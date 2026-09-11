@@ -155,9 +155,12 @@ and the next turn the agent starts is what returns it to `running`.
 
 `codex` only says when a turn ends. It never says a new one started, so its
 run comes back to `running` the way a harness with no reporter does: on
-agent output or a file change. `claude`, `pi` and `omp` report both ends,
-and their runs stay parked until the agent itself says it is working again
-- a TUI repainting while you type is not work.
+agent output or a file change. Everything drawn in the terminal counts
+there, the echo of your own typing included, so a long prompt typed into a
+parked `codex` run can read as `running` before you send it. `claude`, `pi`
+and `omp` report both ends, and their runs stay parked until the agent
+itself says it is working again - a TUI repainting while you type is not
+work.
 
 The last report is recorded with the run, so it survives a server restart:
 a run the agent parked comes back parked, and only what would have released

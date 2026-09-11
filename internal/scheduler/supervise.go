@@ -212,22 +212,29 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	}
 }
 
+// turnTail is how long after a waiting report the terminal is still taken
+// to be painting the turn that ended: the answer it wrote, the prompt
+// being restored, a spinner winding down. It is a bound on a TUI's own
+// trailing frames, not a measured vendor number, so it is generous.
+const turnTail = 3 * time.Second
+
 // unparks reports whether terminal activity on a run the agent parked
 // itself is the next turn rather than the tail of the one that ended.
 //
 // A harness that reports only the end of a turn (harness.ReporterTurnEnd)
 // never says the next one started, so activity is the only thing that can
 // release its run - but the report fires while the finished turn is still
-// being drawn, and codex keeps repainting for a second or two after it.
-// Counting those frames would hand the run straight back to an agent that
-// is waiting, which is the failure this whole mechanism exists to fix. So
-// activity has to move twice: past the park, and again on a later poll. A
-// trailing burst ends inside one poll interval and never does; an agent
-// that is really working again keeps writing and does it on the next poll.
+// being drawn. Counting those frames would hand the run straight back to
+// an agent that is waiting, which is the failure this whole mechanism
+// exists to fix. So the frames are measured against the clock rather than
+// against polls: a poll landing inside the trailing burst would otherwise
+// see it advance twice and release the run, whatever --poll-interval is
+// set to. Past the tail, activity still has to move on a later poll, so a
+// single late frame is not a turn either.
 //
 // Caller must hold s.mu.
 func (e *supervised) unparks(activity time.Time) bool {
-	if !activity.After(e.parkedAt) {
+	if !activity.After(e.parkedAt.Add(turnTail)) {
 		return false
 	}
 	if e.postParkActivity.IsZero() {

@@ -213,10 +213,19 @@ a TUI repaints while the member types. Where it only reports that a turn
 ended (`codex`), there is no such report to wait for, so the run returns
 with `activity resumed` on agent output or a file change. That takes
 activity the report did not already cover: the answer the turn wrote before
-it ended, and the frames codex paints for a second or two after, belong to
-the turn that is over, so output has to keep arriving into a later poll
-before the run reads as working again. Expect the return to `running` to
-land one `--poll-interval` behind the agent.
+it ended, and the frames the TUI keeps painting for a few seconds after it,
+belong to the turn that is over. Those few seconds are measured on the
+clock, not in polls, so `--poll-interval` can be set to anything without
+turning a trailing repaint into a new turn; past them, output still has to
+keep arriving into a later poll before the run reads as working again.
+Expect the return to `running` to land one `--poll-interval` behind the
+agent.
+
+Output here is anything drawn in the terminal, because a harness that
+cannot say when a turn starts leaves nothing else to go on. The echo of
+your own typing counts: type a long prompt into a parked `codex` run and it
+can read as `running` before you send it, and read as `stalled:` rather
+than `waiting for your input` if you then walk away.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at

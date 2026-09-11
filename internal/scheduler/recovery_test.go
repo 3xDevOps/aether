@@ -1138,3 +1138,49 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 }
+
+// TestRecoveryKeepsATurnEndRunParkedThroughItsTail is the codex half of
+// the same restart. Nothing on the terminal since the restart means the
+// park effectively begins again when the run comes back, and a recovered
+// full-screen TUI paints at once - reattaching resizes it. Without a park
+// time to measure those frames against, the first two of them would read
+// as the next turn and hand the run back to an agent that is waiting.
+func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
+	e := newReportingEnv(t, func(cfg *Config) {
+		// Far longer than the test: nothing here is a stall.
+		cfg.StallThreshold = time.Hour
+		cfg.PollInterval = 10 * time.Millisecond
+	})
+	run, c := e.launchOn(t, "codex")
+	waiting := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonInput}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
+		t.Fatalf("report waiting: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	pty2 := newFakePTY()
+	s2 := e.newScheduler(t, e.rt, pty2)
+	startScheduler(t, s2)
+	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
+
+	// The recovered TUI redraws itself over many polls. codex says nothing
+	// when a turn starts, so this is all the scheduler has to judge - and
+	// this soon after the run came back it is still the old turn.
+	stop := pump(t, c)
+	defer stop()
+	time.Sleep(time.Second)
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonInput {
+		t.Fatalf("run = %s because %q after a recovered repaint, want it still parked because %q",
+			r.Status, r.Reason, agentstatus.ReasonInput)
+	}
+
+	// Output still arriving well past the redraw is the agent working.
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+}

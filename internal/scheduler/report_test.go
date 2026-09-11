@@ -373,9 +373,10 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 // harness that says when a turn ends but never when the next one starts
 // has nothing to un-park its run with, so activity still does - which is
 // exactly what a full reporter turns off. What activity means is the whole
-// test: the turn that just ended wrote to the terminal, and codex repaints
-// for a moment after firing notify, so neither the answer nor the trailing
-// frames may hand the run back to an agent that is waiting.
+// test: the turn that just ended wrote to the terminal and keeps painting
+// for a moment after the report, so neither the answer nor the trailing
+// frames may hand the run back to an agent that is waiting - however many
+// polls those frames happen to span.
 func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
@@ -402,10 +403,13 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonInput)
 	}
 
-	// The finished turn's last frame lands just after the report. Many
-	// polls follow, and the run is still the member's through all of them.
-	c.output("\x1b[2K\r> \r\n")
-	time.Sleep(100 * time.Millisecond)
+	// The finished turn goes on painting after the report, and polls land
+	// inside that burst - so counting polls would read the second frame as
+	// a new turn. Frames this soon after the park are the old turn, and the
+	// run is still the member's through every poll they span.
+	stop := pump(t, c)
+	defer stop()
+	time.Sleep(time.Second)
 	r, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
@@ -415,10 +419,8 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 			r.Status, r.Reason, agentstatus.ReasonInput)
 	}
 
-	// An agent that is really talking again keeps writing, and that does
-	// release the run.
-	stop := pump(t, c)
-	defer stop()
+	// An agent that is really talking again is still writing once the
+	// finished turn's frames are long over, and that does release the run.
 	resumed := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
 	if p := resumed.Payload.(events.RunStatusPayload); p.Reason != "activity resumed" {
 		t.Fatalf("resume reason = %q, want \"activity resumed\"", p.Reason)
