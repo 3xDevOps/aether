@@ -1,12 +1,13 @@
 // Package agentstatus is what an agent says about itself. A harness that
-// can run a command on its own lifecycle events - Claude Code's hooks -
-// is given one that calls back into the run's coordination socket, and
-// this package turns that callback's payload into the two states Aether
-// shows a member: the agent is working, or the agent needs them.
+// can run a command on its own lifecycle events - Claude Code's hooks, an
+// opencode plugin - is given one that calls back into the run's
+// coordination socket, and this package turns that callback's payload into
+// the two states Aether shows a member: the agent is working, or the agent
+// needs them.
 //
 // It is a leaf: the mapping functions are pure, and the only other thing
 // here is the harness-side asset the server writes into the run's
-// coordination directory so the hooks exist at all.
+// coordination directory so the callback exists at all.
 package agentstatus
 
 import (
@@ -67,6 +68,17 @@ const ClaudeSettingsName = "claude-settings.json"
 //go:embed claude-settings.json
 var ClaudeSettings []byte
 
+// OpenCodePluginName is the file the server writes into the run's
+// coordination directory and names in opencode's OPENCODE_CONFIG_CONTENT.
+const OpenCodePluginName = "opencode-status.js"
+
+// OpenCodePlugin is that file: an opencode plugin that runs the reporter
+// on the events below. It spawns the staged server binary inside the run
+// container (internal/mcpbridge.BinaryPath).
+//
+//go:embed opencode-status.js
+var OpenCodePlugin []byte
+
 // claudeHook is the subset of Claude Code's hook payload the mapping
 // reads. Every event carries hook_event_name; tool_name comes with the
 // tool events and notification_type with Notification.
@@ -108,6 +120,36 @@ func FromClaudeHook(stdin []byte) (Report, bool) {
 		return Report{}, false
 	case "Stop", "StopFailure":
 		return Report{State: Waiting, Reason: ReasonInput}, true
+	}
+	return Report{}, false
+}
+
+// FromOpenCodeEvent maps one opencode event onto a report. status is the
+// status type a session.status event carries and is empty for every other
+// event. The second result is false for anything that says nothing about
+// whether the agent is working or waiting - a session being created, a
+// message part streaming in, an event a newer opencode invented.
+//
+// A permission or question that has been answered maps back to Working
+// because opencode never says so itself: the session is busy for the whole
+// tool call the prompt interrupted, so no new session.status arrives to
+// un-park the run when the member answers.
+func FromOpenCodeEvent(event, status string) (Report, bool) {
+	switch event {
+	case "session.status":
+		// idle travels as session.idle as well, and that is where the
+		// plugin decides whether the run's own turn ended.
+		if status == "busy" {
+			return Report{State: Working}, true
+		}
+	case "session.idle":
+		return Report{State: Waiting, Reason: ReasonInput}, true
+	case "permission.asked":
+		return Report{State: Waiting, Reason: ReasonPermission}, true
+	case "question.asked":
+		return Report{State: Waiting, Reason: ReasonAnswer}, true
+	case "permission.replied", "question.replied", "question.rejected":
+		return Report{State: Working}, true
 	}
 	return Report{}, false
 }
