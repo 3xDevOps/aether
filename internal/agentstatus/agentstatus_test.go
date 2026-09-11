@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -161,6 +162,33 @@ func TestFromOpenCodeEvent(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("FromOpenCodeEvent(%q, %q) = %+v, want %+v", tc.event, tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFromCodexNotify(t *testing.T) {
+	cases := []struct {
+		name   string
+		arg    string
+		want   Report
+		mapped bool
+	}{
+		{"turn complete", `{"type":"agent-turn-complete","turn-id":"t1","last-assistant-message":"done"}`,
+			Report{State: Waiting, Reason: ReasonInput}, true},
+		{"an event a newer CLI invented", `{"type":"agent-turn-started"}`, Report{}, false},
+		{"no type at all", `{"turn-id":"t1"}`, Report{}, false},
+		{"not JSON", `agent-turn-complete`, Report{}, false},
+		{"empty", ``, Report{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := FromCodexNotify(tc.arg)
+			if ok != tc.mapped {
+				t.Fatalf("FromCodexNotify(%s) mapped = %v, want %v", tc.arg, ok, tc.mapped)
+			}
+			if got != tc.want {
+				t.Errorf("FromCodexNotify(%s) = %+v, want %+v", tc.arg, got, tc.want)
 			}
 		})
 	}
@@ -421,7 +449,7 @@ func requireNode(t *testing.T) string {
 // path is the one thing a scenario cannot provide.
 func stageOpenCodePlugin(t *testing.T, dir, stub string) {
 	t.Helper()
-	const binary = `"/opt/aether/aether-server"`
+	const binary = `"` + ReporterCommand + `"`
 	if bytes.Count(OpenCodePlugin, []byte(binary)) != 1 {
 		t.Fatalf("%s does not name %s exactly once; the container has nothing else to run", OpenCodePluginName, binary)
 	}
@@ -434,5 +462,73 @@ func writePluginFile(t *testing.T, path, content string, mode os.FileMode) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestFromPiEvent(t *testing.T) {
+	cases := []struct {
+		event  string
+		tool   string
+		want   Report
+		mapped bool
+	}{
+		{event: "before_agent_start", want: Report{State: Working}, mapped: true},
+		{event: "agent_start", want: Report{State: Working}, mapped: true},
+		{event: "tool_execution_start", tool: "bash", want: Report{State: Working}, mapped: true},
+		{event: "tool_execution_end", tool: "bash", want: Report{State: Working}, mapped: true},
+		{event: "message_end", want: Report{State: Working}, mapped: true},
+		{event: "tool_call", tool: "bash", want: Report{State: Working}, mapped: true},
+		{event: "tool_call", tool: "ask", want: Report{State: Waiting, Reason: ReasonAnswer}, mapped: true},
+		{event: "tool_call", tool: "AskUserQuestion", want: Report{State: Waiting, Reason: ReasonAnswer}, mapped: true},
+		{event: "tool_approval_requested", tool: "bash",
+			want: Report{State: Waiting, Reason: ReasonPermission}, mapped: true},
+		{event: "tool_approval_resolved", tool: "bash", want: Report{State: Working}, mapped: true},
+		{event: "agent_end", want: Report{State: Waiting, Reason: ReasonInput}, mapped: true},
+		{event: "agent_settled", want: Report{State: Waiting, Reason: ReasonInput}, mapped: true},
+
+		{event: "session_start"},
+		{event: "agent_abort"},
+		{event: ""},
+		// The ask tools are named exactly; a tool whose name merely
+		// contains one is an ordinary tool call.
+		{event: "tool_call", tool: "asking", want: Report{State: Working}, mapped: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.event+"/"+tc.tool, func(t *testing.T) {
+			got, ok := FromPiEvent(tc.event, tc.tool)
+			if ok != tc.mapped {
+				t.Fatalf("FromPiEvent(%q, %q) mapped = %v, want %v", tc.event, tc.tool, ok, tc.mapped)
+			}
+			if got != tc.want {
+				t.Errorf("FromPiEvent(%q, %q) = %+v, want %+v", tc.event, tc.tool, got, tc.want)
+			}
+		})
+	}
+}
+
+// The extension is the pi and omp end of the same contract the settings
+// document is for Claude Code: every event it subscribes to has to be one
+// the mapping answers to, or the agent spawns the reporter for nothing.
+func TestPiExtensionSubscribesToMappedEvents(t *testing.T) {
+	source := string(PiExtension)
+	subscriptions := regexp.MustCompile(`pi\.on\('([a-z_]+)'`).FindAllStringSubmatch(source, -1)
+	if len(subscriptions) == 0 {
+		t.Fatalf("%s subscribes to nothing", PiExtensionName)
+	}
+	for _, m := range subscriptions {
+		if _, ok := FromPiEvent(m[1], ""); !ok {
+			t.Errorf("%s subscribes to %s, which the mapping ignores", PiExtensionName, m[1])
+		}
+	}
+	// The reporter is spawned by absolute path: nothing puts the staged
+	// binary on the agent's PATH.
+	if !strings.Contains(source, ReporterCommand) {
+		t.Errorf("%s does not spawn %s", PiExtensionName, ReporterCommand)
+	}
+	if !strings.Contains(string(ClaudeSettings), ReporterCommand) {
+		t.Errorf("%s does not run %s", ClaudeSettingsName, ReporterCommand)
+	}
+	if !strings.Contains(CodexNotifySetting, ReporterCommand) {
+		t.Errorf("the codex notify setting does not run %s: %s", ReporterCommand, CodexNotifySetting)
 	}
 }

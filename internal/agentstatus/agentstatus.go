@@ -1,13 +1,13 @@
 // Package agentstatus is what an agent says about itself. A harness that
-// can run a command on its own lifecycle events - Claude Code's hooks, an
-// opencode plugin - is given one that calls back into the run's
-// coordination socket, and this package turns that callback's payload into
-// the two states Aether shows a member: the agent is working, or the agent
-// needs them.
+// can run a command on its own lifecycle events - Claude Code's hooks,
+// Codex's notify program, pi's and omp's extensions, an opencode plugin -
+// is given one that calls back into the run's coordination socket, and this
+// package turns that callback's payload into the two states Aether shows a
+// member: the agent is working, or the agent needs them.
 //
-// It is a leaf: the mapping functions are pure, and the only other thing
-// here is the harness-side asset the server writes into the run's
-// coordination directory so the callback exists at all.
+// It is a leaf: the mapping functions are pure, and the only other things
+// here are the harness-side assets the server writes into the run's
+// coordination directory so the callbacks exist at all.
 package agentstatus
 
 import (
@@ -55,6 +55,13 @@ type Report struct {
 	State  State
 	Reason string
 }
+
+// ReporterCommand is the staged server binary inside the run container
+// (internal/mcpbridge.BinaryPath). It is spelled out rather than imported
+// because the bridge package reaches back here through the coordination
+// service, and because the assets beside it are data files that carry the
+// same path as text anyway.
+const ReporterCommand = "/opt/aether/aether-server"
 
 // ClaudeSettingsName is the file the server writes into the run's
 // coordination directory and points Claude Code at with --settings.
@@ -150,6 +157,72 @@ func FromOpenCodeEvent(event, status string) (Report, bool) {
 		return Report{State: Waiting, Reason: ReasonAnswer}, true
 	case "permission.replied", "question.replied", "question.rejected":
 		return Report{State: Working}, true
+	}
+	return Report{}, false
+}
+
+// CodexNotifySetting is the configuration override that points Codex at
+// the reporter for one launch. notify is Codex's external-program setting:
+// it runs the program with one JSON argument when a turn completes. A -c
+// override sits above the member's own config.toml, so a member who uses
+// notify for something else keeps it everywhere except this run. Codex's
+// newer hooks file is not an option: it needs a trust entry in that same
+// config.toml, and the server has no business writing into a member's
+// harness configuration.
+const CodexNotifySetting = `notify=["` + ReporterCommand + `","report","codex"]`
+
+// codexNotify is the subset of Codex's notify argument the mapping reads.
+type codexNotify struct {
+	Type string `json:"type"`
+}
+
+// FromCodexNotify maps one Codex notify payload onto a report. Codex runs
+// the program on the end of a turn and says nothing when the next one
+// starts (harness.ReporterTurnEnd), so a Working report never comes from
+// here: the run is released by the agent's own output instead.
+func FromCodexNotify(arg string) (Report, bool) {
+	var notify codexNotify
+	if err := json.Unmarshal([]byte(arg), &notify); err != nil {
+		return Report{}, false
+	}
+	if notify.Type == "agent-turn-complete" {
+		return Report{State: Waiting, Reason: ReasonInput}, true
+	}
+	return Report{}, false
+}
+
+// PiExtensionName is the file the server writes into the run's
+// coordination directory and points pi and omp at with -e.
+const PiExtensionName = "status.ts"
+
+// PiExtension is that file: one extension both CLIs load, spawning the
+// reporter on each lifecycle event FromPiEvent answers to.
+//
+//go:embed status.ts
+var PiExtension []byte
+
+// askTools are the pi tool names that hand the turn back: the agent calls
+// one and blocks until the member answers it.
+var askTools = map[string]bool{"ask": true, "AskUserQuestion": true}
+
+// FromPiEvent maps one pi or omp lifecycle event onto a report. tool is
+// the tool the event names, empty for the events that name none. Both CLIs
+// report every start and stop (harness.ReporterFull), so the run is held
+// for its member until the agent's own next event says the turn resumed.
+func FromPiEvent(event, tool string) (Report, bool) {
+	switch event {
+	case "before_agent_start", "agent_start", "tool_execution_start",
+		"tool_execution_end", "message_end", "tool_approval_resolved":
+		return Report{State: Working}, true
+	case "tool_call":
+		if askTools[tool] {
+			return Report{State: Waiting, Reason: ReasonAnswer}, true
+		}
+		return Report{State: Working}, true
+	case "tool_approval_requested":
+		return Report{State: Waiting, Reason: ReasonPermission}, true
+	case "agent_end", "agent_settled":
+		return Report{State: Waiting, Reason: ReasonInput}, true
 	}
 	return Report{}, false
 }
