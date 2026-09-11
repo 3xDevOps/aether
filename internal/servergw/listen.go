@@ -3,6 +3,7 @@ package servergw
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -18,9 +19,9 @@ const (
 	// name has tailscaled complete an ACME issuance, which takes well
 	// under a minute when the tailnet has HTTPS certificates enabled.
 	certFetchTimeout = 90 * time.Second
-	// certRefresh is how old a cached certificate may be before the next
-	// handshake asks tailscaled for it again. tailscaled renews the
-	// certificate itself; the refresh is what picks the renewal up.
+	// certRefresh is how often the certificate is fetched again.
+	// tailscaled renews the certificate itself; the refresh is what picks
+	// the renewal up, whether or not anyone opens the dashboard meanwhile.
 	certRefresh = time.Hour
 )
 
@@ -33,13 +34,11 @@ type Tailnet struct {
 	Certs *reachability.Tailscale
 }
 
-type listener = net.Listener
-
 // Start fetches the node's HTTPS certificate, binds the port on every
-// tailnet address, and serves in the background. It refuses to start
-// without the certificate, naming what the tailnet has to have enabled;
-// plain HTTP is never offered. The context bounds setup only; Close
-// stops the gateway.
+// tailnet address that binds, and serves in the background. It refuses
+// to start without the certificate, naming what the tailnet has to have
+// enabled, or when no address binds at all; plain HTTP is never offered.
+// The context bounds setup only; Close stops the gateway.
 func (g *Gateway) Start(ctx context.Context, tn Tailnet) error {
 	if len(tn.Node.Addrs) == 0 {
 		return fmt.Errorf("servergw: tailscaled reports no tailnet address for %s", tn.Node.DNSName)
@@ -55,33 +54,37 @@ func (g *Gateway) Start(ctx context.Context, tn Tailnet) error {
 		MinVersion:     tls.VersionTLS12,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return certs.current(), nil },
 	}
+	// tailscaled reports the IPv6 address whether or not the kernel has
+	// IPv6 enabled, so one address that will not bind is a warning; only
+	// none binding is a refusal.
+	var failed []error
 	for _, addr := range tn.Node.Addrs {
-		ln, err := net.Listen("tcp", netip.AddrPortFrom(addr, uint16(tn.Port)).String())
+		hostPort := netip.AddrPortFrom(addr, uint16(tn.Port)).String()
+		ln, err := net.Listen("tcp", hostPort)
 		if err != nil {
-			for _, opened := range g.lns {
-				_ = opened.Close()
-			}
-			g.lns = nil
-			return fmt.Errorf("servergw: listen: %w", err)
+			slog.Warn("servergw: tailnet address not bound", "addr", hostPort, "error", err)
+			failed = append(failed, err)
+			continue
 		}
 		g.lns = append(g.lns, ln)
-		go func() { _ = g.srv.Serve(tls.NewListener(ln, tlsCfg)) }()
+		g.core.Serve(tls.NewListener(ln, tlsCfg))
 	}
+	if len(g.lns) == 0 {
+		return fmt.Errorf("servergw: listen: no tailnet address could be bound: %w", errors.Join(failed...))
+	}
+	go certs.run(g.ctx)
 	return nil
 }
 
 // certCache holds the certificate handshakes are answered with. A
-// handshake never waits on tailscaled: once the cache is stale the next
-// one hands out the cached pair and refreshes in the background, and a
-// refresh that fails keeps the cached pair and says so.
+// handshake never waits on tailscaled: run fetches the pair again every
+// certRefresh, and a refresh that fails keeps the cached pair and says so.
 type certCache struct {
 	source *reachability.Tailscale
 	domain string
 
-	mu         sync.Mutex
-	cert       *tls.Certificate
-	fetched    time.Time
-	refreshing bool
+	mu   sync.Mutex
+	cert *tls.Certificate
 }
 
 // fetch asks tailscaled for the pair and caches it.
@@ -92,35 +95,32 @@ func (c *certCache) fetch(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	c.cert = &cert
-	c.fetched = time.Now()
 	c.mu.Unlock()
 	return nil
 }
 
-// current returns the cached pair, starting a refresh when it is stale.
+// current returns the cached pair.
 func (c *certCache) current() *tls.Certificate {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if time.Since(c.fetched) > certRefresh && !c.refreshing {
-		c.refreshing = true
-		go c.refresh()
-	}
 	return c.cert
 }
 
-func (c *certCache) refresh() {
-	ctx, cancel := context.WithTimeout(context.Background(), certFetchTimeout)
-	defer cancel()
-	err := c.fetch(ctx)
-	if err != nil {
-		slog.Warn("servergw: HTTPS certificate refresh failed; serving the cached one", "domain", c.domain, "error", err)
+// run refreshes the pair every certRefresh until ctx ends.
+func (c *certCache) run(ctx context.Context) {
+	ticker := time.NewTicker(certRefresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			fetchCtx, cancel := context.WithTimeout(ctx, certFetchTimeout)
+			err := c.fetch(fetchCtx)
+			cancel()
+			if err != nil {
+				slog.Warn("servergw: HTTPS certificate refresh failed; serving the cached one", "domain", c.domain, "error", err)
+			}
+		}
 	}
-	c.mu.Lock()
-	c.refreshing = false
-	if err != nil {
-		// Try again on the next handshake after another interval rather
-		// than on every handshake until tailscaled recovers.
-		c.fetched = time.Now()
-	}
-	c.mu.Unlock()
 }

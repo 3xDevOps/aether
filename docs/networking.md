@@ -296,7 +296,7 @@ identify or encrypt. Each message is printed on stderr and lands in
 | `tailscaled did not report this node: status has no DNS name` | Enable MagicDNS for the tailnet. |
 | `servergw: tailscaled reports no tailnet address for <name>` | The node is not up on the tailnet; `tailscale status --self`. |
 | `servergw: HTTPS certificate for <name>: <error>; enable MagicDNS and HTTPS certificates for the tailnet in the Tailscale admin console (DNS page), or set web-port to 0` | Enable HTTPS certificates, or run as root or the tailscaled operator. The error tailscaled gave is quoted in place of `<error>`. |
-| `servergw: listen: <error>` | The port is taken, or binding it needs privileges the server does not have. |
+| `servergw: listen: no tailnet address could be bound: <errors>` | The port is taken on every tailnet address, or binding it needs privileges the server does not have. One address that will not bind - the IPv6 one on a host with IPv6 disabled - is only a warning in the journal (`servergw: tailnet address not bound`); the others still serve. |
 
 Once it is serving, a request that cannot be identified is refused per
 request, with the JSON error body the dashboard shows:
