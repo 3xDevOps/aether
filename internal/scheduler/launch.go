@@ -78,22 +78,36 @@ func (s *Scheduler) reserveCredentialUser(member domain.MemberID, user string, s
 	return reservation, nil
 }
 
-// syncRunUserReservationsLocked folds recovered runs, and runs installed
-// directly by tests, into the common registry. Stale run reservations are
-// discarded after their run leaves the live-run registry.
+// syncRunUserReservationsLocked folds recovered runs and live environment
+// terminals into the common registry. Stale reservations are discarded after
+// their container leaves the live registry, except for an explicitly pending
+// terminal reservation between reservation and registration.
 func (s *Scheduler) syncRunUserReservationsLocked() {
 	if s.credentialUsers == nil {
 		s.credentialUsers = make(map[*credentialUserReservation]struct{})
 	}
 	for reservation := range s.credentialUsers {
-		if reservation.run == nil {
+		if reservation.run != nil {
+			if s.runs[reservation.run.runID] == reservation.run && reservation.run.runUser != "" {
+				continue
+			}
+			if reservation.run.userReservation == reservation {
+				reservation.run.userReservation = nil
+			}
+			delete(s.credentialUsers, reservation)
 			continue
 		}
-		if s.runs[reservation.run.runID] == reservation.run && reservation.run.runUser != "" {
+		if reservation.terminal == nil {
 			continue
 		}
-		if reservation.run.userReservation == reservation {
-			reservation.run.userReservation = nil
+		if reservation.pending {
+			continue
+		}
+		if s.terminals[reservation.terminal.member] == reservation.terminal && reservation.terminal.runUser != "" {
+			continue
+		}
+		if reservation.terminal.userReservation == reservation {
+			reservation.terminal.userReservation = nil
 		}
 		delete(s.credentialUsers, reservation)
 	}
@@ -110,6 +124,32 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 		s.credentialUsers[reservation] = struct{}{}
 		entry.userReservation = reservation
 	}
+}
+
+func (s *Scheduler) reserveTerminalUser(entry *terminalSupervision, user string) error {
+	if user == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncRunUserReservationsLocked()
+	for other := range s.credentialUsers {
+		if other.memberID == entry.member && other.user != user {
+			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+				entry.member, other.owner, other.user, user)
+		}
+	}
+	reservation := &credentialUserReservation{
+		memberID: entry.member,
+		user:     user,
+		owner:    "environment terminal " + string(entry.member),
+		terminal: entry,
+		pending:  true,
+	}
+	s.credentialUsers[reservation] = struct{}{}
+	entry.runUser = user
+	entry.userReservation = reservation
+	return nil
 }
 
 // reserveRunUser records the resolved run user and reserves its writable
@@ -252,6 +292,9 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	entry.home = plan.Home
+	s.mu.Unlock()
 	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return reserveErr
 	}

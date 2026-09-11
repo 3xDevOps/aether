@@ -3,6 +3,9 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -61,6 +64,59 @@ func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
 	}
 	if _, err := e.db.GetTerminal(context.Background(), e.member.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("terminal row after stop: %v", err)
+	}
+}
+
+func TestRecoveredTerminalUsesCapturedUserAndHomeForImages(t *testing.T) {
+	e := newTestEnv(t, nil)
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	user := fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid())
+	wantUser := user
+	if os.Geteuid() == 0 {
+		wantUser = ""
+	}
+	container, err := e.rt.get(runtime.ID(first.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.mu.Lock()
+	container.spec.User = user
+	container.spec.Env["HOME"] = "/home/actual"
+	container.mu.Unlock()
+	if updateErr := e.db.UpdateMemberImage(t.Context(), e.member.ID, "mutable:latest"); updateErr != nil {
+		t.Fatalf("UpdateMemberImage: %v", updateErr)
+	}
+
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close before recovery: %v", closeErr)
+	}
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	startScheduler(t, recovered)
+	waitFor(t, "terminal recovery", func() bool {
+		return recovered.lookupTerminal(e.member.ID) != nil
+	})
+
+	adoptedTerminal, err := recovered.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal adoption: %v", err)
+	}
+	adopted := recovered.lookupTerminal(e.member.ID)
+	if adoptedTerminal.ContainerID != first.ContainerID || adopted == nil || adopted.runUser != wantUser || adopted.home != "/home/actual" {
+		t.Fatalf("adopted terminal = %+v, metadata = %+v, want user %s and HOME /home/actual", adoptedTerminal, adopted, wantUser)
+	}
+	image := []byte("image")
+	path, err := recovered.SaveTerminalImage(t.Context(), e.member.ID, "", ".png", image)
+	if err != nil {
+		t.Fatalf("SaveTerminalImage: %v", err)
+	}
+	if got := readSavedTerminalImage(t, e, e.member.ID, path); string(got) != string(image) {
+		t.Fatalf("saved image = %q, want %q", got, image)
+	}
+	if !strings.HasPrefix(path, "/home/actual/.aether/terminal-images/") {
+		t.Fatalf("image path = %q, want captured terminal HOME", path)
 	}
 }
 

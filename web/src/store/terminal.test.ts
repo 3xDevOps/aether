@@ -10,7 +10,7 @@ import {
 } from '@/store/terminal'
 
 function socket(close = vi.fn()): RunShellSocket {
-  return { close, send: vi.fn(), resize: vi.fn(), reopen: vi.fn() }
+  return { close, send: vi.fn(), resize: vi.fn(), reopen: vi.fn(), rebind: vi.fn() }
 }
 
 describe('run-shell dock state', () => {

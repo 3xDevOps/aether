@@ -429,6 +429,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		paused:         sc.Paused,
 		killRequested:  sc.KillRequested,
 		runUser:        sc.RunUser,
+		home:           sc.Home,
 		exitObserved:   sc.ExitObserved,
 		exitCode:       sc.ExitCode,
 		bridgeDigest:   sc.BridgeDigest,

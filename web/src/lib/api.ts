@@ -58,6 +58,57 @@ import type {
 } from '@/lib/types'
 
 export const API_BASE = '/api/v1'
+export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
+export const TERMINAL_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
+
+type TerminalImageType = (typeof TERMINAL_IMAGE_TYPES)[number]
+
+function isTerminalImageType(type: string): type is TerminalImageType {
+  return (TERMINAL_IMAGE_TYPES as readonly string[]).includes(type)
+}
+
+function readFileBase64(file: File): Promise<string> {
+  const { promise, resolve, reject } = Promise.withResolvers<string>()
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (typeof reader.result !== 'string') {
+      reject(new Error('Could not read image'))
+      return
+    }
+    const comma = reader.result.indexOf(',')
+    if (comma < 0) {
+      reject(new Error('Could not encode image'))
+      return
+    }
+    resolve(reader.result.slice(comma + 1))
+  }
+  reader.onerror = () => reject(reader.error ?? new Error('Could not read image'))
+  reader.readAsDataURL(file)
+  return promise
+}
+
+/**
+ * Uploads image bytes to the selected terminal's server-owned home. The
+ * gateway validates the decoded bytes again; this client-side check avoids
+ * reading and sending files the RPC cannot accept.
+ */
+async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: string }> {
+  if (!isTerminalImageType(file.type)) {
+    throw new Error('Choose a PNG, JPEG, GIF, or WebP image.')
+  }
+  if (file.size > MAX_TERMINAL_IMAGE_BYTES) {
+    throw new Error('Image must be 8 MiB or smaller.')
+  }
+  const content = await readFileBase64(file)
+  const result = await call<{ path: string }>('terminal.image', {
+    ...(runID ? { run_id: runID } : {}),
+    content,
+  })
+  if (!result.path.startsWith('/')) {
+    throw new Error('The server returned an unusable image path.')
+  }
+  return result
+}
 
 export class ApiError extends Error {
   constructor(
@@ -540,6 +591,7 @@ export const api = {
   localProfilePush: (harness: string) =>
     local<ProfilePushResult>('profile.push', { harness }),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  uploadTerminalImage: (file: File, runID?: string) => uploadTerminalImage(file, runID),
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),
   /** Finishes the GitHub connection the member started with `gh auth login`

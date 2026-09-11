@@ -18,6 +18,7 @@ require (
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	golang.org/x/crypto v0.54.0
+	golang.org/x/image v0.31.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	google.golang.org/protobuf v1.36.11

@@ -117,8 +117,10 @@ to load before it can present one. Unknown paths fall back to `index.html`
 so client-side routing works on a hard refresh. An `/api/`, `/ws/`, or
 `/local/` path hit with the wrong method is the exception: it answers `405`
 with a JSON error body instead of falling through to the SPA, so a
-wrong-verb client bug cannot masquerade as a `200`. Request bodies are
-capped at 1 MiB.
+wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
+bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` is
+the per-method exception: its HTTP body cap is 12 MiB so base64 plus JSON
+framing can carry an image whose decoded bytes are capped separately at 8 MiB.
 
 ### `POST /api/v1/<method>`
 
@@ -285,11 +287,31 @@ listener on the server.
 | `files.diff` | `FilesDiffParams` (`{"run_id":"...","path":"README.md"}`) | `FilesDiffResult` - one file's patch against the run base |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
 | `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
 | `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
+
+`terminal.image` accepts the original image bytes as strict base64 in
+`content`; the server decodes and validates the bytes again. Only PNG, JPEG,
+GIF, and WebP are accepted, and the decoded image must be non-empty and at
+most 8 MiB. Invalid base64, an empty value, an unsupported or invalid image,
+and an image over the decoded limit remain `-32602` invalid-params errors with
+the validation message (for example, `image content is required`, `image
+content is not valid base64: ...`, `image exceeds the 8 MiB limit`, or
+`unsupported or invalid image format`).
+An HTTP body over the 12 MiB image cap is still rejected before dispatch as a
+`400` parse error; it is not passed to the control channel.
+
+Omit `run_id` to target the authenticated caller's live environment terminal;
+that terminal must already be running. Supplying `run_id` targets that run's
+live supervised container and requires the caller's `Steer` capability. The
+server stores the generated file in the target account member's persistent
+home and returns its absolute path as mounted at `$HOME` in that container.
+The path and filename are server-generated; callers cannot choose a host path
+or ask this method to read an arbitrary path.
 
 - The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
   that the patch ends at the last whole line that fit. `from` and `to` select

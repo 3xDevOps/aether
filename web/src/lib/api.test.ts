@@ -91,6 +91,23 @@ describe('environment terminal methods', () => {
       '/ws/terminal?tab=t+2&token=tok_terminal',
     )
   })
+
+  it('encodes an image and targets the requested run', async () => {
+    const fetchSpy = fakeFetch({ path: '/home/alice/.aether/image.png' })
+    vi.stubGlobal('fetch', fetchSpy)
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'screen.png', {
+      type: 'image/png',
+    })
+
+    await expect(api.uploadTerminalImage(file, 'run_1')).resolves.toEqual({
+      path: '/home/alice/.aether/image.png',
+    })
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/terminal.image')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toMatchObject({
+      run_id: 'run_1',
+      content: 'iVBORw==',
+    })
+  })
 })
 
 describe('local setup methods', () => {

@@ -196,6 +196,34 @@ the server exposes, and the browser surface inherits its boundary.
   be - the terminal view falls back to a mirror - and a removed member
   loses every open channel.
 
+### Terminal image uploads
+
+`terminal.image` accepts image bytes, not a client path. The dashboard sends
+only the bytes in a user-selected browser `File` (including an actual image
+`File` from native paste); a text clipboard value that happens to be a local
+path remains text. There is no RPC that asks the server to read an arbitrary
+client path, and the upload action only inserts the returned shell-quoted path
+into the focused terminal - it does not press Enter or run the command.
+
+The server validates the decoded bytes as a non-empty PNG, JPEG, GIF, or WebP
+image no larger than 8 MiB, then writes a generated
+`.aether/terminal-images/image-<random>.<ext>` file with mode `0600` in the
+target account's persistent member home, not in a workspace checkout or source
+tree. The returned absolute path is the path visible inside the target
+container at its `$HOME`; the client cannot choose the destination or filename.
+An upload with no `run_id` targets the authenticated member's running
+environment terminal. A run target requires `Steer` and writes into that run's
+account member home, including the owner's home when the run uses an explicit
+account share.
+
+These files follow member-home retention: stopping or resetting an environment
+does not remove the home, so images remain until they are removed from that
+home or the member is deleted. A member-home bind mount is not part of
+`env.save`'s Docker image, so terminal images are not copied into the saved
+environment image. Account sharing therefore has the same implication as for
+other home files and credentials: a recipient's run can read images in the
+shared account's home.
+
 ## SSH port forwarding
 
 Port forwarding is limited to direct-tcpip channels whose destination is

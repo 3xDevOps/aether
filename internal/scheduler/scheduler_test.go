@@ -157,6 +157,63 @@ func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeConta
 	}
 	return run, c
 }
+func readSavedTerminalImage(t *testing.T, e *testEnv, member domain.MemberID, returnedPath string) []byte {
+	t.Helper()
+	const imagePath = ".aether/terminal-images/"
+	relativeStart := strings.Index(returnedPath, imagePath)
+	if relativeStart < 0 {
+		t.Fatalf("image path = %q, want a .aether terminal image path", returnedPath)
+	}
+	home, err := e.cfg.Homes.Path(member)
+	if err != nil {
+		t.Fatalf("member home: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, filepath.FromSlash(returnedPath[relativeStart:])))
+	if err != nil {
+		t.Fatalf("read saved image from %q: %v", returnedPath, err)
+	}
+	return data
+}
+
+func TestSaveTerminalImageUsesRunAccountHome(t *testing.T) {
+	e := newTestEnv(t, nil)
+	account := &domain.Member{
+		DisplayName: "Grace", PublicKey: testPublicKey(t),
+		Color: "#3cb44b", Role: domain.RoleCollaborator,
+	}
+	if err := e.db.CreateMember(t.Context(), account); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(fakeAgentEnv, "fake-agent {task}")
+	run, err := e.sched.Launch(
+		t.Context(), e.ws.ID, e.member.ID, account.ID,
+		"save image", "fake", domain.LaunchTUI,
+	)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	image := []byte("run account image")
+	path, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, run.ID, ".png", image)
+	if err != nil {
+		t.Fatalf("SaveTerminalImage: %v", err)
+	}
+	if got := readSavedTerminalImage(t, e, account.ID, path); string(got) != string(image) {
+		t.Fatalf("saved image = %q, want %q", got, image)
+	}
+
+	launcherHome, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatalf("launcher home: %v", err)
+	}
+	launcherImages := filepath.Join(launcherHome, ".aether", "terminal-images")
+	entries, err := os.ReadDir(launcherImages)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read launcher image directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("launcher home received terminal image: %v", entries)
+	}
+}
 
 // waitStatusEvent reads sub until a run.status event with the wanted To
 // status arrives and returns it.
@@ -615,6 +672,23 @@ func TestReserveRunUserConflict(t *testing.T) {
 	noHome := &supervised{runID: "run-nohome", memberID: e.member.ID, harness: "claude"}
 	if err := e.sched.reserveRunUser(noHome, "2000:2000", false); err != nil {
 		t.Fatalf("run without credential mounts rejected: %v", err)
+	}
+}
+
+func TestPendingTerminalReservationBlocksConflictingRun(t *testing.T) {
+	e := newTestEnv(t, nil)
+	pending := &terminalSupervision{member: e.member.ID}
+	if err := e.sched.reserveTerminalUser(pending, "1000:1000"); err != nil {
+		t.Fatalf("reserve terminal user: %v", err)
+	}
+
+	conflicting := &supervised{runID: "run-conflict", memberID: e.member.ID}
+	if err := e.sched.reserveRunUser(conflicting, "2000:2000", true); err == nil {
+		t.Fatal("conflicting run user accepted while terminal reservation was pending")
+	}
+	e.sched.releaseTerminalReservation(pending)
+	if err := e.sched.reserveRunUser(conflicting, "2000:2000", true); err != nil {
+		t.Fatalf("run user after terminal release: %v", err)
 	}
 }
 

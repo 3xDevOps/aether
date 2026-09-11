@@ -187,7 +187,9 @@ describe('terminal shortcuts', () => {
     // The host owns this wiring since the key handlers were composed, so this
     // is where a lost clipboard shortcut would now go unnoticed.
     expect(handler(key({ code: 'KeyC', ctrlKey: true, shiftKey: true }))).toBe(false)
-    expect(handler(key({ code: 'KeyV', ctrlKey: true, shiftKey: true }))).toBe(false)
+    const paste = key({ code: 'KeyV', ctrlKey: true, shiftKey: true })
+    expect(handler(paste)).toBe(true)
+    expect(paste.defaultPrevented).toBe(false)
     expect(handler(key({ code: 'KeyA', ctrlKey: true }))).toBe(true)
   })
 

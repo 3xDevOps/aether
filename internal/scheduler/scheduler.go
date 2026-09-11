@@ -162,13 +162,18 @@ type Scheduler struct {
 }
 
 // credentialUserReservation protects one writable member home from
-// ownership changes while its container is live. Root containers do not
-// need a reservation because they skip chown.
+// ownership changes while its container is pending or live. Root containers
+// do not need a reservation because they skip chown.
 type credentialUserReservation struct {
 	memberID domain.MemberID
 	user     string
 	owner    string
 	run      *supervised
+	terminal *terminalSupervision
+	// pending remains true between reserveTerminalUser and registerTerminal.
+	// The reservation must survive registry synchronization during that
+	// window, or a concurrent run could chown the shared home first.
+	pending bool
 }
 
 // supervised is the in-memory state of one run with a live container.
@@ -192,7 +197,11 @@ type supervised struct {
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
 	// recovery.
-	runUser         string
+	runUser string
+	// home is the container-side HOME resolved when this run was
+	// provisioned. Keeping it with supervision avoids reconstructing an old
+	// image/profile choice after a restart or handoff.
+	home            string
 	userReservation *credentialUserReservation
 	// exitObserved / exitCode are the durable Wait result, persisted
 	// before finalize so a crash can resume the original exit.

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { vi } from 'vitest'
+import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
@@ -13,9 +14,10 @@ import { StubSocket } from '@/test/stub-socket'
 import { agentInfo } from '@/test/fixtures'
 // vi.mock factories are hoisted above static imports, so the fixture module
 // must be loaded inside the factory (same as terminal.test.tsx).
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
   const { fakeApi } = await import('@/test/fixtures')
-  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
+  return { ...actual, api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
 
@@ -107,6 +109,7 @@ describe('agents view', () => {
       send: vi.fn(),
       resize: vi.fn(),
       reopen: vi.fn(),
+      rebind: vi.fn(),
       close: vi.fn(),
     }
     registerEnvTerminalSocket('main', connection)

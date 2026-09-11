@@ -7,6 +7,20 @@ type TerminalRequest struct {
 	Rows uint   `json:"rows,omitempty"`
 }
 
+// TerminalImageParams carries the base64-encoded original image bytes.
+// RunID empty targets the caller's environment terminal; when present it
+// targets that run after the server checks steering authorization.
+type TerminalImageParams struct {
+	RunID   string `json:"run_id,omitempty"`
+	Content string `json:"content"`
+}
+
+// TerminalImageResult is the absolute path to the uploaded image inside the
+// target container.
+type TerminalImageResult struct {
+	Path string `json:"path"`
+}
+
 // TerminalResponse is the result of a terminal control operation.
 type TerminalResponse struct {
 	OK   bool   `json:"ok"`

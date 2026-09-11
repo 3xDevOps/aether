@@ -803,10 +803,25 @@ is reachable too. The shell tab strip is a custom manual tab list with one
 keyboard stop and overflow scrolling; it does not use a component-level tab
 primitive.
 
-`TerminalPane` keeps xterm's host geometry intact while layering Find, shared
-zoom/reset, and copy/paste controls over it through the existing controller,
-store and clipboard APIs. The find overlay sizes to the available width, so a
-narrow pane clips neither its input nor its close control.
+`TerminalPane` keeps xterm's host geometry intact while layering the shared
+toolbar and Find over it. `TerminalTools` in the same module owns the search,
+zoom/reset, copy, paste, and `TerminalImageAction` controls; it delegates
+terminal key behavior to the xterm controller and clipboard helpers rather
+than putting those actions in each dock. `useTerminalImage` owns the hidden
+file input, preview dialog, validation, upload call, and shell-quoted path
+insertion. Its identity (`terminal`, target, active-tab key, and enabled
+state) plus a generation token rejects a chooser, paste, or upload callback
+that completes after the host or target has changed. The find overlay sizes to
+the available width, so a narrow pane clips neither its input nor its close
+control.
+
+The image half of clipboard handling is registered by `useTerminalImage` with
+`registerClipboardImages` on the current xterm input in capture phase. The
+effect cleans up and registers again when the terminal identity changes; it
+claims only image-file paste events and leaves text to the native xterm path.
+`clipboardKeys` handles copy and deliberately leaves native paste alive, while
+`xterm-host.tsx` composes it with zoom and find in xterm's one custom key
+handler.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
@@ -819,10 +834,20 @@ shut, so its tab controls expand it: a tab whose dock is collapsed mounts no
 xterm host and would never attach. Expanded-only dock actions are omitted while
 the dock is collapsed. `TerminalDock` mounted with `openOnMount` expands itself
 once, because the Agents and GitHub steps type into it.
-Its tab state and socket registry live in `src/store/terminal.ts`, so opening
-Overview, Diff, or Events does not discard run-shell tabs or their attachments.
-Only the selected shell tab mounts an xterm host; switching tabs remounts that
-host and relies on transcript replay to restore its content.
+
+Run-shell tab state and its socket registry live in `src/store/terminal.ts`;
+the environment dock has the corresponding state and socket registry in
+`src/store/env-terminal.ts`. The live attachment objects stay outside
+persisted Zustand state, but a dock socket can outlive the component that last
+displayed it. When a new xterm host adopts one, the dock calls
+`Attachment.rebind()` with fresh callbacks and reopens it when needed. Run
+shell callbacks guard the current `{ runID, tab }`; the environment dock
+guards its current tab. Host subscriptions are removed on cleanup, while
+closing a tab or an exited shell unregisters its socket. Thus route changes and
+tab remounts cannot deliver late output, resizes, or image actions to a
+disposed host; only the selected shell tab mounts an xterm host and transcript
+replay restores its content. The primary agent attach is owned by
+`TerminalView` and closes with that route, unlike the run-shell attachments.
 
 The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running. Stopping the container and discarding the saved image
@@ -849,9 +874,13 @@ replaces the terminal with the gateway's own error instead.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-terminal and event stream reconnect on the same jittered schedule, and it
+  terminal and event stream reconnect on the same jittered schedule, and it
   splits large input (a paste) into several ordered frames under the gateway's
-  64 KiB frame cap, never splitting a surrogate pair.
+  64 KiB frame cap, never splitting a surrogate pair. Its `Attachment`
+  interface also supports `rebind()` and `reopen()`: a persistent dock socket
+  can keep its transport while a newly mounted host supplies current
+  callbacks.
+
 - **Steer on entry.** The agent header requests `write` on the first attach
   and the active button carries a short pulse animation; the toggle
   reattaches rather than upgrading in place. Until the member has taken
@@ -903,10 +932,12 @@ terminal and event stream reconnect on the same jittered schedule, and it
   and `Dock` writes whichever `maxTabs` it was given beside the disabled
   control - a disabled button shows no tooltip. Each shell attach uses
   `/ws/attach/<run>?shell=<tab>`, requires write/steer permission, and closes
-  its socket when the tab is closed. A `-32001` response does not reconnect;
-  the dock replaces the terminal with the sentence **You can view this run
-  but not open a shell in it**. A normal `1000` socket close removes the
-  finished tab.
+  its socket when the tab is closed. `RunDock` exposes an uploaded-image path
+  only while its attached identity still matches the current `{ runID, tab }`.
+  A `-32001` response does not reconnect; the dock replaces the terminal with
+  the sentence **You can view this run but not open a shell in it**. A normal
+  `1000` socket close removes the finished tab.
+
 - **Every attach answers for itself.** The agent run slice is reset when the
   view mounts, and a successful attach clears the standing refusal. Otherwise
   a denial outlives the socket that produced it: leaving the tab and coming
@@ -926,19 +957,22 @@ terminal and event stream reconnect on the same jittered schedule, and it
   the first. The shared xterm host uses `scrollback: 50000`; the server replay
   ring is 1 MiB and is seeded from the cast tail when a session is restarted,
   so re-attach retains the full recent history rather than only 64 KiB.
-- **Find and zoom ride one key handler.** xterm keeps a single custom key
-  handler, so `src/components/xterm-host.tsx` chains zoom, find and the
-  clipboard shortcuts (`src/lib/term-clipboard.ts`) in that order; the first
-  to claim a key stops it reaching the shell. `Ctrl+Shift+F` opens the find
-  bar `TerminalPane` (`src/components/terminal-pane.tsx`) draws over the
-  terminal, backed by `@xterm/addon-search`; it reports **No matches** from
-  the addon's own answer rather than tracking a count. `Ctrl+=`, `Ctrl+-` and
-  `Ctrl+0` move `UiSlice.terminalFontSize`, clamped to 8-32px by
-  `clampTerminalFontSize` - on the way in from a keystroke and again in the
-  store's `merge`, because a same-version reload never reaches `migrate` and
-  xterm does not validate `fontSize`. The size is one persisted preference
-  behind every terminal, applied to the live instance and re-fitted rather
-  than by rebuilding it, which would throw the scrollback away.
+- **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
+  chains zoom, find, and `clipboardKeys` in that order; the first to claim a
+  key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but
+  leaves native paste alive. `useTerminalImage` separately registers the
+  capture-phase image listener described above, so an image event is claimed
+  only when the current terminal has a live image handler and plain text never
+  takes that path. `Ctrl+Shift+F` opens the find bar `TerminalPane`
+  (`src/components/terminal-pane.tsx`) draws over the terminal, backed by
+  `@xterm/addon-search`; it reports **No matches** from the addon's own answer
+  rather than tracking a count. `Ctrl+=`, `Ctrl+-` and `Ctrl+0` move
+  `UiSlice.terminalFontSize`, clamped to 8-32px by `clampTerminalFontSize` -
+  on the way in from a keystroke and again in the store's `merge`, because a
+  same-version reload never reaches `migrate` and xterm does not validate
+  `fontSize`. The size is one persisted preference behind every terminal,
+  applied to the live instance and re-fitted rather than by rebuilding it,
+  which would throw the scrollback away.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
   glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
   scrolled rows until a forced refresh; the DOM renderer never desyncs. The

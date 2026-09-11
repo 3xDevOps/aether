@@ -30,10 +30,13 @@ var (
 )
 
 type terminalSupervision struct {
-	member      domain.MemberID
-	containerID runtime.ID
-	image       string
-	startedAt   time.Time
+	member          domain.MemberID
+	containerID     runtime.ID
+	image           string
+	startedAt       time.Time
+	home            string
+	runUser         string
+	userReservation *credentialUserReservation
 }
 
 func terminalContainerName(member domain.MemberID) string {
@@ -100,36 +103,45 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	key := terminalCreationKey(member)
 	cid, findErr := s.cfg.Runtime.FindByCreationKey(ctx, key)
 	if findErr == nil {
-		terminal, adopted, adoptErr := s.tryAdoptTerminal(ctx, m, row, cid)
+		adopted, adoptedOK, adoptErr := s.tryAdoptTerminal(ctx, m, row, cid)
 		if adoptErr != nil {
 			return nil, adoptErr
 		}
-		if adopted {
+		if adoptedOK {
+			terminal := adopted.terminal
 			if row == nil || row.ContainerID != terminal.ContainerID {
 				if putErr := s.cfg.Store.PutTerminal(ctx, terminal); putErr != nil {
 					return nil, fmt.Errorf("scheduler: persist terminal: %w", putErr)
 				}
 			}
-			s.registerTerminal(terminal)
+			s.registerAdoptedTerminal(adopted)
 			return terminal, nil
 		}
 	} else if !errors.Is(findErr, runtime.ErrNotFound) {
 		return nil, fmt.Errorf("scheduler: find terminal container: %w", findErr)
 	}
 	if row != nil && (findErr != nil || row.ContainerID != string(cid)) {
-		terminal, adopted, adoptErr := s.tryAdoptTerminal(ctx, m, row, runtime.ID(row.ContainerID))
+		adopted, adoptedOK, adoptErr := s.tryAdoptTerminal(ctx, m, row, runtime.ID(row.ContainerID))
 		if adoptErr != nil {
 			return nil, adoptErr
 		}
-		if adopted {
-			s.registerTerminal(terminal)
-			return terminal, nil
+		if adoptedOK {
+			s.registerAdoptedTerminal(adopted)
+			return adopted.terminal, nil
 		}
 	}
 
 	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, m, harness.Profile{}, EnvironmentPurposeTerminal)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: build terminal environment: %w", err)
+	}
+	terminalReservation := &terminalSupervision{member: member}
+	if reserveErr := s.reserveTerminalUser(terminalReservation, plan.User); reserveErr != nil {
+		return nil, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
+	}
+	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, plan.Mounts, plan.User); ownershipErr != nil {
+		s.releaseTerminalReservation(terminalReservation)
+		return nil, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)
 	}
 	startedAt := time.Now().UTC()
 	spec := runtime.Spec{
@@ -145,25 +157,26 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	}
 	cid, err = s.createAndStartTerminal(ctx, spec)
 	if err != nil {
+		s.releaseTerminalReservation(terminalReservation)
 		return nil, err
 	}
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err != nil {
-		_ = s.cfg.Runtime.Destroy(context.Background(), cid)
+		s.destroyTerminalAfterFailure(terminalReservation, cid)
 		return nil, fmt.Errorf("scheduler: attach terminal: %w", err)
 	}
-	if err := s.cfg.PTY.StartSession(ctx, ptyhost.TerminalSession(member, terminalTabMain), att); err != nil {
+	if sessionErr := s.cfg.PTY.StartSession(ctx, ptyhost.TerminalSession(member, terminalTabMain), att); sessionErr != nil {
 		_ = att.Close()
-		_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-		return nil, fmt.Errorf("scheduler: start terminal session: %w", err)
+		s.destroyTerminalAfterFailure(terminalReservation, cid)
+		return nil, fmt.Errorf("scheduler: start terminal session: %w", sessionErr)
 	}
 	terminal := &domain.Terminal{Member: member, ContainerID: string(cid), Image: plan.Image, StartedAt: startedAt}
-	if err := s.cfg.Store.PutTerminal(ctx, terminal); err != nil {
+	if putErr := s.cfg.Store.PutTerminal(ctx, terminal); putErr != nil {
 		s.cfg.PTY.StopSessionsWithPrefix(context.Background(), terminalPrefix(member))
-		_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-		return nil, fmt.Errorf("scheduler: persist terminal: %w", err)
+		s.destroyTerminalAfterFailure(terminalReservation, cid)
+		return nil, fmt.Errorf("scheduler: persist terminal: %w", putErr)
 	}
-	s.registerTerminal(terminal)
+	s.registerTerminal(terminal, terminalReservation.userReservation, plan.Home)
 	return terminal, nil
 }
 
@@ -210,18 +223,34 @@ func (s *Scheduler) lookupTerminal(member domain.MemberID) *terminalSupervision 
 	return s.terminals[member]
 }
 
-func (s *Scheduler) registerTerminal(terminal *domain.Terminal) {
+func (s *Scheduler) registerAdoptedTerminal(adopted *terminalAdoption) {
+	s.registerTerminal(adopted.terminal, adopted.reservation, adopted.home)
+}
+
+func (s *Scheduler) registerTerminal(terminal *domain.Terminal, reservation *credentialUserReservation, home string) {
 	sup := &terminalSupervision{
 		member: terminal.Member, containerID: runtime.ID(terminal.ContainerID),
-		image: terminal.Image, startedAt: terminal.StartedAt,
+		image: terminal.Image, startedAt: terminal.StartedAt, home: home,
+	}
+	if reservation != nil {
+		sup.runUser = reservation.user
+		sup.userReservation = reservation
 	}
 	s.mu.Lock()
 	if s.terminals == nil {
 		s.terminals = make(map[domain.MemberID]*terminalSupervision)
 	}
 	if old := s.terminals[terminal.Member]; old != nil {
+		if reservation != nil {
+			reservation.terminal = nil
+			delete(s.credentialUsers, reservation)
+		}
 		s.mu.Unlock()
 		return
+	}
+	if reservation != nil {
+		reservation.terminal = sup
+		reservation.pending = false
 	}
 	s.terminals[terminal.Member] = sup
 	s.mu.Unlock()
@@ -229,12 +258,39 @@ func (s *Scheduler) registerTerminal(terminal *domain.Terminal) {
 	go s.superviseTerminal(sup)
 }
 
+func (s *Scheduler) releaseTerminalReservation(entry *terminalSupervision) {
+	if entry == nil {
+		return
+	}
+	s.mu.Lock()
+	if reservation := entry.userReservation; reservation != nil {
+		delete(s.credentialUsers, reservation)
+		entry.userReservation = nil
+	}
+	entry.runUser = ""
+	s.mu.Unlock()
+}
+
+type terminalAdoption struct {
+	terminal    *domain.Terminal
+	home        string
+	reservation *credentialUserReservation
+}
+
+func (s *Scheduler) destroyTerminalAfterFailure(entry *terminalSupervision, cid runtime.ID) {
+	if err := s.cfg.Runtime.Destroy(context.Background(), cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		slog.Warn("scheduler: destroy failed terminal after provisioning error", "member", entry.member, "container", cid, "error", err)
+		return
+	}
+	s.releaseTerminalReservation(entry)
+}
+
 // tryAdoptTerminal adopts cid when its main process is still running. An
 // exited container is destroyed so the caller falls through to create a
 // fresh one: the plan's contract is that exiting the shell and reopening
 // recreates the environment. The probe mirrors recoverSupervised: a short
 // non-destructive Wait whose deadline means "still running".
-func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member, row *domain.Terminal, cid runtime.ID) (*domain.Terminal, bool, error) {
+func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member, row *domain.Terminal, cid runtime.ID) (*terminalAdoption, bool, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, exitProbeTimeout)
 	_, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
 	cancel()
@@ -251,33 +307,74 @@ func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member,
 	default:
 		return nil, false, fmt.Errorf("scheduler: probe terminal container: %w", waitErr)
 	}
-	terminal, err := s.attachTerminalLocked(ctx, member, row, cid)
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
 	if err != nil {
+		return nil, false, fmt.Errorf("scheduler: inspect terminal container: %w", err)
+	}
+	user, home, err := terminalContainerMetadata(info)
+	if err != nil {
+		return nil, false, err
+	}
+	reservationEntry := &terminalSupervision{member: member.ID, home: home}
+	if reserveErr := s.reserveTerminalUser(reservationEntry, user); reserveErr != nil {
+		return nil, false, reserveErr
+	}
+	terminal, err := s.attachTerminalLocked(ctx, member, row, cid, info.Image)
+	if err != nil {
+		s.releaseTerminalReservation(reservationEntry)
 		return nil, false, fmt.Errorf("scheduler: attach terminal: %w", err)
 	}
-	return terminal, true, nil
+	return &terminalAdoption{
+		terminal:    terminal,
+		home:        home,
+		reservation: reservationEntry.userReservation,
+	}, true, nil
 }
 
-func (s *Scheduler) attachTerminalLocked(ctx context.Context, member *domain.Member, row *domain.Terminal, cid runtime.ID) (*domain.Terminal, error) {
+func terminalContainerMetadata(info runtime.ContainerInfo) (string, string, error) {
+	var home string
+	for _, value := range info.Env {
+		name, candidate, ok := strings.Cut(value, "=")
+		if ok && name == "HOME" {
+			home = candidate
+			break
+		}
+	}
+	if home == "" || !strings.HasPrefix(home, "/") {
+		return "", "", errors.New("scheduler: adopted terminal has no absolute HOME")
+	}
+	user := info.User
+	if user == "0" || user == "0:0" {
+		user = ""
+	}
+	return user, home, nil
+}
+
+func (s *Scheduler) attachTerminalLocked(ctx context.Context, member *domain.Member, row *domain.Terminal, cid runtime.ID, image string) (*domain.Terminal, error) {
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err != nil {
 		return nil, err
 	}
 	if !s.hasTerminalSession(member.ID, terminalTabMain) {
-		if err := s.cfg.PTY.StartSession(ctx, ptyhost.TerminalSession(member.ID, terminalTabMain), att); err != nil {
+		if sessionErr := s.cfg.PTY.StartSession(ctx, ptyhost.TerminalSession(member.ID, terminalTabMain), att); sessionErr != nil {
 			_ = att.Close()
-			return nil, fmt.Errorf("scheduler: start terminal session: %w", err)
+			return nil, fmt.Errorf("scheduler: start terminal session: %w", sessionErr)
 		}
 	} else {
 		_ = att.Close()
 	}
-	terminal := &domain.Terminal{Member: member.ID, ContainerID: string(cid), Image: member.Image, StartedAt: time.Now().UTC()}
+	terminal := &domain.Terminal{Member: member.ID, ContainerID: string(cid), Image: image, StartedAt: time.Now().UTC()}
+	if row != nil {
+		if terminal.Image == "" {
+			terminal.Image = row.Image
+		}
+		terminal.StartedAt = row.StartedAt
+	}
+	if terminal.Image == "" {
+		terminal.Image = member.Image
+	}
 	if terminal.Image == "" {
 		terminal.Image = s.cfg.StandardImage
-	}
-	if row != nil {
-		terminal.Image = row.Image
-		terminal.StartedAt = row.StartedAt
 	}
 	return terminal, nil
 }
@@ -440,6 +537,7 @@ func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.Member
 		delete(s.terminals, member)
 	}
 	s.mu.Unlock()
+	s.releaseTerminalReservation(sup)
 	return nil
 }
 
@@ -484,26 +582,26 @@ func (s *Scheduler) recoverTerminals(ctx context.Context) error {
 // stored container when it still runs, else a creation-key match (the row
 // went stale), else the row is pruned so the next open recreates.
 func (s *Scheduler) recoverTerminalLocked(ctx context.Context, member *domain.Member, row *domain.Terminal) error {
-	terminal, adopted, err := s.tryAdoptTerminal(ctx, member, row, runtime.ID(row.ContainerID))
+	adopted, adoptedOK, err := s.tryAdoptTerminal(ctx, member, row, runtime.ID(row.ContainerID))
 	if err != nil {
 		return err
 	}
-	if !adopted {
+	if !adoptedOK {
 		if found, findErr := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member.ID)); findErr == nil && string(found) != row.ContainerID {
-			terminal, adopted, err = s.tryAdoptTerminal(ctx, member, row, found)
+			adopted, adoptedOK, err = s.tryAdoptTerminal(ctx, member, row, found)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	if !adopted {
+	if !adoptedOK {
 		return s.cfg.Store.DeleteTerminal(ctx, member.ID)
 	}
-	if terminal.ContainerID != row.ContainerID {
-		if putErr := s.cfg.Store.PutTerminal(ctx, terminal); putErr != nil {
+	if adopted.terminal.ContainerID != row.ContainerID {
+		if putErr := s.cfg.Store.PutTerminal(ctx, adopted.terminal); putErr != nil {
 			return fmt.Errorf("scheduler: persist recovered terminal: %w", putErr)
 		}
 	}
-	s.registerTerminal(terminal)
+	s.registerAdoptedTerminal(adopted)
 	return nil
 }

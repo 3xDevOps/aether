@@ -95,6 +95,31 @@ describe('connectAttach', () => {
     expect(socket.frames()[1]).toEqual({ type: 'input', data: 'x' })
     a.close()
   })
+  it('rebinds lifecycle callbacks when a persistent socket gets a new host', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack()
+
+    const nextAttached = vi.fn()
+    const nextOutput: string[] = []
+    a.rebind({
+      onData: (chunk) => nextOutput.push(new TextDecoder().decode(chunk)),
+      onAttached: nextAttached,
+      onState: vi.fn(),
+      onRefused: vi.fn(),
+      onWriteDenied: vi.fn(),
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    a.reopen()
+    StubSocket.last().onopen?.()
+    ack()
+    StubSocket.last().onmessage?.({ data: new TextEncoder().encode('new host').buffer })
+
+    expect(nextAttached).toHaveBeenCalledOnce()
+    expect(nextOutput).toEqual(['new host'])
+    a.close()
+  })
   it('splits replay bytes from live output at the acknowledged boundary', () => {
     const a = attach()
     const socket = StubSocket.last()

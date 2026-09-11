@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import type { Run } from '@/lib/types'
+import type * as apiModule from '@/lib/api'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
@@ -9,9 +10,10 @@ import { initialTerminal, type TerminalState } from '@/store/terminal'
 import { bob, run, serverInfo } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
   const { fakeApi } = await import('@/test/fixtures')
-  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
+  return { ...actual, api: fakeApi() }
 })
 
 function terminalRoute() {

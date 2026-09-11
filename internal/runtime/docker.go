@@ -567,6 +567,24 @@ func dockerWaitError(action string, id ID, err error) error {
 	return fmt.Errorf("runtime: %s container %q: %w", action, id, err)
 }
 
+// Inspect implements Runtime by returning the container configuration that
+// was captured at creation time. It deliberately does not resolve the image
+// tag again: recovered callers need the HOME and user of this container.
+func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
+	info, err := d.cli.ContainerInspect(ctx, string(id))
+	if err != nil {
+		return ContainerInfo{}, dockerWaitError("inspect", id, err)
+	}
+	if info.Config == nil {
+		return ContainerInfo{}, fmt.Errorf("runtime: inspect container %q: missing config", id)
+	}
+	return ContainerInfo{
+		Image: info.Config.Image,
+		User:  info.Config.User,
+		Env:   append([]string(nil), info.Config.Env...),
+	}, nil
+}
+
 // FindByCreationKey implements Runtime via the aether.creation-key label,
 // matching containers in any state.
 func (d *Docker) FindByCreationKey(ctx context.Context, key string) (ID, error) {

@@ -8,12 +8,14 @@ import '@/routes/terminal/events'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import type { Run } from '@/lib/types'
+import type * as apiModule from '@/lib/api'
 import { alice, approval, run, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
   const { fakeApi } = await import('@/test/fixtures')
-  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
+  return { ...actual, api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
 const tabs = runTabs.map((tab) => tab.route)

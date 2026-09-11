@@ -341,6 +341,22 @@ func (r *e2eRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatu
 	}
 }
 
+func (r *e2eRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
+	c, err := r.get(id)
+	if err != nil {
+		return runtime.ContainerInfo{}, err
+	}
+	env := make([]string, 0, len(c.spec.Env))
+	for key, value := range c.spec.Env {
+		env = append(env, key+"="+value)
+	}
+	return runtime.ContainerInfo{
+		Image: c.spec.Image,
+		User:  c.spec.User,
+		Env:   env,
+	}, nil
+}
+
 func (r *e2eRuntime) FindByCreationKey(_ context.Context, key string) (runtime.ID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

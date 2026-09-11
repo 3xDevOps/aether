@@ -35,6 +35,19 @@ type Mount struct {
 	ReadOnly bool
 }
 
+// ContainerInfo is immutable metadata captured from a live or stopped
+// container. Env contains the container's configured environment in
+// KEY=value form; it is intentionally metadata-only and does not execute
+// anything in the container.
+type ContainerInfo struct {
+	// Image is the image reference captured when the container was created.
+	Image string
+	// User is the configured uid:gid (empty means the image default).
+	User string
+	// Env is the configured environment, including values such as HOME.
+	Env []string
+}
+
 // Spec describes one run container, engine-neutrally: the image,
 // environment, the run worktree bind-mounted into the container, resource
 // limits, working directory, setup script hook, and the main command.
@@ -241,6 +254,9 @@ type Runtime interface {
 	Exec(ctx context.Context, id ID, argv []string, workDir string) (exitCode int, stdout, stderr string, err error)
 	// Wait blocks until the main process exits and reports its exit code.
 	Wait(ctx context.Context, id ID) (ExitStatus, error)
+	// Inspect returns immutable container configuration metadata without
+	// executing a process in the container.
+	Inspect(ctx context.Context, id ID) (ContainerInfo, error)
 	// FindByCreationKey returns the container created with
 	// Spec.CreationKey == key, or ErrNotFound. It exists for crash
 	// recovery: a container created before its ID was persisted can be
