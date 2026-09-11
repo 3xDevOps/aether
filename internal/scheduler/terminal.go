@@ -24,6 +24,9 @@ const (
 	// terminalUnknownUser is a reservation sentinel, never a container
 	// identity: failed metadata inspection must not be treated as root.
 	terminalUnknownUser = "<unknown-terminal-user>"
+	// Terminal cleanup runs after the main shell exits and must not block a
+	// member lock forever if the daemon or store is unavailable.
+	terminalCleanupTimeout = 30 * time.Second
 )
 
 var (
@@ -43,6 +46,9 @@ type terminalSupervision struct {
 	metadataPending  bool
 	ownershipBlocked bool
 	persistPending   bool
+	// cleanupPending keeps the registry and container identity in place when
+	// an exited terminal cannot yet be destroyed or its row removed.
+	cleanupPending bool
 }
 
 func terminalContainerName(member domain.MemberID) string {
@@ -74,15 +80,11 @@ func (s *Scheduler) terminalLock(member domain.MemberID) *sync.Mutex {
 // TerminalContainerAddr returns the network address of a supervised member
 // terminal container.
 func (s *Scheduler) TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error) {
-	s.mu.Lock()
-	entry := s.terminals[member]
-	if entry == nil {
-		s.mu.Unlock()
+	entry, cleanupPending := s.terminalSnapshot(member)
+	if entry == nil || cleanupPending {
 		return "", errors.New("environment terminal is not running")
 	}
-	containerID := entry.containerID
-	s.mu.Unlock()
-	return s.cfg.Runtime.ContainerIP(ctx, containerID)
+	return s.cfg.Runtime.ContainerIP(ctx, entry.containerID)
 }
 
 // EnsureTerminal creates or adopts one long-lived terminal container for a member.
@@ -94,12 +96,18 @@ func (s *Scheduler) EnsureTerminal(ctx context.Context, member domain.MemberID) 
 }
 
 func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
-	if existing := s.lookupTerminal(member); existing != nil {
-		terminal := terminalFromSupervision(existing)
-		if err := s.ensureTerminalReady(ctx, existing, terminal); err != nil {
-			return nil, err
+	if existing, cleanupPending := s.terminalSnapshot(member); existing != nil {
+		if cleanupPending {
+			if err := s.cleanupExitedTerminalLocked(ctx, existing); err != nil {
+				return nil, err
+			}
+		} else {
+			terminal := terminalFromSupervision(existing)
+			if err := s.ensureTerminalReady(ctx, existing, terminal); err != nil {
+				return nil, err
+			}
+			return terminal, nil
 		}
-		return terminal, nil
 	}
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
@@ -147,11 +155,12 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	}
 	startedAt := time.Now().UTC()
 	spec := runtime.Spec{
-		Name:        terminalContainerName(member),
-		Image:       plan.Image,
-		Env:         plan.Env,
-		WorkingDir:  plan.Home,
-		Command:     []string{"/bin/bash", "-l"},
+		Name:       terminalContainerName(member),
+		Image:      plan.Image,
+		Env:        plan.Env,
+		WorkingDir: plan.Home,
+		// Init hides child exec failures from Start, so select the shell inside the container.
+		Command:     []string{"/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash -l; else exec /bin/sh -l; fi"},
 		TTY:         true,
 		Mounts:      plan.Mounts,
 		User:        plan.User,
@@ -172,10 +181,6 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	return terminal, nil
 }
 
-// createAndStartTerminal creates and starts the terminal container,
-// retrying once with /bin/sh -l when the image has no bash. Docker only
-// reports the missing shell at start (exec stat happens in runc), so the
-// probe is the start error text and the retry needs a fresh container.
 func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
 	cid, err := s.cfg.Runtime.Create(ctx, spec)
 	if err != nil {
@@ -186,33 +191,34 @@ func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spe
 		return cid, nil
 	}
 	_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-	if !isMissingShell(startErr, spec.Command[0]) {
-		return "", fmt.Errorf("scheduler: start terminal: %w", startErr)
-	}
-	spec.Command = []string{"/bin/sh", "-l"}
-	cid, err = s.cfg.Runtime.Create(ctx, spec)
-	if err != nil {
-		return "", fmt.Errorf("scheduler: create terminal (sh fallback): %w", err)
-	}
-	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
-		_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-		return "", fmt.Errorf("scheduler: start terminal (sh fallback): %w", err)
-	}
-	return cid, nil
-}
-
-// isMissingShell recognizes runc's missing-executable start failure for
-// the given shell path.
-func isMissingShell(err error, shell string) bool {
-	msg := err.Error()
-	return strings.Contains(msg, shell) &&
-		(strings.Contains(msg, "no such file or directory") || strings.Contains(msg, "executable file not found"))
+	return "", fmt.Errorf("scheduler: start terminal: %w", startErr)
 }
 
 func (s *Scheduler) lookupTerminal(member domain.MemberID) *terminalSupervision {
+	sup, _ := s.terminalSnapshot(member)
+	return sup
+}
+
+// terminalSnapshot returns the supervision entry and its cleanup state from
+// one Scheduler.mu-protected snapshot. A cleanup-pending entry remains in the
+// registry so its container identity can be retried safely, but it is not a
+// live terminal.
+func (s *Scheduler) terminalSnapshot(member domain.MemberID) (*terminalSupervision, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.terminals[member]
+	sup := s.terminals[member]
+	if sup == nil {
+		return nil, false
+	}
+	return sup, sup.cleanupPending
+}
+
+func (s *Scheduler) lookupLiveTerminal(member domain.MemberID) *terminalSupervision {
+	sup, cleanupPending := s.terminalSnapshot(member)
+	if cleanupPending {
+		return nil
+	}
+	return sup
 }
 
 func (s *Scheduler) registerAdoptedTerminal(adopted *terminalAdoption) *terminalSupervision {
@@ -430,7 +436,11 @@ func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member,
 	cancel()
 	switch {
 	case waitErr == nil:
-		_ = s.cfg.Runtime.Destroy(context.Background(), cid)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+		defer cleanupCancel()
+		if destroyErr := s.cfg.Runtime.Destroy(cleanupCtx, cid); destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
+			return nil, false, fmt.Errorf("scheduler: destroy exited terminal: %w", destroyErr)
+		}
 		return nil, false, nil
 	case errors.Is(waitErr, runtime.ErrNotFound):
 		return nil, false, nil
@@ -517,32 +527,81 @@ func (s *Scheduler) attachTerminalSession(ctx context.Context, member domain.Mem
 	return nil
 }
 
-func (s *Scheduler) superviseTerminal(sup *terminalSupervision) {
-	defer s.wg.Done()
-	_, _ = s.cfg.Runtime.Wait(s.superCtx, sup.containerID)
-	if s.superCtx.Err() != nil {
-		return
+// cleanupExitedTerminalLocked removes an exited terminal only after both its
+// container and its matching durable row are handled. The supervision entry
+// stays registered while either operation can be retried, so a later Ensure
+// cannot create a replacement that an old supervisor would delete.
+func (s *Scheduler) cleanupExitedTerminalLocked(ctx context.Context, sup *terminalSupervision) error {
+	if sup == nil {
+		return nil
 	}
-	// The main process exited. Clean up under the member lock so a
-	// concurrent Ensure or Stop never observes a half-cleaned terminal,
-	// and only when this supervision still owns the member's entry: a
-	// StopTerminal that raced the exit has already cleaned up, and its
-	// successor terminal must not lose its row or sessions to us.
-	lock := s.terminalLock(sup.member)
-	lock.Lock()
-	defer lock.Unlock()
+	s.mu.Lock()
+	if s.terminals[sup.member] != sup {
+		s.mu.Unlock()
+		return nil
+	}
+	sup.cleanupPending = true
+	s.mu.Unlock()
+
+	cleanupCtx, cancel := context.WithTimeout(ctx, terminalCleanupTimeout)
+	defer cancel()
+	s.cfg.PTY.StopSessionsWithPrefix(cleanupCtx, terminalPrefix(sup.member))
+	if err := s.cfg.Runtime.Destroy(cleanupCtx, sup.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		return fmt.Errorf("scheduler: destroy exited terminal: %w", err)
+	}
+
+	row, err := s.cfg.Store.GetTerminal(cleanupCtx, sup.member)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("scheduler: get exited terminal record: %w", err)
+	}
+	// A replacement may have persisted a new row while cleanup was in
+	// progress. Never delete a row naming another container.
+	if row != nil && row.ContainerID == string(sup.containerID) {
+		if err := s.cfg.Store.DeleteTerminal(cleanupCtx, sup.member); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("scheduler: delete exited terminal record: %w", err)
+		}
+	}
+
 	s.mu.Lock()
 	owned := s.terminals[sup.member] == sup
 	if owned {
 		delete(s.terminals, sup.member)
 	}
 	s.mu.Unlock()
+	// The reservation belongs to this supervision, not to whichever
+	// replacement may now occupy the member slot. Release it even when the
+	// slot changed so a failed cleanup cannot strand an ownership claim.
+	s.releaseTerminalReservation(sup)
+	return nil
+}
+
+func (s *Scheduler) superviseTerminal(sup *terminalSupervision) {
+	defer s.wg.Done()
+	_, waitErr := waitForExit(s.superCtx, func(ctx context.Context) (runtime.ExitStatus, error) {
+		return s.cfg.Runtime.Wait(ctx, sup.containerID)
+	})
+	if s.superCtx.Err() != nil {
+		return
+	}
+	if waitErr != nil && !errors.Is(waitErr, runtime.ErrNotFound) {
+		slog.Warn("scheduler: terminal wait inconclusive; retaining supervision", "member", sup.member, "container", sup.containerID, "error", waitErr)
+		return
+	}
+	// The main process exited (or the container disappeared). Clean up under
+	// the member lock so a concurrent Ensure or Stop never observes a
+	// half-cleaned terminal, and only while this supervision owns the entry.
+	lock := s.terminalLock(sup.member)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	owned := s.terminals[sup.member] == sup
+	s.mu.Unlock()
 	if !owned {
 		return
 	}
-	s.cfg.PTY.StopSessionsWithPrefix(context.Background(), terminalPrefix(sup.member))
-	_ = s.cfg.Runtime.Destroy(context.Background(), sup.containerID)
-	_ = s.cfg.Store.DeleteTerminal(context.Background(), sup.member)
+	if err := s.cleanupExitedTerminalLocked(context.Background(), sup); err != nil {
+		slog.Warn("scheduler: clean up exited terminal", "member", sup.member, "container", sup.containerID, "error", err)
+	}
 }
 
 // EnsureTerminalTab ensures a terminal tab process exists for a member.
@@ -607,7 +666,8 @@ func (s *Scheduler) TerminalStatus(ctx context.Context, member domain.MemberID) 
 		return domain.TerminalStatus{}, fmt.Errorf("scheduler: get terminal status: %w", err)
 	}
 	tabs := terminalTabs(s.cfg.PTY.ActiveSessions(terminalPrefix(member)), member)
-	running := len(tabs) > 0 || s.lookupTerminal(member) != nil
+	sup, cleanupPending := s.terminalSnapshot(member)
+	running := !cleanupPending && (len(tabs) > 0 || sup != nil)
 	return domain.TerminalStatus{Running: running, Image: row.Image, SavedImage: m.Image, StartedAt: row.StartedAt, Tabs: tabs}, nil
 }
 
@@ -708,23 +768,52 @@ func (s *Scheduler) recoverTerminals(ctx context.Context) error {
 
 // recoverTerminalLocked re-adopts one persisted terminal on startup: the
 // stored container when it still runs, else a creation-key match (the row
-// went stale), else the row is pruned so the next open recreates.
+// went stale), else the row is pruned so the next open recreates. Durable
+// cleanup is conditional on the row still naming this container, so a
+// replacement cannot be removed by an old recovery attempt.
 func (s *Scheduler) recoverTerminalLocked(ctx context.Context, member *domain.Member, row *domain.Terminal) error {
 	adopted, adoptedOK, err := s.tryAdoptTerminal(ctx, member, row, runtime.ID(row.ContainerID))
 	if err != nil {
 		return err
 	}
 	if !adoptedOK {
-		if found, findErr := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member.ID)); findErr == nil && string(found) != row.ContainerID {
+		found, findErr := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member.ID))
+		switch {
+		case findErr == nil && string(found) != row.ContainerID:
 			adopted, adoptedOK, err = s.tryAdoptTerminal(ctx, member, row, found)
 			if err != nil {
 				return err
 			}
+		case findErr == nil:
+			// The creation-key match is the same exited container.
+		case errors.Is(findErr, runtime.ErrNotFound):
+			// No survivor exists; prune the stale row below.
+		case ctx.Err() != nil:
+			return ctx.Err()
+		default:
+			return fmt.Errorf("scheduler: find terminal replacement: %w", findErr)
 		}
 	}
 	if !adoptedOK {
-		return s.cfg.Store.DeleteTerminal(ctx, member.ID)
+		return s.deleteTerminalRecordIfMatches(ctx, member.ID, row.ContainerID)
 	}
 	_, err = s.finishTerminalAdoption(ctx, adopted)
 	return err
+}
+
+func (s *Scheduler) deleteTerminalRecordIfMatches(ctx context.Context, member domain.MemberID, containerID string) error {
+	current, err := s.cfg.Store.GetTerminal(ctx, member)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: get terminal record for cleanup: %w", err)
+	}
+	if current.ContainerID != containerID {
+		return nil
+	}
+	if err := s.cfg.Store.DeleteTerminal(ctx, member); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("scheduler: delete terminal record: %w", err)
+	}
+	return nil
 }

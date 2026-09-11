@@ -50,7 +50,7 @@ func (s *Scheduler) SaveTerminalImage(ctx context.Context, actor domain.MemberID
 		var running bool
 		s.mu.Lock()
 		entry := s.terminals[account]
-		if entry != nil {
+		if entry != nil && !entry.cleanupPending {
 			home = entry.home
 			containerID := entry.containerID
 			running = true
@@ -58,7 +58,7 @@ func (s *Scheduler) SaveTerminalImage(ctx context.Context, actor domain.MemberID
 				s.mu.Lock()
 				defer s.mu.Unlock()
 				current := s.terminals[account]
-				return current == entry && current.containerID == containerID && current.home == home
+				return current == entry && !current.cleanupPending && current.containerID == containerID && current.home == home
 			}
 		}
 		s.mu.Unlock()

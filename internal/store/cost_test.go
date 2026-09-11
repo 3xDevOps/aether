@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -74,6 +75,88 @@ func TestRunCostMeteredWins(t *testing.T) {
 	}
 	if err := db.PutRunCost(ctx, &RunCost{RunID: "run_missing", WorkspaceID: w.ID, MemberID: m.ID}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("PutRunCost for an unknown run: %v, want ErrNotFound", err)
+	}
+}
+
+// TestSummarizeRunCostsMatchesRollupSemantics covers the scalar history
+// query: metered rows contribute all numeric fields, unmetered rows count
+// but contribute no numbers, and rows from another or empty workspace do not
+// leak into the result.
+func TestSummarizeRunCostsMatchesRollupSemantics(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w1 := mustCreateWorkspace(t, db)
+	w2 := mustCreateWorkspace(t, db)
+	w3 := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	r1 := mustCreateRun(t, db, w1.ID, m.ID, domain.RunRunning)
+	r2 := mustCreateRun(t, db, w1.ID, m.ID, domain.RunRunning)
+	r3 := mustCreateRun(t, db, w1.ID, m.ID, domain.RunRunning)
+	r4 := mustCreateRun(t, db, w1.ID, m.ID, domain.RunRunning)
+	r5 := mustCreateRun(t, db, w2.ID, m.ID, domain.RunRunning)
+	at := time.Unix(100, 0).UTC()
+	put := func(c *RunCost) {
+		t.Helper()
+		if err := db.PutRunCost(ctx, c); err != nil {
+			t.Fatalf("PutRunCost %s: %v", c.RunID, err)
+		}
+	}
+	put(&RunCost{
+		RunID: r1.ID, WorkspaceID: w1.ID, MemberID: m.ID,
+		InputTokens: 10, OutputTokens: 1, CostUSD: 1.25, Metered: true,
+		RecordedAt: at,
+	})
+	put(&RunCost{
+		RunID: r2.ID, WorkspaceID: w1.ID, MemberID: m.ID,
+		InputTokens: 20, OutputTokens: 2, CostUSD: 2.50, Metered: true,
+		RecordedAt: at.Add(time.Second),
+	})
+	put(&RunCost{
+		RunID: r3.ID, WorkspaceID: w1.ID, MemberID: m.ID,
+		InputTokens: 30, OutputTokens: 3, CostUSD: 3.75, Metered: true,
+		RecordedAt: at.Add(2 * time.Second),
+	})
+	// Numeric fields on an unmetered row are ignored just as Rollup.Add
+	// ignores them, even if a malformed or legacy row contains values.
+	put(&RunCost{
+		RunID: r4.ID, WorkspaceID: w1.ID, MemberID: m.ID,
+		InputTokens: 999, OutputTokens: 999, CostUSD: 99, Metered: false,
+		RecordedAt: at.Add(3 * time.Second),
+	})
+	put(&RunCost{
+		RunID: r5.ID, WorkspaceID: w2.ID, MemberID: m.ID,
+		InputTokens: 500, OutputTokens: 50, CostUSD: 100, Metered: true,
+		RecordedAt: at,
+	})
+
+	got, err := db.SummarizeRunCosts(ctx, w1.ID)
+	if err != nil {
+		t.Fatalf("SummarizeRunCosts: %v", err)
+	}
+	if got.Runs != 4 || got.Metered != 3 || got.Unmetered != 1 {
+		t.Fatalf("summary counts = %+v, want 4 runs / 3 metered / 1 unmetered", got)
+	}
+	if got.InputTokens != 60 || got.OutputTokens != 6 {
+		t.Fatalf("summary tokens = %d in / %d out, want 60 / 6", got.InputTokens, got.OutputTokens)
+	}
+	if got.CostUSD != 7.5 {
+		t.Fatalf("summary cost = %v, want 7.5", got.CostUSD)
+	}
+
+	other, err := db.SummarizeRunCosts(ctx, w2.ID)
+	if err != nil {
+		t.Fatalf("SummarizeRunCosts other workspace: %v", err)
+	}
+	if other.Runs != 1 || other.Metered != 1 || other.Unmetered != 0 ||
+		other.InputTokens != 500 || other.OutputTokens != 50 || other.CostUSD != 100 {
+		t.Fatalf("other workspace summary = %+v, want only its own run", other)
+	}
+	empty, err := db.SummarizeRunCosts(ctx, w3.ID)
+	if err != nil {
+		t.Fatalf("SummarizeRunCosts empty workspace: %v", err)
+	}
+	if empty != (RunCostSummary{}) {
+		t.Fatalf("empty workspace summary = %+v, want zero", empty)
 	}
 }
 
@@ -195,5 +278,9 @@ func TestCostMigrationUpgradesExistingDatabase(t *testing.T) {
 	list, err := db.ListRunCosts(ctx, "w1")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("ListRunCosts after migration: %v, %+v", err, list)
+	}
+	summary, err := db.SummarizeRunCosts(ctx, "w1")
+	if err != nil || summary != (RunCostSummary{Runs: 1, Metered: 1, InputTokens: 0, OutputTokens: 0, CostUSD: 1.5}) {
+		t.Fatalf("SummarizeRunCosts after migration: %v, %+v", err, summary)
 	}
 }

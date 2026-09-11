@@ -23,7 +23,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	lock.Lock()
 	defer lock.Unlock()
 
-	sup := s.lookupTerminal(member)
+	sup := s.lookupLiveTerminal(member)
 	if sup == nil {
 		return "", ErrTerminalNotRunning
 	}

@@ -232,6 +232,9 @@ type fakeRuns struct {
 	err             error
 	addr            string
 	addrErr         error
+	addrStarted     chan<- struct{}
+	addrRelease     <-chan struct{}
+	addrCanceled    chan<- struct{}
 	terminalAddr    string
 	terminalAddrErr error
 	calls           []string
@@ -268,9 +271,27 @@ func (f *fakeRuns) Launch(_ context.Context, workspace domain.WorkspaceID, membe
 	}, nil
 }
 
-func (f *fakeRuns) ContainerAddr(_ context.Context, run domain.RunID) (string, error) {
+func (f *fakeRuns) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {
 	if err := f.record(fmt.Sprintf("container-addr:%s", run)); err != nil {
 		return "", err
+	}
+	f.mu.Lock()
+	started, release, canceled := f.addrStarted, f.addrRelease, f.addrCanceled
+	f.mu.Unlock()
+	if release != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			select {
+			case canceled <- struct{}{}:
+			default:
+			}
+			return "", ctx.Err()
+		}
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -300,6 +321,17 @@ func (f *fakeRuns) setAddr(addr string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.addr = addr
+}
+func (f *fakeRuns) blockContainerAddr() (<-chan struct{}, chan struct{}, <-chan struct{}) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	canceled := make(chan struct{}, 1)
+	f.mu.Lock()
+	f.addrStarted = started
+	f.addrRelease = release
+	f.addrCanceled = canceled
+	f.mu.Unlock()
+	return started, release, canceled
 }
 
 func (f *fakeRuns) Kill(_ context.Context, run domain.RunID, actor domain.MemberID) error {

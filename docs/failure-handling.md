@@ -80,7 +80,108 @@ or if the data directory shares a filesystem with something that must not be
 starved. The refusal names the numbers, and the dashboard's disk gauge says
 what is holding the space.
 
+## Capture an unresponsive host
+
+If the server is not answering even though CPU and RAM look free, capture
+evidence before restarting, rebooting, pruning Docker, or killing processes.
+Keep the capture outside the repository and review it before sharing: journal
+lines, command lines, paths, and socket names can be sensitive.
+
+Run this in a root shell (`sudo -s`) on the server host. It writes a
+permission-restricted capture; Docker probes have five-second deadlines:
+
+```sh
+umask 077
+capture=$(mktemp /tmp/aether-capture.XXXXXX)
+{
+  date -Is
+  systemctl show aether-server docker -p Id -p MainPID -p TasksCurrent -p TasksMax \
+    -p LimitNOFILE -p LimitNPROC
+  systemctl status aether-server --no-pager -n 80
+  journalctl -u aether-server -u docker -b --no-pager -n 200
+  journalctl -k -b --no-pager -n 200
+  journalctl -u aether-server -u docker -b -1 --no-pager -n 200
+  journalctl -k -b -1 --no-pager -n 200
+} >"$capture" 2>&1
+
+pid=$(systemctl show aether-server -p MainPID --value)
+if [ "${pid:-0}" -gt 0 ]; then
+  {
+    printf '\n--- service process ---\n'
+    ps -L -p "$pid" -o pid,tid,stat,nlwp,comm
+    cat "/proc/$pid/limits"
+    cat "/proc/$pid/status"
+    printf 'fd_count='
+    find "/proc/$pid/fd" -maxdepth 1 -type l | wc -l
+    ls -l "/proc/$pid/fd" | sed -n '1,100p'
+  } >>"$capture" 2>&1
+fi
+
+{
+  printf '\n--- host pressure and capacity ---\n'
+  cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
+  cat /proc/loadavg /proc/sys/kernel/pid_max /proc/sys/kernel/threads-max
+  cat /proc/sys/fs/file-nr /proc/sys/fs/inotify/max_user_watches
+  cat /proc/sys/fs/inotify/max_user_instances
+  ps -e -o stat= | sort | uniq -c
+  printf 'host_threads='
+  ps -eLf --no-headers | wc -l
+  df -hT
+  df -ih
+  printf '\n--- bounded Docker probes ---\n'
+  timeout 5s docker info
+  timeout 5s docker ps --filter label=aether.managed=true \
+    --format 'table {{.ID}}\t{{.State}}\t{{.Names}}' | sed -n '1,50p'
+  timeout 5s docker stats --no-stream \
+    --format 'table {{.Name}}\t{{.PIDs}}\t{{.CPUPerc}}\t{{.MemUsage}}'
+} >>"$capture" 2>&1
+printf '%s\n' "$capture"
+```
+
+Previous-boot logs require retained journal history. Exit the root shell when
+finished. Do not paste the capture into a repository or an issue without redaction.
+Do not use `SIGQUIT` as a diagnostic shortcut: it terminates a Go server.
+Prefer these read-only probes and preserve the original state for diagnosis.
+
 ## What happens, per failure
+
+### Container wait errors
+
+An error from Docker while waiting is inconclusive: it does not prove that
+the container exited. Run supervision retries the wait with a backoff (from
+50 ms up to 1 s), keeps the run and container supervised, and only proceeds
+when Docker reports an exit or the container is definitively missing. Server
+shutdown cancels the wait without killing the container; a transport error is
+never converted into a made-up exit code.
+
+### File-change watch pressure
+
+The checkout watcher prunes Git-ignored directory subtrees instead of adding
+a kernel watch for every generated child. Tracked files and files made
+visible by a negated rule remain reachable even below an ignored parent.
+Changes to `.gitignore`, `.git/info/exclude`, the Git index, or directory
+creation/rename schedule a coalesced refresh. Newly visible directories gain
+watches; descendants of newly ignored trees lose theirs. If Git cannot answer,
+Aether clears the stale prune state and temporarily walks all directories,
+which is safer than silently missing changes.
+The server logs watcher errors. A queue overflow discards stale watch
+registrations before rescanning the checkout.
+
+Pruning reduces watcher pressure; it is not a constant-time scan guarantee.
+Git refreshes and reconciliation still do work proportional to the paths they
+must inspect, and snapshot timing remains governed by the watcher's quiet,
+minimum, and maximum intervals.
+
+### Environment terminal exit
+
+When the main shell of an environment terminal exits, Aether stops its
+terminal PTY sessions, destroys the exited container, and removes the
+matching durable terminal row before a replacement is created. If container
+destruction or durable-row handling fails during that sequence, the
+supervision entry stays marked for cleanup; the next terminal ensure retries
+cleanup before it can replace the terminal. A retry only removes a durable
+row that still names that same container, so a newer terminal cannot be
+deleted by an older cleanup.
 
 ### Server reboot, or a hard kill
 
@@ -254,6 +355,14 @@ whole. What reaches the agent is always an exact prefix of what the
 connection delivered - never reordered, never duplicated - and a dead
 connection's straggler bytes can never land after the attach unwound, so
 they cannot interleave with the reattach's input.
+
+### SSH port-forward disconnect
+
+For `aether forward`, a client half-close is not a full disconnect. The
+forwarder half-closes the backend and lets the reverse direction drain, so a
+request can finish after the client has sent EOF. A full SSH channel or
+connection teardown cancels the forward and closes both sides, releasing the
+backend instead of leaving a stuck dial behind.
 
 ## Where each row is proven
 

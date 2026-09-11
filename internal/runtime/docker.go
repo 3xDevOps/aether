@@ -173,7 +173,13 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 		cfg.Labels[labelSetupSentinel] = sentinel
 	}
 
+	initEnabled := true
 	hostCfg := &container.HostConfig{
+		// The agent command replaces the image entrypoint and can spawn
+		// descendants without waiting for them. Docker's minimal init stays
+		// outside that command to adopt and reap orphaned children while
+		// preserving the command argv and signal path.
+		Init:        &initEnabled,
 		NetworkMode: container.NetworkMode(d.networkMode),
 		Resources: container.Resources{
 			NanoCPUs: nanoCPUs(spec.CPULimit),
@@ -217,8 +223,9 @@ func newSetupSentinel() string {
 }
 
 // gateEntrypoint waits for the setup sentinel, then execs the container's
-// Cmd (which docker appends as "$@") so the main command becomes PID 1.
-// The fractional-sleep fallback covers strictly POSIX sleep utilities.
+// Cmd (which docker appends as "$@") so the main command runs directly under
+// Docker's minimal init. The fractional-sleep fallback covers strictly POSIX
+// sleep utilities.
 func gateEntrypoint(sentinel string) []string {
 	script := fmt.Sprintf(`until [ -e %s ]; do sleep 0.1 2>/dev/null || sleep 1; done; exec "$@"`, sentinel)
 	return []string{"/bin/sh", "-c", script, "aether-gate"}

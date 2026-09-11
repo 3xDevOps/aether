@@ -40,6 +40,18 @@ type WorkspaceBudget struct {
 	UpdatedAt   time.Time
 }
 
+// RunCostSummary is the workspace-wide usage aggregate used by budget
+// admission and status checks. Unmetered rows contribute to the run counts
+// only; their token and cost columns are intentionally ignored.
+type RunCostSummary struct {
+	Runs         int
+	Metered      int
+	Unmetered    int
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+}
+
 // CostStore is the cost-attribution and budget persistence surface.
 type CostStore interface {
 	// PutRunCost records a run's usage, keyed by run. A metered record
@@ -50,6 +62,10 @@ type CostStore interface {
 	GetRunCost(ctx context.Context, run domain.RunID) (*RunCost, error)
 	// ListRunCosts returns a workspace's records, oldest first.
 	ListRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, error)
+	// SummarizeRunCosts returns the same workspace history as a scalar
+	// aggregate using standard SQL SUM semantics, while avoiding allocation
+	// of every record.
+	SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID) (RunCostSummary, error)
 	// SetWorkspaceBudget creates or replaces a workspace's budget.
 	SetWorkspaceBudget(ctx context.Context, b *WorkspaceBudget) error
 	// GetWorkspaceBudget returns ErrNotFound when the workspace has no budget.
@@ -112,6 +128,28 @@ func (d *DB) ListRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]
 		return nil, fmt.Errorf("store: list run costs: %w", err)
 	}
 	return collect(rows, scanRunCost)
+}
+
+// SummarizeRunCosts returns the aggregate used by budget status and
+// admission. Standard SQL SUM semantics determine the numeric totals while
+// the query avoids allocating one object per historical row.
+func (d *DB) SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID) (RunCostSummary, error) {
+	var summary RunCostSummary
+	err := d.db.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN metered <> 0 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN metered = 0 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN metered <> 0 THEN input_tokens END), 0),
+		       COALESCE(SUM(CASE WHEN metered <> 0 THEN output_tokens END), 0),
+		       COALESCE(SUM(CASE WHEN metered <> 0 THEN cost_usd END), 0)
+		FROM run_costs
+		WHERE workspace_id = ?`, workspace,
+	).Scan(&summary.Runs, &summary.Metered, &summary.Unmetered,
+		&summary.InputTokens, &summary.OutputTokens, &summary.CostUSD)
+	if err != nil {
+		return RunCostSummary{}, fmt.Errorf("store: summarize run costs: %w", err)
+	}
+	return summary, nil
 }
 
 func (d *DB) SetWorkspaceBudget(ctx context.Context, b *WorkspaceBudget) error {

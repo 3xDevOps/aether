@@ -84,7 +84,14 @@ type session struct {
 }
 
 func (s *session) pump() {
-	out := s.att.Stdout()
+	s.mu.Lock()
+	att := s.att
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped || att == nil {
+		return
+	}
+	out := att.Stdout()
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := out.Read(buf)
@@ -129,7 +136,11 @@ func (s *session) end() {
 		return
 	}
 	s.ended = true
-	_ = s.tr.close()
+	tr := s.tr
+	s.tr = nil
+	if tr != nil {
+		_ = tr.close()
+	}
 	for c := range s.clients {
 		c.close(nil)
 	}
@@ -144,19 +155,32 @@ func (s *session) stop() {
 		return
 	}
 	s.stopped = true
-	_ = s.tr.close()
+	tr := s.tr
+	s.tr = nil
+	if tr != nil {
+		_ = tr.close()
+	}
 	for c := range s.clients {
 		c.close(nil)
 	}
-	// The sessions map keeps stopped entries (idempotent StopSession), so
-	// release the replay buffer and client set to bound long-term memory.
+	// The sessions map keeps a lightweight stopped entry so StopSession
+	// remains idempotent. Release all attachment and transcript state that
+	// would otherwise retain runtime stream buffers for the life of the host.
 	s.ring = nil
 	s.clients = nil
+	att := s.att
+	s.att = nil
+	s.stdin = nil
+	s.title = titleScanner{}
+	s.pendingEcho = nil
+	s.onTitle = nil
 	if !s.ended {
 		close(s.done)
 	}
 	s.mu.Unlock()
-	_ = s.att.Close()
+	if att != nil {
+		_ = att.Close()
+	}
 }
 
 func (s *session) isActive() bool {
@@ -275,19 +299,20 @@ func (s *session) applyResize() {
 	s.resizeMu.Lock()
 	defer s.resizeMu.Unlock()
 	s.mu.Lock()
-	if s.geoApplied == s.geoGen || s.ended || s.stopped {
+	if s.geoApplied == s.geoGen || s.ended || s.stopped || s.att == nil {
 		s.mu.Unlock()
 		return
 	}
 	s.geoApplied = s.geoGen
 	cols, rows := s.cols, s.rows
+	att := s.att
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), resizeTimeout)
 	defer cancel()
 	if rows > 1 {
-		_ = s.att.Resize(ctx, cols, rows-1)
+		_ = att.Resize(ctx, cols, rows-1)
 	}
-	applied := s.att.Resize(ctx, cols, rows) == nil
+	applied := att.Resize(ctx, cols, rows) == nil
 	s.mu.Lock()
 	s.paintQuietUntil = time.Now().Add(paintQuiet)
 	var followers []*client
@@ -318,14 +343,15 @@ func (s *session) writeStdin(p []byte) bool {
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
 	s.mu.Lock()
-	if s.ended || s.stopped {
+	if s.ended || s.stopped || s.stdin == nil {
 		s.mu.Unlock()
 		return false
 	}
+	stdin := s.stdin
 	s.expectEcho(p, time.Now())
 	s.mu.Unlock()
 
-	_, err := s.stdin.Write(p)
+	_, err := stdin.Write(p)
 	if err != nil {
 		s.dropEcho()
 	}
@@ -356,7 +382,7 @@ func (s *session) inject(actorName, actorColor, message, submit string) error {
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
 	s.mu.Lock()
-	if s.stopped {
+	if s.stopped || s.stdin == nil {
 		s.mu.Unlock()
 		return ErrNoSession
 	}
@@ -364,12 +390,14 @@ func (s *session) inject(actorName, actorColor, message, submit string) error {
 		s.mu.Unlock()
 		return ErrSessionEnded
 	}
+	stdin := s.stdin
+	tr := s.tr
 	// Neither the banner nor the echo the terminal owes us may touch
 	// lastOut: stall detection reads that clock, and counting the server's
 	// own bytes would clear a stall for an agent that never answered.
 	s.expectEcho(line, time.Now())
 	s.mu.Unlock()
-	n, err := s.stdin.Write(line)
+	n, err := stdin.Write(line)
 	if err != nil {
 		s.dropEcho()
 		return fmt.Errorf("ptyhost: inject stdin write: %w", err)
@@ -385,7 +413,9 @@ func (s *session) inject(actorName, actorColor, message, submit string) error {
 		// The banner has no viewers on a wound-down session, but the
 		// transcript still takes the attribution marker.
 		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
-			s.tr.lateMarker("inject by " + bannerText(actorName) + ": " + bannerText(message))
+			if tr != nil {
+				tr.lateMarker("inject by " + bannerText(actorName) + ": " + bannerText(message))
+			}
 			return nil
 		}
 		return err

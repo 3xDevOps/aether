@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -530,6 +532,436 @@ func nextEvent(t *testing.T, sub events.Subscription, timeout time.Duration) (ev
 	}
 }
 
+// TestDiffWatchPrunesGitIgnoredTrees is a real-git reproduction for watch
+// pressure. The generated tree is ignored, but the checkout also contains a
+// tracked file under an ignored directory and an existing path re-included by
+// a negated rule. Churn in the ignored subtree must not postpone the
+// observable snapshot containing either visible path.
+func TestDiffWatchPrunesGitIgnoredTrees(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	e.cfg.QuietPeriod = 20 * time.Millisecond
+	e.cfg.MinInterval = 20 * time.Millisecond
+	e.cfg.MaxInterval = 10 * time.Minute
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "ignore pressure", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".gitignore"), []byte("generated/*\ntracked-cache/\n!generated/keep.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trackedDir := filepath.Join(checkout, "tracked-cache")
+	noiseDir := filepath.Join(checkout, "generated", "noise")
+	if err := os.MkdirAll(trackedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(noiseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(trackedDir, "checked-in.txt")
+	keep := filepath.Join(checkout, "generated", "keep.txt")
+	noise := filepath.Join(noiseDir, "output.txt")
+	if err := os.WriteFile(tracked, []byte("tracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keep, []byte("included\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(noise, []byte("noise\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", "-f", "tracked-cache/checked-in.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.StartDiffWatch(ctx, "ws1", "run1"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+	stopChurn := make(chan struct{})
+	var stopOnce sync.Once
+	stop := func() { stopOnce.Do(func() { close(stopChurn) }) }
+	churnDone := make(chan struct{})
+	go func() {
+		defer close(churnDone)
+		for {
+			select {
+			case <-stopChurn:
+				return
+			default:
+			}
+			_ = os.WriteFile(noise, []byte("ignored churn\n"), 0o644)
+		}
+	}()
+	t.Cleanup(func() {
+		stop()
+		<-churnDone
+	})
+	if err := os.WriteFile(tracked, []byte("tracked changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keep, []byte("included changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev, ok := nextEvent(t, diffs, 2*time.Second)
+	if !ok {
+		t.Fatal("ignored subtree churn delayed the tracked snapshot")
+	}
+	stop()
+	<-churnDone
+	payload := ev.Payload.(events.RunDiffPayload)
+	seen := make(map[string]bool, len(payload.Files))
+	for _, file := range payload.Files {
+		seen[file.Path] = true
+	}
+	if !seen["tracked-cache/checked-in.txt"] {
+		t.Fatalf("tracked file under ignored directory was not watched: %+v", payload.Files)
+	}
+	if !seen["generated/keep.txt"] {
+		t.Fatalf("negated path under ignored tree was not watched: %+v", payload.Files)
+	}
+}
+
+// TestDiffWatchReconcilesLiveIgnoreRules exercises the transition from an
+// ignored directory to a visible one while a watch is already running. The
+// directory is present at startup, so discovering the file relies on the
+// ignore-file invalidation rather than a fresh-directory walk.
+func TestDiffWatchReconcilesLiveIgnoreRules(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	e.cfg.QuietPeriod = 20 * time.Millisecond
+	e.cfg.MinInterval = 20 * time.Millisecond
+	e.cfg.MaxInterval = 10 * time.Minute
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run-live-ignore", "main", "live ignore", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignore := filepath.Join(checkout, ".gitignore")
+	liveDir := filepath.Join(checkout, "live")
+	if err := os.WriteFile(ignore, []byte("live/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveDir, "before.txt"), []byte("ignored\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+	if err := e.StartDiffWatch(ctx, "ws1", "run-live-ignore"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+
+	if err := os.WriteFile(ignore, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	visible := filepath.Join(liveDir, "after.txt")
+	if err := os.WriteFile(visible, []byte("now visible\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := nextEvent(t, diffs, 5*time.Second)
+	if !ok {
+		t.Fatal("no run.diff after removing a live ignore rule")
+	}
+	payload := ev.Payload.(events.RunDiffPayload)
+	seen := make(map[string]bool, len(payload.Files))
+	for _, file := range payload.Files {
+		seen[file.Path] = true
+	}
+	if !seen["live/after.txt"] {
+		t.Fatalf("newly unignored file was not observed: %+v", payload.Files)
+	}
+}
+
+// TestDiffWatchIgnoresDirectoryCreatedAfterStart verifies that a generated
+// tree created after startup is classified by a coalesced Git refresh before
+// any descendant walk. Once refreshed, churn in that tree is neither a
+// visible change nor a LastFileChange event.
+func TestDiffWatchIgnoresDirectoryCreatedAfterStart(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	e.cfg.QuietPeriod = 20 * time.Millisecond
+	e.cfg.MinInterval = 20 * time.Millisecond
+	e.cfg.MaxInterval = 10 * time.Minute
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run-created-ignore", "main", "created ignore", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignore := filepath.Join(checkout, ".gitignore")
+	if err := os.WriteFile(ignore, []byte("node_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+	if err := e.StartDiffWatch(ctx, "ws1", "run-created-ignore"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+
+	generated := filepath.Join(checkout, "node_modules", "pkg", "output.txt")
+	if err := os.MkdirAll(filepath.Dir(generated), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(generated, []byte("generated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	visible := filepath.Join(checkout, "visible.txt")
+	if err := os.WriteFile(visible, []byte("visible\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := nextEvent(t, diffs, 5*time.Second)
+	if !ok {
+		t.Fatal("no run.diff after creating a visible file alongside ignored tree")
+	}
+	payload := ev.Payload.(events.RunDiffPayload)
+	seenVisible := false
+	for _, file := range payload.Files {
+		if file.Path == "visible.txt" {
+			seenVisible = true
+			break
+		}
+	}
+	if !seenVisible {
+		t.Fatalf("visible file missing from diff: %+v", payload.Files)
+	}
+	last, changed := e.LastFileChange("run-created-ignore")
+	if !changed {
+		t.Fatal("LastFileChange was not set by visible file")
+	}
+
+	if err := os.WriteFile(generated, []byte("generated churn\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if extra, more := nextEvent(t, diffs, 500*time.Millisecond); more {
+		t.Fatalf("ignored tree churn produced run.diff: %+v", extra.Payload)
+	}
+	if got, _ := e.LastFileChange("run-created-ignore"); !got.Equal(last) {
+		t.Fatalf("ignored tree churn updated LastFileChange: before %v, after %v", last, got)
+	}
+}
+
+// inotifyWatchCount reports kernel watches held by this process. It is a
+// resource observation rather than an assertion about diffWatch's private
+// directory set, and is only available on Linux.
+func inotifyWatchCount() (int, bool) {
+	if runtime.GOOS != "linux" {
+		return 0, false
+	}
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return 0, false
+	}
+	count := 0
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if err != nil || !strings.Contains(target, "inotify") {
+			continue
+		}
+		info, err := os.ReadFile(filepath.Join("/proc/self/fdinfo", entry.Name()))
+		if err != nil {
+			return 0, false
+		}
+		for line := range strings.SplitSeq(string(info), "\n") {
+			if strings.HasPrefix(line, "inotify wd:") {
+				count++
+			}
+		}
+	}
+	return count, true
+}
+
+// TestDiffWatchPrunesExistingTreeAfterIgnoreUpdate observes that a tree
+// watched while visible relinquishes its descendant kernel watches when a
+// later ignore rule prunes it. Git metadata watches remain available for
+// subsequent ignore/index changes.
+func TestDiffWatchPrunesExistingTreeAfterIgnoreUpdate(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux /proc inotify accounting")
+	}
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	e.cfg.QuietPeriod = 20 * time.Millisecond
+	e.cfg.MinInterval = 20 * time.Millisecond
+	e.cfg.MaxInterval = 10 * time.Minute
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run-prune-existing", "main", "prune existing", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignore := filepath.Join(checkout, ".gitignore")
+	if err := os.WriteFile(ignore, []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	generatedRoot := filepath.Join(checkout, "generated")
+	const descendantCount = 256
+	for i := range descendantCount {
+		dir := filepath.Join(generatedRoot, fmt.Sprintf("dir-%03d", i))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "output.txt"), []byte("generated\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.git(ctx, checkout, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+	before, found := inotifyWatchCount()
+	if !found {
+		t.Skip("kernel does not expose inotify fd accounting")
+	}
+	if err := e.StartDiffWatch(ctx, "ws1", "run-prune-existing"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+	expanded, found := inotifyWatchCount()
+	if !found || expanded-before < descendantCount {
+		t.Fatalf("visible tree did not consume expected kernel watches: before=%d expanded=%d", before, expanded)
+	}
+
+	if err := os.WriteFile(ignore, []byte("generated/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if got, ok := inotifyWatchCount(); ok && got <= expanded-descendantCount+2 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			got, _ := inotifyWatchCount()
+			t.Fatalf("ignored tree retained kernel watches: before=%d expanded=%d final=%d", before, expanded, got)
+		}
+		<-ticker.C
+	}
+}
+
+// TestDiffWatchReconcilesTrackedAndNegatedPaths covers both ways a path can
+// become visible without creating a directory: force-adding an existing
+// ignored file updates the index, while a new file matching a pre-existing
+// negated rule arrives below an ignored ancestor.
+func TestDiffWatchReconcilesTrackedAndNegatedPaths(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newTestEngine(t, bus)
+	e.cfg.QuietPeriod = 20 * time.Millisecond
+	e.cfg.MinInterval = 20 * time.Millisecond
+	e.cfg.MaxInterval = 10 * time.Minute
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+	ctx := t.Context()
+
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run-visible-paths", "main", "visible paths", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignore := filepath.Join(checkout, ".gitignore")
+	if err := os.WriteFile(ignore, []byte("tracked-cache/\ngenerated/*\n!generated/keep.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trackedDir := filepath.Join(checkout, "tracked-cache")
+	generatedDir := filepath.Join(checkout, "generated")
+	if err := os.MkdirAll(trackedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(trackedDir, "forced.txt")
+	if err := os.WriteFile(tracked, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", ".gitignore"); err != nil {
+		t.Fatal(err)
+	}
+
+	diffs := subscribeTypes(t, bus, events.TypeRunDiff)
+	if err := e.StartDiffWatch(ctx, "ws1", "run-visible-paths"); err != nil {
+		t.Fatalf("StartDiffWatch: %v", err)
+	}
+
+	if err := os.WriteFile(tracked, []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.git(ctx, checkout, "add", "-f", "tracked-cache/forced.txt"); err != nil {
+		t.Fatal(err)
+	}
+	ev, ok := nextEvent(t, diffs, 5*time.Second)
+	if !ok {
+		t.Fatal("no run.diff after force-adding an ignored file")
+	}
+	payload := ev.Payload.(events.RunDiffPayload)
+	seen := make(map[string]bool, len(payload.Files))
+	for _, file := range payload.Files {
+		seen[file.Path] = true
+	}
+	if !seen["tracked-cache/forced.txt"] {
+		t.Fatalf("force-added ignored file was not observed: %+v", payload.Files)
+	}
+
+	negated := filepath.Join(generatedDir, "keep.txt")
+	if err := os.WriteFile(negated, []byte("included\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, ok = nextEvent(t, diffs, 5*time.Second)
+	if !ok {
+		t.Fatal("no run.diff after creating a negated file")
+	}
+	payload = ev.Payload.(events.RunDiffPayload)
+	seen = make(map[string]bool, len(payload.Files))
+	for _, file := range payload.Files {
+		seen[file.Path] = true
+	}
+	if !seen["generated/keep.txt"] {
+		t.Fatalf("newly negated file was not observed: %+v", payload.Files)
+	}
+}
+
 func TestDiffWatchQuiescence(t *testing.T) {
 	bus, err := events.NewInProc(t.Context(), nil)
 	if err != nil {
@@ -713,6 +1145,133 @@ func gitcFail(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
+}
+
+type blockingPackWriter struct {
+	started   chan struct{}
+	release   chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+func newBlockingPackWriter() *blockingPackWriter {
+	return &blockingPackWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (w *blockingPackWriter) Write([]byte) (int, error) {
+	w.startOnce.Do(func() { close(w.started) })
+	<-w.release
+	return 0, io.ErrClosedPipe
+}
+
+func (w *blockingPackWriter) Close() error {
+	w.closeOnce.Do(func() { close(w.release) })
+	return nil
+}
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func waitForPIDFile(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
+			if parseErr == nil && pid > 0 {
+				return pid
+			}
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("read child pid file: %v", err)
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("child pid file %s was not ready", path)
+		}
+		<-ticker.C
+	}
+}
+
+func waitForProcessGone(t *testing.T, pid int) {
+	t.Helper()
+	procPath := filepath.Join("/proc", strconv.Itoa(pid))
+	deadline := time.Now().Add(2 * time.Second)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := os.Stat(procPath)
+		if os.IsNotExist(err) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("stat child process %d: %v", pid, err)
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("child process %d did not exit and get reaped", pid)
+		}
+		<-ticker.C
+	}
+}
+
+func TestUploadPackReturnsOnCtxCancelWithBlockedOutputAfterReap(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("requires Linux /proc process lifecycle observation")
+	}
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	seedWorkspace(t, e, url, "ws1")
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(t.TempDir(), "git.pid")
+	gitWrapper := filepath.Join(t.TempDir(), "git-wrapper")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$$\" > " + shellQuote(pidFile) +
+		"\nexec " + shellQuote(realGit) + " \"$@\"\n"
+	if err := os.WriteFile(gitWrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packConfig := e.cfg
+	packConfig.GitPath = gitWrapper
+	packEngine, err := New(packConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = packEngine.Close() })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	out := newBlockingPackWriter()
+	t.Cleanup(func() { _ = out.Close() })
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Invalid input makes git write a diagnostic, then the writer holds
+		// the os/exec output-copy goroutine in Write until cancellation.
+		_, _ = packEngine.UploadPack(ctx, "ws1", strings.NewReader("not a pkt-line\n"), io.Discard, out)
+	}()
+	select {
+	case <-out.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("git upload-pack did not reach the blocked output writer")
+	}
+	pid := waitForPIDFile(t, pidFile)
+	// /proc disappearance proves Process.Wait reaped the child, not merely
+	// that the wrapper wrote a ready marker before exiting.
+	waitForProcessGone(t, pid)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * packWaitDelay):
+		t.Fatal("UploadPack did not return after cancellation with output blocked")
+	}
 }
 
 func TestUploadPackReturnsOnCtxCancel(t *testing.T) {

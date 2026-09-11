@@ -679,6 +679,12 @@ CREATE TABLE run_steerers (
 	`
 ALTER TABLE workspaces ADD COLUMN origin TEXT NOT NULL DEFAULT '';
 `,
+	// v24: index per-workspace cost history for filtering and detailed
+	// listing.
+	`
+CREATE INDEX idx_run_costs_workspace_recorded
+	ON run_costs(workspace_id, recorded_at, run_id);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:
