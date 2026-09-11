@@ -269,6 +269,9 @@ func TestArgvOverrideDropsRegistryRegistration(t *testing.T) {
 	if args := profile.StatusLaunchArgs(mcpbridge.MountDir); len(args) != 0 {
 		t.Fatalf("override kept the registry status arguments: %v", args)
 	}
+	if env := profile.StatusLaunchEnv(mcpbridge.MountDir); len(env) != 0 {
+		t.Fatalf("override kept the registry status environment: %v", env)
+	}
 	if profile.Reporter != harness.ReporterNone || len(profile.StatusFiles) != 0 {
 		t.Fatalf("override kept reporter %s with %d status files", profile.Reporter, len(profile.StatusFiles))
 	}

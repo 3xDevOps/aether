@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
@@ -309,9 +310,13 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Unlock()
 	// Coordination assets are Aether-owned container surfaces and are appended
 	// after the environment plan's validated workspace mounts.
-	coordMounts, coordArgs := s.coordinationMounts(ctx, entry, run, profile)
+	coordMounts, coordArgs, coordEnv := s.coordinationMounts(ctx, entry, run, profile)
 	plan.Mounts = append(plan.Mounts, coordMounts...)
 	argv = append(argv, coordArgs...)
+	// After the workspace's own variables and the harness's launch
+	// requirements, for the same reason both of those come last: what the
+	// server needs the container to have is not a preference.
+	maps.Copy(plan.Env, coordEnv)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)

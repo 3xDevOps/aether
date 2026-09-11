@@ -135,28 +135,28 @@ func (s *Scheduler) coordinationSeam() *coordination {
 // coordinationMounts stages the bridge, provisions the run's coordination
 // directory, records both in the run's sidecar - all before the container
 // exists - and returns the two read-only mounts plus the launch arguments
-// registering the bridge and the status reporter with the harness. A
-// failure anywhere leaves the run with no coordination and says so on its
-// timeline; it never returns a mount it could not verify.
-func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string) {
+// and environment registering the bridge and the status reporter with the
+// harness. A failure anywhere leaves the run with no coordination and says
+// so on its timeline; it never returns a mount it could not verify.
+func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string, map[string]string) {
 	c := s.coordinationSeam()
 	if c == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	mounts, launchArgs, err := s.provisionCoordination(ctx, c, entry, run, profile)
+	mounts, launchArgs, launchEnv, err := s.provisionCoordination(ctx, c, entry, run, profile)
 	if err == nil {
-		return mounts, launchArgs
+		return mounts, launchArgs, launchEnv
 	}
 	slog.Warn("scheduler: coordination assets unavailable", "run", run.ID, "error", err)
 	s.publishTimeline(ctx, run.WorkspaceID, run.ID, run.MemberID, events.TimelineNote,
 		"coordination unavailable for this run: "+err.Error())
-	return nil, nil
+	return nil, nil, nil
 }
 
-func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile) (mounts []runtime.Mount, launchArgs []string, err error) {
+func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
 	digest, bin, err := c.stage()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// The harness registration: a profile that can load an MCP config gets
 	// one written into its coordination directory, naming the staged bridge,
@@ -168,28 +168,29 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	if mcpArgs := profile.MCPArgs(mcpConfigPath); len(mcpArgs) > 0 {
 		var config []byte
 		if config, err = harness.MCPConfig(mcpbridge.ServerName, mcpbridge.BinaryPath, bridgeSubcommand); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		files[coord.ConfigName] = config
 		launchArgs = append(launchArgs, mcpArgs...)
 	}
 	// The status reporter goes into the same directory the same way, but
 	// only for an interactive run: a headless agent exits when it is done
-	// and never waits for anyone to answer it. The kind is taken from the
-	// same branch that attaches the asset, so what the entry claims about
-	// this run is what the container was actually given.
+	// and never waits for anyone to answer it. The asset is what the
+	// harness is pointed at - by argument or by environment, depending on
+	// what it can load - so its absence is what says there is no reporter,
+	// and the kind is taken from this same branch: what the entry claims
+	// about this run is what the container was actually given.
 	reporter := harness.ReporterNone
-	if run.Mode == domain.LaunchTUI {
-		if statusArgs := profile.StatusLaunchArgs(mcpbridge.MountDir); len(statusArgs) > 0 {
-			maps.Copy(files, profile.StatusFiles)
-			launchArgs = append(launchArgs, statusArgs...)
-			reporter = profile.Reporter
-		}
+	if run.Mode == domain.LaunchTUI && len(profile.StatusFiles) > 0 {
+		maps.Copy(files, profile.StatusFiles)
+		launchArgs = append(launchArgs, profile.StatusLaunchArgs(mcpbridge.MountDir)...)
+		launchEnv = profile.StatusLaunchEnv(mcpbridge.MountDir)
+		reporter = profile.Reporter
 	}
 	var dir string
 	dir, err = c.svc.Provision(ctx, run.ID, files)
 	if err != nil {
-		return nil, nil, fmt.Errorf("provision coordination directory: %w", err)
+		return nil, nil, nil, fmt.Errorf("provision coordination directory: %w", err)
 	}
 	// Past this point the run owns a live socket, so anything that stops it
 	// from being mounted has to hand it straight back rather than leave a
@@ -215,17 +216,17 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	s.mu.Unlock()
 	var trailers []string
 	if trailers, err = s.containerCoAuthors(ctx, run, author); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err = c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
-		return nil, nil, fmt.Errorf("write run co-authors: %w", err)
+		return nil, nil, nil, fmt.Errorf("write run co-authors: %w", err)
 	}
 	mounts = []runtime.Mount{
 		{HostPath: bin, ContainerPath: mcpbridge.BinaryPath, ReadOnly: true},
 		{HostPath: dir, ContainerPath: mcpbridge.MountDir, ReadOnly: true},
 	}
 	if err = checkCoordinationMounts(mounts); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	s.mu.Lock()
 	entry.bridgeDigest, entry.bridgePath, entry.coordDir = digest, bin, dir
@@ -240,12 +241,12 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	// could find the contents on disk under no name at all - which is
 	// exactly the unreferenced-digest case the collector acts on.
 	if err = s.writeSidecar(sc); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err = fsyncDir(s.cfg.StateDir); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return mounts, launchArgs, nil
+	return mounts, launchArgs, launchEnv, nil
 }
 
 // checkCoordinationMounts is the source-side half of mount validation for

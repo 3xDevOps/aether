@@ -312,9 +312,17 @@ type Profile struct {
 	// get them: a headless agent exits when it is done and never waits for
 	// anyone.
 	StatusArgs []string
-	// StatusFiles are the assets StatusArgs points at, written into the
-	// run's coordination directory before the container exists, keyed by
-	// the file name they take there.
+	// StatusEnv is what a harness that has no flag for its reporter needs
+	// in the launch environment instead: opencode loads a plugin named in
+	// OPENCODE_CONFIG_CONTENT. CoordPlaceholder stands for the same
+	// directory as in StatusArgs. It is applied after the workspace's own
+	// variables, so a workspace cannot switch the reporter off, and like
+	// StatusArgs only an interactive run gets it.
+	StatusEnv map[string]string
+	// StatusFiles are the assets StatusArgs and StatusEnv point at, written
+	// into the run's coordination directory before the container exists,
+	// keyed by the file name they take there. A profile with no status
+	// files has no reporter at all.
 	StatusFiles map[string][]byte
 	// InstallScript is the vendor's documented install command, run in the
 	// member's terminal (aether terminal). It must install into ~/.local/bin.
@@ -408,7 +416,17 @@ var profiles = map[string]Profile{
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
 		// The TUI accepts steered text into its editor on the first
 		// Enter and sends on the second.
-		SteerSubmit:   "\r\r",
+		SteerSubmit: "\r\r",
+		// opencode has no flag for a plugin, but it merges the inline JSON
+		// config in OPENCODE_CONFIG_CONTENT over the member's own and
+		// concatenates the plugin lists, so naming the reporter there adds
+		// it to whatever the member already loads. It reports both ends of
+		// a turn: session.status busy and session.idle.
+		Reporter: ReporterFull,
+		StatusEnv: map[string]string{
+			"OPENCODE_CONFIG_CONTENT": `{"plugin":["file://` + CoordPlaceholder + "/" + agentstatus.OpenCodePluginName + `"]}`,
+		},
+		StatusFiles:   map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
 		InstallScript: "curl -fsSL https://opencode.ai/install | bash",
 	},
 	"custom": {Name: "custom"},
@@ -505,6 +523,21 @@ func (p Profile) StatusLaunchArgs(dir string) []string {
 	out := make([]string, 0, len(p.StatusArgs))
 	for _, a := range p.StatusArgs {
 		out = append(out, strings.ReplaceAll(a, CoordPlaceholder, dir))
+	}
+	return out
+}
+
+// StatusLaunchEnv renders StatusEnv, the environment variables an
+// interactive run needs for the harness to load its reporter, with
+// CoordPlaceholder replaced by dir, the container path of the coordination
+// directory. Nil for a harness whose reporter needs no environment.
+func (p Profile) StatusLaunchEnv(dir string) map[string]string {
+	if len(p.StatusEnv) == 0 || dir == "" {
+		return nil
+	}
+	out := make(map[string]string, len(p.StatusEnv))
+	for name, value := range p.StatusEnv {
+		out[name] = strings.ReplaceAll(value, CoordPlaceholder, dir)
 	}
 	return out
 }
