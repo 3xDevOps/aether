@@ -74,7 +74,7 @@ type Config struct {
 	// half-written checkout is worse than a refused one.
 	MinFreeBytes int64
 	// Harnesses overrides or extends the shipped harness registry
-	// (internal/harness: claude, codex, pi, opencode, custom); "fake"
+	// (internal/harness: claude, codex, pi, omp, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
 	// override replaces the registry argv and keeps the profile's user, key
 	// passthrough, and launch environment; it drops the registry's resume
