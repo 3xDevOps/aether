@@ -89,7 +89,8 @@ func shellLink(target, workingDir string) []byte {
 	b.Write(linkInfo(target))
 
 	// StringData: the working directory, as a counted run of UTF-16 code
-	// units with no terminator.
+	// units with no terminator. The count is a uint16 and Windows caps a
+	// path at 32767 units even with long paths enabled, so it cannot wrap.
 	dir := utf16.Encode([]rune(workingDir))
 	put16(uint16(len(dir)))
 	for _, u := range dir {

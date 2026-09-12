@@ -9,6 +9,15 @@ on:
 permissions:
   contents: write
   packages: write
+
+# `make release` generates and removes cmd/aether/resource_windows_*.syso
+# inside the source tree, and every release job targets the same self-hosted
+# label. Two overlapping releases sharing a working directory would race over
+# that file, so they queue instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   runner-policy:
     permissions:

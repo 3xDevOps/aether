@@ -424,15 +424,29 @@ jobs:
             exit 1
           }
           & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -SignatureUpdate
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::signature update failed (exit $LASTEXITCODE); scanning on stale definitions would prove nothing"
+            exit 1
+          }
       - name: Scan the Windows client
         shell: powershell
         run: |
           $mpcmdrun = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          # An empty match would otherwise skip the loop and report clean
+          # without having scanned anything - the failure that matters most,
+          # because it means the release matrix or the artifact is broken.
+          $exes = @(Get-ChildItem dist\aether-windows-*.exe -ErrorAction SilentlyContinue)
+          if ($exes.Count -eq 0) {
+            Write-Host "::error::no Windows binaries in dist/; the artifact download or release-build is broken"
+            exit 1
+          }
           $failed = @()
-          foreach ($exe in Get-ChildItem dist\aether-windows-*.exe) {
+          foreach ($exe in $exes) {
             Write-Host "scanning $($exe.Name)"
-            # -DisableRemediation needs -ScanType 3 with -File, and keeps a
-            # detection from deleting the artifact out from under the job.
+            # -DisableRemediation needs -ScanType 3 with -File. It holds for
+            # this scan only: real-time protection, armed above, follows its
+            # own threat actions, so a detection can still take the file. The
+            # scan reports non-zero either way.
             $out = & $mpcmdrun -Scan -ScanType 3 -File $exe.FullName -DisableRemediation 2>&1
             $code = $LASTEXITCODE
             $out | ForEach-Object { Write-Host "  $_" }

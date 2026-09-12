@@ -4,8 +4,15 @@
 # beyond the Go toolchain (pure Go, CGO_ENABLED=0 throughout).
 
 MODULE  := github.com/3xDevOps/Aether
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# Both reach shell command lines - the linker flags here, the Windows resource
+# arguments in `release` - and a git tag may legally contain a quote, a
+# semicolon or a $. CI builds a pull request's own head with its own tags, so
+# filter each where it is read: a hostile tag name truncates instead of
+# executing. Anything left empty falls back below.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9.+_-')
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null | tr -cd 'A-Za-z0-9')
+VERSION := $(or $(VERSION),dev)
+COMMIT  := $(or $(COMMIT),unknown)
 LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Version=$(VERSION) \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT)
