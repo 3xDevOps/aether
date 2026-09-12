@@ -83,10 +83,11 @@ test('fresh runs show the current prompt while History keeps the complete record
   // Each iteration clears and redraws the screen. The 96-byte payload makes
   // the old redraws exceed the one-MiB live replay ring before the prompt.
   const redrawFill = 'x'.repeat(96)
+  // Emit the first screen only after the server has attached its recorder.
   const historyAgent = `stty -echo
+IFS= read -r start
 printf '\\033[2J\\033[H${firstOutput}\\n'
 sleep 1
-IFS= read -r start
 i=0
 while [ "$i" -lt 18000 ]; do
   printf '\\033[2J\\033[HOLD-REDRAW-%05d-${redrawFill}\\n' "$i"
