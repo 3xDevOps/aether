@@ -240,6 +240,12 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 		t.Fatalf("waiting = %+v, want it to name the one working run", status.Waiting)
 	}
 
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: launched.Run.ID, Message: "done",
+	}, nil); err != nil {
+		t.Fatalf("run.inject harness completion: %v", err)
+	}
+
 	// A clean TUI harness exit leaves a reusable login shell, so the run
 	// remains active until the operator explicitly resolves it.
 	att.waitOutput(t, "[aether] harness exited with code 0")

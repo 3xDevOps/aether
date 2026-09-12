@@ -712,6 +712,38 @@ func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 	}
 }
 
+func TestCloseRunRelabelsWhileExitCleanupFinalizes(t *testing.T) {
+	e := newTestEnv(t, nil)
+	barrier := &destroyBarrierRuntime{
+		Runtime: e.rt,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(barrier.releaseNow)
+	e.sched.cfg.Runtime = barrier
+
+	run, c := e.launchFake(t, "close during exit cleanup")
+	c.exitNow(0)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	select {
+	case <-barrier.started:
+	case <-time.After(time.Second):
+		t.Fatal("container destroy did not start")
+	}
+
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun while finalizing: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+
+	barrier.releaseNow()
+	waitFor(t, "completed run removed from supervision", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID] == nil
+	})
+}
+
 func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 	const stallThreshold = 40 * time.Millisecond
 	e := newTestEnv(t, func(cfg *Config) {

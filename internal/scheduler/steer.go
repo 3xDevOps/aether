@@ -621,8 +621,18 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		return fmt.Errorf("%w: run cleanup is pending", ErrInvalidTransition)
 	}
 	if entry.finalizing {
+		status, workspace := entry.status, entry.workspaceID
+		if !status.Terminal() {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: run finalization is in progress", ErrInvalidTransition)
+		}
+		if status == outcome {
+			s.mu.Unlock()
+			return nil
+		}
+		err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
 		s.mu.Unlock()
-		return fmt.Errorf("%w: run finalization is in progress", ErrInvalidTransition)
+		return err
 	}
 	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
 	mode, retained, alreadyPaused := entry.launchMode, entry.retained, entry.paused
