@@ -68,6 +68,7 @@ type session struct {
 	paintQuietUntil time.Time
 	done            chan struct{}
 	title           titleScanner
+	modes           modeScanner
 	onTitle         func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
@@ -119,6 +120,7 @@ func (s *session) deliver(p []byte) {
 		s.lastOut = now
 	}
 	s.title.scan(p, s.onTitle)
+	s.modes.scan(p)
 	s.ring.write(p)
 	s.tr.output(p)
 	for c := range s.clients {
@@ -172,6 +174,7 @@ func (s *session) stop() {
 	s.att = nil
 	s.stdin = nil
 	s.title = titleScanner{}
+	s.modes = modeScanner{}
 	s.pendingEcho = nil
 	s.onTitle = nil
 	if !s.ended {
@@ -207,11 +210,29 @@ func (s *session) addClient(c *client) error {
 	if s.ended {
 		return ErrSessionEnded
 	}
-	c.replay = s.ring.bytes()
-	s.clients[c] = struct{}{}
-	if c.imposes() {
-		s.reconcileLocked(true)
+	// A resuming client still holds this session's screen and its terminal
+	// state, so it needs only the bytes that arrived while it was away.
+	if c.resume {
+		if missed, ok := s.ring.since(c.cursor); ok {
+			c.replay = missed
+			c.resumed = true
+		}
 	}
+	// Everyone else rebuilds from the ring, which is a byte tail: the
+	// modes the agent set at startup are long gone from it, and the
+	// preamble puts them back ahead of the replay.
+	if !c.resumed {
+		c.replay = append(s.modes.preamble(), s.ring.bytes()...)
+	}
+	// Where the replay leaves this client, so it can say where it got to
+	// if it comes back.
+	c.cursor = s.ring.written
+	s.clients[c] = struct{}{}
+	// Any join can change who imposes, not just this client: the mirror
+	// that was alone here a moment ago no longer is. A resume asks for no
+	// redraw - that is the point of it - so it nudges only if the size it
+	// brings actually differs from the one the session already has.
+	s.reconcileLocked(s.imposesNow(c) && !c.resumed)
 	return nil
 }
 
@@ -219,7 +240,9 @@ func (s *session) removeClient(c *client) {
 	s.mu.Lock()
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
-		if c.imposes() && !s.ended && !s.stopped {
+		// Leaving can promote the client left behind, so the size is
+		// recomputed whoever it was that went.
+		if !s.ended && !s.stopped {
 			s.reconcileLocked(false)
 		}
 	}
@@ -244,14 +267,13 @@ func (s *session) resizeClient(c *client, cols, rows uint) {
 		return
 	}
 	c.cols, c.rows = cols, rows
-	if c.imposes() && !s.ended && !s.stopped {
+	if s.imposesNow(c) && !s.ended && !s.stopped {
 		s.reconcileLocked(false)
 	}
 }
 
 // reconcileLocked recomputes the effective PTY size as the per-dimension
-// minimum over the clients that impose one (a read-only mirror and a
-// follower never do), records it, and schedules the att.Resize application
+// minimum over the clients that impose one (see imposesNow), records it, and schedules the att.Resize application
 // off the lock (a slow runtime resize must never stall output delivery).
 // With no such client the size stays unchanged. force schedules a redraw
 // nudge even when the size did not change (repaint for a new write-mode
@@ -260,7 +282,7 @@ func (s *session) reconcileLocked(force bool) {
 	var cols, rows uint
 	found := false
 	for c := range s.clients {
-		if !c.imposes() {
+		if !s.imposesNow(c) {
 			continue
 		}
 		if !found {
@@ -514,15 +536,19 @@ func bannerText(text string) string {
 }
 
 // ring keeps the last max bytes of raw PTY output for replay-on-attach.
+// written counts every byte the session has ever produced, so a client
+// that says how far it got can be handed exactly what it missed.
 type ring struct {
 	max     int
 	buf     []byte
 	dropped bool
+	written uint64
 }
 
 func newRing(max int) *ring { return &ring{max: max} }
 
 func (r *ring) write(p []byte) {
+	r.written += uint64(len(p))
 	if len(p) >= r.max {
 		if len(p) > r.max || len(r.buf) > 0 {
 			r.dropped = true
@@ -537,6 +563,22 @@ func (r *ring) write(p []byte) {
 	if n := len(r.buf) - r.max; n > 0 {
 		r.buf = append(r.buf[:0], r.buf[n:]...)
 	}
+}
+
+// since returns the bytes written after cursor, and whether the ring
+// still holds all of them. A cursor from further back than the ring
+// retains - or one ahead of what has been written, which no honest
+// client can hold - reports false, and the caller replays everything
+// instead.
+func (r *ring) since(cursor uint64) ([]byte, bool) {
+	if cursor > r.written {
+		return nil, false
+	}
+	behind := r.written - cursor
+	if behind > uint64(len(r.buf)) {
+		return nil, false
+	}
+	return append([]byte(nil), r.buf[uint64(len(r.buf))-behind:]...), true
 }
 
 func (r *ring) bytes() []byte {
@@ -558,9 +600,17 @@ type client struct {
 	// not it may write: it renders the size the session is, so it can
 	// never reflow the agent's screen for anyone else.
 	follow bool
-	cols   uint // guarded by session.mu
-	rows   uint // guarded by session.mu
-	replay []byte
+	// resume means this client kept the screen from a previous attach, so
+	// it is sent only what it missed and provokes no redraw. cursor is how
+	// far it got, and resumed records whether the ring could still answer
+	// from there - when it could not, the attach falls back to a full
+	// replay and the client has to clear its screen after all.
+	resume  bool
+	cursor  uint64
+	resumed bool
+	cols    uint // guarded by session.mu
+	rows    uint // guarded by session.mu
+	replay  []byte
 
 	mu     sync.Mutex
 	cond   *sync.Cond
@@ -575,6 +625,8 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		conn:     conn,
 		readOnly: a.ReadOnly,
 		follow:   a.Follow,
+		resume:   a.Resume,
+		cursor:   a.Cursor,
 		cols:     a.Cols,
 		rows:     a.Rows,
 		done:     make(chan struct{}),
@@ -583,14 +635,44 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 	return c
 }
 
-// imposes reports whether this client's geometry is one the PTY has to fit
-// inside: a mirror never counts, and neither does a client that follows.
-func (c *client) imposes() bool { return !c.readOnly && !c.follow }
+// sizes reports whether c brings a screen of its own to the question of
+// how big the PTY should be. A follower renders at whatever size the
+// session is, and an in-process consumer like the adapter tap has no
+// terminal at all and attaches with none - neither is a screen anything
+// has to fit inside, and neither is company for the check below.
+func (c *client) sizes() bool { return !c.follow && c.cols != 0 && c.rows != 0 }
+
+// imposesNow reports whether c's geometry is one the PTY has to fit
+// inside. A client that may write always counts. A read-only mirror
+// counts only while it is the only client bringing a screen at all -
+// alone there is no other screen to reflow, so a watcher resizing its
+// window is just ssh resizing a terminal, and the agent is better drawn
+// at the size someone is actually looking at. Callers hold mu.
+func (s *session) imposesNow(c *client) bool {
+	if !c.sizes() {
+		return false
+	}
+	if !c.readOnly {
+		return true
+	}
+	for other := range s.clients {
+		if other != c && other.sizes() {
+			return false
+		}
+	}
+	return true
+}
 
 // tellGeometry hands the session's size to a client that asked to be told,
 // which is how an ack reports the live geometry and how a later change
 // reaches a follower. Never called with the session lock held: the conn
 // writes.
+func (c *client) tellResume() {
+	if w, ok := c.conn.(ResumeWriter); ok {
+		w.SetResume(c.cursor, c.resumed)
+	}
+}
+
 func (c *client) tellGeometry(cols, rows uint) {
 	if w, ok := c.conn.(GeometryWriter); ok {
 		w.SetGeometry(cols, rows)

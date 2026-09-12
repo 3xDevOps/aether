@@ -111,6 +111,14 @@ upload is enabled, a native paste containing actual image file data is handled
 by the terminal's image paste listener; ordinary text remains native terminal
 input. On macOS, `Cmd+V` is the native paste shortcut.
 
+A paste reaches the agent as one block rather than as the Enter presses
+its newlines would otherwise be, because the terminal is told the session
+has bracketed paste on. An agent sets that mode once when it starts, long
+before you open the terminal, so the server tracks it - along with the
+cursor, autowrap, and mouse reporting - and restores it ahead of the
+replay. Without that, a terminal opened hours into a run would disagree
+with the agent about how a paste arrives, and only the agent could tell.
+
 The terminal toolbar has named **Copy terminal selection**, **Copy last
 screen**, **Paste into terminal**, and **Upload image to terminal** controls.
 **Copy last screen** copies the rows currently on screen, which is how to copy
@@ -134,6 +142,13 @@ then type or tap one more key, and that key arrives as its control code -
 `Ctrl` then `d` is `Ctrl+D`. It covers the letters, space, and `@ [ \ ] ^ _`,
 applies to one key and then releases; a key it does not cover is sent as
 itself and leaves **Ctrl** armed for the next one.
+
+A run's terminal is sized by the people steering it: the PTY is the
+smallest window among them, so nobody's screen is reflowed past what it
+can show. Watching it read-only imposes nothing - except when you are the
+only one attached, where there is no other screen to protect and the
+terminal follows your window the way `ssh` does. A second attach ends
+that, and the size is recomputed without you.
 
 On a phone every terminal here - a run's, its shells, and this one - shows
 the session at the size it already is rather than at the phone's own width,
@@ -170,6 +185,11 @@ cannot auto-read arbitrary local paths. Choose the actual file in the chooser
 instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
+
+Taking control and handing it back keep the screen you are looking at:
+the terminal reattaches with different permissions rather than redrawing
+its scrollback, so the transition shows nothing beyond the button
+changing.
 
 ### Control availability
 

@@ -896,7 +896,7 @@ Every live socket - `events`, `attach`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
 **10**. A client that changed networks or went to sleep leaves a half-open
 connection that reads as live on both ends; the ping is what releases the PTY
-client it was holding, whose geometry clamps every other viewer. The SPA
+client it was holding, whose geometry may be clamping every other viewer. The SPA
 reconnects on its normal path.
 
 ### `GET /ws/events`
@@ -946,6 +946,17 @@ needs.
    {"write":true,"follow":true,"cols":80,"rows":24}
    ```
 
+   `resume` asks to reattach without the scrollback replay: the client
+   already holds this session's screen and is reattaching only to change
+   what it may do, which is what the dashboard does when you take control
+   or hand it back. It carries `cursor`, the output count the last ack
+   reported plus every live byte received since, and the replay is exactly
+   what followed it - usually nothing, and never the whole scrollback. The
+   client keeps what is on screen along with the terminal state behind it.
+   The ack answers with `"resumed":true`; a session whose ring no longer
+   reaches back that far answers `"resumed":false` and replays everything
+   instead, which the client has to clear its screen for.
+
    `follow` says the client renders the session at the size it already is
    and imposes none of its own, so it is left out of the minimum the PTY is
    sized to whether or not it can write (step 4). Its `cols` and `rows` are
@@ -960,7 +971,12 @@ needs.
    and falls back to the header only when there is no session to have one.
    The optional `replay` value is the number of binary scrollback bytes
    that follow the ack before live output; clients should mute
-   terminal-generated replies until those bytes have been parsed.
+   terminal-generated replies until those bytes have been parsed. It leads
+   with the terminal modes the session is in - bracketed paste, cursor,
+   autowrap, mouse reporting - rebuilt rather than recorded, since the
+   bytes that set them left the scrollback long ago. `cursor` is how much
+   of the session's output the client holds once that replay is parsed;
+   it is what a later `resume` sends back.
    A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is
@@ -980,10 +996,15 @@ needs.
    {"type":"resize","cols":132,"rows":50}
    ```
 
-   Control frames from a read-only attach are ignored. The shared terminal
-   geometry is the per-dimension minimum over the attaches that impose one -
-   every write-capable attach except a `follow` client - so a narrow writer
-   reflows the agent's screen for everyone, and a follower never does.
+   Input from a read-only attach is ignored; its resizes are not, because
+   whether they count is the session's to decide. The shared terminal
+   geometry is the per-dimension minimum over the attaches that impose one:
+   every write-capable attach, plus a read-only one while it is the only
+   attach that is not a `follow` client. So a narrow writer reflows the
+   agent's screen for everyone, a follower never does, and a lone watcher
+   sizes the PTY to its own window the way `ssh` does - until a second
+   attach arrives, when it stops imposing and the minimum is recomputed
+   without it.
 5. Server sends one **text** control frame back to a `follow` attach
    whenever the session's PTY is resized by someone who does impose a size:
 

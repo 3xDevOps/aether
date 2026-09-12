@@ -423,6 +423,19 @@ type AttachRequest struct {
 	// agent's terminal steers it this way without reflowing it for anyone
 	// else.
 	Follow bool `json:"follow,omitempty"`
+	// Resume asks for the attach without its scrollback replay: the
+	// client already holds this session's screen and is reattaching only
+	// to change what it may do. The ack reports a replay of zero and the
+	// client keeps what it has, which is what makes taking control a
+	// change of state rather than a redraw. A client asks for it only
+	// while its previous attach was still live, so an attach that follows
+	// a drop - where the screen may have moved on without it - still gets
+	// the full replay.
+	Resume bool `json:"resume,omitempty"`
+	// Cursor is how much of the session's output this client already has,
+	// taken from the ack it is resuming from. The session replays exactly
+	// what followed it, so nothing produced during the reattach is lost.
+	Cursor uint64 `json:"cursor,omitempty"`
 }
 
 // AttachResponse acknowledges an AttachRequest with the session's live
@@ -433,9 +446,18 @@ type AttachResponse struct {
 	Cols uint `json:"cols,omitempty"`
 	Rows uint `json:"rows,omitempty"`
 	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
-	Replay int    `json:"replay,omitempty"`
-	Code   int    `json:"code,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Replay int `json:"replay,omitempty"`
+	// Cursor is how much of the session's output this client holds once
+	// the replay is parsed. A client that reattaches sends it back to
+	// resume from exactly there.
+	Cursor uint64 `json:"cursor,omitempty"`
+	// Resumed answers a request to resume: true when the replay is only
+	// what this client missed, false when the session could not serve
+	// from its cursor and the replay is the whole scrollback instead -
+	// which the client has to clear its screen for.
+	Resumed bool   `json:"resumed,omitempty"`
+	Code    int    `json:"code,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Exit statuses of the attach subsystem. 0 is the run's terminal session

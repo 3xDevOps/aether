@@ -1235,9 +1235,11 @@ replaces the terminal with the gateway's own error instead.
   frame arrives with its own 1008 close, which is why the client reacts to the
   code only when no refusal preceded it.
 - **Reconnect resumes with full recent history.** The gateway replays the
-  recent transcript to every attach, and the client clears the buffer first,
-  which keeps a reconnect from stacking a second copy of the scrollback under
-  the first. The shared xterm host uses `scrollback: 50000`; the server replay
+  recent transcript to an attach that needs it, and the client clears the
+  buffer first, which keeps a reconnect from stacking a second copy of the
+  scrollback under the first. Taking control and handing it back are the
+  exception: they reattach with `resume`, which replays nothing and clears
+  nothing, because that client already has the screen. The shared xterm host uses `scrollback: 50000`; the server replay
   ring is 1 MiB and is seeded from the cast tail when a session is restarted,
   so re-attach retains the full recent history rather than only 64 KiB.
 - **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
