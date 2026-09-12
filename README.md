@@ -135,10 +135,14 @@ Node.js and no Next server. For dashboard development, run
 
 The server targets Linux (amd64/arm64) and only Linux. The CLI is a supported
 client on Linux, macOS, and Windows (amd64/arm64 each), and CI builds, vets,
-and unit-tests the Windows client on a real Windows runner. Two commands are
-deliberately not part of the Windows client: `aether init`, which prepares a
-Linux server's data directory, and `aether update`, since Windows cannot
-replace a running executable. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+unit-tests and virus-scans the Windows client on a real Windows runner. Two
+commands are not part of the Windows client: `aether init`, which prepares a
+Linux server's data directory and belongs on the server box, and `aether
+update`, which has no Windows implementation yet - re-download the release
+binary to upgrade. The Windows binaries are not code-signed yet; see
+[docs/install.md](docs/install.md#windows-defender-and-smartscreen) for what
+Defender does about that and how to report a detection.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
 ## License
 

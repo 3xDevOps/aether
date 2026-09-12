@@ -390,3 +390,70 @@ jobs:
           name: binaries
           path: dist/
           retention-days: 7
+
+  # Scans the binaries the release matrix just produced with the Defender
+  # build that ships on the runner. A detection here is the same failure a
+  # user hits: the download is blocked, or the client is quarantined on first
+  # run. It is signal, not a flake - the response is to submit the binary at
+  # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
+  # positive, and to check what changed in the client's syscalls or embedded
+  # strings. See docs/install.md.
+  windows-defender:
+    needs: [runner-policy, release-build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist
+      # The runner image ships with real-time protection, cloud reporting and
+      # sample submission switched off, so an untouched runner calls every
+      # file clean. Most detections on a fresh Go binary come from the cloud
+      # classifier, which is exactly the part that is disabled by default.
+      - name: Arm Defender
+        shell: powershell
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $false
+          Set-MpPreference -DisableIOAVProtection $false
+          Set-MpPreference -DisableBehaviorMonitoring $false
+          Set-MpPreference -MAPSReporting 2
+          Set-MpPreference -SubmitSamplesConsent 1
+          $p = Get-MpPreference
+          if ($p.DisableRealtimeMonitoring -or $p.MAPSReporting -ne 2) {
+            Write-Host "::error::Defender did not arm (realtime disabled=$($p.DisableRealtimeMonitoring), MAPSReporting=$($p.MAPSReporting)); a scan now would report clean regardless of the binary"
+            exit 1
+          }
+          & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -SignatureUpdate
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::signature update failed (exit $LASTEXITCODE); scanning on stale definitions would prove nothing"
+            exit 1
+          }
+      - name: Scan the Windows client
+        shell: powershell
+        run: |
+          $mpcmdrun = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          # An empty match would otherwise skip the loop and report clean
+          # without having scanned anything - the failure that matters most,
+          # because it means the release matrix or the artifact is broken.
+          $exes = @(Get-ChildItem dist\aether-windows-*.exe -ErrorAction SilentlyContinue)
+          if ($exes.Count -eq 0) {
+            Write-Host "::error::no Windows binaries in dist/; the artifact download or release-build is broken"
+            exit 1
+          }
+          $failed = @()
+          foreach ($exe in $exes) {
+            Write-Host "scanning $($exe.Name)"
+            # -DisableRemediation needs -ScanType 3 with -File. It holds for
+            # this scan only: real-time protection, armed above, follows its
+            # own threat actions, so a detection can still take the file. The
+            # scan reports non-zero either way.
+            $out = & $mpcmdrun -Scan -ScanType 3 -File $exe.FullName -DisableRemediation 2>&1
+            $code = $LASTEXITCODE
+            $out | ForEach-Object { Write-Host "  $_" }
+            if ($code -ne 0) { $failed += "$($exe.Name) (MpCmdRun exit $code)" }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::Microsoft Defender flagged $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "Defender scan clean."

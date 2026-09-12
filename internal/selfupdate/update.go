@@ -16,9 +16,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/macinstall"
 )
 
-// ErrWindows refuses the in-place swap on Windows: the OS cannot rename
-// over a running executable, so the one documented path is a manual
-// download rather than a half-supported dance.
+// ErrWindows refuses the in-place swap on Windows. Windows locks a running
+// image against being written or deleted, but it does allow that image to be
+// renamed out of the way, which is how an in-place swap is done there. That
+// is implementable and not yet implemented; until it is, the one documented
+// path is a manual download.
 var ErrWindows = errors.New("self-update is not supported on Windows; download the release from https://github.com/" + Repo + "/releases")
 
 // adminInstaller installs one staged file through the platform's

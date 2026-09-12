@@ -4,8 +4,15 @@
 # beyond the Go toolchain (pure Go, CGO_ENABLED=0 throughout).
 
 MODULE  := github.com/3xDevOps/Aether
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# Both reach shell command lines - the linker flags here, the Windows resource
+# arguments in `release` - and a git tag may legally contain a quote, a
+# semicolon or a $. CI builds a pull request's own head with its own tags, so
+# filter each where it is read: a hostile tag name truncates instead of
+# executing. Anything left empty falls back below.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9.+_-')
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null | tr -cd 'A-Za-z0-9')
+VERSION := $(or $(VERSION),dev)
+COMMIT  := $(or $(COMMIT),unknown)
 LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Version=$(VERSION) \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT)
@@ -34,6 +41,29 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
 # the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
 CLI_PLATFORMS    := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+
+# Windows release inputs. The client's PE carries a VERSIONINFO resource, an
+# icon and an application manifest. Without them the file names no publisher,
+# product or version, and Defender's classifiers score an unsigned,
+# metadata-less Go binary as a dropper - the download is blocked and the
+# binary is quarantined on first run. See docs/install.md.
+#
+# goversioninfo writes a .syso the Go linker picks up for the matching
+# GOOS/GOARCH, so this needs no Windows toolchain and no cgo.
+GOVERSIONINFO  := github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
+WINVERSIONINFO := packaging/windows/versioninfo.json
+WINMANIFEST    := packaging/windows/aether.manifest
+WINICON        := desktop/build/icon.ico
+
+# A VERSIONINFO resource versions itself with four numbers, so the tag's x.y.z
+# is taken and any pre-release suffix dropped; a tree with no release tag in
+# reach versions the resource 0.0.0. The full `git describe` output still
+# reaches the resource's Comments field, and `aether version` remains the
+# authority. Assigned lazily - only `release` reads these.
+WIN_VERSION = $(or $(shell printf '%s' '$(VERSION)' | sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p'),0.0.0)
+WIN_MAJOR   = $(word 1,$(subst ., ,$(WIN_VERSION)))
+WIN_MINOR   = $(word 2,$(subst ., ,$(WIN_VERSION)))
+WIN_PATCH   = $(word 3,$(subst ., ,$(WIN_VERSION)))
 
 .PHONY: all build test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard release deploy clean
 
@@ -121,7 +151,19 @@ release: dashboard
 		echo "building $$out"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-server || exit 1; \
 	done
-	@for platform in $(CLI_PLATFORMS); do \
+	@trap 'rm -f cmd/aether/resource_windows_*.syso' EXIT; \
+	for arch in amd64 arm64; do \
+		if [ $$arch = arm64 ]; then armflag=-arm; else armflag=; fi; \
+		echo "generating cmd/aether/resource_windows_$$arch.syso"; \
+		go run $(GOVERSIONINFO) -64 $$armflag \
+			-icon $(WINICON) -manifest $(WINMANIFEST) \
+			-ver-major $(WIN_MAJOR) -ver-minor $(WIN_MINOR) -ver-patch $(WIN_PATCH) -ver-build 0 \
+			-product-ver-major $(WIN_MAJOR) -product-ver-minor $(WIN_MINOR) -product-ver-patch $(WIN_PATCH) -product-ver-build 0 \
+			-file-version '$(WIN_VERSION).0' -product-version '$(WIN_VERSION).0' \
+			-comment '$(VERSION)' \
+			-o cmd/aether/resource_windows_$$arch.syso $(WINVERSIONINFO) || exit 1; \
+	done; \
+	for platform in $(CLI_PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
 		ext=$$([ $$os = windows ] && echo .exe || echo ""); \
 		out=$(DIST)/aether-$$os-$$arch$$ext; \
@@ -130,4 +172,4 @@ release: dashboard
 	done
 
 clean:
-	rm -rf $(DIST)
+	rm -rf $(DIST) cmd/aether/resource_windows_*.syso

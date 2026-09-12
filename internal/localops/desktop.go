@@ -336,11 +336,9 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 		if err := os.MkdirAll(filepath.Dir(app.Launcher), 0o755); err != nil {
 			return DesktopApp{}, err
 		}
-		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", shortcutScript)
-		cmd.Env = append(cmd.Environ(), "AETHER_LNK="+app.Launcher, "AETHER_EXE="+filepath.Join(app.App, "Aether.exe"))
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return DesktopApp{}, fmt.Errorf("localops: create Start Menu shortcut: %w: %s", err, strings.TrimSpace(string(out)))
+		exe := filepath.Join(app.App, "Aether.exe")
+		if err := writeShellLink(app.Launcher, exe, filepath.Dir(exe)); err != nil {
+			return DesktopApp{}, fmt.Errorf("localops: create Start Menu shortcut: %w", err)
 		}
 	}
 	if app.Superseded != "" {
@@ -549,12 +547,3 @@ func desktopExecQuote(s string) string {
 	b.WriteByte('"')
 	return b.String()
 }
-
-// shortcutScript is the PowerShell that writes the Start Menu .lnk named
-// by $env:AETHER_LNK pointing at $env:AETHER_EXE. The paths travel in the
-// environment, never in the script text, so no quoting rule (PowerShell
-// also treats typographic quotes as delimiters) can break on a user name.
-const shortcutScript = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:AETHER_LNK); " +
-	"$s.TargetPath = $env:AETHER_EXE; " +
-	"$s.WorkingDirectory = (Split-Path -Parent $env:AETHER_EXE); " +
-	"$s.Save()"
