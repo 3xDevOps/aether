@@ -124,9 +124,9 @@ export function RunActions({ run }: { run: RunRecord }) {
                     size="sm"
                     aria-label={buttonLabel}
                     className={cn(
-                      'h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2',
+                      'h-[22px] min-h-[22px] w-[22px] px-0 @5xl/run-header:w-auto @5xl/run-header:px-2',
                       !primaryCommands[command.id] &&
-                        'hidden @6xl/run-header:inline-flex',
+                        'hidden @lg/run-header:inline-flex',
                     )}
                     aria-disabled={blocked || undefined}
                     onClick={() => {
@@ -140,7 +140,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                     ) : (
                       <command.Icon className="size-3" aria-hidden />
                     )}
-                    <span className="sr-only @sm/run-header:not-sr-only">{buttonLabel}</span>
+                    <span className="sr-only @5xl/run-header:not-sr-only">{buttonLabel}</span>
                   </Button>
                 )}
               />
@@ -160,7 +160,8 @@ export function RunActions({ run }: { run: RunRecord }) {
                 {...triggerProps}
                 variant="ghost"
                 size="sm"
-                className="hidden h-[22px] min-h-[22px] px-2 text-[12px] @6xl/run-header:inline-flex"
+                aria-label="Hand off"
+                className="hidden h-[22px] min-h-[22px] w-[22px] px-0 text-[12px] @lg/run-header:inline-flex @5xl/run-header:w-auto @5xl/run-header:px-2"
                 aria-disabled={running !== null || undefined}
                 onClick={() => {
                   if (running !== null) return
@@ -168,7 +169,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                 }}
               >
                 <UserPlus className="size-3" aria-hidden />
-                Hand off
+                <span className="sr-only @5xl/run-header:not-sr-only">Hand off</span>
               </Button>
             )}
           />
@@ -211,7 +212,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                       ref={moreTrigger}
                       variant="ghost"
                       size="sm"
-                      className="h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2 @6xl/run-header:hidden"
+                      className="h-[22px] min-h-[22px] w-[22px] px-0 @lg/run-header:hidden"
                       aria-disabled={running !== null || undefined}
                     >
                       {running !== null ? (
@@ -219,7 +220,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                       ) : (
                         <Ellipsis className="size-3" aria-hidden />
                       )}
-                      <span className="sr-only @sm/run-header:not-sr-only">More</span>
+                      <span className="sr-only">More</span>
                     </Button>
                   </DropdownMenuTrigger>
                 )}

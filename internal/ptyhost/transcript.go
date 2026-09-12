@@ -149,8 +149,7 @@ func readCastTail(path string, maxBytes int) ([]byte, error) {
 	}
 	if len(out) > maxBytes {
 		out = out[len(out)-maxBytes:]
-		// The cut can land mid-escape-sequence or mid-rune; replay must
-		// start on a line boundary, the same rule the replay ring applies.
+		// Discard the first clipped output line, as the live ring does.
 		if i := bytes.IndexByte(out, '\n'); i >= 0 {
 			out = out[i+1:]
 		}
@@ -194,6 +193,14 @@ func (w *castWriter) resize(cols, rows uint) {
 	defer w.mu.Unlock()
 	if w.closed {
 		return
+	}
+	// A resize is an ordering boundary. Do not leave an incomplete UTF-8
+	// prefix stranded across it: output the raw prefix first, then record
+	// the geometry event, so cold reconstruction sees the same byte stream
+	// and grid transition as the live emulator.
+	if len(w.pending) > 0 {
+		w.eventLocked("o", w.pending)
+		w.pending = nil
 	}
 	w.eventLocked("r", fmt.Appendf(nil, "%dx%d", cols, rows))
 }
@@ -481,6 +488,9 @@ func (r *replayReader) next() error {
 	}
 	var event []json.RawMessage
 	if uerr := json.Unmarshal(line, &event); uerr != nil || len(event) < 3 {
+		if atEnd {
+			return io.EOF
+		}
 		return fmt.Errorf("ptyhost: malformed transcript event: %w", errBadCastString)
 	}
 	if string(event[1]) != `"o"` {

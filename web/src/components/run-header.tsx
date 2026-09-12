@@ -53,15 +53,14 @@ export function RunHeader({
   const state = runState(run.status, pending.has(run.id))
   const label = runLabel(run)
   const task = run.task.trim()
-  const hasTitle = Boolean(run.title?.trim())
   const detail = subtitle?.trim()
   const showDetail = Boolean(detail && detail !== task)
 
   return (
     <div className="@container/run-header min-w-0 shrink-0">
       <header className="min-w-0 border-b border-border/80">
-        <div className="min-w-0 px-3 py-1 sm:px-4">
-          <div className="flex min-w-0 items-start gap-2">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-3 py-1 sm:px-4">
+          <div className="col-start-1 row-start-1 flex min-w-0 items-start gap-2">
             <h1
               className="min-w-0 flex-1 break-words text-[15px] font-semibold leading-5 text-foreground"
               title={label}
@@ -79,44 +78,7 @@ export function RunHeader({
               </span>
             )}
           </div>
-          {task && (
-            <details className="mt-0.5 min-w-0 max-w-full">
-              <summary
-                className={`${focusRing} flex min-w-0 max-w-full cursor-pointer items-start gap-1.5 break-words text-xs leading-4 text-muted-foreground`}
-              >
-                {hasTitle ? (
-                  <span className="min-w-0 flex-1 line-clamp-1 select-text break-words text-foreground/90">
-                    {task}
-                  </span>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-foreground/90">Task details</span>
-                )}
-                <span className="shrink-0 whitespace-nowrap text-[11px] leading-4 text-muted-foreground underline underline-offset-2">
-                  View full task
-                </span>
-              </summary>
-              <div
-                tabIndex={0}
-                className={`${focusRing} mt-1 max-h-40 min-w-0 max-w-full overflow-y-auto border border-border/70 bg-muted/20 px-2 py-1.5`}
-              >
-                <p className="whitespace-pre-wrap break-words select-text text-[13px] leading-5 text-foreground/90">
-                  {run.task}
-                </p>
-              </div>
-            </details>
-          )}
-          {run.reason && (
-            <div
-              tabIndex={0}
-              className={`${focusRing} mt-1 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonTone(state)}`}
-            >
-              <span className="mr-1.5 font-medium text-muted-foreground">Reason</span>
-              <span className="whitespace-pre-wrap break-words select-text">{run.reason}</span>
-            </div>
-          )}
-        </div>
-        <div className="flex min-h-9 min-w-0 items-stretch overflow-hidden border-t border-border bg-sidebar">
-          <div className="flex min-w-0 flex-[1_1_14rem] items-center gap-2 overflow-x-auto px-3 text-xs leading-4 text-muted-foreground [scrollbar-width:none] sm:px-4 [&::-webkit-scrollbar]:hidden">
+          <div className="col-span-2 row-start-2 flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-4 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <span
               className={`inline-flex min-h-5 shrink-0 items-center gap-1.5 rounded-sm border px-2 py-px text-xs leading-4 ${stateTone(state)}`}
             >
@@ -143,6 +105,34 @@ export function RunHeader({
               </span>
             )}
           </div>
+          {task && (
+            <details className="contents">
+              <summary
+                className={`${focusRing} col-start-2 row-start-1 cursor-pointer whitespace-nowrap text-[11px] leading-5 text-muted-foreground underline underline-offset-2`}
+              >
+                View full task
+              </summary>
+              <div
+                tabIndex={0}
+                className={`${focusRing} col-span-2 row-start-3 max-h-40 min-w-0 max-w-full overflow-y-auto border border-border/70 bg-muted/20 px-2 py-1.5`}
+              >
+                <p className="whitespace-pre-wrap break-words select-text text-[13px] leading-5 text-foreground/90">
+                  {run.task}
+                </p>
+              </div>
+            </details>
+          )}
+          {run.reason && (
+            <div
+              tabIndex={0}
+              className={`${focusRing} col-span-2 max-h-24 min-w-0 max-w-full overflow-y-auto border-l-2 px-2 py-1 text-[13px] leading-5 text-foreground/90 ${reasonTone(state)}`}
+            >
+              <span className="mr-1.5 font-medium text-muted-foreground">Reason</span>
+              <span className="whitespace-pre-wrap break-words select-text">{run.reason}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex min-h-9 min-w-0 items-stretch justify-between overflow-hidden border-t border-border bg-sidebar">
           <RunTabs runID={run.id} active={active} />
           <div
             role="toolbar"

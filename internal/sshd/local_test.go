@@ -269,6 +269,7 @@ func TestLocalAttachFollowsTheSessionGeometry(t *testing.T) {
 		Cols:   80,
 		Rows:   24,
 		Follow: true,
+		Framed: true,
 	})
 	if err != nil || !ack.OK {
 		t.Fatalf("attach: ack=%+v err=%v", ack, err)
@@ -281,9 +282,15 @@ func TestLocalAttachFollowsTheSessionGeometry(t *testing.T) {
 		t.Fatal("the follow flag never reached the PTY host")
 	}
 
+	reader := &protocol.TerminalReader{Reader: term}
+	sizeCh := make(chan [2]uint, 1)
+	go func() {
+		_, size, _ := reader.Read(make([]byte, 1))
+		sizeCh <- size
+	}()
 	e.pty.tell <- [2]uint{120, 40}
 	select {
-	case size := <-term.Geometry():
+	case size := <-sizeCh:
 		if size != [2]uint{120, 40} {
 			t.Fatalf("geometry = %v, want 120x40", size)
 		}

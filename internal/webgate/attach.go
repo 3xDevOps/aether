@@ -46,9 +46,17 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Follow:   req.Follow,
 		Resume:   req.Resume,
 		Cursor:   req.Cursor,
+		Framed:   true,
 	})
-	if err != nil {
-		if !ack.OK && ack.Code == 0 {
+	if err == nil && ack.OK && !ack.Framed {
+		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
+		ack = protocol.AttachResponse{Code: protocol.CodeInternal, Error: err.Error()}
+	}
+	if err != nil || !ack.OK {
+		if term != nil {
+			_ = term.Close()
+		}
+		if ack.Code == 0 && err != nil {
 			ack = protocol.AttachResponse{OK: false, Code: protocol.CodeInternal, Error: err.Error()}
 		}
 		_ = s.WriteJSON(ack)
@@ -92,15 +100,11 @@ func attachEndClose(err error) (websocket.StatusCode, string) {
 	return websocket.StatusInternalError, "attach ended"
 }
 
-// pumpTerminal bridges the socket and a terminal: terminal output goes
-// out as binary frames; JSON control frames come back as input and
-// resizes, honored per the allow flags. It returns the terminal's read
-// error, nil on clean EOF. The peer closing the socket closes the
-// terminal, which in turn ends the output loop.
+// pumpTerminal bridges the socket and a terminal: terminal output records are
+// decoded in order, binary records go out as binary frames, and geometry
+// records become JSON controls before the next record is read. Client input
+// and resize controls are handled concurrently.
 func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error {
-	if source, ok := term.(GeometrySource); ok {
-		go s.pumpGeometry(source)
-	}
 	go func() {
 		defer s.cancel()
 		defer func() { _ = term.Close() }()
@@ -133,9 +137,19 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 		}
 	}()
 
+	reader := &protocol.TerminalReader{Reader: term}
 	buf := make([]byte, 32<<10)
 	for {
-		n, err := term.Read(buf)
+		n, size, err := reader.Read(buf)
+		if size != [2]uint{} {
+			if s.WriteJSON(protocol.DashAttachControl{
+				Type: protocol.DashAttachGeometry,
+				Cols: size[0],
+				Rows: size[1],
+			}) != nil {
+				return nil
+			}
+		}
 		if n > 0 {
 			if s.write(websocket.MessageBinary, buf[:n]) != nil {
 				return nil
@@ -146,31 +160,6 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 				return nil
 			}
 			return err
-		}
-	}
-}
-
-// pumpGeometry relays the session's own resizes to the client as geometry
-// frames. Only a client that follows the session acts on them; the frame
-// is sent either way, because the socket does not decide who is following
-// and a client that imposed its size already knows what it is.
-func (s *Socket) pumpGeometry(source GeometrySource) {
-	sizes := source.Geometry()
-	for {
-		select {
-		case <-s.Ctx.Done():
-			return
-		case size, ok := <-sizes:
-			if !ok {
-				return
-			}
-			if s.WriteJSON(protocol.DashAttachControl{
-				Type: protocol.DashAttachGeometry,
-				Cols: size[0],
-				Rows: size[1],
-			}) != nil {
-				return
-			}
 		}
 	}
 }

@@ -3,7 +3,6 @@ package sshd
 import (
 	"bufio"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 func TestGitExecUploadPack(t *testing.T) {
@@ -436,9 +436,37 @@ func TestWindowChangeFeedsResize(t *testing.T) {
 	}
 }
 
-// TestAttachReplaysFinishedRun pins the replay path: a run the PTY host
-// has no session for but whose transcript was recorded - which is every
-// finished run - attaches as a read-only stream of the recorded output
+// TestAttachRecordingIsFiniteAndMarked covers the read-only, finite recording
+// branch used by the dashboard's download endpoint.
+func TestAttachRecordingIsFiniteAndMarked(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.pty.setTranscript(e.run.ID, []byte("recording bytes"))
+
+	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+	r := bufio.NewReader(pipe)
+	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `","read_only":true,"recording":true}` + "\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if !ack.OK || !ack.Recording {
+		t.Fatalf("ack = %+v, want recording", ack)
+	}
+	data := make([]byte, len("recording bytes"))
+	if _, err := io.ReadFull(r, data); err != nil {
+		t.Fatalf("read recording: %v", err)
+	}
+	if string(data) != "recording bytes" {
+		t.Fatalf("recording = %q", data)
+	}
+	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("after recording read = %v, want EOF", err)
+	}
+}
+
+// TestAttachReplaysFinishedRun pins the raw transcript replay path: a run the
+// PTY host has no session for but whose transcript was recorded - which is
+// every finished run - attaches as a read-only stream of the recorded output
 // and ends cleanly, instead of a refusal the dashboard can only retry
 // forever.
 func TestAttachReplaysFinishedRun(t *testing.T) {
@@ -471,6 +499,37 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	}
 }
 
+func TestAttachFinishedRunUsesFramedSnapshot(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.pty.setErr(errNoSession)
+	e.pty.snapshots = map[domain.RunID]ptyhost.ScreenSnapshot{
+		e.run.ID: {Cols: 120, Rows: 30, Data: []byte("screen")},
+	}
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+	r := bufio.NewReader(pipe)
+	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `","framed":true}` + "\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if !ack.OK || ack.Cols != 120 || ack.Rows != 30 || ack.Replay != len("screen") {
+		t.Fatalf("ack = %+v, want framed snapshot geometry and replay length", ack)
+	}
+	reader := &protocol.TerminalReader{Reader: r}
+	buf := make([]byte, 16)
+	n, size, err := reader.Read(buf)
+	if n != len("screen") || string(buf[:n]) != "screen" || size != [2]uint{} || err != nil {
+		t.Fatalf("snapshot record = n=%d size=%v err=%v data=%q", n, size, err, buf[:n])
+	}
+	if _, _, err := reader.Read(buf); !errors.Is(err, io.EOF) {
+		t.Fatalf("after snapshot read = %v, want EOF", err)
+	}
+}
+
 // TestAttachFinishedRunWithoutTranscriptStillRefuses pins the fallback: a
 // finished run whose transcript predates recording keeps the no-session
 // refusal instead of a bogus empty replay.
@@ -495,10 +554,10 @@ func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
 
 // The SSH transport carries the same two halves the in-process one does
 // (TestLocalAttachFollowsTheSessionGeometry): the ack reports the size the
-// session is, and a later resize arrives as a window-change request on the
-// attach channel. The channel is opened raw here because that is what
-// internal/cli does - an ssh.Session would swallow the request before a
-// client could see it.
+// session is, and a later resize arrives as a geometry record in a framed
+// attach stream. The channel is opened raw here because that is what
+// internal/cli uses - an ssh.Session would swallow the request before a
+// client could inspect the stream.
 func TestAttachFollowerIsToldTheSessionGeometry(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.pty.session = [2]uint{132, 43}
@@ -509,15 +568,8 @@ func TestAttachFollowerIsToldTheSessionGeometry(t *testing.T) {
 		t.Fatalf("open channel: %v", err)
 	}
 	defer func() { _ = ch.Close() }()
-	sizes := make(chan [2]uint, 4)
 	go func() {
 		for req := range reqs {
-			if req.Type == protocol.WindowChangeRequest && len(req.Payload) >= 8 {
-				sizes <- [2]uint{
-					uint(binary.BigEndian.Uint32(req.Payload)),
-					uint(binary.BigEndian.Uint32(req.Payload[4:])),
-				}
-			}
 			if req.WantReply {
 				_ = req.Reply(false, nil)
 			}
@@ -527,12 +579,13 @@ func TestAttachFollowerIsToldTheSessionGeometry(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("subsystem: ok=%v err=%v", ok, err)
 	}
-	header := `{"run_id":"` + string(e.run.ID) + `","cols":80,"rows":24,"follow":true}` + "\n"
+	r := bufio.NewReader(ch)
+	header := `{"run_id":"` + string(e.run.ID) + `","cols":80,"rows":24,"follow":true,"framed":true}` + "\n"
 	if _, err := ch.Write([]byte(header)); err != nil {
 		t.Fatalf("write header: %v", err)
 	}
 	var ack protocol.AttachResponse
-	readJSONLine(t, bufio.NewReader(ch), &ack)
+	readJSONLine(t, r, &ack)
 	if !ack.OK || ack.Cols != 132 || ack.Rows != 43 {
 		t.Fatalf("ack = %+v, want ok with the session's 132x43", ack)
 	}
@@ -541,12 +594,18 @@ func TestAttachFollowerIsToldTheSessionGeometry(t *testing.T) {
 	}
 
 	e.pty.tell <- [2]uint{120, 40}
+	reader := &protocol.TerminalReader{Reader: r}
+	sizeCh := make(chan [2]uint, 1)
+	go func() {
+		_, size, _ := reader.Read(make([]byte, 1))
+		sizeCh <- size
+	}()
 	select {
-	case size := <-sizes:
+	case size := <-sizeCh:
 		if size != [2]uint{120, 40} {
-			t.Fatalf("window-change = %v, want 120x40", size)
+			t.Fatalf("geometry = %v, want 120x40", size)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("no window-change request reached the client")
+		t.Fatal("no geometry record reached the client")
 	}
 }

@@ -88,6 +88,7 @@ type fakePTY struct {
 	gate        ptyhost.WriteGate
 	replay      []byte
 	transcripts map[domain.RunID][]byte
+	snapshots   map[domain.RunID]ptyhost.ScreenSnapshot
 	cols        uint
 	rows        uint
 	readOnly    bool
@@ -111,6 +112,25 @@ func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("ptyhost: open transcript: %w", os.ErrNotExist)
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (p *fakePTY) Recording(run domain.RunID) (io.ReadCloser, error) {
+	return p.Replay(run)
+}
+
+func (p *fakePTY) Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error) {
+	p.mu.Lock()
+	if snap, ok := p.snapshots[run]; ok {
+		snap.Data = append([]byte(nil), snap.Data...)
+		p.mu.Unlock()
+		return snap, nil
+	}
+	snap := ptyhost.ScreenSnapshot{Cols: p.session[0], Rows: p.session[1], Data: append([]byte(nil), p.replay...)}
+	p.mu.Unlock()
+	if len(snap.Data) == 0 && snap.Cols == 0 && snap.Rows == 0 {
+		return ptyhost.ScreenSnapshot{}, fmt.Errorf("ptyhost: snapshot unavailable")
+	}
+	return snap, nil
 }
 
 func (p *fakePTY) setTranscript(run domain.RunID, data []byte) {

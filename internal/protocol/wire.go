@@ -413,15 +413,17 @@ type AttachRequest struct {
 	ReadOnly bool   `json:"read_only,omitempty"`
 	Cols     uint   `json:"cols,omitempty"`
 	Rows     uint   `json:"rows,omitempty"`
+	// Framed carries output and geometry in one ordered terminal record stream.
+	Framed bool `json:"framed,omitempty"`
+	// Recording reads the complete recorded run as asciicast without attaching.
+	Recording bool `json:"recording,omitempty"`
 	// Shell names a shell tab inside the run container; write is required.
 	Shell string `json:"shell,omitempty"`
 	// Follow renders the session at the size it already is and imposes
 	// none of its own: the PTY is the minimum over the clients that do
 	// impose one, and a follower is left out of it whether or not it can
-	// write. The ack reports the size to draw at and a window-change
-	// request reports every later change. A screen too narrow to hold the
-	// agent's terminal steers it this way without reflowing it for anyone
-	// else.
+	// write. The ack reports the initial size; framed output reports later
+	// changes before bytes drawn at that size.
 	Follow bool `json:"follow,omitempty"`
 	// Resume asks for the attach without its scrollback replay: the
 	// client already holds this session's screen and is reattaching only
@@ -442,9 +444,12 @@ type AttachRequest struct {
 // geometry, or with the requested one when no session exists yet to have
 // its own; on failure the server sends OK false with a code and closes.
 type AttachResponse struct {
-	OK   bool `json:"ok"`
-	Cols uint `json:"cols,omitempty"`
-	Rows uint `json:"rows,omitempty"`
+	OK     bool `json:"ok"`
+	Cols   uint `json:"cols,omitempty"`
+	Rows   uint `json:"rows,omitempty"`
+	Framed bool `json:"framed,omitempty"`
+	// Recording confirms this is a finite recording, never a live attach.
+	Recording bool `json:"recording,omitempty"`
 	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
 	Replay int `json:"replay,omitempty"`
 	// Cursor is how much of the session's output this client holds once

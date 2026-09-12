@@ -1,40 +1,64 @@
 package protocol
 
 import (
-	"encoding/json"
+	"bytes"
+	"errors"
+	"io"
+	"slices"
 	"testing"
 )
 
-func TestTerminalRequestAndResultJSON(t *testing.T) {
-	req := TerminalRequest{Tab: "logs", Cols: 120, Rows: 40}
-	data, err := json.Marshal(req)
-	if err != nil {
+func TestTerminalRecordsPreserveOutputGeometryOrder(t *testing.T) {
+	var wire bytes.Buffer
+	before, after := "before\x00\xff", "\x1b[18;60HX"
+	if _, err := WriteTerminalOutput(&wire, []byte(before)); err != nil {
 		t.Fatal(err)
 	}
-	var got TerminalRequest
-	if uerr := json.Unmarshal(data, &got); uerr != nil {
-		t.Fatal(uerr)
-	}
-	if got != req {
-		t.Fatalf("request = %+v, want %+v", got, req)
-	}
-	result := TerminalStatusResult{Running: true, Image: "standard:latest", SavedImage: "aether/member-m1:123", StartedAt: "2026-09-03T12:00:00Z", Tabs: []string{"main", "logs"}}
-	data, err = json.Marshal(result)
-	if err != nil {
+	if err := WriteTerminalGeometry(&wire, 60, 18); err != nil {
 		t.Fatal(err)
 	}
-	var gotResult TerminalStatusResult
-	if err := json.Unmarshal(data, &gotResult); err != nil {
+	if _, err := WriteTerminalOutput(&wire, []byte(after)); err != nil {
 		t.Fatal(err)
 	}
-	if gotResult.Running != result.Running || gotResult.Image != result.Image || gotResult.SavedImage != result.SavedImage || gotResult.StartedAt != result.StartedAt || len(gotResult.Tabs) != 2 {
-		t.Fatalf("result = %+v, want %+v", gotResult, result)
+	r := TerminalReader{Reader: &wire}
+	var output bytes.Buffer
+	var events []string
+	buf := make([]byte, 3)
+	for {
+		n, size, err := r.Read(buf)
+		output.Write(buf[:n])
+		if size != [2]uint{} {
+			if n != 0 || size != [2]uint{60, 18} {
+				t.Fatalf("geometry event: size=%v output=%q", size, buf[:n])
+			}
+			events = append(events, output.String())
+			output.Reset()
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	var save EnvSaveResult
-	if err := json.Unmarshal([]byte(`{"image":"aether/member-m1:123"}`), &save); err != nil {
-		t.Fatal(err)
+	events = append(events, output.String())
+	if !slices.Equal(events, []string{before, after}) {
+		t.Fatalf("output around geometry = %q", events)
 	}
-	if save.Image != result.SavedImage {
-		t.Fatalf("save result = %+v, want image %q", save, result.SavedImage)
+}
+
+func TestTerminalRecordsRejectTruncatedFrames(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"output length": {'o'},
+		"geometry":      {'g', 0, 0, 0, 80},
+		"output body":   {'o', 0, 0, 0, 3, 'x'},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := TerminalReader{Reader: bytes.NewReader(data)}
+			_, _, err := r.Read(make([]byte, 32))
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("truncated record error = %v, want unexpected EOF", err)
+			}
+		})
 	}
 }

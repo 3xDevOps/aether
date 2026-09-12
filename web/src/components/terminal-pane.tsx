@@ -91,7 +91,7 @@ function TerminalTools({
     <div
       role="toolbar"
       aria-label="Terminal controls"
-      className="flex min-w-32 max-w-full flex-[1_1_20rem] items-center gap-0.5 overflow-x-auto"
+      className="flex min-w-32 max-w-full shrink items-center gap-0.5 overflow-x-auto"
     >
       <ToolButton
         type="button"

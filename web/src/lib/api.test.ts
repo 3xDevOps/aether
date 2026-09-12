@@ -8,6 +8,7 @@ function fakeFetch(result: unknown = {}) {
   return vi.fn(async (_input: unknown, _init?: RequestInit) => ({
     ok: true,
     json: async () => result,
+    text: async () => String(result),
   }))
 }
 

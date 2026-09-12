@@ -1,6 +1,7 @@
 package localgw
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,9 +125,12 @@ func newWSStubTerminal(readErr error) *wsStubTerminal {
 		readErr:  readErr,
 	}
 }
-
-func (t *wsStubTerminal) emit(p []byte) { t.out <- p }
-func (t *wsStubTerminal) finish()       { t.once.Do(func() { close(t.done) }) }
+func (t *wsStubTerminal) emit(p []byte) {
+	var framed bytes.Buffer
+	_, _ = protocol.WriteTerminalOutput(&framed, p)
+	t.out <- framed.Bytes()
+}
+func (t *wsStubTerminal) finish() { t.once.Do(func() { close(t.done) }) }
 
 func (t *wsStubTerminal) Read(p []byte) (int, error) {
 	for len(t.pending) == 0 {
@@ -275,7 +279,7 @@ func TestEventsRefusalForwardsCode(t *testing.T) {
 
 func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Framed: true, Cols: 80, Rows: 24}}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-1?shell=tab-1", g.Token())
 
@@ -284,8 +288,8 @@ func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
 		t.Fatalf("ack = %+v, want ok", ack)
 	}
 	req := b.recordedAttach()
-	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != 80 || req.Rows != 24 {
-		t.Fatalf("attach request = %+v, want writable shell tab-1 80x24", req)
+	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != 80 || req.Rows != 24 || !req.Framed {
+		t.Fatalf("attach request = %+v, want writable framed shell tab-1 80x24", req)
 	}
 
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
@@ -317,7 +321,7 @@ func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
 // one watching and so entitled to size the PTY.
 func TestAttachMirrorHeaderMapsToReadOnly(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Framed: true, Cols: 80, Rows: 24}}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
 
@@ -326,8 +330,8 @@ func TestAttachMirrorHeaderMapsToReadOnly(t *testing.T) {
 		t.Fatalf("ack = %+v, want ok", ack)
 	}
 	req := b.recordedAttach()
-	if req.RunID != "run-1" || !req.ReadOnly || req.Cols != 80 || req.Rows != 24 {
-		t.Fatalf("attach request = %+v, want run-1 read-only 80x24", req)
+	if req.RunID != "run-1" || !req.ReadOnly || req.Cols != 80 || req.Rows != 24 || !req.Framed {
+		t.Fatalf("attach request = %+v, want run-1 read-only framed 80x24", req)
 	}
 
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "rm -rf\n"})
@@ -357,7 +361,7 @@ func TestAttachMirrorHeaderMapsToReadOnly(t *testing.T) {
 // can stop reconnecting instead of retrying a session that is over.
 func TestAttachSessionEndNamesTheReason(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Framed: true, Cols: 80, Rows: 24}}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
 
@@ -376,7 +380,7 @@ func TestAttachSessionEndNamesTheReason(t *testing.T) {
 // forwarded to the terminal, clean EOF as 1000.
 func TestAttachForwardsOutputInputAndResize(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 100, Rows: 40}}
+	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Framed: true, Cols: 100, Rows: 40}}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
 
@@ -384,8 +388,8 @@ func TestAttachForwardsOutputInputAndResize(t *testing.T) {
 	if ack := readWSJSON[protocol.AttachResponse](t, conn); !ack.OK || ack.Cols != 100 || ack.Rows != 40 {
 		t.Fatalf("ack = %+v", ack)
 	}
-	if req := b.recordedAttach(); req.ReadOnly || req.Cols != 100 || req.Rows != 40 {
-		t.Fatalf("attach request = %+v, want writable 100x40", req)
+	if req := b.recordedAttach(); req.ReadOnly || req.Cols != 100 || req.Rows != 40 || !req.Framed {
+		t.Fatalf("attach request = %+v, want writable framed 100x40", req)
 	}
 
 	term.emit([]byte("hello"))
@@ -442,7 +446,7 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 }
 func TestTerminalForwardsOutputInputResizeAndClosesCleanly(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
-	b := &wsStubBackend{terminalTerm: term, terminalAck: protocol.TerminalResponse{OK: true, Tab: "dev", Cols: 100, Rows: 40}}
+	b := &wsStubBackend{terminalTerm: term, terminalAck: protocol.TerminalResponse{OK: true, Framed: true, Tab: "dev", Cols: 100, Rows: 40}}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/terminal?tab=dev", g.Token())
 
@@ -452,8 +456,8 @@ func TestTerminalForwardsOutputInputResizeAndClosesCleanly(t *testing.T) {
 		t.Fatalf("ack = %+v", ack)
 	}
 	req := b.recordedTerminal()
-	if req.Tab != "dev" || req.Cols != 100 || req.Rows != 40 {
-		t.Fatalf("terminal request = %+v", req)
+	if req.Tab != "dev" || req.Cols != 100 || req.Rows != 40 || !req.Framed {
+		t.Fatalf("terminal request = %+v, want framed dev 100x40", req)
 	}
 
 	term.emit([]byte("hello"))
@@ -496,4 +500,30 @@ func TestTerminalRejectsInvalidTab(t *testing.T) {
 		t.Fatalf("ack = %+v, want invalid params", ack)
 	}
 	expectClose(t, conn, websocket.StatusPolicyViolation)
+}
+
+func TestTerminalRejectsUnframedBackend(t *testing.T) {
+	for _, path := range []string{"/ws/attach/run-1", "/ws/terminal?tab=dev"} {
+		t.Run(path, func(t *testing.T) {
+			term := newWSStubTerminal(io.EOF)
+			term.out <- []byte("ordinary redraw output")
+			b := &wsStubBackend{
+				attachTerm: term, attachAck: protocol.AttachResponse{OK: true},
+				terminalTerm: term, terminalAck: protocol.TerminalResponse{OK: true},
+			}
+			g, base := newWSGateway(t, b)
+			conn := wsDial(t, base, path, g.Token())
+			writeWSJSON(t, conn, protocol.DashAttachRequest{Cols: 120, Rows: 30})
+			ack := readWSJSON[protocol.AttachResponse](t, conn)
+			if ack.OK || ack.Code != protocol.CodeInternal {
+				t.Fatalf("unframed backend acknowledged as usable terminal: %+v", ack)
+			}
+			expectClose(t, conn, websocket.StatusPolicyViolation)
+			select {
+			case <-term.done:
+			case <-time.After(time.Second):
+				t.Fatal("refused unframed stream remained open")
+			}
+		})
+	}
 }

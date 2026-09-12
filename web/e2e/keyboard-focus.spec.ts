@@ -272,10 +272,11 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
 
   await separator.focus()
   await page.keyboard.press('Home')
-  await expect(separator).toHaveAttribute('aria-valuenow', '200')
+  const minimumWidth = Number(await separator.getAttribute('aria-valuemin'))
+  await expect(separator).toHaveAttribute('aria-valuenow', String(minimumWidth))
   await expect
     .poll(async () => (await sidebar.boundingBox())?.width ?? 0)
-    .toBe(200)
+    .toBe(minimumWidth)
 
   const runs = sidebar.getByText('Runs', { exact: true })
   const toolbar = runs.locator('..')
@@ -303,7 +304,10 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
     throw new Error('minimum-width sidebar controls did not render')
   }
 
-  expect(toolbarBox.height).toBeGreaterThan(35)
+  expect(Math.abs(groupBox.y + groupBox.height / 2 - launchBox.y - launchBox.height / 2)).toBeLessThanOrEqual(1)
+  const runsBox = await runs.boundingBox()
+  if (!runsBox) throw new Error('runs label did not render')
+  expect(Math.abs(runsBox.y + runsBox.height / 2 - launchBox.y - launchBox.height / 2)).toBeLessThanOrEqual(1)
   expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(firstGroupBox.y)
   for (const control of [groupBox, memberBox, launchBox]) {
     expect(control.x).toBeGreaterThanOrEqual(minimum.x)

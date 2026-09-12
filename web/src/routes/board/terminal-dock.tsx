@@ -96,10 +96,9 @@ export function TerminalDock({
   // A member can have this terminal open on more than one screen; a phone
   // follows what the others made it rather than shrinking it for them.
   const phone = useMediaQuery(phoneScreen)
-  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled: activeTab !== null && !dock.collapsed,
-    size: phone ? serverSize ?? standardGeometry : null,
+    follow: phone,
     onData: (data) => {
       if (!activeTab || activeTabRef.current !== activeTab || gate.current.muted()) return
       getEnvTerminalSocket(activeTab)?.send(data)
@@ -129,6 +128,7 @@ export function TerminalDock({
   })
   const terminal = controller.terminal
   terminalRef.current = terminal
+  const { geometry, setGeometry } = controller
   // Keep persistent socket callbacks from reaching a disposed xterm while a
   // route remount is between hosts.
   useEffect(() => {
@@ -211,11 +211,10 @@ export function TerminalDock({
         emitEnvTerminalSocketData(socketKey, chunk, kind),
       onAttached: (_write: boolean, size: { cols: number; rows: number }) => {
         if (isCurrent()) {
-          setServerSize(size)
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
           gate.current.unmute()
-          terminalRef.current?.reset()
+          setGeometry(size.cols, size.rows, true)
           const status = useStore.getState().envTerminal.status
           setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
         }
@@ -250,17 +249,11 @@ export function TerminalDock({
         }
         if (socketKey !== 'main') closeTab(socketKey)
       },
-      geometry: () => {
-        if (!isCurrent()) return standardGeometry
-        return {
-          cols: terminalRef.current?.cols ?? standardGeometry.cols,
-          rows: terminalRef.current?.rows ?? standardGeometry.rows,
-        }
-      },
+      geometry: () => isCurrent() ? geometry() : standardGeometry,
       wantsWrite: () => true,
       follows: () => phone,
       onGeometry: (cols: number, rows: number) => {
-        if (isCurrent()) setServerSize({ cols, rows })
+        if (isCurrent()) setGeometry(cols, rows)
       },
     }
     const existing = getEnvTerminalSocket(socketKey)
@@ -281,7 +274,7 @@ export function TerminalDock({
       unsubscribe()
       if (activeTabRef.current !== socketKey) unregisterEnvTerminalSocket(socketKey)
     }
-  }, [activeTab, closeTab, phone, reset, rpc, setStatus, terminal])
+  }, [activeTab, closeTab, geometry, phone, reset, rpc, setGeometry, setStatus, terminal])
 
   const save = async () => {
     if (saving) return
@@ -466,7 +459,7 @@ export function TerminalDock({
             ) : (
               <TerminalPane
                 controller={controller}
-                className={phone ? 'overflow-x-auto' : undefined}
+                className="overflow-auto"
                 imageTargetKey={activeTab ?? undefined}
                 imageUploadEnabled={attachedTab === activeTab && activeTab !== null}
               >

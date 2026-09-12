@@ -26,20 +26,14 @@ type Backend interface {
 	Terminal(ctx context.Context, req protocol.TerminalRequest) (Terminal, protocol.TerminalResponse, error)
 }
 
-// Terminal is an attached PTY: a byte stream whose window can be resized
-// while it is open. A read error of *protocol.RemoteExitError carries the
-// exit status the server ended the attach with.
+// Terminal is an attached PTY whose wire stream is framed for WebSocket
+// attach and terminal requests. The finite recording endpoint requests its
+// raw stream instead. Its window can be resized while open; a read error of
+// *protocol.RemoteExitError carries the exit status the server ended the
+// attach with.
 type Terminal interface {
 	io.ReadWriteCloser
 	Resize(cols, rows uint) error
-}
-
-// GeometrySource is a terminal that reports the size its session takes,
-// which is what a client following the session has to draw at. Both
-// backends implement it; a terminal that does not simply never moves a
-// follower off the size its ack gave.
-type GeometrySource interface {
-	Geometry() <-chan [2]uint
 }
 
 // Authorizer identifies the caller of r and returns the backend acting as

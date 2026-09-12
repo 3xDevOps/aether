@@ -191,6 +191,42 @@ the terminal reattaches with different permissions rather than redrawing
 its scrollback, so the transition shows nothing beyond the button
 changing.
 
+### Earlier output and full TUI history
+
+Opening a run sends its current screen and up to 200 recent scrollback lines,
+not a replay of every historical redraw. The terminal keeps up to 50,000 lines
+while you stay attached. Neither is a 30-minute retention policy: a busy TUI
+can overwrite earlier screens without adding any scrollback.
+
+Open **History** in the run's terminal toolbar to inspect the full recording.
+Use its timeline to return to the beginning or an earlier point in the run,
+including output recorded before a server restart. Playback uses recorded
+terminal sizes so earlier cursor-addressed screens are not interpreted at the
+current window's width. Close history to return to the unchanged live terminal.
+
+History loads a snapshot only when opened. It does not send keystrokes, resize
+the agent, or replace the live screen. Reopen it to include newer output.
+Large recordings take longer to load in the browser. Output not flushed before
+a crash, or removed with the run's retained artifacts, is unavailable.
+
+### Reattaching after an update
+
+Desktop terminals draw at the shared PTY's size, not independently at each
+window's width. A smaller writer can reduce that grid; other viewers adopt
+the resulting size without reporting it back as their own window size.
+Fresh viewers request a redraw even when they cannot resize the session.
+
+The server tracks the current screen as output arrives, including its cursor,
+colours, alternate buffer, and terminal modes. A fresh dashboard attach receives
+that compact state rather than playing old redraws into a new terminal. Input
+is muted only while this snapshot is parsed. Switching between steering and
+observing still preserves the existing screen and receives only missing bytes.
+
+After a server restart, Aether reconstructs the screen from recorded output
+and resize events, then carries that state into the next transcript. This
+applies to surviving runs, not only agents started after the update. Output
+that never reached the recording before a crash cannot be reconstructed.
+
 ### Control availability
 
 **Upload image to terminal** is disabled until the selected terminal has a

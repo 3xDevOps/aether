@@ -99,6 +99,11 @@ func TestModePreambleRestoresWhatTheAgentSet(t *testing.T) {
 			chunks: []string{"\x1b[?1000$p"},
 			want:   "",
 		},
+		{
+			name:   "full reset restores observed modes to defaults",
+			chunks: []string{"\x1b[?2004h\x1b[?7l", "\x1bc"},
+			want:   "",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

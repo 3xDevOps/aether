@@ -13,6 +13,8 @@ const xterm = vi.hoisted(() => ({
   hostRef: () => {},
   terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn(), focus: vi.fn() },
   ready: true,
+  geometry: () => ({ cols: 80, rows: 24 }),
+  setGeometry: vi.fn(),
   search: null,
   findOpen: false,
   setFindOpen: vi.fn(),

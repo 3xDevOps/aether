@@ -103,6 +103,7 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	g.HandleFunc("POST /api/v1/{method}", g.handleAPI)
 	g.HandleFunc("GET /api/v1/run/{run}/patch", g.handlePatch)
+	g.HandleFunc("GET /api/v1/run/{run}/recording", g.handleRecording)
 	g.HandleFunc("GET /api/v1/disk", g.handleDisk)
 	g.HandleFunc("GET /api/v1/capabilities", g.handleCapabilities)
 	g.HandleFunc("GET /ws/events", g.handleEvents)

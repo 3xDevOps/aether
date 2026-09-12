@@ -168,6 +168,19 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
+async function getText(path: string, signal?: AbortSignal): Promise<string> {
+  const token = bearer()
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    signal,
+  })
+  if (!res.ok) {
+    const err = await failure(res)
+    throw new ApiError(res.status, `${path}: ${err.message}`, err.code, err.data)
+  }
+  return res.text()
+}
+
 /**
  * A client-machine verb: POST /local/v1/<verb>. Only the local gateway
  * serves these (useCapability's hasLocal says which); failures carry the
@@ -437,6 +450,8 @@ export const api = {
     call<unknown>('agent.register', { definition }),
   runProtect: (runID: string, protect: boolean) =>
     call<unknown>('run.protect', { run_id: runID, protected: protect }),
+  runRecording: (runID: string, signal?: AbortSignal) =>
+    getText(`/run/${encodeURIComponent(runID)}/recording`, signal),
   runRelaunch: (runID: string) =>
     call<{ run: Run }>('run.relaunch', { run_id: runID }).then((r) => r.run),
   // The two endpoints that are not RPC methods: patch text is a read of a

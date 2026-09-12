@@ -953,36 +953,36 @@ needs.
    reported plus every live byte received since, and the replay is exactly
    what followed it - usually nothing, and never the whole scrollback. The
    client keeps what is on screen along with the terminal state behind it.
-   The ack answers with `"resumed":true`; a session whose ring no longer
-   reaches back that far answers `"resumed":false` and replays everything
-   instead, which the client has to clear its screen for.
+   The ack answers with `"resumed":true`. If the ring no longer reaches back
+   that far, or the missing output crosses a resize, the server answers
+   `"resumed":false` with a fresh current-screen snapshot.
 
    `follow` says the client renders the session at the size it already is
    and imposes none of its own, so it is left out of the minimum the PTY is
-   sized to whether or not it can write (step 4). Its `cols` and `rows` are
-   then only what a session with no PTY of its own is laid out at - a
-   finished run's replay. The dashboard follows from a phone, mirroring and
-   steering alike, which is how a 45-column screen steers an agent without
+   sized to whether or not it can write (step 4). Its `cols` and `rows` do not
+   override a live or recorded screen's geometry. The dashboard follows from
+   a phone, mirroring and steering alike, which is how a 45-column screen
+   steers an agent without
    reflowing that agent's screen for everyone else watching it.
 
-2. Server answers one **text** frame: `{"ok":true,"cols":120,"rows":40,"replay":4096}`,
-   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close. The
-   ack's geometry is the session's live PTY size, not an echo of the header,
-   and falls back to the header only when there is no session to have one.
-   The optional `replay` value is the number of binary scrollback bytes
-   that follow the ack before live output; clients should mute
-   terminal-generated replies until those bytes have been parsed. It leads
-   with the terminal modes the session is in - bracketed paste, cursor,
-   autowrap, mouse reporting - rebuilt rather than recorded, since the
-   bytes that set them left the scrollback long ago. `cursor` is how much
-   of the session's output the client holds once that replay is parsed;
-   it is what a later `resume` sends back.
+2. Server answers one **text** frame: `{"ok":true,"framed":true,"cols":120,"rows":40,"replay":4096}`,
+   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
+   The ack's geometry is the captured screen's size, not an echo of the header.
+   A later accepted resize arrives after that screen's replay bytes.
+   The optional `replay` value counts the binary bytes preceding live output;
+   clients mute terminal-generated replies until those bytes have been parsed.
+   For a fresh dashboard attach these bytes are a compact current-screen
+   snapshot with up to 200 recent scrollback lines, not the old redraw log.
+   It restores cursor, colours, screen buffers, and terminal modes. A successful
+   resume instead supplies only the missing raw output. `cursor` counts original
+   session output, independently of the snapshot's encoded length, and is what
+   a later `resume` sends back.
    A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is
    refused with `-32000`.
-   A finished run attaches as a read-only replay of its recorded
-   transcript, ending with the session-end close below. A `queued`,
+   A finished run supplies its compact final screen read-only, ending with the
+   session-end close below. A `queued`,
    `provisioning` or `running` run with no session is refused with `-32004`
    rather than held open - the container is still being built, or recovery is
    starting the session - as is a finished run whose transcript predates
@@ -1005,18 +1005,22 @@ needs.
    sizes the PTY to its own window the way `ssh` does - until a second
    attach arrives, when it stops imposing and the minimum is recomputed
    without it.
-5. Server sends one **text** control frame back to a `follow` attach
-   whenever the session's PTY is resized by someone who does impose a size:
+5. Server sends one **text** control frame to attached dashboard clients
+   whenever the runtime accepts a changed PTY size:
 
    ```json
    {"type":"geometry","cols":132,"rows":43}
    ```
 
-   A follower redraws at it; an attach that imposes its own size asked for
-   that size and is sent nothing. It is a relayed SSH `window-change`
-   request, not an event: nothing about it is persisted in the event log,
-   nothing replays it, and a reattach learns the current size from the ack
-   instead.
+   Every dashboard terminal renders at this size, including writers: another
+   writer can make the effective grid smaller than the local pane. The pane's
+   requested geometry remains separate from the rendered grid. Geometry and
+   output use one ordered stream between the server and gateway: a resize
+   reaches the browser before the repaint drawn at that size. A reattach learns
+   the initial size from the ack.
+
+   Fresh dashboard snapshots and successful resumes need no same-size redraw.
+   Raw screen-bearing attachments request a redraw nudge; adapter taps do not.
 
    Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
    across several ordered `input` frames.
@@ -1031,6 +1035,29 @@ needs.
    stops reconnecting; any other end closes with **1011**.
 
 Closing the socket detaches; the run is unaffected.
+
+#### Complete run recording
+
+`GET /api/v1/run/{run}/recording` returns an asciicast v2 snapshot of all
+recorded output, including preserved transcripts from before server restarts.
+It uses the same authentication and run-read authorization as an attach, but
+does not join, resize, or write to the live PTY. The response is streamed with
+`Cache-Control: no-store`; it is not limited to the live replay ring. Missing
+recordings and authorization failures use the normal JSON error envelope.
+
+Internally, the gateway requests `recording:true` on the attach subsystem.
+The ack must confirm `"recording":true`; its bytes are a finite recording, never
+a live stream. An older server that does not acknowledge recording mode is
+refused with an explicit update error.
+Ordinary dashboard attachments request `framed:true` and require the server
+to confirm it in the ack. An older server that ignores the request is refused
+with an update error rather than having raw bytes decoded as terminal records.
+After the ack, an `o` byte and four-byte big-endian payload length precede each
+output record; a `g` byte and two four-byte big-endian dimensions form a
+geometry record. The gateway decodes these sequentially into WebSocket frames.
+Replay counts exclude frame headers. Resume cursors count original session
+output, not the compact snapshot bytes.
+CLI attachments do not request framing and retain their raw terminal stream.
 
 #### Run shell tabs
 

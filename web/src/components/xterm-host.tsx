@@ -12,16 +12,13 @@ import {
   whenTerminalFontReady,
 } from '@/lib/term-font'
 import { clipboardKeys } from '@/lib/term-clipboard'
+import { standardGeometry } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 
 export interface XtermOptions {
   enabled?: boolean
-  /**
-   * Render at exactly this size instead of fitting the pane, and report no
-   * resize. A phone adopts the server's geometry this way and pans the pane
-   * over it, so the shared PTY is never reflowed to a phone's width.
-   */
-  size?: { cols: number; rows: number } | null
+  /** Follow the shared PTY without contributing this pane's size. */
+  follow?: boolean
   onData?: (data: string) => void
   onResize?: (cols: number, rows: number) => void
   /** Called synchronously before a terminal hyperlink opens. Return true to handle it. */
@@ -39,6 +36,10 @@ export interface XtermController {
   hostRef: React.RefCallback<HTMLDivElement>
   terminal: Terminal | null
   ready: boolean
+  /** The pane's requested geometry, independent of the shared PTY grid. */
+  geometry: () => { cols: number; rows: number }
+  /** Apply an attach reset or server resize in order with terminal output. */
+  setGeometry: (cols: number, rows: number, reset?: boolean) => void
   /** Backs the find bar `TerminalPane` draws over this terminal. */
   search: SearchAddon | null
   findOpen: boolean
@@ -163,7 +164,7 @@ function paint(host: HTMLDivElement, terminal: Terminal): void {
 
 export function useXterm({
   enabled = true,
-  size = null,
+  follow = false,
   onData,
   onResize,
   onLink,
@@ -173,18 +174,21 @@ export function useXterm({
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
+  const liveTerminal = useRef<Terminal | null>(null)
   const [search, setSearch] = useState<SearchAddon | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const focusIntent = useRef<Element | null>(null)
   // Zoom is one preference across every terminal, so it comes from the store
   // rather than from each caller.
   const fontSize = useStore((s) => s.terminalFontSize)
-  const fitRef = useRef<FitAddon | null>(null)
   const appliedFontSize = useRef(fontSize)
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const ctrlArmedRef = useRef(false)
-  const sizeRef = useRef(size)
-  sizeRef.current = size
+  const followRef = useRef(follow)
+  const serverSize = useRef<{ cols: number; rows: number } | null>(null)
+  const requestedSize = useRef(standardGeometry)
+  const resizeRef = useRef<(() => void) | null>(null)
+  followRef.current = follow
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
@@ -200,6 +204,18 @@ export function useXterm({
       return
     }
     focusIntent.current = activeElement
+  }, [terminal])
+  const geometry = useCallback(
+    () => followRef.current ? standardGeometry : requestedSize.current,
+    [],
+  )
+  const setGeometry = useCallback((cols: number, rows: number, reset = false) => {
+    serverSize.current = { cols, rows }
+    terminal?.write('', () => {
+      if (liveTerminal.current !== terminal) return
+      if (reset) terminal.reset()
+      terminal.resize(cols, rows)
+    })
   }, [terminal])
   useEffect(() => {
     const intent = focusIntent.current
@@ -235,6 +251,8 @@ export function useXterm({
 
   useEffect(() => {
     if (!enabled || !host) return
+    serverSize.current = null
+    requestedSize.current = standardGeometry
 
     // The DOM renderer, deliberately: @xterm/addon-webgl 0.19.0 reuses stale
     // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
@@ -264,7 +282,7 @@ export function useXterm({
       const searchAddon = new SearchAddon()
       created.loadAddon(searchAddon)
       created.open(host)
-      fitRef.current = fit
+      liveTerminal.current = created
 
       // xterm keeps a single custom key handler, so zoom, find and the
       // clipboard shortcuts are one chain: the first to claim the event stops
@@ -296,18 +314,17 @@ export function useXterm({
       const themeWatch = new MutationObserver(repaint)
       themeWatch.observe(document.documentElement, { attributeFilter: ['class'] })
 
-      // A fixed size is the caller's, not this pane's, so the pane's own
-      // measurements are ignored and nothing is reported back: reporting is
-      // what sends a resize to the shared PTY.
+      // Measure the pane without resizing the renderer: another viewer can
+      // make the shared PTY smaller than this pane's requested geometry.
       const resize = () => {
-        const fixed = sizeRef.current
-        if (fixed) {
-          created.resize(fixed.cols, fixed.rows)
-          return
-        }
-        fit.fit()
-        onResizeRef.current?.(created.cols, created.rows)
+        if (followRef.current) return
+        const proposed = fit.proposeDimensions()
+        if (!proposed) return
+        requestedSize.current = proposed
+        if (!serverSize.current) created.resize(proposed.cols, proposed.rows)
+        onResizeRef.current?.(proposed.cols, proposed.rows)
       }
+      resizeRef.current = resize
       resize()
 
       // At a fixed size the grid is larger than the pane, so the row being
@@ -317,7 +334,7 @@ export function useXterm({
       // `scrollIntoView` is absent in jsdom, and the cursor cell only
       // exists once a renderer has drawn one.
       const showCursor = () => {
-        if (!sizeRef.current) return
+        if (!followRef.current) return
         requestAnimationFrame(() => {
           host
             .querySelector('.xterm-cursor')
@@ -351,7 +368,7 @@ export function useXterm({
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
-        fitRef.current = null
+        resizeRef.current = null
       }
       setTerminal(created)
       setSearch(searchAddon)
@@ -359,6 +376,7 @@ export function useXterm({
 
     return () => {
       active = false
+      liveTerminal.current = null
       armCtrl(false)
       cancelFontWait()
       teardown?.()
@@ -369,13 +387,9 @@ export function useXterm({
     }
   }, [armCtrl, enabled, host])
 
-  // The server's geometry arrives with the attach ack, after the terminal was
-  // built, and changes again on a reattach. Leaving a fixed size behind hands
-  // the pane back to the fit addon, which the next observed resize runs.
   useEffect(() => {
-    if (!terminal || !size) return
-    terminal.resize(size.cols, size.rows)
-  }, [size?.cols, size?.rows, terminal])
+    resizeRef.current?.()
+  }, [follow])
 
   // A zoom step changes the cell size, so the pane has to be re-fitted and
   // the new geometry sent to the shell; nothing else observes the resize. A
@@ -385,15 +399,15 @@ export function useXterm({
     if (!terminal || appliedFontSize.current === fontSize) return
     appliedFontSize.current = fontSize
     terminal.options.fontSize = fontSize
-    if (sizeRef.current) return
-    fitRef.current?.fit()
-    onResizeRef.current?.(terminal.cols, terminal.rows)
+    resizeRef.current?.()
   }, [fontSize, terminal])
 
   return {
     hostRef: setHost,
     terminal,
     ready: terminal !== null,
+    geometry,
+    setGeometry,
     search,
     findOpen,
     setFindOpen,

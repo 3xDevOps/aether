@@ -75,10 +75,17 @@ const drainTimeout = 5 * time.Second
 type Host struct {
 	cfg Config
 
-	mu       sync.Mutex
-	sessions map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
-	starting map[SessionKey]struct{}
-	closed   bool
+	mu        sync.Mutex
+	sessions  map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
+	starting  map[SessionKey]struct{}
+	snapshots map[SessionKey]*snapshotResult
+	closed    bool
+}
+
+type snapshotResult struct {
+	done     chan struct{}
+	snapshot ScreenSnapshot
+	err      error
 }
 
 // New validates cfg, fills defaults, and creates the transcript directory.
@@ -95,13 +102,17 @@ func New(cfg Config) (*Host, error) {
 	if cfg.DefaultRows == 0 {
 		cfg.DefaultRows = defaultRows
 	}
+	if err := validateScreenDimensions(cfg.DefaultCols, cfg.DefaultRows); err != nil {
+		return nil, fmt.Errorf("ptyhost: config screen size: %w", err)
+	}
 	if err := os.MkdirAll(cfg.TranscriptDir, 0o755); err != nil {
 		return nil, fmt.Errorf("ptyhost: create transcript dir: %w", err)
 	}
 	return &Host{
-		cfg:      cfg,
-		sessions: make(map[SessionKey]*session),
-		starting: make(map[SessionKey]struct{}),
+		cfg:       cfg,
+		sessions:  make(map[SessionKey]*session),
+		starting:  make(map[SessionKey]struct{}),
+		snapshots: make(map[SessionKey]*snapshotResult),
 	}, nil
 }
 
@@ -144,33 +155,61 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	path := h.transcriptPath(key)
 	var err error
 	var seed []byte
+	var modes modeScanner
+	var screen *terminalScreen
+	recoveredTranscript := false
+	initialCols, initialRows := h.cfg.DefaultCols, h.cfg.DefaultRows
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
 		seed, err = readCastTail(path, h.cfg.ReplayBytes)
 		if err != nil {
 			slog.Warn("ptyhost: seed replay from transcript", "path", path, "error", err)
 			seed = nil
 		}
+		recovered, scanErr := readCastScreen(path)
+		if scanErr != nil {
+			h.unreserve(key)
+			return fmt.Errorf("ptyhost: restore terminal screen: %w", scanErr)
+		}
+		screen, modes = recovered.screen, recovered.modes
+		initialCols, initialRows = screen.cols, screen.rows
+		recoveredTranscript = true
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		slog.Warn("ptyhost: inspect transcript for replay", "path", path, "error", statErr)
 	}
-	tr, err := newCastWriter(path, h.cfg.DefaultCols, h.cfg.DefaultRows)
+	if screen == nil {
+		screen, err = newTerminalScreen(initialCols, initialRows)
+		if err != nil {
+			h.unreserve(key)
+			return err
+		}
+	}
+	tr, err := newCastWriter(path, initialCols, initialRows)
 	if err != nil {
+		screen.dispose()
 		h.unreserve(key)
 		return err
 	}
+	if recoveredTranscript {
+		tr.output(makeScreenSnapshot(screen, modes).Data)
+	}
 	// Initial geometry goes out before the session is attachable, so a
 	// concurrent write-attach clamp can never be overwritten by it.
-	_ = att.Resize(ctx, h.cfg.DefaultCols, h.cfg.DefaultRows)
+	_ = att.Resize(ctx, initialCols, initialRows)
 	s := &session{
-		run:     key,
-		att:     att,
-		tr:      tr,
-		stdin:   att.Stdin(),
-		clients: make(map[*client]struct{}),
-		ring:    newRing(h.cfg.ReplayBytes),
-		cols:    h.cfg.DefaultCols,
-		rows:    h.cfg.DefaultRows,
-		done:    make(chan struct{}),
+		run:          key,
+		att:          att,
+		tr:           tr,
+		stdin:        att.Stdin(),
+		clients:      make(map[*client]struct{}),
+		ring:         newRing(h.cfg.ReplayBytes),
+		cols:         initialCols,
+		rows:         initialRows,
+		acceptedCols: initialCols,
+		acceptedRows: initialRows,
+		geoTold:      [2]uint{initialCols, initialRows},
+		done:         make(chan struct{}),
+		modes:        modes,
+		screen:       screen,
 	}
 	if len(seed) > 0 {
 		s.ring.write(seed)
@@ -186,10 +225,12 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	if h.closed {
 		h.mu.Unlock()
 		_ = tr.close()
+		screen.dispose()
 		_ = att.Close()
 		return errHostClosed
 	}
 	h.sessions[key] = s
+	delete(h.snapshots, key)
 	h.mu.Unlock()
 
 	go s.pump()
@@ -232,6 +273,22 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 			}
 		}
 	}
+	h.mu.Lock()
+	for key := range h.snapshots {
+		if key == RunSession(run) || strings.HasPrefix(string(key), "run-shell:"+string(run)+":") {
+			delete(h.snapshots, key)
+		}
+	}
+	var purge []*session
+	for key, s := range h.sessions {
+		if key == RunSession(run) || strings.HasPrefix(string(key), "run-shell:"+string(run)+":") {
+			purge = append(purge, s)
+		}
+	}
+	h.mu.Unlock()
+	for _, s := range purge {
+		s.purgeSnapshot()
+	}
 	return nil
 }
 
@@ -260,6 +317,48 @@ func (h *Host) Replay(run domain.RunID) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("ptyhost: open transcript: %w", err)
 	}
 	return &replayReader{f: f, br: bufio.NewReader(f)}, nil
+}
+
+// Snapshot returns the current compact terminal state for a run. Live
+// sessions serialize their incrementally maintained emulator under the
+// session lock; ended/stopped sessions retain only this compact final value.
+// If the session is no longer in memory, the complete cast is reconstructed
+// once and only the compact bytes are cached.
+func (h *Host) Snapshot(run domain.RunID) (ScreenSnapshot, error) {
+	key := RunSession(run)
+	h.mu.Lock()
+	if s := h.sessions[key]; s != nil {
+		h.mu.Unlock()
+		return s.snapshot()
+	}
+	if cached := h.snapshots[key]; cached != nil {
+		h.mu.Unlock()
+		<-cached.done
+		return cloneScreenSnapshot(cached.snapshot), cached.err
+	}
+	result := &snapshotResult{done: make(chan struct{})}
+	h.snapshots[key] = result
+	h.mu.Unlock()
+
+	recovered, err := readCastScreen(h.transcriptPath(key))
+	if err != nil {
+		result.err = fmt.Errorf("ptyhost: reconstruct snapshot: %w", err)
+	} else {
+		result.snapshot = makeScreenSnapshot(recovered.screen, recovered.modes)
+		recovered.screen.dispose()
+	}
+	h.mu.Lock()
+	if result.err != nil && h.snapshots[key] == result {
+		delete(h.snapshots, key)
+	}
+	close(result.done)
+	h.mu.Unlock()
+	return cloneScreenSnapshot(result.snapshot), result.err
+}
+
+func (h *Host) transcriptPath(key SessionKey) string {
+	name := strings.ReplaceAll(string(key), ":", "-")
+	return filepath.Join(h.cfg.TranscriptDir, name+".cast")
 }
 
 // Inject writes message plus submit (the harness's submit sequence, e.g. a
@@ -300,21 +399,23 @@ type AttachClient struct {
 	Cols     uint
 	Rows     uint
 	ReadOnly bool
+	// Snapshot asks for a compact current-screen replay rather than the raw
+	// retained output ring. The dashboard sets this; CLI and screenless taps
+	// leave it false.
+	Snapshot bool
 	// Follow renders at the session's geometry and imposes none, so a
 	// screen too small to hold the agent's can still steer it without
 	// reflowing that screen for everyone else watching. A follower is
 	// told the size it should draw at, at attach and at every change.
 	Follow bool
 	// Resume attaches without the scrollback replay. The client already
-	// holds this session's screen and is reattaching only to change what
-	// it may do, so replaying would redraw what is already correct - and
-	// would cost the client the terminal state it built up, which a fresh
-	// replay has to reconstruct from a preamble.
+	// holds this session's screen and its terminal state, so it is sent
+	// exactly the bytes that arrived while it was away.
 	Resume bool
 	// Cursor is how much of the session's output this client has already
 	// seen, as reported to it by the ack it is resuming from. It is what
-	// makes the reattach lossless: the session hands back exactly the
-	// bytes produced since, rather than everything or nothing.
+	// makes the reattach lossless: the session hands back exactly what it
+	// missed, rather than everything or nothing.
 	Cursor uint64
 }
 
@@ -328,10 +429,9 @@ type ResumeWriter interface {
 }
 
 // GeometryWriter is an attach conn that wants the session's PTY size: once
-// as the attach joins, which is what an ack reports, and - for a follower,
-// the only client that draws at a size it did not choose - again whenever
-// the size changes under it. Out of band from the output the conn also
-// carries, so nothing of this reaches the transcript.
+// as the attach joins, which is what an ack reports, and again whenever the
+// size changes under it. Out of band from the output the conn also carries,
+// so nothing of this reaches the transcript.
 type GeometryWriter interface {
 	SetGeometry(cols, rows uint)
 }
@@ -358,6 +458,9 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	if a.Rows == 0 {
 		a.Rows = h.cfg.DefaultRows
 	}
+	if err := validateScreenDimensions(a.Cols, a.Rows); err != nil {
+		return fmt.Errorf("ptyhost: attach screen size: %w", err)
+	}
 	c := newClient(conn, a)
 	if err := s.addClient(c); err != nil {
 		return err
@@ -366,7 +469,7 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	// The size the session is, not the size this client asked for: the ack
 	// reports it, so a follower draws what the writers see from its first
 	// frame rather than from the first change after it joined.
-	c.tellGeometry(s.geometry())
+	c.tellGeometry(c.replayCols, c.replayRows)
 	c.tellResume()
 
 	readDone := make(chan struct{})
@@ -472,11 +575,6 @@ func (h *Host) unreserve(key SessionKey) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.starting, key)
-}
-
-func (h *Host) transcriptPath(key SessionKey) string {
-	name := strings.ReplaceAll(string(key), ":", "-")
-	return filepath.Join(h.cfg.TranscriptDir, name+".cast")
 }
 
 // ActiveSessions returns the keys of live sessions with the given prefix.

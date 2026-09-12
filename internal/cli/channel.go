@@ -25,17 +25,13 @@ import (
 type sessionStream struct {
 	io.Reader
 	stdin io.WriteCloser
-	// ch is the raw session channel, kept for out-of-band channel
-	// requests (window-change); nil in tests that fake the stream.
+	// ch is the raw session channel, kept for outbound window-change
+	// requests; nil in tests that fake the stream.
 	ch       ssh.Channel
 	closeCh  func() error
 	wait     func() error
 	waitOnce sync.Once
 	waitErr  error
-	// sizes carries the window-change requests the server sends, which
-	// report the session's own PTY size rather than ask for one. One
-	// slot, latest wins: an older size means nothing once a newer arrived.
-	sizes chan [2]uint
 }
 
 func (s *sessionStream) Read(p []byte) (int, error) {
@@ -80,8 +76,7 @@ func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, err
 		return nil, fmt.Errorf("cli: open session: %w", err)
 	}
 	exit := make(chan error, 1)
-	sizes := make(chan [2]uint, 1)
-	go func() { exit <- awaitRequests(reqs, sizes) }()
+	go func() { exit <- awaitRequests(reqs) }()
 	if pty != nil {
 		if perr := requestPTY(ch, pty.cols, pty.rows); perr != nil {
 			_ = ch.Close()
@@ -102,7 +97,6 @@ func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, err
 		stdin:   channelStdin{ch: ch},
 		closeCh: ch.Close,
 		wait:    func() error { return <-exit },
-		sizes:   sizes,
 	}, nil
 }
 
@@ -112,34 +106,20 @@ type RemoteExitError = protocol.RemoteExitError
 
 // awaitRequests consumes session requests until the channel closes. Exit
 // status 0, or a close without any status, is a clean end; a nonzero
-// status carries the remote failure. A window-change arriving from the
-// server reports the session's new PTY size to whoever is following it,
-// and is dropped when nobody reads sizes.
-func awaitRequests(reqs <-chan *ssh.Request, sizes chan [2]uint) error {
+// status carries the remote failure. Requests with no server-side response
+// are acknowledged negatively so an accidental request cannot block closure.
+func awaitRequests(reqs <-chan *ssh.Request) error {
 	var res error
 	for req := range reqs {
-		switch {
-		case req.Type == "exit-status" && len(req.Payload) >= 4:
+		if req.Type == "exit-status" && len(req.Payload) >= 4 {
 			if status := binary.BigEndian.Uint32(req.Payload); status != 0 {
 				res = &RemoteExitError{Status: int(status)}
-			}
-		case req.Type == protocol.WindowChangeRequest && len(req.Payload) >= 8:
-			cols := uint(binary.BigEndian.Uint32(req.Payload))
-			rows := uint(binary.BigEndian.Uint32(req.Payload[4:]))
-			select {
-			case <-sizes:
-			default:
-			}
-			select {
-			case sizes <- [2]uint{cols, rows}:
-			default:
 			}
 		}
 		if req.WantReply {
 			_ = req.Reply(false, nil)
 		}
 	}
-	close(sizes)
 	return res
 }
 
@@ -172,16 +152,10 @@ type Terminal interface {
 }
 
 // TerminalStream is a PTY-backed subsystem stream; Resize sends the RFC
-// 4254 window-change request on the underlying session channel, and
-// Geometry reports the ones the server sends back.
+// 4254 window-change request on the underlying session channel.
 type TerminalStream struct {
 	*bufferedStream
 }
-
-// Geometry reports the sizes the session's PTY takes while this stream is
-// open. A client that asked to follow the session redraws at them; one
-// that imposes its own geometry can ignore the channel entirely.
-func (s *TerminalStream) Geometry() <-chan [2]uint { return s.sizes }
 
 var _ Terminal = (*TerminalStream)(nil)
 

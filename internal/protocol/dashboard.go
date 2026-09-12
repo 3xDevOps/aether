@@ -33,11 +33,8 @@ type DashAttachRequest struct {
 const (
 	DashAttachInput  = "input"
 	DashAttachResize = "resize"
-	// DashAttachGeometry reports the session's new PTY size to a client
-	// that follows it: {"type":"geometry","cols":132,"rows":43}. It is
-	// the window-change request the server sends, relayed. Nothing about
-	// it is durable - it is not an event and it is not replayed - and a
-	// client that imposes its own geometry ignores it.
+	// DashAttachGeometry reports the shared PTY grid before the output drawn
+	// at that size. Every dashboard viewer, including writers, adopts it.
 	DashAttachGeometry = "geometry"
 )
 
