@@ -67,3 +67,6 @@ desktop/package-lock.json
 
 # Local agent scratch: evidence and notes, never part of the public repo.
 .omo/
+
+# Generated Windows resource objects (make release writes and removes these).
+*.syso

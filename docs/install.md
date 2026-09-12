@@ -355,10 +355,51 @@ Move-Item .\aether-windows-amd64.exe "$dir\aether.exe"
 ```
 
 Use `aether-windows-arm64.exe` on an Arm device. Confirm it works with
-`aether version` in a fresh terminal. Windows Defender SmartScreen may warn on
-first run: the binaries are not code-signed, which is why verifying the hash
-matters. To upgrade later, repeat this with the newer release; there is no
-self-update on Windows.
+`aether version` in a fresh terminal. To upgrade later, repeat this with the
+newer release; there is no self-update on Windows.
+
+### Windows Defender and SmartScreen
+
+The client is not code-signed yet, so Windows can stop it in three different
+ways. They are separate systems with separate fixes, and the wording on screen
+does not always say which one you hit.
+
+| What you see | What it is | What to do |
+| --- | --- | --- |
+| The browser refuses the download | SmartScreen, in Edge or Chrome | Keep the file, then verify the hash above |
+| "Windows protected your PC" | SmartScreen, on first run | **More info**, then **Run anyway** |
+| The file disappears, or "virus detected" | Microsoft Defender antivirus | Verify the hash, then report it - below |
+
+The third one is the antivirus, not SmartScreen, and it has no **Run anyway**.
+A detection name ending in `!ml`, such as `Trojan:Win32/Wacatac.B!ml`, comes
+from Defender's cloud classifier rather than a signature match: it scored the
+file on shape, not on anything found inside it. A newly published, unsigned Go
+binary is close to that classifier's idea of a dropper - a large executable
+that resolves its Windows API calls at run time, which is what the Go runtime
+does on every platform.
+
+On a Windows 11 machine with **Smart App Control** enabled, unsigned binaries
+are blocked outright with no override. Smart App Control turns itself off
+permanently once disabled, so check `Windows Security > App & browser control`
+before assuming the download is at fault.
+
+**Report a detection.** Verify the SHA-256 against `checksums.txt` first - if
+it does not match, do not run the file and open an issue. If it matches,
+submit it at
+[microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission)
+as a software developer. Microsoft clears confirmed false positives through a
+definition update, which fixes it for everyone on that release. Please open an
+issue with the detection name too, so the release notes can carry it.
+
+**What the release already does.** Windows binaries carry a VERSIONINFO
+resource, an icon and an application manifest declaring `asInvoker`, so the
+file names its publisher, product and version instead of arriving anonymous.
+The client shells out to no `powershell.exe`, `cmd.exe` or `rundll32.exe`: the
+browser launch and the Start Menu shortcut are direct Windows API calls, which
+keeps both the child processes and their command lines out of the binary.
+Code signing is the remaining gap and is in progress; it is what lets
+reputation accumulate across releases rather than resetting with every new
+file.
 
 ## The Windows client
 
