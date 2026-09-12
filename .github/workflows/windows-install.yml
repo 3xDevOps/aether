@@ -1,0 +1,105 @@
+name: Windows install
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-install.yml'
+      - 'scripts/install*.ps1'
+      - 'cmd/aether/**'
+      - 'internal/localops/**'
+      - 'desktop/**'
+      - 'packaging/windows/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-install.yml'
+      - 'scripts/install*.ps1'
+      - 'cmd/aether/**'
+      - 'internal/localops/**'
+      - 'desktop/**'
+      - 'packaging/windows/**'
+      - 'go.mod'
+      - 'go.sum'
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: install (${{ matrix.shell }}, ${{ matrix.node }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shell: powershell
+            node: system
+            smokeArgs: ''
+          - shell: pwsh
+            node: downloaded
+            smokeArgs: '-WithoutNode'
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+      - name: Installer regression scenarios
+        run: ./scripts/install-test.ps1
+      - name: Direct Node launch regression
+        run: go test ./internal/localops -run TestNodeToolsExecuteJavaScriptEntryPointOnWindows -count=1
+      - name: Build the embedded dashboard
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the Windows client with release metadata
+        run: |
+          go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 -64 `
+            -icon desktop/build/icon.ico -manifest packaging/windows/aether.manifest `
+            -ver-major 0 -ver-minor 4 -ver-patch 0 -ver-build 0 `
+            -product-ver-major 0 -product-ver-minor 4 -product-ver-patch 0 -product-ver-build 0 `
+            -file-version 0.4.0.0 -product-version 0.4.0.0 `
+            -o cmd/aether/resource_windows_amd64.syso packaging/windows/versioninfo.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -trimpath -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=v0.4.0-alpha.6 -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether.exe" ./cmd/aether
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Enable Defender realtime and cloud protection
+        shell: powershell
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $false
+          Set-MpPreference -DisableIOAVProtection $false
+          Set-MpPreference -DisableBehaviorMonitoring $false
+          Set-MpPreference -MAPSReporting 2
+          Set-MpPreference -SubmitSamplesConsent 1
+          $p = Get-MpPreference
+          if ($p.DisableRealtimeMonitoring -or $p.DisableIOAVProtection -or $p.DisableBehaviorMonitoring -or $p.MAPSReporting -ne 2) {
+            throw 'Defender protection did not enable; the install check would prove nothing.'
+          }
+          & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -SignatureUpdate
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, rebuild, and launch the desktop under Defender
+        run: ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" ${{ matrix.smokeArgs }}
+      - name: Upload the installed desktop screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-${{ matrix.shell }}-${{ matrix.node }}
+          path: ${{ runner.temp }}/windows-desktop.png
+          if-no-files-found: error
+          retention-days: 7

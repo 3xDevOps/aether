@@ -45,6 +45,24 @@ shortcut targeting the installed desktop executable, and detect only the
 desktop directory as an installed app. It runs on other hosts too, exercising
 the Windows install path without needing Electron.
 
+The `Windows install` workflow runs `scripts/install-test.ps1` under Windows
+PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection
+before replacement, upgrade and locked-file boundaries, `PATH` preservation,
+CLI-only installation, unsupported releases, and desktop-build failures.
+They use temporary files and restore the user's environment after running.
+
+The same workflow builds the real CLI with the release's Windows metadata
+and embedded dashboard, enables Defender real-time and cloud protection,
+then runs `scripts/install-smoke.ps1`. A local release mirror serves those
+exact bytes and their checksum so the scenario tests the checkout, not the
+latest published release. It installs and rebuilds the desktop, verifies
+the unchanged CLI and Start Menu shortcut, and launches the app with the
+pre-install `PATH`. Windows PowerShell uses system Node; PowerShell 7 hides
+system Node to exercise the verified private download. Defender scans the
+download and install tree without exclusions or disabled remediation.
+This is a detection gate, not a guarantee that an unsigned release will
+never receive a false positive on another machine.
+
 ## Local configuration in tests
 
 Tests that read or write the linked-server config through `cli.Load`,

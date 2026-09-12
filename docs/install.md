@@ -85,9 +85,8 @@ The script ends by naming the next command for the role you picked and linking
 the quickstart. Cancelling setup or the desktop build stops the installer
 instead, preserving the interrupted command's exit status.
 
-The script is POSIX-only: it covers Linux and macOS. There is no Windows
-installer and no PowerShell equivalent. Windows clients install by hand, which
-is three steps: see [Manual install](#manual-install).
+This script covers Linux and macOS. Windows uses the
+[PowerShell installer](#windows-install-script) below.
 
 A checksum mismatch aborts the install. The script needs `curl` or `wget`, and
 `sha256sum` or `shasum`.
@@ -111,6 +110,65 @@ curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/bin
 curl -fsSL .../install.sh | sh -s -- --role server
 ```
 
+## Windows install script
+
+In Windows PowerShell 5.1 or PowerShell 7, download the installer to a file,
+review it, then run it:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+& "$env:TEMP\aether-install.ps1"
+```
+
+Windows is a client platform, so there is no server/client question. By
+default the script downloads the native x64 or ARM64 CLI, verifies its SHA-256
+against the release's `checksums.txt`, installs it at
+`%LOCALAPPDATA%\Programs\Aether\aether.exe`, and runs that binary's
+`gui build`. The result is the desktop app in the Start Menu as **Aether**.
+The CLI supplies Node.js when needed; neither Node nor Go needs installing
+first.
+
+Desktop setup requires `v0.4.0-alpha.6` or newer. Older releases are refused
+before installation because their desktop build can replace the CLI.
+`-Role none` permits a CLI-only installation, including an older release:
+
+```powershell
+& "$env:TEMP\aether-install.ps1" -Role none
+& "$env:TEMP\aether-install.ps1" -Version v0.4.0-alpha.6 -BinDir "$env:LOCALAPPDATA\AetherTools"
+```
+
+| Parameter | Variable | Effect |
+| --- | --- | --- |
+| `-Version <tag>` | `AETHER_VERSION` | Select a release; otherwise resolve the latest published release. |
+| `-BinDir <dir>` | `AETHER_BIN_DIR` | Choose the CLI directory, never the desktop app's managed directory. |
+| `-Role client\|none` | `AETHER_ROLE` | `client` installs the CLI and desktop; `none` stops after the CLI. The default is `client`, including unattended runs. |
+| | `AETHER_REPO` | Download from a GitHub fork. |
+| | `AETHER_BASE_URL` | Download from a release-asset mirror. |
+
+Only the current user's `PATH` is updated, without duplicating the install
+directory or removing other entries. Expandable entries such as `%SystemRoot%`
+keep their registry type. The current PowerShell process also gets the
+directory; existing applications keep their old environment. Sign out and
+back in if another terminal still cannot find the CLI. An older CLI,
+alias, or function can still shadow `aether`: `Get-Command aether -All`
+shows which command runs. The installer never deletes a shadowing copy.
+The desktop also checks the default CLI directory, so a Start Menu process
+with an older `PATH` can find a default installation.
+
+Close Aether before rerunning the installer to upgrade. Downloads and
+checksum failures leave the installed binary alone; a locked binary reports
+the Windows error rather than deleting it first. A desktop-build failure
+keeps the installed CLI, returns failure, and prints the command to retry.
+Configuration and SSH files are untouched.
+
+The installer does not request administrator access, change execution policy,
+disable Defender, add exclusions, or unblock quarantined files. If policy
+blocks unsigned scripts, use an approved script-signing process or the
+[manual installation](#manual-install), not a Defender bypass. Downloads and
+checksums come from the selected repository or mirror; use only one you
+trust. Checksum verification is not code signing and does not guarantee that
+Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows-defender-and-smartscreen).
+
 ## Upgrading
 
 `aether update` replaces the running CLI with the latest release (or
@@ -126,10 +184,10 @@ command to run:
 aether: open /usr/local/bin/.aether-update-probe-1234567890: permission denied: /usr/local/bin is not writable by this user; re-run as `sudo aether update`
 ```
 
-Re-running the installer does the same job; the data directory is untouched
-either way. `aether update` is not a Windows command; it refuses to run
-there. Upgrading a Windows client means downloading the new release binary
-over the old one, exactly as below.
+Re-running either installer upgrades the client without changing its data.
+On Windows, close Aether first and rerun `install.ps1`; the default also
+rebuilds the desktop app. `aether update` still refuses on Windows.
+Replacing the release binary manually remains an option below.
 
 The server's default standard image follows the server build, so a server
 update brings that release's environment image with it - though not into a
@@ -347,7 +405,7 @@ Get-FileHash -Algorithm SHA256 .\aether-windows-amd64.exe
 # 2. Put it somewhere on PATH under the name aether.exe.
 $dir = "$env:LOCALAPPDATA\Programs\Aether"
 New-Item -ItemType Directory -Force -Path $dir
-Move-Item .\aether-windows-amd64.exe "$dir\aether.exe"
+Copy-Item -Force .\aether-windows-amd64.exe "$dir\aether.exe"
 
 # 3. Add that directory to your user PATH (once), then open a new terminal.
 [Environment]::SetEnvironmentVariable(
@@ -355,8 +413,10 @@ Move-Item .\aether-windows-amd64.exe "$dir\aether.exe"
 ```
 
 Use `aether-windows-arm64.exe` on an Arm device. Confirm it works with
-`aether version` in a fresh terminal. To upgrade later, repeat this with the
-newer release; there is no self-update on Windows.
+`aether version` in a fresh terminal. To build the desktop app, run
+`aether gui build` with a release containing the directory fix below.
+To upgrade, rerun the PowerShell installer or replace the CLI manually;
+there is no `aether update` on Windows.
 
 ### Recovering commands after a Windows desktop build
 
@@ -481,7 +541,7 @@ failed attach.
 - `aether init` refuses to run. It prepares a Linux server's data directory,
   so run it on the server box.
 - `aether update` refuses to run. Re-download the release binary instead.
-- `scripts/install.sh` is a POSIX shell script. Install by hand, above.
+- `scripts/install.sh` is a POSIX shell script. Use `scripts/install.ps1` instead.
 - `aether-server` itself. Point the client at a Linux server.
 
 Everything else is the same client: `link`, `run`, `attach`, `gui`,
@@ -507,8 +567,9 @@ dashboard in its own frameless window, with desktop notifications, a
 needs-attention badge, and `aether://run/<id>` deep links. It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
 release publishes it; the CLI builds it for you, and needs nothing installed
-first. Answering `client` to the install script's question runs this for you;
-this is the same command by hand. The window opens at 1280 by 840 and stops
+first. The Windows installer builds it by default; on Linux and macOS,
+answering `client` to the install script's question does the same.
+This is the command by hand. The window opens at 1280 by 840 and stops
 at 960 by 600, the smallest size the dashboard's own layout holds.
 
 ```sh
@@ -587,13 +648,13 @@ message, and the command still exits non-zero.
 The app requires the `aether` CLI installed first; it does not bundle the
 binary and `aether gui build` refuses to run if the shell would not find it.
 It looks for `aether` in `AETHER_BIN`, then `PATH`, then the installer
-defaults (`/usr/local/bin`, `~/.local/bin`). The application menu launches the
-app with your desktop session's `PATH`, not your terminal's, so a CLI that is
-only reachable through a shell profile entry (a Go bin directory, a version
-manager shim) may work in the terminal and still fail from the menu;
-`aether gui build` warns when it finds `aether` that way. If launch fails with
-"aether CLI not found", install the CLI into `/usr/local/bin` or
-`~/.local/bin`, or set `AETHER_BIN` to the binary's full path. That lookup is
+defaults: `%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
+`~/.local/bin` on Linux and macOS. The application menu can have an older or
+different `PATH` than your terminal, so a CLI outside those defaults may work
+in the terminal and still fail from the menu; `aether gui build` warns when
+it finds `aether` that way. If launch fails with "aether CLI not found",
+install the CLI into the default directory or set `AETHER_BIN` to its full
+path. That lookup is
 the launcher's job alone: once the app is running, the dashboard's harness
 detection and scans widen `PATH` from your login shell each time they look,
 so coding agents installed through a shell profile are found from the

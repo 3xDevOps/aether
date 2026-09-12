@@ -149,7 +149,7 @@ os="$(uname -s)"
 case "$os" in
 Linux) os="linux" ;;
 Darwin) os="darwin" ;;
-*) die "unsupported OS $os (Windows clients: download aether-windows-<arch>.exe from the releases page)" ;;
+*) die "unsupported OS $os (Windows clients: use scripts/install.ps1; see docs/install.md#windows-install-script)" ;;
 esac
 
 arch="$(uname -m)"
