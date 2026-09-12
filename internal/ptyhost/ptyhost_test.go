@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -30,6 +31,8 @@ type (
 	sshdPTYAttacher interface {
 		Attach(ctx context.Context, key SessionKey, client AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error
 		Replay(run domain.RunID) (io.ReadCloser, error)
+		Recording(run domain.RunID) (io.ReadCloser, error)
+		Snapshot(run domain.RunID) (ScreenSnapshot, error)
 	}
 )
 
@@ -1437,6 +1440,10 @@ func TestRemoveRunTranscripts(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
+	writeRecordingCast(t, dir, "run-1.cast", recordingHeader(1), "[0,\"o\",\"purge-me\"]\n")
+	if _, err := h.Snapshot("run-1"); err != nil {
+		t.Fatalf("cache cold snapshot: %v", err)
+	}
 
 	if err := h.RemoveRunTranscripts(t.Context(), "run-1"); err != nil {
 		t.Fatalf("RemoveRunTranscripts: %v", err)
@@ -1448,6 +1455,9 @@ func TestRemoveRunTranscripts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "run-2.cast")); err != nil {
 		t.Errorf("unrelated transcript missing: %v", err)
+	}
+	if _, err := h.Snapshot("run-1"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("snapshot after transcript removal = %v, want missing recording", err)
 	}
 }
 
@@ -1581,7 +1591,7 @@ func TestBannerTextEscapesTerminalControls(t *testing.T) {
 
 // followConn is an attach that records the geometry the host tells it, the
 // way the sshd attach conn puts the first one in its ack and sends the rest
-// as window-change requests.
+// as ordered geometry records.
 type followConn struct {
 	testConn
 	mu    sync.Mutex
@@ -1693,7 +1703,7 @@ func TestImposingClientHearsEffectiveGeometryChanges(t *testing.T) {
 	waitAttached(t, h, run, 1)
 	waitFor(t, "desktop's initial geometry", func() bool {
 		told := conn.told()
-		return len(told) > 0 && told[0] == [2]uint{132, 43}
+		return len(told) >= 2 && told[0] == [2]uint{120, 30} && told[len(told)-1] == [2]uint{132, 43}
 	})
 	waitFor(t, "desktop resize", func() bool { return len(att.sizeCalls()) == 3 })
 
@@ -1744,7 +1754,7 @@ func TestFollowerHearsOnlyGeometryTheRuntimeAccepted(t *testing.T) {
 	// gets a redraw nudge at that same accepted geometry.
 	waitFor(t, "the follower learns the session geometry", func() bool {
 		told := conn.told()
-		return len(told) == 2 && told[0] == [2]uint{120, 30} && told[1] == [2]uint{120, 30}
+		return len(told) == 1 && told[0] == [2]uint{120, 30}
 	})
 
 	att.refuseResizes(errors.New("docker: resize refused"))
@@ -1755,7 +1765,7 @@ func TestFollowerHearsOnlyGeometryTheRuntimeAccepted(t *testing.T) {
 	// Nothing to draw at: the terminal is still whatever it was.
 	time.Sleep(50 * time.Millisecond)
 	told := conn.told()
-	if len(told) != 2 {
+	if len(told) != 1 {
 		t.Fatalf("follower was told %v, want only the geometries the runtime accepted", told)
 	}
 
@@ -1763,11 +1773,117 @@ func TestFollowerHearsOnlyGeometryTheRuntimeAccepted(t *testing.T) {
 	desktop.resize <- [2]uint{100, 30}
 	waitFor(t, "the follower hears the geometry that took", func() bool {
 		told := conn.told()
-		return len(told) == 3 && told[2] == [2]uint{100, 30}
+		return len(told) == 2 && told[1] == [2]uint{100, 30}
 	})
 
 	_ = kw.Close()
 	if err := <-done; err != nil {
 		t.Fatalf("follower attach: %v", err)
+	}
+}
+
+// resizeOutputAtt lets a resize callback race the session's output pump. The
+// callback is launched after the runtime has accepted the final geometry,
+// matching a PTY that emits repaint bytes synchronously with its resize RPC.
+type resizeOutputAtt struct {
+	*fakeAtt
+	hook func(cols, rows uint)
+}
+
+func (a *resizeOutputAtt) Resize(_ context.Context, cols, rows uint) error {
+	a.mu.Lock()
+	a.resizes = append(a.resizes, [2]uint{cols, rows})
+	err := a.resizeErr
+	hook := a.hook
+	a.mu.Unlock()
+	if err == nil && hook != nil {
+		hook(cols, rows)
+	}
+	return err
+}
+
+type orderedGeometryConn struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (c *orderedGeometryConn) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (c *orderedGeometryConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, "output:"+string(p))
+	return len(p), nil
+}
+
+func (c *orderedGeometryConn) SetGeometry(cols, rows uint) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, fmt.Sprintf("geometry:%dx%d", cols, rows))
+}
+
+func (c *orderedGeometryConn) recorded() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.events...)
+}
+
+// A runtime repaint emitted during Resize must be delivered only after the
+// accepted geometry event, while output that preceded the resize stays first.
+func TestResizeQueuesGeometryBeforeRepaint(t *testing.T) {
+	tr, err := newCastWriter(filepath.Join(t.TempDir(), "cast"), 120, 30)
+	if err != nil {
+		t.Fatalf("newCastWriter: %v", err)
+	}
+	t.Cleanup(func() { _ = tr.close() })
+
+	base := newFakeAtt()
+	t.Cleanup(func() { _ = base.Close() })
+	att := &resizeOutputAtt{fakeAtt: base}
+	outputDone := make(chan struct{})
+	var s *session
+	att.hook = func(_, rows uint) {
+		if rows != 30 {
+			return
+		}
+		done := make(chan struct{})
+		go func() {
+			s.deliver([]byte("repaint"))
+			close(done)
+		}()
+		<-done
+		close(outputDone)
+	}
+
+	conn := &orderedGeometryConn{}
+	c := newClient(conn, AttachClient{Cols: 120, Rows: 30})
+	s = &session{
+		att:     att,
+		tr:      tr,
+		ring:    newRing(1024),
+		clients: map[*client]struct{}{c: {}},
+		cols:    120,
+		rows:    30,
+		geoGen:  1,
+	}
+	s.deliver([]byte("before"))
+
+	s.applyResize()
+	select {
+	case <-outputDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime repaint did not reach the session")
+	}
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- c.writeLoop() }()
+	c.close(nil)
+	if err := <-writeDone; err != nil {
+		t.Fatalf("writeLoop: %v", err)
+	}
+
+	got := conn.recorded()
+	want := []string{"output:before", "geometry:120x30", "output:repaint"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ordered events = %v, want %v", got, want)
 	}
 }

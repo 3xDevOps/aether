@@ -11,6 +11,7 @@ require (
 	github.com/distribution/reference v0.6.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/gitpod-io/xterm-go v0.0.0-20260907130418-dae5128cb6b3
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/mutagen-io/mutagen v0.18.1

@@ -45,8 +45,16 @@ func (g *Gateway) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		Cols:   cols,
 		Rows:   rows,
 		Follow: req.Follow,
+		Framed: true,
 	})
+	if err == nil && ack.OK && !ack.Framed {
+		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
+		ack = protocol.TerminalResponse{Code: protocol.CodeInternal, Error: err.Error()}
+	}
 	if err != nil || !ack.OK {
+		if term != nil {
+			_ = term.Close()
+		}
 		var perr *protocol.Error
 		if ack.Code == 0 {
 			if errors.As(err, &perr) {
@@ -68,6 +76,7 @@ func (g *Gateway) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		_ = s.Conn.Close(websocket.StatusPolicyViolation, "terminal refused")
 		return
 	}
+	defer func() { _ = term.Close() }()
 	if s.WriteJSON(ack) != nil {
 		return
 	}

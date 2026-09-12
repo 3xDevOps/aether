@@ -44,6 +44,12 @@ const maxPendingEcho = 8 << 10
 
 var errSlowClient = errors.New("ptyhost: client too slow, detached")
 
+type pendingOutputEvent struct {
+	end    int
+	raw    bool
+	marker string
+}
+
 // session is one persistent PTY session: the adopted attachment, its pump,
 // the replay ring, the transcript, and the attached clients.
 type session struct {
@@ -54,33 +60,47 @@ type session struct {
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser
 
-	mu              sync.Mutex
-	clients         map[*client]struct{}
-	ring            *ring
-	cols            uint
-	rows            uint
-	geoGen          uint64  // bumped whenever the PTY must be (re)sized
-	geoApplied      uint64  // last geoGen an applier has picked up
-	geoTold         [2]uint // last size the clients were told about
-	ended           bool
-	stopped         bool
-	lastOut         time.Time
-	paintQuietUntil time.Time
-	done            chan struct{}
-	title           titleScanner
-	modes           modeScanner
-	onTitle         func(string)
+	mu               sync.Mutex
+	clients          map[*client]struct{}
+	ring             *ring
+	cols             uint // desired effective geometry
+	rows             uint
+	acceptedCols     uint // last runtime geometry accepted
+	acceptedRows     uint
+	lastResizeCursor uint64
+	geoGen           uint64  // bumped whenever the PTY must be (re)sized
+	geoApplied       uint64  // last geoGen an applier has picked up
+	geoTold          [2]uint // last size the clients were told about
+	ended            bool
+	stopped          bool
+	lastOut          time.Time
+	paintQuietUntil  time.Time
+	done             chan struct{}
+	title            titleScanner
+	modes            modeScanner
+	screen           *terminalScreen
+	pendingScreen    []byte
+	pendingEvents    []pendingOutputEvent
+	finalSnapshot    ScreenSnapshot
+	onTitle          func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
 	// line discipline echoes them back through the PTY even when the agent
-	// never reads them, so those bytes are not evidence the agent is alive;
+	// never reads it, so those bytes are not evidence the agent is alive;
 	// see expectEcho and consumeEcho. echoDeadline expires the expectation.
 	pendingEcho  []byte
 	echoDeadline time.Time
 
-	// resizeMu serializes att.Resize applications so nudge sequences from
-	// concurrent reconciles never interleave; it is never held with mu.
+	// resizeActive keeps new geometry-aware clients from joining between
+	// the resize boundary and its resolution. resizeDone is closed only
+	// after every existing client's boundary has been resolved.
+	resizeActive bool
+	resizeDone   chan struct{}
+
+	// resizeMu serializes att.Resize applications. A boundary is queued for
+	// geometry-aware clients before each application, so output delivery can
+	// continue without taking this lock while the runtime is in flight.
 	resizeMu sync.Mutex
 }
 
@@ -107,24 +127,151 @@ func (s *session) pump() {
 }
 
 func (s *session) deliver(p []byte) {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped || s.ended {
+	if len(p) == 0 {
 		return
 	}
-	// Viewers, the transcript and the title scanner get every byte; only
-	// the liveness clock discounts the terminal's echo of what the server
-	// wrote, and a repaint provoked by our own resize nudge.
+	now := time.Now()
+	s.mu.Lock()
+	if s.stopped || s.ended {
+		s.mu.Unlock()
+		return
+	}
+	// These scanners and clocks describe when bytes arrived from the PTY,
+	// rather than when a slow geometry RPC eventually lets the emulator
+	// consume them.
 	if s.consumeEcho(p, now) && now.After(s.paintQuietUntil) {
 		s.lastOut = now
 	}
 	s.title.scan(p, s.onTitle)
+	for {
+		if s.resizeActive {
+			// Keep the one deferred buffer bounded. In particular, do not
+			// publish p to the ring or clients before it fits: an attach
+			// acknowledged at that cursor must never miss bytes that the
+			// live screen has not consumed.
+			if len(s.pendingScreen)+len(p) > maxClientBuffer {
+				done := s.resizeDone
+				s.mu.Unlock()
+				if done == nil {
+					// resizeActive and resizeDone are kept in lockstep. Be
+					// defensive if a hand-built test session violates it.
+					s.mu.Lock()
+					if s.stopped || s.ended {
+						s.mu.Unlock()
+						return
+					}
+					s.resizeActive = false
+					continue
+				}
+				<-done
+				s.mu.Lock()
+				if s.stopped || s.ended {
+					s.mu.Unlock()
+					return
+				}
+				continue
+			}
+			s.queuePendingOutputLocked(p, true, "")
+			// Raw consumers (notably the adapter tap) must remain live while
+			// the runtime RPC is in flight. Geometry-aware clients already
+			// have an ordered boundary in front of this output, so enqueueing
+			// it now preserves the same order for them too.
+			for c := range s.clients {
+				c.enqueue(p)
+			}
+			s.mu.Unlock()
+			return
+		}
+		s.commitOutputLocked(p)
+		s.mu.Unlock()
+		return
+	}
+}
+
+// queuePendingOutputLocked appends one ordered output event to the single
+// bounded byte buffer held across a resize. raw controls ring publication;
+// markers belong only to the transcript.
+func (s *session) queuePendingOutputLocked(p []byte, raw bool, marker string) {
+	s.pendingScreen = append(s.pendingScreen, p...)
+	s.pendingEvents = append(s.pendingEvents, pendingOutputEvent{
+		end:    len(s.pendingScreen),
+		raw:    raw,
+		marker: marker,
+	})
+}
+
+// commitOutputLocked applies raw PTY output to every durable/live
+// representation. Callers hold s.mu.
+func (s *session) commitOutputLocked(p []byte) {
+	if len(p) == 0 {
+		return
+	}
+	if s.screen != nil {
+		s.screen.write(p)
+	}
 	s.modes.scan(p)
-	s.ring.write(p)
-	s.tr.output(p)
+	if s.ring != nil {
+		s.ring.write(p)
+	}
+	if s.tr != nil {
+		s.tr.output(p)
+	}
 	for c := range s.clients {
 		c.enqueue(p)
+	}
+}
+
+// commitPendingOutputLocked applies output withheld while a resize RPC was in
+// flight. The caller has already sent this data to live clients. Callers hold
+// s.mu.
+func (s *session) commitPendingOutputLocked(p []byte) {
+	if len(p) == 0 {
+		return
+	}
+	if s.screen != nil {
+		s.screen.write(p)
+	}
+	s.modes.scan(p)
+	if len(s.pendingEvents) == 0 {
+		if s.ring != nil {
+			s.ring.write(p)
+		}
+		if s.tr != nil {
+			s.tr.output(p)
+		}
+		return
+	}
+	offset := 0
+	for _, event := range s.pendingEvents {
+		end := event.end
+		if end < offset {
+			continue
+		}
+		if end > len(p) {
+			end = len(p)
+		}
+		chunk := p[offset:end]
+		if event.raw && s.ring != nil {
+			s.ring.write(chunk)
+		}
+		if s.tr != nil {
+			s.tr.output(chunk)
+			if event.marker != "" {
+				s.tr.marker(event.marker)
+			}
+		}
+		offset = end
+		if offset == len(p) {
+			break
+		}
+	}
+	if offset < len(p) {
+		if s.ring != nil {
+			s.ring.write(p[offset:])
+		}
+		if s.tr != nil {
+			s.tr.output(p[offset:])
+		}
 	}
 }
 
@@ -132,12 +279,37 @@ func (s *session) deliver(p []byte) {
 // and every attachment drains to EOF, but the session stays queryable until
 // StopSession.
 func (s *session) end() {
+	// Finalization must not race an in-flight Resize: otherwise the resize
+	// applier could write to a nil ring or the final snapshot could capture
+	// the old grid while deferred output is still outstanding.
+	s.resizeMu.Lock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.ended || s.stopped {
+		s.mu.Unlock()
+		s.resizeMu.Unlock()
 		return
 	}
 	s.ended = true
+	s.finishLocked()
+	s.ring = nil // no further attaches: release the replay buffer
+	if s.done != nil {
+		close(s.done)
+	}
+	s.mu.Unlock()
+	s.resizeMu.Unlock()
+}
+
+func (s *session) finishLocked() {
+	if len(s.pendingScreen) > 0 {
+		s.commitPendingOutputLocked(s.pendingScreen)
+		s.pendingEvents = nil
+		s.pendingScreen = nil
+	}
+	if s.screen != nil {
+		s.finalSnapshot = makeScreenSnapshot(s.screen, s.modes)
+		s.screen.dispose()
+		s.screen = nil
+	}
 	tr := s.tr
 	s.tr = nil
 	if tr != nil {
@@ -146,44 +318,46 @@ func (s *session) end() {
 	for c := range s.clients {
 		c.close(nil)
 	}
-	s.ring = nil // no further attaches: release the replay buffer
-	close(s.done)
+	if done := s.resizeDone; done != nil {
+		s.resizeDone = nil
+		s.resizeActive = false
+		close(done)
+	} else {
+		s.resizeActive = false
+	}
 }
 
 func (s *session) stop() {
+	s.resizeMu.Lock()
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
+		s.resizeMu.Unlock()
 		return
 	}
 	s.stopped = true
-	tr := s.tr
-	s.tr = nil
-	if tr != nil {
-		_ = tr.close()
-	}
-	for c := range s.clients {
-		c.close(nil)
-	}
+	s.finishLocked()
 	// The sessions map keeps a lightweight stopped entry so StopSession
 	// remains idempotent. Release all attachment and transcript state that
 	// would otherwise retain runtime stream buffers for the life of the host.
+	att := s.att
 	s.ring = nil
 	s.clients = nil
-	att := s.att
 	s.att = nil
 	s.stdin = nil
 	s.title = titleScanner{}
 	s.modes = modeScanner{}
 	s.pendingEcho = nil
 	s.onTitle = nil
-	if !s.ended {
+	if !s.ended && s.done != nil {
 		close(s.done)
 	}
 	s.mu.Unlock()
+	s.resizeMu.Unlock()
 	if att != nil {
 		_ = att.Close()
 	}
+
 }
 
 func (s *session) isActive() bool {
@@ -200,40 +374,78 @@ func (s *session) lastOutput() (time.Time, bool) {
 	}
 	return s.lastOut, true
 }
-
-func (s *session) addClient(c *client) error {
+func (s *session) purgeSnapshot() {
+	s.mu.Lock()
+	s.finalSnapshot = ScreenSnapshot{}
+	s.mu.Unlock()
+}
+func (s *session) snapshot() (ScreenSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.stopped {
-		return ErrNoSession
+	if len(s.finalSnapshot.Data) > 0 {
+		return cloneScreenSnapshot(s.finalSnapshot), nil
 	}
-	if s.ended {
-		return ErrSessionEnded
+	if s.screen == nil {
+		return ScreenSnapshot{}, errors.New("ptyhost: terminal snapshot unavailable")
 	}
-	// A resuming client still holds this session's screen and its terminal
-	// state, so it needs only the bytes that arrived while it was away.
-	if c.resume {
-		if missed, ok := s.ring.since(c.cursor); ok {
-			c.replay = missed
-			c.resumed = true
+	return makeScreenSnapshot(s.screen, s.modes), nil
+}
+
+func (s *session) addClient(c *client) error {
+	for {
+		s.mu.Lock()
+		if s.resizeActive || s.resizeDone != nil {
+			done := s.resizeDone
+			s.mu.Unlock()
+			// Do not let a fresh attach's replay bypass an active
+			// geometry boundary. Waiting is outside mu so output,
+			// resize completion, and existing clients continue.
+			if done != nil {
+				<-done
+			}
+			continue
 		}
+		if s.stopped {
+			s.mu.Unlock()
+			return ErrNoSession
+		}
+		if s.ended {
+			s.mu.Unlock()
+			return ErrSessionEnded
+		}
+		c.replayCols, c.replayRows = s.acceptedCols, s.acceptedRows
+		if c.replayCols == 0 || c.replayRows == 0 {
+			c.replayCols, c.replayRows = s.cols, s.rows
+		}
+		// A resumed terminal can consume a raw gap only when no accepted
+		// resize occurred before that gap. Resize events are not in the raw
+		// ring, so a non-empty gap crossing one must rebuild the screen.
+		if c.resume {
+			if missed, ok := s.ring.since(c.cursor); ok &&
+				(!c.snapshot || len(missed) == 0 || c.cursor >= s.lastResizeCursor) {
+				c.replay = missed
+				c.resumed = true
+			}
+		}
+		if !c.resumed && c.snapshot {
+			c.replay = makeScreenSnapshot(s.screen, s.modes).Data
+		} else if !c.resumed {
+			// Everyone else rebuilds from the ring, which is a byte tail:
+			// modes the agent set at startup are long gone from it, and the
+			// preamble puts them back ahead of the replay.
+			c.replay = append(s.modes.preamble(), s.ring.bytes()...)
+		}
+		// Where the replay leaves this client, so it can say where it got
+		// to if it comes back.
+		c.cursor = s.ring.written
+		s.clients[c] = struct{}{}
+		// Any join can change who imposes, not just this client: the mirror
+		// that was alone here a moment ago no longer is. Raw replay needs
+		// a redraw; snapshots and successful resumes already hold the screen.
+		s.reconcileLocked(!c.snapshot && !c.resumed && c.cols != 0 && c.rows != 0)
+		s.mu.Unlock()
+		return nil
 	}
-	// Everyone else rebuilds from the ring, which is a byte tail: the
-	// modes the agent set at startup are long gone from it, and the
-	// preamble puts them back ahead of the replay.
-	if !c.resumed {
-		c.replay = append(s.modes.preamble(), s.ring.bytes()...)
-	}
-	// Where the replay leaves this client, so it can say where it got to
-	// if it comes back.
-	c.cursor = s.ring.written
-	s.clients[c] = struct{}{}
-	// Any join can change who imposes, not just this client: the mirror
-	// that was alone here a moment ago no longer is. A fresh screen-bearing
-	// attach also needs a redraw at the effective geometry, even when it does
-	// not impose a size; a resume keeps its existing screen and never nudges.
-	s.reconcileLocked(!c.resumed && c.cols != 0 && c.rows != 0)
-	return nil
 }
 
 func (s *session) removeClient(c *client) {
@@ -250,15 +462,8 @@ func (s *session) removeClient(c *client) {
 	c.close(nil)
 }
 
-// geometry is the size the session's PTY has now.
-func (s *session) geometry() (uint, uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cols, s.rows
-}
-
 func (s *session) resizeClient(c *client, cols, rows uint) {
-	if cols == 0 || rows == 0 {
+	if validateScreenDimensions(cols, rows) != nil {
 		return
 	}
 	s.mu.Lock()
@@ -268,7 +473,7 @@ func (s *session) resizeClient(c *client, cols, rows uint) {
 	}
 	c.cols, c.rows = cols, rows
 	if s.imposesNow(c) && !s.ended && !s.stopped {
-		s.reconcileLocked(false)
+		s.reconcileLocked(s.geoApplied != s.geoGen)
 	}
 }
 
@@ -304,55 +509,124 @@ func (s *session) reconcileLocked(force bool) {
 		return
 	}
 	s.cols, s.rows = cols, rows
-	if changed {
-		s.tr.resize(cols, rows)
-	}
 	s.geoGen++
-	go s.applyResize()
+	// One applier owns each scheduled boundary. A resize update that arrives
+	// while its RPC is in flight only advances geoGen; the applier schedules
+	// the next generation after it commits this one.
+	if s.resizeDone == nil {
+		s.resizeDone = make(chan struct{})
+		go s.applyResize()
+	}
 }
 
-// applyResize applies the latest recorded geometry to the attachment with a
-// redraw nudge (rows-1 then rows) so TUIs repaint, then tells every attached
-// geometry writer what the runtime accepted. Appliers serialize on resizeMu
-// and always apply the newest geometry, so concurrent reconciles coalesce and
-// never apply stale sizes, and the clients are told in that same order; each
-// call is bounded by resizeTimeout so a hung runtime cannot wedge it. A resize
-// the runtime refuses or takes too long to answer tells nobody: the PTY is not
-// that size, so a client would be drawing at a geometry that exists only here.
+// applyResize applies one recorded geometry to the attachment with a redraw
+// nudge (rows-1 then rows) so TUIs repaint. Before entering the runtime call
+// it inserts an unresolved boundary in every existing GeometryWriter queue.
+// Output delivery remains live for raw clients while the runtime is in
+// flight, but screen, ring, and cast publication wait for the accepted
+// geometry. Each RPC is bounded by resizeTimeout.
 func (s *session) applyResize() {
 	s.resizeMu.Lock()
-	defer s.resizeMu.Unlock()
 	s.mu.Lock()
 	if s.geoApplied == s.geoGen || s.ended || s.stopped || s.att == nil {
+		done := s.resizeDone
+		s.resizeActive = false
+		s.resizeDone = nil
+		if done != nil {
+			close(done)
+		}
 		s.mu.Unlock()
+		s.resizeMu.Unlock()
 		return
 	}
-	s.geoApplied = s.geoGen
+	gen := s.geoGen
+	s.geoApplied = gen
 	cols, rows := s.cols, s.rows
 	att := s.att
-	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), resizeTimeout)
-	defer cancel()
-	if rows > 1 {
-		_ = att.Resize(ctx, cols, rows-1)
+	done := s.resizeDone
+	if done == nil {
+		done = make(chan struct{})
+		s.resizeDone = done
 	}
-	applied := att.Resize(ctx, cols, rows) == nil
-	s.mu.Lock()
-	s.paintQuietUntil = time.Now().Add(paintQuiet)
-	var geometryWriters []*client
-	// Left unrecorded, a size that failed is told the next time it is
-	// reconciled rather than suppressed as already sent.
-	if applied && s.geoTold != [2]uint{cols, rows} {
-		s.geoTold = [2]uint{cols, rows}
-		for c := range s.clients {
-			if _, ok := c.conn.(GeometryWriter); ok {
-				geometryWriters = append(geometryWriters, c)
-			}
+	s.resizeActive = true
+	var targets []resizeTarget
+	for c := range s.clients {
+		boundary := newResizeBoundary()
+		if c.enqueueResizeBoundary(boundary) {
+			targets = append(targets, resizeTarget{client: c, boundary: boundary})
 		}
 	}
 	s.mu.Unlock()
-	for _, c := range geometryWriters {
-		c.tellGeometry(cols, rows)
+
+	ctx, cancel := context.WithTimeout(context.Background(), resizeTimeout)
+	if rows > 1 {
+		_ = att.Resize(ctx, cols, rows-1)
+	}
+	rpcOK := att.Resize(ctx, cols, rows) == nil
+	cancel()
+
+	s.mu.Lock()
+	applied := rpcOK && !s.ended && !s.stopped
+	s.paintQuietUntil = time.Now().Add(paintQuiet)
+	changed := cols != s.acceptedCols || rows != s.acceptedRows
+	if applied {
+		s.acceptedCols, s.acceptedRows = cols, rows
+		if s.screen != nil {
+			_ = s.screen.resize(cols, rows)
+		}
+		// Keep the cast's resize event before every output emitted while the
+		// RPC was pending. This is the same order used by the emulator.
+		if changed && s.tr != nil {
+			s.tr.resize(cols, rows)
+		}
+	} else if s.geoGen == gen && gen > 0 {
+		// Keep this generation eligible for a later retry without spinning a
+		// retry loop here. A subsequent client resize or attach calls force.
+		s.geoApplied = gen - 1
+	}
+	if len(s.pendingScreen) > 0 {
+		s.commitPendingOutputLocked(s.pendingScreen)
+		s.pendingEvents = nil
+		s.pendingScreen = nil
+	}
+	if applied && changed && s.ring != nil {
+		// A resume cursor below this point crosses the geometry event and
+		// must rebuild from the now-committed screen rather than consume a
+		// raw gap against the old grid.
+		s.lastResizeCursor = s.ring.written
+	}
+	tell := applied && s.geoTold != [2]uint{cols, rows}
+	if tell {
+		s.geoTold = [2]uint{cols, rows}
+	}
+	signals := make([]*resizeBoundary, 0, len(targets))
+	for _, target := range targets {
+		signals = append(signals, target.client.resolveResizeBoundary(target.boundary, cols, rows, tell)...)
+	}
+	// Every completed RPC releases its boundary and lets output between this
+	// operation and a newer one use the geometry the runtime just accepted.
+	s.resizeActive = false
+	s.resizeDone = nil
+	if done != nil {
+		close(done)
+	}
+	next := s.geoGen != gen && !s.ended && !s.stopped && s.att != nil
+	if next {
+		// Reserve the next applier before dropping s.mu; otherwise a resize
+		// update in this small handoff window could launch a duplicate
+		// applier that closes the next generation's boundary.
+		s.resizeDone = make(chan struct{})
+	}
+	s.mu.Unlock()
+
+	// Signal only after results are installed, but before releasing resizeMu:
+	// end/stop can then safely finalize immediately after this operation.
+	for _, boundary := range signals {
+		boundary.signal()
+	}
+	s.resizeMu.Unlock()
+	if next {
+		go s.applyResize()
 	}
 }
 
@@ -383,20 +657,45 @@ func (s *session) writeStdin(p []byte) bool {
 func (s *session) annotateInjection(actorName, actorColor, message string) error {
 	safeActor, safeMessage := bannerText(actorName), bannerText(message)
 	banner := renderBanner(safeActor, actorColor, safeMessage)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped {
-		return ErrNoSession
+	marker := "inject by " + safeActor + ": " + safeMessage
+	for {
+		s.mu.Lock()
+		if s.stopped {
+			s.mu.Unlock()
+			return ErrNoSession
+		}
+		if s.ended {
+			s.mu.Unlock()
+			return ErrSessionEnded
+		}
+		if s.resizeActive && len(s.pendingScreen)+len(banner) > maxClientBuffer {
+			done := s.resizeDone
+			if done == nil {
+				s.resizeActive = false
+				s.mu.Unlock()
+				continue
+			}
+			s.mu.Unlock()
+			<-done
+			continue
+		}
+		if s.resizeActive {
+			s.queuePendingOutputLocked(banner, false, marker)
+		} else {
+			if s.screen != nil {
+				s.screen.write(banner)
+			}
+			if s.tr != nil {
+				s.tr.output(banner)
+				s.tr.marker(marker)
+			}
+		}
+		for c := range s.clients {
+			c.enqueue(banner)
+		}
+		s.mu.Unlock()
+		return nil
 	}
-	if s.ended {
-		return ErrSessionEnded
-	}
-	s.tr.output(banner)
-	s.tr.marker("inject by " + safeActor + ": " + safeMessage)
-	for c := range s.clients {
-		c.enqueue(banner)
-	}
-	return nil
 }
 
 func (s *session) inject(actorName, actorColor, message, submit string) error {
@@ -533,225 +832,4 @@ func bannerText(text string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
-}
-
-// ring keeps the last max bytes of raw PTY output for replay-on-attach.
-// written counts every byte the session has ever produced, so a client
-// that says how far it got can be handed exactly what it missed.
-type ring struct {
-	max     int
-	buf     []byte
-	dropped bool
-	written uint64
-}
-
-func newRing(max int) *ring { return &ring{max: max} }
-
-func (r *ring) write(p []byte) {
-	r.written += uint64(len(p))
-	if len(p) >= r.max {
-		if len(p) > r.max || len(r.buf) > 0 {
-			r.dropped = true
-		}
-		r.buf = append(r.buf[:0], p[len(p)-r.max:]...)
-		return
-	}
-	if len(r.buf)+len(p) > r.max {
-		r.dropped = true
-	}
-	r.buf = append(r.buf, p...)
-	if n := len(r.buf) - r.max; n > 0 {
-		r.buf = append(r.buf[:0], r.buf[n:]...)
-	}
-}
-
-// since returns the bytes written after cursor, and whether the ring
-// still holds all of them. A cursor from further back than the ring
-// retains - or one ahead of what has been written, which no honest
-// client can hold - reports false, and the caller replays everything
-// instead.
-func (r *ring) since(cursor uint64) ([]byte, bool) {
-	if cursor > r.written {
-		return nil, false
-	}
-	behind := r.written - cursor
-	if behind > uint64(len(r.buf)) {
-		return nil, false
-	}
-	return append([]byte(nil), r.buf[uint64(len(r.buf))-behind:]...), true
-}
-
-func (r *ring) bytes() []byte {
-	start := 0
-	if r.dropped {
-		if i := bytes.IndexByte(r.buf, '\n'); i >= 0 {
-			start = i + 1
-		}
-	}
-	return append([]byte(nil), r.buf[start:]...)
-}
-
-// client is one attachment: an outbound buffer pumped to conn by its own
-// write loop so a slow client can never block the session pump.
-type client struct {
-	conn     io.ReadWriter
-	readOnly bool
-	// follow keeps this client out of the geometry reconcile whether or
-	// not it may write: it renders the size the session is, so it can
-	// never reflow the agent's screen for anyone else.
-	follow bool
-	// resume means this client kept the screen from a previous attach, so
-	// it is sent only what it missed and provokes no redraw. cursor is how
-	// far it got, and resumed records whether the ring could still answer
-	// from there - when it could not, the attach falls back to a full
-	// replay and the client has to clear its screen after all.
-	resume  bool
-	cursor  uint64
-	resumed bool
-	cols    uint // guarded by session.mu
-	rows    uint // guarded by session.mu
-	replay  []byte
-
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    []byte
-	closed bool
-	err    error
-	done   chan struct{}
-}
-
-func newClient(conn io.ReadWriter, a AttachClient) *client {
-	c := &client{
-		conn:     conn,
-		readOnly: a.ReadOnly,
-		follow:   a.Follow,
-		resume:   a.Resume,
-		cursor:   a.Cursor,
-		cols:     a.Cols,
-		rows:     a.Rows,
-		done:     make(chan struct{}),
-	}
-	c.cond = sync.NewCond(&c.mu)
-	return c
-}
-
-// sizes reports whether c brings a screen of its own to the question of
-// how big the PTY should be. A follower renders at whatever size the
-// session is, and an in-process consumer like the adapter tap has no
-// terminal at all and attaches with none - neither is a screen anything
-// has to fit inside, and neither is company for the check below.
-func (c *client) sizes() bool { return !c.follow && c.cols != 0 && c.rows != 0 }
-
-// imposesNow reports whether c's geometry is one the PTY has to fit
-// inside. A client that may write always counts. A read-only mirror
-// counts only while it is the only client bringing a screen at all -
-// alone there is no other screen to reflow, so a watcher resizing its
-// window is just ssh resizing a terminal, and the agent is better drawn
-// at the size someone is actually looking at. Callers hold mu.
-func (s *session) imposesNow(c *client) bool {
-	if !c.sizes() {
-		return false
-	}
-	if !c.readOnly {
-		return true
-	}
-	for other := range s.clients {
-		if other != c && other.sizes() {
-			return false
-		}
-	}
-	return true
-}
-
-// tellGeometry hands the session's size to a client that asked to be told,
-// which is how an ack reports the live geometry and how a later change
-// reaches a follower. Never called with the session lock held: the conn
-// writes.
-func (c *client) tellResume() {
-	if w, ok := c.conn.(ResumeWriter); ok {
-		w.SetResume(c.cursor, c.resumed)
-	}
-}
-
-func (c *client) tellGeometry(cols, rows uint) {
-	if w, ok := c.conn.(GeometryWriter); ok {
-		w.SetGeometry(cols, rows)
-	}
-}
-
-func (c *client) enqueue(p []byte) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return
-	}
-	if len(c.buf)+len(p) > maxClientBuffer {
-		c.closed = true
-		c.err = errSlowClient
-		close(c.done)
-		c.cond.Broadcast()
-		return
-	}
-	c.buf = append(c.buf, p...)
-	c.cond.Broadcast()
-}
-
-// close records the client's terminal condition; the first call wins.
-func (c *client) close(err error) {
-	c.mu.Lock()
-	if !c.closed {
-		c.closed = true
-		c.err = err
-		close(c.done)
-	}
-	c.cond.Broadcast()
-	c.mu.Unlock()
-}
-
-func (c *client) isClosed() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.closed
-}
-
-func (c *client) getErr() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.err
-}
-
-// writeLoop pumps buffered output to conn until the client is closed and
-// drained (returning the closing error) or a conn write fails.
-func (c *client) writeLoop() error {
-	replay := c.replay
-	c.replay = nil
-	if rw, ok := c.conn.(ReplayWriter); ok {
-		if _, err := rw.WriteReplay(replay); err != nil {
-			c.close(err)
-			return err
-		}
-	} else if len(replay) > 0 {
-		if _, err := c.conn.Write(replay); err != nil {
-			c.close(err)
-			return err
-		}
-	}
-	for {
-		c.mu.Lock()
-		for len(c.buf) == 0 && !c.closed {
-			c.cond.Wait()
-		}
-		if len(c.buf) == 0 {
-			err := c.err
-			c.mu.Unlock()
-			return err
-		}
-		p := c.buf
-		c.buf = nil
-		c.mu.Unlock()
-		if _, err := c.conn.Write(p); err != nil {
-			c.close(err)
-			return err
-		}
-	}
 }

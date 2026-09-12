@@ -51,7 +51,7 @@ func (l *Local) Call(ctx context.Context, method string, params json.RawMessage)
 // code.
 func (l *Local) Events(ctx context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
 	var ack protocol.SubscribeResponse
-	stream, err := l.open(ctx, req, &ack, nil, func(ctx context.Context, ch subsystemConn) {
+	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
 		l.s.serveEvents(ctx, l.member, ch)
 	})
 	if err != nil {
@@ -73,8 +73,7 @@ func (l *Local) Attach(ctx context.Context, req protocol.AttachRequest) (*LocalT
 	var ack protocol.AttachResponse
 	st := &sessionState{resize: make(chan [2]uint, 16)}
 	st.setPTY(req.Cols, req.Rows)
-	geometry := make(chan [2]uint, 1)
-	stream, err := l.open(ctx, req, &ack, geometry, func(ctx context.Context, ch subsystemConn) {
+	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
 		l.s.serveAttach(ctx, l.member, st, ch)
 	})
 	if err != nil {
@@ -84,17 +83,16 @@ func (l *Local) Attach(ctx context.Context, req protocol.AttachRequest) (*LocalT
 		_ = stream.Close()
 		return nil, ack, fmt.Errorf("sshd: attach: %s", ack.Error)
 	}
-	return &LocalTerminal{localStream: stream, st: st, geometry: geometry}, ack, nil
+	return &LocalTerminal{localStream: stream, st: st}, ack, nil
 }
 
-// Terminal opens the member's persistent environment terminal and returns
-// its acknowledged PTY stream, geometry handled as in Attach.
+// Terminal opens the member's persistent environment terminal. Framed
+// requests receive geometry records in the same stream as output.
 func (l *Local) Terminal(ctx context.Context, req protocol.TerminalRequest) (*LocalTerminal, protocol.TerminalResponse, error) {
 	var ack protocol.TerminalResponse
 	st := &sessionState{resize: make(chan [2]uint, 16)}
 	st.setPTY(req.Cols, req.Rows)
-	geometry := make(chan [2]uint, 1)
-	stream, err := l.open(ctx, req, &ack, geometry, func(ctx context.Context, ch subsystemConn) {
+	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
 		l.s.serveTerminal(ctx, l.member, st, ch)
 	})
 	if err != nil {
@@ -104,23 +102,20 @@ func (l *Local) Terminal(ctx context.Context, req protocol.TerminalRequest) (*Lo
 		_ = stream.Close()
 		return nil, ack, fmt.Errorf("sshd: terminal: %s", ack.Error)
 	}
-	return &LocalTerminal{localStream: stream, st: st, geometry: geometry}, ack, nil
+	return &LocalTerminal{localStream: stream, st: st}, ack, nil
 }
 
 // open starts serve on the server end of a fresh pipe, writes the header
 // line, and reads the ack line into ack; the returned stream carries the
-// bytes after it. geometry receives the session resizes the handler
-// reports, which an SSH client would read as window-change requests; nil
-// for a stream that has no PTY. The handler is tracked like a channel
-// handler: the server's Close ends it by closing its end of the pipe and
-// waits for it.
-func (l *Local) open(ctx context.Context, header, ack any, geometry chan [2]uint, serve func(context.Context, subsystemConn)) (*localStream, error) {
+// bytes after it. The handler is tracked like a channel handler: the
+// server's Close ends it by closing its end of the pipe and waits for it.
+func (l *Local) open(ctx context.Context, header, ack any, serve func(context.Context, subsystemConn)) (*localStream, error) {
 	line, err := json.Marshal(header)
 	if err != nil {
 		return nil, err
 	}
 	server, client := net.Pipe()
-	ch := &pipeConn{Conn: server, sizes: geometry}
+	ch := &pipeConn{Conn: server}
 	if !l.s.trackConn(server) || !l.s.beginHandler() {
 		_ = server.Close()
 		_ = client.Close()
@@ -157,30 +152,9 @@ func (l *Local) open(ctx context.Context, header, ack any, geometry chan [2]uint
 type pipeConn struct {
 	net.Conn
 	status atomic.Int32
-	// sizes carries the session geometry the handler reports, the way an
-	// SSH channel carries a window-change request. One slot, latest wins:
-	// only the size the session is now means anything.
-	sizes chan [2]uint
 }
 
 func (c *pipeConn) exit(status int) { c.status.Store(int32(status)) }
-
-func (c *pipeConn) geometry(cols, rows uint) {
-	if c.sizes == nil {
-		return
-	}
-	// Only one goroutine reports a session's geometry at a time, so
-	// dropping whatever is unread and leaving the newest size cannot lose
-	// the last word.
-	select {
-	case <-c.sizes:
-	default:
-	}
-	select {
-	case c.sizes <- [2]uint{cols, rows}:
-	default:
-	}
-}
 
 // localStream is the client end: the bytes after the ack, and the exit
 // status the handler ended with, surfaced as *protocol.RemoteExitError
@@ -215,18 +189,12 @@ func (t *localStream) Close() error {
 	return nil
 }
 
-// LocalTerminal is an in-process PTY attach; Resize is the SSH
-// window-change request, and Geometry is the same request arriving the
-// other way.
+// LocalTerminal is an in-process PTY attach; Resize adjusts the server-side
+// PTY geometry.
 type LocalTerminal struct {
 	*localStream
-	st       *sessionState
-	geometry chan [2]uint
+	st *sessionState
 }
-
-// Geometry reports the sizes the session's PTY takes while this attach is
-// open, so a client that follows the session can redraw at them.
-func (t *LocalTerminal) Geometry() <-chan [2]uint { return t.geometry }
 
 // Resize adjusts the PTY to cols by rows.
 func (t *LocalTerminal) Resize(cols, rows uint) error {

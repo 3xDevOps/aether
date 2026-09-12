@@ -22,7 +22,7 @@ func TestAttachRevocationCloses1008WithReason(t *testing.T) {
 		{protocol.AttachExitMembershipRevoked, "membership withdrawn"},
 	} {
 		term := newWSStubTerminal(&cli.RemoteExitError{Status: tc.status})
-		b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Cols: 80, Rows: 24}}
+		b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Framed: true, Cols: 80, Rows: 24}}
 		g, base := newWSGateway(t, b)
 		conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
 

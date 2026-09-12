@@ -23,9 +23,6 @@ func (b backend) Events(ctx context.Context, req protocol.SubscribeRequest) (io.
 	return b.local.Events(ctx, req)
 }
 
-// An attach carries the session's own resizes to a client following it.
-var _ webgate.GeometrySource = (*sshd.LocalTerminal)(nil)
-
 func (b backend) Attach(ctx context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
 	term, ack, err := b.local.Attach(ctx, req)
 	if term == nil {

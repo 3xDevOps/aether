@@ -210,8 +210,13 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 		}
 		return out.String()
 	}
-	if got := replayOutput(filepath.Join(dir, string(run)+".cast")); got != "second-life" {
-		t.Fatalf("current transcript = %q, want %q", got, "second-life")
+	recovered, err := readCastScreen(filepath.Join(dir, string(run)+".cast"))
+	if err != nil {
+		t.Fatalf("reconstruct current transcript: %v", err)
+	}
+	defer recovered.screen.dispose()
+	if got := recovered.screen.term.String(); !strings.Contains(got, "first-lifesecond-life") {
+		t.Fatalf("current transcript lost screen continuity across restart: %q", got)
 	}
 	asides, err := filepath.Glob(filepath.Join(dir, string(run)+".*.cast"))
 	if err != nil || len(asides) != 1 {
@@ -286,7 +291,7 @@ func TestRestartSeedsReplayFromTranscriptTail(t *testing.T) {
 // must nevertheless come from the full prior transcript when the mode-setting
 // sequence is older than that tail.
 func TestRestartSeedsReplayModesFromTranscriptHistory(t *testing.T) {
-	h, _ := newTestHost(t, func(c *Config) { c.ReplayBytes = 64 })
+	h, dir := newTestHost(t, func(c *Config) { c.ReplayBytes = 64 })
 	run := domain.RunID("run-replay-modes")
 	ctx := context.Background()
 
@@ -302,6 +307,19 @@ func TestRestartSeedsReplayModesFromTranscriptHistory(t *testing.T) {
 	})
 	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("first StopSession: %v", err)
+	}
+
+	// A crash can interrupt the last JSON event without losing the PTY.
+	path := filepath.Join(dir, string(run)+".cast")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`[1,"o","\u001b[?2004`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	for restart := range 2 {

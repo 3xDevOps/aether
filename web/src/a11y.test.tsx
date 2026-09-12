@@ -500,7 +500,7 @@ describe('sidebar resizer', () => {
     expect(handle.tabIndex).toBe(0)
     expect(handle.getAttribute('aria-controls')).toBe('sidebar')
 
-    const start = useStore.getState().sidebarWidth
+    const start = Number(handle.getAttribute('aria-valuenow'))
     fireEvent.keyDown(handle, { key: 'ArrowRight' })
     expect(useStore.getState().sidebarWidth).toBe(start + 16)
     fireEvent.keyDown(handle, { key: 'ArrowLeft' })

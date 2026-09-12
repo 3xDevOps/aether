@@ -1077,6 +1077,10 @@ the server resize and optional attach reset between xterm writes. A font or
 pane resize reports the local measurement, never the smaller rendered grid,
 so a viewer cannot accidentally pin the shared minimum after it grows.
 Queued geometry work is discarded when its terminal is disposed.
+The server queues geometry with terminal output. SSH and in-process dashboard
+attachments request ordered framing, and the gateway emits the geometry frame
+before the next output record; independent geometry and output pumps would
+allow a repaint to reach xterm at the old size.
 
 **The terminal on a phone.** The PTY is the per-dimension minimum over the
 clients that impose a geometry on it, so a client that fits xterm to its own
@@ -1250,14 +1254,20 @@ replaces the terminal with the gateway's own error instead.
   every reconnect, so those stop the loop and surface the reason. A refusal
   frame arrives with its own 1008 close, which is why the client reacts to the
   code only when no refusal preceded it.
-- **Reconnect resumes with full recent history.** The gateway replays the
-  recent transcript to an attach that needs it, and the client clears the
-  buffer first, which keeps a reconnect from stacking a second copy of the
-  scrollback under the first. Taking control and handing it back are the
-  exception: they reattach with `resume`, which replays nothing and clears
-  nothing, because that client already has the screen. The shared xterm host uses `scrollback: 50000`; the server replay
-  ring is 1 MiB and is seeded from the cast tail when a session is restarted,
-  so re-attach retains the full recent history rather than only 64 KiB.
+- **Fresh opens receive a screen, not a timelapse.** The server maintains a
+  headless xterm state and serializes the current screen with at most 200
+  scrollback lines for dashboard attachments, including finished runs. The
+  browser resets once and mutes terminal replies only until that compact
+  snapshot parses. Taking control and handing it back instead preserve the
+  screen with `resume` and receive only missing bytes from the raw 1 MiB ring.
+  Raw CLI attachments and screenless adapter taps retain their raw replay.
+- **History does not touch the live terminal.** The run terminal's **History**
+  control opens a separate recording player. `api.runRecording()` fetches an
+  authenticated snapshot containing all preserved casts, including earlier
+  server incarnations. The player is loaded only for that dialog and applies
+  recorded geometry while seeking through earlier screens. Closing aborts the
+  request and disposes the player without remounting the live xterm or changing
+  its attach permissions.
 - **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
   chains zoom, find, and `clipboardKeys` in that order; the first to claim a
   key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but

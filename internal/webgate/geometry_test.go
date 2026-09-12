@@ -15,28 +15,30 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// followTerminal is an attach that follows its session: it never produces
-// output, and reports the sizes the session takes the way both real
-// backends do.
+// followTerminal exposes an ordered framed terminal stream, including a
+// geometry record between two output records.
 type followTerminal struct {
-	sizes chan [2]uint
-	done  chan struct{}
-	once  sync.Once
+	r    *io.PipeReader
+	w    *io.PipeWriter
+	once sync.Once
 }
 
-func (t *followTerminal) Read([]byte) (int, error) {
-	<-t.done
-	return 0, io.EOF
+func newFollowTerminal() *followTerminal {
+	r, w := io.Pipe()
+	return &followTerminal{r: r, w: w}
 }
+
+func (t *followTerminal) Read(p []byte) (int, error)  { return t.r.Read(p) }
 func (t *followTerminal) Write(p []byte) (int, error) { return len(p), nil }
 func (t *followTerminal) Resize(uint, uint) error     { return nil }
 
-// Closed by both pump loops, as the real ones are.
 func (t *followTerminal) Close() error {
-	t.once.Do(func() { close(t.done) })
+	t.once.Do(func() {
+		_ = t.r.Close()
+		_ = t.w.Close()
+	})
 	return nil
 }
-func (t *followTerminal) Geometry() <-chan [2]uint { return t.sizes }
 
 type followBackend struct {
 	stubBackend
@@ -46,14 +48,13 @@ type followBackend struct {
 
 func (b *followBackend) Attach(_ context.Context, req protocol.AttachRequest) (Terminal, protocol.AttachResponse, error) {
 	b.request = req
-	return b.term, protocol.AttachResponse{OK: true, Cols: 132, Rows: 43}, nil
+	return b.term, protocol.AttachResponse{OK: true, Framed: true, Cols: 132, Rows: 43}, nil
 }
 
-// The browser half of the follow contract: the header's flag reaches the
-// server, the ack's geometry reaches the page, and a resize of the session
-// arrives as a geometry frame rather than as bytes in the terminal stream.
-func TestAttachRelaysTheSessionGeometryToTheBrowser(t *testing.T) {
-	term := &followTerminal{sizes: make(chan [2]uint, 1), done: make(chan struct{})}
+// The browser half of the framed follow contract: output and geometry records
+// preserve their order, and the dashboard request enables framing.
+func TestAttachRelaysOrderedTerminalRecordsToBrowser(t *testing.T) {
+	term := newFollowTerminal()
 	backend := &followBackend{term: term}
 	g, err := New(Config{Authorize: admitAll(backend)})
 	if err != nil {
@@ -70,29 +71,49 @@ func TestAttachRelaysTheSessionGeometryToTheBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.CloseNow() }()
-	if err := wsjson.Write(ctx, conn, protocol.DashAttachRequest{
+	if err = wsjson.Write(ctx, conn, protocol.DashAttachRequest{
 		Write: true, Cols: 80, Rows: 24, Follow: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	var ack protocol.AttachResponse
-	if err := wsjson.Read(ctx, conn, &ack); err != nil {
+	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
 	if !ack.OK || ack.Cols != 132 || ack.Rows != 43 {
 		t.Fatalf("ack = %+v, want the session's 132x43", ack)
 	}
-	if !backend.request.Follow || backend.request.ReadOnly {
-		t.Fatalf("attach request = %+v, want a writable follower", backend.request)
+	if !backend.request.Follow || backend.request.ReadOnly || !backend.request.Framed {
+		t.Fatalf("attach request = %+v, want a writable framed follower", backend.request)
 	}
 
-	term.sizes <- [2]uint{120, 40}
+	go func() {
+		_, _ = protocol.WriteTerminalOutput(term.w, []byte("old"))
+		_ = protocol.WriteTerminalGeometry(term.w, 120, 40)
+		_, _ = protocol.WriteTerminalOutput(term.w, []byte("new"))
+		_ = term.w.Close()
+	}()
+
+	typ, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != websocket.MessageBinary || string(data) != "old" {
+		t.Fatalf("first frame = (%v,%q), want binary old output", typ, data)
+	}
 	var frame protocol.DashAttachControl
-	if err := wsjson.Read(ctx, conn, &frame); err != nil {
+	if err = wsjson.Read(ctx, conn, &frame); err != nil {
 		t.Fatal(err)
 	}
 	if frame.Type != protocol.DashAttachGeometry || frame.Cols != 120 || frame.Rows != 40 {
 		t.Fatalf("frame = %+v, want a geometry frame of 120x40", frame)
+	}
+	typ, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != websocket.MessageBinary || string(data) != "new" {
+		t.Fatalf("last frame = (%v,%q), want binary new output", typ, data)
 	}
 }

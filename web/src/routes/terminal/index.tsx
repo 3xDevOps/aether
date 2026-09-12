@@ -20,6 +20,7 @@ import {
   replayGate,
 } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
+import { RunHistory } from '@/routes/terminal/run-history'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -253,6 +254,7 @@ function TerminalView({ params }: RouteProps) {
           </span>
         )}
       </Button>
+      <RunHistory runID={runID} />
       {state.steerDenied && (
         <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
           You cannot steer this run.
