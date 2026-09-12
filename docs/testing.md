@@ -38,6 +38,13 @@ Layers, per the design spec's testing strategy:
   no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
   job.
 
+The Windows client CI job also runs `TestInstallDesktopWindowsPreservesCLI`
+in `internal/localops`: install and reinstall must preserve the CLI and
+unrelated files in the documented CLI directory, register a Start Menu
+shortcut targeting the installed desktop executable, and detect only the
+desktop directory as an installed app. It runs on other hosts too, exercising
+the Windows install path without needing Electron.
+
 ## Local configuration in tests
 
 Tests that read or write the linked-server config through `cli.Load`,
