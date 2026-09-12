@@ -418,9 +418,9 @@ func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.Me
 		return nil, err
 	}
 	return &domain.Run{
-		ID: "run_relaunched", WorkspaceID: "ws", MemberID: actor,
+		ID: run, WorkspaceID: "ws", MemberID: actor,
 		Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
-		Status: domain.RunQueued, CreatedAt: time.Now().UTC(),
+		Status: domain.RunRunning, CreatedAt: time.Now().UTC(),
 	}, nil
 }
 

@@ -7,14 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sys/unix"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -397,9 +401,6 @@ func TestHappyPath(t *testing.T) {
 	if run.Worktree != e.git.checkoutPath(run.ID) {
 		t.Fatalf("run.Worktree = %q", run.Worktree)
 	}
-	if got, want := c.spec.Command, []string{"fake-agent", "fix the auth bug"}; !slices.Equal(got, want) {
-		t.Fatalf("container command = %v, want %v", got, want)
-	}
 	if !c.spec.TTY {
 		t.Fatal("container spec must set TTY")
 	}
@@ -463,9 +464,6 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("CloseRun: %v", err)
 	}
 	closed := waitStatusEvent(t, sub, run.ID, domain.RunMerged)
-	if p := closed.Payload.(events.RunStatusPayload); p.Reason != "closed" {
-		t.Fatalf("close reason = %q", p.Reason)
-	}
 	if closed.ActorID != e.member.ID {
 		t.Fatalf("close actor = %s", closed.ActorID)
 	}
@@ -485,10 +483,214 @@ func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
 	}
 }
 
+func TestTUIContainerUsesSafePersistentSupervisor(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run := &domain.Run{ID: "run-tui", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Mode: domain.LaunchTUI}
+	plan := &EnvironmentPlan{Env: map[string]string{}}
+	argv := []string{"agent", "--task", `$(touch compromised)`}
+	spec := e.sched.containerSpec(run, e.member, argv, plan)
+	if len(spec.Command) < 5 || spec.Command[0] != "/bin/sh" || spec.Command[1] != "-c" {
+		t.Fatalf("TUI command = %v, want POSIX supervisor", spec.Command)
+	}
+	script := spec.Command[2]
+	if !strings.Contains(script, `"${@}"`) && !strings.Contains(script, `"$@"`) {
+		t.Fatalf("TUI supervisor does not execute positional argv safely: %q", script)
+	}
+	if !strings.Contains(script, "while :") || !strings.Contains(script, "/bin/bash -l") {
+		t.Fatalf("TUI supervisor does not keep login shells available: %q", script)
+	}
+	if !slices.Equal(spec.Command[4:], argv) {
+		t.Fatalf("TUI supervisor argv = %v, want %v", spec.Command[4:], argv)
+	}
+	headless := *run
+	headless.Mode = domain.LaunchHeadless
+	headlessSpec := e.sched.containerSpec(&headless, e.member, argv, plan)
+	if !slices.Equal(headlessSpec.Command, argv) {
+		t.Fatalf("headless argv changed: %v", headlessSpec.Command)
+	}
+}
+
+type testPTYProcess struct {
+	cmd    *exec.Cmd
+	master *os.File
+	reads  <-chan string
+	done   <-chan error
+	output strings.Builder
+}
+
+func startTestPTYProcess(t *testing.T, argv []string) *testPTYProcess {
+	t.Helper()
+	masterFD, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatalf("open PTY master: %v", err)
+	}
+	master := os.NewFile(uintptr(masterFD), "/dev/ptmx")
+	ptyNumber, err := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPTN)
+	if err != nil {
+		_ = master.Close()
+		t.Fatalf("get PTY number: %v", err)
+	}
+	if unlockErr := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); unlockErr != nil {
+		_ = master.Close()
+		t.Fatalf("unlock PTY: %v", unlockErr)
+	}
+	slaveFD, err := unix.Open("/dev/pts/"+strconv.Itoa(ptyNumber), unix.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		_ = master.Close()
+		t.Fatalf("open PTY slave: %v", err)
+	}
+	slave := os.NewFile(uintptr(slaveFD), "/dev/pts/"+strconv.Itoa(ptyNumber))
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	if err := cmd.Start(); err != nil {
+		_ = slave.Close()
+		_ = master.Close()
+		t.Fatalf("start PTY command: %v", err)
+	}
+	if err := slave.Close(); err != nil {
+		_ = master.Close()
+		t.Fatalf("close PTY slave: %v", err)
+	}
+	reads := make(chan string, 16)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := master.Read(buf)
+			if n > 0 {
+				reads <- string(buf[:n])
+			}
+			if readErr != nil {
+				close(reads)
+				return
+			}
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	return &testPTYProcess{cmd: cmd, master: master, reads: reads, done: done}
+}
+
+func (p *testPTYProcess) waitForOutput(t *testing.T, marker string) {
+	t.Helper()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for !strings.Contains(p.output.String(), marker) {
+		select {
+		case chunk, ok := <-p.reads:
+			if !ok {
+				t.Fatalf("PTY closed before %q; output = %q", marker, p.output.String())
+			}
+			p.output.WriteString(chunk)
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %q; output = %q", marker, p.output.String())
+		}
+	}
+}
+
+func (p *testPTYProcess) drainOutput() {
+	for {
+		select {
+		case chunk, ok := <-p.reads:
+			if !ok {
+				return
+			}
+			p.output.WriteString(chunk)
+		default:
+			return
+		}
+	}
+}
+
+func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
+	wrapped := wrapTUICommand([]string{"/bin/sh", "-c", "printf 'harness-ready\\n'; IFS= read -r line; printf 'harness-input:%s\\n' \"$line\""})
+	p := startTestPTYProcess(t, wrapped)
+	defer func() {
+		_ = p.cmd.Process.Kill()
+		_ = p.master.Close()
+	}()
+
+	p.waitForOutput(t, "harness-ready")
+	if _, err := p.master.Write([]byte("from-harness\n")); err != nil {
+		t.Fatalf("write harness input: %v", err)
+	}
+	p.waitForOutput(t, "harness-input:from-harness")
+	p.waitForOutput(t, "[aether] harness exited with code 0")
+	if _, err := p.master.Write([]byte("case $- in *i*) printf 'shell-%s\\n' interactive;; *) printf 'shell-%s\\n' noninteractive;; esac\nexit\n")); err != nil {
+		t.Fatalf("write first shell input: %v", err)
+	}
+	p.waitForOutput(t, "shell-interactive")
+	if _, err := p.master.Write([]byte("printf 'shell-%s\\n' replacement\n")); err != nil {
+		t.Fatalf("write replacement shell input: %v", err)
+	}
+	p.waitForOutput(t, "shell-replacement")
+
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal ready login shell: %v", err)
+	}
+	select {
+	case err := <-p.done:
+		if err == nil {
+			t.Fatal("supervisor exited successfully after TERM")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not exit after TERM reached login shell")
+	}
+	time.Sleep(100 * time.Millisecond)
+	p.drainOutput()
+	if got := strings.Count(p.output.String(), "[aether] harness exited with code"); got != 1 {
+		t.Fatalf("harness status count = %d, output = %q", got, p.output.String())
+	}
+	time.Sleep(100 * time.Millisecond)
+	_, _ = p.master.Write([]byte("printf 'after-term\\n'\n"))
+	time.Sleep(100 * time.Millisecond)
+	p.drainOutput()
+	if strings.Contains(p.output.String(), "after-term") {
+		t.Fatalf("login shell respawned after TERM: output = %q", p.output.String())
+	}
+}
+
+func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
+	wrapped := wrapTUICommand([]string{"/bin/sh", "-c", "trap 'printf \"harness-%s\\n\" term; exit 0' TERM; printf 'harness-%s\\n' ready; while :; do read -r line; done"})
+	p := startTestPTYProcess(t, wrapped)
+	defer func() {
+		_ = p.cmd.Process.Kill()
+		_ = p.master.Close()
+	}()
+
+	p.waitForOutput(t, "harness-ready")
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal running harness: %v", err)
+	}
+	select {
+	case err := <-p.done:
+		if err == nil {
+			t.Fatal("supervisor exited successfully after TERM")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not exit after TERM reached harness")
+	}
+	time.Sleep(100 * time.Millisecond)
+	p.drainOutput()
+	if got := strings.Count(p.output.String(), "harness-term"); got != 1 {
+		t.Fatalf("harness TERM observations = %d, output = %q", got, p.output.String())
+	}
+	if strings.Contains(p.output.String(), "[aether] harness exited with code") {
+		t.Fatalf("signal shutdown printed normal harness status: output = %q", p.output.String())
+	}
+	_, _ = p.master.Write([]byte("printf 'after-signal\\n'\n"))
+	time.Sleep(100 * time.Millisecond)
+	p.drainOutput()
+	if strings.Contains(p.output.String(), "after-signal") {
+		t.Fatalf("login shell started after harness TERM: output = %q", p.output.String())
+	}
+}
+
 func TestAgentCrash(t *testing.T) {
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
-
 	run, c := e.launchFake(t, "risky refactor\nwith details")
 	c.exitNow(3)
 

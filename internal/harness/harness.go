@@ -8,12 +8,10 @@
 // bind-mounted read-write into every run), an explicit numeric uid:gid
 // mapping for images whose configured user is named rather than numeric,
 // whether the harness can be pointed at an MCP server config at launch (how
-// conflict coordination reaches the agent; see docs/mcp-bridge.md), and how
-// it names a conversation so a relaunch resumes the interrupted run's own: a
-// session ID pinned at launch where the CLI supports one, and "continue
-// whatever ran here last" where it does not (see docs/failure-handling.md).
+// conflict coordination reaches the agent; see docs/mcp-bridge.md).
 //
 // The registry is a map and a few functions, not a plugin system.
+
 package harness
 
 import (
@@ -214,10 +212,9 @@ func isPathWithin(candidate, root string) bool {
 // the CLI's environment, so the registry entry of the same name still
 // supplies EnvPassthrough and Env: an override that renames the executable
 // must not silently drop the key passthrough or a variable the CLI needs to
-// start at all. Unlike the registry's MCP, session, and resume flags, which
-// an override drops because they are appended to an argv nothing has
-// checked, these never touch the command line. A name the registry does not
-// know contributes nothing.
+// start at all. A registered name contributes only those environment
+// settings; the generic definition supplies its own launch and control
+// capabilities. A name the registry does not know contributes nothing.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -267,31 +264,6 @@ type Profile struct {
 	// configured user is named rather than numeric; empty resolves from
 	// the image (see ResolveUser).
 	User string
-	// SessionFlag pins the harness's conversation identity at launch
-	// (Claude Code's "--session-id <uuid>"). The server generates one UUID
-	// per run and records it on the run row, so relaunching that run names
-	// the exact conversation instead of guessing. Empty means the harness
-	// cannot pin a session and relaunch falls back to ResumeFlag.
-	SessionFlag string
-	// SessionResumeFlag resumes a pinned conversation by ID (Claude Code's
-	// "--resume <uuid>"). It names the conversation outright, so it is
-	// unaffected by every run mounting its checkout at the same container
-	// path and sharing one credential home per member. Set it only
-	// together with SessionFlag.
-	SessionResumeFlag string
-	// ResumeFlag is the harness's flag for continuing the conversation it
-	// last had in the working directory. It is the fallback a relaunch
-	// uses when no pinned session is available: a harness with no
-	// SessionFlag, or a run row created before pinning existed. Empty
-	// means the harness has no such flag and a relaunch starts the agent
-	// fresh.
-	//
-	// The flag names no session. Every run mounts its checkout at the same
-	// container path and shares one credential home per member, so what is
-	// resumed is that member's most recent conversation at that path - not
-	// necessarily the interrupted run's own, and not necessarily one from
-	// the same workspace. See docs/failure-handling.md.
-	ResumeFlag string
 	// SteerSubmit is the literal bytes appended to a steering message
 	// written to the agent's stdin (run.inject). TUIs submit on Enter
 	// ("\r"), but some - opencode - treat the first Enter as "accept the
@@ -364,13 +336,7 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
-		// claude --session-id refuses an ID that already names a
-		// conversation ("Session ID <id> is already in use."), so it is a
-		// launch-only flag and --resume replaces it on relaunch.
-		SessionFlag:       "--session-id",
-		SessionResumeFlag: "--resume",
-		ResumeFlag:        "--continue",
-		MCPConfigFlag:     "--mcp-config",
+		MCPConfigFlag: "--mcp-config",
 		// Claude Code runs a command on every lifecycle event a settings
 		// file registers a hook for, and --settings merges one more
 		// settings document over the member's own for this launch alone.
@@ -408,11 +374,6 @@ var profiles = map[string]Profile{
 		LocalRoot:       ".pi",
 		// pi stores provider keys and OAuth tokens under ~/.pi/agent/.
 		DenyNames: []string{"auth.json", "oauth.json"},
-		// pi -c continues the most recent session; sessions are organized
-		// by working directory. pi has no launch-time session ID, so a
-		// relaunch keeps the best-effort behavior: it resumes whichever of
-		// the member's conversations at that path spoke last.
-		ResumeFlag: "--continue",
 		// pi loads an extension with -e, and the one Aether ships reports
 		// every start and stop of a turn.
 		Reporter:    ReporterFull,
@@ -433,7 +394,6 @@ var profiles = map[string]Profile{
 		// omp keeps provider keys and OAuth tokens in the SQLite database
 		// under ~/.omp/agent/, so the write-ahead log holds them too.
 		DenyNames:     []string{"agent.db", "agent.db-wal", "agent.db-shm"},
-		ResumeFlag:    "--continue",
 		Reporter:      ReporterFull,
 		StatusArgs:    []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
 		StatusFiles:   map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
@@ -514,23 +474,6 @@ func Argv(template []string, task string) []string {
 		out = append(out, strings.ReplaceAll(a, TaskPlaceholder, task))
 	}
 	return out
-}
-
-// WithFlag returns argv with flag - and value behind it, when value is not
-// empty - inserted directly behind the executable, which is where every CLI
-// that has one accepts it. An empty flag or an empty argv returns argv
-// unchanged: a harness with no such flag is launched exactly as before
-// rather than being handed a flag it does not know.
-func WithFlag(argv []string, flag, value string) []string {
-	if flag == "" || len(argv) == 0 {
-		return argv
-	}
-	out := make([]string, 0, len(argv)+2)
-	out = append(out, argv[0], flag)
-	if value != "" {
-		out = append(out, value)
-	}
-	return append(out, argv[1:]...)
 }
 
 // MCPArgs are the arguments appended to a run's launch command so the

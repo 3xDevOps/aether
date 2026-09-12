@@ -279,58 +279,51 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 	}
 }
 
-// TestRelaunchRejectsCheckoutInUse pins that relaunch refuses to clone from
-// a source whose old checkout is somehow still named by an active run.
-func TestRelaunchRejectsCheckoutInUse(t *testing.T) {
-	e := newTestEnv(t, nil)
+// TestSweepRechecksInMemoryLifecycle prevents checkout GC from trusting a
+// stale terminal row after the same run has been reopened in memory.
+func TestSweepSkipsReopenedCheckoutFromStaleTerminalSnapshot(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.CheckoutTTL = time.Hour
+	})
 	ctx := t.Context()
-
-	run, _ := e.launchFake(t, "interrupted work")
-	if err := e.sched.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	run := &domain.Run{
+		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "reopened",
+		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunQueued,
 	}
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
-	startScheduler(t, s2)
-	old := e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-
-	next, err := s2.Relaunch(ctx, run.ID, e.member.ID)
+	if err := e.db.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	path, branch, err := e.git.CreateRunCheckout(ctx, e.ws.ID, run.ID, "main", run.Task, "")
 	if err != nil {
-		t.Fatalf("Relaunch: %v", err)
+		t.Fatalf("CreateRunCheckout: %v", err)
 	}
-	if next.Worktree == old.Worktree {
-		t.Fatal("relaunch must not share the old worktree")
+	run.Worktree, run.Branch = path, branch
+	if updateErr := e.db.UpdateRun(ctx, run); updateErr != nil {
+		t.Fatalf("UpdateRun: %v", updateErr)
 	}
-	if e.git.baseBranchFor(next.ID) != old.Branch {
-		t.Fatalf("CreateRunCheckout base = %q, want %q", e.git.baseBranchFor(next.ID), old.Branch)
+	finished := time.Now().UTC().Add(-2 * time.Hour)
+	if statusErr := e.db.UpdateRunStatus(ctx, run.ID, domain.RunInterrupted, "", nil, &finished); statusErr != nil {
+		t.Fatalf("UpdateRunStatus: %v", statusErr)
 	}
+	entry := &supervised{
+		runID: run.ID, workspaceID: run.WorkspaceID, containerID: "retained-container",
+		status: domain.RunRunning, launchMode: domain.LaunchTUI, done: make(chan struct{}),
+	}
+	e.sched.mu.Lock()
+	e.sched.runs[run.ID] = entry
+	e.sched.mu.Unlock()
 
-	// A leftover active row still naming the old checkout must block
-	// another relaunch of that source.
-	blocker := &domain.Run{
-		WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "blocker",
-		Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning,
-		Branch: "aether/run-blocker", Worktree: old.Worktree,
+	e.sched.sweepCheckouts(ctx)
+
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("reopened checkout removed from stale terminal snapshot: %v", statErr)
 	}
-	if cerr := e.db.CreateRun(ctx, blocker); cerr != nil {
-		t.Fatalf("CreateRun blocker: %v", cerr)
-	}
-	if _, rerr := s2.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(rerr, ErrInvalidTransition) {
-		t.Fatalf("Relaunch with old checkout in use = %v, want ErrInvalidTransition", rerr)
-	}
-	finished := time.Now().UTC()
-	if uerr := e.db.UpdateRunStatus(ctx, blocker.ID, domain.RunAbandoned, "", nil, &finished); uerr != nil {
-		t.Fatalf("abandon blocker: %v", uerr)
-	}
-	third, err := s2.Relaunch(ctx, run.ID, e.member.ID)
+	fresh, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
-		t.Fatalf("Relaunch after blocker released: %v", err)
+		t.Fatalf("GetRun: %v", err)
 	}
-	if third.Worktree == old.Worktree || third.Worktree == next.Worktree {
-		t.Fatalf("third relaunch worktree = %q, collided with old %q or next %q", third.Worktree, old.Worktree, next.Worktree)
-	}
-	if e.git.baseBranchFor(third.ID) != old.Branch {
-		t.Fatalf("third CreateRunCheckout base = %q, want %q", e.git.baseBranchFor(third.ID), old.Branch)
+	if fresh.Worktree != path {
+		t.Fatalf("reopened worktree = %q, want %q", fresh.Worktree, path)
 	}
 }
 

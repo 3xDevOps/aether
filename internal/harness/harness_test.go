@@ -154,9 +154,6 @@ func TestPiProfile(t *testing.T) {
 			t.Errorf("pi deny names %v missing %q", pi.DenyNames, denied)
 		}
 	}
-	if pi.ResumeFlag != "--continue" {
-		t.Errorf("pi resume flag = %q, want --continue", pi.ResumeFlag)
-	}
 	if !strings.Contains(pi.InstallScript, "--ignore-scripts") {
 		t.Errorf("pi install script %q must pass --ignore-scripts per the vendor's instruction", pi.InstallScript)
 	}
@@ -364,60 +361,6 @@ func TestResolveUser(t *testing.T) {
 	}
 }
 
-// TestWithFlagCarriesTheSessionFlags pins the failure table's server-reboot
-// promise that a relaunch resumes the agent's own conversation: the flag and
-// its value ride directly behind the executable, the rest of the argv is
-// untouched, and a harness that declares no such flag is launched unchanged
-// rather than growing a made-up one.
-func TestWithFlagCarriesTheSessionFlags(t *testing.T) {
-	claude, ok := Lookup("claude")
-	if !ok {
-		t.Fatal("claude is not in the registry")
-	}
-	if claude.SessionFlag == "" || claude.SessionResumeFlag == "" {
-		t.Fatal("claude pins a session with --session-id and resumes it with --resume")
-	}
-	if claude.ResumeFlag == "" {
-		t.Fatal("claude has no fallback resume flag for rows that predate pinning")
-	}
-	plain := Argv(claude.TUIArgs, "keep going")
-
-	const id = "9d1b2f6c-0000-4000-8000-000000000001"
-	pinned := WithFlag(plain, claude.SessionFlag, id)
-	wantPinned := []string{"claude", "--session-id", id, "--dangerously-skip-permissions", "keep going"}
-	if !slices.Equal(pinned, wantPinned) {
-		t.Fatalf("pinned argv = %v, want %v", pinned, wantPinned)
-	}
-
-	resumed := WithFlag(plain, claude.SessionResumeFlag, id)
-	wantResumed := []string{"claude", "--resume", id, "--dangerously-skip-permissions", "keep going"}
-	if !slices.Equal(resumed, wantResumed) {
-		t.Fatalf("resume argv = %v, want %v", resumed, wantResumed)
-	}
-
-	// A valueless flag is the pre-pinning fallback and must not leave an
-	// empty argument behind it.
-	fallback := WithFlag(plain, claude.ResumeFlag, "")
-	wantFallback := []string{"claude", "--continue", "--dangerously-skip-permissions", "keep going"}
-	if !slices.Equal(fallback, wantFallback) {
-		t.Fatalf("fallback argv = %v, want %v", fallback, wantFallback)
-	}
-
-	if got := WithFlag(plain, "", id); !slices.Equal(got, plain) {
-		t.Fatalf("argv with no flag = %v, want the argv unchanged %v", got, plain)
-	}
-	if got := WithFlag(nil, "--continue", ""); got != nil {
-		t.Fatalf("argv of an empty template = %v, want nil", got)
-	}
-
-	// A harness that cannot pin a session must not declare a resume-by-ID
-	// flag: the relaunch would have no ID to hand it.
-	for _, p := range Profiles() {
-		if p.SessionResumeFlag != "" && p.SessionFlag == "" {
-			t.Fatalf("harness %q resumes by ID but pins no session", p.Name)
-		}
-	}
-}
 func TestDefinitionValidation(t *testing.T) {
 	valid := Definition{
 		Name:            "omp",

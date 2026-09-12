@@ -228,11 +228,19 @@ Member stay on one row; a phone drawer remains bounded by its viewport.
 The sidebar is a workspace switcher over a flat list of that workspace's runs.
 There is no run tree: one workspace is in view at a time, so the runs group
 instead by state or by owning member (`groupBy`, persisted). Rows and headers
-are compact rather than a lower navigation card. At 1000px and narrower the
-adjacent workspace/run pane collapses into the persistent activity rail, which
-exposes **Expand sidebar** without changing the stored preference. The width
-handle remains a keyboard and pointer window splitter (see
-[Keyboard and focus](#keyboard-and-focus)).
+are compact rather than a lower navigation card.
+
+Every rendered group header is a disclosure button with its run count. When
+grouped by **Status**, every status header toggles its own member rows; `Done`
+starts collapsed and every other status group starts expanded. When grouped by
+**Member**, every member header toggles its own rows and every member group
+starts expanded. Disclosure state is local to the current grouping mode, so a
+collapse in Status does not carry into a Member group with the same key.
+
+At 1000px and narrower the adjacent workspace/run pane collapses into the
+persistent activity rail, which exposes **Expand sidebar** without changing the
+stored preference. The width handle remains a keyboard and pointer window
+splitter (see [Keyboard and focus](#keyboard-and-focus)).
 
 At 640px and narrower the expanded pane is a modal drawer instead: a Radix
 `Dialog` over a scrim, dismissed by a tap outside, by Escape, or by any
@@ -2085,6 +2093,12 @@ lifecycle, terminal attach/reconnect behavior, permissions and error paths
 remain covered as state transitions. Component tests should assert labels,
 accessible names, focus handoff, keyboard actions, navigation, loading and
 empty states, server errors, capability gates and mutation results.
+
+Run actions cover the retained-run contract: Close chooses merged or abandoned,
+while Relaunch appears only for an explicitly closed retained TUI Done run
+before its TTL expires; expired or unavailable runs have no Relaunch action.
+Sidebar tests cover Status and Member disclosure independently, with `Done`
+collapsed by default in Status and every Member group expanded.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar splitter
 with keyboard events: arrow navigation, Enter and Space activation, Delete and

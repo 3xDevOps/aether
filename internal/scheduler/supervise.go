@@ -83,6 +83,32 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 			return
 		}
 	}
+
+	// Claim the exit transition while holding the lifecycle mutex, then let it
+	// go before any potentially blocking finalization work. Kill deliberately
+	// remains able to acquire the mutex and record cancellation while commit or
+	// publish is in flight.
+	entry.lifecycleMu.Lock()
+	s.mu.Lock()
+	live, retained := s.runs[entry.runID] == entry, entry.retained
+	alreadyFinalizing := entry.finalizing
+	if live && !retained && !alreadyFinalizing {
+		entry.finalizing = true
+	}
+	s.mu.Unlock()
+	if !live || alreadyFinalizing {
+		entry.lifecycleMu.Unlock()
+		return
+	}
+	if retained {
+		if err := s.expireRetainedLocked(context.Background(), entry); err != nil {
+			slog.Warn("scheduler: expire retained container after exit", "run", entry.runID, "error", err)
+		}
+		entry.lifecycleMu.Unlock()
+		return
+	}
+	entry.lifecycleMu.Unlock()
+
 	s.recordExitObserved(entry, st.Code)
 	s.finalize(entry, st.Code)
 }
@@ -93,21 +119,29 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 	s.mu.Lock()
 	entry.exitObserved = true
 	entry.exitCode = code
-	sc := entry.sidecar()
 	live := s.runs[entry.runID] == entry
 	s.mu.Unlock()
 	if !live {
 		return
 	}
-	if err := s.writeSidecar(sc); err != nil {
+	// Re-snapshot under the scheduler lock immediately before writing. Kill
+	// may have set killRequested after the first snapshot; writing that stale
+	// snapshot would erase the durable cancellation request.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[entry.runID] != entry {
+		return
+	}
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist exit_observed", "run", entry.runID, "error", err)
 	}
 }
 
 // finalize implements the pinned exit handling (§6.6): stop the watches,
 // commit results ("aether:" on clean exit, "wip:" otherwise), publish the
-// run branch, record the completed or final status, destroy the container,
-// and drop the sidecar. Checkout and transcript are always preserved.
+// run branch, record the completed or final status, destroy the container.
+// The caller has already released entry.lifecycleMu; the finalizing flag
+// keeps other destructive lifecycle operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
 	defer cancel()
@@ -160,19 +194,127 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		slog.Warn("scheduler: record exit status", "run", entry.runID, "error", err)
 	}
 
-	if err := s.cfg.Runtime.Destroy(ctx, entry.containerID); err != nil {
-		slog.Warn("scheduler: destroy container", "run", entry.runID, "error", err)
+	if destroyErr := s.cfg.Runtime.Destroy(ctx, entry.containerID); destroyErr != nil &&
+		!errors.Is(destroyErr, runtime.ErrNotFound) {
+		// Keep every ownership reference when destruction is uncertain. The
+		// expiry sweep will retry without allowing checkout/home/coordination
+		// reclamation to race a still-live container.
+		s.mu.Lock()
+		if s.runs[entry.runID] == entry {
+			now := time.Now().UTC()
+			entry.retained = true
+			entry.retainedUntil = &now
+			entry.finalizing = false
+			_ = s.writeSidecar(entry.sidecar())
+		}
+		s.mu.Unlock()
+		slog.Warn("scheduler: destroy container", "run", entry.runID, "error", destroyErr)
+		return
 	}
 	s.removeSidecar(entry.runID)
-	if entry.done != nil {
-		close(entry.done)
-	}
+	s.closeDone(entry)
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry {
+		entry.finalizing = false
 		delete(s.runs, entry.runID)
 	}
 	s.mu.Unlock()
+}
 
+// sweepRetained is the single bounded expiry sweep for all retained run
+// containers. It deliberately performs no per-run goroutine scheduling.
+func (s *Scheduler) sweepRetained(ctx context.Context) {
+	s.mu.Lock()
+	entries := make([]*supervised, 0)
+	for _, entry := range s.runs {
+		if entry.retained && entry.retainedUntil != nil {
+			entries = append(entries, entry)
+		}
+	}
+	s.mu.Unlock()
+	now := time.Now().UTC()
+	for _, entry := range entries {
+		s.mu.Lock()
+		due := s.runs[entry.runID] == entry && entry.retainedUntil != nil &&
+			!now.Before(*entry.retainedUntil)
+		s.mu.Unlock()
+		if due {
+			if err := s.expireRetained(ctx, entry); err != nil {
+				slog.Warn("scheduler: retained expiry", "run", entry.runID, "error", err)
+			}
+		}
+	}
+}
+
+// expireRetained destroys one retained container idempotently and changes the
+// terminal reason before dropping its sidecar and in-memory supervision.
+// lifecycleMu serializes it with CloseRun and Relaunch.
+func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error {
+	entry.lifecycleMu.Lock()
+	err := s.expireRetainedLocked(ctx, entry)
+	entry.lifecycleMu.Unlock()
+	if err != nil {
+		s.mu.Lock()
+		retry := s.runs[entry.runID] == entry && entry.retained
+		s.mu.Unlock()
+		if retry {
+			s.startRetainedWaitAfterDestroyFailure(ctx, entry)
+		}
+	}
+	return err
+}
+
+// expireRetainedLocked is called with entry.lifecycleMu held.
+func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised) error {
+	s.mu.Lock()
+	if s.runs[entry.runID] != entry || !entry.retained {
+		s.mu.Unlock()
+		return nil
+	}
+	deadline := entry.retainedUntil
+	cid := entry.containerID
+	reason := retainedExpiredReason
+	if s.cfg.RunContainerTTL >= 0 && deadline != nil && time.Now().UTC().Before(*deadline) {
+		reason = retainedUnavailableReason
+	}
+	s.mu.Unlock()
+
+	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		// Keep every ownership reference and make this owner due now. The
+		// bounded sweep will retry without allowing cleanup to race a live
+		// container.
+		s.mu.Lock()
+		s.markRetainedDestroyDueLocked(entry)
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler: destroy retained container: %w", err)
+	}
+
+	var transitionErr error
+	s.mu.Lock()
+	if s.runs[entry.runID] == entry && entry.retained {
+		if run, err := s.cfg.Store.GetRun(ctx, entry.runID); err == nil &&
+			(run.Status == domain.RunMerged || run.Status == domain.RunAbandoned) {
+			transitionErr = s.transitionLocked(ctx, entry.runID, run.WorkspaceID, run.Status, run.Status, reason, "")
+		}
+		entry.retained = false
+		entry.retainedUntil = nil
+		if entry.userReservation != nil {
+			delete(s.credentialUsers, entry.userReservation)
+			entry.userReservation = nil
+		}
+	}
+	s.mu.Unlock()
+	// Remove durable ownership before publishing completion. Keep the exact
+	// entry installed until its completion signal is closed, so consumers that
+	// observe owner removal cannot race an open done channel.
+	s.removeSidecar(entry.runID)
+	s.mu.Lock()
+	if s.runs[entry.runID] == entry {
+		s.closeDone(entry)
+		delete(s.runs, entry.runID)
+	}
+	s.mu.Unlock()
+	return transitionErr
 }
 
 // checkStalls implements §6.7: a running, non-paused run with no PTY
@@ -304,9 +446,9 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 		slog.Warn("scheduler: checkout gc: list workspaces", "error", err)
 		return
 	}
-	// Checkouts are per-run-ID (relaunch clones a new tree from the old
-	// published branch), but skip reclaiming a path an active run still
-	// names in case of a leftover shared tree.
+	// Checkouts are normally per-run-ID. Relaunch reuses the retained run's
+	// exact checkout; never trust a stale terminal snapshot when that checkout
+	// has since been reopened or adopted.
 	active, err := s.cfg.Store.ListActiveRuns(ctx)
 	if err != nil {
 		slog.Warn("scheduler: checkout gc: list active runs", "error", err)
@@ -332,24 +474,72 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 			if inUse[r.Worktree] {
 				continue
 			}
-			if err := s.cfg.Git.RemoveRunCheckout(ctx, r.ID); err != nil {
-				slog.Warn("scheduler: checkout gc: remove checkout", "run", r.ID, "error", err)
+
+			var lifecycle *supervised
+			s.mu.Lock()
+			lifecycle = s.runs[r.ID]
+			s.mu.Unlock()
+			if lifecycle == nil && s.RetainsContainer(ctx, r.ID) {
 				continue
 			}
-			// Re-read before the full-row write: UpdateRun replaces every
-			// mutable column, and the row listed above may be stale (e.g. a
-			// concurrent handoff changed member_id).
+			if lifecycle != nil {
+				lifecycle.lifecycleMu.Lock()
+				s.mu.Lock()
+				same := s.runs[r.ID] == lifecycle
+				retained := same && lifecycle.retained
+				finalizing := same && lifecycle.finalizing
+				running := same && !lifecycle.status.Terminal()
+				s.mu.Unlock()
+				if !same || retained || finalizing || running {
+					lifecycle.lifecycleMu.Unlock()
+					continue
+				}
+			}
+
+			// Lifecycle ownership is held before this durable re-read. The
+			// row listed above may have been reopened or otherwise changed
+			// while the sweep was enumerating it.
 			fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
 			if err != nil {
+				if lifecycle != nil {
+					lifecycle.lifecycleMu.Unlock()
+				}
 				slog.Warn("scheduler: checkout gc: reread run", "run", r.ID, "error", err)
+				continue
+			}
+			if !fresh.Status.Terminal() || fresh.Worktree == "" ||
+				fresh.Worktree != r.Worktree || fresh.FinishedAt == nil ||
+				fresh.FinishedAt.After(cutoff) {
+				if lifecycle != nil {
+					lifecycle.lifecycleMu.Unlock()
+				}
+				continue
+			}
+			if lifecycle == nil && s.RetainsContainer(ctx, r.ID) {
+				continue
+			}
+
+			// Keep the per-entry lock through physical reclamation so
+			// relaunch/expiry cannot race a mounted checkout.
+			if err := s.cfg.Git.RemoveRunCheckout(ctx, r.ID); err != nil {
+				if lifecycle != nil {
+					lifecycle.lifecycleMu.Unlock()
+				}
+				slog.Warn("scheduler: checkout gc: remove checkout", "run", r.ID, "error", err)
 				continue
 			}
 			fresh.Worktree = ""
 			if err := s.cfg.Store.UpdateRun(ctx, fresh); err != nil {
+				if lifecycle != nil {
+					lifecycle.lifecycleMu.Unlock()
+				}
 				slog.Warn("scheduler: checkout gc: clear worktree", "run", r.ID, "error", err)
 				continue
 			}
 			s.removeSidecar(r.ID)
+			if lifecycle != nil {
+				lifecycle.lifecycleMu.Unlock()
+			}
 		}
 	}
 }

@@ -117,11 +117,14 @@ type Config struct {
 	// file changes before it parks at needs-attention; PollInterval is how
 	// often that is checked. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
+	// RunContainerTTL is how long an explicitly closed TUI run's container
+	// is retained for reopening (negative disables retention).
 	// MinFreeDiskBytes is the free-space floor below which new runs are
 	// refused (negative disables the floor).
 	StallThreshold   time.Duration
 	PollInterval     time.Duration
 	CheckoutTTL      time.Duration
+	RunContainerTTL  time.Duration
 	MinFreeDiskBytes int64
 }
 
@@ -293,6 +296,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		StallThreshold:       cfg.StallThreshold,
 		PollInterval:         cfg.PollInterval,
 		CheckoutTTL:          cfg.CheckoutTTL,
+		RunContainerTTL:      cfg.RunContainerTTL,
 		MinFreeBytes:         cfg.MinFreeDiskBytes,
 		ServerBinary:         cfg.ServerBinary,
 	}); err != nil {

@@ -23,12 +23,13 @@ func init() {
 			return nil, errors.New("coordination needs a store with the run mailbox")
 		}
 		svc, err := coord.New(coord.Config{
-			Dir:   filepath.Join(d.DataDir, "coord"),
-			Store: d.Store,
-			Mail:  mail,
-			Bus:   d.Bus,
-			Peers: lazyRadar{ssh: d.SSH},
-			PTY:   d.PTY,
+			Dir:              filepath.Join(d.DataDir, "coord"),
+			Store:            d.Store,
+			RetainsContainer: d.Runs.RetainsContainer,
+			Mail:             mail,
+			Bus:              d.Bus,
+			Peers:            lazyRadar{ssh: d.SSH},
+			PTY:              d.PTY,
 			// The scheduler is the single writer of run statuses, so the
 			// agent's own status reports land on it.
 			Reports:  d.Runs,

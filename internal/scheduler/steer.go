@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -13,11 +15,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// Kill terminates a run: any non-terminal state moves to abandoned with
-// reason "killed"; the checkout, branch, and transcript are preserved and
-// partial work is committed as "wip:". For a supervised run the container
-// is stopped and the wait goroutine finishes the job. Terminal calls are
-// idempotent.
 func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -31,23 +28,32 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 		s.mu.Unlock()
 		return s.killUnsupervised(ctx, run, actor)
 	}
-	if entry.status.Terminal() {
+	s.mu.Unlock()
+
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	if s.runs[run] != entry {
 		s.mu.Unlock()
+		return s.killUnsupervised(ctx, run, actor)
+	}
+	if entry.status.Terminal() {
+		retained := entry.retained
+		s.mu.Unlock()
+		if retained {
+			return s.expireRetainedLocked(ctx, entry)
+		}
 		return nil
 	}
 	entry.killRequested = true
 	entry.killActor = actor
 	workspace, cid := entry.workspaceID, entry.containerID
-	// Written under s.mu so a finalize that concurrently removes the entry
-	// (and its sidecar) cannot interleave and leave an orphaned file.
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist kill flag", "run", run, "error", err)
 	}
 	s.mu.Unlock()
 	// No container yet (still provisioning): the provisioning checkpoints
-	// see killRequested and abort. The container may also vanish mid-call
-	// - a finalize that raced this stop destroyed it after transitioning
-	// the status - and gone is the goal, so not-found is success.
+	// see killRequested and abort. Not-found means the desired state is gone.
 	if cid != "" {
 		if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			return err
@@ -57,9 +63,6 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	return nil
 }
 
-// killUnsupervised abandons a non-terminal run the scheduler holds no
-// container for (e.g. a run parked at needs-attention, or store state left
-// over from an incomplete recovery). The status is re-read and transitioned
 // under s.mu: every scheduler status write holds the lock, so the locked
 // read is authoritative and a concurrent terminal transition cannot be
 // overwritten.
@@ -116,6 +119,7 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		entry := s.runs[run]
 		pending := s.pending[run]
 		terminal := entry != nil && entry.status.Terminal()
+		retained := entry != nil && entry.retained
 		var done <-chan struct{}
 		if entry != nil {
 			done = entry.done
@@ -130,6 +134,12 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 			continue
 		}
 		if entry != nil {
+			if retained {
+				if err := s.expireRetained(ctx, entry); err != nil {
+					return err
+				}
+				continue
+			}
 			if !terminal {
 				if err := s.Kill(ctx, run, actor); err != nil {
 					return err
@@ -151,7 +161,20 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		}
 		workspace = current.WorkspaceID
 		if !current.Status.Terminal() {
-			if err := s.Kill(ctx, run, actor); err != nil {
+			if killErr := s.Kill(ctx, run, actor); killErr != nil {
+				return killErr
+			}
+			continue
+		}
+		retainedEntry, retry, err := s.reconcileRetainedSidecarForDelete(ctx, run)
+		if err != nil {
+			return err
+		}
+		if retry {
+			continue
+		}
+		if retainedEntry != nil {
+			if err := s.expireRetained(ctx, retainedEntry); err != nil {
 				return err
 			}
 			continue
@@ -177,17 +200,62 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 	return nil
 }
 
-// Pause freezes a supervised run's container (SIGSTOP semantics). Pause
-// itself does not change the status; the paused flag is durable and exempts
-// the run from stall detection. An agent status report already in flight
-// when the freeze lands still moves the run, because the frozen container
-// cannot send it again (see ReportAgentState).
+// reconcileRetainedSidecarForDelete atomically checks for a concurrently
+// installed owner and adopts a durable retained sidecar when no owner exists.
+// The adopted entry is deliberately not given a Wait owner: DeleteRun owns
+// the lifecycle until destruction is confirmed.
+func (s *Scheduler) reconcileRetainedSidecarForDelete(ctx context.Context, run domain.RunID) (*supervised, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry := s.runs[run]; entry != nil {
+		return entry, true, nil
+	}
+	if s.pending[run] != nil {
+		return nil, true, nil
+	}
+	current, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return nil, false, err
+	}
+	if !current.Status.Terminal() {
+		return nil, true, nil
+	}
+	sc, err := s.readSidecar(run)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("scheduler: inspect retained sidecar: %w", err)
+	}
+	mode := sc.Mode
+	if mode == "" {
+		mode = current.Mode
+	}
+	if sc.RunID != string(run) || sc.ContainerID == "" ||
+		mode == "" || (!sc.Retained && sc.RetainedUntil == nil) {
+		return nil, false, nil
+	}
+	entry := s.entryFromSidecar(current, sc)
+	entry.retained = true
+	s.runs[run] = entry
+	return entry, false, nil
+
+}
+
 func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
-	if entry == nil || entry.containerID == "" {
-		s.mu.Unlock()
+	s.mu.Unlock()
+	if entry == nil {
 		return fmt.Errorf("%w: run has no live container", ErrInvalidTransition)
+	}
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	if s.runs[run] != entry || entry.containerID == "" ||
+		entry.status.Terminal() || entry.retained || entry.finalizing {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: run cannot be paused in its current state", ErrInvalidTransition)
 	}
 	if entry.paused {
 		s.mu.Unlock()
@@ -203,13 +271,22 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 	return nil
 }
 
-// Resume thaws a paused run.
+// Resume thaws a paused run. Retained terminal containers reopen only through
+// Relaunch, which performs the admission checks for re-entry.
 func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
 	s.mu.Lock()
 	entry := s.runs[run]
-	if entry == nil || entry.containerID == "" {
-		s.mu.Unlock()
+	s.mu.Unlock()
+	if entry == nil {
 		return fmt.Errorf("%w: run has no live container", ErrInvalidTransition)
+	}
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	if s.runs[run] != entry || entry.containerID == "" ||
+		entry.status.Terminal() || entry.retained || entry.finalizing {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: retained or terminal runs must use Relaunch", ErrInvalidTransition)
 	}
 	if !entry.paused {
 		s.mu.Unlock()
@@ -291,65 +368,194 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	return nil
 }
 
-// CloseRun resolves a run's outcome on a human's say-so from any state
-// that holds a record. A live run is stopped first: the disposition lands
-// before the agent's exit so the board says what was decided, and
-// finalization then skips its own already-terminal transition while still
-// destroying the container and sidecar. A finished run is re-labeled in
-// place. Provisioning runs have no record yet to close; use Delete or
-// wait out the startup.
+// CloseRun resolves a run's outcome on a human's say-so. A live TUI run is
+// detached, paused, committed, published, and retained in its exact
+// container; all other runs follow the immediate stop-and-destroy path.
 func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error {
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
+
 	s.mu.Lock()
 	if pending := s.pending[run]; pending != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
 	}
 	entry := s.runs[run]
+	s.mu.Unlock()
 	if entry == nil {
-		// Unsupervised: the status is read and transitioned under s.mu so
-		// a concurrent Kill or CloseRun cannot both win and overwrite
-		// each other's terminal disposition.
+		// Unsupervised terminal rows have no retained container to keep.
 		r, err := s.cfg.Store.GetRun(ctx, run)
 		if err != nil {
-			s.mu.Unlock()
 			return err
 		}
 		if r.Status == domain.RunQueued {
-			s.mu.Unlock()
 			return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
 		}
 		if r.Status == outcome {
+			return nil
+		}
+		s.mu.Lock()
+		err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
+		s.mu.Unlock()
+		return err
+	}
+
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	if s.runs[run] != entry {
+		s.mu.Unlock()
+		return retainedTransitionError()
+	}
+	if entry.finalizing {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: run finalization is in progress", ErrInvalidTransition)
+	}
+	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
+	mode, retained, alreadyPaused := entry.launchMode, entry.retained, entry.paused
+	if status == outcome && (!retained || s.cfg.RunContainerTTL >= 0) {
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	if retained {
+		// Re-labeling an already closed retained run keeps the same deadline
+		// and container; no agent or checkout operation is repeated.
+		s.mu.Lock()
+		err := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
+		if err == nil {
+			entry.status = outcome
+			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
+				slog.Warn("scheduler: persist retained close outcome", "run", run, "error", werr)
+			}
+		}
+		s.mu.Unlock()
+		return err
+	}
+
+	if mode == domain.LaunchTUI && !status.Terminal() && s.cfg.RunContainerTTL >= 0 {
+		// Detach before committing so no PTY client can continue typing while
+		// the close operation snapshots the worktree.
+		s.cfg.Git.StopDiffWatch(run)
+		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run))
+		s.cfg.PTY.StopSessionsWithPrefix(context.WithoutCancel(ctx), string(ptyhost.RunShellSession(run, "")))
+		paused := alreadyPaused
+		if !paused {
+			if err := s.cfg.Runtime.Pause(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+				slog.Warn("scheduler: pause closed TUI run", "run", run, "error", err)
+			} else if err == nil {
+				paused = true
+			}
+		}
+		if paused {
+			msg := "wip: "
+			if outcome == domain.RunMerged {
+				msg = "aether: "
+			}
+			if _, cerr := s.commitAll(ctx, run, msg+taskLine(entry.task)); cerr != nil {
+				slog.Warn("scheduler: commit closed TUI run", "run", run, "error", cerr)
+			}
+			if _, perr := s.cfg.Git.PublishRunBranch(ctx, run); perr != nil {
+				slog.Warn("scheduler: publish closed TUI run", "run", run, "error", perr)
+			}
+			deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
+			s.mu.Lock()
+			if s.runs[run] != entry {
+				s.mu.Unlock()
+				return retainedTransitionError()
+			}
+			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
+			s.mu.Unlock()
+			if transitionErr != nil {
+				if rollbackErr := s.restoreAfterCloseFailure(ctx, entry, alreadyPaused); rollbackErr != nil {
+					return errors.Join(transitionErr, rollbackErr)
+				}
+				return transitionErr
+			}
+			s.mu.Lock()
+			entry.status = outcome
+			entry.paused = true
+			entry.retained = true
+			entry.retainedUntil = &deadline
+			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
+				slog.Warn("scheduler: persist retained close", "run", run, "error", werr)
+			}
 			s.mu.Unlock()
 			return nil
 		}
-		var cid runtime.ID
-		if sc, serr := s.readSidecar(run); serr == nil {
-			cid = runtime.ID(sc.ContainerID)
-		}
-		err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
-		s.mu.Unlock()
-		if err != nil {
-			return err
-		}
-		s.stopCloseContainer(ctx, cid)
-		return nil
 	}
-	workspace := entry.workspaceID
-	cid := entry.containerID
-	if entry.status == outcome {
-		s.mu.Unlock()
-		return nil
-	}
-	err := s.transitionLocked(ctx, run, workspace, entry.status, outcome, "closed", actor)
+	// Headless runs, negative-TTL TUI runs, and pause failures are immediate.
+	s.mu.Lock()
+	err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
 	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	s.stopCloseContainer(ctx, cid)
 	return nil
+}
+
+// restoreAfterCloseFailure returns a detached TUI run to its exact
+// pre-close interaction state after the terminal store update failed. The
+// container is paused while the restoration is in progress, so every
+// confirmed runtime state is persisted before the next potentially failing
+// step.
+func (s *Scheduler) restoreAfterCloseFailure(ctx context.Context, entry *supervised, alreadyPaused bool) error {
+	// CloseRun paused every formerly-running run before reaching the store
+	// transition. Keep the in-memory and sidecar state truthful until Resume
+	// confirms that the container is running again.
+	s.setPaused(entry, true)
+
+	resumed := false
+	if !alreadyPaused {
+		if err := s.cfg.Runtime.Resume(ctx, entry.containerID); err != nil {
+			return fmt.Errorf("scheduler: restore closed run: resume: %w", err)
+		}
+		resumed = true
+		s.setPaused(entry, false)
+	}
+
+	att, err := s.cfg.Runtime.Attach(ctx, entry.containerID)
+	if err != nil {
+		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
+			fmt.Errorf("scheduler: restore closed run: attach: %w", err))
+	}
+	if err := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
+		_ = att.Close()
+		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(entry.runID))
+		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
+			fmt.Errorf("scheduler: restore closed run: pty: %w", err))
+	}
+	if err := s.cfg.Git.StartDiffWatch(ctx, entry.workspaceID, entry.runID); err != nil {
+		s.cfg.Git.StopDiffWatch(entry.runID)
+		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(entry.runID))
+		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
+			fmt.Errorf("scheduler: restore closed run: diff watch: %w", err))
+	}
+	// For an originally paused run, Attach/PTY/watch do not thaw the
+	// container, so the confirmed state remains paused. For an originally
+	// running run, Resume already established the running state.
+	s.setPaused(entry, alreadyPaused)
+	return nil
+}
+
+// closeRollbackFailure cleans up resources created by a partial rollback and
+// compensates a confirmed Resume. A failed compensating Pause leaves the last
+// confirmed state (running) in memory and in the sidecar rather than claiming
+// that the container is paused.
+func (s *Scheduler) closeRollbackFailure(ctx context.Context, entry *supervised, alreadyPaused, resumed bool, cause error) error {
+	if alreadyPaused || !resumed {
+		s.setPaused(entry, true)
+		return cause
+	}
+	if err := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), entry.containerID); err != nil {
+		s.setPaused(entry, false)
+		return errors.Join(cause, fmt.Errorf("scheduler: restore closed run: pause: %w", err))
+	}
+	s.setPaused(entry, true)
+	return cause
 }
 
 func (s *Scheduler) stopCloseContainer(ctx context.Context, cid runtime.ID) {

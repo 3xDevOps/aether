@@ -5,19 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // startScheduler runs sched.Start in the background for the duration of
@@ -307,180 +304,6 @@ func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 	waitFor(t, "orphaned container destroyed", func() bool { return e.rt.byName(string(r.ID)) == nil })
 }
 
-func TestRelaunchFromInterrupted(t *testing.T) {
-	e := newTestEnv(t, nil)
-
-	run, _ := e.launchFake(t, "interrupted work")
-	if err := e.sched.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
-	startScheduler(t, s2)
-	old := e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-	e.git.mu.Lock()
-	e.git.branchCommits[e.ws.ID][old.Branch] = "published-exact"
-	e.git.mu.Unlock()
-
-	member2 := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
-	if err := e.db.CreateMember(t.Context(), member2); err != nil {
-		t.Fatalf("CreateMember: %v", err)
-	}
-	next, err := s2.Relaunch(t.Context(), run.ID, member2.ID)
-	if err != nil {
-		t.Fatalf("Relaunch: %v", err)
-	}
-	if next.ID == old.ID {
-		t.Fatal("relaunch must create a new run row")
-	}
-	if next.Worktree == old.Worktree || next.Worktree == "" {
-		t.Fatalf("relaunch must create a distinct worktree, got %q (old %q)", next.Worktree, old.Worktree)
-	}
-	if next.Branch == old.Branch || next.Branch == "" {
-		t.Fatalf("relaunch must create a new branch, got %q (old %q)", next.Branch, old.Branch)
-	}
-	if got := e.git.baseBranchFor(next.ID); got != old.Branch {
-		t.Fatalf("CreateRunCheckout base branch = %q, want old branch %q", got, old.Branch)
-	}
-	if got := e.git.baseCommitFor(next.ID); got != "published-exact" {
-		t.Fatalf("CreateRunCheckout base commit = %q, want published exact commit", got)
-	}
-	if next.BaseCommit != old.BaseCommit || next.BaseBranch != old.BaseBranch ||
-		next.BaseSource != old.BaseSource || !next.BaseCheckedAt.Equal(old.BaseCheckedAt) {
-		t.Fatalf("relaunch changed base provenance: old=%+v next=%+v", old, next)
-	}
-	e.base.mu.Lock()
-	calls := slices.Clone(e.base.calls)
-	e.base.mu.Unlock()
-	if !slices.Equal(calls, []string{""}) {
-		t.Fatalf("relaunch refreshed base capture: %v", calls)
-	}
-	if next.MemberID != member2.ID || next.Task != old.Task || next.Harness != old.Harness || next.Mode != old.Mode {
-		t.Fatalf("relaunched run = %+v", next)
-	}
-	if next.Status != domain.RunRunning {
-		t.Fatalf("relaunched run status = %s", next.Status)
-	}
-	if e.git.checkoutCount() != 2 {
-		t.Fatalf("checkout count = %d, want 2 (old checkout survives)", e.git.checkoutCount())
-	}
-	if _, err = os.Stat(old.Worktree); err != nil {
-		t.Fatalf("old checkout must survive relaunch: %v", err)
-	}
-	oldAgain, err := e.db.GetRun(t.Context(), old.ID)
-	if err != nil {
-		t.Fatalf("GetRun old: %v", err)
-	}
-	if oldAgain.Status != domain.RunInterrupted {
-		t.Fatalf("old run mutated to %s", oldAgain.Status)
-	}
-
-	c := rt2.byName(string(next.ID))
-	if c == nil {
-		t.Fatal("no container for relaunched run")
-	}
-	c.exitNow(0)
-	e.waitStoreStatus(t, next.ID, domain.RunCompleted)
-}
-
-func TestDeleteRunWaitsForRelaunchCheckout(t *testing.T) {
-	e := newTestEnv(t, nil)
-	old, oldContainer := e.launchFake(t, "delete relaunch")
-	oldContainer.exitNow(0)
-	e.waitStoreStatus(t, old.ID, domain.RunCompleted)
-	if err := e.sched.CloseRun(t.Context(), old.ID, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatalf("CloseRun: %v", err)
-	}
-
-	created := make(chan domain.RunID, 1)
-	release := make(chan struct{})
-	e.git.createHook = func(run domain.RunID) {
-		created <- run
-		<-release
-	}
-	relaunched := make(chan *domain.Run, 1)
-	relaunchErr := make(chan error, 1)
-	go func() {
-		next, err := e.sched.Relaunch(t.Context(), old.ID, e.member.ID)
-		relaunched <- next
-		relaunchErr <- err
-	}()
-
-	runID := <-created
-	deleted := make(chan error, 1)
-	go func() {
-		deleted <- e.sched.DeleteRun(t.Context(), runID, e.member.ID)
-	}()
-	select {
-	case err := <-deleted:
-		close(release)
-		t.Fatalf("DeleteRun returned before relaunch checkout completed: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	close(release)
-	next := <-relaunched
-	if err := <-relaunchErr; err != nil {
-		t.Fatalf("Relaunch: %v", err)
-	}
-	if next.ID != runID {
-		t.Fatalf("relaunch ID = %s, want %s", next.ID, runID)
-	}
-	if err := <-deleted; err != nil {
-		t.Fatalf("DeleteRun: %v", err)
-	}
-	if _, err := os.Stat(e.git.checkoutPath(runID)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("checkout after delete: %v", err)
-	}
-	if _, err := e.db.GetRun(t.Context(), runID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("run after delete: %v", err)
-	}
-}
-
-func TestRelaunchRejectsUnpublishedBranch(t *testing.T) {
-	e := newTestEnv(t, nil)
-	run, _ := e.launchFake(t, "unpublished work")
-	if err := e.sched.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	s2 := e.newScheduler(t, newFakeRuntime(), newFakePTY())
-	startScheduler(t, s2)
-	old := e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-	if _, err := os.Stat(old.Worktree); err != nil {
-		t.Fatalf("preserved checkout: %v", err)
-	}
-	published, err := e.git.WorkspaceBranchExists(t.Context(), e.ws.ID, old.Branch)
-	if err != nil {
-		t.Fatalf("WorkspaceBranchExists: %v", err)
-	}
-	if !published {
-		t.Fatal("recovery did not publish source branch")
-	}
-	e.git.unpublishBranch(e.ws.ID, old.Branch)
-
-	before, err := e.db.ListRunsByWorkspace(t.Context(), old.WorkspaceID)
-	if err != nil {
-		t.Fatalf("ListRunsByWorkspace before relaunch: %v", err)
-	}
-	next, err := s2.Relaunch(t.Context(), old.ID, e.member.ID)
-	if next != nil {
-		t.Fatalf("Relaunch returned run %+v for unpublished branch", next)
-	}
-	if !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("Relaunch error = %v, want ErrInvalidTransition", err)
-	}
-	wantErr := ErrInvalidTransition.Error() + ": " + relaunchRequiresCheckout
-	if err.Error() != wantErr {
-		t.Fatalf("Relaunch error = %q, want %q", err, wantErr)
-	}
-	after, listErr := e.db.ListRunsByWorkspace(t.Context(), old.WorkspaceID)
-	if listErr != nil {
-		t.Fatalf("ListRunsByWorkspace after relaunch: %v", listErr)
-	}
-	if len(after) != len(before) {
-		t.Fatalf("run count = %d after rejected relaunch, want %d", len(after), len(before))
-	}
-}
 
 func TestCheckoutGC(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
@@ -709,348 +532,268 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 	}
 }
 
-// TestRelaunchResumesTheHarnessSession pins the failure table's server
-// reboot row down to the argv: a launch names its own conversation with
-// --session-id, relaunching a run the reboot interrupted resumes that exact
-// ID, and relaunching a run that simply finished starts a fresh one. The
-// registry's claude profile is used directly because a Config.Harnesses
-// override deliberately drops the registry's flags - nothing checks the
-// override is still that CLI.
-func TestRelaunchResumesTheHarnessSession(t *testing.T) {
-	e := newTestEnv(t, nil)
+func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run, container := e.launchFake(t, "retain this terminal")
+	containerID := container.id
+	worktree := run.Worktree
 
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	closed := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if closed.Reason != retainedCloseReason {
+		t.Fatalf("close reason = %q, want %q", closed.Reason, retainedCloseReason)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil {
-		t.Fatalf("Launch: %v", err)
+		t.Fatalf("read retained sidecar: %v", err)
 	}
-	session := run.HarnessSessionID
-	if _, perr := uuid.Parse(session); perr != nil {
-		t.Fatalf("launch pinned session %q is not a UUID: %v", session, perr)
-	}
-	launched := e.rt.byName(string(run.ID))
-	if launched == nil {
-		t.Fatal("no container for the launched run")
-	}
-	wantLaunch := []string{"claude", "--session-id", session, "--dangerously-skip-permissions", "resume me"}
-	if !slices.Equal(launched.spec.Command, wantLaunch) {
-		t.Fatalf("launch argv = %v, want the pinned session: %v", launched.spec.Command, wantLaunch)
-	}
-	if cerr := e.sched.Close(); cerr != nil {
-		t.Fatalf("Close: %v", cerr)
+	if !sc.Retained || sc.Mode != domain.LaunchTUI || sc.RetainedUntil == nil {
+		t.Fatalf("retained sidecar = %+v", sc)
 	}
 
-	// The reboot: a new scheduler on a runtime whose containers are gone
-	// interrupts the run and preserves its checkout.
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
-	startScheduler(t, s2)
-	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-
-	next, err := s2.Relaunch(t.Context(), run.ID, e.member.ID)
+	reopened, err := e.sched.Relaunch(ctx, run.ID, e.member.ID)
 	if err != nil {
 		t.Fatalf("Relaunch: %v", err)
 	}
-	c := rt2.byName(string(next.ID))
-	if c == nil {
-		t.Fatal("no container for the relaunched run")
+	if reopened.ID != run.ID || reopened.Worktree != worktree || reopened.Status != domain.RunRunning {
+		t.Fatalf("reopened run = %+v, want same running row/worktree", reopened)
 	}
-	want := []string{"claude", "--resume", session, "--dangerously-skip-permissions", "resume me"}
-	if !slices.Equal(c.spec.Command, want) {
-		t.Fatalf("relaunch of an interrupted run = %v, want %v", c.spec.Command, want)
+	if got := e.rt.byName(string(run.ID)); got == nil || got.id != containerID {
+		t.Fatalf("relaunch replaced container: got %v, want %s", got, containerID)
 	}
-	if next.HarnessSessionID != session {
-		t.Fatalf("relaunched run session = %q, want the resumed one %q", next.HarnessSessionID, session)
+	if _, watching := e.git.watchingFor(run.ID); !watching {
+		t.Fatal("relaunch did not restart diff watch")
 	}
-
-	// A run that reached a terminal state on its own has no conversation to
-	// resume, so its relaunch starts the agent fresh on a session of its own.
-	c.exitNow(0)
-	e.waitStoreStatus(t, next.ID, domain.RunCompleted)
-	if cerr := s2.CloseRun(t.Context(), next.ID, e.member.ID, domain.RunMerged); cerr != nil {
-		t.Fatalf("CloseRun: %v", cerr)
-	}
-	after, err := s2.Relaunch(t.Context(), next.ID, e.member.ID)
-	if err != nil {
-		t.Fatalf("Relaunch of a merged run: %v", err)
-	}
-	fresh := rt2.byName(string(after.ID))
-	if fresh == nil {
-		t.Fatal("no container for the second relaunch")
-	}
-	if slices.Contains(fresh.spec.Command, "--resume") || slices.Contains(fresh.spec.Command, "--continue") {
-		t.Fatalf("relaunch of a merged run = %v, want no resume flag", fresh.spec.Command)
-	}
-	if after.HarnessSessionID == "" || after.HarnessSessionID == session {
-		t.Fatalf("relaunch of a merged run session = %q, want a new one", after.HarnessSessionID)
+	if reopened.FinishedAt != nil {
+		t.Fatalf("reopened FinishedAt = %v, want nil", reopened.FinishedAt)
 	}
 }
 
-// relaunchSessionArgv returns the session flag and ID a relaunch of run
-// used, so a test can assert which of the three paths it took.
-func relaunchSessionArgv(t *testing.T, rt *fakeRuntime, run *domain.Run) (string, string) {
-	t.Helper()
-	c := rt.byName(string(run.ID))
-	if c == nil {
-		t.Fatalf("no container for run %s", run.ID)
+func TestRetainedExpiryDestroysContainerAndHidesRelaunch(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "expire this terminal")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
+		t.Fatalf("CloseRun: %v", err)
 	}
-	argv := c.spec.Command
-	for i, a := range argv {
-		switch a {
-		case "--session-id", "--resume":
-			if i+1 >= len(argv) {
-				t.Fatalf("argv %v: %s has no value", argv, a)
-			}
-			return a, argv[i+1]
-		case "--continue":
-			return a, ""
-		}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	past := time.Now().UTC().Add(-time.Second)
+	entry.retainedUntil = &past
+	if err := e.sched.writeSidecar(entry.sidecar()); err != nil {
+		t.Fatalf("write expired sidecar: %v", err)
 	}
-	return "", ""
+	e.sched.mu.Unlock()
+
+	e.sched.sweepRetained(ctx)
+	waitFor(t, "expired container destroyed", func() bool {
+		return e.rt.byName(string(run.ID)) == nil
+	})
+	expired := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if expired.Reason != retainedExpiredReason {
+		t.Fatalf("expiry reason = %q, want %q", expired.Reason, retainedExpiredReason)
+	}
+	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) ||
+		!strings.Contains(err.Error(), retainedUnavailableReason) {
+		t.Fatalf("expired Relaunch error = %v, want retained-unavailable invalid transition", err)
+	}
 }
 
-// TestRelaunchOfARunThatNeverStartedPinsAFreshSession covers a queued or
-// provisioning row that the reboot interrupted. Its session ID was stamped
-// when the row was created, so no transcript stands behind it and
-// claude --resume would exit 1 with "No conversation found with session
-// ID". The relaunch must open a conversation of its own instead.
-func TestRelaunchOfARunThatNeverStartedPinsAFreshSession(t *testing.T) {
-	e := newTestEnv(t, nil)
+func TestNegativeRetentionDestroysAndRejectsRelaunch(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
 	ctx := t.Context()
 
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "never spoke", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("Launch: %v", err)
+	fallback, _ := e.launchFake(t, "negative fallback")
+	if err := e.sched.CloseRun(ctx, fallback.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun fallback: %v", err)
 	}
-	stamped := run.HarnessSessionID
-	// Roll the row back to what a launch that died during provisioning
-	// leaves behind: a checkout, a stamped session, and no agent that ever
-	// ran. Recovery interrupts it exactly like a running row.
-	run.Status, run.StartedAt = domain.RunQueued, nil
-	if uerr := e.db.UpdateRun(ctx, run); uerr != nil {
-		t.Fatalf("roll the row back to queued: %v", uerr)
+	e.sched.cfg.RunContainerTTL = -time.Second
+	if !e.sched.RetainsContainer(ctx, fallback.ID) {
+		t.Fatal("negative-TTL retained sidecar lost ownership before destruction")
 	}
-	if cerr := e.sched.Close(); cerr != nil {
-		t.Fatalf("Close: %v", cerr)
+	if _, err := e.sched.Relaunch(ctx, fallback.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) ||
+		!strings.Contains(err.Error(), retainedUnavailableReason) {
+		t.Fatalf("negative fallback Relaunch error = %v, want retained-unavailable invalid transition", err)
+	}
+	waitFor(t, "negative fallback container destroyed", func() bool {
+		return e.rt.byName(string(fallback.ID)) == nil
+	})
+	fallbackRow := e.waitStoreStatus(t, fallback.ID, domain.RunMerged)
+	if fallbackRow.Reason != retainedExpiredReason {
+		t.Fatalf("negative fallback reason = %q, want %q", fallbackRow.Reason, retainedExpiredReason)
+	}
+	if _, err := os.Stat(e.sched.sidecarPath(fallback.ID)); !os.IsNotExist(err) {
+		t.Fatalf("negative fallback sidecar still exists: %v", err)
 	}
 
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
+	e.sched.cfg.RunContainerTTL = time.Hour
+	boot, _ := e.launchFake(t, "negative boot")
+	if err := e.sched.CloseRun(ctx, boot.ID, e.member.ID, domain.RunAbandoned); err != nil {
+		t.Fatalf("CloseRun boot: %v", err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	e.cfg.RunContainerTTL = -time.Second
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	startScheduler(t, s2)
-	interrupted := e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-	if interrupted.StartedAt != nil {
-		t.Fatal("the rolled-back row must stay unstarted")
+	waitFor(t, "negative boot container destroyed", func() bool {
+		return e.rt.byName(string(boot.ID)) == nil
+	})
+	waitFor(t, "negative boot reason", func() bool {
+		row, err := e.db.GetRun(ctx, boot.ID)
+		return err == nil && row.Reason == retainedExpiredReason
+	})
+	if _, err := s2.Relaunch(ctx, boot.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("negative boot Relaunch error = %v, want ErrInvalidTransition", err)
 	}
-
-	next, err := s2.Relaunch(ctx, run.ID, e.member.ID)
-	if err != nil {
-		t.Fatalf("Relaunch: %v", err)
-	}
-	flag, id := relaunchSessionArgv(t, rt2, next)
-	if flag != "--session-id" {
-		t.Fatalf("relaunch of an unstarted run used %q, want a fresh --session-id", flag)
-	}
-	if id == stamped {
-		t.Fatalf("relaunch reused the stamped session %q, which has no transcript", stamped)
-	}
-	if next.HarnessSessionID != id {
-		t.Fatalf("run row session = %q, want the launched %q", next.HarnessSessionID, id)
+	if _, err := os.Stat(s2.sidecarPath(boot.ID)); !os.IsNotExist(err) {
+		t.Fatalf("negative boot sidecar still exists: %v", err)
 	}
 }
 
-// TestRelaunchByAnotherMemberPinsAFreshSession covers the collaborator
-// relaunch that steer_others allows and a handoff creates. The container
-// mounts the actor's credential home, so the owner's transcript is not
-// there to resume.
-func TestRelaunchByAnotherMemberPinsAFreshSession(t *testing.T) {
-	e := newTestEnv(t, nil)
+type destroyRetryRuntime struct {
+	runtime.Runtime
+	mu       sync.Mutex
+	failures int
+	destroys int
+	waits    int
+}
+
+func (r *destroyRetryRuntime) Destroy(ctx context.Context, id runtime.ID) error {
+	r.mu.Lock()
+	r.destroys++
+	if r.failures == 0 {
+		r.failures++
+		r.mu.Unlock()
+		return errors.New("destroy temporarily unavailable")
+	}
+	r.mu.Unlock()
+	return r.Runtime.Destroy(ctx, id)
+}
+
+func (r *destroyRetryRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
+	r.mu.Lock()
+	r.waits++
+	r.mu.Unlock()
+	return r.Runtime.Wait(ctx, id)
+}
+
+func (r *destroyRetryRuntime) counts() (int, int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.failures, r.destroys, r.waits
+}
+
+func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+		cfg.PollInterval = 200 * time.Millisecond
+	})
 	ctx := t.Context()
-
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "not yours", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("Launch: %v", err)
+	run, container := e.launchFake(t, "retry boot destroy")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
+		t.Fatalf("CloseRun: %v", err)
 	}
-	owned := run.HarnessSessionID
-	if cerr := e.sched.Close(); cerr != nil {
-		t.Fatalf("Close: %v", cerr)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
 	}
 
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
+	e.cfg.RunContainerTTL = -time.Second
+	retry := &destroyRetryRuntime{Runtime: e.rt}
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = retry
 	startScheduler(t, s2)
-	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
 
-	other := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
-	if cerr := e.db.CreateMember(ctx, other); cerr != nil {
-		t.Fatalf("CreateMember: %v", cerr)
+	waitFor(t, "boot destroy failure", func() bool {
+		failures, _, _ := retry.counts()
+		return failures == 1
+	})
+	if e.rt.byName(string(run.ID)) != container {
+		t.Fatal("failed boot destroy must retain the container")
 	}
-	next, err := s2.Relaunch(ctx, run.ID, other.ID)
+
+	var owner *supervised
+	waitFor(t, "retained retry owner", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		owner = s2.runs[run.ID]
+		return owner != nil && owner.retained && owner.retainedUntil != nil && owner.waitStarted
+	})
+	sc, err := s2.readSidecar(run.ID)
 	if err != nil {
-		t.Fatalf("Relaunch: %v", err)
+		t.Fatalf("read retained retry sidecar: %v", err)
 	}
-	flag, id := relaunchSessionArgv(t, rt2, next)
-	if flag != "--session-id" {
-		t.Fatalf("relaunch by another member used %q, want a fresh --session-id", flag)
+	if sc.ContainerID != string(container.id) || !sc.Retained || sc.RetainedUntil == nil ||
+		time.Now().UTC().Before(*sc.RetainedUntil) {
+		t.Fatalf("retry sidecar = %+v, want due retained owner", sc)
 	}
-	if id == owned {
-		t.Fatalf("relaunch resumed %q from another member's home", owned)
+
+	waitFor(t, "sweep destroy retry", func() bool {
+		return e.rt.byName(string(run.ID)) == nil
+	})
+	waitFor(t, "retained owner dropped", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		return s2.runs[run.ID] == nil
+	})
+	select {
+	case <-owner.done:
+	default:
+		t.Fatal("retained owner done channel is still open")
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if row.Reason != retainedExpiredReason {
+		t.Fatalf("boot retry reason = %q, want %q", row.Reason, retainedExpiredReason)
+	}
+	if _, err := os.Stat(s2.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("boot retry sidecar still exists: %v", err)
+	}
+	failures, destroys, waits := retry.counts()
+	if failures != 1 || destroys < 2 || waits > 2 {
+		t.Fatalf("destroy/wait calls = failures %d, destroys %d, waits %d; want one failed destroy, retry, and at most one Wait owner", failures, destroys, waits)
+	}
+	if _, err := s2.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("Relaunch after retry = %v, want ErrInvalidTransition", err)
 	}
 }
 
-func TestRelaunchByAnotherMemberResumesExplicitSharedAccountSession(t *testing.T) {
-	e := newTestEnv(t, nil)
+func TestRetainedTUIRebootsAndReopensSameContainer(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
 	ctx := t.Context()
-	account := &domain.Member{
-		DisplayName: "Account", PublicKey: testPublicKey(t),
-		Color: "#4363d8", Role: domain.RoleCollaborator,
+	run, container := e.launchFake(t, "reboot retained terminal")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
 	}
-	if err := e.db.CreateMember(ctx, account); err != nil {
-		t.Fatalf("CreateMember account: %v", err)
-	}
-
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, account.ID, "shared", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("Launch: %v", err)
-	}
-	owned := run.HarnessSessionID
-	if closeErr := e.sched.Close(); closeErr != nil {
-		t.Fatalf("Close: %v", closeErr)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
 	}
 
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	startScheduler(t, s2)
-	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-	other := &domain.Member{
-		DisplayName: "Grace", PublicKey: testPublicKey(t),
-		Color: "#3cb44b", Role: domain.RoleCollaborator,
-	}
-	if createErr := e.db.CreateMember(ctx, other); createErr != nil {
-		t.Fatalf("CreateMember actor: %v", createErr)
-	}
-	next, err := s2.Relaunch(ctx, run.ID, other.ID)
+	reopened, err := s2.Relaunch(ctx, run.ID, e.member.ID)
 	if err != nil {
-		t.Fatalf("Relaunch: %v", err)
+		t.Fatalf("Relaunch after reboot: %v", err)
 	}
-	flag, id := relaunchSessionArgv(t, rt2, next)
-	if flag != "--resume" || id != owned {
-		t.Fatalf("shared-account relaunch session = %q %q, want --resume %q", flag, id, owned)
+	if reopened.ID != run.ID {
+		t.Fatalf("reopened ID = %s, want %s", reopened.ID, run.ID)
 	}
-	if next.MemberID != other.ID || next.AccountMember() != account.ID {
-		t.Fatalf("relaunch actor/account = %s/%s, want %s/%s", next.MemberID, next.AccountMember(), other.ID, account.ID)
+	if got := e.rt.byName(string(run.ID)); got == nil || got.id != container.id {
+		t.Fatalf("reboot relaunch replaced container: got %v, want %s", got, container.id)
 	}
 }
 
-// TestRelaunchTwiceRefusesToShareOneConversation pins the guard that keeps
-// two agents from appending to one transcript. The checkout guard cannot
-// catch this: the second relaunch gets a checkout of its own.
-func TestRelaunchTwiceRefusesToShareOneConversation(t *testing.T) {
-	e := newTestEnv(t, nil)
-	ctx := t.Context()
-
-	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "resume me once", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("Launch: %v", err)
-	}
-	if cerr := e.sched.Close(); cerr != nil {
-		t.Fatalf("Close: %v", cerr)
-	}
-
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
-	startScheduler(t, s2)
-	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-
-	first, err := s2.Relaunch(ctx, run.ID, e.member.ID)
-	if err != nil {
-		t.Fatalf("first Relaunch: %v", err)
-	}
-	before, err := e.db.ListRunsByWorkspace(ctx, run.WorkspaceID)
-	if err != nil {
-		t.Fatalf("ListRunsByWorkspace: %v", err)
-	}
-
-	second, err := s2.Relaunch(ctx, run.ID, e.member.ID)
-	if second != nil {
-		t.Fatalf("second Relaunch returned run %+v, want a refusal", second)
-	}
-	if !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("second Relaunch error = %v, want ErrInvalidTransition", err)
-	}
-	wantErr := ErrInvalidTransition.Error() +
-		": agent conversation already resumed by active run " + string(first.ID)
-	if err.Error() != wantErr {
-		t.Fatalf("second Relaunch error = %q, want %q", err, wantErr)
-	}
-	after, err := e.db.ListRunsByWorkspace(ctx, run.WorkspaceID)
-	if err != nil {
-		t.Fatalf("ListRunsByWorkspace after: %v", err)
-	}
-	if len(after) != len(before) {
-		t.Fatalf("run count = %d after the refused relaunch, want %d", len(after), len(before))
-	}
-
-	// Once the first relaunch is done with the conversation, relaunching
-	// the original row resumes it again: the two agents never overlap.
-	c := rt2.byName(string(first.ID))
-	if c == nil {
-		t.Fatal("no container for the first relaunch")
-	}
-	c.exitNow(0)
-	e.waitStoreStatus(t, first.ID, domain.RunCompleted)
-	if cerr := s2.CloseRun(ctx, first.ID, e.member.ID, domain.RunMerged); cerr != nil {
-		t.Fatalf("CloseRun: %v", cerr)
-	}
-	third, err := s2.Relaunch(ctx, run.ID, e.member.ID)
-	if err != nil {
-		t.Fatalf("Relaunch after the first one finished: %v", err)
-	}
-	flag, id := relaunchSessionArgv(t, rt2, third)
-	if flag != "--resume" || id != run.HarnessSessionID {
-		t.Fatalf("relaunch after the conversation was free = %s %s, want --resume %s",
-			flag, id, run.HarnessSessionID)
-	}
-}
-
-// TestRelaunchWithoutAPinnedSessionFallsBackToContinue covers the rows that
-// predate session pinning: they carry no session ID, so the relaunch keeps
-// the documented best-effort behavior instead of dropping resume entirely.
-func TestRelaunchWithoutAPinnedSessionFallsBackToContinue(t *testing.T) {
-	e := newTestEnv(t, nil)
-
-	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "resume me", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("Launch: %v", err)
-	}
-	// Age the row back to what a pre-pinning launch wrote.
-	run.HarnessSessionID = ""
-	if uerr := e.db.UpdateRun(t.Context(), run); uerr != nil {
-		t.Fatalf("clear pinned session: %v", uerr)
-	}
-	if cerr := e.sched.Close(); cerr != nil {
-		t.Fatalf("Close: %v", cerr)
-	}
-
-	rt2 := newFakeRuntime()
-	s2 := e.newScheduler(t, rt2, newFakePTY())
-	startScheduler(t, s2)
-	e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
-
-	next, err := s2.Relaunch(t.Context(), run.ID, e.member.ID)
-	if err != nil {
-		t.Fatalf("Relaunch: %v", err)
-	}
-	c := rt2.byName(string(next.ID))
-	if c == nil {
-		t.Fatal("no container for the relaunched run")
-	}
-	want := []string{"claude", "--continue", "--dangerously-skip-permissions", "resume me"}
-	if !slices.Equal(c.spec.Command, want) {
-		t.Fatalf("relaunch without a pinned session = %v, want %v", c.spec.Command, want)
-	}
-	if next.HarnessSessionID != "" {
-		t.Fatalf("--continue relaunch recorded session %q, want none to pin", next.HarnessSessionID)
-	}
-}
 
 // TestRecoveryKeepsARunParkedForItsMember covers what a restart must not do
 // to a run that is waiting for the member. Nothing has been observed on the

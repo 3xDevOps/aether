@@ -533,7 +533,7 @@ func (a *fakeAttachment) Close() error {
 }
 
 // fakeGit implements the GitEngine seam with real checkout directories
-// (so relaunch's existence check works) and recorded git operations.
+// and recorded git operations.
 type fakeGit struct {
 	root string
 
@@ -636,12 +636,6 @@ func (g *fakeGit) baseCommitFor(run domain.RunID) string {
 	return g.baseCommits[run]
 }
 
-func (g *fakeGit) baseBranchFor(run domain.RunID) string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.bases[run]
-}
-
 func (g *fakeGit) originFor(run domain.RunID) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -738,25 +732,10 @@ func (g *fakeGit) commitAuthors(run domain.RunID) []domain.GitIdentity {
 	return slices.Clone(g.authors[run])
 }
 
-func (g *fakeGit) unpublishBranch(ws domain.WorkspaceID, branch string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	delete(g.publishedBranches[ws], branch)
-	delete(g.branchCommits[ws], branch)
-}
-
 func (g *fakeGit) publishedCount(run domain.RunID) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.published[run]
-}
-
-func (g *fakeGit) checkoutCount() int {
-	entries, err := os.ReadDir(g.root)
-	if err != nil {
-		return 0
-	}
-	return len(entries)
 }
 
 // fakePTY implements the PTYHost seam. Like the real ptyhost it takes

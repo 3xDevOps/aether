@@ -114,11 +114,121 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 	}
 }
 
+// TestIntegrationChaosRebootRetainedTUI proves that an explicitly closed TUI
+// row keeps ownership of its checkout and paused container across a server
+// restart. Relaunch must reopen that exact retained run and container rather
+// than provision a replacement.
+func TestIntegrationChaosRebootRetainedTUI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	env := newChaosEnv(ctx, t)
+
+	ctrl, client := env.connect(t)
+	var launched protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(env.ws.ID), Task: "chaos reboot retained", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
+	}, &launched); err != nil {
+		t.Fatalf("run.launch: %v", err)
+	}
+	runID := launched.Run.ID
+	branch := launched.Run.Branch
+	env.sweepContainer(t, runID)
+	worktree := filepath.Join(env.dataDir, "checkouts", runID)
+	worktreeInfo, err := os.Stat(worktree)
+	if err != nil {
+		t.Fatalf("stat retained checkout: %v", err)
+	}
+	containerID := env.containerID(t, runID)
+
+	att := openAttach(t, client, runID)
+	waitOutput(t, att, "agent-ready")
+	att.close()
+
+	var closed protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: runID, Outcome: string(domain.RunMerged),
+	}, &closed); err != nil {
+		t.Fatalf("run.close retained TUI run: %v", err)
+	}
+	if closed.Run.Status != string(domain.RunMerged) ||
+		closed.Run.Mode != string(domain.LaunchTUI) {
+		t.Fatalf("closed retained run = status %q mode %q, want merged TUI",
+			closed.Run.Status, closed.Run.Mode)
+	}
+
+	// The retained container is paused, but Docker still reports it as
+	// running; its identity must survive the hard server outage.
+	env.hardKill(t)
+	if !env.containerRunning(t, runID) {
+		t.Fatal("the retained run container did not survive the server's death")
+	}
+	if got := env.containerID(t, runID); got != containerID {
+		t.Fatalf("container after server death = %q, want retained %q", got, containerID)
+	}
+	env.start(t)
+
+	ctrl, client = env.connect(t)
+	var retained protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: runID}, &retained); err != nil {
+		t.Fatalf("run.get retained row after reboot: %v", err)
+	}
+	if retained.Run.ID != runID || retained.Run.Branch != branch ||
+		retained.Run.Status != string(domain.RunMerged) ||
+		retained.Run.Mode != string(domain.LaunchTUI) {
+		t.Fatalf("retained row after reboot = %+v, want the same merged TUI row", retained.Run)
+	}
+	if got := env.containerID(t, runID); got != containerID {
+		t.Fatalf("container after reboot = %q, want retained %q", got, containerID)
+	}
+	if after, statErr := os.Stat(worktree); statErr != nil {
+		t.Fatalf("retained checkout after reboot: %v", statErr)
+	} else if !os.SameFile(worktreeInfo, after) {
+		t.Fatalf("checkout after reboot is not the retained checkout %s", worktree)
+	}
+
+	var reopened protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: runID}, &reopened); err != nil {
+		t.Fatalf("run.relaunch retained TUI run: %v", err)
+	}
+	if reopened.Run.ID != runID || reopened.Run.Status != string(domain.RunRunning) ||
+		reopened.Run.Mode != string(domain.LaunchTUI) {
+		t.Fatalf("reopened run = %+v, want the same running TUI row", reopened.Run)
+	}
+	if got := env.containerID(t, runID); got != containerID {
+		t.Fatalf("container after relaunch = %q, want retained %q", got, containerID)
+	}
+	if after, statErr := os.Stat(worktree); statErr != nil {
+		t.Fatalf("retained checkout after relaunch: %v", statErr)
+	} else if !os.SameFile(worktreeInfo, after) {
+		t.Fatalf("checkout after relaunch is not the retained checkout %s", worktree)
+	}
+
+	// A fresh attach and steer prove the retained container is usable again,
+	// not merely present in Docker and the database.
+	att = waitAttach(t, client, runID)
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: runID, Message: "resume-probe",
+	}, nil); err != nil {
+		t.Fatalf("run.inject after retained relaunch: %v", err)
+	}
+	waitOutput(t, att, "got:resume-probe")
+	env.waitStatus(t, ctrl, runID, domain.RunCompleted)
+
+	head := env.fetchBranch(t, branch)
+	if !strings.Contains(head.message, "aether:") {
+		t.Errorf("run branch head message = %q, want the clean-exit \"aether:\" commit", head.message)
+	}
+	if head.files["result.txt"] != "hello-from-agent\n" {
+		t.Errorf("result.txt on the published branch = %q, want the retained agent's result",
+			head.files["result.txt"])
+	}
+}
+
 // TestIntegrationChaosRebootLostContainer drives the other half of the
 // "Server reboot" row: the machine went down and took the containers with
-// it. On boot the scheduler must commit the partial work as "wip:",
-// publish the branch, and park the run at interrupted with its checkout
-// preserved so the one-click relaunch has something to resume from.
+// it. On boot the scheduler must commit the partial work as "wip:", publish
+// the branch, and park the run at interrupted with its checkout preserved.
 func TestIntegrationChaosRebootLostContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
@@ -156,21 +266,6 @@ func TestIntegrationChaosRebootLostContainer(t *testing.T) {
 			head.files["progress.txt"])
 	}
 
-	// One-click relaunch: the interrupted run is the source, and the new run
-	// comes up running from the published branch.
-	var relaunched protocol.RunResult
-	if err := ctrl.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: runID}, &relaunched); err != nil {
-		t.Fatalf("run.relaunch after an interrupted run: %v", err)
-	}
-	env.sweepContainer(t, relaunched.Run.ID)
-	if relaunched.Run.Status != string(domain.RunRunning) {
-		t.Fatalf("relaunched run status = %q, want running", relaunched.Run.Status)
-	}
-	att = waitAttach(t, client, relaunched.Run.ID)
-	waitOutput(t, att, "agent-ready")
-	if err := ctrl.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: relaunched.Run.ID}, nil); err != nil {
-		t.Fatalf("run.kill the relaunched run: %v", err)
-	}
 }
 
 // chaosEnv is a real aether-server child process on a fixed data directory.
@@ -406,6 +501,15 @@ func (e *chaosEnv) containerRunning(t *testing.T, runID string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) == "true"
+}
+
+func (e *chaosEnv) containerID(t *testing.T, runID string) string {
+	t.Helper()
+	out, err := exec.Command("docker", "inspect", "-f", "{{.Id}}", containerName(runID)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker inspect %s: %v (%s)", containerName(runID), err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (e *chaosEnv) removeContainer(t *testing.T, runID string) {

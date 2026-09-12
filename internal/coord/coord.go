@@ -76,12 +76,17 @@ type Injector interface {
 }
 
 // Config wires the service. Dir, Store, Mail, Bus, and Peers are
-// required; PTY may be nil, which degrades to no notices.
+// required; PTY may be nil, which degrades to no notices. RetainsContainer
+// may be nil; when set, it identifies terminal TUI runs whose retained
+// container still owns this coordination directory during recovery.
 type Config struct {
 	// Dir is the coordination state root, <data>/coord.
 	Dir string
 	// Store resolves runs and members.
 	Store Runs
+	// RetainsContainer reports whether a terminal run's retained container
+	// is still valid and owns its coordination assets.
+	RetainsContainer func(context.Context, domain.RunID) bool
 	// Mail persists the mailbox.
 	Mail store.MessageStore
 	// Bus carries the radar's overlap changes in and timeline entries out.

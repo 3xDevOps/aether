@@ -73,6 +73,56 @@ func TestSharedAccountLaunchRequiresOwnerGrant(t *testing.T) {
 	}
 }
 
+// Relaunch reuses the retained container, so a handoff cannot silently
+// authorize access to an unshared backing account.
+func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
+		t.Fatalf("mark run retained: %v", err)
+	}
+	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	if err := e.store.TransferRun(ctx, e.run.ID, grantee.ID); err != nil {
+		t.Fatalf("transfer run: %v", err)
+	}
+	params, err := json.Marshal(protocol.RunIDParams{RunID: string(e.run.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, perr := e.srv.runRelaunch(ctx, grantee.ID, params); perr == nil ||
+		perr.Code != protocol.CodeDenied ||
+		!strings.Contains(perr.Message, "has not shared") {
+		t.Fatalf("relaunch without account grant = %+v, want explicit denial", perr)
+	}
+	if calls := e.runs.Calls(); len(calls) != 0 {
+		t.Fatalf("scheduler calls after denied relaunch = %v, want none", calls)
+	}
+
+	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+		t.Fatalf("share account: %v", err)
+	}
+	result, perr := e.srv.runRelaunch(ctx, grantee.ID, params)
+	if perr != nil {
+		t.Fatalf("relaunch with account grant: %+v", perr)
+	}
+	reopened := result.(protocol.RunResult).Run
+	if reopened.ID != string(e.run.ID) {
+		t.Fatalf("relaunch returned %q, want addressed run %q", reopened.ID, e.run.ID)
+	}
+	if calls := e.runs.Calls(); len(calls) != 1 || calls[0] != "relaunch:"+string(e.run.ID)+":"+string(grantee.ID) {
+		t.Fatalf("scheduler calls after granted relaunch = %v, want addressed run", calls)
+	}
+
+	if err := e.store.RevokeAccountShare(ctx, e.member.ID, grantee.ID); err != nil {
+		t.Fatalf("revoke account share: %v", err)
+	}
+	if _, perr := e.srv.runRelaunch(ctx, grantee.ID, params); perr == nil ||
+		perr.Code != protocol.CodeDenied {
+		t.Fatalf("relaunch after account revoke = %+v, want denied", perr)
+	}
+}
+
 func TestAccountShareCannotTargetSelfOrPendingMember(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()

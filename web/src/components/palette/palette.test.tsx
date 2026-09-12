@@ -501,9 +501,17 @@ describe('command palette', () => {
     await waitFor(() => expect(api.runHandoff).toHaveBeenCalledWith('run_1', bob.id))
   })
 
-  it('offers relaunch only on a terminal run', async () => {
+  it('offers relaunch only on a retained TUI Done run', async () => {
     useStore.setState({
-      runs: { [active.id]: toRecord(run({ status: 'failed' })) },
+      runs: {
+        [active.id]: toRecord(
+          run({
+            status: 'merged',
+            mode: 'tui',
+            reason: 'closed; retained container',
+          }),
+        ),
+      },
       route: { name: 'terminal', params: { runId: 'run_1' } },
       capabilities: {
         gateway: 'local',

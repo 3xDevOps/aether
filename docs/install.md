@@ -721,7 +721,8 @@ It prints one startup line naming what it bound, the dashboard included when
 aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
 ```
 
-Serve options, which are also the config-file keys:
+Serve options, which are also the config-file keys. For duration options, `0`
+uses the default; negative values have the semantics in the table.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -735,6 +736,7 @@ Serve options, which are also the config-file keys:
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
+| `--run-container-ttl` | `1h` | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `1h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
 | `--harness-definitions` | none | Path to a custom harness registry file; see [harnesses.md](harnesses.md). |
 
@@ -874,7 +876,7 @@ automatic.
 | `ssh/` | The server's SSH host key. |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
-| `checkouts/` | Per-run worktrees, garbage-collected after a TTL once a run finishes. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
+| `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
 | `transcripts/` | Per-run PTY recordings (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |

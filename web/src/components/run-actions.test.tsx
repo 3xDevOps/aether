@@ -173,15 +173,41 @@ test('pull branch needs a published commit and local pull capability', async () 
   await waitFor(() => expect(api.localPull).toHaveBeenCalledWith(record.id))
 })
 
-test('relaunch is offered on a finished run only', () => {
-  const { unmount } = render(<RunActions run={seed({ paused: false })} />)
+test('relaunch is offered only for a retained TUI close', () => {
+  const initial = render(<RunActions run={seed({ paused: false })} />)
   expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
-  unmount()
-  render(<RunActions run={seed({ run: { status: 'merged' } })} />)
+  initial.unmount()
+  const retained = seed({
+    run: { status: 'merged', mode: 'tui', reason: 'closed; retained container' },
+  })
+  const retainedRender = render(<RunActions run={retained} />)
   expect(screen.getByRole('button', { name: 'Relaunch' })).toBeTruthy()
   // A finished agent has nothing to kill, but remains deletable.
   expect(screen.queryByRole('button', { name: 'Kill' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy()
+  retainedRender.unmount()
+
+  for (const status of ['failed', 'interrupted'] as const) {
+    const unsuccessful = seed({
+      run: { status, mode: 'tui', reason: 'closed; retained container' },
+    })
+    const unsuccessfulRender = render(<RunActions run={unsuccessful} />)
+    expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
+    unsuccessfulRender.unmount()
+  }
+
+  const expired = seed({
+    run: { status: 'merged', mode: 'tui', reason: 'retained container expired' },
+  })
+  const expiredRender = render(<RunActions run={expired} />)
+  expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
+  expiredRender.unmount()
+  const headless = seed({
+    run: { status: 'merged', mode: 'headless', reason: 'closed; retained container' },
+  })
+  const headlessRender = render(<RunActions run={headless} />)
+  expect(screen.queryByRole('button', { name: 'Relaunch' })).toBeNull()
+  headlessRender.unmount()
 })
 
 // The failure path: the server's refusal is the whole message, prefixed by

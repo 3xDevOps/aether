@@ -20,8 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -98,6 +96,7 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
+	RunContainerTTL      time.Duration // default 1h; negative destroys on close
 	// MinFreeBytes is the free-space floor: a launch or relaunch that
 	// would start below it is refused with ErrDiskFull rather than filling
 	// the disk out from under the runs already on it. Runs already
@@ -108,9 +107,9 @@ type Config struct {
 	// (internal/harness: claude, codex, pi, omp, opencode, custom); "fake"
 	// (the deterministic e2e agent) is registered here by default. An
 	// override replaces the registry argv and keeps the profile's user, key
-	// passthrough, and launch environment; it drops the registry's resume
-	// and coordination flags, which would be appended to an argv nothing
-	// has checked. Member definitions shape argv inside that member's own
+	// passthrough, and launch environment; it drops the registry's
+	// coordination flag, which would be appended to an argv nothing has
+	// checked. Member definitions shape argv inside that member's own
 	// container and do not leak across members.
 	Harnesses map[string]HarnessSpec
 	// ServerBinary is the server binary staged into run containers to
@@ -122,6 +121,8 @@ type Config struct {
 	// has no mcp subcommand.
 	ServerBinary string
 }
+
+const DefaultRunContainerTTL = time.Hour
 
 // DefaultServerBinary is the running server binary, /proc/self/exe rather
 // than os.Args[0].
@@ -248,7 +249,21 @@ type supervised struct {
 	// a waiting report is what parked the run.
 	parkedAt         time.Time
 	postParkActivity time.Time
-	done             chan struct{}
+	launchMode       domain.LaunchMode
+	retained         bool
+	retainedUntil    *time.Time
+	destroyPending   bool
+	// finalizing reserves the lifecycle transition after the agent exits.
+	// The reservation is brief: finalize's git/runtime/store work runs
+	// without lifecycleMu so Kill can still record cancellation.
+	finalizing  bool
+	done        chan struct{}
+	doneOnce    sync.Once
+	waitStarted bool
+	// lifecycleMu serializes close, relaunch, expiry, and steering admission
+	// for this exact container. It is deliberately independent of Scheduler.mu:
+	// runtime and git calls must not run while the scheduler lock is held.
+	lifecycleMu sync.Mutex
 	// runUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root (no ownership pass). Set once
 	// the user is resolved during provisioning, or from the sidecar on
@@ -319,6 +334,54 @@ func (s *Scheduler) waitPending(ctx context.Context, run domain.RunID) error {
 	}
 }
 
+// startSupervision installs exactly one wait owner for a run. Callers must
+// have already installed the entry in s.runs; the helper is safe when two
+// recovery paths race to adopt the same sidecar.
+func (s *Scheduler) startSupervision(entry *supervised) {
+	s.mu.Lock()
+	if s.runs[entry.runID] != entry || entry.waitStarted {
+		s.mu.Unlock()
+		return
+	}
+	entry.waitStarted = true
+	s.wg.Add(1)
+	s.mu.Unlock()
+	go s.superviseWait(entry)
+}
+
+func (s *Scheduler) closeDone(entry *supervised) {
+	if entry != nil && entry.done != nil {
+		entry.doneOnce.Do(func() { close(entry.done) })
+	}
+}
+
+// RetainsContainer reports whether a durable terminal TUI row still owns a
+// live retained container. It intentionally does not consult in-memory state:
+// coordination recovery calls it during a fresh process boot. A retained
+// sidecar remains an ownership reference until the scheduler has confirmed
+// destruction and removed it; TTL policy is deliberately not consulted here.
+func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil || r.Mode != domain.LaunchTUI ||
+		(r.Status != domain.RunMerged && r.Status != domain.RunAbandoned) ||
+		r.Reason != retainedCloseReason {
+		return false
+	}
+	sc, err := s.readSidecar(run)
+	if err != nil {
+		return false
+	}
+	mode := sc.Mode
+	if mode == "" {
+		mode = r.Mode
+	}
+	if sc.RunID != string(run) || mode != domain.LaunchTUI ||
+		(!sc.Retained && sc.RetainedUntil == nil) || sc.ContainerID == "" {
+		return false
+	}
+	return true
+}
+
 // New validates cfg, applies defaults, and prepares the state directory.
 func New(cfg Config) (*Scheduler, error) {
 	switch {
@@ -349,6 +412,9 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	if cfg.CheckoutTTL == 0 {
 		cfg.CheckoutTTL = 72 * time.Hour
+	}
+	if cfg.RunContainerTTL == 0 {
+		cfg.RunContainerTTL = DefaultRunContainerTTL
 	}
 	harnesses := defaultHarnesses()
 	for name, spec := range cfg.Harnesses {
@@ -390,9 +456,6 @@ func New(cfg Config) (*Scheduler, error) {
 	}, nil
 }
 
-// Start performs reboot recovery, then drives the stall-detection and
-// checkout-GC loops until ctx is done or Close is called. Shutting down
-// never stops containers; supervision simply ends.
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverRuns(ctx); err != nil {
 		return err
@@ -400,8 +463,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverTerminals(ctx); err != nil {
 		return err
 	}
-	stall := time.NewTicker(s.cfg.PollInterval)
-	defer stall.Stop()
+	interval := s.cfg.PollInterval
+	if interval > time.Minute {
+		interval = time.Minute
+	}
+	sweep := time.NewTicker(interval)
+	defer sweep.Stop()
 	var gcC <-chan time.Time
 	if s.cfg.CheckoutTTL > 0 {
 		s.sweepCheckouts(ctx)
@@ -416,8 +483,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-s.superCtx.Done():
 			return nil
-		case <-stall.C:
+		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.sweepRetained(ctx)
 			s.tickUpdates(ctx)
 		case <-gcC:
 			s.sweepCheckouts(ctx)
@@ -520,14 +588,10 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 				DenyNames:       spec.DenyNames,
 			}).Profile()
 		}
-		// An explicit argv override is respected verbatim. Registry MCP,
-		// session, resume, status-reporter and semantic-control flags
-		// belong to the shipped CLI, not an override: nothing checks the
-		// override is still that CLI.
+		// An explicit argv override is respected verbatim. The registry MCP
+		// flag belongs to the shipped CLI, not an override: nothing checks
+		// the override is still that CLI.
 		profile.MCPConfigFlag = ""
-		profile.SessionFlag = ""
-		profile.SessionResumeFlag = ""
-		profile.ResumeFlag = ""
 		profile.Reporter = harness.ReporterNone
 		profile.StatusArgs = nil
 		profile.StatusEnv = nil
@@ -555,52 +619,80 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 	return harness.Argv(argv, task), profile, nil
 }
 
-// pinSession gives a launch a conversation of its own and returns the argv
-// to run plus the session ID to record on the run row. Claude Code's
-// --session-id names the conversation up front so a later relaunch can name
-// it back; a harness without that flag records nothing and relaunches on
-// ResumeFlag's best effort.
-func pinSession(argv []string, profile harness.Profile) ([]string, string) {
-	if profile.SessionFlag == "" {
-		return argv, ""
-	}
-	id := uuid.NewString()
-	return harness.WithFlag(argv, profile.SessionFlag, id), id
+// wrapTUICommand makes the configured harness the first child of a
+// POSIX-shell supervisor. Harness arguments remain positional parameters, so
+// task text and other argv values can never become shell source. Once the
+// harness exits its status is reported and the container stays available via
+// a login shell until the scheduler explicitly closes or kills the run.
+func wrapTUICommand(argv []string) []string {
+	const script = `exec 3<&0
+child=
+child_signal=TERM
+child_signaled=
+pending_signal=
+pending_status=
+
+forward_shutdown() {
+	if [ -n "$child" ] && [ -z "$child_signaled" ]; then
+		kill -"$child_signal" "$child" 2>/dev/null || :
+		child_signaled=1
+	fi
 }
 
-// resumeSession points a relaunch at the interrupted run's own conversation
-// and returns the argv plus the session the new row carries forward.
-// Resuming by ID names the conversation outright rather than trusting "the
-// most recent one in this directory" - every run mounts its checkout at the
-// same container path and shares one credential home per member, so that
-// guess can land on another run's conversation, even one from another
-// workspace.
-//
-// The pinned ID is only worth naming when this relaunch can reach the
-// transcript behind it, which two interrupted rows cannot:
-//
-//   - The agent never started. recoverUnstarted interrupts queued and
-//     provisioning rows too, and the ID is stamped when the row is created,
-//     so it names a conversation the harness never opened.
-//   - The relaunch changes agent accounts. A normal run relaunched by another
-//     member uses that member's home, where the old transcript is absent. An
-//     explicitly shared account stays pinned and can resume across handoff.
-//
-// claude --resume on an ID it cannot find prints "No conversation found
-// with session ID: <id>" and exits 1, which would fail the relaunch
-// outright, so both open a fresh conversation instead.
-//
-// A row with no pinned session at all - a harness that cannot pin, or a row
-// written before pinning existed - keeps ResumeFlag's best effort. That
-// fallback is sticky: there is no earlier ID left to recover.
-func resumeSession(argv []string, profile harness.Profile, old *domain.Run, account domain.MemberID) ([]string, string) {
-	if old.HarnessSessionID == "" || profile.SessionResumeFlag == "" {
-		return harness.WithFlag(argv, profile.ResumeFlag, ""), ""
-	}
-	if old.StartedAt == nil || old.AccountMember() != account {
-		return pinSession(argv, profile)
-	}
-	return harness.WithFlag(argv, profile.SessionResumeFlag, old.HarnessSessionID), old.HarnessSessionID
+request_shutdown() {
+	if [ -z "$pending_signal" ]; then
+		pending_signal=$1
+		pending_status=$2
+	fi
+	forward_shutdown
+}
+
+trap 'request_shutdown TERM 143' TERM
+trap 'request_shutdown INT 130' INT
+trap 'request_shutdown HUP 129' HUP
+
+run_child() {
+	child_signal=$1
+	shift
+	child_signaled=
+	if [ -n "$pending_signal" ]; then
+		exit "$pending_status"
+	fi
+	"$@" <&3 &
+	child=$!
+	if [ -n "$pending_signal" ]; then
+		forward_shutdown
+		wait "$child" 2>/dev/null || :
+		exit "$pending_status"
+	fi
+	wait "$child"
+	status=$?
+	if [ -n "$pending_signal" ]; then
+		forward_shutdown
+		wait "$child" 2>/dev/null || :
+		exit "$pending_status"
+	fi
+	child=
+	child_signaled=
+	return "$status"
+}
+
+run_child TERM "$@"
+status=$?
+printf '\n[aether] harness exited with code %s\n' "$status"
+while :
+do
+	if [ -n "$pending_signal" ]; then
+		exit "$pending_status"
+	fi
+	if [ -x /bin/bash ]; then
+		run_child HUP /bin/bash -l
+	else
+		run_child HUP /bin/sh -l
+	fi
+done`
+	command := []string{"/bin/sh", "-c", script, "aether-run-supervisor"}
+	return append(command, argv...)
 }
 
 // memberHarnessSpec loads and validates the member's stored definition for
@@ -652,6 +744,9 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = identity.Name
 	env["GIT_AUTHOR_EMAIL"] = identity.Email
 	env["GIT_COMMITTER_EMAIL"] = identity.Email
+	if run.Mode == domain.LaunchTUI {
+		argv = wrapTUICommand(argv)
+	}
 	return runtime.Spec{
 		Name:              string(run.ID),
 		Image:             plan.Image,

@@ -21,6 +21,9 @@ func TestDispatchHelp(t *testing.T) {
 			t.Errorf("help missing %q:\n%s", name, help)
 		}
 	}
+	if !strings.Contains(help, "reopen a retained Done run") {
+		t.Errorf("relaunch help = %q, want retained Done-run wording", help)
+	}
 }
 
 func TestDispatchUnknownCommand(t *testing.T) {

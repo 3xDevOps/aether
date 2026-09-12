@@ -18,10 +18,10 @@ func init() {
 	registerGuarded(protocol.MethodBudgetSet, permissions.WorkspaceAdmin, nil, (*Server).budgetSet)
 }
 
-// GuardRuns wraps a run controller so a new run is admitted against its
-// workspace's budget before it starts. Runs already running are untouched -
-// a budget never stops work in flight. A nil service leaves the
-// controller as it is: budgets are a service, not a hard dependency.
+// GuardRuns wraps a run controller so launches and retained-run reopens are
+// admitted against the workspace's budget before they start. Runs already
+// running are untouched - a budget never stops work in flight. A nil service
+// leaves the controller as it is: budgets are a service, not a hard dependency.
 func GuardRuns(runs RunController, svc CostService, st store.Store) RunController {
 	if svc == nil || st == nil {
 		return runs
@@ -52,8 +52,8 @@ func (g budgetGate) launch(ctx context.Context, workspace domain.WorkspaceID, me
 	return launchWithOptions(ctx, g.RunController, workspace, member, account, task, harness, mode, opts)
 }
 
-// Relaunch starts a fresh run from a finished one, so it is admitted like
-// any other new run.
+// Relaunch reopens the addressed retained run, so it remains subject to the
+// same budget admission as a launch.
 func (g budgetGate) Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
 	r, err := g.store.GetRun(ctx, run)
 	if err != nil {

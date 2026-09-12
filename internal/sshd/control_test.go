@@ -162,8 +162,8 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	if err := c.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: string(e.run.ID)}, &rr); err != nil {
 		t.Fatalf("run.relaunch: %v", err)
 	}
-	if rr.Run.ID != "run_relaunched" {
-		t.Errorf("relaunch returned %q, want the new run", rr.Run.ID)
+	if rr.Run.ID != string(e.run.ID) {
+		t.Errorf("relaunch returned %q, want the addressed run %q", rr.Run.ID, e.run.ID)
 	}
 
 	want := []string{

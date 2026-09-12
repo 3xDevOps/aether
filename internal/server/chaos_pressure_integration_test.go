@@ -145,13 +145,42 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		t.Errorf("disk gauge worktree bytes = %d after the sweep, was %d before: the gauge does not "+
 			"follow the reclaim", after.WorktreeBytes, before.WorktreeBytes)
 	}
+	// Keep one explicit retained TUI row as the relaunch fixture. It is
+	// created after the checkout sweep so the floor test can prove relaunch
+	// reuses its checkout instead of requesting new checkout admission.
+	var retained protocol.RunResult
+	if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(env.ws.ID), Task: "retained disk relaunch", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
+	}, &retained); err != nil {
+		t.Fatalf("run.launch retained fixture: %v", err)
+	}
+	retainedCheckout := filepath.Join(env.dataDir, "checkouts", retained.Run.ID)
+	retainedCheckoutInfo, err := os.Stat(retainedCheckout)
+	if err != nil {
+		t.Fatalf("stat retained fixture checkout: %v", err)
+	}
+	retainedAtt := openAttach(t, env.client, retained.Run.ID)
+	waitOutput(t, retainedAtt, "agent-ready")
+	retainedAtt.close()
+	var closed protocol.RunResult
+	if err := env.ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: retained.Run.ID, Outcome: string(domain.RunMerged),
+	}, &closed); err != nil {
+		t.Fatalf("run.close retained fixture: %v", err)
+	}
+	if closed.Run.Status != string(domain.RunMerged) ||
+		closed.Run.Reason != "closed; retained container" {
+		t.Fatalf("retained fixture after close = status %q reason %q, want merged retained row",
+			closed.Run.Status, closed.Run.Reason)
+	}
 
 	// The floor: a server that cannot promise the configured headroom
 	// refuses new work instead of filling the disk out from under the runs
 	// already on it.
 	env.restart(t, Config{MinFreeDiskBytes: math.MaxInt64})
 	var refused protocol.RunResult
-	err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+	err = env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: "over the floor", Harness: "fake",
 	}, &refused)
 	if err == nil {
@@ -176,10 +205,34 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 			t.Errorf("refused launch left run %s behind in %s", r.ID, r.Status)
 		}
 	}
-	// Relaunch is a new run too, and the floor holds for it.
-	if err := env.ctrl.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: done[0].id}, nil); err == nil {
-		t.Error("run.relaunch succeeded below the free-space floor; it provisions a new run too")
+
+	// Relaunch reopens the same retained row and container. It does not
+	// perform new checkout admission, so the free-space floor applies only
+	// to the refused new launch above.
+	var reopened protocol.RunResult
+	if err := env.ctrl.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{
+		RunID: retained.Run.ID,
+	}, &reopened); err != nil {
+		t.Fatalf("run.relaunch retained fixture below the free-space floor: %v", err)
 	}
+	if reopened.Run.ID != retained.Run.ID || reopened.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("reopened fixture = ID %q status %q, want same ID %q running",
+			reopened.Run.ID, reopened.Run.Status, retained.Run.ID)
+	}
+	if after, statErr := os.Stat(retainedCheckout); statErr != nil {
+		t.Fatalf("retained fixture checkout after relaunch: %v", statErr)
+	} else if !os.SameFile(retainedCheckoutInfo, after) {
+		t.Fatalf("relaunch replaced retained fixture checkout %s", retainedCheckout)
+	}
+	retainedAtt = waitAttach(t, env.client, retained.Run.ID)
+	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: retained.Run.ID, Message: "finish",
+	}, nil); err != nil {
+		t.Fatalf("run.inject retained fixture: %v", err)
+	}
+	waitOutput(t, retainedAtt, "got:finish")
+	retainedAtt.close()
+	env.waitStatus(t, retained.Run.ID, domain.RunCompleted)
 }
 
 // TestIntegrationChaosStallUX drives the failure table's "Agent crashes or

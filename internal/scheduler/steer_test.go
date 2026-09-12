@@ -3,14 +3,41 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
+
+type failingRunStatusStore struct {
+	store.Store
+	fail bool
+}
+
+func (s *failingRunStatusStore) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	if s.fail {
+		return errors.New("test: status transition failed")
+	}
+	return s.Store.UpdateRunStatus(ctx, id, status, reason, startedAt, finishedAt)
+}
+
+type destroyFailureRuntime struct {
+	runtime.Runtime
+	destroyErr error
+}
+
+func (r *destroyFailureRuntime) Destroy(ctx context.Context, id runtime.ID) error {
+	if r.destroyErr != nil {
+		return r.destroyErr
+	}
+	return r.Runtime.Destroy(ctx, id)
+}
 
 func TestKill(t *testing.T) {
 	e := newTestEnv(t, nil)
@@ -256,9 +283,9 @@ func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
 	}
 }
 
-// CloseRun resolves a stalled run's disposition directly: the status
-// moves to the outcome before the agent's exit, the container is torn
-// down, and finalization still cleans up behind the expected race.
+// CloseRun resolves a stalled TUI run's disposition directly: the status
+// moves to the outcome before any later relaunch, and its exact container is
+// retained until DeleteRun or expiry.
 func TestCloseRunResolvesStalledRun(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 40 * time.Millisecond
@@ -285,14 +312,75 @@ func TestCloseRunResolvesStalledRun(t *testing.T) {
 	if r.FinishedAt == nil {
 		t.Fatal("closed run must have FinishedAt")
 	}
-	waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
-	waitFor(t, "entry removed", func() bool {
-		e.sched.mu.Lock()
-		defer e.sched.mu.Unlock()
-		return e.sched.runs[run.ID] == nil
-	})
+	if e.rt.byName(string(run.ID)) == nil {
+		t.Fatal("closed TUI run lost its retained container")
+	}
+	e.sched.mu.Lock()
+	retained := e.sched.runs[run.ID] != nil && e.sched.runs[run.ID].retained
+	e.sched.mu.Unlock()
+	if !retained {
+		t.Fatal("closed TUI run was not marked retained")
+	}
 	if err := e.sched.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
+	}
+}
+
+// A failed terminal transition must restore a run that was already paused
+// without thawing its container; the interaction surface is restored while
+// the pause flag remains truthful.
+func TestCloseRunRollbackPreservesPrePausedState(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+
+	run, c := e.launchFake(t, "paused close rollback")
+	if err := e.sched.Pause(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	failingStore := &failingRunStatusStore{Store: e.db, fail: true}
+	e.sched.cfg.Store = failingStore
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err == nil {
+		t.Fatal("CloseRun succeeded despite injected terminal transition failure")
+	}
+
+	if got := c.currentState(); got != "paused" {
+		t.Fatalf("container state after failed close = %q, want paused", got)
+	}
+	if !e.sched.Paused(run.ID) {
+		t.Fatal("Paused(run) = false after failed close of pre-paused run")
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("read sidecar after failed close: %v", err)
+	}
+	if !sc.Paused {
+		t.Fatal("sidecar paused = false after failed close of pre-paused run")
+	}
+	if got := e.pty.ActiveSessions(string(ptyhost.RunSession(run.ID))); len(got) != 1 {
+		t.Fatalf("restored PTY sessions = %v, want one", got)
+	}
+	if _, watching := e.git.watchingFor(run.ID); !watching {
+		t.Fatal("diff watch was not restored after failed close")
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+
+	failingStore.fail = false
+	if resumeErr := e.sched.Resume(ctx, run.ID, e.member.ID); resumeErr != nil {
+		t.Fatalf("Resume after failed close: %v", resumeErr)
+	}
+	if got := c.currentState(); got != "running" {
+		t.Fatalf("container state after Resume = %q, want running", got)
+	}
+	if e.sched.Paused(run.ID) {
+		t.Fatal("Paused(run) = true after Resume")
+	}
+	sc, err = e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("read sidecar after Resume: %v", err)
+	}
+	if sc.Paused {
+		t.Fatal("sidecar paused = true after Resume")
 	}
 }
 
@@ -436,17 +524,94 @@ func TestDeleteRunSurvivesKillFinalizingDuringStop(t *testing.T) {
 	if err := e.rt.Destroy(t.Context(), cid); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
+	close(release)
 	waitFor(t, "finalization released the entry", func() bool {
 		e.sched.mu.Lock()
 		defer e.sched.mu.Unlock()
 		return e.sched.runs[run.ID] == nil
 	})
 
-	close(release)
 	if err := <-errCh; err != nil {
 		t.Fatalf("DeleteRun: %v", err)
 	}
 	if _, err := e.sched.cfg.Store.GetRun(t.Context(), run.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetRun after delete = %v, want not found", err)
+	}
+}
+
+func TestDeleteRunReconcilesUnsupervisedRetainedSidecar(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "delete retained sidecar")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Recovery cannot decide whether the retained container is still alive,
+	// leaving its durable ownership marker without an in-memory entry.
+	e.rt.waitErr = errors.New("test: retained probe inconclusive")
+	destroyErr := errors.New("test: retained destroy failed")
+	rt := &destroyFailureRuntime{Runtime: e.rt, destroyErr: destroyErr}
+	cfg := e.cfg
+	cfg.Runtime = rt
+	cfg.PTY = newFakePTY()
+	recovered, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New recovered scheduler: %v", err)
+	}
+	t.Cleanup(func() { _ = recovered.Close() })
+	if recoverErr := recovered.recoverRuns(ctx); recoverErr != nil {
+		t.Fatalf("recoverRuns: %v", recoverErr)
+	}
+	recovered.mu.Lock()
+	if recovered.runs[run.ID] != nil {
+		recovered.mu.Unlock()
+		t.Fatal("inconclusive recovery installed a run entry")
+	}
+	recovered.mu.Unlock()
+
+	err = recovered.DeleteRun(ctx, run.ID, e.member.ID)
+	if !errors.Is(err, destroyErr) || !strings.Contains(err.Error(), "destroy retained container") {
+		t.Fatalf("DeleteRun with failed destroy = %v, want contextual destroy error", err)
+	}
+	if _, statErr := os.Stat(recovered.sidecarPath(run.ID)); statErr != nil {
+		t.Fatalf("sidecar after failed delete: %v", statErr)
+	}
+	if _, statErr := os.Stat(run.Worktree); statErr != nil {
+		t.Fatalf("checkout after failed delete: %v", statErr)
+	}
+	if _, getErr := e.db.GetRun(ctx, run.ID); getErr != nil {
+		t.Fatalf("run row after failed delete: %v", getErr)
+	}
+	if e.rt.byName(string(run.ID)) == nil {
+		t.Fatal("container removed after failed delete")
+	}
+	recovered.mu.Lock()
+	entry := recovered.runs[run.ID]
+	recovered.mu.Unlock()
+	if entry == nil || !entry.retained || entry.waitStarted {
+		t.Fatalf("retained ownership after failed delete = %+v", entry)
+	}
+
+	rt.destroyErr = nil
+	if err := recovered.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun retry: %v", err)
+	}
+	if _, getErr := e.db.GetRun(ctx, run.ID); !errors.Is(getErr, store.ErrNotFound) {
+		t.Fatalf("run row after successful retry: %v", getErr)
+	}
+	if _, statErr := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(statErr) {
+		t.Fatalf("sidecar after successful retry: %v", statErr)
+	}
+	if _, statErr := os.Stat(run.Worktree); !os.IsNotExist(statErr) {
+		t.Fatalf("checkout after successful retry: %v", statErr)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("container remains after successful retry")
 	}
 }

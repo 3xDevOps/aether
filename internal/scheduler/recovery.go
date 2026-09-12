@@ -12,157 +12,281 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
 const (
-	relaunchRequiresCheckout = "relaunch requires a terminal run with a preserved checkout"
+	retainedCloseReason       = "closed; retained container"
+	retainedExpiredReason     = "retained container expired"
+	retainedUnavailableReason = "retained container unavailable"
 	// exitProbeTimeout is the short non-destructive Wait window used on
 	// startup to learn whether a container already exited before attach.
 	exitProbeTimeout = 2 * time.Second
 )
 
-// Relaunch creates a new run from a terminal source: same workspace, task,
-// harness, and mode, owned by the actor. The new checkout is cloned from the
-// exact commit currently published at refs/heads/<old.Branch> via
-// Git.CreateRunCheckoutAt and is named for the new run ID. The old row and
-// its checkout are left untouched.
+func retainedTransitionError() error {
+	return fmt.Errorf("%w: %s", ErrInvalidTransition, retainedUnavailableReason)
+}
+
+// Relaunch reopens the exact retained TUI run and container. It never creates
+// a run row, checkout, branch, or replacement container.
 func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
-	if err := s.checkFreeSpace(); err != nil {
-		return nil, err
-	}
 	old, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		return nil, err
 	}
-	if !old.Status.Terminal() || old.Worktree == "" || old.Branch == "" {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
+	if old.Mode != domain.LaunchTUI ||
+		(old.Status != domain.RunMerged && old.Status != domain.RunAbandoned) ||
+		old.Reason != retainedCloseReason {
+		return nil, retainedTransitionError()
 	}
-	if _, statErr := os.Stat(old.Worktree); statErr != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
-	}
-	account := old.RelaunchAccount(actor)
-	argv, profile, err := s.command(ctx, account, old.Harness, old.Mode, old.Task)
-	if err != nil {
-		return nil, err
-	}
-	// A run the reboot interrupted still has the agent's own harness
-	// session behind it, so the relaunch continues it where the harness
-	// can (docs/failure-handling.md, "Server reboot"). A run that finished
-	// on its own has nothing to resume and starts fresh, with a session of
-	// its own.
-	var session string
-	if old.Status == domain.RunInterrupted {
-		argv, session = resumeSession(argv, profile, old, account)
-	} else {
-		argv, session = pinSession(argv, profile)
-	}
-	member, err := s.cfg.Store.GetMember(ctx, actor)
-	if err != nil {
-		return nil, err
-	}
-	accountMember, err := s.cfg.Store.GetMember(ctx, account)
-	if err != nil {
-		return nil, err
-	}
-	ws, err := s.cfg.Store.GetWorkspace(ctx, old.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	published, err := s.cfg.Git.WorkspaceBranchExists(ctx, ws.ID, old.Branch)
-	if err != nil {
-		return nil, err
-	}
-	if !published {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidTransition, relaunchRequiresCheckout)
-	}
-	publishedCommit, err := s.cfg.Git.WorkspaceBranchCommit(ctx, ws.ID, old.Branch)
-	if err != nil {
-		return nil, err
-	}
-	next := &domain.Run{
-		WorkspaceID:      old.WorkspaceID,
-		MemberID:         actor,
-		AccountMemberID:  account,
-		Task:             old.Task,
-		Harness:          old.Harness,
-		Mode:             old.Mode,
-		Status:           domain.RunQueued,
-		HarnessSessionID: session,
-		BaseCommit:       old.BaseCommit,
-		BaseBranch:       old.BaseBranch,
-		BaseSource:       old.BaseSource,
-		BaseCheckedAt:    old.BaseCheckedAt,
-	}
-	// Checking for an active run in the same checkout and creating the new
-	// row under one critical section serializes concurrent relaunches of
-	// a still-in-use old tree. After the per-run-ID checkout fix two
-	// actives never share a tree, but the guard still rejects a leftover
-	// shared path. The new row is created under the same lock, so the
-	// session guard below sees the row an in-flight relaunch just made.
-	pending := &pendingRun{done: make(chan struct{})}
-	s.mu.Lock()
-	active, err := s.cfg.Store.ListActiveRuns(ctx)
-	if err == nil {
-		for _, a := range active {
-			if a.Worktree != "" && a.Worktree == old.Worktree {
-				err = fmt.Errorf("%w: checkout already in use by active run %s", ErrInvalidTransition, a.ID)
-				break
+
+	// A negative retention policy is an explicit no-retention mode. A
+	// durable sidecar still owns its container (and coordination assets)
+	// until destruction is confirmed, but it must never be adopted.
+	if s.cfg.RunContainerTTL < 0 {
+		s.mu.Lock()
+		entry := s.runs[run]
+		s.mu.Unlock()
+		if entry != nil && entry.retained {
+			if derr := s.expireRetained(ctx, entry); derr != nil {
+				return nil, errors.Join(retainedTransitionError(), derr)
 			}
-			// Relaunching one interrupted row twice would leave two agents
-			// resuming one conversation, appending to a single transcript.
-			// The checkout guard never catches it: every relaunch gets a
-			// checkout of its own.
-			if session != "" && a.HarnessSessionID == session {
-				err = fmt.Errorf("%w: agent conversation already resumed by active run %s", ErrInvalidTransition, a.ID)
-				break
+		} else if entry == nil {
+			sc, serr := s.readSidecar(run)
+			if serr == nil && (sc.Retained || sc.RetainedUntil != nil) && sc.ContainerID != "" {
+				if entry := s.installRetainedDestroyOwner(ctx, old, sc); entry != nil {
+					if derr := s.expireRetained(ctx, entry); derr != nil {
+						return nil, errors.Join(retainedTransitionError(), derr)
+					}
+				}
 			}
 		}
+		return nil, retainedTransitionError()
 	}
-	if err == nil {
-		err = s.cfg.Store.CreateRun(ctx, next)
-		if err == nil {
-			s.pending[next.ID] = pending
+
+	s.mu.Lock()
+	entry := s.runs[run]
+	adopted := false
+	if entry == nil {
+		sc, serr := s.readSidecar(run)
+		if serr == nil && (sc.Retained || sc.RetainedUntil != nil) &&
+			sc.Mode == domain.LaunchTUI && sc.ContainerID != "" {
+			entry = s.entryFromSidecar(old, sc)
+			entry.retained = true
+			s.runs[run] = entry
+			s.syncRunUserReservationsLocked()
+			adopted = true
 		}
 	}
 	s.mu.Unlock()
+	if entry == nil {
+		return nil, retainedTransitionError()
+	}
+	if adopted {
+		// Sidecar fallback adoption must have the same single Wait owner as
+		// normal recovery, otherwise a natural exit leaves the row stranded.
+		s.startSupervision(entry)
+	}
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	fresh, ferr := s.cfg.Store.GetRun(ctx, run)
+	deadline := entry.retainedUntil
+	if ferr != nil {
+		s.mu.Unlock()
+		return nil, ferr
+	}
+	valid := s.runs[run] == entry && entry.retained && fresh.Mode == domain.LaunchTUI &&
+		(fresh.Status == domain.RunMerged || fresh.Status == domain.RunAbandoned) &&
+		fresh.Reason == retainedCloseReason && deadline != nil && time.Now().UTC().Before(*deadline)
+	paused, cid := entry.paused, entry.containerID
+	s.mu.Unlock()
+	if !valid {
+		if deadline == nil || !time.Now().UTC().Before(*deadline) {
+			if deadline == nil {
+				s.mu.Lock()
+				if s.runs[run] == entry && entry.retained {
+					s.markRetainedDestroyDueLocked(entry)
+				}
+				s.mu.Unlock()
+			}
+			if expireErr := s.expireRetainedLocked(ctx, entry); expireErr != nil {
+				return nil, expireErr
+			}
+		}
+		return nil, retainedTransitionError()
+	}
+
+	resumed := false
+	if paused {
+		if resumeErr := s.cfg.Runtime.Resume(ctx, cid); resumeErr != nil {
+			return nil, errors.Join(retainedTransitionError(), resumeErr)
+		}
+		resumed = true
+		s.mu.Lock()
+		if s.runs[run] == entry {
+			entry.paused = false
+			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
+				slog.Warn("scheduler: persist resumed retained run", "run", run, "error", werr)
+			}
+		}
+		s.mu.Unlock()
+	}
+
+	rollback := func(cause error) error {
+		s.cfg.Git.StopDiffWatch(run)
+		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), ptyhost.RunSession(run))
+		mustPause := resumed || !paused
+		if mustPause {
+			if perr := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid); perr != nil &&
+				!errors.Is(perr, runtime.ErrNotFound) {
+				return errors.Join(cause, fmt.Errorf("scheduler: relaunch rollback pause: %w", perr))
+			}
+		}
+		s.mu.Lock()
+		var werr error
+		if s.runs[run] == entry {
+			entry.paused = true
+			entry.retained = true
+			werr = s.writeSidecar(entry.sidecar())
+		}
+		s.mu.Unlock()
+		if werr != nil {
+			return errors.Join(cause, fmt.Errorf("scheduler: relaunch rollback sidecar: %w", werr))
+		}
+		return cause
+	}
+
+	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err != nil {
-		return nil, err
+		return nil, rollback(err)
 	}
-	defer s.finishPending(next.ID, pending)
-	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, next.ID, publishedCommit, old.Branch, next.Task, ws.Origin)
+	if startSessionErr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(run), att); startSessionErr != nil {
+		_ = att.Close()
+		return nil, rollback(startSessionErr)
+	}
+	if diffWatchErr := s.cfg.Git.StartDiffWatch(ctx, fresh.WorkspaceID, run); diffWatchErr != nil {
+		return nil, rollback(diffWatchErr)
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	if s.runs[run] != entry {
+		s.mu.Unlock()
+		return nil, rollback(retainedTransitionError())
+	}
+	fresh, err = s.cfg.Store.GetRun(ctx, run)
+	if err == nil {
+		fresh.Status = domain.RunRunning
+		fresh.Reason = ""
+		fresh.StartedAt = &now
+		fresh.FinishedAt = nil
+		err = s.cfg.Store.UpdateRun(ctx, fresh)
+	}
+	s.mu.Unlock()
 	if err != nil {
-		s.failRelaunch(next, actor, fmt.Errorf("create checkout: %w", err))
-		return nil, err
+		return nil, rollback(err)
 	}
-	next.Worktree, next.Branch = checkout, branch
-	if err := s.cfg.Store.UpdateRun(ctx, next); err != nil {
-		s.failRelaunch(next, actor, fmt.Errorf("record checkout: %w", err))
-		return nil, err
+
+	s.mu.Lock()
+	entry.status = domain.RunRunning
+	entry.startedAt = now
+	entry.retained = false
+	entry.retainedUntil = nil
+	entry.paused = false
+	s.publish(ctx, events.Event{
+		WorkspaceID: fresh.WorkspaceID,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunStatusPayload{From: old.Status, To: domain.RunRunning},
+	})
+	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
+		slog.Warn("scheduler: clear retained sidecar after relaunch", "run", run, "error", werr)
 	}
-	if err := s.provision(ctx, next, ws, member, accountMember, argv, profile, true); err != nil {
-		return nil, err
-	}
-	return s.freshen(ctx, next), nil
+	s.mu.Unlock()
+	return fresh, nil
+
 }
 
-// failRelaunch marks a queued relaunch row failed after checkout creation
-// failed, walking queued -> provisioning -> failed so the transition table
-// stays legal.
-func (s *Scheduler) failRelaunch(run *domain.Run, actor domain.MemberID, cause error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+// installRetainedDestroyOwner installs the sidecar's exact container as a
+// retained owner before a boot-time destroy. That makes an uncertain destroy
+// visible to the in-memory lifecycle and gives the bounded sweep a due entry
+// to retry.
+func (s *Scheduler) installRetainedDestroyOwner(ctx context.Context, r *domain.Run, scanned sidecar) *supervised {
 	s.mu.Lock()
-	err := s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunQueued, domain.RunProvisioning, "", actor)
-	if err == nil {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
-			"provisioning: "+cause.Error(), actor)
+	defer s.mu.Unlock()
+	if entry := s.runs[r.ID]; entry != nil {
+		if !entry.retained || entry.containerID == "" ||
+			(scanned.ContainerID != "" && entry.containerID != runtime.ID(scanned.ContainerID)) {
+			return nil
+		}
+		s.markRetainedDestroyDueLocked(entry)
+		return entry
 	}
-	s.mu.Unlock()
+	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
 	if err != nil {
-		slog.Warn("scheduler: record relaunch checkout failure", "run", run.ID, "error", err)
+		slog.Warn("scheduler: reload retained run before destroy retry", "run", r.ID, "error", err)
+		return nil
+	}
+	current, err := s.readSidecar(r.ID)
+	if err != nil {
+		slog.Warn("scheduler: reload retained sidecar before destroy retry", "run", r.ID, "error", err)
+		return nil
+	}
+	mode := current.Mode
+	if mode == "" {
+		mode = fresh.Mode
+	}
+	if fresh.Mode != domain.LaunchTUI || !fresh.Status.Terminal() ||
+		fresh.Reason != retainedCloseReason || mode != domain.LaunchTUI ||
+		(!current.Retained && current.RetainedUntil == nil) || current.ContainerID == "" ||
+		(scanned.ContainerID != "" && current.ContainerID != scanned.ContainerID) {
+		return nil
+	}
+	current.Mode = mode
+	entry := s.entryFromSidecar(fresh, current)
+	entry.retained = true
+	s.runs[r.ID] = entry
+	s.syncRunUserReservationsLocked()
+	s.markRetainedDestroyDueLocked(entry)
+	return entry
+}
+
+// startRetainedWaitAfterDestroyFailure adds a Wait owner only when the
+// retained container is still alive. startSupervision supplies the
+// single-owner check when another recovery path already won the race.
+func (s *Scheduler) startRetainedWaitAfterDestroyFailure(ctx context.Context, entry *supervised) {
+	if entry == nil || ctx.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	eligible := s.runs[entry.runID] == entry && entry.retained && !entry.waitStarted
+	s.mu.Unlock()
+	if !eligible {
+		return
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	_, err := s.cfg.Runtime.Wait(probeCtx, entry.containerID)
+	cancel()
+	if errors.Is(err, context.DeadlineExceeded) {
+		s.startSupervision(entry)
+	}
+}
+
+// markRetainedDestroyDueLocked keeps failed destroy ownership eligible for
+// the next bounded sweep. The sidecar remains the durable ownership record.
+func (s *Scheduler) markRetainedDestroyDueLocked(entry *supervised) {
+	if entry == nil || s.runs[entry.runID] != entry || !entry.retained {
+		return
+	}
+	now := time.Now().UTC()
+	entry.retainedUntil = &now
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		slog.Warn("scheduler: persist retained destroy retry", "run", entry.runID, "error", err)
 	}
 }
 
@@ -198,9 +322,9 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 	return nil
 }
 
-// cleanupTerminalSidecars closes the crash window after a terminal status
-// persisted but before the final container destroy and sidecar removal.
-// Completed rows are terminal for recovery even though they remain closable.
+// cleanupTerminalSidecars reconciles terminal sidecars. An unexpired retained
+// TUI sidecar is adopted as dormant supervision; every other sidecar is
+// destroyed idempotently. Terminal rows never become active work during boot.
 func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 	entries, err := os.ReadDir(s.cfg.StateDir)
 	if err != nil {
@@ -216,11 +340,11 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				sc, serr := s.readSidecar(run)
-				if serr != nil {
-					slog.Warn("scheduler: read deleted terminal sidecar", "run", run, "error", serr)
-					continue
+				if serr == nil {
+					if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
+						slog.Warn("scheduler: retain orphan sidecar after destroy failure", "run", run, "error", derr)
+					}
 				}
-				s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run)
 				continue
 			}
 			slog.Warn("scheduler: load sidecar run during recovery", "run", run, "error", err)
@@ -234,18 +358,113 @@ func (s *Scheduler) cleanupTerminalSidecars(ctx context.Context) {
 			slog.Warn("scheduler: read terminal sidecar during recovery", "run", run, "error", err)
 			continue
 		}
-		s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run)
+		// The sidecar and the terminal row can change while the directory
+		// listing is in flight (notably when Relaunch clears retention).
+		// Never destroy a sidecar based on that stale terminal snapshot.
+		fresh, ferr := s.cfg.Store.GetRun(ctx, run)
+		if ferr != nil {
+			slog.Warn("scheduler: reload terminal sidecar run", "run", run, "error", ferr)
+			continue
+		}
+		if !fresh.Status.Terminal() {
+			continue
+		}
+		r = fresh
+		mode := sc.Mode
+		if mode == "" {
+			mode = r.Mode
+		}
+		retained := sc.Retained || sc.RetainedUntil != nil
+		if mode != domain.LaunchTUI || !retained || r.Reason != retainedCloseReason {
+			if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
+				slog.Warn("scheduler: retain invalid terminal sidecar", "run", run, "error", derr)
+			}
+			continue
+		}
+		sc.Mode = mode
+		sc.Retained = true
+		expireRetained := func(reason string) {
+			if sc.ContainerID == "" {
+				s.removeSidecar(run)
+				s.markRetainedReason(ctx, r, retainedExpiredReason)
+				return
+			}
+			owner := s.installRetainedDestroyOwner(ctx, r, sc)
+			if owner == nil {
+				return
+			}
+			if derr := s.expireRetained(ctx, owner); derr != nil {
+				slog.Warn("scheduler: "+reason, "run", run, "error", derr)
+			}
+		}
+		if sc.RetainedUntil == nil {
+			expireRetained("retain undated sidecar after destroy failure")
+			continue
+		}
+		if s.cfg.RunContainerTTL < 0 {
+			expireRetained("retain negative-TTL sidecar after destroy failure")
+			continue
+		}
+		if !time.Now().UTC().Before(*sc.RetainedUntil) {
+			expireRetained("retain expired sidecar after destroy failure")
+			continue
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		_, waitErr := s.cfg.Runtime.Wait(probeCtx, runtime.ID(sc.ContainerID))
+		cancel()
+		switch {
+		case waitErr == nil, errors.Is(waitErr, runtime.ErrNotFound):
+			if derr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), run); derr != nil {
+				slog.Warn("scheduler: retain unavailable sidecar after destroy failure", "run", run, "error", derr)
+				continue
+			}
+			s.markRetainedReason(ctx, r, retainedUnavailableReason)
+		case errors.Is(waitErr, context.DeadlineExceeded):
+			// The probe only establishes that the container is still alive.
+			// Reconcile the durable row and in-memory owner under one lock
+			// before installing a recovered Wait owner. A concurrent
+			// Relaunch may already own this run; never replace it.
+			s.mu.Lock()
+			if s.runs[run] != nil {
+				s.mu.Unlock()
+				continue
+			}
+			fresh, ferr := s.cfg.Store.GetRun(ctx, run)
+			if ferr != nil {
+				s.mu.Unlock()
+				slog.Warn("scheduler: reload retained run after probe", "run", run, "error", ferr)
+				continue
+			}
+			if fresh.Mode != domain.LaunchTUI ||
+				!fresh.Status.Terminal() || fresh.Reason != retainedCloseReason {
+				s.mu.Unlock()
+				continue
+			}
+			entry := s.entryFromSidecar(fresh, sc)
+			entry.retained = true
+			s.runs[run] = entry
+			s.mu.Unlock()
+			s.startSupervision(entry)
+		default:
+			slog.Warn("scheduler: retained sidecar probe failed", "run", run, "error", waitErr)
+		}
+	}
+}
+func (s *Scheduler) markRetainedReason(ctx context.Context, r *domain.Run, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.transitionLocked(ctx, r.ID, r.WorkspaceID, r.Status, r.Status, reason, ""); err != nil {
+		slog.Warn("scheduler: update retained close reason", "run", r.ID, "error", err)
 	}
 }
 
 // recoverUnstarted handles queued/provisioning rows whose launch died with
 // the server. Any container created for the run must be destroyed before
 // interrupting, or a still-running agent would keep mutating the checkout
-// forever - and corrupt it alongside a relaunch. The sidecar (written
-// right after Runtime.Start) names the container for the wide crash
-// window; a crash in the narrow window between Runtime.Create and the
-// sidecar write is reconciled through the container's creation key (the
-// run ID, persisted by the runtime at Create).
+// forever. The sidecar (written right after Runtime.Start) names the
+// container for the wide crash window; a crash in the narrow window between
+// Runtime.Create and the sidecar write is reconciled through the container's
+// creation key (the run ID, persisted by the runtime at Create).
 func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 	var cid runtime.ID
 	if sc, err := s.readSidecar(r.ID); err == nil && sc.ContainerID != "" {
@@ -256,8 +475,9 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 		slog.Warn("scheduler: creation-key lookup during recovery", "run", r.ID, "error", err)
 	}
 	if cid != "" {
-		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil {
+		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
 			slog.Warn("scheduler: destroy orphaned container during recovery", "run", r.ID, "error", derr)
+			return
 		}
 	}
 	if r.Worktree != "" {
@@ -272,8 +492,8 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 }
 
 // interrupt marks a run interrupted ("server restarted"), preserving its
-// checkout for relaunch. The status is re-read under s.mu so a steering
-// call that raced recovery (e.g. a kill) is never overwritten.
+// checkout for inspection and pull. The status is re-read under s.mu so a
+// steering call that raced recovery (e.g. a kill) is never overwritten.
 func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 	s.mu.Lock()
 	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
@@ -291,11 +511,12 @@ func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 	}
 	s.removeSidecar(r.ID)
 }
-
 func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 	if r.Status.Terminal() {
 		if sc, err := s.readSidecar(r.ID); err == nil {
-			s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), r.ID)
+			if cleanupErr := s.cleanupLeftoverContainer(ctx, runtime.ID(sc.ContainerID), r.ID); cleanupErr != nil {
+				slog.Warn("scheduler: cleanup terminal run container during recovery", "run", r.ID, "error", cleanupErr)
+			}
 		}
 		return
 	}
@@ -304,13 +525,21 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		s.interrupt(ctx, r)
 		return
 	}
+	// A successful relaunch persists RunRunning before clearing its retained
+	// marker. On reboot, the active durable row wins: stale terminal-retention
+	// metadata must not make the sweep destroy this live container.
+	if sc.Retained || sc.RetainedUntil != nil {
+		sc.Retained = false
+		sc.RetainedUntil = nil
+		if werr := s.writeSidecar(sc); werr != nil {
+			slog.Warn("scheduler: clear stale retained sidecar", "run", r.ID, "error", werr)
+		}
+	}
 	cid := runtime.ID(sc.ContainerID)
-
 	if sc.ExitObserved {
 		s.finalizeObservedExit(ctx, r, sc)
 		return
 	}
-
 	probeCtx, cancel := context.WithTimeout(ctx, exitProbeTimeout)
 	st, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
 	cancel()
@@ -339,9 +568,15 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 
 func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc sidecar) {
 	entry := s.entryFromSidecar(r, sc)
+	// Match the lifecycle lock order used by steering and supervision:
+	// lifecycleMu precedes Scheduler.mu. Claim finalizing before releasing
+	// either lock, then run the potentially blocking finalization work with
+	// both locks released.
+	entry.lifecycleMu.Lock()
 	s.mu.Lock()
 	if s.runs[r.ID] != nil {
 		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
 		return
 	}
 	// Kill and Close both use s.mu to serialize their status write. Read
@@ -351,27 +586,39 @@ func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc 
 	fresh, err := s.cfg.Store.GetRun(ctx, r.ID)
 	if err != nil {
 		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
 		slog.Warn("scheduler: reload observed-exit run", "run", r.ID, "error", err)
 		return
 	}
 	if fresh.Status.Terminal() {
 		s.mu.Unlock()
-		s.cleanupLeftoverContainer(context.Background(), entry.containerID, r.ID)
+		entry.lifecycleMu.Unlock()
+		if derr := s.cleanupLeftoverContainer(context.Background(), entry.containerID, r.ID); derr != nil {
+			slog.Warn("scheduler: retain observed-exit sidecar after destroy failure", "run", r.ID, "error", derr)
+		}
 		return
 	}
 	entry.status = fresh.Status
 	s.runs[r.ID] = entry
+	if s.runs[r.ID] != entry || entry.retained || entry.finalizing {
+		s.mu.Unlock()
+		entry.lifecycleMu.Unlock()
+		return
+	}
+	entry.finalizing = true
 	s.mu.Unlock()
+	entry.lifecycleMu.Unlock()
 	s.finalize(entry, sc.ExitCode)
 }
 
-func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID, run domain.RunID) {
+func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID, run domain.RunID) error {
 	if cid != "" {
-		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil {
-			slog.Warn("scheduler: destroy leftover container during recovery", "run", run, "error", derr)
+		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
+			return fmt.Errorf("scheduler: destroy leftover container during recovery: %w", derr)
 		}
 	}
 	s.removeSidecar(run)
+	return nil
 }
 
 func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtime.ID) {
@@ -384,8 +631,9 @@ func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtim
 		}
 	}
 	if cid != "" {
-		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil {
+		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
 			slog.Warn("scheduler: destroy stale container during recovery", "run", r.ID, "error", derr)
+			return
 		}
 	}
 	s.interrupt(ctx, r)
@@ -437,8 +685,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 			s.didNotSurvive(ctx, r, cid)
 			return
 		}
-		s.wg.Add(1)
-		go s.superviseWait(entry)
+		s.startSupervision(entry)
 		if sc.KillRequested {
 			if serr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); serr != nil {
 				slog.Warn("scheduler: re-issue persisted kill during recovery", "run", r.ID, "error", serr)
@@ -471,6 +718,10 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if sc.agentReport().State == agentstatus.Waiting {
 		parked = time.Now().UTC()
 	}
+	mode := sc.Mode
+	if mode == "" {
+		mode = r.Mode
+	}
 	return &supervised{
 		runID: r.ID,
 		// The workspace comes off the run row, not the sidecar: a sidecar
@@ -486,14 +737,17 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		// run itself. Reattaching resizes the terminal, so a full-screen
 		// agent repaints at once - and without the report that repaint
 		// would read as work resuming and hand the run back to an agent
-		// that is still waiting for its member.
+		// that is still waiting for their member.
 		reporter:       sc.Reporter,
 		agentReport:    sc.agentReport(),
 		parkedAt:       parked,
+		launchMode:     mode,
 		status:         r.Status,
 		startedAt:      started,
 		paused:         sc.Paused,
 		killRequested:  sc.KillRequested,
+		retained:       sc.Retained,
+		retainedUntil:  sc.RetainedUntil,
 		runUser:        sc.RunUser,
 		home:           sc.Home,
 		exitObserved:   sc.ExitObserved,

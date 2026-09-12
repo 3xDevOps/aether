@@ -257,7 +257,13 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       perform: (d) => d.api.runProtect(id, !run.protected),
     })
   }
-  if (finished && cap.hasMethod('run.relaunch') && maySteer) {
+  if (
+    run.mode === 'tui' &&
+    runState(run.status) === 'done' &&
+    run.reason === 'closed; retained container' &&
+    cap.hasMethod('run.relaunch') &&
+    maySteer
+  ) {
     list.push({
       id: 'relaunch',
       label: 'Relaunch run',

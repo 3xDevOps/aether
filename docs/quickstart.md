@@ -451,11 +451,10 @@ everyone watching sees who said it.
 
 ## 8. Pull the result
 
-When the first TUI agent exits unsuccessfully, the run stays alive in a login
-shell. Start another installed agent in the same checkout if needed, then type
-`exit` to finish the run. A successful TUI exit finishes the run directly.
-Aether commits the latest work to the run's branch and parks the run in
-`needs-attention`.
+When the TUI agent exits, the run stays alive in a login shell. Start another
+installed agent in the same checkout if needed; exiting that shell opens another
+login shell, so the run remains live until you explicitly close it. Close
+commits and publishes the latest work to the run's branch.
 
 ```sh
 aether pull <run-id>
@@ -509,6 +508,17 @@ Then close the run out so it leaves the attention board:
 ```sh
 aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
+
+Closing retains the exact TUI container, checkout, run row, member account and
+coordination surfaces for `--run-container-ttl` (default `1h`). Before that
+retention expires, reopen the same run with:
+
+```sh
+aether relaunch <run-id>
+```
+
+Relaunch does not create a new run or container and expired or unavailable runs
+cannot be relaunched. Kill and Delete remain immediate cleanup operations.
 
 The local daemon is optional. It fetches server-owned run branches as agents
 commit and can push your local base branch in **local-only** workspaces. It

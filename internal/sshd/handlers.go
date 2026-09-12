@@ -268,6 +268,9 @@ func (s *Server) runClose(ctx context.Context, member domain.MemberID, params js
 	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
 }
 
+// runRelaunch re-enters the addressed retained TUI run. The retained
+// container still carries the account environment it was launched with, so
+// account-share authorization must be current before the scheduler attaches.
 func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	id, perr := runIDParams(params)
 	if perr != nil {
@@ -277,7 +280,7 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if _, perr := s.launchAccount(ctx, member, string(old.RelaunchAccount(member))); perr != nil {
+	if _, perr := s.launchAccount(ctx, member, string(old.AccountMember())); perr != nil {
 		return nil, perr
 	}
 	run, err := s.cfg.Runs.Relaunch(ctx, id, member)

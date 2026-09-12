@@ -82,6 +82,10 @@ roster, and a disk gauge. Launch, inject, pause, kill, close, relaunch and
 handoff all call the same methods the CLI does, with the same permission checks
 and timeline attribution. The server-hosted dashboard also exposes the shared
 member-home **Files** editor through the same authenticated RPCs.
+A live TUI run closed as merged or abandoned keeps its exact run row, container
+and checkout for `--run-container-ttl` (default `1h`); relaunch reopens that
+retained Done run before expiry rather than creating a new run or container.
+Expired or unavailable runs cannot relaunch.
 Launch freshness is server-owned: before a run row exists, the server captures
 the workspace base. A configured mirror refreshes that base; a local-only
 workspace reads its local base. A failed pre-run check creates no run row.

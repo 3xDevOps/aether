@@ -8,19 +8,22 @@ drive these paths are in [testing.md](testing.md).
 
 ## The tuning knobs
 
-Four `aether-server serve` flags, all with working defaults. Zero always
-means "use the default"; a negative value turns a guard off.
+Five `aether-server serve` flags, all with working defaults. For duration
+settings, zero means "use the default". A negative value disables a guard
+where noted; for `--run-container-ttl`, negative means no retention and
+immediate cleanup.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
+| `--run-container-ttl` | `1h` | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `1h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
-`CheckoutTTL`, `MinFreeDiskBytes`) and pass straight through to the
-scheduler.
+`CheckoutTTL`, `RunContainerTTL`, `MinFreeDiskBytes`) and pass straight through
+to the scheduler.
 
 ### Picking a stall threshold
 
@@ -186,82 +189,78 @@ deleted by an older cleanup.
 ### Server reboot, or a hard kill
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs
-to run. On the next boot the scheduler reconciles every non-terminal run
-against the runtime's actual containers:
+to run. On the next boot the scheduler reconciles every non-terminal run and
+every retained closed TUI run against the runtime's actual containers:
 
-- **The container survived** (the server died, the container did not):
-  supervision reattaches to it, the PTY session is re-adopted, the diff
-  watch restarts from the tree its last snapshot wrote so the next interval
+- **An active container survived** (the server died, the container did not):
+  supervision reattaches to it, the PTY session is re-adopted, the diff watch
+  restarts from the tree its last snapshot wrote so the next interval
   continues the chain, and the run stays `running`. Attaches, injects and the
   eventual exit all work as if nothing happened. A kill that was accepted
   before the crash is re-issued. A run the agent had parked stays parked
   with its reason: the last report is recovered with the run, so
   reattaching - which resizes the terminal and makes a full-screen agent
   repaint - does not read as the turn resuming.
-- **The container is gone**: the partial work is committed as `wip:`, the
+- **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
-  checkout preserved.
+  checkout preserved. An interrupted run is not relaunchable.
 - **The run never started** (it died between the row and the container): any
   container that was created is destroyed first - found by its sidecar or,
   in the narrow window before the sidecar exists, by the run ID the runtime
-  persists as the container's creation key - and then the same wip-commit
-  and interrupt applies.
+  persists as the container's creation key - and then the same wip-commit and
+  interrupt applies.
+- **A retained closed TUI container survived**: its merged or abandoned row,
+  checkout, member account, and coordination surfaces remain owned by that
+  exact container. Boot reconciliation preserves them for an eligible
+  relaunch.
+- **A retained container is gone or expired**: boot cleanup destroys any
+  remaining runtime object, removes its retention metadata, and leaves the
+  row unavailable for relaunch. It never creates a replacement.
 
-`completed` runs are not recovered: their committed result branch and status
-are already durable, their run containers are gone, and they remain
-`completed` across the restart. They are non-final only in the review sense:
-an authorized member can still close one as merged or abandoned.
+Headless runs are not recovered into a shell. When their agent exits, Aether
+commits and publishes the branch, records `completed` for a clean exit or
+`failed` for an error, and destroys the container immediately. A `completed`
+run remains available for review and an authorized member may close it as
+merged or abandoned, but neither headless status is relaunchable.
 
-An interrupted run relaunches in one click (`aether relaunch <run>`, or the
-run card). The relaunch is a new run cloned from the published branch, and
-where the harness supports it the agent is asked to continue its own
-conversation. A harness with no resume flag starts fresh, and a
-deployment-supplied argv override never has one appended - nothing checks
-the override is still that CLI. See [harnesses.md](harnesses.md).
+### TUI lifecycle and relaunch
 
-For a harness that can name a conversation, the run's identity is pinned at
-launch: the server generates one UUID per run, launches with
-`claude --session-id <uuid>`, and records it on the run row. The relaunch
-then runs `claude --resume <uuid>`, which names that exact conversation. It
-is unaffected by every run mounting its checkout at the same container path
-and sharing one credential home per member, so a reboot that interrupted
-several of a member's runs still relaunches each one into its own
-conversation.
+For `--mode tui`, container PID 1 supervises the harness. After any normal
+harness exit, PID 1 opens a login shell; when that shell exits, another login
+shell opens. The run and its container therefore remain `running` until an
+explicit Close, Kill, or Delete. A harness terminated by a signal or other
+non-normal error does not get a replacement shell; supervision records the
+failure and cleans up the container.
 
-Two cases do not resume the pinned conversation. `claude --resume` on an ID it
-cannot find prints `No conversation found with session ID: <id>` and exits 1,
-which would fail the relaunch outright.
+Close is explicit and records one of the two outcomes:
 
-The first opens a fresh conversation instead:
+```sh
+aether close <run> --outcome merged
+aether close <run> --outcome abandoned
+```
 
-- The run was interrupted before its agent ever started (a `queued` or
-  `provisioning` row). The ID is stamped when the row is created, so it
-  names a conversation the harness never opened.
-- The relaunch changes agent accounts. A normal run relaunched directly by
-  another member uses that member's account, whose home lacks the transcript.
-  An account distinct from the run owner, whether selected at launch or left
-  by a handoff, stays pinned; the owner can relaunch and resume it only while
-  they have access.
+Closing a live TUI run pauses its container, commits and publishes the current
+checkout, records the selected outcome, and retains the exact container,
+checkout, run row, member account, and coordination surfaces for
+`--run-container-ttl`. Zero uses the default `1h`; a negative TTL disables
+retention and cleans up immediately. Kill stops and destroys a run immediately.
+Delete stops any live container and removes the checkout, transcript, and
+durable run records; its timeline remains audit history.
 
-The second is refused: relaunching one interrupted row twice while the first
-relaunch is still active fails with `agent conversation already resumed by
-active run <id>`. Two agents appending to one transcript is not a
-recoverable state, and the checkout guard never catches it because every
-relaunch gets a checkout of its own. Once the first relaunch reaches a
-terminal state, relaunching the original row resumes the conversation
-again.
+Relaunch is available only for an explicitly closed, retained TUI run whose
+retention deadline has not passed:
 
-A run whose harness cannot pin a session (`pi`, `omp`) falls back to
-`--continue`, and so does a run row created before pinning existed.
-`--continue` names no conversation: it resumes that member's most recent
-conversation at that container path, which is not necessarily this run's own
-and not necessarily one from this workspace. Treat that fallback as a
-convenience, not a guarantee, and read the agent's first turn before
-steering it. The fallback is sticky - a row that has no pinned ID never
-acquires one, because there is no earlier conversation to name.
+```sh
+aether relaunch <run>
+```
 
-Relaunching a run that finished on its own does *not* resume: there is no
-interrupted conversation behind it. It gets a session of its own instead.
+It resumes the same run row, container, checkout, member account, and
+coordination surfaces. It does not create a run, checkout, branch, or
+replacement container, and it performs no new launch or disk-floor admission.
+An expired, unavailable, interrupted, killed, deleted, or headless run cannot
+be relaunched. The expiry sweep runs within at most one minute; boot
+reconciliation also sweeps expired or unavailable retained runs, so a failed
+relaunch never falls back to a new run.
 
 ### Disk pressure
 
@@ -285,10 +284,12 @@ live run it first stops the container, waits for supervision to publish the
 final branch, then removes the checkout and durable run records; its timeline
 stays as audit history.
 
-Below `--min-free-disk`, `run.launch` and `run.relaunch` are refused with
-`-32004` (unavailable) and a message naming the numbers. Everything else -
-attaching, steering, pulling published run branches, closing, killing and
-deleting runs - keeps working, which is what you need to actually clear space.
+Below `--min-free-disk`, `run.launch` is refused with `-32004` (unavailable)
+and a message naming the numbers. Relaunching an eligible retained TUI run
+does not perform a new launch or disk-floor admission, so it can reopen its
+exact retained container and checkout below that floor. Everything else -
+attaching, steering, pulling, closing, killing and deleting runs - keeps
+working, which is what you need to actually clear space.
 
 If the filesystem cannot be read at all, the floor allows the run: the guard
 exists to stop a disk from filling, not to stop the server.
@@ -386,11 +387,13 @@ Either way the run remains supervised in its run container: while unpaused,
 members with the existing steer permission can attach, inject input, and
 open or reconnect a writable run-container shell to investigate it.
 
-A clean agent exit commits the latest work to the run branch, destroys the
-container, and marks the run `completed`. A crashing agent marks the run
-`failed`; either outcome has no replacement login shell. The worktree and
-transcript are preserved as appropriate, and a failed run's partial work is
-committed as `wip:`.
+A clean TUI harness exit returns to the supervisor, which opens a login shell
+instead of finalizing the run. Explicit Close commits and publishes the latest
+work, records merged or abandoned, and applies the retention policy. A harness
+terminated by a signal or other non-normal error marks the run `failed` and
+cleans up the container; it does not receive a replacement shell. Headless
+clean exit still commits and publishes, records `completed`, and destroys the
+container immediately. A failed run's partial work is committed as `wip:`.
 
 ### SSH drop mid-attach
 
