@@ -203,17 +203,46 @@ func TestIntegrationChaosRebootRetainedTUI(t *testing.T) {
 	} else if !os.SameFile(worktreeInfo, after) {
 		t.Fatalf("checkout after relaunch is not the retained checkout %s", worktree)
 	}
-
-	// A fresh attach and steer prove the retained container is usable again,
-	// not merely present in Docker and the database.
 	att = waitAttach(t, client, runID)
+
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
 		RunID: runID, Message: "resume-probe",
 	}, nil); err != nil {
 		t.Fatalf("run.inject after retained relaunch: %v", err)
 	}
 	waitOutput(t, att, "got:resume-probe")
-	env.waitStatus(t, ctrl, runID, domain.RunCompleted)
+	// The harness exits cleanly, but the TUI supervisor keeps the container
+	// alive in its reusable login-shell loop.
+	waitOutput(t, att, "[aether] harness exited with code 0")
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: runID, Message: "printf 'reboot-login-shell-ready\\n'",
+	}, nil); err != nil {
+		t.Fatalf("run.inject in retained login shell: %v", err)
+	}
+	waitOutput(t, att, "reboot-login-shell-ready")
+	att.close()
+
+	var active protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: runID}, &active); err != nil {
+		t.Fatalf("run.get after retained harness exit: %v", err)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("run after retained harness exit = %q, want running in the login-shell loop",
+			active.Run.Status)
+	}
+
+	var finalized protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: runID, Outcome: string(domain.RunMerged),
+	}, &finalized); err != nil {
+		t.Fatalf("run.close after retained relaunch: %v", err)
+	}
+	if finalized.Run.Status != string(domain.RunMerged) ||
+		finalized.Run.Mode != string(domain.LaunchTUI) {
+		t.Fatalf("finalized retained run = status %q mode %q, want merged TUI",
+			finalized.Run.Status, finalized.Run.Mode)
+	}
+	env.waitStatus(t, ctrl, runID, domain.RunMerged)
 
 	head := env.fetchBranch(t, branch)
 	if !strings.Contains(head.message, "aether:") {

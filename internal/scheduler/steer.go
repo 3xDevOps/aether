@@ -71,10 +71,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	if err != nil {
 		return err
 	}
-	if r.Status.Terminal() {
-		return nil
-	}
-	if r.Worktree != "" {
+	if !r.Status.Terminal() && r.Worktree != "" {
 		if _, cerr := s.commitAll(ctx, id, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit on kill", "run", id, "error", cerr)
 		}
@@ -89,6 +86,12 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return s.Kill(ctx, id, actor)
 	}
+	if pending := s.pending[id]; pending != nil {
+		pending.killRequested = true
+		pending.killActor = actor
+		s.mu.Unlock()
+		return nil
+	}
 	r, err = s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
 		s.mu.Unlock()
@@ -96,6 +99,22 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	}
 	if r.Status.Terminal() {
 		s.mu.Unlock()
+		// A terminal retained row can outlive the in-memory owner during
+		// startup, before recoverRuns has had a chance to adopt its sidecar.
+		// Reuse DeleteRun's reconciliation so Kill has the same durable
+		// ownership and retry behavior instead of treating that row as a
+		// no-op and leaking its container.
+		retainedEntry, retry, reconcileErr := s.reconcileRetainedSidecarForDelete(ctx, id)
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		if retainedEntry != nil || retry {
+			// Let Kill reacquire an entry's lifecycle lock before deciding
+			// between expiry and a terminal no-op. A retry with no owner
+			// means a pending launch or a row that moved back to active;
+			// route it through Kill as well so that state is not discarded.
+			return s.Kill(ctx, id, actor)
+		}
 		return nil
 	}
 	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
@@ -238,6 +257,7 @@ func (s *Scheduler) reconcileRetainedSidecarForDelete(ctx context.Context, run d
 	entry := s.entryFromSidecar(current, sc)
 	entry.retained = true
 	s.runs[run] = entry
+	s.syncRunUserReservationsLocked()
 	return entry, false, nil
 
 }
@@ -368,6 +388,19 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	return nil
 }
 
+// persistRetainedSidecar makes both the sidecar contents and its directory
+// entry durable. CloseRun calls it before writing the terminal row, so a
+// reboot can never see the retained promise without the ownership marker.
+func (s *Scheduler) persistRetainedSidecar(sc sidecar) error {
+	if err := s.writeSidecar(sc); err != nil {
+		return fmt.Errorf("scheduler: persist retained close: %w", err)
+	}
+	if err := fsyncDir(s.cfg.StateDir); err != nil {
+		return fmt.Errorf("scheduler: persist retained close: %w", err)
+	}
+	return nil
+}
+
 // CloseRun resolves a run's outcome on a human's say-so. A live TUI run is
 // detached, paused, committed, published, and retained in its exact
 // container; all other runs follow the immediate stop-and-destroy path.
@@ -422,15 +455,20 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 
 	if retained {
 		// Re-labeling an already closed retained run keeps the same deadline
-		// and container; no agent or checkout operation is repeated.
+		// and container; no agent or checkout operation is repeated. Verify
+		// the ownership marker is durable before changing the row again.
 		s.mu.Lock()
-		err := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
-		if err == nil {
-			entry.status = outcome
-			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
-				slog.Warn("scheduler: persist retained close outcome", "run", run, "error", werr)
-			}
+		retainedSidecar := entry.sidecar()
+		s.mu.Unlock()
+		if err := s.persistRetainedSidecar(retainedSidecar); err != nil {
+			return err
 		}
+		s.mu.Lock()
+		if s.runs[run] != entry {
+			s.mu.Unlock()
+			return retainedTransitionError()
+		}
+		err := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
 		s.mu.Unlock()
 		return err
 	}
@@ -466,23 +504,47 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				s.mu.Unlock()
 				return retainedTransitionError()
 			}
+			// Install the retained ownership marker before the terminal
+			// row. If the process dies between these writes, recovery sees
+			// an active row and clears the stale marker rather than
+			// destroying the container; once the row is terminal, the
+			// marker is already durable and protects the promise.
+			preCloseSidecar := entry.sidecar()
+			rollbackSidecar := preCloseSidecar
+			rollbackSidecar.Paused = true
+			rollbackSidecar.Retained = false
+			rollbackSidecar.RetainedUntil = nil
+			retainedSidecar := preCloseSidecar
+			retainedSidecar.Paused = true
+			retainedSidecar.Retained = true
+			retainedSidecar.RetainedUntil = &deadline
+			persistErr := s.persistRetainedSidecar(retainedSidecar)
+			if persistErr != nil {
+				rollbackErr := s.persistRetainedSidecar(rollbackSidecar)
+				s.mu.Unlock()
+				restoreErr := s.restoreAfterCloseFailure(ctx, entry, alreadyPaused)
+				if rollbackErr != nil || restoreErr != nil {
+					return errors.Join(persistErr, rollbackErr, restoreErr)
+				}
+				return persistErr
+			}
 			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
+			if transitionErr == nil {
+				entry.status = outcome
+				entry.paused = true
+				entry.retained = true
+				entry.retainedUntil = &deadline
+			}
 			s.mu.Unlock()
 			if transitionErr != nil {
+				// A failed row write leaves entry in its pre-close
+				// state. The rollback restores that state, including
+				// replacing this marker before reattaching the session.
 				if rollbackErr := s.restoreAfterCloseFailure(ctx, entry, alreadyPaused); rollbackErr != nil {
 					return errors.Join(transitionErr, rollbackErr)
 				}
 				return transitionErr
 			}
-			s.mu.Lock()
-			entry.status = outcome
-			entry.paused = true
-			entry.retained = true
-			entry.retainedUntil = &deadline
-			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
-				slog.Warn("scheduler: persist retained close", "run", run, "error", werr)
-			}
-			s.mu.Unlock()
 			return nil
 		}
 	}
@@ -498,7 +560,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 }
 
 // restoreAfterCloseFailure returns a detached TUI run to its exact
-// pre-close interaction state after the terminal store update failed. The
+// pre-close interaction state after a retained close step failed. The
 // container is paused while the restoration is in progress, so every
 // confirmed runtime state is persisted before the next potentially failing
 // step.

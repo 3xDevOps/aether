@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -323,6 +324,111 @@ func TestCloseRunResolvesStalledRun(t *testing.T) {
 	}
 	if err := e.sched.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
+	}
+}
+
+// Kill must reconcile a durable retained owner before recoverRuns adopts it.
+// The terminal row remains, but the exact retained container and sidecar are
+// destroyed through the normal retry-owning expiry path.
+func TestKillUnsupervisedRetainedSidecar(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "kill retained sidecar")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("read retained sidecar: %v", err)
+	}
+	if !sc.Retained || sc.ContainerID == "" {
+		t.Fatalf("retained sidecar = %+v", sc)
+	}
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	if killErr := recovered.Kill(ctx, run.ID, e.member.ID); killErr != nil {
+		t.Fatalf("startup Kill: %v", killErr)
+	}
+	waitFor(t, "unsupervised retained container destroyed", func() bool {
+		return e.rt.byName(string(run.ID)) == nil
+	})
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun after startup Kill: %v", err)
+	}
+	if row.Reason != retainedUnavailableReason {
+		t.Fatalf("startup Kill reason = %q, want %q", row.Reason, retainedUnavailableReason)
+	}
+	if recovered.RetainsContainer(ctx, run.ID) {
+		t.Fatal("startup Kill left a durable retained ownership promise")
+	}
+	if _, err := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("sidecar after startup Kill: %v", err)
+	}
+	recovered.mu.Lock()
+	entry := recovered.runs[run.ID]
+	recovered.mu.Unlock()
+	if entry != nil {
+		t.Fatalf("startup Kill left an in-memory owner: %+v", entry)
+	}
+}
+
+// A retained sidecar is installed before the row transition. If that write
+// fails, CloseRun must return an error and restore the exact live state rather
+// than publishing a terminal retained promise.
+func TestCloseRunRetainedSidecarFailureRollsBack(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, c := e.launchFake(t, "retained sidecar failure")
+	stateDir := e.cfg.StateDir
+	e.sched.cfg.StateDir = filepath.Join(stateDir, "missing")
+
+	err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged)
+	e.sched.cfg.StateDir = stateDir
+	if err == nil || !strings.Contains(err.Error(), "persist retained close") {
+		t.Fatalf("CloseRun sidecar failure = %v", err)
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if row.Reason != "" {
+		t.Fatalf("row reason after failed retained close = %q, want empty", row.Reason)
+	}
+	if got := c.currentState(); got != "running" {
+		t.Fatalf("container state after failed retained close = %q, want running", got)
+	}
+	if e.sched.Paused(run.ID) {
+		t.Fatal("failed retained close left the run paused")
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("read sidecar after failed retained close: %v", err)
+	}
+	if sc.Paused || sc.Retained || sc.RetainedUntil != nil {
+		t.Fatalf("sidecar after failed retained close = %+v", sc)
+	}
+	if got := e.pty.ActiveSessions(string(ptyhost.RunSession(run.ID))); len(got) != 1 {
+		t.Fatalf("restored PTY sessions = %v, want one", got)
+	}
+	if _, watching := e.git.watchingFor(run.ID); !watching {
+		t.Fatal("diff watch was not restored after failed retained close")
+	}
+	if retryErr := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); retryErr != nil {
+		t.Fatalf("CloseRun retry after sidecar failure: %v", retryErr)
+	}
+	closed := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if closed.Reason != retainedCloseReason {
+		t.Fatalf("retry close reason = %q, want %q", closed.Reason, retainedCloseReason)
+	}
+	sc, err = e.sched.readSidecar(run.ID)
+	if err != nil || !sc.Retained || sc.RetainedUntil == nil {
+		t.Fatalf("sidecar after close retry = %+v, %v", sc, err)
+	}
+	if err := e.sched.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun after close retry: %v", err)
 	}
 }
 

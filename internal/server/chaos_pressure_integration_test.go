@@ -148,6 +148,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	// Keep one explicit retained TUI row as the relaunch fixture. It is
 	// created after the checkout sweep so the floor test can prove relaunch
 	// reuses its checkout instead of requesting new checkout admission.
+	env.retainedTUIFallback(t, "retained disk relaunch")
 	var retained protocol.RunResult
 	if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: "retained disk relaunch", Harness: "fake",
@@ -231,8 +232,38 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		t.Fatalf("run.inject retained fixture: %v", err)
 	}
 	waitOutput(t, retainedAtt, "got:finish")
+	// A clean harness exit enters the supervisor's reusable login-shell loop;
+	// it does not complete the TUI run.
+	waitOutput(t, retainedAtt, "[aether] harness exited with code 0")
+	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: retained.Run.ID, Message: "printf 'pressure-login-shell-ready\\n'",
+	}, nil); err != nil {
+		t.Fatalf("run.inject in retained login shell: %v", err)
+	}
+	waitOutput(t, retainedAtt, "pressure-login-shell-ready")
 	retainedAtt.close()
-	env.waitStatus(t, retained.Run.ID, domain.RunCompleted)
+
+	var active protocol.RunResult
+	if err := env.ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: retained.Run.ID}, &active); err != nil {
+		t.Fatalf("run.get after retained harness exit: %v", err)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("retained fixture after harness exit = %q, want running in the login-shell loop",
+			active.Run.Status)
+	}
+
+	var finalized protocol.RunResult
+	if err := env.ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: retained.Run.ID, Outcome: string(domain.RunAbandoned),
+	}, &finalized); err != nil {
+		t.Fatalf("run.close retained fixture after relaunch: %v", err)
+	}
+	if finalized.Run.Status != string(domain.RunAbandoned) ||
+		finalized.Run.Reason != "closed; retained container" {
+		t.Fatalf("finalized retained fixture = status %q reason %q, want abandoned retained row",
+			finalized.Run.Status, finalized.Run.Reason)
+	}
+	env.waitStatus(t, retained.Run.ID, domain.RunAbandoned)
 }
 
 // TestIntegrationChaosStallUX drives the failure table's "Agent crashes or
@@ -453,6 +484,41 @@ func (e *pressureEnv) parkOnStdin(t *testing.T, task string) {
 				return
 			}
 			c.output("got:" + line + "\r\n")
+		}
+	})
+}
+
+// retainedTUIFallback models the Docker TUI supervisor for the no-Docker
+// runtime: the fake harness handles "finish", exits normally into a persistent
+// shell phase, and answers the shell probe without claiming a container exit.
+func (e *pressureEnv) retainedTUIFallback(t *testing.T, task string) {
+	t.Helper()
+	fake, ok := e.rt.(*e2eRuntime)
+	if !ok {
+		return
+	}
+	fake.script(task, func(c *e2eContainer) {
+		for {
+			line, ok := c.readStdinLine()
+			if !ok {
+				return
+			}
+			c.output("got:" + line + "\r\n")
+			if line != "finish" {
+				continue
+			}
+			_ = os.WriteFile(filepath.Join(c.spec.WorktreeHostPath, "result.txt"),
+				[]byte("hello-from-agent\n"), 0o644)
+			c.output("[aether] harness exited with code 0\r\n")
+			for {
+				line, ok := c.readStdinLine()
+				if !ok {
+					return
+				}
+				if line == "printf 'pressure-login-shell-ready\\n'" {
+					c.output("pressure-login-shell-ready\r\n")
+				}
+			}
 		}
 	})
 }
