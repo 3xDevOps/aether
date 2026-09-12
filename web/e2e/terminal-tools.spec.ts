@@ -36,7 +36,7 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
   await screen.click()
   // Ctrl+Shift+V must stay on xterm's native paste path. This exercises the
   // Windows-sensitive shortcut without depending on navigator.clipboard.readText
-  // in the renderer; clipboard-read permission is deliberately not granted.
+  // in the renderer.
   await page.context().grantPermissions(['clipboard-write'], {
     origin: new URL(alice.url).origin,
   })
@@ -79,12 +79,86 @@ test('the terminal dock opens on request, zooms and finds', async ({ page, aethe
   await find.press('Enter')
   await expect(dock.locator('.xterm-selection div').first()).toBeVisible()
 
+  await find.press('Escape')
+  await expect(dock.getByLabel('Find in terminal')).toBeHidden()
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: new URL(alice.url).origin,
+  })
+  const readClipboard = () => page.evaluate(() => navigator.clipboard.readText())
+  await dock.getByRole('button', { name: 'Copy terminal selection' }).click()
+  await expect.poll(readClipboard).toBe('aether-found-me')
+
+  // The keyboard copy path must copy xterm's selection even though the
+  // browser has no native DOM selection to handle. Focus xterm directly so
+  // the find input does not consume the shortcut or clear the match.
+  await page.evaluate(() => navigator.clipboard.writeText('stale clipboard'))
+  await dock.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+Shift+C')
+  await expect.poll(readClipboard).toBe('aether-found-me')
+
+  if (process.platform === 'darwin') {
+    // Native Cmd+C can arrive after xterm has lost focus (for example, after
+    // a repaint). The document fallback must still use the selected terminal.
+    await page.evaluate(() => navigator.clipboard.writeText('stale clipboard'))
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    })
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.activeElement === document.body || document.activeElement === document.documentElement,
+        ),
+      )
+      .toBeTruthy()
+    await page.keyboard.press('Meta+C')
+    await expect.poll(readClipboard).toBe('aether-found-me')
+  }
+
+  await dock.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.press('Control+Shift+F')
   await find.fill('no-such-output')
   await find.press('Enter')
   await expect(dock.getByText('No matches')).toBeVisible()
 
   await find.press('Escape')
   await expect(dock.getByLabel('Find in terminal')).toBeHidden()
+
+  if (process.platform === 'darwin') {
+    // Enable xterm mouse reporting, then hold Option while dragging. The
+    // configured macOptionClickForcesSelection path must keep this local,
+    // rather than sending a mouse event to the shell.
+    await dock.locator('.xterm-helper-textarea').focus()
+    await page.keyboard.type("printf '\\033[?1000h'; printf '\\141ether-mouse-select\\n'\n")
+    await expect(dock.locator('.xterm-rows')).toContainText('aether-mouse-select', {
+      timeout: 30_000,
+    })
+    try {
+      const row = dock
+        .locator('.xterm-rows > div')
+        .filter({ hasText: 'aether-mouse-select' })
+        .last()
+      const box = await row.boundingBox()
+      expect(box).not.toBeNull()
+      if (!box) throw new Error('mouse-selection row has no bounding box')
+      const y = box.y + box.height / 2
+      await page.keyboard.down('Alt')
+      try {
+        await page.mouse.move(box.x + 2, y)
+        await page.mouse.down()
+        await page.mouse.move(box.x + box.width - 2, y)
+        await page.mouse.up()
+      } finally {
+        await page.mouse.up().catch(() => {})
+        await page.keyboard.up('Alt').catch(() => {})
+      }
+      await expect(dock.locator('.xterm-selection div').first()).toBeVisible()
+      await dock.getByRole('button', { name: 'Copy terminal selection' }).click()
+      await expect.poll(readClipboard).toContain('aether-mouse-select')
+    } finally {
+      await dock.locator('.xterm-helper-textarea').focus()
+      await page.keyboard.type("printf '\\033[?1000l'\n")
+    }
+  }
 
   await dock.getByRole('button', { name: 'Collapse terminal dock' }).click()
   await dock.getByRole('button', { name: 'Expand terminal dock' }).click()

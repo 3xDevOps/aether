@@ -27,6 +27,10 @@ vi.mock('@xterm/xterm', () => {
 
     attachCustomKeyEventHandler() {}
 
+    onSelectionChange() {
+      return { dispose() {} }
+    }
+
     onData() {
       return { dispose() {} }
     }

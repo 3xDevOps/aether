@@ -34,6 +34,53 @@ const IMAGE_TYPES: Record<string, true> = {
   'image/webp': true,
 }
 
+let activeCopyTerminal: Terminal | null = null
+
+/** Keep native Cmd+C working when a read-only terminal has been blurred. */
+export function registerTerminalCopy(term: Terminal, host: HTMLElement): () => void {
+  const owner = host.parentElement ?? host
+  const onInteraction = () => {
+    activeCopyTerminal = term
+  }
+  const onCopy = (rawEvent: Event) => {
+    if (rawEvent.defaultPrevented || activeCopyTerminal !== term) return
+    if (!host.isConnected || host.getClientRects().length === 0) return
+    const target = rawEvent.target
+    if (
+      target instanceof HTMLElement &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+    ) return
+    if (
+      target instanceof Node &&
+      target !== document.body &&
+      target !== document.documentElement &&
+      !owner.contains(target)
+    ) return
+    const domSelection = document.getSelection()
+    if (domSelection && !domSelection.isCollapsed) return
+    if (!term.hasSelection()) return
+    const text = term.getSelection()
+    if (!text) return
+    const event = rawEvent as ClipboardEvent
+    if (!event.clipboardData) return
+    event.clipboardData.setData('text/plain', text)
+    event.preventDefault()
+  }
+  host.addEventListener('pointerdown', onInteraction)
+  host.addEventListener('focusin', onInteraction)
+  const onSelection = term.onSelectionChange(() => {
+    if (term.hasSelection()) onInteraction()
+  })
+  document.addEventListener('copy', onCopy)
+  return () => {
+    host.removeEventListener('pointerdown', onInteraction)
+    host.removeEventListener('focusin', onInteraction)
+    onSelection.dispose()
+    document.removeEventListener('copy', onCopy)
+    if (activeCopyTerminal === term) activeCopyTerminal = null
+  }
+}
+
 function terminalInput(term: Terminal): TerminalInput | null {
   const input = (term as Terminal & { textarea?: HTMLTextAreaElement | null }).textarea
   return input ?? null
@@ -170,7 +217,14 @@ export function clipboardKeys(term: Terminal): (ev: KeyboardEvent) => boolean {
 
 /** Copy the terminal's selection, reporting whether it reached a clipboard. */
 export async function copySelection(term: Terminal): Promise<boolean> {
-  return writeText(term.getSelection())
+  const text = term.getSelection()
+  if (!text) {
+    toast.error(
+      'Nothing selected: drag to select text (Option-drag on macOS) or use Copy last screen',
+    )
+    return false
+  }
+  return writeText(text)
 }
 
 /**
