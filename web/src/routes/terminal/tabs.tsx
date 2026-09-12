@@ -70,7 +70,7 @@ export function RunTabs({ runID, active }: { runID: string; active: string }) {
     <div
       role="tablist"
       aria-label="Run tabs"
-      className="flex h-9 min-h-9 items-end gap-0 overflow-x-auto border-b border-border bg-sidebar px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex h-9 min-h-9 min-w-0 flex-[0_1_auto] items-end gap-0 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {runTabs.map(({ route, label }, i) => (
         <button

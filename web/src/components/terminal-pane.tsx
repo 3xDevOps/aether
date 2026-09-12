@@ -91,7 +91,7 @@ function TerminalTools({
     <div
       role="toolbar"
       aria-label="Terminal controls"
-      className="flex min-w-0 max-w-full flex-1 items-center gap-0.5 overflow-x-auto"
+      className="flex min-w-32 max-w-full flex-[1_1_20rem] items-center gap-0.5 overflow-x-auto"
     >
       <ToolButton
         type="button"
@@ -219,7 +219,7 @@ function FindBar({
     <div
       role="search"
       aria-label="Find terminal output"
-      className="flex h-8 min-h-8 min-w-0 w-full items-center gap-1 border border-input bg-background px-1 coarse:h-11 coarse:min-h-11"
+      className="flex h-8 min-h-8 min-w-32 flex-[1_1_20rem] items-center gap-1 border border-input bg-background px-1 coarse:h-11 coarse:min-h-11"
     >
       <Input
         ref={input}
@@ -279,6 +279,7 @@ export function TerminalPane({
   controller,
   className,
   children,
+  toolbarEnd,
   imageTarget,
   imageTargetKey,
   imageUploadEnabled,
@@ -289,6 +290,8 @@ export function TerminalPane({
   className?: string
   /** Additional content drawn over the terminal, such as `TerminalSpinner`. */
   children?: React.ReactNode
+  /** Controls and state placed after the terminal tools in their shared strip. */
+  toolbarEnd?: React.ReactNode
   /** Run ID for a run terminal or shell; omit for the member environment. */
   imageTarget?: string
   /** Active terminal identity, used to reject late uploads after tab changes. */
@@ -316,7 +319,7 @@ export function TerminalPane({
   }, [armCtrl, writable])
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex h-9 min-h-9 shrink-0 items-center border-b border-border bg-sidebar px-2 coarse:h-12 coarse:min-h-12">
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-2 coarse:min-h-12">
         {!controller.findOpen ? (
           <TerminalTools controller={controller} image={image} />
         ) : (
@@ -328,6 +331,7 @@ export function TerminalPane({
             }}
           />
         )}
+        {toolbarEnd}
       </div>
       <div
         ref={controller.hostRef}

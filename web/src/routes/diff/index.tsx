@@ -19,7 +19,7 @@ import { parsePatch } from '@/routes/diff/parse'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { ReviewCommands } from '@/routes/diff/review-commands'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
+import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import {
   initialDiff,
@@ -82,8 +82,7 @@ function DiffView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <RunHeader run={run} subtitle={run.branch} />
-      <RunTabs runID={runID} active="diff" />
+      <RunHeader run={run} subtitle={run.branch} active="diff" />
       <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col')}>
         <Land run={run} />
 

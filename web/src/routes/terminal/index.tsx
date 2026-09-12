@@ -21,7 +21,7 @@ import {
   standardGeometry,
 } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
-import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
+import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import { initialTerminal } from '@/store/terminal'
@@ -225,69 +225,75 @@ function TerminalView({ params }: RouteProps) {
     attachRef.current?.reopen()
   }
 
+  const attachmentControls = (
+    <div
+      role="group"
+      aria-label="Terminal attachment controls"
+      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 py-1 text-[13px]"
+    >
+      {!starting && (
+        <span
+          className={cn(
+            'shrink-0 rounded-[2px] border border-border bg-background px-2 py-0.5 text-[12px] font-medium text-muted-foreground',
+            state.connection === 'offline' &&
+              'border-state-failed/40 bg-state-failed/10 text-[var(--danger-soft-foreground)]',
+          )}
+        >
+          {connectionLabel[state.connection]}
+        </span>
+      )}
+      <Button
+        size="sm"
+        variant={state.write ? 'default' : 'outline'}
+        disabled={state.steerDenied || !steerable}
+        className="relative"
+        onClick={toggleWrite}
+      >
+        {state.write ? 'Steering' : 'Take control'}
+        {state.write && (
+          <span aria-hidden className="steering-signal">
+            <span />
+          </span>
+        )}
+      </Button>
+      {state.steerDenied && (
+        <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
+          You cannot steer this run.
+        </span>
+      )}
+      {/* A disabled control shows no tooltip, so the reason is written out
+          beside it rather than hidden in a title attribute. */}
+      {!steerable && !starting && !state.steerDenied && (
+        <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
+          This run is not running
+        </span>
+      )}
+      {/* Nothing else on screen separates watching from steering, so the
+          attach says what it is until the member has taken control once. */}
+      {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
+        <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
+          Read-only mirror. Take control to type into the agent.
+        </span>
+      )}
+      {state.message && (
+        <span className="min-w-0 flex-[1_1_16rem] break-words whitespace-pre-wrap text-muted-foreground">
+          {state.refused && sessionMissing && endedStatuses.includes(run.status)
+            ? 'This run has ended and left no recorded terminal to replay.'
+            : state.message}
+        </span>
+      )}
+      {state.refused && !endedStatuses.includes(run.status) && (
+        <Button size="sm" variant="ghost" className="shrink-0" onClick={retry}>
+          Retry
+        </Button>
+      )}
+    </div>
+  )
+
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      <RunHeader run={run} subtitle={run.branch} />
-      <RunTabs runID={runID} active="terminal" />
+      <RunHeader run={run} subtitle={run.branch} active="terminal" />
       <div {...runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')}>
-        <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-3 py-1 text-[13px]">
-          {!starting && (
-            <span
-              className={cn(
-                'shrink-0 rounded-[2px] border border-border bg-background px-2 py-0.5 text-[12px] font-medium text-muted-foreground',
-                state.connection === 'offline' &&
-                  'border-state-failed/40 bg-state-failed/10 text-[var(--danger-soft-foreground)]',
-              )}
-            >
-              {connectionLabel[state.connection]}
-            </span>
-          )}
-          <Button
-            size="sm"
-            variant={state.write ? 'default' : 'outline'}
-            disabled={state.steerDenied || !steerable}
-            className="relative"
-            onClick={toggleWrite}
-          >
-            {state.write ? 'Steering' : 'Take control'}
-            {state.write && (
-              <span aria-hidden className="steering-signal">
-                <span />
-              </span>
-            )}
-          </Button>
-          {state.steerDenied && (
-            <span className="min-w-0 break-words text-muted-foreground">
-              You cannot steer this run.
-            </span>
-          )}
-          {/* A disabled control shows no tooltip, so the reason is written out
-              beside it rather than hidden in a title attribute. */}
-          {!steerable && !starting && !state.steerDenied && (
-            <span className="min-w-0 break-words text-muted-foreground">
-              This run is not running
-            </span>
-          )}
-          {/* Nothing else on screen separates watching from steering, so the
-              attach says what it is until the member has taken control once. */}
-          {!controlTaken && !state.write && !state.steerDenied && run.status === 'running' && (
-            <span className="min-w-0 break-words text-muted-foreground">
-              Read-only mirror. Take control to type into the agent.
-            </span>
-          )}
-          {state.message && (
-            <span className="min-w-0 flex-[1_1_16rem] break-words whitespace-pre-wrap text-muted-foreground">
-              {state.refused && sessionMissing && endedStatuses.includes(run.status)
-                ? 'This run has ended and left no recorded terminal to replay.'
-                : state.message}
-            </span>
-          )}
-          {state.refused && !endedStatuses.includes(run.status) && (
-            <Button size="sm" variant="ghost" className="shrink-0" onClick={retry}>
-              Retry
-            </Button>
-          )}
-        </div>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
             <TerminalPane
@@ -301,6 +307,7 @@ function TerminalView({ params }: RouteProps) {
               className={phone ? 'overflow-x-auto' : undefined}
               writable={state.write && !starting}
               imageTarget={runID}
+              toolbarEnd={attachmentControls}
               imageTargetKey={runID}
               imageUploadEnabled={
                 !starting && state.connection === 'live' && state.write && !state.steerDenied

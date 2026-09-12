@@ -60,9 +60,10 @@ Use compact workbench geometry rather than landing-page ornament:
 
 - 35px title and command bar, 48px activity rail with 24px icons, and a
   preferred 260px workspace/run sidebar constrained to 200-520px.
-- 35px view and section headers; run tab strips stay 36px, while dock
-  headers use a `min-h-9` strip whose actions can wrap to another row; 22px
-  status rows and 22-28px list rows according to real content.
+- 35px view and section headers; the run detail's combined metadata, tab and
+  action strip stays 36px, while dock headers use a `min-h-9` strip whose
+  actions can wrap to another row; 22px status rows and 22-28px list rows
+  according to real content.
 - 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
   gaps, 16px content gutters and 12px compact gutters.
 - Adjoining panes, sections, rows, run cards and tab strips have zero radius.
@@ -120,10 +121,12 @@ presentation state. Domain status enums remain unchanged.
 | `--state-idle` | `#6e7681` | `#858585` |
 
 `StateIndicator` uses bouncing dots for working runs in cards, headers and
-lists. Sidebar rows pulse one dot and palette rows remain static. The steering
-signal, working dots and sidebar pulse stop moving under
-`prefers-reduced-motion: reduce`; state meaning remains available as text and
-labels. Loading spinners and delayed skeletons remain functional feedback.
+lists. The labeled run-status chip reserves the full width of all three dots
+before its text; compact unlabeled surfaces keep the fixed dot box so state
+changes do not shift their columns. Sidebar rows pulse one dot and palette rows
+remain static. The steering signal, working dots and sidebar pulse stop moving
+under `prefers-reduced-motion: reduce`; state meaning remains available as text
+and labels. Loading spinners and delayed skeletons remain functional feedback.
 
 The desktop first-launch splash is a finite branded handoff, not a loading
 screen. Its dark sky, grain, clouds, twinkling field and shooting stars stay
