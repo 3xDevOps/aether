@@ -687,20 +687,12 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			if _, perr := s.cfg.Git.PublishRunBranch(ctx, run); perr != nil {
 				slog.Warn("scheduler: publish closed TUI run", "run", run, "error", perr)
 			}
-			if s.cfg.RunContainerTTL < 0 {
-				s.mu.Lock()
-				err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
-				s.mu.Unlock()
-				if err != nil {
-					if restoreErr := s.restoreAfterCloseFailure(ctx, entry, alreadyPaused); restoreErr != nil {
-						return errors.Join(err, restoreErr)
-					}
-					return err
-				}
-				s.stopCloseContainer(ctx, cid)
-				return nil
+			ttl := s.cfg.RunContainerTTL
+			deadline := time.Now().UTC().Add(ttl)
+			closeReason := retainedCloseReason
+			if ttl < 0 {
+				closeReason = "closed"
 			}
-			deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
 			s.mu.Lock()
 			if s.runs[run] != entry {
 				s.mu.Unlock()
@@ -730,7 +722,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				}
 				return persistErr
 			}
-			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, retainedCloseReason, actor)
+			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, closeReason, actor)
 			if transitionErr == nil {
 				entry.status = outcome
 				entry.paused = true
@@ -747,10 +739,14 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				}
 				return transitionErr
 			}
+			if ttl < 0 {
+				s.stopCloseContainer(ctx, cid)
+				s.destroyClosedRetained(ctx, entry)
+			}
 			return nil
 		}
 	}
-	// Headless runs, negative-TTL TUI runs, and pause failures are immediate.
+	// Headless runs and TUI pause failures are immediate.
 	s.mu.Lock()
 	err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
 	s.mu.Unlock()
@@ -829,4 +825,33 @@ func (s *Scheduler) stopCloseContainer(ctx context.Context, cid runtime.ID) {
 	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		slog.Warn("scheduler: stop container behind closed run", "container", cid, "error", err)
 	}
+}
+
+// destroyClosedRetained completes a negative-TTL TUI close while the caller
+// holds lifecycleMu. Marking the owner retained before stopping the container
+// keeps superviseWait from committing the already-snapshotted checkout again.
+func (s *Scheduler) destroyClosedRetained(ctx context.Context, entry *supervised) {
+	if entry == nil {
+		return
+	}
+	if err := s.cfg.Runtime.Destroy(ctx, entry.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		slog.Warn("scheduler: destroy container behind closed run", "run", entry.runID, "error", err)
+		return
+	}
+	s.removeSidecar(entry.runID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs[entry.runID] != entry {
+		return
+	}
+	entry.retained = false
+	entry.retainedUntil = nil
+	entry.destroyPending = false
+	if entry.userReservation != nil {
+		delete(s.credentialUsers, entry.userReservation)
+		entry.userReservation = nil
+	}
+	s.closeDone(entry)
+	delete(s.runs, entry.runID)
+	s.syncRunUserReservationsLocked()
 }

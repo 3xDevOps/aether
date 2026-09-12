@@ -301,7 +301,13 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		return fmt.Errorf("destroy-pending container: %w", err)
 	}
-	s.preserveRecoveryWork(ctx, entry.runID, entry.task)
+	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
+	if err != nil {
+		return fmt.Errorf("load destroy-pending run: %w", err)
+	}
+	if !run.Status.Terminal() {
+		s.preserveRecoveryWork(ctx, entry.runID, entry.task)
+	}
 	return s.finishDestroyPending(ctx, entry)
 }
 

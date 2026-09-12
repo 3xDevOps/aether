@@ -593,15 +593,23 @@ func TestCloseRunWithoutRetentionCommitsAndPublishes(t *testing.T) {
 		t.Fatalf("CloseRun: %v", err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	waitFor(t, "container destroyed", func() bool {
+		return e.rt.byName(string(run.ID)) == nil
+	})
+	waitFor(t, "supervision released", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID] == nil
+	})
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: no-retention close" {
 		t.Fatalf("commits = %v", got)
 	}
 	if e.git.publishedCount(run.ID) == 0 {
 		t.Fatal("run branch was not published")
 	}
-	waitFor(t, "container destroyed", func() bool {
-		return e.rt.byName(string(run.ID)) == nil
-	})
+	if _, err := os.Stat(e.sched.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("sidecar after no-retention close: %v", err)
+	}
 }
 
 func TestCloseRunWithoutRetentionRestoresAfterTransitionFailure(t *testing.T) {
