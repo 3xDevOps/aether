@@ -38,12 +38,13 @@ Layers, per the design spec's testing strategy:
   no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
   job.
 
-The Windows client CI job also runs `TestInstallDesktopWindowsPreservesCLI`
-in `internal/localops`: install and reinstall must preserve the CLI and
-unrelated files in the documented CLI directory, register a Start Menu
-shortcut targeting the installed desktop executable, and detect only the
-desktop directory as an installed app. It runs on other hosts too, exercising
-the Windows install path without needing Electron.
+Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
+install and reinstall must preserve the CLI and unrelated files in the
+documented CLI directory and detect only the desktop directory as an installed
+app. `TestShellLinkLaunchesNativeConsumer` exercises Windows' real shortcut
+launcher with a target path containing spaces, an ampersand, and non-ASCII
+characters, and checks the launched process's working directory. These checks
+run before desktop packaging.
 
 The `Windows install` workflow runs `scripts/install-test.ps1` under Windows
 PowerShell 5.1 and PowerShell 7. Those scenarios cover checksum rejection

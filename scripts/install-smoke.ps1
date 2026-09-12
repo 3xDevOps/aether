@@ -95,6 +95,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         }) -join ';'
         if (Get-Command node.exe -ErrorAction SilentlyContinue) { throw 'Node is still on PATH.' }
     }
+    $preInstallPath = $env:PATH
     $cliDir = Join-Path $env:LOCALAPPDATA 'Programs\Aether'
     New-Item -ItemType Directory -Path $cliDir -Force | Out-Null
     $sentinel = Join-Path $cliDir 'unrelated.txt'
@@ -120,7 +121,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     }
 
     # Model Explorer retaining the PATH from before the installer ran.
-    $env:PATH = $saved['PATH']
+    $env:PATH = $preInstallPath
     [Environment]::SetEnvironmentVariable('AETHER_BIN', $null, 'Process')
     $hadProtocol = Test-Path -LiteralPath $protocolKey
     if ($hadProtocol) {
@@ -133,9 +134,8 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     $listener.Start()
     $debugPort = $listener.LocalEndpoint.Port
     $listener.Stop()
-    $launched = Start-Process -FilePath $shortcut -ArgumentList @("--remote-debugging-port=$debugPort", ('--user-data-dir="' + $profile + '"')) -PassThru
-    if ($launched.Path -ne $desktop) { throw "The Start Menu shortcut launched $($launched.Path), not $desktop." }
-    $app = $launched
+    $app = Start-Process -FilePath $shortcut -ArgumentList @("--remote-debugging-port=$debugPort", ('--user-data-dir="' + $profile + '"')) -PassThru
+    if ($app.Path -ne $desktop) { throw "The Start Menu shortcut launched $($app.Path), not $desktop." }
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
         if ($app.HasExited) { throw "The Start Menu app exited with code $($app.ExitCode)." }

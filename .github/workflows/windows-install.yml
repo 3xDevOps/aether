@@ -52,6 +52,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Native Windows shortcut regression
+        run: |
+          go test ./internal/localops -run '^(TestShellLink|TestInstallDesktopWindowsPreservesCLI)' -count=1 -timeout 3m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -2,7 +2,6 @@ package localops
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -74,6 +73,9 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 }
 
 func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows desktop install creates a native shortcut")
+	}
 	home := t.TempDir()
 	local := filepath.Join(home, "AppData", "Local")
 	t.Setenv("LOCALAPPDATA", local)
@@ -113,14 +115,8 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 		if got, readErr := os.ReadFile(exe); readErr != nil || string(got) != version {
 			t.Fatalf("installed desktop executable = %q, %v", got, readErr)
 		}
-		link, err := os.ReadFile(app.Launcher)
-		if err != nil {
-			t.Fatal(err)
-		}
-		info := shellLinkHeaderSize
-		offset := int(binary.LittleEndian.Uint32(link[info+28:]))
-		if got := decodeUTF16(t, link, info+offset, exe); got != exe {
-			t.Fatalf("Start Menu shortcut targets %q, want %q", got, exe)
+		if _, statErr := os.Stat(app.Launcher); statErr != nil {
+			t.Fatalf("Start Menu shortcut missing: %v", statErr)
 		}
 		if got, ok := InstalledDesktopApp("windows", RealUser{Home: home}); !ok || got != app.App {
 			t.Fatalf("installed desktop not found: %q, %v", got, ok)

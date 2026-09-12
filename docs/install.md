@@ -467,17 +467,12 @@ does not always say which one you hit.
 | The file disappears, or "virus detected" | Microsoft Defender antivirus | Verify the hash, then report it - below |
 
 The third one is the antivirus, not SmartScreen, and it has no **Run anyway**.
-A detection name ending in `!ml`, such as `Trojan:Win32/Wacatac.B!ml`, comes
-from Defender's cloud classifier rather than a signature match: it scored the
-file on shape, not on anything found inside it. A newly published, unsigned Go
-binary is close to that classifier's idea of a dropper - a large executable
-that resolves its Windows API calls at run time, which is what the Go runtime
-does on every platform.
+Do not disable Defender or add an exclusion to recover a quarantined binary.
+A matching checksum establishes download integrity, not safety; follow the
+report process below.
 
-On a Windows 11 machine with **Smart App Control** enabled, unsigned binaries
-are blocked outright with no override. Smart App Control turns itself off
-permanently once disabled, so check `Windows Security > App & browser control`
-before assuming the download is at fault.
+Smart App Control and organizational policies can also reject unsigned
+binaries. The installer does not change those policies.
 
 **Report a detection.** Verify the SHA-256 against `checksums.txt` first - if
 it does not match, do not run the file and open an issue. If it matches,
@@ -487,15 +482,14 @@ as a software developer. Microsoft clears confirmed false positives through a
 definition update, which fixes it for everyone on that release. Please open an
 issue with the detection name too, so the release notes can carry it.
 
-**What the release already does.** Windows binaries carry a VERSIONINFO
-resource, an icon and an application manifest declaring `asInvoker`, so the
-file names its publisher, product and version instead of arriving anonymous.
-The client shells out to no `powershell.exe`, `cmd.exe` or `rundll32.exe`: the
-browser launch and the Start Menu shortcut are direct Windows API calls, which
-keeps both the child processes and their command lines out of the binary.
-Code signing is the remaining gap and is in progress; it is what lets
-reputation accumulate across releases rather than resetting with every new
-file.
+**Windows build safeguards.** Windows binaries carry a VERSIONINFO resource,
+an icon, and an application manifest declaring `asInvoker`. Browser launch
+uses Windows APIs; Start Menu registration uses `IShellLinkW` and `IPersistFile`
+instead of a shell command. Neither operation launches `powershell.exe`,
+`cmd.exe`, or `rundll32.exe`.
+
+These measures do not confer publisher trust. Releases remain unsigned;
+Defender or SmartScreen may still flag a new binary.
 
 ## The Windows client
 
