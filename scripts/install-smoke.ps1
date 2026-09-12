@@ -21,7 +21,7 @@ if ($initialPreferences.ExclusionPath -or $initialPreferences.ExclusionProcess -
     throw 'Run this smoke scenario in a disposable runner without Defender exclusions.'
 }
 $knownDetections = @(Get-MpThreatDetection | ForEach-Object { $_.DetectionID })
-$node = (Get-Command node.exe -CommandType Application).Source
+$node = (Get-Command node.exe -CommandType Application | Select-Object -First 1).Source
 $installer = Join-Path $PSScriptRoot 'install.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('Aether smoke & ' + [guid]::NewGuid().ToString('N'))
 $variables = @('LOCALAPPDATA', 'APPDATA', 'USERPROFILE', 'HOME', 'PATH', 'AETHER_BIN',
@@ -185,11 +185,17 @@ const { chromium } = require(process.argv[2])
         throw ("Defender detected threats during installation, even if remediated: " + ($detections | Format-List | Out-String))
     }
     Write-Host 'Defender scan of the installer downloads, CLI, Node, and desktop is clean.'
+} catch {
+    Write-Host $_.ScriptStackTrace
+    throw
 } finally {
     if ($app -and -not $app.HasExited) {
         & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
     }
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+    foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
+    if ($hadUserPath) { $registry.SetValue('Path', $userPath, $userPathKind) } else { $registry.DeleteValue('Path', $false) }
+    $registry.Dispose()
     if ($protocolCaptured) {
         if (Test-Path -LiteralPath $protocolKey) { Remove-Item -LiteralPath $protocolKey -Recurse -Force }
         if ($hadProtocol) {
@@ -197,8 +203,5 @@ const { chromium } = require(process.argv[2])
             if ($LASTEXITCODE -ne 0) { throw 'Could not restore the aether:// protocol registration.' }
         }
     }
-    foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
-    if ($hadUserPath) { $registry.SetValue('Path', $userPath, $userPathKind) } else { $registry.DeleteValue('Path', $false) }
-    $registry.Dispose()
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
 }
