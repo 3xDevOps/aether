@@ -74,6 +74,7 @@ function Invoke-AetherPowerShellFile {
     )
     $start = New-Object System.Diagnostics.ProcessStartInfo
     $start.FileName = Get-AetherPowerShellExecutable
+    $start.WorkingDirectory = $root
     $argumentText = @('-NoProfile', '-NonInteractive', '-File', (Quote-AetherProcessArgument $ScriptPath))
     foreach ($argument in $Arguments) {
         $argumentText += (Quote-AetherProcessArgument ([string]$argument))
@@ -380,7 +381,7 @@ func main() {
     $freshBin = Join-Path $freshLocal 'Programs\Aether'
     $freshCli = Join-Path $freshBin 'aether.exe'
     $freshDesktop = Join-Path $freshLocal 'Programs\Aether Desktop\aether-desktop.exe'
-    Assert-AetherEqual 0 $result.ExitCode 'fresh default install failed'
+    Assert-AetherEqual 0 $result.ExitCode ("fresh default install failed: " + $result.Output)
     Assert-AetherTest (Get-AetherTestBytesEqual $fixture $freshCli) 'fresh install did not retain the CLI executable'
     Assert-AetherTest (Test-Path -LiteralPath $freshDesktop -PathType Leaf) 'GUI build did not create the sibling desktop executable'
     Assert-AetherTest ((Get-AetherTestUserPath).StartsWith($freshUserPath)) 'fresh install altered unrelated PATH entries'
@@ -398,12 +399,12 @@ func main() {
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $reinstallLog
     }
-    Assert-AetherEqual 0 $result.ExitCode 'first reinstall failed'
+    Assert-AetherEqual 0 $result.ExitCode ("first reinstall failed: " + $result.Output)
     $result = Invoke-AetherPowerShellFile $installer @('-Version', $version, '-Role', 'none', '-BinDir', $freshBin) @{
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $reinstallLog
     }
-    Assert-AetherEqual 0 $result.ExitCode 'second reinstall failed'
+    Assert-AetherEqual 0 $result.ExitCode ("second reinstall failed: " + $result.Output)
     Assert-AetherEqual 'unrelated user file' ([IO.File]::ReadAllText($unrelated)) 'reinstall deleted an unrelated file'
     $finalUserPath = Get-AetherTestUserPath
     Assert-AetherTest ($finalUserPath.Contains('%SystemRoot%\System32')) 'reinstall lost an expandable PATH token'
@@ -420,24 +421,26 @@ func main() {
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $noneLog
     }
-    Assert-AetherEqual 0 $result.ExitCode 'CLI-only install failed'
+    Assert-AetherEqual 0 $result.ExitCode ("CLI-only install failed: " + $result.Output)
     Assert-AetherTest (Test-Path -LiteralPath (Join-Path $noneBin 'aether.exe') -PathType Leaf) 'CLI-only install did not install the CLI'
     Assert-AetherTest (-not (Test-Path -LiteralPath $noneLog)) 'CLI-only opt out invoked GUI build'
 
     # A desktop failure is nonzero, leaves the newly installed CLI, and restores
     # AETHER_BIN even when the installer is dot-sourced by an interactive host.
-    $failureBin = Join-Path $root 'failure-bin'
+    $failureCase = Join-Path $root 'failure-case'
+    $failureBin = Join-Path $failureCase 'bin'
     New-Item -ItemType Directory -Path $failureBin -Force | Out-Null
     $failureLog = Join-Path $root 'failure.log'
     $restoreResult = Join-Path $root 'restored-aether-bin.txt'
     $wrapper = Join-Path $root 'dot-source-wrapper.ps1'
     $installerLiteral = $installer.Replace("'", "''")
-    $failureBinLiteral = $failureBin.Replace("'", "''")
+    $failureCaseLiteral = $failureCase.Replace("'", "''")
     $restoreLiteral = $restoreResult.Replace("'", "''")
     $wrapperSource = @"
 `$env:AETHER_BIN = 'caller-sentinel'
+Set-Location -LiteralPath '$failureCaseLiteral'
 try {
-    . '$installerLiteral' -Version '$version' -Role client -BinDir '$failureBinLiteral'
+    . '$installerLiteral' -Version '$version' -Role client -BinDir '.\bin'
 }
 catch {
     [IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process'))
@@ -490,7 +493,7 @@ catch {
         PROCESSOR_ARCHITEW6432 = 'ARM64'
         PROCESSOR_ARCHITECTURE = 'x86'
     }
-    Assert-AetherEqual 0 $result.ExitCode 'native architecture detection install failed'
+    Assert-AetherEqual 0 $result.ExitCode ("native architecture detection install failed: " + $result.Output)
     Assert-AetherEqual 'arm-native-payload' ([IO.File]::ReadAllText((Join-Path $archBin 'aether.exe'))) 'native architecture detection selected the wrong asset'
     $requests = [IO.File]::ReadAllText($requestLog)
     Assert-AetherTest ($requests.Contains('aether-windows-arm64.exe')) 'architecture test did not request arm64 asset'

@@ -52,14 +52,18 @@ CLI-only installation, unsupported releases, and desktop-build failures.
 They use temporary files and restore the user's environment after running.
 
 The same workflow builds the real CLI with the release's Windows metadata
-and embedded dashboard, enables Defender real-time and cloud protection,
-then runs `scripts/install-smoke.ps1`. A local release mirror serves those
+and embedded dashboard, removes the hosted runner's inherited exclusions,
+and enables Defender realtime, script, archive, and first-seen cloud scanning
+before running `scripts/install-smoke.ps1`. A local release mirror serves those
 exact bytes and their checksum so the scenario tests the checkout, not the
 latest published release. It installs and rebuilds the desktop, verifies
 the unchanged CLI and Start Menu shortcut, and launches the app with the
-pre-install `PATH`. Windows PowerShell uses system Node; PowerShell 7 hides
+pre-install `PATH`. Playwright checks the installed window's onboarding screen
+and saves a screenshot. Windows PowerShell uses system Node; PowerShell 7 hides
 system Node to exercise the verified private download. Defender scans the
-download and install tree without exclusions or disabled remediation.
+download and install tree without exclusions or disabled remediation. The
+gate rejects new detections even when Defender has already remediated them,
+and checks that installation changed neither protection settings nor exclusions.
 This is a detection gate, not a guarantee that an unsigned release will
 never receive a false positive on another machine.
 

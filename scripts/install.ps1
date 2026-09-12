@@ -42,7 +42,13 @@ function Write-AetherMessage {
 function Get-AetherAbsolutePath {
     param([Parameter(Mandatory = $true)][string] $Path)
     try {
-        return [System.IO.Path]::GetFullPath($Path)
+        $provider = $null
+        $drive = $null
+        $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path, [ref]$provider, [ref]$drive)
+        if ($provider.Name -ne 'FileSystem') {
+            throw 'installation paths must use the filesystem provider'
+        }
+        return [System.IO.Path]::GetFullPath($resolved)
     }
     catch {
         throw ("invalid path '{0}': {1}" -f $Path, $_.Exception.Message)
@@ -331,7 +337,7 @@ function Install-AetherCli {
         if (Test-Path -LiteralPath $destination) {
             # File.Replace is a single filesystem operation and leaves the old
             # executable in place when Windows refuses a locked destination.
-            [System.IO.File]::Replace($stage, $destination, $null, $true)
+            [System.IO.File]::Replace($stage, $destination, [NullString]::Value, $true)
         }
         else {
             [System.IO.File]::Move($stage, $destination)
@@ -352,7 +358,7 @@ function Invoke-AetherGuiBuild {
     param([Parameter(Mandatory = $true)][string] $CliPath)
     $hadAetherBin = Test-Path -LiteralPath 'Env:AETHER_BIN'
     $oldAetherBin = [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process')
-    $previousExit = Get-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+    $previousExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     $rerun = "& '{0}' gui build" -f $CliPath.Replace("'", "''")
     $oldGuiEap = $ErrorActionPreference
     try {
@@ -386,7 +392,7 @@ function Invoke-AetherGuiBuild {
             Remove-Item -LiteralPath 'Env:AETHER_BIN' -Force -ErrorAction SilentlyContinue
         }
         if ($null -ne $previousExit) {
-            $global:LASTEXITCODE = $previousExit.Value
+            $global:LASTEXITCODE = $previousExit
         } else {
             Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
         }

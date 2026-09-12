@@ -86,12 +86,16 @@ jobs:
           Set-MpPreference -DisableRealtimeMonitoring $false
           Set-MpPreference -DisableIOAVProtection $false
           Set-MpPreference -DisableBehaviorMonitoring $false
+          Set-MpPreference -DisableScriptScanning $false
+          Set-MpPreference -DisableArchiveScanning $false
+          Set-MpPreference -DisableBlockAtFirstSeen $false
+          Set-MpPreference -ScanAvgCPULoadFactor 50
           Set-MpPreference -MAPSReporting 2
           Set-MpPreference -SubmitSamplesConsent 1
           $p = Get-MpPreference
-          if ($p.DisableRealtimeMonitoring -or $p.DisableIOAVProtection -or $p.DisableBehaviorMonitoring -or $p.MAPSReporting -ne 2) {
-            throw 'Defender protection did not enable; the install check would prove nothing.'
-          }
+          if ($p.ExclusionPath) { Remove-MpPreference -ExclusionPath $p.ExclusionPath }
+          if ($p.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $p.ExclusionProcess }
+          if ($p.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $p.ExclusionExtension }
           & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -SignatureUpdate
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install, rebuild, and launch the desktop under Defender

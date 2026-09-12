@@ -8,6 +8,19 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $false
 if ($env:OS -ne 'Windows_NT') { throw 'This smoke scenario requires Windows.' }
+$initialPreferences = Get-MpPreference
+if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true -or $initialPreferences.MAPSReporting -ne 2) {
+    throw 'Enable Defender realtime and cloud protection before running this smoke scenario.'
+}
+$scanningFlags = @('DisableRealtimeMonitoring', 'DisableIOAVProtection', 'DisableBehaviorMonitoring',
+    'DisableScriptScanning', 'DisableArchiveScanning', 'DisableBlockAtFirstSeen')
+foreach ($flag in $scanningFlags) {
+    if ($initialPreferences.$flag) { throw "Defender $flag is enabled; scanning would be incomplete." }
+}
+if ($initialPreferences.ExclusionPath -or $initialPreferences.ExclusionProcess -or $initialPreferences.ExclusionExtension) {
+    throw 'Run this smoke scenario in a disposable runner without Defender exclusions.'
+}
+$knownDetections = @(Get-MpThreatDetection | ForEach-Object { $_.DetectionID })
 $node = (Get-Command node.exe -CommandType Application).Source
 $installer = Join-Path $PSScriptRoot 'install.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('Aether smoke & ' + [guid]::NewGuid().ToString('N'))
@@ -22,6 +35,10 @@ $userPath = $registry.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOpti
 $userPathKind = if ($hadUserPath) { $registry.GetValueKind('Path') } else { $null }
 $server = $null
 $app = $null
+$protocolKey = 'HKCU:\Software\Classes\aether'
+$protocolCaptured = $false
+$protocolBackup = Join-Path $root 'protocol.reg'
+$reg = Join-Path $env:SystemRoot 'System32\reg.exe'
 
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
@@ -108,6 +125,12 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     # Model Explorer retaining the PATH from before the installer ran.
     $env:PATH = $saved['PATH']
     [Environment]::SetEnvironmentVariable('AETHER_BIN', $null, 'Process')
+    $hadProtocol = Test-Path -LiteralPath $protocolKey
+    if ($hadProtocol) {
+        & $reg export 'HKCU\Software\Classes\aether' $protocolBackup /y
+        if ($LASTEXITCODE -ne 0) { throw 'Could not back up the aether:// protocol registration.' }
+    }
+    $protocolCaptured = $true
     $profile = Join-Path $root 'Electron'
     $app = Start-Process -FilePath $desktop -ArgumentList @('--remote-debugging-port=0', ('--user-data-dir="' + $profile + '"')) -PassThru -RedirectStandardOutput (Join-Path $root 'desktop.log') -RedirectStandardError (Join-Path $root 'desktop.err')
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
@@ -144,17 +167,36 @@ const { chromium } = require(process.argv[2])
     Write-Host 'The desktop found the CLI without an updated PATH and loaded its dashboard.'
 
     $preferences = Get-MpPreference
-    if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true -or $preferences.MAPSReporting -ne 2) {
+    if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true -or $preferences.MAPSReporting -ne 2 -or $preferences.DisableRealtimeMonitoring -or $preferences.DisableIOAVProtection -or $preferences.DisableBehaviorMonitoring) {
         throw 'Defender realtime/cloud protection is not enabled; this would not verify installation safety.'
+    }
+    foreach ($flag in $scanningFlags) {
+        if ($preferences.$flag) { throw "Installation disabled Defender protection: $flag." }
+    }
+    foreach ($property in @('ExclusionPath', 'ExclusionProcess', 'ExclusionExtension')) {
+        if (($preferences.$property -join "`0") -cne ($initialPreferences.$property -join "`0")) {
+            throw "Installation changed Defender $property."
+        }
     }
     & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -Scan -ScanType 3 -File $root
     if ($LASTEXITCODE -ne 0) { throw "Defender installation scan failed (exit $LASTEXITCODE)." }
+    $detections = @(Get-MpThreatDetection | Where-Object { $_.DetectionID -notin $knownDetections })
+    if ($detections.Count -gt 0) {
+        throw ("Defender detected threats during installation, even if remediated: " + ($detections | Format-List | Out-String))
+    }
     Write-Host 'Defender scan of the installer downloads, CLI, Node, and desktop is clean.'
 } finally {
     if ($app -and -not $app.HasExited) {
         & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
     }
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+    if ($protocolCaptured) {
+        if (Test-Path -LiteralPath $protocolKey) { Remove-Item -LiteralPath $protocolKey -Recurse -Force }
+        if ($hadProtocol) {
+            & $reg import $protocolBackup
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restore the aether:// protocol registration.' }
+        }
+    }
     foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
     if ($hadUserPath) { $registry.SetValue('Path', $userPath, $userPathKind) } else { $registry.DeleteValue('Path', $false) }
     $registry.Dispose()
