@@ -214,6 +214,28 @@ checkout, transcripts and run-owned database records. For an old run it
 removes the checkout and transcripts directly. The run's timeline remains as
 audit history.
 
+`run.relaunch` is another proxied control-channel method:
+
+```sh
+aether relaunch <run-id>
+```
+
+The equivalent gateway call is `POST /api/v1/run.relaunch` with
+`{"run_id":"run_..."}` and a `RunResult` response. It is eligible only for a
+TUI run in the **Done** state (`merged` or `abandoned`) whose `run.close`
+operation retained its container (`reason` is `closed; retained container`)
+and whose `--run-container-ttl` deadline has not passed. Relaunch resumes the
+same run row in the same container and checkout; it does not create a new run
+or container and does not perform a new launch or disk-floor admission.
+
+Retention expiry is swept within at most one minute and reconciled on server
+boot. Once expiry destroys the retained container, the call returns `-32002`
+(invalid state, retained container unavailable), and the run cannot be
+relaunched. An expired or otherwise unavailable retained run cannot be
+relaunched; a row removed by `run.delete` instead returns not found. The
+default `--run-container-ttl` is `1h`; negative values disable retention, so a
+closed TUI run is unavailable to `run.relaunch` immediately.
+
 ### `GET /api/v1/capabilities`
 
 ```json

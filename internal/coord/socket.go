@@ -239,9 +239,10 @@ func (s *Service) Release(run domain.RunID) error {
 // recoverListeners rebuilds the host side after a restart. A run's
 // directory is the record that it was provisioned, and the socket names in
 // it are the wire versions its container references: while coordination is
-// enabled, every one of them is rebound for a run that is still active,
-// and the directory of a run that is not is garbage collected. The rebind
-// creates a new inode, so a bridge holding the old one redials.
+// enabled, every one of them is rebound for a run that is still active or
+// whose terminal container is still retained, and the directory of every
+// other run is garbage collected. The rebind creates a new inode, so a
+// bridge holding the old one redials.
 //
 // With the kill switch off, old sockets are unlinked and nothing is
 // recreated: the directory and config still mounted in a live container
@@ -255,6 +256,7 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 		return fmt.Errorf("coord: read %s: %w", s.cfg.Dir, err)
 	}
 	active := make(map[domain.RunID]bool)
+	retained := make(map[domain.RunID]bool)
 	if !s.cfg.Disabled {
 		runs, lerr := s.cfg.Store.ListActiveRuns(ctx)
 		if lerr != nil {
@@ -262,6 +264,20 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 		}
 		for _, r := range runs {
 			active[r.ID] = true
+		}
+		if s.cfg.RetainsContainer != nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				run := domain.RunID(e.Name())
+				if active[run] {
+					continue
+				}
+				if s.cfg.RetainsContainer(ctx, run) {
+					retained[run] = true
+				}
+			}
 		}
 	}
 	for _, e := range entries {
@@ -277,7 +293,7 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 					return fmt.Errorf("coord: unlink %s: %w", filepath.Join(dir, name), err)
 				}
 			}
-		case active[run]:
+		case active[run] || retained[run]:
 			// A retired version's socket goes first: leaving it bound
 			// would answer an old bridge in a shape it cannot read.
 			for _, name := range retiredSocketNames {

@@ -324,6 +324,82 @@ func TestDirectTCPIPTerminalTarget(t *testing.T) {
 	}
 }
 
+func TestDirectTCPIPTerminalRevokesOnMembershipChange(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		revoke func(*testing.T, *testEnv, *domain.Member)
+	}{
+		{
+			name: "pending",
+			revoke: func(t *testing.T, e *testEnv, member *domain.Member) {
+				member.Pending = true
+				if err := e.store.UpdateMember(t.Context(), member); err != nil {
+					t.Fatalf("mark member pending: %v", err)
+				}
+			},
+		},
+		{
+			name: "removed",
+			revoke: func(t *testing.T, e *testEnv, member *domain.Member) {
+				if err := e.store.DeleteMember(t.Context(), member.ID); err != nil {
+					t.Fatalf("remove member: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEnv(t, func(c *Config) {
+				c.revalidateInterval = 50 * time.Millisecond
+			})
+			listener := startForwardEchoBackend(t)
+			e.runs.setTerminalAddr("127.0.0.1")
+			signer, member := addMember(t, e, "Terminal user", domain.RoleCollaborator, false)
+			ch := openDirectTCPIPChannel(t, e, signer, forwardTestPayload{
+				DestHost: "terminal",
+				DestPort: uint32(listener.Addr().(*net.TCPAddr).Port),
+				OrigHost: "127.0.0.1",
+			})
+
+			if _, err := ch.Write([]byte("before")); err != nil {
+				t.Fatalf("authorized write: %v", err)
+			}
+			if got := readForwardBytes(t, ch, len("before")); string(got) != "before" {
+				t.Fatalf("authorized echo = %q, want before", got)
+			}
+
+			tc.revoke(t, e, member)
+			waitForwardClosed(t, ch, e.srv.cfg.revalidateInterval)
+		})
+	}
+}
+
+func TestDirectTCPIPRunRevokesOnSteerLoss(t *testing.T) {
+	e := newTestEnv(t, func(c *Config) {
+		c.revalidateInterval = 50 * time.Millisecond
+	})
+	listener := startForwardEchoBackend(t)
+	e.runs.setAddr("127.0.0.1")
+	signer, member := addMember(t, e, "Run user", domain.RoleCollaborator, false)
+	ch := openDirectTCPIPChannel(t, e, signer, forwardTestPayload{
+		DestHost: "run:" + string(e.run.ID),
+		DestPort: uint32(listener.Addr().(*net.TCPAddr).Port),
+		OrigHost: "127.0.0.1",
+	})
+
+	if _, err := ch.Write([]byte("before")); err != nil {
+		t.Fatalf("authorized write: %v", err)
+	}
+	if got := readForwardBytes(t, ch, len("before")); string(got) != "before" {
+		t.Fatalf("authorized echo = %q, want before", got)
+	}
+
+	member.Role = domain.RoleViewer
+	if err := e.store.UpdateMember(t.Context(), member); err != nil {
+		t.Fatalf("demote member: %v", err)
+	}
+	waitForwardClosed(t, ch, e.srv.cfg.revalidateInterval)
+}
+
 func TestDirectTCPIPRejectsUnavailableTerminal(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.runs.terminalAddrErr = errors.New("not running")
@@ -364,6 +440,61 @@ func TestDirectTCPIPRejectsViewer(t *testing.T) {
 	}
 	defer func() { _ = client.Close() }()
 	assertForwardRejected(t, client, forwardTestPayload{DestHost: "run:" + string(e.run.ID), DestPort: 1}, "permission denied: steer requires the collaborator role")
+}
+
+func startForwardEchoBackend(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = io.Copy(conn, conn)
+	}()
+	return listener
+}
+
+func openDirectTCPIPChannel(t *testing.T, e *testEnv, signer ssh.Signer, payload forwardTestPayload) ssh.Channel {
+	t.Helper()
+	client, err := e.dialWith(signer, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ch, reqs, err := client.OpenChannel("direct-tcpip", ssh.Marshal(payload))
+	if err != nil {
+		t.Fatalf("open direct-tcpip channel: %v", err)
+	}
+	t.Cleanup(func() { _ = ch.Close() })
+	go func() {
+		for range reqs {
+		}
+	}()
+	return ch
+}
+
+func waitForwardClosed(t *testing.T, ch ssh.Channel, interval time.Duration) {
+	t.Helper()
+	closed := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1)
+		_, err := ch.Read(buf)
+		closed <- err
+	}()
+	select {
+	case err := <-closed:
+		if err == nil {
+			t.Fatal("forward read returned data after authorization revocation")
+		}
+	case <-time.After(4 * interval):
+		t.Fatal("forward remained open after authorization revocation")
+	}
 }
 
 func assertForwardRejected(t *testing.T, client *ssh.Client, payload forwardTestPayload, message string) {

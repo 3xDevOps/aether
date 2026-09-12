@@ -9,7 +9,7 @@ import (
 func init() {
 	register(command{
 		name:  "relaunch",
-		short: "relaunch a terminal run as a new run",
+		short: "reopen a retained Done run",
 		run:   runRelaunch,
 	})
 }

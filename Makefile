@@ -114,7 +114,7 @@ lint:
 # release, and govulncheck has no suppression flag, so this target exits
 # non-zero until upstream ships a fix. See docs/security.md.
 vulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
 fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi

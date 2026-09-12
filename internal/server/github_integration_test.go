@@ -142,7 +142,10 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt,
 		StandardImage: image,
 		Harnesses: map[string]scheduler.HarnessSpec{
-			"claude": {TUIArgs: []string{"sh", "/workspace/agent.sh"}},
+			"claude": {
+				TUIArgs:      []string{"sh", "/workspace/agent.sh"},
+				HeadlessArgs: []string{"sh", "/workspace/agent.sh"},
+			},
 		},
 	})
 	if err != nil {

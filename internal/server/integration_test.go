@@ -45,10 +45,10 @@ printf 'hello-from-agent\n' > result.txt
 
 // TestIntegrationEndToEnd proves the Wave 1 seams end to end through one
 // wired server: bare repo seeded via git push over the SSH transport, a
-// run launched over the control channel with the fake harness, live PTY
+// TUI run launched over the control channel with the fake harness, live PTY
 // output observed over a real SSH attach, an injection round-tripped
-// through the agent, the run branch fetched back over SSH after exit, and
-// the bus traffic matching the contract's lifecycle table.
+// through the agent and reusable login shell, the run explicitly closed and
+// fetched back over SSH, and the bus traffic matching the lifecycle table.
 func TestIntegrationEndToEnd(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
@@ -58,7 +58,10 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	// A not-yet-existing data dir proves first-run startup: New must create
 	// the directory itself before opening the store.
 	dataDir := filepath.Join(t.TempDir(), "data")
-	srv, err := New(ctx, Config{DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt})
+	srv, err := New(ctx, Config{
+		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt,
+		RunContainerTTL: -time.Second,
+	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -118,6 +121,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(ws.ID), Task: "integration e2e", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -167,13 +171,35 @@ func TestIntegrationEndToEnd(t *testing.T) {
 		t.Errorf("attach output missing inject banner: %q", att.output())
 	}
 
-	// Agent exits; the attach ends (server closes the channel after the
-	// session ends) and the run completes with committed results.
-	att.waitEnd(t)
-	ev := waitEvent(t, sub, &seen, "run.status completed", statusOf(domain.RunCompleted))
-	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
-		t.Fatalf("completed reason = %q", p.Reason)
+	// A clean TUI harness exit leaves the supervisor's login shell alive;
+	// it does not complete the run automatically. Prove the shell is usable
+	// before asking the scheduler to close the run.
+	att.waitOutput(t, "[aether] harness exited with code 0")
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: run.ID, Message: "printf 'e2e-login-shell-ready\\n'",
+	}, nil); err != nil {
+		t.Fatalf("run.inject login-shell probe: %v", err)
 	}
+	att.waitOutput(t, "e2e-login-shell-ready")
+	var active protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: run.ID}, &active); err != nil {
+		t.Fatalf("run.get after harness exit: %v", err)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("run status after harness exit = %q, want running", active.Run.Status)
+	}
+
+	var closed protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: run.ID, Outcome: string(domain.RunMerged),
+	}, &closed); err != nil {
+		t.Fatalf("run.close: %v", err)
+	}
+	if closed.Run.Status != string(domain.RunMerged) {
+		t.Fatalf("closed run status = %q, want merged", closed.Run.Status)
+	}
+	att.close()
+	waitEvent(t, sub, &seen, "run.status merged", statusOf(domain.RunMerged))
 	waitEvent(t, sub, &seen, "git.branch", func(e events.Event) bool {
 		p, ok := e.Payload.(events.GitBranchPayload)
 		return ok && e.RunID == runID && p.Branch == run.Branch && p.Commit != ""
@@ -241,16 +267,16 @@ func assertLifecycle(t *testing.T, seen []events.Event, run domain.RunID, actor 
 			}
 		case events.TimelinePayload:
 			if p.Kind == events.TimelineSteer {
-				steer = true
-				if p.Message != "ping-e2e" || e.ActorID != actor {
-					t.Errorf("steer entry = %+v actor %q", p, e.ActorID)
+				if e.ActorID != actor {
+					t.Errorf("steer entry = %+v actor %q, want %q", p, e.ActorID, actor)
 				}
+				steer = steer || p.Message == "ping-e2e"
 			}
 		case events.GitBranchPayload:
 			banner = true
 		}
 	}
-	want := []domain.RunStatus{domain.RunProvisioning, domain.RunRunning, domain.RunCompleted}
+	want := []domain.RunStatus{domain.RunProvisioning, domain.RunRunning, domain.RunMerged}
 	if len(statuses) != len(want) {
 		t.Fatalf("run.status transitions = %v, want %v", statuses, want)
 	}
@@ -601,23 +627,6 @@ func (a *attachConn) output() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.buf.String()
-}
-
-// waitEnd blocks until the server closes the attach stream (EOF on the
-// channel's output).
-func (a *attachConn) waitEnd(t *testing.T) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(deadline) {
-		a.mu.Lock()
-		ended := a.eof
-		a.mu.Unlock()
-		if ended {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("attach stream never ended; output %q", a.output())
 }
 
 func (a *attachConn) waitOutput(t *testing.T, substr string) {

@@ -81,6 +81,12 @@ func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{containers: make(map[runtime.ID]*fakeContainer), containerIP: "127.0.0.1"}
 }
 
+func (r *fakeRuntime) setWaitError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waitErr = err
+}
+
 type fakeContainer struct {
 	id   runtime.ID
 	spec runtime.Spec
@@ -356,8 +362,11 @@ func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
 }
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
-	if r.waitErr != nil {
-		return runtime.ExitStatus{}, r.waitErr
+	r.mu.Lock()
+	waitErr := r.waitErr
+	r.mu.Unlock()
+	if waitErr != nil {
+		return runtime.ExitStatus{}, waitErr
 	}
 	c, err := r.get(id)
 	if err != nil {
@@ -533,7 +542,7 @@ func (a *fakeAttachment) Close() error {
 }
 
 // fakeGit implements the GitEngine seam with real checkout directories
-// (so relaunch's existence check works) and recorded git operations.
+// and recorded git operations.
 type fakeGit struct {
 	root string
 
@@ -738,25 +747,10 @@ func (g *fakeGit) commitAuthors(run domain.RunID) []domain.GitIdentity {
 	return slices.Clone(g.authors[run])
 }
 
-func (g *fakeGit) unpublishBranch(ws domain.WorkspaceID, branch string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	delete(g.publishedBranches[ws], branch)
-	delete(g.branchCommits[ws], branch)
-}
-
 func (g *fakeGit) publishedCount(run domain.RunID) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.published[run]
-}
-
-func (g *fakeGit) checkoutCount() int {
-	entries, err := os.ReadDir(g.root)
-	if err != nil {
-		return 0
-	}
-	return len(entries)
 }
 
 // fakePTY implements the PTYHost seam. Like the real ptyhost it takes

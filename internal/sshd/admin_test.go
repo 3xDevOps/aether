@@ -171,6 +171,24 @@ func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 	}
 }
 
+func TestMemberRemoveRetainsMemberWhenTerminalCleanupFails(t *testing.T) {
+	e := newTestEnv(t, nil)
+	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
+	stopErr := errors.New("terminal is still using member credentials")
+	e.runs.setTerminalStopErr(stopErr)
+
+	c := controlClient(t, e)
+	var pe *protocol.Error
+	err := c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInternal ||
+		!strings.Contains(pe.Message, "member.remove: stop terminal") {
+		t.Fatalf("member.remove cleanup failure = %v, want contextual internal error", err)
+	}
+	if _, err := e.store.GetMember(context.Background(), target.ID); err != nil {
+		t.Fatalf("member removed after terminal cleanup failure: %v", err)
+	}
+}
+
 func TestInviteJoinRegistersCollaboratorAndBurns(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })

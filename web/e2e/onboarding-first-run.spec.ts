@@ -1,8 +1,8 @@
 // The last step: a real run, in a real container, launched from the wizard.
 // The picker offers only the agents this account has installed, so the run
 // here is launched by an agent this scenario installs: a shim that runs the
-// `agent.sh` the seed repository carries, exits cleanly, and completes the
-// run with its work committed.
+// `agent.sh` the seed repository carries, exits cleanly into the supervisor's
+// reusable shell, and stays Working until the member explicitly closes it.
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
@@ -51,12 +51,33 @@ test('the first run completes', async ({ page, aether }) => {
     'true',
   )
 
-  // The header carries the state on the terminal tab, so nobody has to leave
-  // the agent to find out how the run is doing: the fake agent exits
-  // cleanly, which now completes the run with its work committed.
-  const header = page.locator('header').filter({ hasText: 'write the result file' })
-  await expect(header).toContainText('Done', { timeout: 3 * 60 * 1000 })
+  // The agent's marker is pre-work output, not completion: only the
+  // supervisor's exit line proves that the reusable login shell is ready.
+  const terminal = page.locator('.xterm-rows')
+  await expect(terminal).toContainText('[aether] harness exited with code 0', {
+    timeout: 3 * 60 * 1000,
+  })
 
+  // Drive the reusable shell through the visible terminal, rather than
+  // inferring completion from the agent's earlier output. The octal prefix
+  // keeps the response marker out of the echoed command.
+  await page.locator('.xterm-screen').click()
+  await page.keyboard.type('printf "\\157nboarding-shell-ready\\n"; cat result.txt\n')
+  await expect(terminal).toContainText('onboarding-shell-ready', { timeout: 30_000 })
+  await expect(terminal).toContainText('hello-from-agent', { timeout: 30_000 })
+
+  const header = page.locator('header').filter({ hasText: 'write the result file' })
+  await expect(header).toContainText('Working')
+  await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible()
+
+  // Closing is an explicit user action for an interactive run. The agent
+  // committed its work, so record the successful outcome through the real UI.
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  const closeDialog = page.getByRole('dialog', { name: 'Close this run?' })
+  await expect(closeDialog).toBeVisible()
+  await closeDialog.getByRole('button', { name: 'Merged', exact: true }).click()
+  await expect(header).toContainText('Done')
+  await expect(header).toContainText('closed; retained container')
 })
 
 test('with no agent installed the first run sends you back to Agents', async ({

@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 // imageUserResolver is the optional runtime capability used to learn the
@@ -211,7 +212,6 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, err
 	}
-	argv, session := pinSession(argv, profile)
 	actor, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
 		return nil, err
@@ -255,25 +255,24 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		source = "local"
 	}
 	run := &domain.Run{
-		WorkspaceID:      workspace,
-		MemberID:         member,
-		AccountMemberID:  account,
-		Task:             task,
-		Harness:          harness,
-		Mode:             mode,
-		Status:           domain.RunQueued,
-		HarnessSessionID: session,
-		BaseCommit:       base.Commit,
-		BaseBranch:       base.Branch,
-		BaseSource:       source,
-		BaseCheckedAt:    base.CheckedAt,
+		WorkspaceID:     workspace,
+		MemberID:        member,
+		AccountMemberID: account,
+		Task:            task,
+		Harness:         harness,
+		Mode:            mode,
+		Status:          domain.RunQueued,
+		BaseCommit:      base.Commit,
+		BaseBranch:      base.Branch,
+		BaseSource:      source,
+		BaseCheckedAt:   base.CheckedAt,
 	}
 	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
-	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile, false); err != nil {
+	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -285,12 +284,13 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // the row underneath the in-flight launch. Any error after the row exists
 // marks the run failed ("provisioning: <err>"), or abandoned ("killed")
 // when a kill was accepted meanwhile.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile) error {
 	entry := &supervised{
 		runID:       run.ID,
 		workspaceID: run.WorkspaceID,
 		task:        run.Task,
 		memberID:    run.AccountMember(),
+		launchMode:  run.Mode,
 		status:      domain.RunProvisioning,
 		startedAt:   time.Now().UTC(),
 		done:        make(chan struct{}),
@@ -309,26 +309,24 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile, reuseCheckout); err != nil {
+	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile); err != nil {
 		s.failProvisioning(run, actor.ID, err)
 		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, reuseCheckout bool) error {
-	if !reuseCheckout {
-		checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
-		if err != nil {
-			return fmt.Errorf("create checkout: %w", err)
-		}
-		run.Worktree, run.Branch = checkout, branch
-		if err := s.cfg.Store.UpdateRun(ctx, run); err != nil {
-			return fmt.Errorf("record checkout: %w", err)
-		}
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile) error {
+	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
+	if err != nil {
+		return fmt.Errorf("create checkout: %w", err)
 	}
-	if err := s.pinLatestProfile(ctx, run); err != nil {
-		return fmt.Errorf("pin profile: %w", err)
+	run.Worktree, run.Branch = checkout, branch
+	if updateErr := s.cfg.Store.UpdateRun(ctx, run); updateErr != nil {
+		return fmt.Errorf("record checkout: %w", updateErr)
+	}
+	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
+		return fmt.Errorf("pin profile: %w", pinErr)
 	}
 	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, account, profile, EnvironmentPurposeRun)
 	if err != nil {
@@ -364,8 +362,15 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 		return fmt.Errorf("create container: %w", err)
 	}
 	fail := func(step string, cause error) error {
-		if derr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid); derr != nil {
-			slog.Warn("scheduler: destroy container after failed provisioning", "run", run.ID, "error", derr)
+		if derr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid); derr != nil &&
+			!errors.Is(derr, runtime.ErrNotFound) {
+			s.mu.Lock()
+			entry.destroyPending = true
+			_ = s.writeSidecar(entry.sidecar())
+			s.mu.Unlock()
+			slog.Warn("scheduler: retain container after failed provisioning destroy", "run", run.ID, "error", derr)
+			return errors.Join(fmt.Errorf("%s: %w", step, cause),
+				fmt.Errorf("scheduler: destroy container after failed provisioning: %w", derr))
 		}
 		s.removeSidecar(run.ID)
 		return fmt.Errorf("%s: %w", step, cause)
@@ -411,8 +416,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 		return fail("mark running", err)
 	}
 	run.Status = domain.RunRunning
-	s.wg.Add(1)
-	go s.superviseWait(entry)
+	s.startSupervision(entry)
 	return nil
 }
 
@@ -448,14 +452,22 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
 			"provisioning: "+cause.Error(), actor)
 	}
+	destroyPending := entry != nil && entry.destroyPending
+	if destroyPending && s.runs[run.ID] == entry {
+		now := time.Now().UTC()
+		entry.retained = true
+		entry.retainedUntil = &now
+		_ = s.writeSidecar(entry.sidecar())
+	}
 	s.mu.Unlock()
+	if destroyPending {
+		return
+	}
 	if err != nil {
 		slog.Warn("scheduler: record provisioning outcome", "run", run.ID, "error", err)
 	}
 	s.removeSidecar(run.ID)
-	if entry != nil && entry.done != nil {
-		close(entry.done)
-	}
+	s.closeDone(entry)
 	s.mu.Lock()
 	if s.runs[run.ID] == entry {
 		delete(s.runs, run.ID)

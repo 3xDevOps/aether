@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -89,6 +90,11 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	// removal and a demotion racing each other can both see two admins.
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRemove); err != nil {
+		return nil, err
+	}
 	id := domain.MemberID(p.MemberID)
 	target, err := s.cfg.Store.GetMember(ctx, id)
 	if err != nil {
@@ -103,18 +109,15 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last admin"}
 		}
 	}
+	// Stop the bind-mounted terminal before deleting its member row. If
+	// cleanup fails, retain the member as the durable recovery path.
+	if err := s.cfg.Runs.StopTerminal(ctx, id); err != nil {
+		return nil, rpcError(fmt.Errorf("member.remove: stop terminal: %w", err))
+	}
 	if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
 		return nil, rpcError(err)
 	}
-	// The home is bind-mounted into the terminal container; deleting the
-	// tree under a container that refused to stop would leave a live
-	// shell writing into a removed directory. Retain it for a later
-	// cleanup instead.
-	stopErr := s.cfg.Runs.StopTerminal(ctx, id)
-	if stopErr != nil {
-		slog.Warn("sshd: member terminal cleanup failed; retaining home", "member", id, "error", stopErr)
-	}
-	if stopErr == nil && s.cfg.Homes != nil {
+	if s.cfg.Homes != nil {
 		if err := s.cfg.Homes.Remove(id); err != nil {
 			slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)
 		}

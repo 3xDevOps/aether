@@ -18,15 +18,15 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Status | Resume | Steering | Env setup |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | by session ID (`--session-id`, `--resume`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | notify (`-c notify=[...]`) | no | PTY | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | best effort (`--continue`) | PTY | yes |
-| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | best effort (`--continue`) | PTY | no |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | plugin (`OPENCODE_CONFIG_CONTENT`) | no | HTTP TUI API | no |
-| `fake` | a script you name | - | - | - | - | no | - | no | PTY | no |
-| `custom` | deployment-supplied | - | - | - | - | no | - | no | PTY | no |
+| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Status | Steering | Env setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | PTY | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | notify (`-c notify=[...]`) | PTY | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | PTY | yes |
+| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | PTY | no |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | plugin (`OPENCODE_CONFIG_CONTENT`) | HTTP TUI API | no |
+| `fake` | a script you name | - | - | - | - | no | - | PTY | no |
+| `custom` | deployment-supplied | - | - | - | - | no | - | PTY | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
@@ -66,29 +66,38 @@ reporting".
 Either way, a variable the server sets itself replaces a workspace
 environment variable of the same name rather than merging with it.
 
-The **Resume** column is what a relaunch uses when a server reboot
-interrupted the run. The flags ride directly behind the executable.
+- **TUI.** Container PID 1 supervises the harness and opens a login shell after
+  any normal harness exit. Exiting that shell opens another, so the run and
+  container remain `running` until an explicit Close, Kill, or Delete.
+- **Headless.** The harness is the container's main process. When it exits,
+  Aether commits and publishes the branch, records `completed` or `failed`,
+  and destroys the container immediately. It never opens a replacement shell
+  and is never relaunchable.
 
-**By session ID** is exact. The server generates one UUID per run and
-launches with `claude --session-id <uuid>`, recording it on the run row; the
-relaunch runs `claude --resume <uuid>`, which names that conversation
-outright. `--session-id` is launch-only - Claude Code refuses an ID that
-already names a conversation ("Session ID `<id>` is already in use.") - so
-the two flags never appear together.
+Close a TUI run explicitly:
 
-**Best effort** is `--continue`, which names no conversation: it continues
-whichever conversation the harness spoke last in the working directory.
-Every run mounts its checkout at the same container path and shares one
-credential home per member, so what comes back is that member's *most
-recent* conversation at that path - not necessarily the interrupted run's
-own, and not necessarily one from the same workspace. Neither `pi` nor its
-fork `omp` has a launch-time session ID, so they stay here, and so does any
-run row created before session pinning existed.
+```sh
+aether close <run> --outcome merged
+aether close <run> --outcome abandoned
+```
 
-A harness with neither starts fresh, and a deployment-supplied argv override
-never has any of these appended - nothing checks the override is still that
-CLI. Relaunching a run that finished on its own never resumes; it gets a
-session of its own. See [failure-handling.md](failure-handling.md).
+Close pauses the container and retains the exact container, checkout, run row,
+member account, and coordination surfaces for `--run-container-ttl`. The
+default is `1h`; `0` uses that default and a negative value disables retention
+and cleans up immediately. Kill and Delete remain immediate cleanup operations.
+
+Relaunch is available only for an explicitly closed, retained TUI run while
+its retention deadline has not passed:
+
+```sh
+aether relaunch <run>
+```
+
+It resumes the same row, container, checkout, member account, and coordination
+surfaces; it performs no new launch, checkout, container, branch, or disk-floor
+admission. Expired or unavailable runs cannot relaunch. A deployment-supplied
+argv override receives no registry-only flags, because nothing checks that the
+override is still the registered CLI. See [failure-handling.md](failure-handling.md).
 
 ## Status reporting
 
@@ -100,11 +109,11 @@ events. Aether points each one at the staged server binary inside the
 container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
 and where that mechanism needs a file, the file is written into the run's
-coordination directory beside the MCP config. The interactive launch of
-each, with the session pin and the MCP registration it already carried:
+coordination directory beside the MCP config. The interactive launch of each,
+with the MCP registration it already carried:
 
 ```
-claude --session-id <uuid> --dangerously-skip-permissions "<task>" \
+claude --dangerously-skip-permissions "<task>" \
   --mcp-config /run/aether/mcp.json \
   --settings /run/aether/claude-settings.json
 
@@ -234,12 +243,16 @@ transcript plus the diff timeline, which is always enough. Adding an adapter is
 
 `--mode tui` (the default) runs the agent's native interactive TUI in a
 persistent server-side PTY: `aether attach <run>` puts you in it from the
-CLI, and the dashboard navigates there automatically on launch. The native
-TUI process is supervised directly: Aether never replaces it with a login
-shell in the run container. A clean exit commits the result to the run branch,
-destroys the run container, and marks the run `completed`; an unsuccessful
-exit is likewise handled by supervision rather than leaving a shell behind.
-`--mode headless` runs the agent's machine-readable mode and exits with it.
+CLI, and the dashboard navigates there automatically on launch. Container
+PID 1 supervises the TUI process and, after any normal harness exit, opens a
+login shell; exiting that shell opens another. The run and container remain
+`running` until an explicit Close, Kill, or Delete. A signal or other
+non-normal harness failure records `failed` and cleans up without a
+replacement shell.
+`--mode headless` runs the agent's machine-readable mode as a one-shot:
+on exit Aether commits and publishes the branch, records `completed` or
+`failed`, and destroys the container immediately. Headless runs never open a
+replacement shell and are not relaunchable.
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 
@@ -559,9 +572,9 @@ visible immediately to the shared home.
 ## Adding a harness
 
 The registry is one map entry: argv templates for both modes, credential
-paths, profile root, denylist, API key passthrough, the optional MCP,
-session, and resume flags, and the status reporter - what the harness can
-report, which is what declares a reporter at all, plus the arguments or
-environment variables that point the harness at it and any asset files
-those name. An adapter is a separate, optional file. Both are covered in
+paths, profile root, denylist, API key passthrough, the optional MCP flag,
+and the status reporter - what the harness can report, which is what declares
+a reporter at all, plus the arguments or environment variables that point the
+harness at it and any asset files those name. An adapter is a separate,
+optional file. Both are covered in
 [adapters.md](adapters.md).

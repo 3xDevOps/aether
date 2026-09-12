@@ -247,6 +247,70 @@ func TestRestartRecovery(t *testing.T) {
 		}
 	})
 
+	t.Run("retained terminal", func(t *testing.T) {
+		h := newHarness(t, 3)
+		h.start()
+		retained, expired, sender := h.run(0), h.run(1), h.run(2)
+		for _, r := range []domain.RunID{retained, expired, sender} {
+			if _, err := h.svc.Provision(ctx, r, nil); err != nil {
+				t.Fatalf("Provision(%s): %v", r, err)
+			}
+		}
+		h.peers.pair(sender, retained, "src/auth.go")
+		if _, err := h.svc.Send(ctx, sender, protocol.CoordSendParams{
+			ToRunID: string(retained), Body: "keep this mailbox",
+		}); err != nil {
+			t.Fatalf("Send(retained): %v", err)
+		}
+		h.advance(sendRefill)
+		h.peers.pair(sender, expired, "src/auth.go")
+		if _, err := h.svc.Send(ctx, sender, protocol.CoordSendParams{
+			ToRunID: string(expired), Body: "retire this mailbox",
+		}); err != nil {
+			t.Fatalf("Send(expired): %v", err)
+		}
+		for _, r := range []domain.RunID{retained, expired} {
+			if err := h.db.UpdateRunStatus(ctx, r, domain.RunMerged, "", nil, nil); err != nil {
+				t.Fatalf("finish run %s: %v", r, err)
+			}
+		}
+		socket := filepath.Join(h.dir, "coord", string(retained), SocketName)
+		if err := h.svc.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := os.Chmod(socket, 0o600); err != nil {
+			t.Fatalf("chmod retained socket: %v", err)
+		}
+
+		h.restart(t, false, func(cfg *Config) {
+			cfg.RetainsContainer = func(_ context.Context, run domain.RunID) bool {
+				return run == retained
+			}
+		})
+		if got := mode(t, socket); got != socketMode {
+			t.Errorf("retained socket mode after recovery = %o, want %o", got, socketMode)
+		}
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(retained))); err != nil {
+			t.Fatalf("retained run directory was removed: %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(expired))); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("expired run directory survived recovery: %v", err)
+		}
+		if n, err := h.db.CountUnackedRunMessages(ctx, retained); err != nil || n != 1 {
+			t.Fatalf("retained mailbox = %d (err %v), want one message", n, err)
+		}
+		if n, err := h.db.CountUnackedRunMessages(ctx, expired); err != nil || n != 0 {
+			t.Fatalf("expired mailbox = %d (err %v), want empty", n, err)
+		}
+		var inbox protocol.CoordInboxResult
+		if err := h.dial(t, retained).Call(protocol.MethodCoordInbox, nil, &inbox); err != nil {
+			t.Fatalf("coord.inbox for retained run: %v", err)
+		}
+		if len(inbox.Messages) != 1 || inbox.Messages[0].Body != "keep this mailbox" {
+			t.Fatalf("retained inbox = %+v, want preserved message", inbox)
+		}
+	})
+
 	t.Run("switched off", func(t *testing.T) {
 		h := newHarness(t, 1)
 		h.start()
@@ -304,9 +368,9 @@ func TestRestartRecovery(t *testing.T) {
 
 // restart builds a second service over the same data directory, the way a
 // server restart does, and starts it.
-func (h *coordHarness) restart(t *testing.T, disabled bool) {
+func (h *coordHarness) restart(t *testing.T, disabled bool, opts ...func(*Config)) {
 	t.Helper()
-	svc, err := New(Config{
+	svcCfg := Config{
 		Dir:      filepath.Join(h.dir, "coord"),
 		Store:    h.db,
 		Mail:     h.db,
@@ -315,7 +379,11 @@ func (h *coordHarness) restart(t *testing.T, disabled bool) {
 		PTY:      h.pty,
 		Disabled: disabled,
 		now:      h.now,
-	})
+	}
+	for _, opt := range opts {
+		opt(&svcCfg)
+	}
+	svc, err := New(svcCfg)
 	if err != nil {
 		t.Fatalf("New (restart): %v", err)
 	}

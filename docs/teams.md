@@ -102,8 +102,10 @@ that are already open**, not at next login: the role is re-read from the
 store on every request, so a demotion takes effect mid-session. A live write
 attach is re-checked every few seconds and dropped when steer goes away -
 `detached: you can no longer steer this run` - and `aether attach
---read-only` still shows the terminal afterwards. Removing a member ends
-every attach and live sync of theirs.
+--read-only` still shows the terminal afterwards. `member remove` first stops
+and destroys that member's environment terminal. If cleanup fails, the command
+returns the runtime error and leaves the member in place so an admin can retry.
+A successful removal ends every attach and live sync of theirs.
 
 Setting someone to the role they already hold is a harmless no-op, and a
 pending member's role can be changed before they are approved - approval and

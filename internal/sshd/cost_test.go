@@ -102,6 +102,20 @@ func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 		}
 	}
 
+	// Reopening a retained run is also admitted against the cap; it must not
+	// bypass budget control just because it addresses an existing row.
+	relaunchErr := control.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{
+		RunID: string(e.run.ID),
+	}, nil)
+	if relaunchErr == nil || !strings.Contains(relaunchErr.Error(), "workspace budget exceeded") {
+		t.Fatalf("run.relaunch succeeded past the cap: %v", relaunchErr)
+	}
+	for _, call := range e.runs.Calls() {
+		if strings.HasPrefix(call, "relaunch:") {
+			t.Fatalf("scheduler was asked to reopen past the cap: %q", call)
+		}
+	}
+
 	// The run already running is never touched: it finishes on its own and
 	// its metered record survives the terminal transition.
 	if _, err := e.bus.Publish(ctx, events.Event{

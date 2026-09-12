@@ -55,7 +55,10 @@ func TestIntegrationServerGateway(t *testing.T) {
 	whois := &stubWhoIs{}
 	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
 	dataDir := filepath.Join(t.TempDir(), "data")
-	srv, err := New(ctx, Config{DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt, WhoIs: whois})
+	srv, err := New(ctx, Config{
+		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt,
+		RunContainerTTL: -time.Second, WhoIs: whois,
+	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -123,7 +126,10 @@ func TestIntegrationServerGateway(t *testing.T) {
 
 	t.Setenv("AETHER_FAKE_AGENT", "sh /workspace/agent.sh")
 	var launched protocol.RunResult
-	params, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: string(ws.ID), Task: "phone e2e", Harness: "fake"})
+	params, _ := json.Marshal(protocol.RunLaunchParams{
+		WorkspaceID: string(ws.ID), Task: "phone e2e", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
+	})
 	if status := postJSON(t, web.URL+"/api/v1/run.launch", string(params), &launched); status != http.StatusOK {
 		t.Fatalf("run.launch status = %d", status)
 	}
@@ -149,15 +155,39 @@ func TestIntegrationServerGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitTerminalOutput(t, ctx, attach, &output, "got:ping-gw")
-	// The agent exits after the echo: the socket closes with the
-	// session-ended reason and the run completes.
-	if code, reason := waitClose(t, ctx, attach); code != websocket.StatusNormalClosure || reason != "session ended" {
-		t.Fatalf("attach close = %d %q, want 1000 session ended", code, reason)
+	// A clean TUI harness exit keeps the supervisor's login shell available;
+	// the attach does not close and the run remains running until an
+	// explicit close.
+	waitTerminalOutput(t, ctx, attach, &output, "[aether] harness exited with code 0")
+	if err := wsjson.Write(ctx, attach, protocol.DashAttachControl{
+		Type: protocol.DashAttachInput, Data: "printf 'gateway-login-shell-ready\\n'\r",
+	}); err != nil {
+		t.Fatal(err)
 	}
-	waitWireEvent(t, ctx, events, "run.status completed", func(ev protocol.Event) bool {
+	waitTerminalOutput(t, ctx, attach, &output, "gateway-login-shell-ready")
+
+	getParams, _ := json.Marshal(protocol.RunIDParams{RunID: launched.Run.ID})
+	var active protocol.RunResult
+	if status := postJSON(t, web.URL+"/api/v1/run.get", string(getParams), &active); status != http.StatusOK {
+		t.Fatalf("run.get after harness exit status = %d", status)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("run status after harness exit = %q, want running", active.Run.Status)
+	}
+	closeParams, _ := json.Marshal(protocol.RunCloseParams{
+		RunID: launched.Run.ID, Outcome: string(domain.RunMerged),
+	})
+	var closed protocol.RunResult
+	if status := postJSON(t, web.URL+"/api/v1/run.close", string(closeParams), &closed); status != http.StatusOK {
+		t.Fatalf("run.close status = %d", status)
+	}
+	if closed.Run.Status != string(domain.RunMerged) {
+		t.Fatalf("closed run status = %q, want merged", closed.Run.Status)
+	}
+	waitWireEvent(t, ctx, events, "run.status merged", func(ev protocol.Event) bool {
 		var p struct{ To string }
 		return ev.Type == "run.status" && ev.RunID == launched.Run.ID &&
-			json.Unmarshal(ev.Payload, &p) == nil && p.To == string(domain.RunCompleted)
+			json.Unmarshal(ev.Payload, &p) == nil && p.To == string(domain.RunMerged)
 	})
 
 	// Identity is resolved per request: a tagged node and a resolver that
@@ -461,21 +491,6 @@ func waitTerminalOutput(t *testing.T, ctx context.Context, conn *websocket.Conn,
 		if typ == websocket.MessageBinary {
 			output.Write(data)
 		}
-	}
-}
-
-func waitClose(t *testing.T, ctx context.Context, conn *websocket.Conn) (websocket.StatusCode, string) {
-	t.Helper()
-	for {
-		_, _, err := conn.Read(ctx)
-		if err == nil {
-			continue
-		}
-		var ce websocket.CloseError
-		if !errors.As(err, &ce) {
-			t.Fatalf("read ended without a close frame: %v", err)
-		}
-		return ce.Code, ce.Reason
 	}
 }
 

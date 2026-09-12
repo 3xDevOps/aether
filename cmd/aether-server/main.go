@@ -73,7 +73,6 @@ run "aether-server serve -h" for what each one does, or keep them in %s
 `, joinOptions(), serversetup.DefaultConfigPath)
 }
 
-// serveOptions holds the bound values of every `serve` option.
 type serveOptions struct {
 	dataDir              *string
 	addr                 *string
@@ -86,6 +85,7 @@ type serveOptions struct {
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
 	checkoutTTL          *time.Duration
+	runContainerTTL      *time.Duration
 	minFreeDisk          *int64
 }
 
@@ -112,6 +112,8 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.pollInterval = fs.Duration("poll-interval", 0, "how often stalls are checked (0 = 30s)")
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
+	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
+		"how long an explicitly closed TUI run's container is retained (0 = 1h, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"refuse new runs below this many free bytes (0 = 1GiB, negative = no floor)")
 	return o
@@ -148,7 +150,6 @@ func serve(args []string) error {
 		TailnetRequireKey: *o.tailnetRequireKey,
 
 		CoordinationDisabled: !*o.conflictCoordination,
-
 		// The one place a process is granted the right to replace itself
 		// and to ask systemd for a restart. Nothing else supplies it, so
 		// no test binary can reach the host's service manager.
@@ -157,6 +158,7 @@ func serve(args []string) error {
 		StallThreshold:   *o.stallThreshold,
 		PollInterval:     *o.pollInterval,
 		CheckoutTTL:      *o.checkoutTTL,
+		RunContainerTTL:  *o.runContainerTTL,
 		MinFreeDiskBytes: *o.minFreeDisk,
 	})
 	if err != nil {

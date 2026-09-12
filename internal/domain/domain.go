@@ -619,12 +619,8 @@ type Run struct {
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID
-	// HarnessSessionID is the harness-native conversation ID pinned at
-	// launch, so relaunching an interrupted run resumes this run's own
-	// conversation by name. Empty means the harness cannot pin one, or the
-	// row predates pinning; a relaunch then falls back to the harness's
-	// "continue the most recent conversation here" flag. See
-	// docs/failure-handling.md.
+	// HarnessSessionID is legacy persisted data retained for existing rows.
+	// It is not relaunch authority; new launches leave it empty.
 	HarnessSessionID string
 	// BaseCommit is the commit SHA recorded for the workspace base at the
 	// last base check. Empty means no base commit has been observed.
@@ -644,17 +640,6 @@ func (r *Run) AccountMember() MemberID {
 		return r.AccountMemberID
 	}
 	return r.MemberID
-}
-
-// RelaunchAccount preserves an account that is distinct from the current run
-// owner, including after handoff. A direct relaunch by someone other than the
-// current owner switches an otherwise unshared run to that actor's account.
-func (r *Run) RelaunchAccount(actor MemberID) MemberID {
-	account := r.AccountMember()
-	if account == r.MemberID && actor != r.MemberID {
-		return actor
-	}
-	return account
 }
 
 // AccountShare grants Grantee permission to launch agents with Owner's

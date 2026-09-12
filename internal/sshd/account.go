@@ -104,6 +104,8 @@ func (s *Server) accountRevoke(ctx context.Context, member domain.MemberID, raw 
 	if perr != nil {
 		return nil, perr
 	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
 	if err := s.cfg.Store.RevokeAccountShare(ctx, member, grantee); err != nil {
 		return nil, rpcError(err)
 	}

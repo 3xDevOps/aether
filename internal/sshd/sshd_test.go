@@ -246,7 +246,6 @@ func (p *fakePTY) setErr(err error) {
 	p.err = err
 }
 
-// fakeRuns records RunController calls and returns the configured error.
 type fakeRuns struct {
 	mu              sync.Mutex
 	err             error
@@ -255,11 +254,48 @@ type fakeRuns struct {
 	addrStarted     chan<- struct{}
 	addrRelease     <-chan struct{}
 	addrCanceled    chan<- struct{}
+	relaunchStarted chan<- struct{}
+	relaunchRelease <-chan struct{}
+	terminalStarted chan<- struct{}
+	terminalRelease <-chan struct{}
+	launchStarted   chan<- struct{}
+	launchRelease   <-chan struct{}
 	terminalAddr    string
 	terminalAddrErr error
+	terminalStopErr error
 	calls           []string
 	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
+}
+
+func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	f.mu.Lock()
+	f.terminalStarted = started
+	f.terminalRelease = release
+	f.mu.Unlock()
+	return started, release
+}
+
+func (f *fakeRuns) blockRelaunch() (<-chan struct{}, chan struct{}) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	f.mu.Lock()
+	f.relaunchStarted = started
+	f.relaunchRelease = release
+	f.mu.Unlock()
+	return started, release
+}
+
+func (f *fakeRuns) blockLaunch() (<-chan struct{}, chan struct{}) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	f.mu.Lock()
+	f.launchStarted = started
+	f.launchRelease = release
+	f.mu.Unlock()
+	return started, release
 }
 
 func (f *fakeRuns) record(call string) error {
@@ -273,6 +309,11 @@ func (f *fakeRuns) setErr(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.err = err
+}
+func (f *fakeRuns) setTerminalStopErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.terminalStopErr = err
 }
 
 func (f *fakeRuns) Calls() []string {
@@ -290,16 +331,28 @@ func (f *fakeRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, mem
 	return f.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
 }
 
-func (f *fakeRuns) LaunchWithOptions(_ context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	f.mu.Lock()
 	f.launchOptions = append(f.launchOptions, opts)
+	started, release := f.launchStarted, f.launchRelease
 	f.mu.Unlock()
 	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
 	}
+	if release != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return &domain.Run{
-		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account, Task: task,
-		Harness: harness, Mode: mode, Status: domain.RunQueued,
+		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account,
+		Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued,
 		CreatedAt: time.Now().UTC(),
 	}, nil
 }
@@ -413,23 +466,51 @@ func (f *fakeRuns) CloseRun(_ context.Context, run domain.RunID, actor domain.Me
 	return f.record(fmt.Sprintf("close:%s:%s:%s", run, actor, outcome))
 }
 
-func (f *fakeRuns) Relaunch(_ context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
+func (f *fakeRuns) Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
 	if err := f.record(fmt.Sprintf("relaunch:%s:%s", run, actor)); err != nil {
 		return nil, err
 	}
+	f.mu.Lock()
+	started, release := f.relaunchStarted, f.relaunchRelease
+	f.mu.Unlock()
+	if release != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return &domain.Run{
-		ID: "run_relaunched", WorkspaceID: "ws", MemberID: actor,
+		ID: run, WorkspaceID: "ws", MemberID: actor,
 		Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
-		Status: domain.RunQueued, CreatedAt: time.Now().UTC(),
+		Status: domain.RunRunning, CreatedAt: time.Now().UTC(),
 	}, nil
 }
 
 func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
 	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
 }
-func (f *fakeRuns) EnsureTerminal(_ context.Context, member domain.MemberID) (*domain.Terminal, error) {
+func (f *fakeRuns) EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
 	if err := f.record(fmt.Sprintf("terminal:%s", member)); err != nil {
 		return nil, err
+	}
+	f.mu.Lock()
+	started, release := f.terminalStarted, f.terminalRelease
+	f.mu.Unlock()
+	if release != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	return &domain.Terminal{Member: member, ContainerID: "terminal-container", Image: "standard", StartedAt: time.Now().UTC()}, nil
 }
@@ -439,7 +520,12 @@ func (f *fakeRuns) EnsureTerminalTab(_ context.Context, member domain.MemberID, 
 }
 
 func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error {
-	return f.record(fmt.Sprintf("terminal-stop:%s", member))
+	if err := f.record(fmt.Sprintf("terminal-stop:%s", member)); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.terminalStopErr
 }
 
 func (f *fakeRuns) TerminalStatus(_ context.Context, member domain.MemberID) (domain.TerminalStatus, error) {

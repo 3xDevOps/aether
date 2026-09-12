@@ -24,6 +24,7 @@ test('a card gives up its branch name without opening the run', async ({ page, a
       workspace_id: workspaces[0].id,
       harness: 'fake',
       task: 'a run whose branch name is long enough to be cut short on a card',
+      mode: 'headless',
     },
   )
 

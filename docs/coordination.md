@@ -45,36 +45,44 @@ workspace's upstream repository when one was recorded, and the member home
 carries the gh login (see
 [environment-home.md](environment-home.md#connect-github)).
 Provisioning writes the list as it stands, so a recovered run starts with
-the steerers it already had rather than empty. A relaunch is a new run row
-and `run_steerers` is keyed by run, so a relaunched run starts with its
-owner alone. It is rewritten each time someone new steers, when a member
-already on it changes their git identity mid-run, and on every handoff,
-which adds the outgoing owner as a steerer and puts the incoming one on the
-list because the container still authors as whoever launched it. So an
-agent re-reads it rather than caching it. Each rewrite is a temp file and a
-rename, so a reader never catches the path missing. Like `mcp.json` it is
-read-only in the container: who is credited is the server's answer, not the
-agent's. The same trailers go on the commits Aether makes itself at run end,
-so the branch is credited whether or not the agent cooperated - see
-[teams.md](teams.md).
+the steerers it already had rather than empty. A retained close and relaunch
+keep the same run row and `run_steerers` entries, so existing steerers remain
+after close, reboot and relaunch; no new run row is created. It is rewritten
+each time someone new steers, when a member already on it changes their git
+identity mid-run, and on every handoff, which adds the outgoing owner as a
+steerer and puts the incoming one on the list because the container still
+authors as whoever launched it. So an agent re-reads it rather than caching
+it. Each rewrite is a temp file and a rename, so a reader never catches the
+path missing. Like `mcp.json` it is read-only in the container: who is
+credited is the server's answer, not the agent's. The same trailers go on the
+commits Aether makes itself at run end, so the branch is credited whether or
+not the agent cooperated - see [teams.md](teams.md).
 
-The socket file deliberately survives process shutdown: its presence is
-the record that the run was provisioned, and its name is the wire version
-its container was provisioned against.
+For an active run, and for a live TUI container explicitly closed as merged
+or abandoned, the socket file and mailbox deliberately survive process
+shutdown and server reboot. The socket's presence records that the run was
+provisioned, and its name is the wire version its container was provisioned
+against. Close leaves the same run row, checkout, container and coordination
+assets in place for `--run-container-ttl` (default `1h`; a negative value
+means no retention); `run.relaunch` reopens that exact retained TUI run rather
+than creating another one. Expiry, Kill or Delete release the socket and
+mailbox only after destruction of the retained container is confirmed.
 
 ## Restart recovery
 
 On start the server walks `<data>/coord/`:
 
-- **Coordination enabled.** A run that is still active has any retired
-  wire version's socket unlinked, then every socket still on disk for a
-  version this server speaks rebound - the socket files are the record of
-  what was provisioned - and the rebind creates a new inode, which is what
-  makes a bridge holding the old one redial. A run that is no longer active
-  has its directory removed and its mailbox rows deleted.
+- **Coordination enabled.** An active run or a retained terminal TUI run has
+  any retired wire version's socket unlinked, then every socket still on disk
+  for a version this server speaks rebound - the socket files are the record
+  of what was provisioned - and the rebind creates a new inode, which is what
+  makes a bridge holding the old one redial. A run that is neither active nor
+  retained has its directory removed and its mailbox rows deleted. Retained
+  ownership is reconciled on boot; expiry is swept within at most one minute,
+  and an expired or unavailable run cannot be relaunched.
 - **Coordination disabled.** Old sockets are unlinked and nothing is
-  recreated. The directory and its read-only config stay where a live
-  container has them mounted; they are simply inert.
+  recreated. The directory and its read-only config stay where a live or
+  retained container has them mounted; they are simply inert.
 
 ## Wire v2
 
@@ -155,9 +163,14 @@ original token until it is acknowledged - so a response lost between the
 server and the agent costs a duplicate, never a silently dropped "I'll
 wait". Tokens live in `run_messages`, so they survive a restart.
 
-The rows are retired with their reader: releasing a run's coordination
-deletes its mailbox, and recovery deletes the mailbox of any run whose
-directory it removes. The timeline notes remain the audit trail.
+The rows are retired with their reader only after the run no longer owns a
+container. `Release` stops the run's listeners, removes its coordination
+directory and deletes its mailbox; retention expiry, Kill and Delete call it
+only after destruction is confirmed. Recovery performs the same removal for
+a run that is neither active nor retained. A retained close therefore keeps
+the socket and unread mailbox rows through close and reboot, and a relaunch
+continues with those same coordination surfaces. The timeline notes remain
+the audit trail.
 
 ### Caps and failures
 

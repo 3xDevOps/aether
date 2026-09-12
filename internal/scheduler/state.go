@@ -154,11 +154,18 @@ func (s *Scheduler) publishTimeline(ctx context.Context, workspace domain.Worksp
 // unknown fields, so it decodes here unchanged, and the run's workspace
 // is read off the run row (entryFromSidecar) rather than this file.
 type sidecar struct {
-	RunID         string `json:"run_id"`
-	ContainerID   string `json:"container_id"`
-	WorkspaceID   string `json:"workspace_id"`
-	Paused        bool   `json:"paused"`
-	KillRequested bool   `json:"kill_requested"`
+	RunID         string            `json:"run_id"`
+	ContainerID   string            `json:"container_id"`
+	WorkspaceID   string            `json:"workspace_id"`
+	Mode          domain.LaunchMode `json:"mode,omitempty"`
+	Paused        bool              `json:"paused"`
+	KillRequested bool              `json:"kill_requested"`
+	Retained      bool              `json:"retained,omitempty"`
+	RetainedUntil *time.Time        `json:"retained_until,omitempty"`
+	// DestroyPending is durable ownership for a container whose destruction
+	// was attempted but not confirmed. Such an owner is retried by the
+	// bounded cleanup sweep before the run is terminalized.
+	DestroyPending bool `json:"destroy_pending,omitempty"`
 	// RunUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root. Recovered so the
 	// credential-home ownership guard still sees live runs across a
@@ -187,8 +194,8 @@ type sidecar struct {
 	ExitObserved bool `json:"exit_observed"`
 	ExitCode     int  `json:"exit_code"`
 	// The conflict-coordination assets this run's container holds, written
-	// before the container is created. BridgeDigest and BridgePath name the
-	// staged MCP bridge binary and are the reference that keeps it from
+	// before the container is created. BridgeDigest and BridgePath name
+	// the staged MCP bridge binary and are the reference that keeps it from
 	// being collected; CoordDir is the provisioned coordination directory,
 	// and its presence is what "this run has coordination" means. All empty
 	// for a run launched with coordination off.
@@ -207,8 +214,12 @@ func (e *supervised) sidecar() sidecar {
 		RunID:          string(e.runID),
 		ContainerID:    string(e.containerID),
 		WorkspaceID:    string(e.workspaceID),
+		Mode:           e.launchMode,
 		Paused:         e.paused,
 		KillRequested:  e.killRequested,
+		Retained:       e.retained,
+		RetainedUntil:  e.retainedUntil,
+		DestroyPending: e.destroyPending,
 		RunUser:        e.runUser,
 		Home:           e.home,
 		Reporter:       e.reporter,

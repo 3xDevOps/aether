@@ -66,8 +66,8 @@ func stubRelease(t *testing.T, tag string) *httptest.Server {
 // TestIntegrationServerUpdateAppliesWhenIdle drives the scheduled path end
 // to end through a wired server: an admin schedules an update while a real
 // containerized run is working, the poll loop leaves it alone, and the
-// moment the run parks the update applies, publishes its phases, replaces
-// both binaries, and re-executes.
+// moment the run is explicitly resolved the update applies, publishes its
+// phases, replaces both binaries, and re-executes.
 //
 // The re-exec itself is the one thing that cannot run here - it would
 // replace the test process - so Config.SelfUpdate supplies an exec that
@@ -102,10 +102,11 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	t.Cleanup(releaseExec)
 
 	srv, err := New(ctx, Config{
-		DataDir:      dataDir,
-		Addr:         "127.0.0.1:0",
-		Runtime:      rt,
-		PollInterval: 200 * time.Millisecond,
+		DataDir:         dataDir,
+		Addr:            "127.0.0.1:0",
+		Runtime:         rt,
+		RunContainerTTL: -time.Second,
+		PollInterval:    200 * time.Millisecond,
 		SelfUpdate: serverupdate.Config{
 			Checker:    selfupdate.NewChecker(release.URL, time.Hour),
 			Executable: serverBin,
@@ -184,6 +185,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(ws.ID), Task: "hold the server busy", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -238,17 +240,41 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 		t.Fatalf("waiting = %+v, want it to name the one working run", status.Waiting)
 	}
 
-	// Finish the run. The agent exits on the injected line and the run
-	// parks, which is the first idle tick.
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
 		RunID: launched.Run.ID, Message: "done",
 	}, nil); err != nil {
-		t.Fatalf("run.inject: %v", err)
+		t.Fatalf("run.inject harness completion: %v", err)
 	}
-	att.waitEnd(t)
-	waitEvent(t, sub, &seen, "run.status completed", func(e events.Event) bool {
+
+	// A clean TUI harness exit leaves a reusable login shell, so the run
+	// remains active until the operator explicitly resolves it.
+	att.waitOutput(t, "[aether] harness exited with code 0")
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: launched.Run.ID, Message: "printf 'update-login-shell-ready\\n'",
+	}, nil); err != nil {
+		t.Fatalf("run.inject login-shell probe: %v", err)
+	}
+	att.waitOutput(t, "update-login-shell-ready")
+	var active protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(runID)}, &active); err != nil {
+		t.Fatalf("run.get after harness exit: %v", err)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("run status after harness exit = %q, want running", active.Run.Status)
+	}
+	var closed protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: string(runID), Outcome: string(domain.RunMerged),
+	}, &closed); err != nil {
+		t.Fatalf("run.close: %v", err)
+	}
+	if closed.Run.Status != string(domain.RunMerged) {
+		t.Fatalf("closed run status = %q, want merged", closed.Run.Status)
+	}
+	att.close()
+	waitEvent(t, sub, &seen, "run.status merged", func(e events.Event) bool {
 		p, ok := e.Payload.(events.RunStatusPayload)
-		return ok && e.RunID == runID && p.To == domain.RunCompleted
+		return ok && e.RunID == runID && p.To == domain.RunMerged
 	})
 
 	waitEvent(t, sub, &seen, "server.update applying", phaseOf(events.ServerUpdateApplying))

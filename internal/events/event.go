@@ -48,10 +48,10 @@ const (
 	TypeGitBranch Type = "git.branch"
 	// TypeAgentEvent carries structured agent activity translated from a
 	// harness's machine-readable output by its run adapter: tool calls,
-	// tool results, subagent spawns, plan/approval pauses, and resume
-	// metadata. Only headless runs whose harness has an adapter emit it;
-	// runs without one degrade to the PTY + diff timeline and no feature
-	// may hard-require these events.
+	// tool results, subagent spawns, plan/approval pauses, and session
+	// metadata for timeline observability. Only headless runs whose harness
+	// has an adapter emit it; runs without one degrade to the PTY + diff
+	// timeline and no feature may hard-require these events.
 	TypeAgentEvent Type = "run.agent"
 	// TypeProfile records a member+harness profile snapshot change
 	// (put, rollback, or pin). Publishing still requires a WorkspaceID;
@@ -240,10 +240,8 @@ const (
 	AgentSubagent AgentEventKind = "subagent"
 	// AgentPause is the agent pausing for plan review or approval.
 	AgentPause AgentEventKind = "pause"
-	// AgentSession carries the harness-native session identifier the
-	// agent reports for itself - for claude, the one the launch pinned
-	// with --session-id. It is a timeline record for the operator; a
-	// relaunch resumes from domain.Run.HarnessSessionID.
+	// AgentSession carries the harness-native session identifier reported by
+	// the agent. It is retained as timeline observability for operators.
 	AgentSession AgentEventKind = "session"
 )
 
@@ -263,8 +261,8 @@ type AgentEventPayload struct {
 	Detail string `json:"detail,omitempty"`
 	// IsError marks a failed tool_result.
 	IsError bool `json:"is_error,omitempty"`
-	// HarnessSessionID is the harness-native session identifier
-	// (session kind only).
+	// HarnessSessionID is the harness-native session identifier reported in
+	// a session timeline event (session kind only).
 	HarnessSessionID string `json:"harness_session_id,omitempty"`
 }
 

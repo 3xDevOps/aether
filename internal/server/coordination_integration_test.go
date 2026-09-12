@@ -370,6 +370,7 @@ func (e *coordEnv) launch(t *testing.T, ctrl *protocol.Client, task, harnessName
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(e.ws.ID), Task: task, Harness: harnessName,
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch %q on harness %s: %v", task, harnessName, err)
 	}

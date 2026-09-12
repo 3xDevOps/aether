@@ -131,6 +131,15 @@ func (s *failingPutTerminalStore) DeleteTerminal(ctx context.Context, member dom
 	return s.Store.DeleteTerminal(ctx, member)
 }
 
+type failingTerminalFindRuntime struct {
+	runtime.Runtime
+	findErr error
+}
+
+func (r *failingTerminalFindRuntime) FindByCreationKey(context.Context, string) (runtime.ID, error) {
+	return "", r.findErr
+}
+
 type failingDestroyRuntime struct {
 	*scriptedWaitRuntime
 	destroyErr error
@@ -283,6 +292,181 @@ func TestRecoveredTerminalPutFailurePreservesAndRetries(t *testing.T) {
 	}
 	if stored.ContainerID != first.ContainerID {
 		t.Fatalf("stored container = %q, want %q", stored.ContainerID, first.ContainerID)
+	}
+}
+
+func TestRecoverTerminalWithoutRowAdoptsCreationKeySurvivor(t *testing.T) {
+	e := newTestEnv(t, nil)
+	failing := &failingPutTerminalStore{Store: e.db, fail: true}
+	e.sched.cfg.Store = failing
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err == nil {
+		t.Fatal("EnsureTerminal unexpectedly succeeded while PutTerminal was unavailable")
+	}
+	firstID, err := e.rt.FindByCreationKey(t.Context(), terminalCreationKey(e.member.ID))
+	if err != nil {
+		t.Fatalf("FindByCreationKey: %v", err)
+	}
+	container, err := e.rt.get(firstID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.mu.Lock()
+	container.spec.User = "1000:1000"
+	container.mu.Unlock()
+	if _, getErr := e.db.GetTerminal(t.Context(), e.member.ID); !errors.Is(getErr, store.ErrNotFound) {
+		t.Fatalf("terminal row after failed initial persist = %v, want ErrNotFound", getErr)
+	}
+	e.rt.mu.Lock()
+	createdBefore := e.rt.seq
+	containersBefore := len(e.rt.containers)
+	e.rt.mu.Unlock()
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close before recovery: %v", closeErr)
+	}
+
+	failing.fail = false
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Store = failing
+	startScheduler(t, s2)
+	waitFor(t, "row-less terminal recovery", func() bool {
+		stored, storeErr := e.db.GetTerminal(t.Context(), e.member.ID)
+		sup := s2.lookupTerminal(e.member.ID)
+		return storeErr == nil && stored.ContainerID == string(firstID) &&
+			sup != nil && sup.containerID == firstID &&
+			len(s2.cfg.PTY.ActiveSessions(terminalPrefix(e.member.ID))) == 1
+	})
+
+	stored, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal after recovery: %v", err)
+	}
+	if stored.ContainerID != string(firstID) {
+		t.Fatalf("recovered terminal row = %+v, want container %q", stored, firstID)
+	}
+	sup := s2.lookupTerminal(e.member.ID)
+	if sup == nil || sup.userReservation == nil || sup.runUser != "1000:1000" {
+		t.Fatalf("recovered terminal ownership = %+v, want one reserved 1000:1000 owner", sup)
+	}
+	e.rt.mu.Lock()
+	createdAfter := e.rt.seq
+	containersAfter := len(e.rt.containers)
+	e.rt.mu.Unlock()
+	if createdAfter != createdBefore || containersAfter != containersBefore {
+		t.Fatalf("row-less recovery changed runtime population: creates %d -> %d, containers %d -> %d",
+			createdBefore, createdAfter, containersBefore, containersAfter)
+	}
+	s2.mu.Lock()
+	reservationCount := len(s2.credentialUsers)
+	s2.mu.Unlock()
+	if reservationCount != 1 {
+		t.Fatalf("terminal credential reservations = %d, want 1", reservationCount)
+	}
+}
+
+func TestRecoverTerminalWithoutRowAndSurvivorDoesNotCreate(t *testing.T) {
+	e := newTestEnv(t, nil)
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	if err := s2.recoverTerminals(t.Context()); err != nil {
+		t.Fatalf("recoverTerminals: %v", err)
+	}
+	e.rt.mu.Lock()
+	created := e.rt.seq
+	containers := len(e.rt.containers)
+	e.rt.mu.Unlock()
+	if created != 0 || containers != 0 {
+		t.Fatalf("recovery created terminal without survivor: creates=%d containers=%d", created, containers)
+	}
+	if sup := s2.lookupTerminal(e.member.ID); sup != nil {
+		t.Fatalf("terminal supervision without survivor = %+v", sup)
+	}
+}
+
+func TestRecoveredTerminalProbeFailurePreservesAndRetries(t *testing.T) {
+
+	e := newTestEnv(t, nil)
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	container, err := e.rt.get(runtime.ID(first.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	container.mu.Lock()
+	container.spec.User = "1000:1000"
+	container.mu.Unlock()
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	probeErr := errors.New("test: daemon probe unavailable")
+	e.rt.setWaitError(probeErr)
+	row, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal: %v", err)
+	}
+	lock := s2.terminalLock(e.member.ID)
+	lock.Lock()
+	recoverErr := s2.recoverTerminalLocked(t.Context(), e.member, row)
+	lock.Unlock()
+	if recoverErr == nil || !errors.Is(recoverErr, probeErr) {
+		t.Fatalf("recovery error = %v, want probe error", recoverErr)
+	}
+	sup := s2.lookupTerminal(e.member.ID)
+	if sup == nil || sup.containerID != runtime.ID(first.ContainerID) ||
+		sup.userReservation == nil || !sup.metadataPending {
+		t.Fatalf("surviving terminal ownership after probe error = %+v", sup)
+	}
+
+	e.rt.setWaitError(nil)
+	retried, err := s2.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal retry: %v", err)
+	}
+	if retried.ContainerID != first.ContainerID {
+		t.Fatalf("retried container = %q, want surviving %q", retried.ContainerID, first.ContainerID)
+	}
+	if got := len(s2.cfg.PTY.ActiveSessions(terminalPrefix(e.member.ID))); got != 1 {
+		t.Fatalf("terminal PTY sessions after retry = %d, want 1", got)
+	}
+	s2.mu.Lock()
+	reservationCount := len(s2.credentialUsers)
+	s2.mu.Unlock()
+	if reservationCount != 1 {
+		t.Fatalf("terminal credential reservations after retry = %d, want 1", reservationCount)
+	}
+}
+
+func TestRecoverTerminalWithoutRowFindFailureFailsClosed(t *testing.T) {
+	e := newTestEnv(t, nil)
+	failing := &failingPutTerminalStore{Store: e.db, fail: true}
+	e.sched.cfg.Store = failing
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err == nil {
+		t.Fatal("EnsureTerminal unexpectedly succeeded while PutTerminal was unavailable")
+	}
+	if _, err := e.rt.FindByCreationKey(t.Context(), terminalCreationKey(e.member.ID)); err != nil {
+		t.Fatalf("FindByCreationKey before restart: %v", err)
+	}
+	if closeErr := e.sched.Close(); closeErr != nil {
+		t.Fatalf("Close before recovery: %v", closeErr)
+	}
+
+	findErr := errors.New("test: daemon creation-key lookup unavailable")
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = &failingTerminalFindRuntime{Runtime: e.rt, findErr: findErr}
+	if err := s2.recoverTerminals(t.Context()); err == nil || !errors.Is(err, findErr) {
+		t.Fatalf("recoverTerminals error = %v, want creation-key lookup failure", err)
+	}
+	if sup := s2.lookupTerminal(e.member.ID); sup != nil {
+		t.Fatalf("terminal supervision after failed creation-key lookup = %+v", sup)
+	}
+	e.rt.mu.Lock()
+	created := e.rt.seq
+	containers := len(e.rt.containers)
+	e.rt.mu.Unlock()
+	if created != 1 || containers != 1 {
+		t.Fatalf("failed recovery changed runtime population: creates=%d containers=%d, want 1 and 1", created, containers)
 	}
 }
 

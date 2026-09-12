@@ -30,9 +30,19 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 	if !domain.ValidSteerOthers(p.SteerOthers) {
 		return nil, invalidParams(`steer_others must be "" or "admins_only"`)
 	}
-	id := domain.WorkspaceID(p.WorkspaceID)
-	if err := s.cfg.Store.SetWorkspaceSteerOthers(ctx, id, p.SteerOthers); err != nil {
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
 		return nil, rpcError(err)
+	}
+	if cerr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{}); cerr != nil {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodWorkspaceSettings + ": " + cerr.Error()}
+	}
+
+	id := domain.WorkspaceID(p.WorkspaceID)
+	if updateErr := s.cfg.Store.SetWorkspaceSteerOthers(ctx, id, p.SteerOthers); updateErr != nil {
+		return nil, rpcError(updateErr)
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, id)
 	if err != nil {
@@ -108,8 +118,22 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 		return nil, invalidParams("run_id is required")
 	}
 	id := domain.RunID(p.RunID)
-	if err := s.cfg.Store.SetRunProtected(ctx, id, p.Protected); err != nil {
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
 		return nil, rpcError(err)
+	}
+	target, err := resolveRunTarget(ctx, s.cfg.Store, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if cerr := permissions.Check(permissions.Protect, actor, target); cerr != nil {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunProtect + ": " + cerr.Error()}
+	}
+
+	if updateErr := s.cfg.Store.SetRunProtected(ctx, id, p.Protected); updateErr != nil {
+		return nil, rpcError(updateErr)
 	}
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
