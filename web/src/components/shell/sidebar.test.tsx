@@ -4,7 +4,6 @@ import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
 import {
-  alice,
   approval,
   bob,
   fakeApi,
@@ -286,9 +285,147 @@ describe('Sidebar', () => {
 
     expect(screen.getAllByTitle('Needs you').length).toBeGreaterThan(0)
     // The run groups under Needs you, so the attention sort surfaces it.
-    expect(screen.getByRole('heading', { name: 'Needs you' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
   })
 
+  it('starts the Done status group collapsed with its run count visible', () => {
+    const done = run({
+      id: 'run_done',
+      task: 'publish the finished checkout',
+      status: 'completed',
+    })
+    act(() =>
+      useStore.setState((s) => ({
+        runs: { ...s.runs, [done.id]: toRecord(done) },
+      })),
+    )
+    render(<Sidebar />)
+
+    const doneHeader = screen.getByRole('button', { name: /^Done/, expanded: false })
+    expect(doneHeader.getAttribute('aria-expanded')).toBe('false')
+    expect(doneHeader.textContent).toContain('1')
+    expect(screen.queryByText(done.task)).toBeNull()
+
+    const region = document.getElementById(doneHeader.getAttribute('aria-controls') ?? '')
+    expect(region?.hasAttribute('hidden')).toBe(true)
+
+    fireEvent.click(doneHeader)
+
+    expect(doneHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(done.task)).toBeDefined()
+  })
+
+  it('toggles a status group without changing its run ordering', () => {
+    render(<Sidebar />)
+
+    const workingHeader = screen.getByRole('button', { name: /^Working/, expanded: true })
+    expect(workingHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+
+    fireEvent.click(workingHeader)
+
+    expect(workingHeader.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('rewrite the checkout flow')).toBeNull()
+
+    fireEvent.click(workingHeader)
+
+    expect(workingHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+  })
+
+  it('toggles one member group while leaving other member rows visible', () => {
+    const bobRun = run({
+      id: 'run_bob',
+      member_id: bob.id,
+      account_member_id: bob.id,
+      task: 'tune the rate limiter',
+    })
+    act(() =>
+      useStore.setState((s) => ({
+        runs: { ...s.runs, [bobRun.id]: toRecord(bobRun) },
+      })),
+    )
+    render(<Sidebar />)
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Group runs by' })).getByRole('button', {
+        name: 'Member',
+      }),
+    )
+
+    const aliceHeader = screen.getByRole('button', { name: /^Alice/, expanded: true })
+    expect(aliceHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+    expect(screen.getByText(bobRun.task)).toBeDefined()
+
+    fireEvent.click(aliceHeader)
+
+    expect(aliceHeader.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('rewrite the checkout flow')).toBeNull()
+    expect(screen.getByText(bobRun.task)).toBeDefined()
+
+    fireEvent.click(aliceHeader)
+
+    expect(aliceHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('rewrite the checkout flow')).toBeDefined()
+  })
+
+  it('keeps disclosure state isolated between grouping modes with the same key', () => {
+    const sameKey = run({
+      id: 'run_same_key',
+      member_id: 'done',
+      account_member_id: 'done',
+      task: 'inspect the matching key',
+      status: 'completed',
+    })
+    act(() =>
+      useStore.setState((s) => ({
+        runs: { ...s.runs, [sameKey.id]: toRecord(sameKey) },
+      })),
+    )
+    render(<Sidebar />)
+
+    const groupBy = within(screen.getByRole('group', { name: 'Group runs by' }))
+    const doneStatusHeader = screen.getByRole('button', { name: /^Done/, expanded: false })
+    expect(doneStatusHeader.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(groupBy.getByRole('button', { name: 'Member' }))
+
+    const doneMemberHeader = screen.getByRole('button', { name: /^done/, expanded: true })
+    expect(doneMemberHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(sameKey.task)).toBeDefined()
+
+    fireEvent.click(doneMemberHeader)
+    expect(doneMemberHeader.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText(sameKey.task)).toBeNull()
+
+    fireEvent.click(groupBy.getByRole('button', { name: 'Status' }))
+    expect(
+      screen.getByRole('button', { name: /^Done/, expanded: false }).getAttribute('aria-expanded'),
+    ).toBe(
+      'false',
+    )
+
+    fireEvent.click(groupBy.getByRole('button', { name: 'Member' }))
+    expect(
+      screen.getByRole('button', { name: /^done/, expanded: false }).getAttribute('aria-expanded'),
+    ).toBe(
+      'false',
+    )
+  })
+
+
+  it('keeps the explorer and main top bars the same height', () => {
+    render(
+      <>
+        <Sidebar />
+        <ViewHeader title="All runs" />
+      </>,
+    )
+
+    const sidebar = screen.getByRole('complementary', { name: 'Runs' })
+    expect(sidebar.firstElementChild?.className).toContain('h-9')
+    expect(screen.getByRole('banner').className).toContain('h-9')
+  })
 
   it('offers a new run to a member who may start one', () => {
     useStore.setState({ info: { ...serverInfo, member: bob } })
@@ -383,7 +520,7 @@ describe('Sidebar', () => {
     expect(member.getAttribute('aria-pressed')).toBe('true')
     expect(status.getAttribute('aria-pressed')).toBe('false')
     // The runs regroup under their owner rather than their state.
-    expect(screen.getByRole('heading', { name: alice.display_name })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /^Alice/ })).toBeDefined()
   })
 
   it('shows the admin and desktop surfaces the gateway can serve', () => {

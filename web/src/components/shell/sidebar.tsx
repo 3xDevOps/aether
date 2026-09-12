@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  ChevronRight,
   FolderGit2,
   LayoutGrid,
   List,
@@ -37,7 +39,7 @@ import {
   useSidebarGroups,
 } from '@/store/hooks'
 import type { SidebarGroup, SidebarRun } from '@/store/selectors'
-import { maxSidebarWidth, minSidebarWidth } from '@/store/ui'
+import { maxSidebarWidth, minSidebarWidth, type GroupBy } from '@/store/ui'
 
 /**
  * The desktop shell cannot open a window narrower than 960px, so this matches
@@ -450,11 +452,20 @@ function AttentionBadge() {
 
 function RunTree() {
   const groups = useSidebarGroups()
+  const groupBy = useStore((s) => s.groupBy)
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
+  const [expandedByGroup, setExpandedByGroup] = useState<Record<string, boolean>>({})
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && groups.length === 0)
+
+  const toggleGroup = useCallback((key: string, initiallyExpanded: boolean) => {
+    setExpandedByGroup((current) => ({
+      ...current,
+      [key]: !(current[key] ?? initiallyExpanded),
+    }))
+  }, [])
 
   if (groups.length === 0) {
     return (
@@ -482,11 +493,30 @@ function RunTree() {
 
   return (
     <div className="flex-1 overflow-y-auto py-1">
-      {groups.map((group) => (
-        <Group key={group.key} group={group} />
-      ))}
+      {groups.map((group) => {
+        const stateKey = groupStateKey(groupBy, group.key)
+        const initiallyExpanded = groupBy !== 'status' || group.key !== 'done'
+        const expanded = expandedByGroup[stateKey] ?? initiallyExpanded
+        return (
+          <Group
+            key={stateKey}
+            group={group}
+            expanded={expanded}
+            onToggle={() => toggleGroup(stateKey, initiallyExpanded)}
+            regionId={groupRegionId(groupBy, group.key)}
+          />
+        )
+      })}
     </div>
   )
+}
+
+function groupStateKey(groupBy: GroupBy, groupKey: string): string {
+  return `${groupBy}:${groupKey}`
+}
+
+function groupRegionId(groupBy: GroupBy, groupKey: string): string {
+  return `sidebar-run-group-${groupBy}-${groupKey}`
 }
 
 function approvalsLabel(label: string, waiting: number, error: string | null): string {
@@ -612,15 +642,43 @@ export function ActivityRail({
   )
 }
 
-function Group({ group }: { group: SidebarGroup }) {
+function Group({
+  group,
+  expanded,
+  onToggle,
+  regionId,
+}: {
+  group: SidebarGroup
+  expanded: boolean
+  onToggle: () => void
+  regionId: string
+}) {
   return (
     <section className="mb-1">
-      <h2 className="px-3 py-0.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-        {group.label}
+      <h2>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={regionId}
+          onClick={onToggle}
+          className={cn(
+            focusRing,
+            'flex w-full items-center gap-1 px-3 py-0.5 text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase hover:bg-toolbar-hover',
+          )}
+        >
+          {expanded ? (
+            <ChevronDown className="size-3.5 shrink-0" />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0" />
+          )}
+          <span className="truncate">{group.label}</span>
+          <span className="ml-auto shrink-0 normal-case">{group.runs.length}</span>
+        </button>
       </h2>
-      {group.runs.map((run) => (
-        <RunRow key={run.run.id} entry={run} />
-      ))}
+      <div id={regionId} hidden={!expanded}>
+        {expanded &&
+          group.runs.map((run) => <RunRow key={run.run.id} entry={run} />)}
+      </div>
     </section>
   )
 }
