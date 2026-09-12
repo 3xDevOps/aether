@@ -652,7 +652,7 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		return err
 	}
 
-	if mode == domain.LaunchTUI && !status.Terminal() && s.cfg.RunContainerTTL >= 0 {
+	if mode == domain.LaunchTUI && !status.Terminal() {
 		// Detach before committing so no PTY client can continue typing while
 		// the close operation snapshots the worktree.
 		s.cfg.Git.StopDiffWatch(run)
@@ -676,6 +676,19 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			}
 			if _, perr := s.cfg.Git.PublishRunBranch(ctx, run); perr != nil {
 				slog.Warn("scheduler: publish closed TUI run", "run", run, "error", perr)
+			}
+			if s.cfg.RunContainerTTL < 0 {
+				s.mu.Lock()
+				err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
+				s.mu.Unlock()
+				if err != nil {
+					if restoreErr := s.restoreAfterCloseFailure(ctx, entry, alreadyPaused); restoreErr != nil {
+						return errors.Join(err, restoreErr)
+					}
+					return err
+				}
+				s.stopCloseContainer(ctx, cid)
+				return nil
 			}
 			deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
 			s.mu.Lock()

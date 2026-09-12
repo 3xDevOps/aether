@@ -582,6 +582,55 @@ func TestCloseRunRetainedSidecarFailureRollsBack(t *testing.T) {
 	}
 }
 
+func TestCloseRunWithoutRetentionCommitsAndPublishes(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+	})
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "no-retention close")
+
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: no-retention close" {
+		t.Fatalf("commits = %v", got)
+	}
+	if e.git.publishedCount(run.ID) == 0 {
+		t.Fatal("run branch was not published")
+	}
+	waitFor(t, "container destroyed", func() bool {
+		return e.rt.byName(string(run.ID)) == nil
+	})
+}
+
+func TestCloseRunWithoutRetentionRestoresAfterTransitionFailure(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+	})
+	ctx := t.Context()
+	run, c := e.launchFake(t, "failed no-retention close")
+	failingStore := &failingRunStatusStore{Store: e.db, fail: true}
+	e.sched.cfg.Store = failingStore
+
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err == nil {
+		t.Fatal("CloseRun succeeded despite terminal transition failure")
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if got := c.currentState(); got != "running" {
+		t.Fatalf("container state after failed CloseRun = %q, want running", got)
+	}
+	if e.sched.Paused(run.ID) {
+		t.Fatal("failed CloseRun left the run paused")
+	}
+	if got := e.pty.ActiveSessions(string(ptyhost.RunSession(run.ID))); len(got) != 1 {
+		t.Fatalf("restored PTY sessions = %v, want one", got)
+	}
+	if _, watching := e.git.watchingFor(run.ID); !watching {
+		t.Fatal("diff watch was not restored")
+	}
+}
+
 // A failed terminal transition must restore a run that was already paused
 // without thawing its container; the interaction surface is restored while
 // the pause flag remains truthful.
