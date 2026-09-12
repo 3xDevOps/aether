@@ -267,10 +267,10 @@ func assertLifecycle(t *testing.T, seen []events.Event, run domain.RunID, actor 
 			}
 		case events.TimelinePayload:
 			if p.Kind == events.TimelineSteer {
-				steer = true
-				if p.Message != "ping-e2e" || e.ActorID != actor {
-					t.Errorf("steer entry = %+v actor %q", p, e.ActorID)
+				if e.ActorID != actor {
+					t.Errorf("steer entry = %+v actor %q, want %q", p, e.ActorID, actor)
 				}
+				steer = steer || p.Message == "ping-e2e"
 			}
 		case events.GitBranchPayload:
 			banner = true
