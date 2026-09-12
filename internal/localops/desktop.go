@@ -144,14 +144,13 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	if err != nil {
 		return "", err
 	}
-	node, err := ensureNode(ctx, nodeRoot, stdout)
+	tools, err := ensureNode(ctx, nodeRoot, stdout)
 	if err != nil {
 		return "", err
 	}
 
 	run := func(tool string, args ...string) error {
-		name, argv := node.command(tool, args...)
-		cmd := exec.CommandContext(ctx, name, argv...)
+		cmd := exec.CommandContext(ctx, tool, args...)
 		cmd.Dir = buildDir
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
@@ -160,12 +159,10 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 		// npm's electron postinstall would download the runtime zip once
 		// more than electron-builder does for itself, so skip it.
 		cmd.Env = append(cmd.Environ(), "CSC_IDENTITY_AUTO_DISCOVERY=false", "ELECTRON_SKIP_BINARY_DOWNLOAD=1")
-		// npm and npx are scripts that look up node on PATH, and
-		// electron-builder spawns node again, so a downloaded Node has to
-		// lead this build's PATH. Only these two commands see it: nothing
-		// on the machine, and no shell profile, is changed.
-		if node.pathDir != "" {
-			cmd.Env = append(cmd.Env, "PATH="+node.pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		// npm lifecycle scripts and electron-builder's children must find
+		// the private Node without changing the caller's environment.
+		if tools.pathDir != "" {
+			cmd.Env = append(cmd.Env, "PATH="+tools.pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		}
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("localops: %s %s: %w", filepath.Base(tool), strings.Join(args, " "), err)
@@ -173,11 +170,18 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 		return nil
 	}
 	phase(PhaseDependencies)
-	if err := run(node.npm, "install", "--no-audit", "--no-fund"); err != nil {
+	npm := tools.npm
+	npmArgs := make([]string, 0, 4)
+	if runtime.GOOS == "windows" {
+		npm = tools.node
+		npmArgs = append(npmArgs, tools.npm)
+	}
+	npmArgs = append(npmArgs, "install", "--no-audit", "--no-fund")
+	if err := run(npm, npmArgs...); err != nil {
 		return "", err
 	}
 	phase(PhasePackaging)
-	if err := run(node.npx, "electron-builder", "--dir", "--publish", "never"); err != nil {
+	if err := run(tools.node, filepath.Join("node_modules", "electron-builder", "cli.js"), "--dir", "--publish", "never"); err != nil {
 		return "", err
 	}
 	return builtDesktopApp(runtime.GOOS, dist)

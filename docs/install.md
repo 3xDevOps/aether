@@ -601,7 +601,7 @@ The Windows desktop executable is `aether-desktop.exe`. Keep the CLI's
 manual install above), never inside the desktop app directory: a rebuild
 replaces that directory in full. A build does not change your `PATH`.
 
-The build uses `node`, `npm` and `npx` from `PATH` when `node` is version 22
+The build uses `node` and `npm` from `PATH` when `node` is version 22
 or newer. Otherwise it downloads a pinned Node.js 22 release for this OS and
 CPU (Linux, macOS and Windows, x64 and arm64) from <https://nodejs.org/dist/>,
 verifies it against that release's `SHASUMS256.txt`, and unpacks it in a
@@ -614,6 +614,8 @@ access, and later builds reuse the cached copy; a build that fetches a newer
 pinned version deletes the old one. A failed download or a checksum mismatch
 fails `aether gui build` with the error and the URL to fetch by hand; it
 never falls back to a system Node older than 22.
+The CLI runs electron-builder through Node directly, avoiding `npx` shell
+wrappers and their handling of spaces and metacharacters in Windows paths.
 
 The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and

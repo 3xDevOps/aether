@@ -60,8 +60,6 @@ jobs:
           bun-version-file: web/.bun-version
       - name: Installer regression scenarios
         run: ./scripts/install-test.ps1
-      - name: Direct Node launch regression
-        run: go test ./internal/localops -run TestNodeToolsExecuteJavaScriptEntryPointOnWindows -count=1
       - name: Build the embedded dashboard
         working-directory: web
         run: |

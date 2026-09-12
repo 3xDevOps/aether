@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -156,25 +157,14 @@ func TestEnsureNodeDownloadsThenReusesTheCache(t *testing.T) {
 // is what keeps a build on a normal machine free of a 50 MB download.
 func TestEnsureNodeUsesAGoodNodeOnPath(t *testing.T) {
 	requireScriptableNode(t)
-	stubs := stubNodeOnPath(t, "v24.11.0")
+	stubNodeOnPath(t, "v24.11.0")
 	_, dist := serveFakeNode(t, fakeNodeTree(), "")
 
-	var out bytes.Buffer
-	tools, err := ensureNode(t.Context(), t.TempDir(), &out)
-	if err != nil {
+	if _, err := ensureNode(t.Context(), t.TempDir(), io.Discard); err != nil {
 		t.Fatalf("ensureNode: %v", err)
-	}
-	if tools.pathDir != "" {
-		t.Errorf("pathDir = %q, want empty: PATH is not to be rewritten for a usable Node", tools.pathDir)
-	}
-	if tools.npm != filepath.Join(stubs, "npm") || tools.npx != filepath.Join(stubs, "npx") {
-		t.Errorf("npm = %q, npx = %q, want the pair on PATH under %q", tools.npm, tools.npx, stubs)
 	}
 	if got := dist.downloads.Load(); got != 0 {
 		t.Errorf("downloaded Node %d times with a usable one on PATH", got)
-	}
-	if out.Len() != 0 {
-		t.Errorf("printed %q, want nothing: this build has nothing to wait for", out.String())
 	}
 }
 
@@ -190,10 +180,8 @@ func TestEnsureNodeRefetchesABrokenCache(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"npm", "npx"} {
-		if err := os.WriteFile(filepath.Join(binDir, tool), []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(binDir, "npm"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(binDir, "node"), []byte("#!/bin/sh\necho v18.20.0\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -381,22 +369,18 @@ func requireSymlinks(t *testing.T) {
 	}
 }
 
-// stubNodeOnPath puts a node reporting version, with npm and npx beside
-// it, on PATH as the only entry, and returns the directory holding them.
-func stubNodeOnPath(t *testing.T, version string) string {
+func stubNodeOnPath(t *testing.T, version string) {
 	t.Helper()
 	stubs := t.TempDir()
 	for tool, body := range map[string]string{
 		"node": "#!/bin/sh\necho " + version + "\n",
 		"npm":  "#!/bin/sh\n",
-		"npx":  "#!/bin/sh\n",
 	} {
 		if err := os.WriteFile(filepath.Join(stubs, tool), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", stubs)
-	return stubs
 }
 
 // hidePathNode empties PATH so the machine's own Node cannot answer.

@@ -54,34 +54,16 @@ const (
 	maxNodeTree    = 1 << 30
 )
 
-// nodeTools are the executables the desktop build runs. On Windows npm and
-// npx are JavaScript entry points, because their .cmd wrappers cannot be
-// launched by os/exec directly. pathDir is the directory to prepend to PATH
-// so npm, npx, and electron-builder find their own node; it is empty when the
-// tools came from PATH already.
+// On Windows npm names its JavaScript entry point, not the .cmd shell wrapper.
 type nodeTools struct {
 	node    string
 	npm     string
-	npx     string
 	pathDir string
-}
-
-// command returns the executable and argv for one of nodeTools' commands.
-// Windows runs the selected JavaScript entry point through the selected
-// node.exe; every other platform keeps invoking npm and npx directly.
-func (tools nodeTools) command(tool string, args ...string) (string, []string) {
-	if runtime.GOOS != "windows" {
-		return tool, args
-	}
-	argv := make([]string, 1, len(args)+1)
-	argv[0] = tool
-	argv = append(argv, args...)
-	return tools.node, argv
 }
 
 // nodeRelease is where the pinned Node lives for one platform: the archive
 // nodejs.org publishes for it, and the directory inside that archive
-// holding node, npm and npx. The unix tarballs keep them in bin/; the
+// holding node and npm. The unix tarballs keep them in bin/; the
 // Windows zips keep them in the archive root.
 type nodeRelease struct {
 	archive string
@@ -99,8 +81,8 @@ func nodeCacheDir() (string, error) {
 	return filepath.Join(cache, "aether", "node"), nil
 }
 
-// ensureNode returns the npm and npx the desktop build should run. A node
-// of nodeMinMajor or newer on PATH, with npm and npx beside it, is used
+// ensureNode returns the node and npm the desktop build should run. A node
+// of nodeMinMajor or newer on PATH, with npm beside it, is used
 // as it stands. Otherwise the pinned release is downloaded into root and
 // used for this build only: nothing outside root changes and no shell
 // profile is touched. Progress goes to out, because the first download
@@ -136,46 +118,27 @@ func systemNode(ctx context.Context) (nodeTools, string) {
 	if err != nil {
 		return nodeTools{}, "no npm on PATH"
 	}
-	npx, err := exec.LookPath("npx")
+	tools, err := nodeToolsFor(node, npm, "")
 	if err != nil {
-		return nodeTools{}, "no npx on PATH"
-	}
-	tools, err := nodeToolsFor(node, npm, npx, "")
-	if err != nil {
-		return nodeTools{}, fmt.Sprintf("npm/npx on PATH are unusable: %v", err)
+		return nodeTools{}, fmt.Sprintf("npm on PATH is unusable: %v", err)
 	}
 	return tools, ""
 }
 
-// nodeToolsFor resolves npm and npx to the JavaScript entry points in the
-// selected installation. Windows .cmd wrappers conventionally live beside
-// node_modules/npm; checking those files without executing them lets a
-// missing or incomplete installation fall through to bootstrap.
-func nodeToolsFor(node, npm, npx, pathDir string) (nodeTools, error) {
+func nodeToolsFor(node, npm, pathDir string) (nodeTools, error) {
+	tools := nodeTools{node: node, npm: npm, pathDir: pathDir}
 	if runtime.GOOS != "windows" {
-		return nodeTools{node: node, npm: npm, npx: npx, pathDir: pathDir}, nil
+		return tools, nil
 	}
-	npmScript, err := nodeScriptPath(npm, "npm-cli.js")
+	tools.npm = filepath.Join(filepath.Dir(npm), "node_modules", "npm", "bin", "npm-cli.js")
+	info, err := os.Stat(tools.npm)
 	if err != nil {
-		return nodeTools{}, err
-	}
-	npxScript, err := nodeScriptPath(npx, "npx-cli.js")
-	if err != nil {
-		return nodeTools{}, err
-	}
-	return nodeTools{node: node, npm: npmScript, npx: npxScript, pathDir: pathDir}, nil
-}
-
-func nodeScriptPath(wrapper, script string) (string, error) {
-	entry := filepath.Join(filepath.Dir(wrapper), "node_modules", "npm", "bin", script)
-	info, err := os.Stat(entry)
-	if err != nil {
-		return "", fmt.Errorf("%s has no usable %s entry point: %w", wrapper, script, err)
+		return nodeTools{}, fmt.Errorf("npm entry point %s: %w", tools.npm, err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%s has no usable %s entry point: not a regular file", wrapper, script)
+		return nodeTools{}, fmt.Errorf("npm entry point %s: not a regular file", tools.npm)
 	}
-	return entry, nil
+	return tools, nil
 }
 
 // nodeReports runs `node --version` and returns what it printed, trimmed.
@@ -328,14 +291,12 @@ func pruneNodeCache(root string) {
 // runs and reports exactly the pinned version. That check is what makes a
 // cached copy safe to reuse and a broken one safe to delete.
 func nodeToolsIn(ctx context.Context, binDir string) (nodeTools, error) {
-	node, npm, npx := filepath.Join(binDir, "node"), filepath.Join(binDir, "npm"), filepath.Join(binDir, "npx")
+	node, npm := filepath.Join(binDir, "node"), filepath.Join(binDir, "npm")
 	if runtime.GOOS == "windows" {
-		node, npm, npx = node+".exe", npm+".cmd", npx+".cmd"
+		node, npm = node+".exe", npm+".cmd"
 	}
-	for _, tool := range []string{npm, npx} {
-		if _, err := os.Stat(tool); err != nil {
-			return nodeTools{}, fmt.Errorf("localops: %s: %w", tool, err)
-		}
+	if _, err := os.Stat(npm); err != nil {
+		return nodeTools{}, fmt.Errorf("localops: %s: %w", npm, err)
 	}
 	reported, err := nodeReports(ctx, node)
 	if err != nil {
@@ -344,7 +305,7 @@ func nodeToolsIn(ctx context.Context, binDir string) (nodeTools, error) {
 	if reported != "v"+nodeVersion {
 		return nodeTools{}, fmt.Errorf("localops: %s reports %s, not v%s", node, reported, nodeVersion)
 	}
-	tools, err := nodeToolsFor(node, npm, npx, binDir)
+	tools, err := nodeToolsFor(node, npm, binDir)
 	if err != nil {
 		return nodeTools{}, err
 	}
