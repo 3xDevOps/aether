@@ -90,7 +90,7 @@ the terminal itself claims them before the shell sees them.
 
 | Key | What it does |
 | --- | --- |
-| `Ctrl+Shift+C` | Copy the selection. A plain `Ctrl+C` copies too when text is selected, and interrupts when none is. |
+| `Ctrl+Shift+C` | Copy the selection. On macOS, use `Cmd+C`; a plain `Ctrl+C` copies too when text is selected, and interrupts when none is. |
 | `Ctrl+Shift+V` | Native paste on Windows and Linux. Plain `Ctrl+V` is native too; on macOS use native `Cmd+V`. |
 | `Ctrl+Shift+F` | Open the find bar. `Enter` goes to the next match, `Shift+Enter` back, `Esc` closes it. |
 | `Ctrl+=` / `Ctrl+-` | Grow or shrink the terminal font, 8px to 32px. `Ctrl+Shift+=` grows too, since that is how a keyboard without a numpad types `Ctrl++`. |
@@ -109,7 +109,12 @@ shortcuts; it does not depend on the asynchronous `navigator.clipboard` API.
 That matters on Windows when clipboard-read permission is denied. When image
 upload is enabled, a native paste containing actual image file data is handled
 by the terminal's image paste listener; ordinary text remains native terminal
-input. On macOS, `Cmd+V` is the native paste shortcut.
+input. On macOS, `Cmd+V` is the native paste shortcut. In apps that enable
+mouse reporting, hold `Option` while dragging to select text; the terminal
+uses that gesture to force a local selection instead of sending mouse input
+to the agent. `Cmd+C` and the Edit menu keep selected terminal text available
+in completed or read-only runs after focus leaves the terminal; selections in
+regular inputs still use the browser's normal copy behavior.
 
 A paste reaches the agent as one block rather than as the Enter presses
 its newlines would otherwise be, because the terminal is told the session
@@ -124,7 +129,9 @@ screen**, **Paste into terminal**, and **Upload image to terminal** controls.
 **Copy last screen** copies the rows currently on screen, which is how to copy
 without a drag selection - a touch screen has none. On a touch screen both
 copy controls carry their name beside them, since the tooltip that tells
-them apart needs a pointer to hover. Copying an empty screen says so.
+them apart needs a pointer to hover. Copying with no selection reports that
+nothing is selected and points to **Copy last screen**; copying an empty screen
+says so.
 The toolbar's Paste control first uses the browser clipboard API to look for
 an image and then falls back to text. If no usable clipboard read API
 remains, or its reads are denied, it shows a visible **Paste unavailable**

@@ -149,7 +149,7 @@ function TerminalTools({
         variant="ghost"
         size="icon"
         aria-label="Copy terminal selection"
-        hint="Copy terminal selection (Ctrl+Shift+C)"
+        hint="Copy terminal selection (Ctrl+Shift+C; Cmd+C on macOS)"
         disabled={!terminal}
         onClick={() => {
           if (terminal) void copySelection(terminal)

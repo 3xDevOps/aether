@@ -6,6 +6,7 @@ import {
   copySelection,
   pasteClipboard,
   registerClipboardImages,
+  registerTerminalCopy,
   type ClipboardImageHandler,
 } from './term-clipboard'
 
@@ -24,6 +25,7 @@ function mount(selection = '') {
     paste,
     focus,
     textarea: input,
+    onSelectionChange: () => ({ dispose: vi.fn() }),
   }
   const handler: KeyHandler = clipboardKeys(term as unknown as Terminal)
   return { handler, paste, focus, input, term: term as unknown as Terminal }
@@ -111,6 +113,111 @@ describe('terminal clipboard keys', () => {
     expect(handler(key({ code: 'KeyV', metaKey: true }))).toBe(true)
     expect(handler(key({ code: 'KeyC', ctrlKey: true, altKey: true, shiftKey: true }))).toBe(true)
     expect(handler(key({ code: 'KeyV', ctrlKey: true, altKey: true, shiftKey: true }))).toBe(true)
+  })
+
+  it('reports when the copy action has no terminal selection', async () => {
+    const { handler, term } = mount()
+    expect(handler(key({ code: 'KeyC', metaKey: true }))).toBe(true)
+    await copySelection(term)
+    expect(toast.error).toHaveBeenCalledWith(
+      'Nothing selected: drag to select text (Option-drag on macOS) or use Copy last screen',
+    )
+  })
+
+  it('copies the most recently selected terminal when the document has focus', () => {
+    const first = mount('first')
+    const second = mount('second')
+    const firstHost = document.createElement('div')
+    const secondHost = document.createElement('div')
+    document.body.append(firstHost, secondHost)
+    Object.defineProperty(firstHost, 'getClientRects', { value: () => [{}] })
+    Object.defineProperty(secondHost, 'getClientRects', { value: () => [{}] })
+    const firstSelection = { dispose: vi.fn() }
+    const secondSelection = { dispose: vi.fn() }
+    let secondChanged: (() => void) | undefined
+    first.term.onSelectionChange = () => firstSelection
+    second.term.onSelectionChange = (callback) => {
+      secondChanged = callback
+      return secondSelection
+    }
+    const unregisterFirst = registerTerminalCopy(first.term, firstHost)
+    const unregisterSecond = registerTerminalCopy(second.term, secondHost)
+
+    secondChanged?.()
+    const data = { setData: vi.fn() }
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', { value: data })
+    document.body.dispatchEvent(event)
+
+    expect(data.setData).toHaveBeenCalledWith('text/plain', 'second')
+    expect(event.defaultPrevented).toBe(true)
+    second.term.hasSelection = () => false
+    secondHost.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    const noFallback = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    const noFallbackData = { setData: vi.fn() }
+    Object.defineProperty(noFallback, 'clipboardData', { value: noFallbackData })
+    document.body.dispatchEvent(noFallback)
+    expect(noFallbackData.setData).not.toHaveBeenCalled()
+    second.term.hasSelection = () => true
+    const alreadyHandled = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    alreadyHandled.preventDefault()
+    Object.defineProperty(alreadyHandled, 'clipboardData', { value: noFallbackData })
+    document.body.dispatchEvent(alreadyHandled)
+    expect(noFallbackData.setData).not.toHaveBeenCalled()
+    unregisterFirst()
+    unregisterSecond()
+  })
+
+  it('leaves native DOM selections and editable targets alone', () => {
+    const { term } = mount('terminal')
+    const host = document.createElement('div')
+    const input = document.createElement('input')
+    host.append(input)
+    document.body.append(host)
+    Object.defineProperty(host, 'getClientRects', { value: () => [{}] })
+    const unregister = registerTerminalCopy(term, host)
+    host.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+
+    const data = { setData: vi.fn() }
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', { value: data })
+    input.dispatchEvent(event)
+    expect(data.setData).not.toHaveBeenCalled()
+
+    const selection = document.getSelection()!
+    const text = document.createTextNode('outside')
+    document.body.append(text)
+    const range = document.createRange()
+    range.selectNodeContents(text)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    const domData = { setData: vi.fn() }
+    const domEvent = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(domEvent, 'clipboardData', { value: domData })
+    document.body.dispatchEvent(domEvent)
+    expect(domData.setData).not.toHaveBeenCalled()
+    selection.removeAllRanges()
+    unregister()
+  })
+
+  it('does not copy from an invisible or unregistered terminal', () => {
+    const { term } = mount('terminal')
+    const host = document.createElement('div')
+    document.body.append(host)
+    Object.defineProperty(host, 'getClientRects', { value: () => [], configurable: true })
+    const unregister = registerTerminalCopy(term, host)
+    host.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    const data = { setData: vi.fn() }
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', { value: data })
+    document.body.dispatchEvent(event)
+    expect(data.setData).not.toHaveBeenCalled()
+    Object.defineProperty(host, 'getClientRects', { value: () => [{}], configurable: true })
+    unregister()
+    const after = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(after, 'clipboardData', { value: data })
+    document.body.dispatchEvent(after)
+    expect(data.setData).not.toHaveBeenCalled()
   })
 
   it('delivers a native image paste once and leaves text-only paste native', async () => {

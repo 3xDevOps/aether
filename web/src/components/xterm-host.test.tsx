@@ -381,7 +381,7 @@ describe('the terminal toolbar', () => {
 
     const copy = screen.getByRole('button', { name: 'Copy terminal selection' })
     expect(copy.getAttribute('aria-disabled')).toBe('true')
-    expect(await hintOn(copy)).toBe('Copy terminal selection (Ctrl+Shift+C)')
+    expect(await hintOn(copy)).toBe('Copy terminal selection (Ctrl+Shift+C; Cmd+C on macOS)')
 
     fireEvent.click(screen.getByRole('button', { name: 'Decrease terminal text size' }))
 

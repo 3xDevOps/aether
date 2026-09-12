@@ -94,7 +94,7 @@ function commandGroups(): { name: string; entries: [string, string][] }[] {
     {
       name: 'Terminal (in the terminal that has focus)',
       entries: [
-        ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],
+        ['Copy', 'Ctrl+Shift+C / Cmd+C on macOS - a plain Ctrl+C copies too when text is selected'],
         ['Paste', 'Ctrl+Shift+V - plain Ctrl+V works as well'],
         ['Find', 'Ctrl+Shift+F - Enter for the next match, Shift+Enter back, Esc closes'],
         [

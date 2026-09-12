@@ -11,7 +11,7 @@ import {
   terminalZoomKey,
   whenTerminalFontReady,
 } from '@/lib/term-font'
-import { clipboardKeys } from '@/lib/term-clipboard'
+import { clipboardKeys, registerTerminalCopy } from '@/lib/term-clipboard'
 import { useStore } from '@/store'
 
 export interface XtermOptions {
@@ -249,6 +249,7 @@ export function useXterm({
       // would throw its scrollback away, so the size is applied below.
       fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
       fontFamily: terminalFontFamily,
+      macOptionClickForcesSelection: true,
       scrollback: 50_000,
       cursorBlink: false,
       linkHandler: { activate: (_event, uri) => openLink(uri) },
@@ -264,6 +265,7 @@ export function useXterm({
       const searchAddon = new SearchAddon()
       created.loadAddon(searchAddon)
       created.open(host)
+      const unregisterCopy = registerTerminalCopy(created, host)
       fitRef.current = fit
 
       // xterm keeps a single custom key handler, so zoom, find and the
@@ -346,6 +348,7 @@ export function useXterm({
       const observer = new ResizeObserver(resize)
       observer.observe(host)
       teardown = () => {
+        unregisterCopy()
         cursor.dispose()
         host.removeEventListener('focusin', showCursor)
         observer.disconnect()
