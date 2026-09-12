@@ -4,7 +4,7 @@ import { MemberAvatar } from '@/routes/board/member-avatar'
 import { RunHeader } from '@/components/run-header'
 import { timeAgo } from '@/lib/format'
 import { registerRoute, type RouteProps } from '@/routes/registry'
-import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
+import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 
 export function RunView({ params }: RouteProps) {
@@ -20,8 +20,7 @@ export function RunView({ params }: RouteProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <RunHeader run={run} subtitle={run.branch} />
-      <RunTabs runID={run.id} active="run" />
+      <RunHeader run={run} subtitle={run.branch} active="run" />
       <div {...runTabPanel('run', 'min-h-0 flex-1 overflow-y-auto', true)}>
         <main className="mx-auto w-full max-w-5xl min-w-0 space-y-3 p-3 sm:p-4">
           <header className="border-b border-border/80 pb-2">

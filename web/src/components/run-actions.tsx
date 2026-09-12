@@ -126,7 +126,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                     className={cn(
                       'h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2',
                       !primaryCommands[command.id] &&
-                        'hidden @4xl/run-header:inline-flex',
+                        'hidden @6xl/run-header:inline-flex',
                     )}
                     aria-disabled={blocked || undefined}
                     onClick={() => {
@@ -160,7 +160,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                 {...triggerProps}
                 variant="ghost"
                 size="sm"
-                className="hidden h-[22px] min-h-[22px] px-2 text-[12px] @4xl/run-header:inline-flex"
+                className="hidden h-[22px] min-h-[22px] px-2 text-[12px] @6xl/run-header:inline-flex"
                 aria-disabled={running !== null || undefined}
                 onClick={() => {
                   if (running !== null) return
@@ -211,7 +211,7 @@ export function RunActions({ run }: { run: RunRecord }) {
                       ref={moreTrigger}
                       variant="ghost"
                       size="sm"
-                      className="h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2 @4xl/run-header:hidden"
+                      className="h-[22px] min-h-[22px] w-[22px] px-0 @sm/run-header:w-auto @sm/run-header:px-2 @6xl/run-header:hidden"
                       aria-disabled={running !== null || undefined}
                     >
                       {running !== null ? (

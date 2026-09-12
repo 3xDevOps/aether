@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { drain, olderFeed, openFeed, pageBudget } from '@/routes/team/sync'
-import { RunTabs, runTabPanel } from '@/routes/terminal/tabs'
+import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 
 export function RunEvents({ params, client = api }: RouteProps & { client?: Api }) {
@@ -59,8 +59,7 @@ export function RunEvents({ params, client = api }: RouteProps & { client?: Api 
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
-      <RunHeader run={run} subtitle={run.branch} />
-      <RunTabs runID={runID} active="events" />
+      <RunHeader run={run} subtitle={run.branch} active="events" />
       <div
         {...runTabPanel('events', 'min-h-0 min-w-0 flex-1 overflow-y-auto bg-background p-3 sm:p-4', true)}
       >

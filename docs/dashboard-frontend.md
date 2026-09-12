@@ -457,14 +457,16 @@ inside itself. `sm` is a width breakpoint, so a desktop window narrower than
   The popup also writes out the facts a pointer reads from a hover: the disk
   breakdown, the protocol version and what this machine is linked to. Tooltips
   and `title` stay hints for a pointer, never the only copy of a fact.
-- **The run header** keeps the title, task, branch and harness mode readable with
-  compact headers and a wrapping action group. Terminal tabs remain one keyboard
-  stop with internal horizontal overflow. On a coarse pointer the action group
-  becomes one **Actions** button and every verb moves into its menu, where
-  each carries its full label at finger size. Six 44px buttons do not fit
-  across a phone, and the mouse answer to a narrow row - 22px icons with the
-  label in a hover tooltip - is six unnamed icons to a finger. Hand off is in
-  the same menu.
+- **The run header** gives the title its own full-width first row. Its second
+  row keeps state, harness/mode and branch metadata on the left, with the
+  run-detail tabs and run actions together on the right. Metadata and tabs
+  scroll inside their own regions before either or the actions become
+  unreachable. On a coarse pointer the action group becomes one **Actions**
+  button and every verb moves into its menu, where each carries its full label
+  at finger size. Six 44px
+  buttons do not fit across a phone, and the mouse answer to a narrow row -
+  22px icons with the label in a hover tooltip - is six unnamed icons to a
+  finger. Hand off is in the same menu.
 - **The board** uses one column on narrow screens and three columns from the
   `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
   small screens. State labels remain visible; empty, loading and error panels
@@ -997,13 +999,13 @@ conflict chip, template, and the launch and onboarding forms. Overview stays a
 tab for the metadata a finished run is read for, which `src/routes/run.tsx`
 renders as one list: the reason, owner, agent account where the run borrowed
 one, the created and changed times, and the last commit. The shared
-`RunHeader` owns the run title, task, state, harness and mode above every tab;
-each caller supplies the branch as its subtitle. All four tabs render one
-`RunHeader` (`src/components/run-header.tsx`), so the run's own state travels
-with the reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar row lit
-while they move between the tabs.
-`RunHeader` keeps long task text behind a **View full task** disclosure, so its
-compact summary never discards the task.
+`RunHeader` gives the run title the full first row, then owns the run state,
+harness, mode, branch, tab strip and actions in the second. All four routes
+render one `RunHeader` (`src/components/run-header.tsx`), so the run's own state
+travels with the reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar
+row lit while they move between the tabs. `RunHeader` keeps long task text
+behind a **View full task** disclosure, so its compact summary never discards
+the task.
 
 A run id none of the four tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
@@ -1026,9 +1028,11 @@ which would leave the previous run's output on screen under the new run's
 name.
 
 The Terminal view is a vertical split. The agent terminal keeps flexible space
-above a `RunDock` below it. The shared run header keeps the title, task, branch,
-harness mode and status readable while its actions wrap at narrow widths. The
-terminal status toolbar also wraps without truncating real gateway errors.
+above a `RunDock` below it. The header's first row belongs to the title; the
+second puts run metadata before the tabs and actions. The terminal tools and
+attachment state share one wrapping strip, with connection and steering
+controls after the search, font, clipboard and image tools. Real gateway
+errors wrap there rather than being truncated.
 
 The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
@@ -1042,8 +1046,10 @@ primitive.
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
 toolbar and Find over it. `TerminalTools` in the same module owns the search,
 zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction` controls;
-it delegates terminal key behavior to the xterm controller and clipboard
-helpers rather than putting those actions in each dock. `useTerminalImage`
+the run terminal supplies its connection and steering controls to the right
+side of that same strip. Terminal tools delegate key behavior to the xterm
+controller and clipboard helpers rather than putting those actions in each
+dock. `useTerminalImage`
 owns the hidden file input, preview dialog, validation, upload call, and
 shell-quoted path insertion. Its identity (`terminal`, target, active-tab
 key, and enabled state) plus a generation token rejects a chooser, paste, or
