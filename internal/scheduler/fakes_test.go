@@ -81,6 +81,12 @@ func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{containers: make(map[runtime.ID]*fakeContainer), containerIP: "127.0.0.1"}
 }
 
+func (r *fakeRuntime) setWaitError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waitErr = err
+}
+
 type fakeContainer struct {
 	id   runtime.ID
 	spec runtime.Spec
@@ -356,8 +362,11 @@ func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
 }
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
-	if r.waitErr != nil {
-		return runtime.ExitStatus{}, r.waitErr
+	r.mu.Lock()
+	waitErr := r.waitErr
+	r.mu.Unlock()
+	if waitErr != nil {
+		return runtime.ExitStatus{}, waitErr
 	}
 	c, err := r.get(id)
 	if err != nil {
@@ -634,6 +643,12 @@ func (g *fakeGit) baseCommitFor(run domain.RunID) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.baseCommits[run]
+}
+
+func (g *fakeGit) baseBranchFor(run domain.RunID) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.bases[run]
 }
 
 func (g *fakeGit) originFor(run domain.RunID) string {

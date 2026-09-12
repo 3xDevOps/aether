@@ -439,6 +439,7 @@ func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member,
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
 		defer cleanupCancel()
 		if destroyErr := s.cfg.Runtime.Destroy(cleanupCtx, cid); destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
+			s.retainTerminalAfterRuntimeError(member, row, cid)
 			return nil, false, fmt.Errorf("scheduler: destroy exited terminal: %w", destroyErr)
 		}
 		return nil, false, nil
@@ -449,22 +450,34 @@ func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member,
 	case ctx.Err() != nil:
 		return nil, false, ctx.Err()
 	default:
+		s.retainTerminalAfterRuntimeError(member, row, cid)
 		return nil, false, fmt.Errorf("scheduler: probe terminal container: %w", waitErr)
 	}
+	return s.pendingTerminalAdoption(member, row, cid), true, nil
+}
+
+// pendingTerminalAdoption captures ownership before runtime metadata, PTY
+// attach, or durable persistence is repaired. The reservation is deliberately
+// unknown until Inspect succeeds; treating an inconclusive probe as root would
+// allow another container to take ownership of the member home.
+func (s *Scheduler) pendingTerminalAdoption(member *domain.Member, row *domain.Terminal, cid runtime.ID) *terminalAdoption {
 	terminal := terminalForAdoption(member, row, cid, "")
 	if terminal.Image == "" {
 		terminal.Image = s.cfg.StandardImage
 	}
 	entry := &terminalSupervision{
-		member: member.ID, containerID: cid,
-		image: terminal.Image, startedAt: terminal.StartedAt,
-		metadataPending: true,
+		member: member.ID, containerID: cid, image: terminal.Image,
+		startedAt: terminal.StartedAt, metadataPending: true,
 	}
 	s.retainTerminalReservation(entry, terminalUnknownUser)
 	return &terminalAdoption{
 		terminal: terminal, home: "", reservation: entry.userReservation,
 		metadataPending: true, persistPending: row == nil || row.ContainerID != string(cid),
-	}, true, nil
+	}
+}
+
+func (s *Scheduler) retainTerminalAfterRuntimeError(member *domain.Member, row *domain.Terminal, cid runtime.ID) {
+	s.registerAdoptedTerminal(s.pendingTerminalAdoption(member, row, cid))
 }
 
 func terminalForAdoption(member *domain.Member, row *domain.Terminal, cid runtime.ID, image string) *domain.Terminal {
@@ -744,22 +757,29 @@ func (s *Scheduler) recoverTerminals(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		row, err := s.cfg.Store.GetTerminal(ctx, member.ID)
-		if errors.Is(err, store.ErrNotFound) {
+		lock := s.terminalLock(member.ID)
+		lock.Lock()
+		if s.lookupTerminal(member.ID) != nil {
+			lock.Unlock()
 			continue
 		}
-		if err != nil {
+		row, err := s.cfg.Store.GetTerminal(ctx, member.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			lock.Unlock()
 			if ctx.Err() != nil {
 				return nil
 			}
 			return fmt.Errorf("scheduler: recover terminal %q: %w", member.ID, err)
 		}
-		lock := s.terminalLock(member.ID)
-		lock.Lock()
-		if s.lookupTerminal(member.ID) == nil {
-			if adoptErr := s.recoverTerminalLocked(ctx, member, row); adoptErr != nil {
-				slog.Warn("scheduler: recover terminal", "member", member.ID, "error", adoptErr)
+		if adoptErr := s.recoverTerminalLocked(ctx, member, row); adoptErr != nil {
+			if s.lookupTerminal(member.ID) == nil {
+				lock.Unlock()
+				if ctx.Err() != nil {
+					return nil
+				}
+				return fmt.Errorf("scheduler: recover terminal %q: %w", member.ID, adoptErr)
 			}
+			slog.Warn("scheduler: recover terminal", "member", member.ID, "error", adoptErr)
 		}
 		lock.Unlock()
 	}
@@ -768,10 +788,33 @@ func (s *Scheduler) recoverTerminals(ctx context.Context) error {
 
 // recoverTerminalLocked re-adopts one persisted terminal on startup: the
 // stored container when it still runs, else a creation-key match (the row
-// went stale), else the row is pruned so the next open recreates. Durable
-// cleanup is conditional on the row still naming this container, so a
+// went stale), else the row is pruned so the next open recreates. When no row
+// exists, a creation-key survivor is adopted but no replacement is created.
+// Durable cleanup is conditional on the row still naming this container, so a
 // replacement cannot be removed by an old recovery attempt.
 func (s *Scheduler) recoverTerminalLocked(ctx context.Context, member *domain.Member, row *domain.Terminal) error {
+	if row == nil {
+		found, findErr := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member.ID))
+		switch {
+		case findErr == nil:
+			adopted, adoptedOK, err := s.tryAdoptTerminal(ctx, member, nil, found)
+			if err != nil {
+				return err
+			}
+			if !adoptedOK {
+				return nil
+			}
+			_, err = s.finishTerminalAdoption(ctx, adopted)
+			return err
+		case errors.Is(findErr, runtime.ErrNotFound):
+			return nil
+		case ctx.Err() != nil:
+			return ctx.Err()
+		default:
+			return fmt.Errorf("scheduler: find terminal container: %w", findErr)
+		}
+	}
+
 	adopted, adoptedOK, err := s.tryAdoptTerminal(ctx, member, row, runtime.ID(row.ContainerID))
 	if err != nil {
 		return err

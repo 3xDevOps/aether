@@ -221,13 +221,14 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	s.mu.Unlock()
 }
 
-// sweepRetained is the single bounded expiry sweep for all retained run
-// containers. It deliberately performs no per-run goroutine scheduling.
+// sweepRetained is the single bounded expiry sweep for retained run
+// containers and active destroy-pending recovery owners. It deliberately
+// performs no per-run goroutine scheduling.
 func (s *Scheduler) sweepRetained(ctx context.Context) {
 	s.mu.Lock()
 	entries := make([]*supervised, 0)
 	for _, entry := range s.runs {
-		if entry.retained && entry.retainedUntil != nil {
+		if entry.destroyPending || (entry.retained && entry.retainedUntil != nil) {
 			entries = append(entries, entry)
 		}
 	}
@@ -235,15 +236,73 @@ func (s *Scheduler) sweepRetained(ctx context.Context) {
 	now := time.Now().UTC()
 	for _, entry := range entries {
 		s.mu.Lock()
+		pending := s.runs[entry.runID] == entry && entry.destroyPending
 		due := s.runs[entry.runID] == entry && entry.retainedUntil != nil &&
 			!now.Before(*entry.retainedUntil)
 		s.mu.Unlock()
+		if pending {
+			s.retryDestroyPending(ctx, entry)
+			continue
+		}
 		if due {
 			if err := s.expireRetained(ctx, entry); err != nil {
 				slog.Warn("scheduler: retained expiry", "run", entry.runID, "error", err)
 			}
 		}
 	}
+}
+
+// retryDestroyPending retries a previously uncertain destruction while
+// retaining the lifecycle owner. It terminalizes an active row only after
+// the runtime confirms the container is gone.
+func (s *Scheduler) retryDestroyPending(ctx context.Context, entry *supervised) {
+	if entry == nil {
+		return
+	}
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	if err := s.retryDestroyPendingLocked(ctx, entry); err != nil {
+		slog.Warn("scheduler: retry destroy-pending cleanup", "run", entry.runID, "error", err)
+	}
+}
+
+// retryDestroyPendingLocked is the same retry for a caller that already owns
+// entry.lifecycleMu, such as Kill.
+func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *supervised) error {
+	if entry == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.runs[entry.runID] != entry || !entry.destroyPending {
+		s.mu.Unlock()
+		return nil
+	}
+	cid := entry.containerID
+	s.mu.Unlock()
+	if cid == "" {
+		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(entry.runID))
+		if err != nil {
+			if errors.Is(err, runtime.ErrNotFound) {
+				s.preserveRecoveryWork(ctx, entry.runID, entry.task)
+				return s.finishDestroyPending(ctx, entry)
+			}
+			return fmt.Errorf("find destroy-pending container: %w", err)
+		}
+		cid = found
+		s.mu.Lock()
+		if s.runs[entry.runID] == entry && entry.destroyPending {
+			entry.containerID = cid
+			if err := s.writeSidecar(entry.sidecar()); err != nil {
+				slog.Warn("scheduler: persist resolved destroy-pending container", "run", entry.runID, "error", err)
+			}
+		}
+		s.mu.Unlock()
+	}
+	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		return fmt.Errorf("destroy-pending container: %w", err)
+	}
+	s.preserveRecoveryWork(ctx, entry.runID, entry.task)
+	return s.finishDestroyPending(ctx, entry)
 }
 
 // expireRetained destroys one retained container idempotently and changes the
@@ -298,6 +357,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 		}
 		entry.retained = false
 		entry.retainedUntil = nil
+		entry.destroyPending = false
 		if entry.userReservation != nil {
 			delete(s.credentialUsers, entry.userReservation)
 			entry.userReservation = nil

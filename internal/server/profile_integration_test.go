@@ -56,7 +56,10 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 	srv, err := New(ctx, Config{
 		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt,
 		Harnesses: map[string]scheduler.HarnessSpec{
-			"claude": {TUIArgs: []string{"sh", "/workspace/agent.sh", "{task}"}},
+			"claude": {
+				TUIArgs:      []string{"sh", "/workspace/agent.sh", "{task}"},
+				HeadlessArgs: []string{"sh", "/workspace/agent.sh", "{task}"},
+			},
 		},
 	})
 	if err != nil {
@@ -237,13 +240,15 @@ func pushProfile(t *testing.T, ctrl *protocol.Client, skill string) {
 	}
 }
 
-// launchRun launches a run over the control channel and checks it came up
-// running.
+// launchRun launches a one-shot headless run over the control channel and
+// checks it came up running. Tests that exercise TUI persistence should pass
+// an explicit LaunchTUI mode instead of using this helper.
 func launchRun(t *testing.T, ctrl *protocol.Client, workspace, task, harnessName string) protocol.Run {
 	t.Helper()
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: workspace, Task: task, Harness: harnessName,
+		Mode: string(domain.LaunchHeadless),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch %q: %v", task, err)
 	}

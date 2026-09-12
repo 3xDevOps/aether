@@ -115,6 +115,15 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Task == "" && mode == domain.LaunchHeadless {
 		return nil, invalidParams("task is required in headless mode")
 	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if cerr := permissions.Check(permissions.Launch, actor, permissions.Target{}); cerr != nil {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunLaunch + ": " + cerr.Error()}
+	}
 	account, perr := s.launchAccount(ctx, member, p.AccountMemberID)
 	if perr != nil {
 		return nil, perr
@@ -276,18 +285,35 @@ func (s *Server) runRelaunch(ctx context.Context, member domain.MemberID, params
 	if perr != nil {
 		return nil, perr
 	}
-	old, err := s.cfg.Store.GetRun(ctx, id)
+
+	// The generic guard above is defense in depth. Re-resolve every
+	// authorization fact while holding authorizationMu so a revocation
+	// cannot commit between this check and retained-run admission.
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if _, perr := s.launchAccount(ctx, member, string(old.AccountMember())); perr != nil {
+	target, err := resolveRunTarget(ctx, s.cfg.Store, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if cerr := permissions.Check(permissions.Steer, actor, target); cerr != nil {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunRelaunch + ": " + cerr.Error()}
+	}
+	run, err := s.cfg.Store.GetRun(ctx, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if _, perr := s.launchAccount(ctx, member, string(run.AccountMember())); perr != nil {
 		return nil, perr
 	}
-	run, err := s.cfg.Runs.Relaunch(ctx, id, member)
+	reopened, err := s.cfg.Runs.Relaunch(ctx, id, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+	return protocol.RunResult{Run: protocol.RunFromDomain(reopened)}, nil
 }
 
 func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -298,6 +324,20 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	if p.RunID == "" || p.ToMemberID == "" {
 		return nil, invalidParams("run_id and to_member_id are required")
 	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	target, err := resolveRunTarget(ctx, s.cfg.Store, domain.RunID(p.RunID))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if cerr := permissions.Check(permissions.Handoff, actor, target); cerr != nil {
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunHandoff + ": " + cerr.Error()}
+	}
+
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 	if err != nil {
 		return nil, rpcError(err)
@@ -314,8 +354,8 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 	if recipient.Pending {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: membership is pending admin approval", recipient.DisplayName))
 	}
-	actor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
-	if derr := permissions.Check(permissions.Launch, actor, permissions.Target{}); derr != nil {
+	recipientActor := permissions.Actor{ID: recipient.ID, Role: recipient.Role}
+	if derr := permissions.Check(permissions.Launch, recipientActor, permissions.Target{}); derr != nil {
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
 	}
 	from := run.MemberID

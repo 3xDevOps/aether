@@ -356,15 +356,14 @@ func (s *Scheduler) closeDone(entry *supervised) {
 }
 
 // RetainsContainer reports whether a durable terminal TUI row still owns a
-// live retained container. It intentionally does not consult in-memory state:
-// coordination recovery calls it during a fresh process boot. A retained
-// sidecar remains an ownership reference until the scheduler has confirmed
-// destruction and removed it; TTL policy is deliberately not consulted here.
+// container. It intentionally does not consult in-memory state: coordination
+// recovery calls it during a fresh process boot. Every terminal sidecar with
+// a container ID remains an ownership reference until the scheduler confirms
+// destruction and removes it; TTL policy and close reason are deliberately
+// not consulted here.
 func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool {
 	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil || r.Mode != domain.LaunchTUI ||
-		(r.Status != domain.RunMerged && r.Status != domain.RunAbandoned) ||
-		r.Reason != retainedCloseReason {
+	if err != nil || r.Mode != domain.LaunchTUI || !r.Status.Terminal() {
 		return false
 	}
 	sc, err := s.readSidecar(run)
@@ -376,7 +375,7 @@ func (s *Scheduler) RetainsContainer(ctx context.Context, run domain.RunID) bool
 		mode = r.Mode
 	}
 	if sc.RunID != string(run) || mode != domain.LaunchTUI ||
-		(!sc.Retained && sc.RetainedUntil == nil) || sc.ContainerID == "" {
+		(sc.ContainerID == "" && !sc.DestroyPending) {
 		return false
 	}
 	return true

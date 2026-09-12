@@ -3,6 +3,7 @@ package sshd
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -133,6 +135,107 @@ func TestProtectedRunRestrictsToOwnerAndAdmin(t *testing.T) {
 	// The owner (admin here) still steers.
 	if err := admin.Call(protocol.MethodRunPause, protocol.RunIDParams{RunID: string(e.run.ID)}, nil); err != nil {
 		t.Fatalf("owner pause of protected run: %v", err)
+	}
+}
+
+// A run.protect request that passed its outer guard must re-check ownership
+// after a queued handoff commits while it waits for authorizationMu.
+func TestRunProtectRechecksOwnerAfterHandoff(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	_, owner := addMember(t, e, "Owner", domain.RoleCollaborator, false)
+	_, recipient := addMember(t, e, "Recipient", domain.RoleCollaborator, false)
+	run := &domain.Run{
+		WorkspaceID: e.ws.ID, MemberID: owner.ID, Task: "mine",
+		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
+	}
+	if err := e.store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	protectParams, err := json.Marshal(protocol.RunProtectParams{RunID: string(run.ID), Protected: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseLookup := make(chan struct{})
+	lookupStarted := make(chan struct{})
+	e.srv.cfg.Store = &relaunchRunLookupGate{
+		Store:   e.store,
+		started: lookupStarted,
+		release: releaseLookup,
+	}
+
+	protectDone := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := e.srv.dispatch(ctx, owner.ID, protocol.MethodRunProtect, protectParams)
+		protectDone <- perr
+	}()
+	select {
+	case <-lookupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("run.protect guard did not resolve its target")
+	}
+
+	handoffParams, err := json.Marshal(protocol.RunHandoffParams{
+		RunID: string(run.ID), ToMemberID: string(recipient.ID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := e.srv.runHandoff(ctx, e.member.ID, handoffParams); perr != nil {
+		t.Fatalf("handoff while protection waited: %+v", perr)
+	}
+	close(releaseLookup)
+
+	if perr := <-protectDone; perr == nil || perr.Code != protocol.CodeDenied {
+		t.Fatalf("stale run.protect result = %+v, want CodeDenied", perr)
+	}
+	stored, err := e.store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Protected {
+		t.Fatal("stale run.protect mutated the handed-off run")
+	}
+}
+
+// workspace.settings must re-check the caller after waiting for the
+// authorization lock; a demoted former admin cannot mutate policy.
+func TestWorkspaceSettingsRechecksAdminAfterDemotion(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	_, _ = addMember(t, e, "Second admin", domain.RoleAdmin, false)
+	params, err := json.Marshal(protocol.WorkspaceSettingsParams{
+		WorkspaceID: string(e.ws.ID), SteerOthers: domain.SteerOthersAdminsOnly,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := resolveActor(ctx, e.store, e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkErr := permissions.Check(permissions.WorkspaceAdmin, actor, permissions.Target{}); checkErr != nil {
+		t.Fatalf("pre-demotion workspace authorization = %v", checkErr)
+	}
+	member, err := e.store.GetMember(ctx, e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member.Role = domain.RoleCollaborator
+	if updateErr := e.store.UpdateMember(ctx, member); updateErr != nil {
+		t.Fatal(updateErr)
+	}
+
+	if _, perr := e.srv.workspaceSettings(ctx, e.member.ID, params); perr == nil ||
+		perr.Code != protocol.CodeDenied {
+		t.Fatalf("workspace.settings after demotion = %+v, want CodeDenied", perr)
+	}
+	ws, err := e.store.GetWorkspace(ctx, e.ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.SteerOthers != "" {
+		t.Fatalf("workspace policy changed after denied settings = %q", ws.SteerOthers)
 	}
 }
 

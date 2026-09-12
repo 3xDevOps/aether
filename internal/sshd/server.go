@@ -135,6 +135,15 @@ type Server struct {
 	// concurrent demotions must not both observe two admins and leave the
 	// deployment with none.
 	registerMu sync.Mutex
+	// authorizationMu is the credential-bearing admission invariant: run
+	// launch/relaunch and terminal setup hold it from their fresh member or
+	// account checks through the durable scheduler admission boundary, while
+	// account revoke, run handoff/protection, workspace steer policy, role
+	// changes, and member removal hold it across their store writes. This
+	// makes either admission or revocation the linearization point. Handlers
+	// that also need registerMu acquire registerMu first; authorizationMu
+	// paths never acquire registerMu or mu, so the lock order cannot cycle.
+	authorizationMu sync.Mutex
 
 	mu    sync.Mutex
 	ln    net.Listener

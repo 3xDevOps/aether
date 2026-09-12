@@ -51,6 +51,7 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: "chaos reboot survivor", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -90,8 +91,8 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 	}
 
 	// Supervision is only really back if the run still steers and still
-	// finalizes. Inject over the recovered PTY, watch the agent answer on a
-	// fresh attach, then let it exit and see the new server finalize it.
+	// reaches its reusable login shell. Inject over the recovered PTY, watch
+	// the agent answer on a fresh attach, then prove the shell is usable.
 	att = waitAttach(t, client, runID)
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
 		RunID: runID, Message: "resume-probe",
@@ -99,11 +100,37 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 		t.Fatalf("run.inject after reboot: %v", err)
 	}
 	waitOutput(t, att, "got:resume-probe")
+	waitOutput(t, att, "[aether] harness exited with code 0")
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: runID, Message: "printf 'reboot-login-shell-ready\\n'",
+	}, nil); err != nil {
+		t.Fatalf("run.inject in login shell after reboot: %v", err)
+	}
+	waitOutput(t, att, "reboot-login-shell-ready")
+	att.close()
 
-	env.waitStatus(t, ctrl, runID, domain.RunCompleted)
+	var active protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: runID}, &active); err != nil {
+		t.Fatalf("run.get after harness exit: %v", err)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("run after harness exit = %q, want running in the login-shell loop",
+			active.Run.Status)
+	}
+	var finalized protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: runID, Outcome: string(domain.RunMerged),
+	}, &finalized); err != nil {
+		t.Fatalf("run.close after reboot: %v", err)
+	}
+	if finalized.Run.Status != string(domain.RunMerged) ||
+		finalized.Run.Mode != string(domain.LaunchTUI) {
+		t.Fatalf("finalized run = %+v, want merged TUI", finalized.Run)
+	}
+	env.waitStatus(t, ctrl, runID, domain.RunMerged)
 
-	// git survived too: the reattached supervisor committed and published
-	// the agent's work on the run's own branch.
+	// git survived too: the explicit close committed and published the
+	// agent's work on the run's own branch.
 	head := env.fetchBranch(t, branch)
 	if !strings.Contains(head.message, "aether:") {
 		t.Errorf("run branch head message = %q, want the clean-exit \"aether:\" commit", head.message)
@@ -267,6 +294,7 @@ func TestIntegrationChaosRebootLostContainer(t *testing.T) {
 	var launched protocol.RunResult
 	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: "chaos reboot casualty", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}

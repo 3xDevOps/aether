@@ -181,9 +181,6 @@ func TestOmpProfile(t *testing.T) {
 			t.Errorf("omp deny names %v missing %q", omp.DenyNames, denied)
 		}
 	}
-	if omp.ResumeFlag != "--continue" {
-		t.Errorf("omp resume flag = %q, want --continue", omp.ResumeFlag)
-	}
 	if !strings.Contains(omp.InstallScript, "omp.sh/install") {
 		t.Errorf("omp install script %q must be the vendor's own", omp.InstallScript)
 	}

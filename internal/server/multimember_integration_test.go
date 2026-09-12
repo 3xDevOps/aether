@@ -90,7 +90,10 @@ func TestIntegrationMultiMember(t *testing.T) {
 	whois := &stubWhoIs{}
 	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
 	dataDir := filepath.Join(t.TempDir(), "data")
-	srv, err := New(ctx, Config{DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt, WhoIs: whois})
+	srv, err := New(ctx, Config{
+		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt,
+		RunContainerTTL: -time.Second, WhoIs: whois,
+	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -232,6 +235,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	var launched protocol.RunResult
 	if err := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: wsID, Task: "collab", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("bo run.launch: %v", err)
 	}
@@ -375,6 +379,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	var crashed protocol.RunResult
 	if err := boCtrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: wsID, Task: "crash", Harness: "fake",
+		Mode: string(domain.LaunchHeadless),
 	}, &crashed); err != nil {
 		t.Fatalf("run.launch under override: %v", err)
 	}
@@ -398,16 +403,42 @@ func TestIntegrationMultiMember(t *testing.T) {
 	}
 
 	// Bo steers the run they handed away - still allowed as a
-	// collaborator - and the collab run finishes.
+	// collaborator - and the collab agent finishes its turn.
 	if err := boCtrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
 		RunID: collab.ID, Message: "done",
 	}, nil); err != nil {
 		t.Fatalf("bo run.inject after handoff: %v", err)
 	}
 	camAtt.waitOutput(t, "got:done")
-	waitEvent(t, sub, &seen, "collab run completed", func(e events.Event) bool {
+	// TUI clean exit enters the reusable login shell; prove it remains
+	// usable before explicitly closing the run.
+	camAtt.waitOutput(t, "[aether] harness exited with code 0")
+	if err := boCtrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: collab.ID, Message: "printf 'multimember-login-shell-ready\\n'",
+	}, nil); err != nil {
+		t.Fatalf("run.inject login-shell probe: %v", err)
+	}
+	camAtt.waitOutput(t, "multimember-login-shell-ready")
+	var active protocol.RunResult
+	if err := adaCtrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: collab.ID}, &active); err != nil {
+		t.Fatalf("run.get after harness exit: %v", err)
+	}
+	if active.Run.Status != string(domain.RunRunning) {
+		t.Fatalf("collab run status after harness exit = %q, want running", active.Run.Status)
+	}
+	var closed protocol.RunResult
+	if err := adaCtrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
+		RunID: collab.ID, Outcome: string(domain.RunMerged),
+	}, &closed); err != nil {
+		t.Fatalf("run.close collab: %v", err)
+	}
+	if closed.Run.Status != string(domain.RunMerged) {
+		t.Fatalf("closed collab status = %q, want merged", closed.Run.Status)
+	}
+	camAtt.close()
+	waitEvent(t, sub, &seen, "collab run merged", func(e events.Event) bool {
 		p, ok := e.Payload.(events.RunStatusPayload)
-		return ok && string(e.RunID) == collab.ID && p.To == domain.RunCompleted
+		return ok && string(e.RunID) == collab.ID && p.To == domain.RunMerged
 	})
 
 	// The finished branch credits everyone: authored as Cam, who owns the
@@ -455,6 +486,16 @@ func registerMultiMemberScripts(rt *e2eRuntime) {
 			c.output("got:" + line + "\r\n")
 		}
 		_ = os.WriteFile(filepath.Join(c.spec.WorktreeHostPath, "result.txt"), []byte("collab done\n"), 0o644)
+		c.output("[aether] harness exited with code 0\r\n")
+		for {
+			line, ok := c.readStdinLine()
+			if !ok {
+				return
+			}
+			if line == "printf 'multimember-login-shell-ready\\n'" {
+				c.output("multimember-login-shell-ready\r\n")
+			}
+		}
 	})
 	rt.script("crash", func(c *e2eContainer) {
 		_ = os.WriteFile(filepath.Join(c.spec.WorktreeHostPath, "partial.txt"), []byte("half-finished\n"), 0o644)

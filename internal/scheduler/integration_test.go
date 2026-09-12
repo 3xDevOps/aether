@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// TestIntegrationHappyPathDocker drives the full happy path against the
-// real Docker runtime: a scripted busybox "agent" runs on a TTY with the
-// checkout bind-mounted at /workspace, writes a file, exits cleanly, and
-// the run completes with results committed.
+// TestIntegrationHappyPathDocker drives the full TUI path against the real
+// Docker runtime: a scripted busybox "agent" runs on a TTY with the checkout
+// bind-mounted at /workspace, writes a file, exits cleanly into the
+// supervisor's reusable login shell, and the test explicitly closes the run
+// with committed results.
 func TestIntegrationHappyPathDocker(t *testing.T) {
 	docker, err := runtime.NewDocker(
 		runtime.WithLabels(map[string]string{"aether.test": t.Name()}),
@@ -31,6 +31,10 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Runtime = docker
+		// This TUI lifecycle test closes explicitly but does not exercise
+		// retained-container relaunch; destroy the container after close so
+		// the sidecar cleanup assertion remains meaningful.
+		cfg.RunContainerTTL = -time.Second
 		cfg.Harnesses = map[string]HarnessSpec{
 			// The leading sleep keeps the first output behind the attach:
 			// Docker attachments stream from the attach point onward.
@@ -58,13 +62,33 @@ func TestIntegrationHappyPathDocker(t *testing.T) {
 		t.Fatalf("run status after launch = %s, want running", run.Status)
 	}
 
-	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
-	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
-		t.Fatalf("completed reason = %q", p.Reason)
+	// A clean harness exit is not a completed run in TUI mode: the supervisor
+	// keeps its container and login shell available for the member.
+	sess := e.pty.session(run.ID)
+	if sess == nil {
+		t.Fatal("no pty session recorded")
 	}
+	waitFor(t, "harness exit", func() bool {
+		return strings.Contains(sess.output(), "[aether] harness exited with code 0")
+	})
+	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "printf 'scheduler-login-shell-ready\\n'"); err != nil {
+		t.Fatalf("Inject login-shell probe: %v", err)
+	}
+	waitFor(t, "login shell probe", func() bool {
+		return strings.Contains(sess.output(), "scheduler-login-shell-ready")
+	})
+	if active, err := e.db.GetRun(ctx, run.ID); err != nil {
+		t.Fatalf("GetRun after harness exit: %v", err)
+	} else if active.Status != domain.RunRunning {
+		t.Fatalf("run status after harness exit = %s, want running", active.Status)
+	}
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	waitStatusEvent(t, sub, run.ID, domain.RunMerged)
 
 	// The agent's TTY output reached the PTY seam.
-	sess := e.pty.session(run.ID)
+	sess = e.pty.session(run.ID)
 	if sess == nil {
 		t.Fatal("no pty session recorded")
 	}

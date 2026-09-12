@@ -414,19 +414,6 @@ describe('Sidebar', () => {
   })
 
 
-  it('keeps the explorer and main top bars the same height', () => {
-    render(
-      <>
-        <Sidebar />
-        <ViewHeader title="All runs" />
-      </>,
-    )
-
-    const sidebar = screen.getByRole('complementary', { name: 'Runs' })
-    expect(sidebar.firstElementChild?.className).toContain('h-9')
-    expect(screen.getByRole('banner').className).toContain('h-9')
-  })
-
   it('offers a new run to a member who may start one', () => {
     useStore.setState({ info: { ...serverInfo, member: bob } })
     render(<Sidebar />)

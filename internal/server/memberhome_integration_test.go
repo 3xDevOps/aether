@@ -55,7 +55,10 @@ func TestMemberHomePersistsAcrossContainers(t *testing.T) {
 	srv, err := New(ctx, Config{
 		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt,
 		Harnesses: map[string]scheduler.HarnessSpec{
-			"claude": {TUIArgs: []string{"sh", "/workspace/agent.sh", "{task}"}},
+			"claude": {
+				TUIArgs:      []string{"sh", "/workspace/agent.sh", "{task}"},
+				HeadlessArgs: []string{"sh", "/workspace/agent.sh", "{task}"},
+			},
 		},
 	})
 	if err != nil {

@@ -336,7 +336,7 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
-		MCPConfigFlag: "--mcp-config",
+		MCPConfigFlag:   "--mcp-config",
 		// Claude Code runs a command on every lifecycle event a settings
 		// file registers a hook for, and --settings merges one more
 		// settings document over the member's own for this launch alone.

@@ -255,17 +255,17 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		source = "local"
 	}
 	run := &domain.Run{
-		WorkspaceID:      workspace,
-		MemberID:         member,
-		AccountMemberID:  account,
-		Task:             task,
-		Harness:          harness,
-		Mode:             mode,
-		Status:           domain.RunQueued,
-		BaseCommit:       base.Commit,
-		BaseBranch:       base.Branch,
-		BaseSource:       source,
-		BaseCheckedAt:    base.CheckedAt,
+		WorkspaceID:     workspace,
+		MemberID:        member,
+		AccountMemberID: account,
+		Task:            task,
+		Harness:         harness,
+		Mode:            mode,
+		Status:          domain.RunQueued,
+		BaseCommit:      base.Commit,
+		BaseBranch:      base.Branch,
+		BaseSource:      source,
+		BaseCheckedAt:   base.CheckedAt,
 	}
 	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
 		return nil, err
@@ -322,8 +322,8 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 		return fmt.Errorf("create checkout: %w", err)
 	}
 	run.Worktree, run.Branch = checkout, branch
-	if err := s.cfg.Store.UpdateRun(ctx, run); err != nil {
-		return fmt.Errorf("record checkout: %w", err)
+	if updateErr := s.cfg.Store.UpdateRun(ctx, run); updateErr != nil {
+		return fmt.Errorf("record checkout: %w", updateErr)
 	}
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
 		return fmt.Errorf("pin profile: %w", pinErr)

@@ -37,12 +37,6 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 		_ = writeJSONLine(ch, protocol.TerminalResponse{Code: protocol.CodeParse, Error: "parse error: " + err.Error()})
 		return
 	}
-	if err := s.checkMember(ctx, member); err != nil {
-		e := rpcError(err)
-		_ = writeJSONLine(ch, protocol.TerminalResponse{Code: e.Code, Error: e.Message})
-		return
-	}
-
 	tab := req.Tab
 	if tab == "" {
 		tab = "main"
@@ -54,13 +48,18 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	if cols == 0 || rows == 0 {
 		cols, rows = 80, 24
 	}
-	if _, err := s.cfg.Runs.EnsureTerminal(ctx, member); err != nil {
-		e := rpcError(err)
-		_ = writeJSONLine(ch, protocol.TerminalResponse{Code: e.Code, Error: e.Message})
-		return
+
+	s.authorizationMu.Lock()
+	admissionErr := s.checkMember(ctx, member)
+	if admissionErr == nil {
+		_, admissionErr = s.cfg.Runs.EnsureTerminal(ctx, member)
 	}
-	if err := s.cfg.Runs.EnsureTerminalTab(ctx, member, tab, cols, rows); err != nil {
-		e := rpcError(err)
+	if admissionErr == nil {
+		admissionErr = s.cfg.Runs.EnsureTerminalTab(ctx, member, tab, cols, rows)
+	}
+	s.authorizationMu.Unlock()
+	if admissionErr != nil {
+		e := rpcError(admissionErr)
 		_ = writeJSONLine(ch, protocol.TerminalResponse{Code: e.Code, Error: e.Message})
 		return
 	}

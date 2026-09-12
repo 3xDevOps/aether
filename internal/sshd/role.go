@@ -47,6 +47,12 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	// uses to keep its own read-then-write of this table honest.
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
+		return nil, err
+	}
+
 	m, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
 	if err != nil {
 		return nil, rpcError(err)

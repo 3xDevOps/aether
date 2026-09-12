@@ -37,6 +37,10 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 		s.mu.Unlock()
 		return s.killUnsupervised(ctx, run, actor)
 	}
+	if entry.destroyPending {
+		s.mu.Unlock()
+		return s.retryDestroyPendingLocked(ctx, entry)
+	}
 	if entry.status.Terminal() {
 		retained := entry.retained
 		s.mu.Unlock()
@@ -63,6 +67,74 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	return nil
 }
 
+// reconcileActiveDestroyPending admits a durable destroy-pending sidecar for
+// an active row before an unsupervised Kill can terminalize it. The sidecar is
+// an ownership record even when it has no container ID yet: the admitted owner
+// keeps the row and checkout protected while creation-key cleanup is retried.
+func (s *Scheduler) reconcileActiveDestroyPending(ctx context.Context, id domain.RunID) (bool, error) {
+	s.mu.Lock()
+	if s.runs[id] != nil || s.pending[id] != nil {
+		s.mu.Unlock()
+		return true, nil
+	}
+	r, err := s.cfg.Store.GetRun(ctx, id)
+	if err != nil {
+		s.mu.Unlock()
+		return false, err
+	}
+	if r.Status.Terminal() {
+		s.mu.Unlock()
+		return false, nil
+	}
+	sc, err := s.readSidecar(id)
+	if err != nil {
+		s.mu.Unlock()
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("scheduler: inspect destroy-pending sidecar: %w", err)
+	}
+	if sc.RunID != "" && sc.RunID != string(id) {
+		s.mu.Unlock()
+		return false, fmt.Errorf("scheduler: destroy-pending sidecar run ID mismatch")
+	}
+	if !sc.DestroyPending {
+		s.mu.Unlock()
+		return false, nil
+	}
+	s.mu.Unlock()
+
+	s.recoverDestroyMetadata(ctx, runtime.ID(sc.ContainerID), &sc)
+	owner, admitted := s.admitDestroyPendingOwner(ctx, r, sc, runtime.ID(sc.ContainerID))
+	if admitted {
+		// Kill reacquires the exact owner's lifecycle lock and performs the
+		// physical cleanup. Releasing here keeps this helper non-blocking
+		// with respect to the caller's ordinary steering path.
+		owner.lifecycleMu.Unlock()
+		return true, nil
+	}
+
+	// Admission may lose to recovery or another steering call, but a durable
+	// pending marker must never fall through to an ordinary row transition.
+	s.mu.Lock()
+	owned := s.runs[id] != nil || s.pending[id] != nil
+	s.mu.Unlock()
+	if owned {
+		return true, nil
+	}
+	current, readErr := s.readSidecar(id)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("scheduler: recheck destroy-pending sidecar: %w", readErr)
+	}
+	if current.DestroyPending {
+		return false, errors.New("scheduler: destroy-pending owner admission failed")
+	}
+	return true, nil
+}
+
 // under s.mu: every scheduler status write holds the lock, so the locked
 // read is authoritative and a concurrent terminal transition cannot be
 // overwritten.
@@ -71,7 +143,51 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	if err != nil {
 		return err
 	}
-	if !r.Status.Terminal() && r.Worktree != "" {
+	s.mu.Lock()
+	if s.runs[id] != nil {
+		// A launch registered the run meanwhile: route through the
+		// supervised path.
+		s.mu.Unlock()
+		return s.Kill(ctx, id, actor)
+	}
+	if pending := s.pending[id]; pending != nil {
+		pending.killRequested = true
+		pending.killActor = actor
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+
+	if r.Status.Terminal() {
+		// A terminal retained row can outlive the in-memory owner during
+		// startup, before recoverRuns has had a chance to adopt its sidecar.
+		// Reuse DeleteRun's reconciliation so Kill has the same durable
+		// ownership and retry behavior instead of treating that row as
+		// a no-op and leaking its container.
+		retainedEntry, retry, reconcileErr := s.reconcileRetainedSidecarForDelete(ctx, id)
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		if retainedEntry != nil || retry {
+			// Let Kill reacquire an entry's lifecycle lock before deciding
+			// between expiry and a terminal no-op. A retry with no owner
+			// means a pending launch or a row that moved back to active;
+			// route it through Kill as well so that state is not discarded.
+			return s.Kill(ctx, id, actor)
+		}
+		return nil
+	}
+
+	// Resolve an active durable cleanup owner before committing/publishing
+	// the ordinary kill transition. This is needed when a process rebooted
+	// after recording DestroyPending but before recoverRuns admitted it.
+	if handled, reconcileErr := s.reconcileActiveDestroyPending(ctx, id); reconcileErr != nil {
+		return reconcileErr
+	} else if handled {
+		return s.Kill(ctx, id, actor)
+	}
+
+	if r.Worktree != "" {
 		if _, cerr := s.commitAll(ctx, id, "wip: "+taskLine(r.Task)); cerr != nil {
 			slog.Warn("scheduler: wip commit on kill", "run", id, "error", cerr)
 		}
@@ -79,6 +195,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 			slog.Warn("scheduler: publish branch on kill", "run", id, "error", perr)
 		}
 	}
+
 	s.mu.Lock()
 	if s.runs[id] != nil {
 		// A launch registered the run meanwhile: route through the
@@ -99,23 +216,17 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	}
 	if r.Status.Terminal() {
 		s.mu.Unlock()
-		// A terminal retained row can outlive the in-memory owner during
-		// startup, before recoverRuns has had a chance to adopt its sidecar.
-		// Reuse DeleteRun's reconciliation so Kill has the same durable
-		// ownership and retry behavior instead of treating that row as a
-		// no-op and leaking its container.
-		retainedEntry, retry, reconcileErr := s.reconcileRetainedSidecarForDelete(ctx, id)
-		if reconcileErr != nil {
-			return reconcileErr
-		}
-		if retainedEntry != nil || retry {
-			// Let Kill reacquire an entry's lifecycle lock before deciding
-			// between expiry and a terminal no-op. A retry with no owner
-			// means a pending launch or a row that moved back to active;
-			// route it through Kill as well so that state is not discarded.
-			return s.Kill(ctx, id, actor)
-		}
-		return nil
+		return s.killUnsupervised(ctx, id, actor)
+	}
+	// Sidecar writes are serialized by s.mu. Recheck immediately before the
+	// status write so a pending marker installed after the first probe still
+	// owns cleanup and cannot be bypassed by this transition.
+	if sc, serr := s.readSidecar(id); serr == nil && sc.DestroyPending {
+		s.mu.Unlock()
+		return s.killUnsupervised(ctx, id, actor)
+	} else if serr != nil && !os.IsNotExist(serr) {
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler: inspect destroy-pending sidecar: %w", serr)
 	}
 	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
 	s.mu.Unlock()
@@ -137,6 +248,7 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		s.mu.Lock()
 		entry := s.runs[run]
 		pending := s.pending[run]
+		pendingDestroy := entry != nil && entry.destroyPending
 		terminal := entry != nil && entry.status.Terminal()
 		retained := entry != nil && entry.retained
 		var done <-chan struct{}
@@ -153,6 +265,12 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 			continue
 		}
 		if entry != nil {
+			if pendingDestroy {
+				if err := s.Kill(ctx, run, actor); err != nil {
+					return err
+				}
+				continue
+			}
 			if retained {
 				if err := s.expireRetained(ctx, entry); err != nil {
 					return err
@@ -220,31 +338,57 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 }
 
 // reconcileRetainedSidecarForDelete atomically checks for a concurrently
-// installed owner and adopts a durable retained sidecar when no owner exists.
+// installed owner and adopts a durable retained or destroy-pending sidecar
+// when no owner exists. Destroy-pending ownership is returned with pending
+// precedence so callers retry physical cleanup rather than retained expiry.
 // The adopted entry is deliberately not given a Wait owner: DeleteRun owns
 // the lifecycle until destruction is confirmed.
 func (s *Scheduler) reconcileRetainedSidecarForDelete(ctx context.Context, run domain.RunID) (*supervised, bool, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if entry := s.runs[run]; entry != nil {
+		s.mu.Unlock()
 		return entry, true, nil
 	}
 	if s.pending[run] != nil {
+		s.mu.Unlock()
 		return nil, true, nil
 	}
 	current, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
+		s.mu.Unlock()
 		return nil, false, err
 	}
 	if !current.Status.Terminal() {
+		s.mu.Unlock()
 		return nil, true, nil
 	}
 	sc, err := s.readSidecar(run)
 	if err != nil {
+		s.mu.Unlock()
 		if os.IsNotExist(err) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("scheduler: inspect retained sidecar: %w", err)
+	}
+	if sc.DestroyPending {
+		s.mu.Unlock()
+		s.recoverDestroyMetadata(ctx, runtime.ID(sc.ContainerID), &sc)
+		entry, admitted := s.admitDestroyPendingOwner(ctx, current, sc, runtime.ID(sc.ContainerID))
+		if admitted {
+			entry.lifecycleMu.Unlock()
+			return entry, true, nil
+		}
+		// Another lifecycle path may have won while metadata was being
+		// inspected. Never fall through to destructive row deletion while
+		// a pending marker remains durable.
+		s.mu.Lock()
+		entry = s.runs[run]
+		pending := s.pending[run] != nil
+		s.mu.Unlock()
+		if entry != nil || pending {
+			return entry, true, nil
+		}
+		return nil, true, nil
 	}
 	mode := sc.Mode
 	if mode == "" {
@@ -252,12 +396,14 @@ func (s *Scheduler) reconcileRetainedSidecarForDelete(ctx context.Context, run d
 	}
 	if sc.RunID != string(run) || sc.ContainerID == "" ||
 		mode == "" || (!sc.Retained && sc.RetainedUntil == nil) {
+		s.mu.Unlock()
 		return nil, false, nil
 	}
 	entry := s.entryFromSidecar(current, sc)
 	entry.retained = true
 	s.runs[run] = entry
 	s.syncRunUserReservationsLocked()
+	s.mu.Unlock()
 	return entry, false, nil
 
 }
@@ -273,7 +419,7 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	if s.runs[run] != entry || entry.containerID == "" ||
-		entry.status.Terminal() || entry.retained || entry.finalizing {
+		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run cannot be paused in its current state", ErrInvalidTransition)
 	}
@@ -304,7 +450,7 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	if s.runs[run] != entry || entry.containerID == "" ||
-		entry.status.Terminal() || entry.retained || entry.finalizing {
+		entry.status.Terminal() || entry.retained || entry.destroyPending || entry.finalizing {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: retained or terminal runs must use Relaunch", ErrInvalidTransition)
 	}
@@ -417,7 +563,10 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	entry := s.runs[run]
 	s.mu.Unlock()
 	if entry == nil {
-		// Unsupervised terminal rows have no retained container to keep.
+		// Recovery deliberately leaves an inconclusive active probe
+		// unsupervised. Before closing such a row, reconcile its durable
+		// sidecar so a live harness cannot keep mutating the checkout after
+		// the terminal status is published.
 		r, err := s.cfg.Store.GetRun(ctx, run)
 		if err != nil {
 			return err
@@ -425,13 +574,39 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		if r.Status == domain.RunQueued {
 			return fmt.Errorf("%w: run %s is still provisioning", ErrInvalidTransition, run)
 		}
-		if r.Status == outcome {
-			return nil
+		sc, serr := s.readSidecar(run)
+		if serr != nil && !os.IsNotExist(serr) {
+			return fmt.Errorf("scheduler: reconcile close sidecar: %w", serr)
 		}
-		s.mu.Lock()
-		err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
-		s.mu.Unlock()
-		return err
+		if serr == nil && sc.ContainerID != "" {
+			if sc.RunID != "" && sc.RunID != string(run) {
+				return fmt.Errorf("scheduler: reconcile close sidecar: run ID mismatch")
+			}
+			s.mu.Lock()
+			if r.Status.Terminal() {
+				entry = s.adoptRetainedOwnerLocked(r, sc)
+			}
+			s.mu.Unlock()
+			if !r.Status.Terminal() {
+				entry = s.adoptLiveSidecar(r, sc)
+			}
+			if entry != nil {
+				// A single Wait owner is required even though recovery's
+				// short probe did not establish liveness.
+				s.startSupervision(entry)
+			}
+		}
+		if entry == nil {
+			// No durable container owner exists, so this is an ordinary
+			// unsupervised terminal transition.
+			if r.Status == outcome {
+				return nil
+			}
+			s.mu.Lock()
+			err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
+			s.mu.Unlock()
+			return err
+		}
 	}
 
 	entry.lifecycleMu.Lock()
@@ -440,6 +615,10 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	if s.runs[run] != entry {
 		s.mu.Unlock()
 		return retainedTransitionError()
+	}
+	if entry.destroyPending {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: run cleanup is pending", ErrInvalidTransition)
 	}
 	if entry.finalizing {
 		s.mu.Unlock()

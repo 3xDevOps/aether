@@ -36,9 +36,14 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 	if err := ctx.Err(); err != nil {
 		return
 	}
-	var addr string
+	var (
+		addr           string
+		terminalTarget bool
+		runID          domain.RunID
+	)
 	switch {
 	case payload.DestHost == "terminal":
+		terminalTarget = true
 		if err := s.checkMember(ctx, member); err != nil {
 			rejectDirectTCPIP(nc, ssh.Prohibited, rpcError(err).Message)
 			return
@@ -50,7 +55,7 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 			return
 		}
 	case strings.HasPrefix(payload.DestHost, "run:") && strings.TrimPrefix(payload.DestHost, "run:") != "":
-		runID := domain.RunID(strings.TrimPrefix(payload.DestHost, "run:"))
+		runID = domain.RunID(strings.TrimPrefix(payload.DestHost, "run:"))
 		if err := checkSteer(ctx, s.cfg.Store, member, runID); err != nil {
 			reason := err.Error()
 			if errors.Is(err, store.ErrNotFound) {
@@ -104,9 +109,37 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		}
 		cancelChannel()
 	})
+	s.spawn(func() {
+		s.revokeDirectTCPIPOnPolicyChange(channelCtx, cancelChannel, member, runID, terminalTarget)
+	})
 	proxyDirectTCPIP(channelCtx, tcp, ch)
 	_ = tcp.Close()
 	_ = ch.Close()
+}
+
+// revokeDirectTCPIPOnPolicyChange re-runs the target authorization while a
+// direct-tcpip proxy is live. The initial gate is a snapshot: without this,
+// a member removed or left pending keeps a terminal tunnel open, and a
+// member who loses Steer keeps a run tunnel open until disconnect.
+func (s *Server) revokeDirectTCPIPOnPolicyChange(ctx context.Context, cancel context.CancelFunc, member domain.MemberID, run domain.RunID, terminal bool) {
+	ticker := time.NewTicker(s.cfg.revalidateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if terminal {
+				if s.checkMember(ctx, member) == nil {
+					continue
+				}
+			} else if checkSteer(ctx, s.cfg.Store, member, run) == nil {
+				continue
+			}
+			cancel()
+			return
+		}
+	}
 }
 
 func rejectDirectTCPIP(nc ssh.NewChannel, reason ssh.RejectionReason, message string) {

@@ -398,10 +398,11 @@ the browser draft available.
 Port forwarding is limited to direct-tcpip channels whose destination is
 `run:<run-id>` or exactly `terminal`. Run targets require the Steer capability
 for the authenticated member; the terminal target resolves that member's own
-live environment container and does not require Steer. The server resolves
-addresses itself and dials only the requested container port. Arbitrary hosts
-and ports are not targets, and reverse forwarding is disabled: global
-forwarding requests are denied.
+live environment container and requires current membership. The server
+revalidates that authorization while the channel is open and closes the tunnel
+when membership or Steer is withdrawn. It resolves addresses itself and dials
+only the requested container port. Arbitrary hosts and ports are not targets,
+and reverse forwarding is disabled: global forwarding requests are denied.
 
 The local dashboard recognizes OAuth authorization links whose redirect URI is
 an HTTP loopback address. It binds the matching local callback port before

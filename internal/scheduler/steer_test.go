@@ -377,6 +377,156 @@ func TestKillUnsupervisedRetainedSidecar(t *testing.T) {
 		t.Fatalf("startup Kill left an in-memory owner: %+v", entry)
 	}
 }
+func syntheticDestroyPendingRun(t *testing.T, e *testEnv, task string) *domain.Run {
+	t.Helper()
+	run, _ := e.launchFake(t, task)
+	ctx := t.Context()
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	if err := e.sched.writeSidecar(sidecar{
+		RunID: string(run.ID), WorkspaceID: string(run.WorkspaceID),
+		DestroyPending: true, RunUser: unknownRecoveryRunUser,
+	}); err != nil {
+		t.Fatalf("write synthetic sidecar: %v", err)
+	}
+	return run
+}
+func activeDestroyPendingRun(t *testing.T, e *testEnv, task string) *domain.Run {
+	t.Helper()
+	run, _ := e.launchFake(t, task)
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil {
+		t.Fatalf("read active sidecar: %v", err)
+	}
+	sc.ContainerID = ""
+	sc.Retained = false
+	sc.RetainedUntil = nil
+	sc.DestroyPending = true
+	if err := e.sched.writeSidecar(sc); err != nil {
+		t.Fatalf("write active pending sidecar: %v", err)
+	}
+	return run
+}
+
+func TestKillUnsupervisedActiveEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run := activeDestroyPendingRun(t, e, "kill active synthetic pending")
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	t.Cleanup(func() { _ = recovered.Close() })
+
+	if err := recovered.Kill(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("startup Kill: %v", err)
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun after startup Kill: %v", err)
+	}
+	if row.Status != domain.RunInterrupted {
+		t.Fatalf("row after startup Kill = %s, want interrupted cleanup result", row.Status)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("startup Kill left the active pending container")
+	}
+	recovered.mu.Lock()
+	owner := recovered.runs[run.ID]
+	recovered.mu.Unlock()
+	if owner != nil {
+		t.Fatalf("startup Kill left an active pending owner: %+v", owner)
+	}
+	if _, err := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("active pending sidecar after startup Kill: %v", err)
+	}
+}
+
+func TestDeleteUnsupervisedActiveEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run := activeDestroyPendingRun(t, e, "delete active synthetic pending")
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+	t.Cleanup(func() { _ = recovered.Close() })
+
+	if err := recovered.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("startup DeleteRun: %v", err)
+	}
+	if _, err := e.db.GetRun(ctx, run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetRun after startup DeleteRun: %v, want store.ErrNotFound", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("startup DeleteRun left the active pending container")
+	}
+	if _, err := os.Stat(run.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("startup DeleteRun left checkout: %v", err)
+	}
+	if _, err := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("active pending sidecar after startup DeleteRun: %v", err)
+	}
+}
+
+func TestKillUnsupervisedEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run := syntheticDestroyPendingRun(t, e, "kill synthetic pending")
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+
+	if err := recovered.Kill(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("startup Kill: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("startup Kill left the synthetic pending container")
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun after startup Kill: %v", err)
+	}
+	if row.Status != domain.RunMerged || row.Reason != retainedExpiredReason {
+		t.Fatalf("row after startup Kill = %+v, want retained terminal row", row)
+	}
+	if _, err := os.Stat(run.Worktree); err != nil {
+		t.Fatalf("startup Kill removed checkout: %v", err)
+	}
+	if _, err := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("synthetic sidecar after startup Kill: %v", err)
+	}
+}
+
+func TestDeleteUnsupervisedEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run := syntheticDestroyPendingRun(t, e, "delete synthetic pending")
+	recovered := e.newScheduler(t, e.rt, newFakePTY())
+
+	if err := recovered.DeleteRun(ctx, run.ID, e.member.ID); err != nil {
+		t.Fatalf("startup DeleteRun: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("startup DeleteRun left the synthetic pending container")
+	}
+	if _, err := e.db.GetRun(ctx, run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetRun after startup DeleteRun: %v, want store.ErrNotFound", err)
+	}
+	if _, err := os.Stat(run.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("startup DeleteRun left checkout: %v", err)
+	}
+	if _, err := os.Stat(recovered.sidecarPath(run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("synthetic sidecar after startup DeleteRun: %v", err)
+	}
+}
 
 // A retained sidecar is installed before the row transition. If that write
 // fails, CloseRun must return an error and restore the exact live state rather
@@ -645,7 +795,7 @@ func TestDeleteRunSurvivesKillFinalizingDuringStop(t *testing.T) {
 	}
 }
 
-func TestDeleteRunReconcilesUnsupervisedRetainedSidecar(t *testing.T) {
+func TestDeleteRunReconcilesRetainedSidecarAfterProbeError(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -658,9 +808,9 @@ func TestDeleteRunReconcilesUnsupervisedRetainedSidecar(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Recovery cannot decide whether the retained container is still alive,
-	// leaving its durable ownership marker without an in-memory entry.
-	e.rt.waitErr = errors.New("test: retained probe inconclusive")
+	// An inconclusive recovery probe keeps the durable sidecar represented by
+	// an in-memory retry owner.
+	e.rt.setWaitError(errors.New("test: retained probe inconclusive"))
 	destroyErr := errors.New("test: retained destroy failed")
 	rt := &destroyFailureRuntime{Runtime: e.rt, destroyErr: destroyErr}
 	cfg := e.cfg
@@ -675,11 +825,11 @@ func TestDeleteRunReconcilesUnsupervisedRetainedSidecar(t *testing.T) {
 		t.Fatalf("recoverRuns: %v", recoverErr)
 	}
 	recovered.mu.Lock()
-	if recovered.runs[run.ID] != nil {
-		recovered.mu.Unlock()
-		t.Fatal("inconclusive recovery installed a run entry")
-	}
+	entry := recovered.runs[run.ID]
 	recovered.mu.Unlock()
+	if entry == nil || !entry.retained || !entry.waitStarted {
+		t.Fatalf("retained ownership after inconclusive recovery = %+v", entry)
+	}
 
 	err = recovered.DeleteRun(ctx, run.ID, e.member.ID)
 	if !errors.Is(err, destroyErr) || !strings.Contains(err.Error(), "destroy retained container") {
@@ -698,9 +848,9 @@ func TestDeleteRunReconcilesUnsupervisedRetainedSidecar(t *testing.T) {
 		t.Fatal("container removed after failed delete")
 	}
 	recovered.mu.Lock()
-	entry := recovered.runs[run.ID]
+	entry = recovered.runs[run.ID]
 	recovered.mu.Unlock()
-	if entry == nil || !entry.retained || entry.waitStarted {
+	if entry == nil || !entry.retained || !entry.waitStarted {
 		t.Fatalf("retained ownership after failed delete = %+v", entry)
 	}
 

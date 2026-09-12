@@ -162,6 +162,10 @@ type sidecar struct {
 	KillRequested bool              `json:"kill_requested"`
 	Retained      bool              `json:"retained,omitempty"`
 	RetainedUntil *time.Time        `json:"retained_until,omitempty"`
+	// DestroyPending is durable ownership for a container whose destruction
+	// was attempted but not confirmed. Such an owner is retried by the
+	// bounded cleanup sweep before the run is terminalized.
+	DestroyPending bool `json:"destroy_pending,omitempty"`
 	// RunUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root. Recovered so the
 	// credential-home ownership guard still sees live runs across a
@@ -215,6 +219,7 @@ func (e *supervised) sidecar() sidecar {
 		KillRequested:  e.killRequested,
 		Retained:       e.retained,
 		RetainedUntil:  e.retainedUntil,
+		DestroyPending: e.destroyPending,
 		RunUser:        e.runUser,
 		Home:           e.home,
 		Reporter:       e.reporter,

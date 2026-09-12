@@ -72,6 +72,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		var launched protocol.RunResult
 		if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 			WorkspaceID: string(env.ws.ID), Task: fmt.Sprintf("gc load %d", i), Harness: "fake",
+			Mode: string(domain.LaunchHeadless),
 		}, &launched); err != nil {
 			t.Fatalf("run.launch %d: %v", i, err)
 		}
@@ -183,6 +184,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	var refused protocol.RunResult
 	err = env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: "over the floor", Harness: "fake",
+		Mode: string(domain.LaunchHeadless),
 	}, &refused)
 	if err == nil {
 		t.Fatalf("run.launch (run %s) succeeded below the free-space floor; new runs must be refused",
@@ -287,6 +289,7 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 	var launched protocol.RunResult
 	if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: stallTask, Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &launched); err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
@@ -353,6 +356,7 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 	var deaf protocol.RunResult
 	if err := env.ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(env.ws.ID), Task: deafTask, Harness: "fake",
+		Mode: string(domain.LaunchTUI),
 	}, &deaf); err != nil {
 		t.Fatalf("run.launch hung agent: %v", err)
 	}

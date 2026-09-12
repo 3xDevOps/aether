@@ -30,9 +30,9 @@ const task = 'write the result file'
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
 /**
- * The wizard, up to the moment a run screen is on the page. Neither claim
- * below is about the agent, so nothing here waits for the container: the run
- * screen exists as soon as the launch returns.
+ * The wizard, up to the moment a run screen is on the page. The shell claims
+ * below need the interactive run screen, and the helper waits for the fake
+ * agent's marker before asserting that its supervised shell remains Working.
  */
 async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   const alice = await aether.member('alice')
@@ -53,6 +53,22 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await wizard.firstRun.launch('claude', task)
 
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
+  // The fake agent exits, but this interactive run keeps its supervised shell
+  // and remains usable until the member explicitly closes it.
+  await expect(page.locator('.xterm-rows')).toContainText('agent-ready')
+  await expect(page.locator('header').filter({ hasText: task })).toContainText('Working')
+}
+
+/** Close the live TUI run through the same controls a member uses. */
+async function closeFirstRun(page: Page): Promise<void> {
+  const header = page.locator('header').filter({ hasText: task })
+  await expect(header).toContainText('Working')
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Close this run?' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
+  await expect(header).toContainText('Done')
+  await expect(header).toContainText('closed; retained container')
 }
 
 interface Indicator {
@@ -152,6 +168,8 @@ test('Escape closes a dialog on a run without leaving the run', async ({
   )
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
+  await closeFirstRun(page)
+
   // The same key with nothing over the run does leave it. Without this the
   // assertions above would also pass on a build where the shortcut never
   // registered, which is not what they are meant to prove.
@@ -185,6 +203,8 @@ test('Escape closes the status popup without leaving the run', async ({
   await expect(trigger).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
+  await closeFirstRun(page)
+
   // The same key with nothing over the run does leave it, so the assertions
   // above cannot pass on a build where the shell shortcut never registered.
   await page.keyboard.press('Escape')
@@ -208,10 +228,9 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   const overview = tabs.getByRole('tab', { name: 'Overview' })
   await expect(overview).toBeFocused()
   expectVisibleFocus('the run tab', await indicator(overview))
-
-  // A row that fills a scroll container must keep its focus outline visible
-  // at its edges; the painted check allows either inset or outset outlines.
-  await page.keyboard.press('Escape')
+  // Keep the live run on screen while checking its sidebar row. The Working
+  // group is expanded by default; closing first would move the row under the
+  // collapsed Done group and leave nothing for focus() to target.
   const row = page
     .getByRole('complementary', { name: 'Runs' })
     .getByRole('button', { name: new RegExp(task) })
@@ -227,7 +246,11 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await page.keyboard.press('Tab')
   const allRuns = surfaces.getByRole('button', { name: 'All runs', exact: true })
   await expect(allRuns).toBeFocused()
-  expectVisibleFocus('the sidebar surface button', await indicator(allRuns))
+  expectVisibleFocus('the All runs activity-rail button', await indicator(allRuns))
+
+  // Close only after the live run and all focus targets have been exercised.
+  await closeFirstRun(page)
+  await page.keyboard.press('Escape')
 
   // The neighbouring control, reached by mouse instead: no outline. Without
   // this the checks above would also pass on a control that is outlined all
@@ -313,4 +336,5 @@ test('resizing the sidebar follows the pointer delta and keeps minimum controls 
     expect(control.x).toBeGreaterThanOrEqual(minimum.x)
     expect(control.x + control.width).toBeLessThanOrEqual(minimum.x + minimum.width)
   }
+  await closeFirstRun(page)
 })

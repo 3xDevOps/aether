@@ -173,11 +173,19 @@ func (e *testEnv) reporterOf(t *testing.T, run domain.RunID) harness.Reporter {
 	return entry.reporter
 }
 
+func tuiHarnessCommand(t *testing.T, command []string) []string {
+	t.Helper()
+	if len(command) < 4 || command[0] != "/bin/sh" || command[1] != "-c" {
+		t.Fatalf("TUI command = %v, want POSIX supervisor", command)
+	}
+	return command[4:]
+}
+
 // TestOpenCodeStatusReporterRegistration is the same contract for a
 // harness whose reporter rides in the environment instead of on the
 // command line: the plugin lands in the run's coordination directory and
-// opencode is told to load it from there, an interactive run alone, and
-// the argv it was launched with is untouched.
+// opencode is told to load it from there, an interactive run alone, without
+// changing the harness command passed through the TUI supervisor.
 func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
@@ -208,13 +216,14 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != wantConfig {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q, want %q", got, wantConfig)
 	}
-	// opencode has no flag for a plugin, so the launch command is exactly
+	// opencode has no flag for a plugin, so the harness command is exactly
 	// what a run without a reporter would have had: nothing on it names
-	// the coordination directory.
-	if argv := spec.Command; len(argv) != 2 || slices.ContainsFunc(argv, func(a string) bool {
+	// the coordination directory. The first four arguments belong to the
+	// TUI supervisor.
+	if argv := tuiHarnessCommand(t, spec.Command); len(argv) != 2 || slices.ContainsFunc(argv, func(a string) bool {
 		return strings.Contains(a, agentstatus.OpenCodePluginName)
 	}) {
-		t.Fatalf("opencode argv = %v, want the launch command untouched", argv)
+		t.Fatalf("opencode argv = %v, want the harness command untouched", argv)
 	}
 	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
 		t.Fatalf("interactive opencode run recorded reporter %s, want %s", got, harness.ReporterFull)
@@ -262,7 +271,7 @@ func TestReporterRegistrationPerHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch codex run: %v", err)
 	}
-	argv := e.rt.byName(string(codex.ID)).spec.Command
+	argv := tuiHarnessCommand(t, e.rt.byName(string(codex.ID)).spec.Command)
 	if i := slices.Index(argv, "-c"); i < 0 || i+1 >= len(argv) || argv[i+1] != agentstatus.CodexNotifySetting {
 		t.Fatalf("interactive codex argv = %v, want -c %s in it", argv, agentstatus.CodexNotifySetting)
 	}
@@ -280,7 +289,7 @@ func TestReporterRegistrationPerHarness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("launch %s run: %v", name, err)
 		}
-		argv := e.rt.byName(string(run.ID)).spec.Command
+		argv := tuiHarnessCommand(t, e.rt.byName(string(run.ID)).spec.Command)
 		if i := slices.Index(argv, "-e"); i < 0 || i+1 >= len(argv) || argv[i+1] != extension {
 			t.Fatalf("interactive %s argv = %v, want -e %s in it", name, argv, extension)
 		}
