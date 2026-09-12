@@ -2,6 +2,7 @@ package localops
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -68,6 +69,61 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 	} {
 		if !strings.Contains(string(entry), want) {
 			t.Errorf("launcher missing %q:\n%s", want, entry)
+		}
+	}
+}
+
+func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
+	home := t.TempDir()
+	local := filepath.Join(home, "AppData", "Local")
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	cliDir := filepath.Join(local, "Programs", "Aether")
+	if err := os.MkdirAll(cliDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(cliDir, "aether.exe")
+	if err := os.WriteFile(cli, []byte("installed CLI"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(cliDir, "user-file")
+	if err := os.WriteFile(extra, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := InstalledDesktopApp("windows", RealUser{Home: home}); ok {
+		t.Fatalf("CLI directory mistaken for desktop app: %q", got)
+	}
+
+	built := t.TempDir()
+	for _, version := range []string{"first shell", "rebuilt shell"} {
+		if err := os.WriteFile(filepath.Join(built, "aether-desktop.exe"), []byte(version), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		app, err := InstallDesktop("windows", home, built, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, readErr := os.ReadFile(cli); readErr != nil || string(got) != "installed CLI" {
+			t.Fatalf("desktop install replaced the CLI: %q, %v", got, readErr)
+		}
+		if got, readErr := os.ReadFile(extra); readErr != nil || string(got) != "keep" {
+			t.Fatalf("desktop install changed unrelated files: %q, %v", got, readErr)
+		}
+		exe := filepath.Join(app.App, "aether-desktop.exe")
+		if got, readErr := os.ReadFile(exe); readErr != nil || string(got) != version {
+			t.Fatalf("installed desktop executable = %q, %v", got, readErr)
+		}
+		link, err := os.ReadFile(app.Launcher)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info := shellLinkHeaderSize
+		offset := int(binary.LittleEndian.Uint32(link[info+28:]))
+		if got := decodeUTF16(t, link, info+offset, exe); got != exe {
+			t.Fatalf("Start Menu shortcut targets %q, want %q", got, exe)
+		}
+		if got, ok := InstalledDesktopApp("windows", RealUser{Home: home}); !ok || got != app.App {
+			t.Fatalf("installed desktop not found: %q, %v", got, ok)
 		}
 	}
 }

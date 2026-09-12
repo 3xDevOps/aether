@@ -41,6 +41,7 @@ mac:
     - zip
 
 win:
+  executableName: aether-desktop
   target:
     - nsis
 

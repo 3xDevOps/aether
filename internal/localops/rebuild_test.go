@@ -75,16 +75,6 @@ func TestDesktopAppPathsPerOS(t *testing.T) {
 	if len(mac) != 2 || mac[0] != "/Applications/Aether.app" || mac[1] != "/Users/u/Applications/Aether.app" {
 		t.Fatalf("darwin = %v", mac)
 	}
-	// The windows branch reads LOCALAPPDATA with the host's own filepath,
-	// so this case is written with a path the host calls absolute: a real
-	// C:\ one on the Windows runner that actually ships this client, and a
-	// stand-in elsewhere. What is asserted either way is the Programs\Aether
-	// tail and that a relative LOCALAPPDATA leaves nowhere to look.
-	local := filepath.Join(t.TempDir(), "AppData", "Local")
-	win := desktopAppPaths("windows", filepath.Join("home", "u"), "", local)
-	if len(win) != 1 || win[0] != filepath.Join(local, "Programs", "Aether") {
-		t.Fatalf("windows = %v", win)
-	}
 	if got := desktopAppPaths("windows", "/home/u", "", "AppData"); got != nil {
 		t.Fatalf("windows with a relative LOCALAPPDATA = %v", got)
 	}

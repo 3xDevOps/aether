@@ -358,6 +358,42 @@ Use `aether-windows-arm64.exe` on an Arm device. Confirm it works with
 `aether version` in a fresh terminal. To upgrade later, repeat this with the
 newer release; there is no self-update on Windows.
 
+### Recovering commands after a Windows desktop build
+
+Older builds installed the desktop app into the CLI's own
+`%LOCALAPPDATA%\Programs\Aether` directory, replacing its contents. Windows
+treats Electron's `Aether.exe` and the CLI's `aether.exe` as the same name.
+Afterwards every `aether` command could launch Electron, which tried to
+launch itself as the gateway and printed
+`aether gui printed an unparseable line: SyntaxError: Unexpected end of JSON input`.
+This is an installation collision, not a Defender detection or damaged
+linked-server configuration.
+
+Quit Aether, including any stuck copies in Task Manager. Download a client
+release containing the separate **Aether Desktop** install location and
+verify it against that release's `checksums.txt`, as above. From that download
+directory, restore the CLI and rebuild the app:
+
+```powershell
+$cli = "$env:LOCALAPPDATA\Programs\Aether\aether.exe"
+Copy-Item -Force .\aether-windows-amd64.exe $cli
+& $cli version
+& $cli gui build
+Get-Command aether -All | Select-Object Source
+aether version
+```
+
+Use the Arm asset on an Arm device. If you installed the CLI elsewhere, set
+`$cli` to that path. The explicit path bypasses a shadowing command on `PATH`;
+`Get-Command` shows which copy a bare `aether` invokes. An older CLI can restore
+terminal commands, but running its `gui build` repeats the collision.
+
+The rebuilt app replaces the Start Menu shortcut and uses
+`%LOCALAPPDATA%\Programs\Aether Desktop\aether-desktop.exe`. The old
+`Programs\Aether` directory is deliberately not deleted: it holds the restored
+CLI and may hold unrelated files. Your `%APPDATA%\aether\config.json` and
+`%USERPROFILE%\.ssh` files do not need changing.
+
 ### Windows Defender and SmartScreen
 
 The client is not code-signed yet, so Windows can stop it in three different
@@ -493,11 +529,16 @@ desktop lists applications:
 | --- | --- | --- |
 | Linux | `~/.local/share/aether/desktop/` | `~/.local/share/applications/aether-desktop.desktop` |
 | macOS | `/Applications/Aether.app` | Applications folder and Spotlight |
-| Windows | `%LOCALAPPDATA%\Programs\Aether\` | Start Menu > Aether |
+| Windows | `%LOCALAPPDATA%\Programs\Aether Desktop\` | Start Menu > Aether |
 
 A macOS account without administrator rights cannot write to `/Applications`,
 so the app goes to `~/Applications` instead; the command prints where it put
 it.
+
+The Windows desktop executable is `aether-desktop.exe`. Keep the CLI's
+`aether.exe` in its own directory (`%LOCALAPPDATA%\Programs\Aether` in the
+manual install above), never inside the desktop app directory: a rebuild
+replaces that directory in full. A build does not change your `PATH`.
 
 The build uses `node`, `npm` and `npx` from `PATH` when `node` is version 22
 or newer. Otherwise it downloads a pinned Node.js 22 release for this OS and
@@ -945,7 +986,7 @@ the app is `/Applications/Aether.app` (or `~/Applications/Aether.app` for a
 non-administrator account), and the build caches are
 `~/Library/Caches/aether`, `~/Library/Caches/electron`, and
 `~/Library/Caches/electron-builder`. On Windows the state is
-`%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether` plus
+`%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether Desktop` plus
 its Start Menu shortcut, the build caches are `%LOCALAPPDATA%\aether`,
 `%LOCALAPPDATA%\electron`, and `%LOCALAPPDATA%\electron-builder`, and the
 client binary is wherever you put `aether.exe` on PATH.

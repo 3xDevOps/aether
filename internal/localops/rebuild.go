@@ -101,7 +101,7 @@ func desktopAppPaths(goos, home, xdgData, localAppData string) []string {
 		if !filepath.IsAbs(localAppData) {
 			return nil
 		}
-		return []string{filepath.Join(localAppData, "Programs", "Aether")}
+		return []string{filepath.Join(localAppData, "Programs", "Aether Desktop")}
 	default:
 		return nil
 	}

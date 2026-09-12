@@ -336,7 +336,7 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 		if err := os.MkdirAll(filepath.Dir(app.Launcher), 0o755); err != nil {
 			return DesktopApp{}, err
 		}
-		exe := filepath.Join(app.App, "Aether.exe")
+		exe := filepath.Join(app.App, "aether-desktop.exe")
 		if err := writeShellLink(app.Launcher, exe, filepath.Dir(exe)); err != nil {
 			return DesktopApp{}, fmt.Errorf("localops: create Start Menu shortcut: %w", err)
 		}
@@ -487,7 +487,7 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 			return DesktopApp{}, errors.New("localops: LOCALAPPDATA and APPDATA must be absolute paths")
 		}
 		return DesktopApp{
-			App:      filepath.Join(local, "Programs", "Aether"),
+			App:      filepath.Join(local, "Programs", "Aether Desktop"),
 			Launcher: filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Aether.lnk"),
 		}, nil
 	default:
