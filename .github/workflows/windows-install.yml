@@ -103,9 +103,10 @@ jobs:
       - name: Install, rebuild, and launch the desktop under Defender
         run: ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" ${{ matrix.smokeArgs }}
       - name: Upload the installed desktop screenshot
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-desktop-${{ matrix.shell }}-${{ matrix.node }}
           path: ${{ runner.temp }}/windows-desktop.png
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7

@@ -162,6 +162,7 @@ const { chromium } = require(process.argv[2])
     await page.getByRole('heading', { name: 'Onboarding', exact: true }).waitFor({ timeout: 45000 })
     await page.screenshot({ path: process.argv[4] })
     console.log('The installed desktop rendered its first-run onboarding screen.')
+    await page.close()
   } finally {
     await browser.close()
   }
@@ -170,6 +171,7 @@ const { chromium } = require(process.argv[2])
     $playwright = Join-Path $PSScriptRoot '..\web\node_modules\playwright'
     & $node $verifyScript $playwright $endpoint (Join-Path $env:RUNNER_TEMP 'windows-desktop.png')
     if ($LASTEXITCODE -ne 0) { throw 'The installed desktop did not render onboarding.' }
+    if (-not $app.WaitForExit(15000)) { throw 'The desktop did not exit after closing its window.' }
     Write-Host 'The installed Start Menu shortcut found the CLI without an updated PATH and loaded its dashboard.'
 
     $preferences = Get-MpPreference
@@ -197,8 +199,12 @@ const { chromium } = require(process.argv[2])
 } finally {
     if ($app -and -not $app.HasExited) {
         & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
+        if (-not $app.WaitForExit(15000)) { throw 'The desktop test process did not stop.' }
     }
-    if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+    if ($server -and -not $server.HasExited) {
+        Stop-Process -Id $server.Id -Force
+        if (-not $server.WaitForExit(10000)) { throw 'The release fixture server did not stop.' }
+    }
     foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
     if ($hadUserPath) { $registry.SetValue('Path', $userPath, $userPathKind) } else { $registry.DeleteValue('Path', $false) }
     $registry.Dispose()
