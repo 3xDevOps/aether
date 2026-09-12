@@ -57,8 +57,8 @@ and enables Defender realtime, script, archive, and first-seen cloud scanning
 before running `scripts/install-smoke.ps1`. A local release mirror serves those
 exact bytes and their checksum so the scenario tests the checkout, not the
 latest published release. It installs and rebuilds the desktop, verifies
-the unchanged CLI and Start Menu shortcut, and launches the app with the
-pre-install `PATH`. Playwright checks the installed window's onboarding screen
+the unchanged CLI, and launches the installed Start Menu shortcut with the
+pre-install `PATH`. Playwright checks that window's onboarding screen
 and saves a screenshot. Windows PowerShell uses system Node; PowerShell 7 hides
 system Node to exercise the verified private download. Defender scans the
 download and install tree without exclusions or disabled remediation. The

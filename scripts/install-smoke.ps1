@@ -113,10 +113,7 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         if (-not (Test-Path -LiteralPath $desktop)) { throw 'The desktop executable was not installed.' }
         & $installed version
         if ($LASTEXITCODE -ne 0) { throw 'The installed CLI no longer runs.' }
-        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
-        if ($link.TargetPath -ne $desktop) { throw "Start Menu target is $($link.TargetPath), not $desktop." }
-        if ($link.WorkingDirectory -ne (Split-Path $desktop)) { throw 'The shortcut has the wrong working directory.' }
-        Write-Host "Automatic install $round preserved the CLI and registered the desktop."
+        Write-Host "Automatic install $round preserved the CLI and installed the desktop."
     }
     if ($WithoutNode -and -not (Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'aether\node') -Filter node.exe -Recurse)) {
         throw 'The build did not provision its private Node runtime.'
@@ -132,16 +129,25 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     }
     $protocolCaptured = $true
     $profile = Join-Path $root 'Electron'
-    $app = Start-Process -FilePath $desktop -ArgumentList @('--remote-debugging-port=0', ('--user-data-dir="' + $profile + '"')) -PassThru -RedirectStandardOutput (Join-Path $root 'desktop.log') -RedirectStandardError (Join-Path $root 'desktop.err')
+    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $debugPort = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    $launched = Start-Process -FilePath $shortcut -ArgumentList @("--remote-debugging-port=$debugPort", ('--user-data-dir="' + $profile + '"')) -PassThru
+    if ($launched.Path -ne $desktop) { throw "The Start Menu shortcut launched $($launched.Path), not $desktop." }
+    $app = $launched
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
-        $debugLog = Get-Content -LiteralPath (Join-Path $root 'desktop.err') -Raw -ErrorAction SilentlyContinue
-        if ($app.HasExited) { throw "Desktop exited: $debugLog" }
-        if ($debugLog -match 'DevTools listening on (ws://127\.0\.0\.1:\d+/devtools/browser/[^\s]+)') {
-            $endpoint = $Matches[1]
+        if ($app.HasExited) { throw "The Start Menu app exited with code $($app.ExitCode)." }
+        try {
+            $debugInfo = Invoke-RestMethod -Uri "http://127.0.0.1:$debugPort/json/version" -TimeoutSec 2
+            $endpoint = $debugInfo.webSocketDebuggerUrl
             break
+        } catch {
+            if ([DateTime]::UtcNow -gt $deadline) {
+                throw "The Start Menu app did not expose its debugging endpoint: $($_.Exception.Message)"
+            }
         }
-        if ([DateTime]::UtcNow -gt $deadline) { throw "Desktop debugging endpoint did not start: $debugLog" }
         Start-Sleep -Milliseconds 200
     } while ($true)
     $verifyScript = Join-Path $root 'verify-desktop.cjs'
@@ -164,7 +170,7 @@ const { chromium } = require(process.argv[2])
     $playwright = Join-Path $PSScriptRoot '..\web\node_modules\playwright'
     & $node $verifyScript $playwright $endpoint (Join-Path $env:RUNNER_TEMP 'windows-desktop.png')
     if ($LASTEXITCODE -ne 0) { throw 'The installed desktop did not render onboarding.' }
-    Write-Host 'The desktop found the CLI without an updated PATH and loaded its dashboard.'
+    Write-Host 'The installed Start Menu shortcut found the CLI without an updated PATH and loaded its dashboard.'
 
     $preferences = Get-MpPreference
     if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true -or $preferences.MAPSReporting -ne 2 -or $preferences.DisableRealtimeMonitoring -or $preferences.DisableIOAVProtection -or $preferences.DisableBehaviorMonitoring) {
