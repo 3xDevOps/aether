@@ -33,7 +33,19 @@ curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/instal
 ```
 Aether installs in two places: a **desktop client** & CLI for your laptop/PC, and a **server framework** for where you intend to run your agents - a home server, PC, or an old laptop repurposed to be on all day long. 
 
-The server framework will run on any Linux device. The install script covers Linux and macOS clients, while Windows clients can download the release binary instead. The install script handles installations on both sides and asks whether the current machine is your server or a client. 
+The server runs on Linux. The script above handles Linux and macOS, asking
+whether this machine is a server or a client.
+
+On **Windows**, download and review the PowerShell installer, then run it:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+& "$env:TEMP\aether-install.ps1"
+```
+
+It installs the CLI and builds the desktop app by default. `-Role none`
+installs only the CLI. See the [Windows install guide](docs/install.md#windows-install-script)
+for supported releases and script-policy requirements.
 
 **Next, see [docs/quickstart.md](docs/quickstart.md) to set up your first workspace and link your codebase, tools, and CLI agents.** 
 

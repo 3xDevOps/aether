@@ -51,15 +51,16 @@ function main() {
 
   // --- binary discovery ---------------------------------------------------
 
-  // Where scripts/install.sh puts the CLI: /usr/local/bin by default,
-  // ~/.local/bin when there is no sudo.
+  // The application menu may still have the PATH from before installation.
   function installLocations() {
+    if (process.platform === 'win32') {
+      const local = process.env.LOCALAPPDATA
+      return local && path.isAbsolute(local)
+        ? [path.join(local, 'Programs', 'Aether', 'aether.exe')]
+        : []
+    }
     const home = app.getPath('home')
-    const names = process.platform === 'win32' ? ['aether.exe'] : ['aether']
-    const dirs = ['/usr/local/bin', path.join(home, '.local', 'bin')]
-    const out = []
-    for (const dir of dirs) for (const name of names) out.push(path.join(dir, name))
-    return out
+    return ['/usr/local/bin/aether', path.join(home, '.local', 'bin', 'aether')]
   }
 
   // A which-style PATH lookup; Electron main has no `which` to shell out to

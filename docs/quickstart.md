@@ -40,9 +40,18 @@ server, the desktop app ([step 7](#prefer-a-native-window)) on a client. To
 install the binaries and stop there, add `--role none`; see
 [install.md](install.md#the-install-script).
 
-On **Windows** the client is a manual download - three PowerShell commands in
-[install.md](install.md#manual-install). Everything else there is optional:
-pinning a version, the data layout, the desktop app.
+On **Windows**, download and review the PowerShell installer, then run it:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+& "$env:TEMP\aether-install.ps1"
+```
+
+It installs the CLI and desktop app by default, without administrator access.
+Use `-Role none` for the CLI alone. Desktop setup requires a release containing
+the Windows installer fixes (`v0.4.0-alpha.6` or newer); the installer refuses
+older desktop builds. See [install.md](install.md#windows-install-script)
+for script-policy requirements, version selection, upgrades, and manual installation.
 
 ## 2. Start the server
 

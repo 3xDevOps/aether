@@ -144,13 +144,13 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	if err != nil {
 		return "", err
 	}
-	node, err := ensureNode(ctx, nodeRoot, stdout)
+	tools, err := ensureNode(ctx, nodeRoot, stdout)
 	if err != nil {
 		return "", err
 	}
 
-	run := func(name string, args ...string) error {
-		cmd := exec.CommandContext(ctx, name, args...)
+	run := func(tool string, args ...string) error {
+		cmd := exec.CommandContext(ctx, tool, args...)
 		cmd.Dir = buildDir
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
@@ -159,24 +159,29 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 		// npm's electron postinstall would download the runtime zip once
 		// more than electron-builder does for itself, so skip it.
 		cmd.Env = append(cmd.Environ(), "CSC_IDENTITY_AUTO_DISCOVERY=false", "ELECTRON_SKIP_BINARY_DOWNLOAD=1")
-		// npm and npx are scripts that look up node on PATH, and
-		// electron-builder spawns node again, so a downloaded Node has to
-		// lead this build's PATH. Only these two commands see it: nothing
-		// on the machine, and no shell profile, is changed.
-		if node.pathDir != "" {
-			cmd.Env = append(cmd.Env, "PATH="+node.pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		// npm lifecycle scripts and electron-builder's children must find
+		// the private Node without changing the caller's environment.
+		if tools.pathDir != "" {
+			cmd.Env = append(cmd.Env, "PATH="+tools.pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		}
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("localops: %s %s: %w", filepath.Base(name), strings.Join(args, " "), err)
+			return fmt.Errorf("localops: %s %s: %w", filepath.Base(tool), strings.Join(args, " "), err)
 		}
 		return nil
 	}
 	phase(PhaseDependencies)
-	if err := run(node.npm, "install", "--no-audit", "--no-fund"); err != nil {
+	npm := tools.npm
+	npmArgs := make([]string, 0, 4)
+	if runtime.GOOS == "windows" {
+		npm = tools.node
+		npmArgs = append(npmArgs, tools.npm)
+	}
+	npmArgs = append(npmArgs, "install", "--no-audit", "--no-fund")
+	if err := run(npm, npmArgs...); err != nil {
 		return "", err
 	}
 	phase(PhasePackaging)
-	if err := run(node.npx, "electron-builder", "--dir", "--publish", "never"); err != nil {
+	if err := run(tools.node, filepath.Join("node_modules", "electron-builder", "cli.js"), "--dir", "--publish", "never"); err != nil {
 		return "", err
 	}
 	return builtDesktopApp(runtime.GOOS, dist)
@@ -420,25 +425,37 @@ func removeHint(goos, path string, err error) string {
 
 // DesktopFindsCLI reports whether the shell will locate the aether binary
 // at launch, mirroring desktop/main.js: AETHER_BIN, then PATH, then the
-// install script's default locations. The shell runs with the desktop
-// session's PATH, not this terminal's, so a binary found only through a
-// PATH entry outside the defaults is reported in shellOnly: it works from
-// here but may not from the application menu.
+// install script's (or Windows installer's) default locations. The shell
+// runs with the desktop session's PATH, not this terminal's, so a binary
+// found only through a PATH entry outside the defaults is reported in
+// shellOnly: it works from here but may not from the application menu.
 func DesktopFindsCLI(home string) (found bool, shellOnly string) {
 	if explicit := os.Getenv("AETHER_BIN"); explicit != "" {
 		_, err := exec.LookPath(explicit)
 		return err == nil, ""
 	}
 	name := "aether"
+	var defaults []string
 	if runtime.GOOS == "windows" {
 		name += ".exe"
+		if local := os.Getenv("LOCALAPPDATA"); filepath.IsAbs(local) {
+			defaults = []string{filepath.Join(local, "Programs", "Aether")}
+		}
+	} else {
+		defaults = []string{"/usr/local/bin", filepath.Join(home, ".local", "bin")}
 	}
-	defaults := []string{"/usr/local/bin", filepath.Join(home, ".local", "bin")}
-	if path, err := exec.LookPath("aether"); err == nil {
+	if path, err := exec.LookPath(name); err == nil {
 		dir := filepath.Dir(path)
-		for _, d := range append(defaults, "/usr/bin", "/opt/homebrew/bin") {
+		for _, d := range defaults {
 			if dir == d {
 				return true, ""
+			}
+		}
+		if runtime.GOOS != "windows" {
+			for _, d := range []string{"/usr/bin", "/opt/homebrew/bin"} {
+				if dir == d {
+					return true, ""
+				}
 			}
 		}
 		return true, path
