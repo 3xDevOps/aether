@@ -149,13 +149,35 @@ func readCastTail(path string, maxBytes int) ([]byte, error) {
 	}
 	if len(out) > maxBytes {
 		out = out[len(out)-maxBytes:]
-		// The cut can land mid-escape-sequence or mid-rune; replay must
-		// start on a line boundary, the same rule the replay ring applies.
-		if i := bytes.IndexByte(out, '\n'); i >= 0 {
-			out = out[i+1:]
-		}
 	}
 	return out, nil
+}
+
+// readCastModes scans every recorded output event and returns the latest
+// tracked DEC mode state. A restarted session can seed its byte ring from the
+// transcript tail, but the sequence that set a mode may be much older than
+// that tail, so reconstructing modes requires the complete history.
+func readCastModes(path string) (modeScanner, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return modeScanner{}, err
+	}
+	defer func() { _ = f.Close() }()
+	r := &replayReader{f: f, br: bufio.NewReader(f)}
+	var modes modeScanner
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := r.Read(buf)
+		if n > 0 {
+			modes.scan(buf[:n])
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return modes, nil
+			}
+			return modeScanner{}, fmt.Errorf("ptyhost: read transcript modes: %w", readErr)
+		}
+	}
 }
 
 func (w *castWriter) flushLoop() {

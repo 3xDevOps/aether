@@ -77,14 +77,13 @@ export function RunDock({ runID }: { runID: string }) {
   // A shell tab is one session shared by everyone on that tab, so a phone
   // follows it for the same reason it follows the agent's terminal.
   const phone = useMediaQuery(phoneScreen)
-  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled:
       canOpenShell &&
       activeTab !== null &&
       !dock.collapsed &&
       dock.refusedMessage === null,
-    size: phone ? serverSize ?? standardGeometry : null,
+    follow: phone,
     onData: (data) => {
       if (!activeTab) return
       const current = currentAttachmentRef.current
@@ -100,6 +99,7 @@ export function RunDock({ runID }: { runID: string }) {
   })
   const terminal = controller.terminal
   terminalRef.current = terminal
+  const { geometry, setGeometry } = controller
   currentAttachmentRef.current =
     canOpenShell &&
     activeTab !== null &&
@@ -150,10 +150,9 @@ export function RunDock({ runID }: { runID: string }) {
         // background tab reconnecting must never wipe the active tab or
         // unmute its replay.
         if (isCurrent()) {
-          setServerSize(size)
           setAttachedIdentity(identity)
           gate.current.unmute()
-          terminalRef.current?.reset()
+          setGeometry(size.cols, size.rows, true)
           setShellRefused(runID, null)
         }
       },
@@ -172,17 +171,11 @@ export function RunDock({ runID }: { runID: string }) {
         clearAttached()
         removeShellTab(runID, socketKey)
       },
-      geometry: () => {
-        if (!isCurrent()) return standardGeometry
-        return {
-          cols: terminalRef.current?.cols ?? standardGeometry.cols,
-          rows: terminalRef.current?.rows ?? standardGeometry.rows,
-        }
-      },
+      geometry: () => isCurrent() ? geometry() : standardGeometry,
       wantsWrite: () => true,
       follows: () => phone,
       onGeometry: (cols: number, rows: number) => {
-        if (isCurrent()) setServerSize({ cols, rows })
+        if (isCurrent()) setGeometry(cols, rows)
       },
     }
     const existing = getShellSocket(runID, socketKey)
@@ -203,6 +196,8 @@ export function RunDock({ runID }: { runID: string }) {
     }
   }, [
     activeTab,
+    geometry,
+    setGeometry,
     canOpenShell,
     dock.refusedMessage,
     phone,
@@ -272,7 +267,7 @@ export function RunDock({ runID }: { runID: string }) {
       ) : (
         <TerminalPane
           controller={controller}
-          className={phone ? 'overflow-x-auto' : undefined}
+          className="overflow-auto"
           imageTarget={runID}
           imageTargetKey={activeTab ?? undefined}
           imageUploadEnabled={

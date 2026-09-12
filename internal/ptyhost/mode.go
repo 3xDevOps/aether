@@ -79,6 +79,11 @@ func (s *modeScanner) byte(b byte) {
 		switch b {
 		case '[':
 			s.state = modeCSI
+		case 'c':
+			// RIS resets the terminal's tracked modes to their power-on
+			// defaults, just as it resets the screen and cursor.
+			s.reset()
+			s.state = modeNormal
 		case ']', 'P', 'X', '^', '_':
 			// OSC, DCS, SOS, PM, APC. Everything up to the string
 			// terminator is payload - a window title or a device reply -
@@ -157,6 +162,13 @@ func (s *modeScanner) apply(on bool) {
 	s.params = s.params[:0]
 }
 
+// reset records the power-on state for modes already observed. Untouched
+// modes stay absent so a replay does not assert state the agent never used.
+func (s *modeScanner) reset() {
+	for mode := range s.set {
+		s.set[mode] = modeDefaults[mode]
+	}
+}
 func splitParams(p []byte) []string {
 	if len(p) == 0 {
 		return nil

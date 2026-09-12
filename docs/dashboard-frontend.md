@@ -220,8 +220,10 @@ in `run-card.tsx`.
 `src/components/shell/sidebar.tsx` owns the resizable workspace/run sidebar
 beside a persistent 48px activity rail. The rail carries existing navigation,
 capability gates, accessible labels and tooltips, a 2px active indicator and
-overflow when all destinations do not fit. The adjacent sidebar is a preferred
-260px wide and remains constrained to 200-520px.
+overflow when all destinations do not fit. The adjacent sidebar defaults to
+320px and is constrained to 320-520px. Older saved widths below the minimum
+are clamped when rendered. Runs, the attention count, New run, and Status /
+Member stay on one row; a phone drawer remains bounded by its viewport.
 
 The sidebar is a workspace switcher over a flat list of that workspace's runs.
 There is no run tree: one workspace is in view at a time, so the runs group
@@ -457,11 +459,13 @@ inside itself. `sm` is a width breakpoint, so a desktop window narrower than
   The popup also writes out the facts a pointer reads from a hover: the disk
   breakdown, the protocol version and what this machine is linked to. Tooltips
   and `title` stay hints for a pointer, never the only copy of a fact.
-- **The run header** gives the title its own full-width first row. Its second
-  row keeps state, harness/mode and branch metadata on the left, with the
-  run-detail tabs and run actions together on the right. Metadata and tabs
-  scroll inside their own regions before either or the actions become
-  unreachable. On a coarse pointer the action group becomes one **Actions**
+- **The run header** gives its first section two lines: the title and task
+  disclosure, then state, harness/mode and branch metadata. The second section
+  holds only the run-detail tabs and actions. Desktop actions all appear from
+  a 512px header width, with icon labels expanding from 1024px; narrower
+  headers retain More. Metadata and tabs scroll inside their own regions
+  before either or the actions become unreachable.
+  On a coarse pointer the action group becomes one **Actions**
   button and every verb moves into its menu, where each carries its full label
   at finger size. Six 44px
   buttons do not fit across a phone, and the mouse answer to a narrow row -
@@ -999,9 +1003,9 @@ conflict chip, template, and the launch and onboarding forms. Overview stays a
 tab for the metadata a finished run is read for, which `src/routes/run.tsx`
 renders as one list: the reason, owner, agent account where the run borrowed
 one, the created and changed times, and the last commit. The shared
-`RunHeader` gives the run title the full first row, then owns the run state,
-harness, mode, branch, tab strip and actions in the second. All four routes
-render one `RunHeader` (`src/components/run-header.tsx`), so the run's own state
+`RunHeader` puts run state, harness, mode and branch below the title in its
+first section, leaving the second section to the tab strip and actions.
+All four routes render one `RunHeader` (`src/components/run-header.tsx`), so the run's own state
 travels with the reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar
 row lit while they move between the tabs. `RunHeader` keeps long task text
 behind a **View full task** disclosure, so its compact summary never discards
@@ -1028,11 +1032,11 @@ which would leave the previous run's output on screen under the new run's
 name.
 
 The Terminal view is a vertical split. The agent terminal keeps flexible space
-above a `RunDock` below it. The header's first row belongs to the title; the
-second puts run metadata before the tabs and actions. The terminal tools and
-attachment state share one wrapping strip, with connection and steering
-controls after the search, font, clipboard and image tools. Real gateway
-errors wrap there rather than being truncated.
+above a `RunDock` below it. The first header section contains the title and
+metadata on two lines; the next contains tabs and actions on one line. The
+terminal strip left-aligns connection and steering immediately after the
+search, font, clipboard and image tools, without a spacer between the groups.
+Real gateway errors wrap there rather than being truncated.
 
 The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
@@ -1046,8 +1050,8 @@ primitive.
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
 toolbar and Find over it. `TerminalTools` in the same module owns the search,
 zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction` controls;
-the run terminal supplies its connection and steering controls to the right
-side of that same strip. Terminal tools delegate key behavior to the xterm
+the run terminal supplies its connection and steering controls immediately
+after those tools. Terminal tools delegate key behavior to the xterm
 controller and clipboard helpers rather than putting those actions in each
 dock. `useTerminalImage`
 owns the hidden file input, preview dialog, validation, upload call, and
@@ -1065,6 +1069,15 @@ claims only image-file paste events and leaves text to the native xterm path.
 `xterm-host.tsx` composes it with zoom and find in xterm's one custom key
 handler.
 
+**Shared terminal geometry.** Every terminal renders the server's acknowledged
+grid and subsequent `geometry` frames, including desktop writers whose panes
+are larger than another writer's. `useXterm.geometry()` returns the local pane
+measurement from FitAddon without resizing the renderer; `setGeometry()` queues
+the server resize and optional attach reset between xterm writes. A font or
+pane resize reports the local measurement, never the smaller rendered grid,
+so a viewer cannot accidentally pin the shared minimum after it grows.
+Queued geometry work is discarded when its terminal is disposed.
+
 **The terminal on a phone.** The PTY is the per-dimension minimum over the
 clients that impose a geometry on it, so a client that fits xterm to its own
 pane reflows the agent's screen for everyone else. The protocol's answer is
@@ -1078,15 +1091,13 @@ may be watching at a desktop's width.
 
 A following terminal therefore:
 
-- sends `follow` in the attach header and renders at the `cols` and `rows`
-  the server reports, through `useXterm`'s `size` option, which replaces the
-  fit addon and reports no resize. The geometry beside the flag is the run
-  terminal's `standardGeometry` (80x24) and the docks' own xterm size, which
-  on a phone is that same fixed size; either way it decides nothing but the
-  size of a session being created, a new shell tab. The pane gets
-  `overflow-x-auto` and pans over a grid bigger than the screen; naming one
-  axis is enough, since CSS makes the other a scroller too. This holds while
-  steering: the flag, not silence, is what keeps the session unchanged.
+- sends `follow` in the attach header. `useXterm`'s `follow` option suppresses
+  local measurements and resize reports, while `setGeometry()` applies the
+  server's grid just as on desktop. The header carries `standardGeometry`
+  (80x24) only for a session being created, such as a new shell tab.
+  Every terminal pane has `overflow-auto` so an oversized grid remains
+  reachable. While steering, the flag still keeps this viewer out of the
+  shared size calculation.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no
@@ -1104,8 +1115,7 @@ word beside them under `coarse:`, because a tooltip is the only other thing
 telling them apart and hover is what opens one.
 
 The pane scrolls the cursor into view whenever it moves or the host takes
-focus, but only at a fixed size, where the row being written on can be
-outside the pane.
+focus on a phone, where the row being written on can be outside the pane.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once

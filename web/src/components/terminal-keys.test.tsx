@@ -9,6 +9,8 @@ function controller(over: Partial<XtermController> = {}): XtermController {
     hostRef: () => {},
     terminal: null,
     ready: false,
+    geometry: () => ({ cols: 80, rows: 24 }),
+    setGeometry: () => {},
     search: null,
     findOpen: false,
     setFindOpen: () => {},

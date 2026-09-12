@@ -191,6 +191,25 @@ the terminal reattaches with different permissions rather than redrawing
 its scrollback, so the transition shows nothing beyond the button
 changing.
 
+### Reattaching after an update
+
+Desktop terminals draw at the shared PTY's size, not independently at each
+window's width. A smaller writer can reduce that grid; other viewers adopt
+the resulting size without reporting it back as their own window size.
+Fresh viewers request a redraw even when they cannot resize the session.
+
+After a server restart, Aether reconstructs tracked terminal modes from the
+recorded output, including bracketed paste, and carries them into the next
+transcript. This helps surviving runs as well as new runs; it does not require
+restarting an agent just because it predates the update.
+
+Replay is still a bounded output tail, not a complete terminal screen
+snapshot. Historical cursor-positioned output can have missing context or
+have been drawn at another size. A live agent's resize-triggered redraw can
+restore its current screen, but Aether cannot reconstruct missing historical
+state or output that was never flushed before a crash. A finished run has no
+live process to redraw that history.
+
 ### Control availability
 
 **Upload image to terminal** is disabled until the selected terminal has a

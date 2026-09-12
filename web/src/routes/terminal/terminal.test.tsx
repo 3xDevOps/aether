@@ -193,6 +193,30 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('draws a desktop replay and live redraw at the shared PTY geometry', async () => {
+    const open = vi.spyOn(Terminal.prototype, 'open')
+    const view = mount()
+    const terminal = open.mock.contexts[0] as Terminal
+    attached({ cols: 20, rows: 4 })
+    act(() => StubSocket.last().onmessage?.({
+      data: new TextEncoder().encode(`${'a'.repeat(20)}B`).buffer,
+    }))
+    await vi.waitFor(() => expect(terminal.buffer.active.getLine(1)?.translateToString().trimEnd()).toBe('B'))
+
+    act(() => {
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ type: 'geometry', cols: 30, rows: 4 }),
+      })
+      StubSocket.last().onmessage?.({
+        data: new TextEncoder().encode(`\x1b[3;1H${'c'.repeat(30)}D`).buffer,
+      })
+    })
+    await vi.waitFor(() => expect(terminal.buffer.active.getLine(3)?.translateToString().trimEnd()).toBe('D'))
+    expect(terminal.buffer.active.getLine(2)?.translateToString().trimEnd()).toBe('c'.repeat(30))
+    view.unmount()
+    open.mockRestore()
+  })
+
   it('offers a retry when the attach is refused outright', () => {
     const view = mount()
     act(() => StubSocket.last().onopen?.())

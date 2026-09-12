@@ -1,6 +1,7 @@
 package ptyhost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -278,6 +279,47 @@ func TestRestartSeedsReplayFromTranscriptTail(t *testing.T) {
 	}
 	if err := h.StopSession(ctx, RunSession(run)); err != nil {
 		t.Fatalf("second StopSession: %v", err)
+	}
+}
+
+// Recovery seeds the replay ring from only the transcript tail. Mode state
+// must nevertheless come from the full prior transcript when the mode-setting
+// sequence is older than that tail.
+func TestRestartSeedsReplayModesFromTranscriptHistory(t *testing.T) {
+	h, _ := newTestHost(t, func(c *Config) { c.ReplayBytes = 64 })
+	run := domain.RunID("run-replay-modes")
+	ctx := context.Background()
+
+	first := newFakeAtt()
+	if err := h.StartSession(ctx, RunSession(run), first); err != nil {
+		t.Fatalf("first StartSession: %v", err)
+	}
+	first.writeOutput(t, "\x1b[?2004h")
+	first.writeOutput(t, strings.Repeat("cursor redraw\r\n", 32))
+	waitFor(t, "first output recorded", func() bool {
+		ts, ok := h.LastOutput(RunSession(run))
+		return ok && !ts.IsZero()
+	})
+	if err := h.StopSession(ctx, RunSession(run)); err != nil {
+		t.Fatalf("first StopSession: %v", err)
+	}
+
+	for restart := range 2 {
+		next := newFakeAtt()
+		if err := h.StartSession(ctx, RunSession(run), next); err != nil {
+			t.Fatalf("recovery %d StartSession: %v", restart, err)
+		}
+		s := h.lookup(RunSession(run))
+		c := newClient(nil, AttachClient{Cols: 120, Rows: 30})
+		if err := s.addClient(c); err != nil {
+			t.Fatalf("addClient: %v", err)
+		}
+		if !bytes.HasPrefix(c.replay, []byte("\x1b[?2004h")) {
+			t.Fatalf("recovery %d replay lacks historical mode preamble: %q", restart, c.replay)
+		}
+		if err := h.StopSession(ctx, RunSession(run)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

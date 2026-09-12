@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SearchAddon } from '@xterm/addon-search'
+import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { TerminalPane } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
+import type { XtermController } from '@/components/xterm-host'
 import { defaultTerminalFontSize } from '@/lib/term-font'
 import { connectAttach } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
@@ -110,46 +112,76 @@ describe('xterm replay scrollback', () => {
   })
 })
 
-/** A phone's terminal: the server's geometry, and no fit of its own. */
 function SizedProbe({
-  size,
+  follow = true,
   onResize,
   onReady,
 }: {
-  size: { cols: number; rows: number }
+  follow?: boolean
   onResize: (cols: number, rows: number) => void
-  onReady: (terminal: Terminal) => void
+  onReady: (controller: XtermController) => void
 }) {
-  const { hostRef, terminal } = useXterm({ size, onResize })
+  const controller = useXterm({ follow, onResize })
   useEffect(() => {
-    if (terminal) onReady(terminal)
-  }, [onReady, terminal])
-  return <div ref={hostRef} />
+    if (controller.terminal) onReady(controller)
+  })
+  return <div ref={controller.hostRef} />
 }
 
-describe('a terminal at a fixed size', () => {
-  it('renders the size it was given and reports no resize of its own', async () => {
-    let ready: Terminal | null = null
+describe('shared terminal geometry', () => {
+  it('follows the server without reporting a phone-sized viewport', async () => {
+    let controller: XtermController | null = null
     const onResize = vi.fn()
-    const onReady = (terminal: Terminal) => (ready = terminal)
-    const view = render(
-      <SizedProbe size={{ cols: 132, rows: 43 }} onResize={onResize} onReady={onReady} />,
+    const view = render(<SizedProbe onResize={onResize} onReady={(next) => { controller = next }} />)
+    await waitFor(() => expect(controller?.terminal).toBeTruthy())
+    const host = controller as unknown as XtermController
+    host.setGeometry(132, 43)
+    host.terminal!.write('\x1b[43;132HX')
+    await waitFor(() =>
+      expect(host.terminal!.buffer.active.getLine(42)?.translateToString().trimEnd()).toBe(`${' '.repeat(131)}X`),
     )
-    await waitFor(() => expect(ready).not.toBeNull())
-
-    const terminal = ready as unknown as Terminal
-    expect([terminal.cols, terminal.rows]).toEqual([132, 43])
-    // Reporting is what sends a resize to the shared PTY, and a pane that
-    // adopted someone else's geometry has nothing to report.
-    expect(onResize).not.toHaveBeenCalled()
-
-    // A reattach can answer with a different size; the pane follows it.
-    view.rerender(
-      <SizedProbe size={{ cols: 100, rows: 30 }} onResize={onResize} onReady={onReady} />,
-    )
-    await waitFor(() => expect([terminal.cols, terminal.rows]).toEqual([100, 30]))
     expect(onResize).not.toHaveBeenCalled()
     view.unmount()
+  })
+
+  it('renders server-sized output in order without feeding that size back as its viewport', async () => {
+    const proposal = vi.spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({ cols: 120, rows: 30 })
+    let controller: XtermController | null = null
+    const onResize = vi.fn()
+    const view = render(<SizedProbe follow={false} onResize={onResize} onReady={(next) => { controller = next }} />)
+    await waitFor(() => expect(controller?.terminal).toBeTruthy())
+    const host = controller as unknown as XtermController
+    const terminal = host.terminal!
+    host.setGeometry(20, 4)
+    terminal.write(`${'a'.repeat(20)}B`)
+    host.setGeometry(30, 4)
+    terminal.write(`\x1b[3;1H${'c'.repeat(30)}D`)
+    await waitFor(() => expect(terminal.buffer.active.getLine(3)?.translateToString().trimEnd()).toBe('D'))
+    expect(terminal.buffer.active.getLine(0)?.translateToString().trimEnd()).toBe('a'.repeat(20))
+    expect(terminal.buffer.active.getLine(1)?.translateToString().trimEnd()).toBe('B')
+    expect(host.geometry()).toEqual({ cols: 120, rows: 30 })
+
+    proposal.mockReturnValue({ cols: 100, rows: 25 })
+    act(() => useStore.getState().setTerminalFontSize(14))
+    await waitFor(() => expect(onResize).toHaveBeenLastCalledWith(100, 25))
+    terminal.write('\x1b[4;30HX')
+    await waitFor(() => expect(terminal.buffer.active.getLine(3)?.getCell(29)?.getChars()).toBe('X'))
+    expect([terminal.cols, terminal.rows]).toEqual([30, 4])
+    expect(host.geometry()).toEqual({ cols: 100, rows: 25 })
+    view.unmount()
+    proposal.mockRestore()
+  })
+
+  it('starts measuring immediately when a phone becomes a desktop', async () => {
+    const proposal = vi.spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({ cols: 100, rows: 25 })
+    const onResize = vi.fn()
+    const onReady = () => {}
+    const view = render(<SizedProbe onResize={onResize} onReady={onReady} />)
+    expect(onResize).not.toHaveBeenCalled()
+    view.rerender(<SizedProbe follow={false} onResize={onResize} onReady={onReady} />)
+    await waitFor(() => expect(onResize).toHaveBeenLastCalledWith(100, 25))
+    view.unmount()
+    proposal.mockRestore()
   })
 })
 
@@ -342,6 +374,8 @@ describe('terminal shortcuts', () => {
           hostRef: () => {},
           terminal: null,
           ready: false,
+          geometry: () => ({ cols: 80, rows: 24 }),
+          setGeometry: () => {},
           search: null,
           findOpen: true,
           setFindOpen: () => {},
@@ -369,6 +403,8 @@ describe('the terminal toolbar', () => {
           hostRef: () => {},
           terminal: null,
           ready: false,
+          geometry: () => ({ cols: 80, rows: 24 }),
+          setGeometry: () => {},
           search: null,
           findOpen: false,
           setFindOpen: () => {},

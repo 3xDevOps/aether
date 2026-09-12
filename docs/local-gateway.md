@@ -1005,18 +1005,23 @@ needs.
    sizes the PTY to its own window the way `ssh` does - until a second
    attach arrives, when it stops imposing and the minimum is recomputed
    without it.
-5. Server sends one **text** control frame back to a `follow` attach
-   whenever the session's PTY is resized by someone who does impose a size:
+5. Server sends one **text** control frame to attached dashboard clients
+   whenever the runtime accepts a changed PTY size:
 
    ```json
    {"type":"geometry","cols":132,"rows":43}
    ```
 
-   A follower redraws at it; an attach that imposes its own size asked for
-   that size and is sent nothing. It is a relayed SSH `window-change`
-   request, not an event: nothing about it is persisted in the event log,
-   nothing replays it, and a reattach learns the current size from the ack
-   instead.
+   Every dashboard terminal renders at this size, including writers: another
+   writer can make the effective grid smaller than the local pane. The pane's
+   requested geometry remains separate from the rendered grid. This is a
+   relayed SSH `window-change` request, not a persisted event; a reattach learns
+   the current size from the ack.
+
+   A fresh screen-bearing attach requests a same-size redraw nudge even when
+   it follows another viewer. A successfully resumed attach keeps its screen
+   and does not request that nudge. Screenless adapter taps request neither
+   a size nor a redraw.
 
    Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
    across several ordered `input` frames.

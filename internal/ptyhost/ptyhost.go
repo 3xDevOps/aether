@@ -144,12 +144,19 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	path := h.transcriptPath(key)
 	var err error
 	var seed []byte
+	var modes modeScanner
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
 		seed, err = readCastTail(path, h.cfg.ReplayBytes)
 		if err != nil {
 			slog.Warn("ptyhost: seed replay from transcript", "path", path, "error", err)
 			seed = nil
 		}
+		scanned, scanErr := readCastModes(path)
+		if scanErr != nil {
+			h.unreserve(key)
+			return fmt.Errorf("ptyhost: restore terminal modes: %w", scanErr)
+		}
+		modes = scanned
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		slog.Warn("ptyhost: inspect transcript for replay", "path", path, "error", statErr)
 	}
@@ -158,6 +165,8 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		h.unreserve(key)
 		return err
 	}
+	// Carry recovered modes across this transcript's next rotation too.
+	tr.output(modes.preamble())
 	// Initial geometry goes out before the session is attachable, so a
 	// concurrent write-attach clamp can never be overwritten by it.
 	_ = att.Resize(ctx, h.cfg.DefaultCols, h.cfg.DefaultRows)
@@ -171,6 +180,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		cols:    h.cfg.DefaultCols,
 		rows:    h.cfg.DefaultRows,
 		done:    make(chan struct{}),
+		modes:   modes,
 	}
 	if len(seed) > 0 {
 		s.ring.write(seed)
@@ -328,10 +338,9 @@ type ResumeWriter interface {
 }
 
 // GeometryWriter is an attach conn that wants the session's PTY size: once
-// as the attach joins, which is what an ack reports, and - for a follower,
-// the only client that draws at a size it did not choose - again whenever
-// the size changes under it. Out of band from the output the conn also
-// carries, so nothing of this reaches the transcript.
+// as the attach joins, which is what an ack reports, and again whenever the
+// size changes under it. Out of band from the output the conn also carries,
+// so nothing of this reaches the transcript.
 type GeometryWriter interface {
 	SetGeometry(cols, rows uint)
 }

@@ -81,7 +81,7 @@ export function onboardingStepIndex(step: OnboardingStep): number {
   return Math.max(0, onboardingSteps.indexOf(step))
 }
 
-export const minSidebarWidth = 200
+export const minSidebarWidth = 320
 export const maxSidebarWidth = 520
 
 export interface UiSlice {
@@ -164,7 +164,7 @@ export interface UiSlice {
 
 export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   theme: 'system',
-  sidebarWidth: 280,
+  sidebarWidth: minSidebarWidth,
   sidebarCollapsed: false,
   terminalDockHeight: 280,
   runDockHeight: 240,

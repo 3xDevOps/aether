@@ -229,10 +229,10 @@ func (s *session) addClient(c *client) error {
 	c.cursor = s.ring.written
 	s.clients[c] = struct{}{}
 	// Any join can change who imposes, not just this client: the mirror
-	// that was alone here a moment ago no longer is. A resume asks for no
-	// redraw - that is the point of it - so it nudges only if the size it
-	// brings actually differs from the one the session already has.
-	s.reconcileLocked(s.imposesNow(c) && !c.resumed)
+	// that was alone here a moment ago no longer is. A fresh screen-bearing
+	// attach also needs a redraw at the effective geometry, even when it does
+	// not impose a size; a resume keeps its existing screen and never nudges.
+	s.reconcileLocked(!c.resumed && c.cols != 0 && c.rows != 0)
 	return nil
 }
 
@@ -273,11 +273,11 @@ func (s *session) resizeClient(c *client, cols, rows uint) {
 }
 
 // reconcileLocked recomputes the effective PTY size as the per-dimension
-// minimum over the clients that impose one (see imposesNow), records it, and schedules the att.Resize application
-// off the lock (a slow runtime resize must never stall output delivery).
-// With no such client the size stays unchanged. force schedules a redraw
-// nudge even when the size did not change (repaint for a new write-mode
-// joiner).
+// minimum over the clients that impose one (see imposesNow), records it, and
+// schedules the att.Resize application off the lock (a slow runtime resize
+// must never stall output delivery). With no such client the size stays
+// unchanged; a fresh screen-bearing client can still force a redraw nudge at
+// that current size.
 func (s *session) reconcileLocked(force bool) {
 	var cols, rows uint
 	found := false
@@ -294,7 +294,10 @@ func (s *session) reconcileLocked(force bool) {
 		rows = min(rows, c.rows)
 	}
 	if !found {
-		return
+		if !force {
+			return
+		}
+		cols, rows = s.cols, s.rows
 	}
 	changed := cols != s.cols || rows != s.rows
 	if !changed && !force {
@@ -309,14 +312,13 @@ func (s *session) reconcileLocked(force bool) {
 }
 
 // applyResize applies the latest recorded geometry to the attachment with a
-// redraw nudge (rows-1 then rows) so TUIs repaint, then tells the attached
-// followers what the session now is. Appliers serialize on resizeMu and
-// always apply the newest geometry, so concurrent reconciles coalesce and
-// never apply stale sizes, and the clients are told in that same order;
-// each call is bounded by resizeTimeout so a hung runtime cannot wedge the
-// session. A resize the runtime refuses or takes too long to answer tells
-// nobody: the PTY is not that size, so a follower would be drawing at a
-// geometry that exists only here.
+// redraw nudge (rows-1 then rows) so TUIs repaint, then tells every attached
+// geometry writer what the runtime accepted. Appliers serialize on resizeMu
+// and always apply the newest geometry, so concurrent reconciles coalesce and
+// never apply stale sizes, and the clients are told in that same order; each
+// call is bounded by resizeTimeout so a hung runtime cannot wedge it. A resize
+// the runtime refuses or takes too long to answer tells nobody: the PTY is not
+// that size, so a client would be drawing at a geometry that exists only here.
 func (s *session) applyResize() {
 	s.resizeMu.Lock()
 	defer s.resizeMu.Unlock()
@@ -337,21 +339,19 @@ func (s *session) applyResize() {
 	applied := att.Resize(ctx, cols, rows) == nil
 	s.mu.Lock()
 	s.paintQuietUntil = time.Now().Add(paintQuiet)
-	var followers []*client
+	var geometryWriters []*client
 	// Left unrecorded, a size that failed is told the next time it is
 	// reconciled rather than suppressed as already sent.
 	if applied && s.geoTold != [2]uint{cols, rows} {
 		s.geoTold = [2]uint{cols, rows}
 		for c := range s.clients {
-			// Only a follower redraws at someone else's geometry; a
-			// client that imposed this size asked for it.
-			if c.follow {
-				followers = append(followers, c)
+			if _, ok := c.conn.(GeometryWriter); ok {
+				geometryWriters = append(geometryWriters, c)
 			}
 		}
 	}
 	s.mu.Unlock()
-	for _, c := range followers {
+	for _, c := range geometryWriters {
 		c.tellGeometry(cols, rows)
 	}
 }

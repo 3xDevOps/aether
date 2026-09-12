@@ -18,7 +18,6 @@ import {
   codeUnavailable,
   connectAttach,
   replayGate,
-  standardGeometry,
 } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
 import { runTabPanel } from '@/routes/terminal/tabs'
@@ -87,10 +86,9 @@ function TerminalView({ params }: RouteProps) {
   // screen is neither garbled here nor reflowed to 45 columns for everyone
   // else the moment this phone takes control.
   const phone = useMediaQuery(phoneScreen)
-  const [serverSize, setServerSize] = useState<{ cols: number; rows: number } | null>(null)
   const controller = useXterm({
     enabled: known,
-    size: phone ? serverSize ?? standardGeometry : null,
+    follow: phone,
     onData: (data) => {
       // A mirror's input frames are ignored by the server; not sending them
       // is what makes the read-only state true on this side as well.
@@ -118,6 +116,7 @@ function TerminalView({ params }: RouteProps) {
   })
   const terminal = controller.terminal
   terminalRef.current = terminal
+  const { geometry, setGeometry } = controller
   useEffect(() => {
     if (!terminal || !known) return
 
@@ -153,12 +152,11 @@ function TerminalView({ params }: RouteProps) {
         // here rather than on the click keeps a denied first attempt from
         // silencing the mirror hint for good.
         if (write && askedForControl.current) markControlTaken()
-        setServerSize(size)
         gate.current.unmute()
         // A resumed attach brings no replay, so the screen on display is
         // the only copy of it - and the terminal state behind that screen
         // is what makes a paste arrive as a paste.
-        if (!resumed) terminal.reset()
+        setGeometry(size.cols, size.rows, !resumed)
         setTerminal(runID, { message: null, refused: false })
       },
       onState: (connection) => {
@@ -170,12 +168,9 @@ function TerminalView({ params }: RouteProps) {
         setTerminal(runID, { message, refused: true })
       },
       onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
-      // Someone with a bigger screen resized the session; a follower
-      // redraws at it rather than at what its ack once said.
-      onGeometry: (cols, rows) => setServerSize({ cols, rows }),
+      onGeometry: setGeometry,
       sessionPending: () => run !== undefined && !endedStatuses.includes(run.status),
-      geometry: () =>
-        phone ? standardGeometry : { cols: terminal.cols, rows: terminal.rows },
+      geometry,
       wantsWrite: () => writeRef.current,
       follows: () => phone,
     })
@@ -187,6 +182,8 @@ function TerminalView({ params }: RouteProps) {
     }
   }, [
     known,
+    geometry,
+    setGeometry,
     markControlTaken,
     phone,
     run?.member_id,
@@ -229,7 +226,7 @@ function TerminalView({ params }: RouteProps) {
     <div
       role="group"
       aria-label="Terminal attachment controls"
-      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 py-1 text-[13px]"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1 py-1 text-[13px]"
     >
       {!starting && (
         <span
@@ -299,12 +296,7 @@ function TerminalView({ params }: RouteProps) {
             <TerminalPane
               key={runID}
               controller={controller}
-              // At the session's geometry the grid is bigger than the
-              // screen, so the pane pans over it rather than cropping it.
-              // Naming the sideways axis is enough: CSS turns the other
-              // one into a scroller too, which is what reaches the rows
-              // below the fold.
-              className={phone ? 'overflow-x-auto' : undefined}
+              className="overflow-auto"
               writable={state.write && !starting}
               imageTarget={runID}
               toolbarEnd={attachmentControls}

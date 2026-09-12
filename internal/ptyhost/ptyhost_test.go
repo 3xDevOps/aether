@@ -391,18 +391,16 @@ func TestGeometryClampAndRestore(t *testing.T) {
 	waitAttached(t, h, run, 3)
 	att.writeOutput(t, "x")
 	waitFor(t, "read-only mirror output", func() bool { return ro.out.String() == "x" })
-	if n := len(att.sizeCalls()); n != 5 {
-		t.Fatalf("read-only attach alongside writers changed geometry: %d resize calls", n)
-	}
+	waitSizes(7) // fresh mirror forces a repaint at the existing 80x40
 
 	b.resize <- [2]uint{90, 45} // min over writers becomes (90,40)
-	waitSizes(7)
+	waitSizes(9)
 
 	b.detach()
 	if err := b.wait(t); err != nil {
 		t.Fatalf("detach b: %v", err)
 	}
-	waitSizes(9) // larger writer's size restored
+	waitSizes(11) // larger writer's size restored
 
 	a.detach()
 	if err := a.wait(t); err != nil {
@@ -410,12 +408,13 @@ func TestGeometryClampAndRestore(t *testing.T) {
 	}
 	waitAttached(t, h, run, 1)
 	// The mirror is the only client left, so it is now the one deciding.
-	waitSizes(11)
+	waitSizes(13)
 
 	want := [][2]uint{
 		{120, 30},            // StartSession default
 		{100, 39}, {100, 40}, // writer a joins
 		{80, 39}, {80, 40}, // writer b clamps
+		{80, 39}, {80, 40}, // fresh read-only mirror repaints at 80x40
 		{90, 39}, {90, 40}, // b resizes, min recomputed
 		{100, 39}, {100, 40}, // b detaches, a's size restored
 		{10, 4}, {10, 5}, // a detaches, the lone mirror takes over
@@ -1633,13 +1632,16 @@ func TestFollowClientStealsNoGeometry(t *testing.T) {
 	}()
 	waitAttached(t, h, run, 2)
 
-	// It is told what to draw at before anything else, and the session is
-	// untouched: a minimum over the clients that impose one leaves it out.
+	// It is told what to draw at before anything else, and the fresh
+	// screen-bearing attach forces a redraw nudge at that same size without
+	// changing the session geometry.
 	waitFor(t, "the phone learns the session geometry", func() bool {
-		return len(conn.told()) == 1 && conn.told()[0] == [2]uint{132, 43}
+		told := conn.told()
+		return len(told) > 0 && told[len(told)-1] == [2]uint{132, 43}
 	})
-	if n := len(att.sizeCalls()); n != 3 {
-		t.Fatalf("a following attach resized the session: %d resize calls %v", n, att.sizeCalls())
+	waitSizes(5)
+	if n := len(att.sizeCalls()); n != 5 {
+		t.Fatalf("a following attach changed geometry: %d resize calls %v", n, att.sizeCalls())
 	}
 
 	// Following is not watching: the keystrokes reach the agent.
@@ -1652,19 +1654,68 @@ func TestFollowClientStealsNoGeometry(t *testing.T) {
 
 	// Someone else resizing the session is how the phone learns to redraw.
 	desktop.resize <- [2]uint{120, 40}
-	waitSizes(5)
+	waitSizes(7)
 	waitFor(t, "the phone hears the new geometry", func() bool {
 		told := conn.told()
-		return len(told) == 2 && told[1] == [2]uint{120, 40}
+		return len(told) > 0 && told[len(told)-1] == [2]uint{120, 40}
 	})
 
 	_ = kw.Close()
 	if err := <-phoneErr; err != nil {
 		t.Fatalf("phone attach: %v", err)
 	}
-	waitAttached(t, h, run, 1)
-	if n := len(att.sizeCalls()); n != 5 {
+	if n := len(att.sizeCalls()); n != 7 {
 		t.Fatalf("a following detach resized the session: %d resize calls %v", n, att.sizeCalls())
+	}
+}
+
+// Every terminal that renders the session needs effective geometry updates,
+// not only followers: a desktop attach can bring a larger screen and later
+// be clamped by a smaller writer.
+func TestImposingClientHearsEffectiveGeometryChanges(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-geometry-update")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	waitFor(t, "initial resize", func() bool { return len(att.sizeCalls()) == 1 })
+
+	kr, kw := io.Pipe()
+	t.Cleanup(func() { _ = kw.Close(); _ = kr.Close() })
+	conn := &followConn{testConn: testConn{r: kr, w: &sink{}}}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(context.Background(), RunSession(run), AttachClient{
+			Member: "desktop", Cols: 132, Rows: 43,
+		}, conn, nil)
+	}()
+	waitAttached(t, h, run, 1)
+	waitFor(t, "desktop's initial geometry", func() bool {
+		told := conn.told()
+		return len(told) > 0 && told[0] == [2]uint{132, 43}
+	})
+	waitFor(t, "desktop resize", func() bool { return len(att.sizeCalls()) == 3 })
+
+	phone := startAttach(t, h, run, "phone", 100, 40, false)
+	waitAttached(t, h, run, 2)
+	waitFor(t, "phone clamp", func() bool { return len(att.sizeCalls()) == 5 })
+	waitFor(t, "desktop hears effective geometry", func() bool {
+		for _, size := range conn.told() {
+			if size == [2]uint{100, 40} {
+				return true
+			}
+		}
+		return false
+	})
+
+	_ = kw.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("desktop attach: %v", err)
+	}
+	phone.detach()
+	if err := phone.wait(t); err != nil {
+		t.Fatalf("phone attach: %v", err)
 	}
 }
 
@@ -1689,28 +1740,30 @@ func TestFollowerHearsOnlyGeometryTheRuntimeAccepted(t *testing.T) {
 		}, conn, nil)
 	}()
 	waitAttached(t, h, run, 1)
-	// The session's own size, which the ack reports; no resize was needed
-	// for it, so it is told whatever the runtime does later.
+	// The session's own size, which the ack reports; a fresh follower also
+	// gets a redraw nudge at that same accepted geometry.
 	waitFor(t, "the follower learns the session geometry", func() bool {
-		return len(conn.told()) == 1 && conn.told()[0] == [2]uint{120, 30}
+		told := conn.told()
+		return len(told) == 2 && told[0] == [2]uint{120, 30} && told[1] == [2]uint{120, 30}
 	})
 
 	att.refuseResizes(errors.New("docker: resize refused"))
 	desktop := startAttach(t, h, run, "desktop", 132, 43, false)
 	waitFor(t, "the refused resize was attempted", func() bool {
-		return len(att.sizeCalls()) == 3
+		return len(att.sizeCalls()) == 5
 	})
 	// Nothing to draw at: the terminal is still whatever it was.
 	time.Sleep(50 * time.Millisecond)
-	if told := conn.told(); len(told) != 1 {
-		t.Fatalf("follower was told %v, want only the geometry the runtime accepted", told)
+	told := conn.told()
+	if len(told) != 2 {
+		t.Fatalf("follower was told %v, want only the geometries the runtime accepted", told)
 	}
 
 	att.refuseResizes(nil)
 	desktop.resize <- [2]uint{100, 30}
 	waitFor(t, "the follower hears the geometry that took", func() bool {
 		told := conn.told()
-		return len(told) == 2 && told[1] == [2]uint{100, 30}
+		return len(told) == 3 && told[2] == [2]uint{100, 30}
 	})
 
 	_ = kw.Close()

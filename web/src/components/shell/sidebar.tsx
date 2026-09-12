@@ -50,7 +50,7 @@ const mobileQuery = '(max-width: 640px)'
 
 export function Sidebar() {
   const collapsed = useStore((s) => s.sidebarCollapsed)
-  const width = useStore((s) => s.sidebarWidth)
+  const width = useStore((s) => Math.max(minSidebarWidth, s.sidebarWidth))
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   const [autoCollapsed, setAutoCollapsed] = useState(
@@ -351,12 +351,12 @@ function SidebarHeader() {
   // it. A member who cannot start a run is not offered the way in.
   const launchable = canLaunch({ cap: useCapability(), role: useSelfRole() })
   return (
-    <div className="flex min-h-[var(--title-bar-height)] shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-0.5">
-      <span className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+    <div className="flex min-h-[var(--title-bar-height)] shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-0.5">
+      <span className="shrink-0 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
         Runs
       </span>
       <AttentionBadge />
-      <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {launchable && (
           <Tooltip>
             <Tooltip.Trigger<'button'>
