@@ -30,12 +30,15 @@ Layers, per the design spec's testing strategy:
   `window.innerWidth`/`innerHeight` report it, and the returned resize fires
   `change` where an answer moved and `resize` on the window. It decides
   which branch renders and nothing more: real layout belongs to the browser
-  suite below. `setup.ts` also empties the stylesheets jsdom keeps after
-  their `<style>` element is gone: jsdom forgets a sheet only when that
-  element is removed while still connected, and xterm discards its three
-  style elements with the terminal around them, so without this every
-  terminal a file mounts would slow down every later `getComputedStyle` -
-  which is what each testing-library visibility query runs.
+  suite below. `setup.ts` also empties the rules of every stylesheet whose
+  `<style>` element has been detached. jsdom unregisters a sheet only while
+  that element is still connected, and xterm discards its three style
+  elements with the terminal around them, so each terminal a file mounts
+  strands three sheets of roughly 800 rules. The entries themselves stay in
+  `document.styleSheets` and their count still grows; emptying their rules
+  is what keeps the cost flat, because `getComputedStyle` - which every
+  testing-library visibility query runs - re-cascades only the rules that
+  are still there.
 - **Dashboard end-to-end tests** live in `web/e2e/` and run with
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real

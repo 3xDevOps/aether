@@ -21,20 +21,17 @@ beforeEach(() => {
   window.localStorage.clear()
 })
 
-// jsdom drops a stylesheet from `document.styleSheets` only when the <style>
-// element itself is removed while still connected. xterm nests its three
-// style elements inside the terminal it disposes of wholesale, so every
-// terminal a test mounts orphans three sheets - about 800 rules - in that
-// list for the rest of the file, and `getComputedStyle`, which
-// testing-library runs on every visibility query, re-cascades the whole pile.
-// The sheets cannot be unregistered (`ownerNode` hands back jsdom's internal
-// node, which has no parent to remove it from), so empty them instead.
-afterEach(() => {
+// Once a <style> element is disconnected, removing it no longer unregisters
+// its stylesheet, so a sheet orphaned by a discarded subtree stays in
+// `document.styleSheets` and only its rules can still be dropped.
+export function emptyDetachedStyleSheets(): void {
   for (const sheet of document.styleSheets) {
     if (sheet.ownerNode?.isConnected !== false) continue
     while (sheet.cssRules.length > 0) sheet.deleteRule(0)
   }
-})
+}
+
+afterEach(emptyDetachedStyleSheets)
 
 // Radix measures, scrolls and captures the pointer over whatever it pops out -
 // an open select, a dialog, a menu - and xterm's fit addon measures its host.
