@@ -360,6 +360,15 @@ covered - WebKit is not installed.
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `run-views.mobile.spec.ts` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
 | `terminal-phone.mobile.spec.ts` | A real run's Terminal tab on a phone, against the real gateway: a desktop-sized writer attached straight to the gateway's WebSocket sets the session to 132x43, the phone opens as a mirror rather than steering, renders every one of those rows at that width and pans over them, and the session is still 132x43 after the phone takes control, taps Esc from the key bar and loses half its screen to a keyboard - read back from the server through a fresh attach ack, not inferred from what the phone sent. Then the writer's window changes, and the phone follows it there |
+| `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome |
+
+The installed window itself is not in the suite. Chromium exposes no
+`display-mode` override - not through `emulateMedia`, not through CDP's
+`Emulation.setEmulatedMedia` features, and not through the `PWA` domain, which
+headless does not carry - so a standalone window stays a manual check on a
+phone (`docs/dashboard-frontend.md` has that path). What the suite can prove is
+that Chrome is served a manifest it will accept, and that the shell needs
+nothing the browser's chrome was providing.
 
 Mobile specs tap rather than click. `locator.tap()` dispatches touch events,
 and a control that answers only a mouse would still pass a click-driven test.

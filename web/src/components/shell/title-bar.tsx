@@ -128,10 +128,12 @@ export function TitleBar({
           : {}),
       }}
       className={cn(
-        // viewport-fit=cover paints the bar under a landscape notch; the
+        // The bar is the top edge of the shell, so it paints under a landscape
+        // notch and under an installed iOS app's translucent status bar: it
+        // grows by the top inset and pads its controls back below it. The
         // insets are 0 everywhere else, and the Electron inline padding above
         // wins where it applies.
-        'relative z-50 grid h-[var(--title-bar-height)] shrink-0 select-none grid-cols-[minmax(36px,1fr)_minmax(0,600px)_minmax(36px,1fr)] items-center border-b border-border bg-sidebar pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground max-[767px]:grid-cols-[36px_minmax(0,1fr)_36px]',
+        'relative z-50 grid h-[calc(var(--title-bar-height)_+_var(--safe-top))] shrink-0 select-none grid-cols-[minmax(36px,1fr)_minmax(0,600px)_minmax(36px,1fr)] items-center border-b border-border bg-sidebar pt-[var(--safe-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground max-[767px]:grid-cols-[36px_minmax(0,1fr)_36px]',
         desktop && 'backdrop-blur',
       )}
     >

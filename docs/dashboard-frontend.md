@@ -143,6 +143,47 @@ invariant is kept by two placeholder files:
 `web/dist/.gitkeep`. A binary built without running the web build serves the
 gateway's "dashboard not built" response rather than a blank page.
 
+### The web app manifest
+
+`web/src/app/manifest.ts` is a Next metadata file, so the export writes
+`/manifest.webmanifest` and links it from the page. A static export refuses to
+collect a metadata route that has not declared itself static, which is what the
+`export const dynamic = 'force-static'` in it is for.
+
+It declares `display: standalone` and `start_url: '/'`, and names four icons
+from `web/public/icons/`: 192px and 512px in both `any` and `maskable`. 192 and
+512 are the pair Chrome and MDN document; what the installability check
+enforces is lower - one `any` icon of at least 144px - so shipping both
+documented sizes is belt and braces. No service worker ships. Chromium's
+installability check no longer looks for one; the post announcing the removal
+([update-install-criteria](https://developer.chrome.com/blog/update-install-criteria))
+scopes it to installing "from the menu, since version 108 on mobile and 112 on
+Desktop". The dashboard could not cache anyway, because it lives inside the
+server binary and has to change with it.
+
+**Both mobile browsers read the manifest.** Safari has since iOS 11.3
+(`display`, `name`, `short_name`, `start_url`, `scope`), with `theme_color`
+since 15 and `icons` since 15.4, so an iPhone's standalone window comes from
+the manifest, not from the layout's Apple meta tags. Those tags cover what a
+manifest cannot say: the status bar style, which needs
+`apple-mobile-web-app-capable` spelled out by hand because Next 16 emits only
+the unprefixed `mobile-web-app-capable`. `web/public/icons/apple-touch-icon.png`
+stays because Safari prefers it over the manifest icons.
+
+A manifest carries one `theme_color` where the layout's viewport export carries
+one per colour scheme, so both read `web/src/app/theme-color.ts` and the
+manifest takes the dark value. `background_color` is the separate
+`iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
+an icon on it, and any other value would leave the icon's tile showing as a
+square. That hex is deliberately darker than the dashboard's own dark
+`--background`, `#1f1f1f` - a launcher icon has to read as an object against a
+wallpaper - so the splash lightens slightly as the SPA paints over it.
+
+Every icon is generated from `web/public/aether-mark.png` by `python3
+scripts/make-icons.py`, the same script that writes the desktop app's, and the
+output is committed. Maskable icons and the iOS icon are square and full-bleed
+because the platform applies its own mask; the rest carry the rounded tile.
+
 CI installs Bun with `oven-sh/setup-bun` (version pinned in `web/.bun-version`)
 in jobs that run `make build` or `make release`, plus a dashboard job that
 typechecks and tests the SPA on its own.
@@ -330,10 +371,12 @@ visible to already-running processes immediately; a tool may need to reload.
 
 `src/components/shell/title-bar.tsx` renders the browser and Electron
 title/command bar at 35px. The command center names the active workspace and
-opens the existing command palette through `togglePalette(true)`. The bar pads
-itself with `env(safe-area-inset-left/right)` so a landscape notch cannot sit
-over it; the inset is 0 on every screen without one, and the Electron traffic
-light inset above wins where it applies.
+opens the existing command palette through `togglePalette(true)`. It is the
+top edge of the shell, so it pads itself with `env(safe-area-inset-left/right)`
+against a landscape notch and grows by `--safe-top` under the status bar an
+installed iOS app paints over the page, padding its controls back below it.
+Every inset is 0 on a screen without one, and the Electron traffic light inset
+above wins where it applies.
 
 In Electron the window is frameless, so the SPA draws the bar and its native
 controls: on Windows and Linux, minimize, maximize/restore and close are wired
@@ -383,11 +426,15 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   own width rather than a desktop-sized canvas scaled down.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
-  `env(safe-area-inset-*)`: the title bar sideways, the status bar and its
-  details popup downwards, the sidebar drawer on all three edges it reaches,
-  since it is the one surface that spans a screen corner to corner, and the
-  row holding the activity rail on the left, which is the edge a landscape
-  notch covers when the drawer is not up. A surface that pads itself keeps
+  `env(safe-area-inset-*)`: the title bar sideways and downwards, the status
+  bar and its details popup downwards, the sidebar drawer on all three edges
+  it reaches, since it is the one surface that spans a screen corner to
+  corner, and the row holding the activity rail on the left, which is the edge
+  a landscape notch covers when the drawer is not up. The top inset is the one
+  a surface away from that edge also has to read, because an installed iOS app
+  asks for a `black-translucent` status bar and gets the whole screen: it is
+  `--safe-top` in `src/index.css`, and the title bar's height, the palette's
+  drop from under it and a top-anchored dialog's 1rem gap all count it. A surface that pads itself keeps
   painting to the edge and insets only what it holds, so the notch shows the
   bar's own colour rather than a gap. Every inset is 0 where there is none, so
   nothing guards them. Toasts sit above the status bar rather than against the
@@ -439,14 +486,19 @@ fits inside them. A row that has to line up with a bar reads the token - the
 title bar and the sidebar's workspace switcher, the status bar with every
 control and readout in it, the command palette's drop from under the title
 bar - and so does every offset measured from one: the update banner cap and
-the toast offset. Add a coarse size to a control in a fixed-height row only
-together with the row, or the control grows out of the bar that holds it.
+the toast offset. `--safe-top` is the third token of this kind: the top
+safe-area inset under a name, so that a surface measuring from the title bar
+can add the same amount the bar itself grew by. It carries a `0px` fallback
+because a bare `env()` in a browser without it would void every `calc()`
+height that reads it. Add a coarse size to a control in a fixed-height row
+only together with the row, or the control grows out of the bar that holds
+it.
 
-Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. Where
-`interactive-widget` is ignored, a centred fixed dialog sits behind the
-keyboard; anchored to the top it stays in the visual viewport, and a dialog
-taller than the screen is clamped by `max-h-[calc(100dvh-2rem)]` and scrolls
-inside itself. `sm` is a width breakpoint, so a desktop window narrower than
+Dialogs anchor to the top (1rem plus `--safe-top`) below `sm` and centre from
+`sm` up. Where `interactive-widget` is ignored, a centred fixed dialog sits
+behind the keyboard; anchored to the top it stays in the visual viewport, and
+a dialog taller than the screen is clamped to the viewport less that gap and
+scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower than
 640px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.
@@ -2166,7 +2218,16 @@ same tailnet. Expect the board as the first screen, already identified by
 WhoIs: no onboarding wizard, no Settings, no link chip, no update banner, and
 no pull, forward or sync controls, because the descriptor carries no `local`
 verbs. Files and configuration editing remain available through the
-server-hosted gateway. Watch what the server saw with:
+server-hosted gateway.
+
+The installed app is a manual check too, because no browser lets a test
+emulate the `display-mode: standalone` a real install gives. On Android,
+Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
+Add to Home Screen**. The icon that lands on the home screen should be the
+Aether mark on a dark tile, and opening it should give a full-screen dashboard
+with the shell's own title bar and status bar, safe-area padding intact under
+the notch, and the soft keyboard still shortening the layout rather than
+covering it. Watch what the server saw with:
 
 ```sh
 journalctl -u aether-server -f

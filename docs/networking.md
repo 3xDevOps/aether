@@ -245,6 +245,30 @@ setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
 `aether-server install --web-port 443` and `aether-server config set web-port
 443` set it without questions ([install.md](install.md#first-boot)).
 
+### Add it to your home screen
+
+The dashboard ships a web app manifest, so a phone can keep it as an app
+instead of a tab. The installed app opens full screen with no browser chrome:
+the dashboard draws its own title bar and status bar, so nothing is lost.
+
+- **Android.** Open the server URL in Chrome and pick **Install app** from the
+  ⋮ menu.
+- **iPhone.** Open the server URL in Safari and pick **Share > Add to Home
+  Screen**.
+
+Install the **server** URL, not an `aether gui` one. `aether gui` puts a
+per-process bearer token in the URL, and the home-screen icon starts the app at
+the site root with no query string - so a saved `aether gui` app opens
+unauthenticated, and the token is dead the next time `aether gui` restarts
+anyway. The server-hosted dashboard has no token to lose: every request is
+identified by tailnet WhoIs, so the installed app is signed in whenever the
+phone is on the tailnet.
+
+There is no offline mode and no service worker. The dashboard is served out of
+the server binary and has to change the moment the binary does, so nothing is
+cached; away from the tailnet the installed app shows the same connection
+error the browser does.
+
 ### What it needs
 
 - **tailscaled on the server host**, running before the server starts. It is

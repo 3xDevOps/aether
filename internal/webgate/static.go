@@ -34,6 +34,13 @@ func StaticHandler(fsys fs.FS) http.Handler {
 			serveIndex(w)
 			return
 		}
+		// Go's built-in table has no .webmanifest entry, and whether any of
+		// the system files it also reads supplies one varies by host;
+		// without this the web app manifest is sniffed as plain text on
+		// some machines and not others.
+		if strings.HasSuffix(name, ".webmanifest") {
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
 		files.ServeHTTP(w, r)
 	})
 }
