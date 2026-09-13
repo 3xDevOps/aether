@@ -366,6 +366,9 @@ jobs:
   release-build:
     needs: runner-policy
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    # The Android build runs a Gradle daemon in a container; a wedged one
+    # would otherwise hold a self-hosted runner for GitHub's six-hour default.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
