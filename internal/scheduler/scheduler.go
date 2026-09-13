@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"strings"
@@ -496,8 +497,15 @@ func (s *Scheduler) Start(ctx context.Context) error {
 // caused. Cancelling the scheduler's context aborts the store calls a
 // recovery pass runs under, and a caller that stopped the scheduler must see
 // that as the clean shutdown the Start loop reports, not as a failed start.
+// The context is the test rather than the error because a cancelled store
+// call does not always surface as context.Canceled, so anything else caught
+// here is a real failure that the shutdown only coincided with: report it
+// instead of losing it.
 func recoveryError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			slog.Warn("scheduler: recovery failed while stopping", "error", err)
+		}
 		return nil
 	}
 	return err
