@@ -47,6 +47,11 @@ It installs the CLI and builds the desktop app by default. `-Role none`
 installs only the CLI. See the [Windows install guide](docs/install.md#windows-install-script)
 for supported releases and script-policy requirements.
 
+On **Android**, every release carries `aether-android.apk`, a phone app for
+the server-hosted dashboard; install it from the release page as described in
+the [Android app guide](docs/install.md#android-app). It is not on Google Play
+yet. What it stores and sends is in [docs/privacy.md](docs/privacy.md).
+
 **Next, see [docs/quickstart.md](docs/quickstart.md) to set up your first workspace and link your codebase, tools, and CLI agents.** 
 
 For manual installation or uninstallation, see [install.md](docs/install.md#manual-install).
@@ -123,6 +128,7 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 | [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
+| [Privacy](docs/privacy.md) | What the Android app and the dashboard store and send. |
 | [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
 | [Dashboard SPA](docs/dashboard-frontend.md) | The web client's structure. |
 | [Coordination](docs/coordination.md) | How overlapping runs warn and message each other. |
