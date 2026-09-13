@@ -75,7 +75,11 @@ class MainActivity : ComponentActivity() {
             },
         )
 
-        open(intent)
+        // A task Android recreates after killing the process is handed its
+        // root intent again, so a shell first launched from an
+        // aether://run link would reopen that run on every return. The link
+        // is one-shot here, as it is in the dashboard.
+        open(if (savedInstanceState == null) intent else null)
     }
 
     override fun onNewIntent(intent: Intent) {
