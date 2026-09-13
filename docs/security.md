@@ -296,7 +296,11 @@ identify its callers.
   included, is handed to the phone's browser instead of being loaded with the
   member's tailnet position behind it, and a scheme that is neither - an
   `intent://` URL that would start another app with page-chosen extras - is
-  dropped.
+  dropped. WebView Safe Browsing is turned off in the manifest, because it
+  checks every navigation's URL hash prefixes through Play services: on a
+  WebView that only ever loads the member's own server it would send that
+  server's tailnet name off the phone and protect nothing, while the browser
+  that gets every other link runs its own.
 
 ### Both
 

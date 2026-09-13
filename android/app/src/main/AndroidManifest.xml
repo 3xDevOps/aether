@@ -14,6 +14,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Aether">
 
+        <!-- Safe Browsing checks a URL's hash prefixes through Play services.
+             This WebView only ever loads one origin, the member's own server,
+             and hands every other link to the phone's browser - which runs
+             its own Safe Browsing. Leaving it on would send the tailnet name
+             of a private server off the phone and protect nothing
+             (docs/security.md). -->
+        <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="false" />
+
         <!-- singleTask so an aether://run/<id> link reuses the running window
              instead of stacking another WebView. The config changes are
              handled in place: recreating the Activity would reload the
