@@ -170,7 +170,10 @@ ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=... \
 ```
 
 Generate a throwaway keystore with `keytool -genkeypair -keyalg RSA -keysize
-2048` and keep it outside the checkout. The release keystore is never on a
+2048` and keep it outside the checkout. `keytool` writes PKCS12, which holds
+one password for the store and the key, so `ANDROID_KEY_PASSWORD` is the same
+string as `ANDROID_KEYSTORE_PASSWORD` unless the keystore was made as JKS
+(`-storetype JKS`). The release keystore is never on a
 developer machine: the release workflow decodes it from `ANDROID_KEYSTORE_B64`
 into the runner's temp directory and deletes it afterwards
 ([docs/install.md](docs/install.md#releases)).
