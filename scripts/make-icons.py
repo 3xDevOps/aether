@@ -33,8 +33,12 @@ SOURCE = ROOT / "web" / "public" / "aether-mark.png"
 DESKTOP_BUILD = ROOT / "desktop" / "build"
 WEB_ICONS = ROOT / "web" / "public" / "icons"
 
-# The dashboard's dark `--background` token, oklch(0.145 0 0), in sRGB. The
-# Electron window already uses this hex to avoid a white flash before paint.
+# The ground every Aether icon is drawn on, #0a0a0a. The Electron window uses
+# this hex to avoid a white flash before first paint, and the web app
+# manifest's `background_color` matches it so the tile does not show as a
+# square on an installed app's splash (`web/src/app/theme-color.ts`). It is
+# darker than the dashboard's own dark `--background`, #1f1f1f: an icon has to
+# read as an object on a launcher rather than blend into a page.
 BACKGROUND = (10, 10, 10, 255)
 CORNER_RADIUS_RATIO = 0.2237
 
