@@ -1,7 +1,9 @@
 # Aether build and release automation.
 #
-# Requires GNU make and Go 1.26+. Release cross-compilation needs nothing
-# beyond the Go toolchain (pure Go, CGO_ENABLED=0 throughout).
+# Requires GNU make and Go 1.26+. The Go binaries cross-compile with nothing
+# beyond that toolchain (pure Go, CGO_ENABLED=0 throughout), but `make
+# release` also builds the dashboard, which needs Bun and Node, and the
+# Android APK, which needs Docker.
 
 MODULE  := github.com/3xDevOps/Aether
 # Both reach shell command lines - the linker flags here, the Windows resource
