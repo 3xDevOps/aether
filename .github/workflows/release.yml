@@ -10,10 +10,10 @@ permissions:
   contents: write
   packages: write
 
-# `make release` generates and removes cmd/aether/resource_windows_*.syso
-# inside the source tree, and every release job targets the same self-hosted
-# label. Two overlapping releases sharing a working directory would race over
-# that file, so they queue instead.
+# `make release` writes inside the source tree - cmd/aether/resource_windows_*.syso,
+# which it also removes, and the Android build's android/app/build - and every
+# release job targets the same self-hosted label. Two overlapping releases
+# sharing a working directory would race over both, so they queue instead.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -67,8 +67,46 @@ jobs:
       - name: Unit tests
         run: make test
 
+      # Every release of the Android shell is signed with the same key, which
+      # is the only way a later release installs over an earlier one. Missing
+      # secrets end the release here rather than publishing an APK nobody can
+      # upgrade from. The keystore is written outside the checkout and deleted
+      # below; only its path reaches the build.
+      - name: Decode the Android signing keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=
+          for name in ANDROID_KEYSTORE_B64 ANDROID_KEYSTORE_PASSWORD \
+            ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            eval "value=\${$name}"
+            [ -n "$value" ] || missing="${missing:+$missing }$name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::the Android APK cannot be signed; these repository secrets are not set: $missing. Set all four (see the Android app section of docs/install.md), then rerun this release."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/aether-android.jks"
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          echo "ANDROID_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
+
+      # `make release` also builds and signs dist/aether-android.apk in its
+      # pinned SDK container, and fails the release if apksigner cannot verify
+      # it. It lands before the checksums, so the glob below covers it.
       - name: Cross-compile the release matrix
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: make release
+      # The runner is self-hosted, so RUNNER_TEMP is not wiped for us.
+      - name: Remove the signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/aether-android.jks"
       - name: Checksums
         working-directory: dist
         run: sha256sum aether-* > checksums.txt
