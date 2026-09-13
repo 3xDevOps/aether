@@ -4,12 +4,19 @@ import '../index.css'
 import { themeColor } from './theme-color'
 
 /**
- * `appleWebApp` is what an iPhone reads when someone picks Share > Add to
- * Home Screen; iOS has no manifest support, so the name, the standalone
- * window and the icon all have to be said again in meta tags.
- * `black-translucent` puts the shell under the status bar, which is the half
- * of `viewport-fit=cover` iOS needs, and the safe-area padding already in the
- * title bar pads it back out.
+ * What an iPhone reads when someone picks Share > Add to Home Screen is mostly
+ * the manifest - Safari has taken `display`, `name` and `start_url` from it
+ * since iOS 11.3, `theme_color` since 15 and `icons` since 15.4 - so the
+ * standalone window comes from there, not from here. What the manifest cannot
+ * say is the status bar style, and `black-translucent` is what puts the shell
+ * under the status bar, the half of `viewport-fit=cover` iOS needs; the
+ * safe-area padding already in the title bar pads it back out. The
+ * `apple-touch-icon` stays because Safari prefers it over the manifest icons.
+ *
+ * `apple-mobile-web-app-capable` is spelled out by hand because Next 16 emits
+ * only the unprefixed `mobile-web-app-capable` for `appleWebApp.capable`, and
+ * Apple documents the status bar tag as having no effect without the prefixed
+ * one.
  */
 export const metadata: Metadata = {
   title: 'Aether',
@@ -17,6 +24,7 @@ export const metadata: Metadata = {
   applicationName: 'Aether',
   icons: { apple: '/icons/apple-touch-icon.png' },
   appleWebApp: { capable: true, title: 'Aether', statusBarStyle: 'black-translucent' },
+  other: { 'apple-mobile-web-app-capable': 'yes' },
 }
 
 /**
