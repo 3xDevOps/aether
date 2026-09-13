@@ -15,7 +15,9 @@ about this policy go to <https://github.com/3xDevOps/Aether/issues>.
 - **The server name you type on the first screen**, in the app's private
   storage. Nothing else the app writes is its own.
 - **The WebView's ordinary cache** of the dashboard's files, and the
-  dashboard's session storage, both private to the app.
+  dashboard's own local storage of your view preferences: theme, terminal font
+  size, dock heights, sidebar width, the workspace you were last in. Both are
+  private to the app and last until you uninstall it.
 
 No account, password, token, cookie or key is stored. There is no sign-in:
 the phone's Tailscale login identifies it to your server
@@ -27,8 +29,9 @@ everything above.
 - **To your server, and only there.** Every request the dashboard makes goes
   over HTTPS to the server whose name you typed, which you or your team run.
   That includes what you type into a terminal, the instructions you send an
-  agent, file edits, approvals, and the run controls you use. The server keeps
-  them as part of each run's record, on its own disk
+  agent, an image you pick from the phone to paste into a terminal, the
+  contents of files you edit in the dashboard, approvals, and the run controls
+  you use. The server keeps them as part of each run's record, on its own disk
   ([install.md](install.md#what-lives-in-the-data-directory)); who on your
   team can see them is in [teams.md](teams.md#roles) and
   [security.md](security.md#the-dashboard-gateways). The app refuses a plain
@@ -45,7 +48,9 @@ everything above.
 
 ## Permissions
 
-`INTERNET`. Nothing else is declared or requested.
+`INTERNET` is the only permission the app asks for. The androidx library
+adds one signature-level permission the app defines for its own receivers,
+which no other app can hold and which grants nothing.
 
 ## Deleting your data
 

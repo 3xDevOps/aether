@@ -31,13 +31,14 @@ management.
 | Category | Type | What it is |
 | --- | --- | --- |
 | Messages | Other in-app messages | What the member types into an agent's terminal and the instructions sent to a run |
-| Files and docs | Files and docs | Edits made in the dashboard's Files editor, and files chosen for an upload |
+| Photos and videos | Photos | An image the member picks to paste into a terminal; on a phone the picker opens the gallery. It is the dashboard's only upload reachable from the phone: the onboarding profile import exists only on the local `aether gui` gateway |
+| Files and docs | Files and docs | The contents of files edited in the dashboard's Files editor |
 | App activity | Other user-generated content | Approvals, run launches and the other controls the dashboard sends the server |
 
 Not collected, so leave unticked: Location, Personal info (the app sends no
 name, email or ID; the server learns the tailnet login from Tailscale, not
-from the app), Financial info, Health and fitness, Photos and videos, Audio,
-Calendar, Contacts, Web browsing, App info and performance (no crash logs or
+from the app), Financial info, Health and fitness, Videos, Audio, Calendar,
+Contacts, Web browsing, App info and performance (no crash logs or
 diagnostics leave the phone), Device or other IDs.
 
 ## Other declarations on the same page

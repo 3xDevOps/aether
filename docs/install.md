@@ -710,7 +710,8 @@ in to the same tailnet.
 To change the address later, long-press the app icon and pick **Server
 address**. An address that does not resolve leaves the WebView's own error page
 on screen, which names what actually failed, with a **Server address** button
-on it.
+on it. That screen also carries the link to [privacy.md](privacy.md), the
+only place the app itself shows one.
 
 `aether://run/<id>` opens the app on that run, the same link the desktop shell
 handles.

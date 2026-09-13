@@ -287,8 +287,9 @@ identify its callers.
 - **The Android app adds nothing to this boundary.** The APK on every release
   ([install.md](install.md#android-app)) is a WebView on one origin. The only
   thing of its own it stores is the server's address, beside the WebView's
-  ordinary cache of the dashboard's files: no token, no cookie jar it shares
-  with anything, no key, and no JavaScript bridge into the app. What leaves
+  ordinary cache of the dashboard's files and the dashboard's local storage
+  of view preferences: no token, no cookie jar it shares with anything, no
+  key, and no JavaScript bridge into the app. What leaves
   the phone, and where, is [privacy.md](privacy.md). HTTPS is
   pinned in three places, so there is no way to point it at a cleartext
   listener: the address screen refuses a `http://` URL, the app's network
