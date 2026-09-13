@@ -1170,9 +1170,10 @@ pinned SDK container, so the release needs Docker on the runner and four
 repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
 base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
 `ANDROID_KEY_PASSWORD`. The workflow decodes the keystore into the runner's
-temp directory, deletes it when the build ends, and fails before building
-anything if a secret is missing - an unsigned APK is worse than no APK,
-because nothing can update over it. `apksigner verify` has to pass before the
+temp directory and deletes it when the build ends. It checks all four in its
+first step, so a missing one ends the release in seconds rather than after a
+build - an unsigned APK is worse than no APK, because nothing can update over
+it. `apksigner verify` has to pass before the
 assets are uploaded. Keep the keystore: losing it means no published release
 can ever update an installed app again.
 

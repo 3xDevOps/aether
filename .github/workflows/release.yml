@@ -46,32 +46,13 @@ jobs:
     if: ${{ needs.runner-policy.outputs.allowed == 'true' }}
     runs-on: [self-hosted, Linux, X64, moss]
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0 # full history so git describe stamps the tag
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: web/.bun-version
-
-      # Publishing a release does not run the PR pipeline, so gate the release
-      # on the fast checks rather than publishing an untested binary.
-      - name: Vet
-        run: make vet
-      - name: Unit tests
-        run: make test
-
       # Every release of the Android shell is signed with the same key, which
-      # is the only way a later release installs over an earlier one. Missing
-      # secrets end the release here rather than publishing an APK nobody can
-      # upgrade from. The keystore is written outside the checkout and deleted
-      # below; only its path reaches the build.
+      # is the only way a later release installs over an earlier one. This is
+      # the first step in the job so a missing secret ends the release in
+      # seconds, before a toolchain is installed or anything is built: an
+      # unsigned APK is worse than no APK, because nothing can update over
+      # it. The keystore is written outside the checkout and deleted below;
+      # only its path reaches the build.
       - name: Decode the Android signing keystore
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -93,6 +74,26 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
           chmod 600 "$keystore"
           echo "ANDROID_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # full history so git describe stamps the tag
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+
+      # Publishing a release does not run the PR pipeline, so gate the release
+      # on the fast checks rather than publishing an untested binary.
+      - name: Vet
+        run: make vet
+      - name: Unit tests
+        run: make test
 
       # `make release` also builds and signs dist/aether-android.apk in its
       # pinned SDK container, and fails the release if apksigner cannot verify
