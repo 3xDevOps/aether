@@ -4,19 +4,10 @@ import '../index.css'
 import { themeColor } from './theme-color'
 
 /**
- * What an iPhone reads when someone picks Share > Add to Home Screen is mostly
- * the manifest - Safari has taken `display`, `name` and `start_url` from it
- * since iOS 11.3, `theme_color` since 15 and `icons` since 15.4 - so the
- * standalone window comes from there, not from here. What the manifest cannot
- * say is the status bar style, and `black-translucent` is what puts the shell
- * under the status bar, the half of `viewport-fit=cover` iOS needs; the
- * safe-area padding already in the title bar pads it back out. The
- * `apple-touch-icon` stays because Safari prefers it over the manifest icons.
- *
- * `apple-mobile-web-app-capable` is spelled out by hand because Next 16 emits
- * only the unprefixed `mobile-web-app-capable` for `appleWebApp.capable`, and
- * Apple documents the status bar tag as having no effect without the prefixed
- * one.
+ * `apple-mobile-web-app-capable` is spelled out by hand, beside the
+ * `appleWebApp.capable` that looks like the same thing: Next 16 emits only
+ * the unprefixed `mobile-web-app-capable` for that field, and Apple's status
+ * bar tag has no effect without the prefixed one.
  */
 export const metadata: Metadata = {
   title: 'Aether',
@@ -28,18 +19,11 @@ export const metadata: Metadata = {
 }
 
 /**
- * The shell is a fixed column that never scrolls the document, so a phone has
- * to be told three things Next's default meta does not say.
- *
- * `viewport-fit=cover` lets the shell paint under the notch and the home
- * indicator; the title bar and status bar pad themselves back out with
- * `env(safe-area-inset-*)`. `interactive-widget=resizes-content` makes the
- * soft keyboard shrink the layout viewport, which is what every `dvh` in the
- * app - dialogs, the palette, selects - is already sized against. Without it
- * the keyboard covers a dialog footer instead of shortening the dialog.
- *
- * `themeColor` follows the OS scheme rather than the app's own theme setting:
- * the browser reads it before the SPA has applied a stored preference.
+ * `viewportFit: 'cover'` and the translucent status bar above hand the shell
+ * the screen edges the system used to keep back, and nothing here pads them:
+ * every surface that reaches an edge insets itself, the top one through
+ * `--safe-top` in `src/index.css`. See `docs/dashboard-frontend.md` for what
+ * each field buys.
  */
 export const viewport: Viewport = {
   width: 'device-width',

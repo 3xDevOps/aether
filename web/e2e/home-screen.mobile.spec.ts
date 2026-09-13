@@ -1,15 +1,13 @@
-// The dashboard as an app on a phone's home screen. What Chrome needs before
-// it offers to install one is the manifest and its icons, fetched with no
-// credential of any kind, so the gateway has to serve all of them to an
-// anonymous request with the right content types.
+// The dashboard as an app on a phone's home screen: what a browser fetches
+// before it will offer to install one, and what the shell does with the
+// screen edges an installed window hands it.
 //
 // The standalone window itself is not emulable here. Chromium exposes no
 // `display-mode` override - not through Playwright's `emulateMedia`, not
 // through CDP's `Emulation.setEmulatedMedia` features, and not through the
 // `PWA` domain, which headless does not carry - so the closest this suite
 // gets is what the mobile project already is: a phone-sized viewport with no
-// browser chrome around it. The shell is asserted whole in that viewport
-// below; a real installed window stays a manual check on a phone.
+// browser chrome around it. A real installed window stays a manual check.
 
 import { seedWorkspace } from './harness/setup'
 import { expect, test } from './mobile'
@@ -34,10 +32,9 @@ test('a phone is served everything it needs to install the dashboard', async ({
     '/manifest.webmanifest',
   )
 
-  // The gui gateway authenticates by a bearer header or a `?token=` query,
-  // and these requests carry neither - which is the shape that matters: a
-  // browser fetches the manifest and the icons before anyone is signed in,
-  // and the installed app starts at `/` with no token in the URL.
+  // These requests carry neither of the gateway's credentials, a bearer
+  // header or a `?token=` query, because that is the shape that matters: a
+  // browser fetches the manifest and the icons before anyone is signed in.
   const origin = new URL(alice.url).origin
   const response = await page.request.get(origin + '/manifest.webmanifest')
   expect(response.status()).toBe(200)
@@ -50,8 +47,7 @@ test('a phone is served everything it needs to install the dashboard', async ({
     display: 'standalone',
   })
 
-  // Chrome will not offer to install an app without a 192px and a 512px
-  // icon, and every icon named has to actually be there.
+  // Every icon the manifest names has to actually be served.
   const icons: ManifestIcon[] = manifest.icons
   expect(icons.map((icon) => icon.sizes)).toEqual(
     expect.arrayContaining(['192x192', '512x512']),
@@ -63,15 +59,14 @@ test('a phone is served everything it needs to install the dashboard', async ({
     expect(image.headers()['content-type'], icon.src).toBe('image/png')
   }
 
-  // Safari reads the manifest but prefers an `apple-touch-icon` over its
-  // icons, so the link tag is what an iPhone actually puts on a home screen.
+  // Safari prefers an `apple-touch-icon` over the manifest's icons.
   const apple = '/icons/apple-touch-icon.png'
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', apple)
   expect((await page.request.get(origin + apple)).status()).toBe(200)
 
-  // The shell draws its own title bar and status bar, so an installed window
-  // loses nothing when the browser's chrome goes: on a phone-sized viewport
-  // with none of it, everything is still reachable and nothing overflows.
+  // The shell draws its own title bar and status bar, so nothing is lost
+  // when the browser's chrome goes: everything stays reachable and nothing
+  // overflows.
   await expect(page.getByRole('contentinfo')).toBeInViewport({ ratio: 1 })
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
   const overflow = await page.evaluate(() =>
