@@ -141,8 +141,9 @@ from real runners; treat cross-builds as test artifacts.
 
 Every icon Aether ships is generated from `web/public/aether-mark.png` - the
 desktop app's into `desktop/build/`, the web app manifest's and the iOS
-home-screen one into `web/public/icons/`, and the phone app's launcher icons
-into `android/app/src/main/res/mipmap-*`. Regenerate them all with `python3
+home-screen one into `web/public/icons/`, the phone app's launcher icons
+into `android/app/src/main/res/mipmap-*`, and the Play listing's feature
+graphic into `android/listing/`. Regenerate them all with `python3
 scripts/make-icons.py` after the mark changes, and commit what it wrote.
 
 ### Android shell
@@ -159,9 +160,11 @@ run the same toolchain:
 make android
 ```
 
-That runs the app's JUnit tests and writes `dist/aether-android-unsigned.apk`.
-With signing variables in the environment it writes `dist/aether-android.apk`
-instead and fails unless `apksigner verify` passes:
+That runs the app's JUnit tests and writes `dist/aether-android-unsigned.apk`
+and `dist/aether-android-unsigned.aab`, the app bundle Google Play takes. With
+signing variables in the environment it writes `dist/aether-android.apk` and
+`dist/aether-android.aab` instead and fails unless `apksigner verify` passes
+on the APK and `jarsigner -verify` on the bundle:
 
 ```sh
 ANDROID_KEYSTORE_FILE=/path/outside/the/checkout/throwaway.jks \
@@ -186,8 +189,15 @@ debug APK builds versionCode 1 from any tree, which is honest - neither can
 install over a release anyway. `sh scripts/android-version-code-test.sh`,
 part of `make test-scripts`, covers the mapping and its ordering.
 
-`make release` builds the APK as part of the matrix, so it needs Docker as
-well as Go, Node and Bun.
+`make release` builds the APK and the bundle as part of the matrix, so it
+needs Docker as well as Go, Node and Bun.
+
+The Play listing's texts, reviewer instructions, data safety answers and
+feature graphic live in `android/listing/`
+([its README](android/listing/README.md) maps each to a console field), and
+the privacy policy the listing and the app link to is
+[docs/privacy.md](docs/privacy.md). A change to what the app stores or sends
+changes all three.
 
 Gradle's caches live in `~/.cache/aether/android-gradle`; set
 `ANDROID_GRADLE_HOME` to move them. The wrapper and its distribution checksum

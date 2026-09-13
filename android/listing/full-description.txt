@@ -1,0 +1,16 @@
+Aether is a self-hosted development environment for AI coding agents. The agents run in containers on a server you own; this app is that server's dashboard, full screen on your phone.
+
+From the phone you can:
+
+• See every run on the board, sorted by what needs attention.
+• Watch a run's terminal live, and take control to type into it.
+• Approve or refuse what an agent asks permission for.
+• Read the diff a run has produced; launch, pause, kill and relaunch runs.
+• Edit the files in your member home.
+• Open a run straight from an aether://run link.
+
+What it needs: an Aether server on your Tailscale network with its dashboard turned on, and this phone signed in to the same tailnet. There is no account and no password. Tailscale identifies the phone, and the server decides what it may do.
+
+What it does not do: the app talks only to the server you name, over HTTPS. Nothing is sent to the publisher. No ads, no analytics, no tracking. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md
+
+Aether is free software under the GPL-3.0. Source, documentation and the server: https://github.com/3xDevOps/Aether

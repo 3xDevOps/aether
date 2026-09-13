@@ -8,8 +8,9 @@ Run after web/public/aether-mark.png changes:
 Writes desktop/build/icons/ and desktop/build/icon.ico, which electron-builder
 resolves for every platform, converting the set to .icns for macOS; only
 Windows needs a prebuilt file. Writes web/public/icons/ for the web app
-manifest and the iOS home screen, and android/app/src/main/res/mipmap-* for
-the phone app's launcher icon. Needs Pillow.
+manifest and the iOS home screen, android/app/src/main/res/mipmap-* for the
+phone app's launcher icon, and android/listing/feature-graphic.png for the
+Play listing. Needs Pillow.
 
 The mark is thin light-blue line art on transparency, so it is composited onto
 a tile in the dashboard's --background color rather than shipped bare:
@@ -34,6 +35,7 @@ SOURCE = ROOT / "web" / "public" / "aether-mark.png"
 DESKTOP_BUILD = ROOT / "desktop" / "build"
 WEB_ICONS = ROOT / "web" / "public" / "icons"
 ANDROID_RES = ROOT / "android" / "app" / "src" / "main" / "res"
+ANDROID_LISTING = ROOT / "android" / "listing"
 
 # The ground every Aether icon is drawn on, #0a0a0a. The web app manifest's
 # `background_color` matches it so the tile does not show as a square on an
@@ -77,6 +79,12 @@ ANDROID_DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi":
 ANDROID_LEGACY_DP = 48
 ANDROID_ADAPTIVE_DP = 108
 ANDROID_ADAPTIVE_COVERAGE = 0.48
+
+# Google Play's feature graphic is a fixed 1024x500 banner in JPEG or 24-bit
+# PNG with no alpha (android/listing/README.md). Play crops it on some
+# surfaces, so the mark sits in the middle at a little over half the height.
+FEATURE_SIZE = (1024, 500)
+FEATURE_COVERAGE = 0.36
 
 # Supersampling factor: render large, then box down, so the rounded corners and
 # the mark's diagonals land antialiased.
@@ -184,11 +192,23 @@ def write_android(mark: Image.Image) -> None:
     print(f"wrote {ANDROID_RES.relative_to(ROOT)}/mipmap-* ({len(ANDROID_DENSITIES)} densities)")
 
 
+def write_listing(mark: Image.Image) -> None:
+    ANDROID_LISTING.mkdir(parents=True, exist_ok=True)
+    width, height = (side * SUPERSAMPLE for side in FEATURE_SIZE)
+    banner = Image.new("RGBA", (width, height), BACKGROUND)
+    paste_mark(mark, banner, FEATURE_COVERAGE)
+    banner.resize(FEATURE_SIZE, Image.LANCZOS).convert("RGB").save(
+        ANDROID_LISTING / "feature-graphic.png"
+    )
+    print(f"wrote {ANDROID_LISTING.relative_to(ROOT)}/feature-graphic.png")
+
+
 def main() -> None:
     mark = load_mark()
     write_desktop(mark)
     write_web(mark)
     write_android(mark)
+    write_listing(mark)
 
 
 if __name__ == "__main__":
