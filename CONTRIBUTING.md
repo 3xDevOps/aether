@@ -173,10 +173,18 @@ Generate a throwaway keystore with `keytool -genkeypair -keyalg RSA -keysize
 2048` and keep it outside the checkout. `keytool` writes PKCS12, which holds
 one password for the store and the key, so `ANDROID_KEY_PASSWORD` is the same
 string as `ANDROID_KEYSTORE_PASSWORD` unless the keystore was made as JKS
-(`-storetype JKS`). The release keystore is never on a
-developer machine: the release workflow decodes it from `ANDROID_KEYSTORE_B64`
-into the runner's temp directory and deletes it afterwards
+(`-storetype JKS`). The release keystore is never on a developer machine: the
+release workflow decodes it from `ANDROID_KEYSTORE_B64` into the runner's temp
+directory and deletes it afterwards
 ([docs/install.md](docs/install.md#releases)).
+
+A signed build also needs a release tag, because the APK's versionCode comes
+from it (`scripts/android-version-code.sh`, and
+[docs/install.md](docs/install.md#releases) for the formula): signing an
+untagged tree stops with the tag the script could not parse. An unsigned or
+debug APK builds versionCode 1 from any tree, which is honest - neither can
+install over a release anyway. `sh scripts/android-version-code-test.sh`,
+part of `make test-scripts`, covers the mapping and its ordering.
 
 `make release` builds the APK as part of the matrix, so it needs Docker as
 well as Go, Node and Bun.

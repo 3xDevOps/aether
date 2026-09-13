@@ -84,11 +84,15 @@ ANDROID_RUN = docker run --rm \
 	-v '$(ANDROID_GRADLE_HOME)':/gradle \
 	-e HOME=/gradle -e GRADLE_USER_HOME=/gradle
 
-# versionCode has to rise with every release and cannot be derived from the
-# tag, because alphas of one version share its x.y.z. The tagged commit's
-# count rises monotonically and is the same number on a rebuild of that
-# commit. Assigned lazily - only `android` reads it.
-ANDROID_VERSION_CODE = $(or $(shell git rev-list --count HEAD 2>/dev/null),1)
+# Android installs an update only when its versionCode is above the installed
+# one, so the number has to rise with every release. A commit count does not,
+# across branches: a hotfix tagged off a shorter branch scores below the
+# release it fixes. scripts/android-version-code.sh derives it from the tag
+# instead and carries the formula and its ceilings. An unsigned or debug APK
+# can never install over a release, so an untagged tree builds code 1 rather
+# than failing; a signed build refuses a tag the script cannot parse, in the
+# recipe below. Assigned lazily - only `android` reads it.
+ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh '$(VERSION)' 2>/dev/null),1)
 
 # Release signing comes from the environment, never the tree: a keystore path
 # and the three secrets beside it. Without them the APK comes out unsigned and
@@ -137,6 +141,7 @@ test-scripts:
 	sh scripts/install-test.sh
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
+	sh scripts/android-version-code-test.sh
 
 vet:
 	go vet ./...
@@ -174,6 +179,7 @@ android:
 		echo 'make android: ANDROID_KEYSTORE_FILE does not name a file: $(ANDROID_KEYSTORE_FILE)' >&2; \
 		exit 1; \
 	fi
+	@[ -z '$(ANDROID_SIGNING)' ] || sh scripts/android-version-code.sh '$(VERSION)' >/dev/null
 	$(ANDROID_RUN) $(ANDROID_SIGNING) $(ANDROID_IMAGE) \
 		./gradlew --console=plain test assembleRelease \
 			'-PaetherVersionName=$(VERSION)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)

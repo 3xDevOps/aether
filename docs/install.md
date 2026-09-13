@@ -1173,12 +1173,34 @@ base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
 temp directory and deletes it when the build ends. It checks all four in its
 first step, so a missing one ends the release in seconds rather than after a
 build - an unsigned APK is worse than no APK, because nothing can update over
-it. A PKCS12 keystore, which is what
-`keytool` writes, holds one password for the store and the key, so
-`ANDROID_KEY_PASSWORD` is the same string as `ANDROID_KEYSTORE_PASSWORD`;
-only a keystore made as JKS has two. `apksigner verify` has to pass before
-the assets are uploaded. Keep the keystore: losing it means no published
-release can ever update an installed app again.
+it. A PKCS12 keystore, which is what `keytool` writes, holds one password for
+the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
+`ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. `apksigner
+verify` has to pass before the assets are uploaded. Keep the keystore: losing
+it means no published release can ever update an installed app again.
+
+The APK's versionCode is the only thing Android compares when deciding
+whether an APK is an update, and it comes from the tag, through
+[`scripts/android-version-code.sh`](../scripts/android-version-code.sh):
+
+```
+MAJOR * 10000000 + MINOR * 100000 + PATCH * 1000 + rank
+```
+
+where rank orders the pre-releases of a version below its final release -
+`alpha.N` is 100 + N, `beta.N` is 300 + N, `rc.N` is 500 + N, a final release
+is 999. So `v0.4.0-alpha.6` is 400106, `v0.4.0-rc.1` is 400501, `v0.4.0` is
+400999, and `v0.4.1-alpha.1` is 401101. Every release scores above the one
+before it whatever branch it was tagged from, which a commit count does not:
+a hotfix tagged off a shorter branch would score below the release it fixes,
+and Android would refuse the correctly signed APK as a downgrade.
+
+So a release tag has to be `vMAJOR.MINOR.PATCH` with an optional
+`-alpha.N`, `-beta.N` or `-rc.N`. A signed build refuses anything else before
+it builds. The ceilings the script enforces - major 209, minor 99, patch 99,
+pre-release number 199 - hold the result under Android's 2100000000 maximum
+and keep one rank from reaching the next. An APK built from a checkout is
+unsigned and carries versionCode 1; it cannot be installed over a release.
 
 If the release workflow fails after building, rerun it for the published
 release. The publisher uploads missing assets to the existing release and
