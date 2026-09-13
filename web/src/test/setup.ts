@@ -21,6 +21,18 @@ beforeEach(() => {
   window.localStorage.clear()
 })
 
+// Once a <style> element is disconnected, removing it no longer unregisters
+// its stylesheet, so a sheet orphaned by a discarded subtree stays in
+// `document.styleSheets` and only its rules can still be dropped.
+export function emptyDetachedStyleSheets(): void {
+  for (const sheet of document.styleSheets) {
+    if (sheet.ownerNode?.isConnected !== false) continue
+    while (sheet.cssRules.length > 0) sheet.deleteRule(0)
+  }
+}
+
+afterEach(emptyDetachedStyleSheets)
+
 // Radix measures, scrolls and captures the pointer over whatever it pops out -
 // an open select, a dialog, a menu - and xterm's fit addon measures its host.
 // jsdom implements none of these, and a component that reaches for one throws
