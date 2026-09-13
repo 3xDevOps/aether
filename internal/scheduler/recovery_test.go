@@ -34,17 +34,44 @@ func startScheduler(t *testing.T, sched *Scheduler) {
 	t.Cleanup(func() { cancel(); <-done })
 }
 
+// failingActiveRunsStore fails the first recovery listing, standing in for a
+// backend failure that is not a cancellation.
+type failingActiveRunsStore struct {
+	store.Store
+	err error
+}
+
+func (s *failingActiveRunsStore) ListActiveRuns(context.Context) ([]*domain.Run, error) {
+	return nil, s.err
+}
+
 // TestStartCancelledDuringRecoveryIsACleanStop pins that a shutdown landing
 // inside the recovery pass reports what the Start loop reports for a
 // shutdown: nothing. The aborted store call is the caller stopping the
-// scheduler, not a scheduler that failed to start.
+// scheduler, not a scheduler that failed to start. A failure the shutdown
+// only raced still has to be reported: Server.Run names whatever Start
+// returns as the reason the server went down.
 func TestStartCancelledDuringRecoveryIsACleanStop(t *testing.T) {
-	e := newTestEnv(t, nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if err := e.sched.Start(ctx); err != nil {
-		t.Fatalf("Start after shutdown = %v, want nil", err)
-	}
+	t.Run("cancellation", func(t *testing.T) {
+		e := newTestEnv(t, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := e.sched.Start(ctx); err != nil {
+			t.Fatalf("Start after shutdown = %v, want nil", err)
+		}
+	})
+
+	t.Run("backend failure during the same shutdown", func(t *testing.T) {
+		diskErr := errors.New("disk I/O error")
+		e := newTestEnv(t, func(c *Config) {
+			c.Store = &failingActiveRunsStore{Store: c.Store, err: diskErr}
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := e.sched.Start(ctx); !errors.Is(err, diskErr) {
+			t.Fatalf("Start after shutdown with a failing store = %v, want %v", err, diskErr)
+		}
+	})
 }
 
 func TestRebootRecoveryResumesSupervision(t *testing.T) {
