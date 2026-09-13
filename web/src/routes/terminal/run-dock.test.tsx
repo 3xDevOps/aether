@@ -104,7 +104,8 @@ describe('run-shell dock', () => {
       screen.getByRole('button', { name: 'Open shell' }).parentElement,
     )
     view.unmount()
-  }, 20_000)
+  })
+
   it('rebinds a persistent shell after the terminal route remounts', async () => {
     const first = mount()
     fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
