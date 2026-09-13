@@ -310,6 +310,7 @@ attaches the server's output to the report.
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
+| `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration, the query is gone from the address bar afterwards, and a reload lands back on the board |
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
 | `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: correct shared-grid growth, zoom, observe/steer, and reattach; a long redraw log opens as a compact current screen with responsive input, while History can display the first output and return to the unchanged live terminal |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
@@ -321,7 +322,7 @@ attaches the server's output to the report.
 
 `board-card`, `keyboard-focus`, `onboarding-agents`, `onboarding-github`,
 `onboarding-first-run`'s launch scenario, `run-attach-retry`,
-`run-provisioning`, `run-switch`, `run-views.mobile.spec.ts`,
+`run-deep-link`, `run-provisioning`, `run-switch`, `run-views.mobile.spec.ts`,
 `shell-drawer.mobile.spec.ts`, `terminal-geometry`, `terminal-images` and `terminal-tools` need a
 reachable Docker daemon and skip without one. That skip is specific to the
 dashboard suite: `make test-integration` requires its real Docker setup and

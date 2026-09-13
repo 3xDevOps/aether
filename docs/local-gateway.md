@@ -64,6 +64,15 @@ which the dashboard reports as an expired link, showing that message, rather
 than retrying a credential the gateway has already rejected. Open the URL
 `aether gui` printed again to get a working one.
 
+`run` is the other query parameter the dashboard reads on first load, and it
+leaves the address bar the same way. `?run=<run_id>` opens that run's
+terminal as soon as the first hydration has the runs; a run the member cannot
+see is ignored and the board stays. This is how both shells deliver an
+`aether://run/<id>` deep link - the desktop shell (`desktop/main.js`) and the
+Android app (`android/`) append it to the dashboard URL and load that -
+and removing it is what stops a reload, or the re-hydration a reconnect runs,
+from reopening a run the member has since left.
+
 ### Agent OAuth logins
 
 When an agent prints an OAuth URL in the dashboard, click it. If the URL

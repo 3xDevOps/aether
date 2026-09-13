@@ -72,6 +72,46 @@ describe('hydrate', () => {
     expect(s.runs.run_1.status).toBe('running')
   })
 
+  // Both shells turn `aether://run/<id>` into `<dashboard>?run=<id>`, so the
+  // query is the whole deep-link contract on the dashboard's side.
+  describe('a ?run= deep link', () => {
+    afterEach(() => {
+      window.history.replaceState({}, '', '/')
+    })
+
+    it('opens that run and leaves the address bar clean', async () => {
+      window.history.replaceState({}, '', '/?run=run_1')
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+
+      expect(store.getState().route).toEqual({
+        name: 'terminal',
+        params: { runId: 'run_1' },
+      })
+      // Stripped, so a reload does not reopen a run the member left.
+      expect(window.location.search).toBe('')
+    })
+
+    it('stays on the board for a run the member cannot see', async () => {
+      window.history.replaceState({}, '', '/?run=run_someone_elses')
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+
+      expect(store.getState().route).toEqual({ name: 'board', params: {} })
+      expect(window.location.search).toBe('')
+    })
+
+    it('does not reopen the run when a reconnect re-hydrates', async () => {
+      window.history.replaceState({}, '', '/?run=run_1')
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      store.getState().navigate('board')
+
+      await hydrate(store, fakeApi())
+
+      expect(store.getState().route).toEqual({ name: 'board', params: {} })
+    })
+  })
 
   it('points the app at a workspace, keeping one the member already chose', async () => {
     // Nothing chosen: the lowest id wins, so two tabs hydrating off the same

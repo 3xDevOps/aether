@@ -72,6 +72,15 @@ When `AETHER_DASHBOARD` points at the server gateway instead, the browser
 sends no token: Tailscale WhoIs identifies the phone or development browser
 on every request.
 
+`?run=<run_id>` is read the same way, by `takeRequestedRun` beside the token
+reader in `src/lib/api.ts`, and `hydrate` in `src/store/sync.ts` acts on it
+once the runs are in the store: it navigates to that run's terminal, or
+leaves the board alone when the run is not one this member was sent. Reading
+it removes it from the address bar, which is what makes it one-shot - a
+reconnect re-hydrates and must not drag the member back. It is the whole
+deep-link contract for both shells; see
+[local-gateway.md](local-gateway.md#running-it).
+
 Node 22+ is required for a hand-run dashboard build. The complete contributor
 toolchain and the optional desktop installer workflow are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#toolchain).
