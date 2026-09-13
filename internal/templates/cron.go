@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -92,6 +94,13 @@ func (s *Service) loop(ctx context.Context) {
 // next slot from now, which is how a schedule missed while the server was
 // down is skipped instead of caught up.
 func (s *Service) scan(ctx context.Context, fire bool) error {
+	// Only timers that already existed can be pruned below: SaveSchedule
+	// seeds a timer after its row is committed, so a schedule saved while
+	// this listing is in flight is missing from the listing but present in
+	// the map, and pruning it would drop the seeded first slot.
+	s.mu.Lock()
+	prunable := slices.Collect(maps.Keys(s.timers))
+	s.mu.Unlock()
 	schedules, err := s.store.ListSchedules(ctx, "")
 	if err != nil {
 		return fmt.Errorf("templates: list schedules: %w", err)
@@ -123,7 +132,7 @@ func (s *Service) scan(ctx context.Context, fire bool) error {
 		t.next = t.rule.Next(now)
 		due = append(due, sc)
 	}
-	for id := range s.timers {
+	for _, id := range prunable {
 		if _, ok := live[id]; !ok {
 			delete(s.timers, id)
 		}

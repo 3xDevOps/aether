@@ -306,3 +306,76 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 
 // testPublicKey is a throwaway key: members need one identity.
 const testPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF3jVX1WCbXCEjHVFVBExpFvhOsSJfLNJDDXCM4Q3xJd test"
+
+// listGateStore holds the first ListSchedules open until the test releases
+// it, which is the window a concurrent SaveSchedule lands in.
+type listGateStore struct {
+	store.Store
+	once    sync.Once
+	listed  chan struct{}
+	release chan struct{}
+}
+
+func (g *listGateStore) ListSchedules(ctx context.Context, workspace domain.WorkspaceID) ([]*store.Schedule, error) {
+	out, err := g.Store.ListSchedules(ctx, workspace)
+	g.once.Do(func() {
+		close(g.listed)
+		<-g.release
+	})
+	return out, err
+}
+
+// A schedule saved while a scan's listing is in flight is missing from that
+// listing and present in the timer map. Pruning the map against the stale
+// listing would drop the slot SaveSchedule just seeded, and the next scan
+// would re-seed it from a later now - silently moving the first fire a slot
+// out, or losing it entirely against a clock that is not advancing.
+func TestScheduleSavedDuringAScanKeepsItsSeededSlot(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+
+	m := &domain.Member{DisplayName: "Ada", PublicKey: testPublicKey, Color: "#e6194b", Role: domain.RoleCollaborator}
+	if err = db.CreateMember(ctx, m); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: domain.DefaultBaseBranch}
+	if err = db.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	tpl := &store.Template{WorkspaceID: ws.ID, Name: "nightly-deps", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
+	if err = db.SaveTemplate(ctx, tpl); err != nil {
+		t.Fatalf("save template: %v", err)
+	}
+
+	gate := &listGateStore{Store: db, listed: make(chan struct{}), release: make(chan struct{})}
+	clock := &fakeClock{t: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
+	svc, err := New(Config{Store: gate, Bus: bus, Runs: &recordingLauncher{}, Now: clock.now})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	scanned := make(chan error, 1)
+	go func() { scanned <- svc.scan(ctx, false) }()
+	<-gate.listed
+	saved, err := svc.SaveSchedule(ctx, ws.ID, tpl.Name, "* * * * *", m.ID)
+	if err != nil {
+		t.Fatalf("SaveSchedule: %v", err)
+	}
+	close(gate.release)
+	if scanErr := <-scanned; scanErr != nil {
+		t.Fatalf("scan: %v", scanErr)
+	}
+
+	if next := svc.nextFire(saved.Schedule.ID); !next.Equal(saved.Next) {
+		t.Fatalf("next fire after the scan = %v, want the seeded %v", next, saved.Next)
+	}
+}
