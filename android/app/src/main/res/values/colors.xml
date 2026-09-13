@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dashboard's own background token (web/src/index.css), so the
+         window does not flash a different color before the page paints. The
+         adaptive launcher icon's background layer is the tile color
+         scripts/make-icons.py composites onto. -->
+    <color name="window_background">#ffffff</color>
+    <color name="error_text">#b3261e</color>
+    <color name="ic_launcher_background">#0a0a0a</color>
+</resources>

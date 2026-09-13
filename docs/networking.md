@@ -240,6 +240,10 @@ what it bound:
 aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
 ```
 
+On Android, the [app on every release](install.md#android-app) wraps this same
+URL full screen. It is a WebView and nothing more, so everything below holds
+for it unchanged.
+
 `web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
 setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
 `aether-server install --web-port 443` and `aether-server config set web-port

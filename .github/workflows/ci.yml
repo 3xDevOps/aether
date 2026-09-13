@@ -366,6 +366,9 @@ jobs:
   release-build:
     needs: runner-policy
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    # The Android build runs a Gradle daemon in a container; a wedged one
+    # would otherwise hold a self-hosted runner for GitHub's six-hour default.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -383,8 +386,28 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
+      # `make release` builds the Android shell too, in its pinned SDK
+      # container, so a broken shell fails the pull request. The container
+      # carries the SDK; only Gradle's dependency and distribution caches are
+      # worth keeping between runs, and actions/cache stores paths relative to
+      # the workspace, so the Makefile's default cache directory is moved into
+      # it. A hosted runner and a self-hosted one lay the archive out
+      # differently, hence runner.environment in the key.
+      - uses: actions/cache@v4
+        with:
+          path: .gradle-cache
+          key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-${{ runner.environment }}-
       - name: Cross-compile release matrix
+        env:
+          ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
         run: make release
+      # The daemon logs and the compiled-script caches are large and
+      # machine-specific; saving them would cost more than it returns.
+      - name: Trim the Gradle cache before it is saved
+        if: always()
+        run: rm -rf .gradle-cache/daemon .gradle-cache/native
       - uses: actions/upload-artifact@v4
         with:
           name: binaries

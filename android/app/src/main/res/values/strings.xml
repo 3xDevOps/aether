@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aether</string>
+
+    <string name="setup_title">Aether server</string>
+    <string name="setup_explainer">Your server hosts the dashboard on your tailnet. Enter its MagicDNS name. This phone has to be signed in to the same tailnet.</string>
+    <string name="setup_label">Server name</string>
+    <string name="setup_hint">my-server.tailnet-name.ts.net</string>
+    <string name="setup_open">Open dashboard</string>
+
+    <string name="server_address">Server address</string>
+    <string name="server_address_short">Server</string>
+    <string name="no_app_for_link">No app on this phone opens %1$s</string>
+</resources>

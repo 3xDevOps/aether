@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dashboard fills the window and draws its own chrome, so the shell has
+     no menu to hang a settings entry on. Long-pressing the launcher icon is
+     where the server address lives; a failed load also offers it. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="server-address"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutLongLabel="@string/server_address"
+        android:shortcutShortLabel="@string/server_address_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="io.aether.android.SetupActivity"
+            android:targetPackage="io.aether.android" />
+    </shortcut>
+</shortcuts>

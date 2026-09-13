@@ -352,9 +352,9 @@ function main() {
 
   // --- deep links -------------------------------------------------------------
 
-  // aether://run/<id> focuses the window on that run. Appending &run=<id> to
-  // the gateway URL is harmless today: the SPA reads ?token= and ignores the
-  // rest of the query.
+  // aether://run/<id> focuses the window on that run: the SPA reads &run=<id>
+  // off the gateway URL and opens that run's terminal once it has hydrated
+  // (docs/local-gateway.md).
   function handleDeepLink(raw) {
     let parsed
     try {

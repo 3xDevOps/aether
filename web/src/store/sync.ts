@@ -1,7 +1,7 @@
 // Hydration and live updates: one HTTP fetch fills the store, then the event
 // stream is the only thing that changes it.
 
-import { api, ApiError, type Api } from '@/lib/api'
+import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
@@ -96,6 +96,16 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     )
     s.setOverlaps(overlaps)
     s.setCapabilities(capabilities)
+    // A deep link (`aether://run/<id>` from either shell) arrives as
+    // `?run=<id>` and can only be acted on now that the runs are here. A
+    // member is sent the runs they may see, so an id that is not among them
+    // is not theirs or no longer exists: the board stays, rather than
+    // mounting a run detail for something nothing can load. Before the
+    // onboarding redirect below, which outranks it.
+    const requested = takeRequestedRun()
+    if (requested && store.getState().runs[requested]) {
+      store.getState().navigate('terminal', { runId: requested })
+    }
     // The status bar's link chip reads linkStatus, and nothing else
     // fetches it until the settings or onboarding view opens - so without
     // this, a linked machine launches looking unlinked and the chip points

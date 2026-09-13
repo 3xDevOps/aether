@@ -139,6 +139,25 @@ function bearer(): string | null {
   return window.sessionStorage.getItem(tokenKey)
 }
 
+/**
+ * The run an `aether://run/<id>` deep link asked for, once.
+ *
+ * Both shells map the link to `<dashboard>?run=<id>` and load that, so the id
+ * arrives in the query exactly as `token` does and is removed from the
+ * address bar the same way. Removing it is also what makes this one-shot:
+ * a reload, or the re-hydration a reconnect runs, must not reopen the run
+ * the member has since navigated away from.
+ */
+export function takeRequestedRun(): string | null {
+  if (typeof window === 'undefined') return null
+  const id = new URLSearchParams(window.location.search).get('run')
+  if (!id) return null
+  const clean = new URL(window.location.href)
+  clean.searchParams.delete('run')
+  window.history.replaceState({}, '', clean.toString())
+  return id
+}
+
 async function call<T>(method: string, params: unknown = {}): Promise<T> {
   const token = bearer()
   const res = await fetch(`${API_BASE}/${method}`, {

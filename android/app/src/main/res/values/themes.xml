@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dashboard draws its own chrome, so the shell contributes a window
+         background and nothing else. Platform Material rather than AppCompat:
+         the app has no toolbar, no menu and no widget of its own beyond the
+         setup form. -->
+    <style name="Theme.Aether" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>
