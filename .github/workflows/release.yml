@@ -45,6 +45,11 @@ jobs:
     needs: runner-policy
     if: ${{ needs.runner-policy.outputs.allowed == 'true' }}
     runs-on: [self-hosted, Linux, X64, moss]
+    # The same Gradle-in-a-container build as ci.yml's release-build, plus the
+    # image push and its smoke checks. This job also holds the release-*
+    # concurrency group, so a wedged one would block the next release for
+    # GitHub's six-hour default.
+    timeout-minutes: 90
     steps:
       # Every release of the Android shell is signed with the same key, which
       # is the only way a later release installs over an earlier one. This is
