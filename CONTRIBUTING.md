@@ -160,9 +160,11 @@ run the same toolchain:
 make android
 ```
 
-That runs the app's JUnit tests and writes `dist/aether-android-unsigned.apk`.
-With signing variables in the environment it writes `dist/aether-android.apk`
-instead and fails unless `apksigner verify` passes:
+That runs the app's JUnit tests and writes `dist/aether-android-unsigned.apk`
+and `dist/aether-android-unsigned.aab`, the app bundle Google Play takes. With
+signing variables in the environment it writes `dist/aether-android.apk` and
+`dist/aether-android.aab` instead and fails unless `apksigner verify` passes
+on the APK and `jarsigner -verify` on the bundle:
 
 ```sh
 ANDROID_KEYSTORE_FILE=/path/outside/the/checkout/throwaway.jks \
@@ -187,8 +189,8 @@ debug APK builds versionCode 1 from any tree, which is honest - neither can
 install over a release anyway. `sh scripts/android-version-code-test.sh`,
 part of `make test-scripts`, covers the mapping and its ordering.
 
-`make release` builds the APK as part of the matrix, so it needs Docker as
-well as Go, Node and Bun.
+`make release` builds the APK and the bundle as part of the matrix, so it
+needs Docker as well as Go, Node and Bun.
 
 The Play listing's texts, reviewer instructions, data safety answers and
 feature graphic live in `android/listing/`

@@ -100,9 +100,10 @@ jobs:
       - name: Unit tests
         run: make test
 
-      # `make release` also builds and signs dist/aether-android.apk in its
-      # pinned SDK container, and fails the release if apksigner cannot verify
-      # it. It lands before the checksums, so the glob below covers it.
+      # `make release` also builds and signs dist/aether-android.apk and
+      # dist/aether-android.aab in its pinned SDK container, and fails the
+      # release if either does not verify. They land before the checksums, so
+      # the glob below covers them.
       - name: Cross-compile the release matrix
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

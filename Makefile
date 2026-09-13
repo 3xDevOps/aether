@@ -95,18 +95,21 @@ ANDROID_RUN = docker run --rm \
 ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh '$(VERSION)' 2>/dev/null),1)
 
 # Release signing comes from the environment, never the tree: a keystore path
-# and the three secrets beside it. Without them the APK comes out unsigned and
-# is named for it, so a PR's build can never be mistaken for a release asset.
-# The release workflow refuses to run at all when the secrets are missing.
+# and the three secrets beside it. Without them the APK and the bundle come
+# out unsigned and are named for it, so a PR's build can never be mistaken for
+# a release asset. The release workflow refuses to run at all when the secrets
+# are missing.
 ifneq ($(ANDROID_KEYSTORE_FILE),)
 ANDROID_SIGNING := -v '$(ANDROID_KEYSTORE_FILE)':/keystore:ro \
 	-e ANDROID_KEYSTORE_FILE=/keystore \
 	-e ANDROID_KEYSTORE_PASSWORD -e ANDROID_KEY_ALIAS -e ANDROID_KEY_PASSWORD
 ANDROID_APK   := aether-android.apk
+ANDROID_AAB   := aether-android.aab
 ANDROID_BUILT := app-release.apk
 else
 ANDROID_SIGNING :=
 ANDROID_APK   := aether-android-unsigned.apk
+ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
@@ -171,8 +174,13 @@ public-audit:
 # The server binary embeds web/dist (web/embed.go), so the static dashboard
 # export is built before Go compiles. Bun installs dependencies; Node runs the
 # Next build.
-# The Android shell's unit tests and release APK, built in the pinned SDK
-# container.
+# The Android shell's unit tests, release APK and app bundle, built in the
+# pinned SDK container. The APK is for direct installs; the bundle is what
+# Google Play takes (docs/install.md). Both are signed with the same key.
+# apksigner does not read bundles, so the bundle is checked with jarsigner,
+# which exits 0 for an unsigned file and only says so; the grep is what
+# turns that into a failure. Its -strict would refuse every Android key,
+# which is self-signed by nature.
 android:
 	@mkdir -p $(DIST) '$(ANDROID_GRADLE_HOME)'
 	@if [ -n '$(ANDROID_KEYSTORE_FILE)' ] && [ ! -f '$(ANDROID_KEYSTORE_FILE)' ]; then \
@@ -181,14 +189,16 @@ android:
 	fi
 	@[ -z '$(ANDROID_SIGNING)' ] || sh scripts/android-version-code.sh '$(VERSION)' >/dev/null
 	$(ANDROID_RUN) $(ANDROID_SIGNING) $(ANDROID_IMAGE) \
-		./gradlew --console=plain test assembleRelease \
+		./gradlew --console=plain test assembleRelease bundleRelease \
 			'-PaetherVersionName=$(VERSION)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)
 	cp android/app/build/outputs/apk/release/$(ANDROID_BUILT) $(DIST)/$(ANDROID_APK)
+	cp android/app/build/outputs/bundle/release/app-release.aab $(DIST)/$(ANDROID_AAB)
 	@if [ -n '$(ANDROID_SIGNING)' ]; then \
-		docker run --rm -v '$(CURDIR)/$(DIST)':/dist $(ANDROID_IMAGE) \
-			$(ANDROID_APKSIGNER) verify --print-certs -v -Werr /dist/$(ANDROID_APK) || exit 1; \
+		docker run --rm -v '$(CURDIR)/$(DIST)':/dist $(ANDROID_IMAGE) sh -c \
+			'$(ANDROID_APKSIGNER) verify --print-certs -v -Werr /dist/$(ANDROID_APK) \
+			&& jarsigner -verify /dist/$(ANDROID_AAB) | tee /dev/stderr | grep -q "^jar verified"' || exit 1; \
 	else \
-		echo 'make android: no ANDROID_KEYSTORE_FILE in the environment, so $(DIST)/$(ANDROID_APK) is unsigned and cannot be installed or released'; \
+		echo 'make android: no ANDROID_KEYSTORE_FILE in the environment, so $(DIST)/$(ANDROID_APK) and $(DIST)/$(ANDROID_AAB) are unsigned and cannot be installed or released'; \
 	fi
 
 # A debuggable APK for a real phone. Gradle signs it with its own debug key,

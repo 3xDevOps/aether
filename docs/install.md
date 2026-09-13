@@ -683,8 +683,11 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 ## Android app
 
 Optional: a shell app that opens the server-hosted dashboard full screen on a
-phone. Every release carries `aether-android.apk` in its assets and in
-`checksums.txt`. It is not on the Play Store.
+phone. Every release carries two builds of it in its assets and in
+`checksums.txt`: `aether-android.apk` for installing straight from the release
+page, and `aether-android.aab`, the app bundle Google Play takes. It is not on
+Google Play yet; the listing material is in `android/listing/`. What the app
+stores and sends is in [privacy.md](privacy.md).
 
 The app holds no logic and no credential. It is a WebView locked to one HTTPS
 origin, so identity stays the phone's own tailnet login, resolved by the server
@@ -1165,19 +1168,27 @@ runs the unit tests, cross-compiles the full matrix with `make release`, writes
 publisher runs this release job on the self-hosted runner labeled `moss`;
 other publishers are skipped.
 
-`make release` also builds and signs the [Android app](#android-app) in a
-pinned SDK container, so the release needs Docker on the runner and four
-repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
-base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
-`ANDROID_KEY_PASSWORD`. The workflow decodes the keystore into the runner's
+`make release` also builds and signs the [Android app](#android-app), the
+APK and the app bundle, in a pinned SDK container, so the release needs
+Docker on the runner and four repository secrets: `ANDROID_KEYSTORE_B64`
+(the release keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. The workflow decodes the
+keystore into the runner's
 temp directory and deletes it when the build ends. It checks all four in its
 first step, so a missing one ends the release in seconds rather than after a
 build - an unsigned APK is worse than no APK, because nothing can update over
 it. A PKCS12 keystore, which is what `keytool` writes, holds one password for
 the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
 `ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. `apksigner
-verify` has to pass before the assets are uploaded. Keep the keystore: losing
-it means no published release can ever update an installed app again.
+verify` on the APK and `jarsigner -verify` on the bundle have to pass before
+the assets are uploaded. Keep the keystore: losing it means no published
+release can ever update an installed app again.
+
+On Google Play the same keystore is the upload key: Play App Signing re-signs
+what the store serves with a key of its own, so an install from Play and an
+install of the release APK never update each other unless the first Play
+release enrolls this key as the app signing key
+([android/listing/README.md](../android/listing/README.md#signing)).
 
 The APK's versionCode is the only thing Android compares when deciding
 whether an APK is an update, and it comes from the tag, through
