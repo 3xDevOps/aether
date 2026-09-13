@@ -748,9 +748,6 @@ func (s *Scheduler) recoverTerminals(ctx context.Context) error {
 	}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
 		return fmt.Errorf("scheduler: list terminal members: %w", err)
 	}
 	for _, member := range members {
@@ -766,17 +763,11 @@ func (s *Scheduler) recoverTerminals(ctx context.Context) error {
 		row, err := s.cfg.Store.GetTerminal(ctx, member.ID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			lock.Unlock()
-			if ctx.Err() != nil {
-				return nil
-			}
 			return fmt.Errorf("scheduler: recover terminal %q: %w", member.ID, err)
 		}
 		if adoptErr := s.recoverTerminalLocked(ctx, member, row); adoptErr != nil {
 			if s.lookupTerminal(member.ID) == nil {
 				lock.Unlock()
-				if ctx.Err() != nil {
-					return nil
-				}
 				return fmt.Errorf("scheduler: recover terminal %q: %w", member.ID, adoptErr)
 			}
 			slog.Warn("scheduler: recover terminal", "member", member.ID, "error", adoptErr)
