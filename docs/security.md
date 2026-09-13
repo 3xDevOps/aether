@@ -294,7 +294,9 @@ identify its callers.
   refuses mixed content. Certificate errors are never offered to the user to
   click through. A navigation off the dashboard's origin, `target=_blank`
   included, is handed to the phone's browser instead of being loaded with the
-  member's tailnet position behind it.
+  member's tailnet position behind it, and a scheme that is neither - an
+  `intent://` URL that would start another app with page-chosen extras - is
+  dropped.
 
 ### Both
 

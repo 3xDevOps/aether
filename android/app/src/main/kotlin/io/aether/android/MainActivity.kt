@@ -26,11 +26,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
-// Schemes the shell hands to the system. Everything else a page navigates to
-// is dropped rather than launched: an `intent://` URL is a way to start
-// another app with page-chosen extras.
-private val EXTERNAL_SCHEMES = setOf("http", "https", "mailto", "tel")
-
 /**
  * The whole shell: one WebView on the dashboard the server hosts on the
  * tailnet.
@@ -162,12 +157,16 @@ class MainActivity : ComponentActivity() {
                     val target = request.url
                     // Multiple windows are unsupported, so `target=_blank`
                     // and `window.open` arrive here as top-level navigations
-                    // too. blob:, data: and about: are the page's own.
-                    if (target.scheme?.lowercase() !in EXTERNAL_SCHEMES) return false
-                    val base = loaded
-                    if (base != null && isDashboardUrl(base, target.toString())) return false
-                    openExternally(target)
-                    return true
+                    // too.
+                    val decision =
+                        navigationFor(
+                            loaded,
+                            target.toString(),
+                            target.scheme?.lowercase(),
+                            request.isForMainFrame,
+                        )
+                    if (decision == Navigation.EXTERNAL) openExternally(target)
+                    return decision != Navigation.LOAD
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -216,6 +215,10 @@ class MainActivity : ComponentActivity() {
     private fun open(intent: Intent?) {
         val base = storedDashboardUrl()
         if (base == null) {
+            // A deep link that arrives before a server address is set is
+            // dropped here: setup is a separate Activity, and carrying the
+            // link through it would have to survive the member abandoning
+            // that screen. Tapping the link again after setup works.
             openSetup()
             finish()
             return
