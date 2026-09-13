@@ -17,7 +17,6 @@ export const themeColor = {
  * launcher icon has to read as an object against a wallpaper, not blend into
  * a page - so the splash lightens slightly as the SPA paints over it.
  *
- * `scripts/make-icons.py` renders the tiles on this same hex, and the Electron
- * window uses it to avoid a white flash before first paint.
+ * `scripts/make-icons.py` renders the tiles on this same hex.
  */
 export const iconBackground = '#0a0a0a'
