@@ -457,10 +457,10 @@ func New(cfg Config) (*Scheduler, error) {
 
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverRuns(ctx); err != nil {
-		return err
+		return recoveryError(err)
 	}
 	if err := s.recoverTerminals(ctx); err != nil {
-		return err
+		return recoveryError(err)
 	}
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
@@ -490,6 +490,27 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.sweepCheckouts(ctx)
 		}
 	}
+}
+
+// recoveryError drops a recovery failure the caller's own shutdown caused.
+// Cancelling the scheduler's context aborts the store calls a recovery pass
+// runs under, and a caller that stopped the scheduler must see that as the
+// clean shutdown the Start loop reports, not as a failed start. Only the
+// cancellation itself is dropped: Server.Run reports whatever Start returns
+// as the reason the server went down, so a real failure that a shutdown
+// merely raced still has to reach it.
+//
+// Matching the error rather than the context is exact for the store calls a
+// recovery pass makes. modernc.org/sqlite checks the context before it steps
+// a statement and replaces its own SQLITE_INTERRUPT with ctx.Err() whenever
+// the cancellation interrupted one, and database/sql closes a Rows with
+// ctx.Err(), so a cancelled query, scan, or iteration all wrap
+// context.Canceled.
+func recoveryError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	return err
 }
 
 // Close stops supervision and the Start loops. Containers keep running.

@@ -92,6 +92,18 @@ func (s *Service) loop(ctx context.Context) {
 // next slot from now, which is how a schedule missed while the server was
 // down is skipped instead of caught up.
 func (s *Service) scan(ctx context.Context, fire bool) error {
+	// SaveSchedule seeds a timer after its row is committed, so a schedule
+	// saved while this listing is in flight is missing from the listing and
+	// present in the map. Both halves of that window are decided against
+	// this snapshot: a timer absent from it was seeded during the listing
+	// and must not be pruned, and a timer whose rule has moved since it was
+	// taken must not be rebuilt from the listing's older row.
+	s.mu.Lock()
+	before := make(map[string]string, len(s.timers))
+	for id, t := range s.timers {
+		before[id] = t.spec
+	}
+	s.mu.Unlock()
 	schedules, err := s.store.ListSchedules(ctx, "")
 	if err != nil {
 		return fmt.Errorf("templates: list schedules: %w", err)
@@ -105,6 +117,11 @@ func (s *Service) scan(ctx context.Context, fire bool) error {
 		live[sc.ID] = struct{}{}
 		t, ok := s.timers[sc.ID]
 		if !ok || t.spec != sc.Cron {
+			// The timer moved since the snapshot: SaveSchedule seeded
+			// the newer rule and this listing's row is the stale one.
+			if ok && before[sc.ID] != t.spec {
+				continue
+			}
 			rule, perr := cron.ParseStandard(sc.Cron)
 			if perr != nil {
 				slog.Warn("templates: unparseable cron", "schedule", sc.ID, "cron", sc.Cron, "error", perr)
@@ -123,7 +140,7 @@ func (s *Service) scan(ctx context.Context, fire bool) error {
 		t.next = t.rule.Next(now)
 		due = append(due, sc)
 	}
-	for id := range s.timers {
+	for id := range before {
 		if _, ok := live[id]; !ok {
 			delete(s.timers, id)
 		}

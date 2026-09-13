@@ -306,3 +306,149 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 
 // testPublicKey is a throwaway key: members need one identity.
 const testPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF3jVX1WCbXCEjHVFVBExpFvhOsSJfLNJDDXCM4Q3xJd test"
+
+// listGateStore holds the first ListSchedules open until the test releases
+// it, which is the window a concurrent SaveSchedule lands in.
+type listGateStore struct {
+	store.Store
+	once     sync.Once
+	released sync.Once
+	listed   chan struct{}
+	release  chan struct{}
+}
+
+func (g *listGateStore) ListSchedules(ctx context.Context, workspace domain.WorkspaceID) ([]*store.Schedule, error) {
+	out, err := g.Store.ListSchedules(ctx, workspace)
+	g.once.Do(func() {
+		close(g.listed)
+		<-g.release
+	})
+	return out, err
+}
+
+func (g *listGateStore) open() { g.released.Do(func() { close(g.release) }) }
+
+// gateEnv is the fixture the two save-during-a-scan tests share: a service
+// over a store whose first schedule listing the test holds open, and one
+// template ready to schedule.
+type gateEnv struct {
+	svc      *Service
+	gate     *listGateStore
+	ws       domain.WorkspaceID
+	tpl      string
+	owner    domain.MemberID
+	scanned  chan error
+	waitOnce sync.Once
+	scanErr  error
+}
+
+func newGateEnv(t *testing.T, clock *fakeClock) *gateEnv {
+	t.Helper()
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("bus: %v", err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+
+	m := &domain.Member{DisplayName: "Ada", PublicKey: testPublicKey, Color: "#e6194b", Role: domain.RoleCollaborator}
+	if err = db.CreateMember(ctx, m); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	ws := &domain.Workspace{Name: "proj", BaseBranch: domain.DefaultBaseBranch}
+	if err = db.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	tpl := &store.Template{WorkspaceID: ws.ID, Name: "nightly-deps", Task: "sweep", Harness: "claude", Mode: domain.LaunchHeadless}
+	if err = db.SaveTemplate(ctx, tpl); err != nil {
+		t.Fatalf("save template: %v", err)
+	}
+	gate := &listGateStore{Store: db, listed: make(chan struct{}), release: make(chan struct{})}
+	svc, err := New(Config{Store: gate, Bus: bus, Runs: &recordingLauncher{}, Now: clock.now})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return &gateEnv{svc: svc, gate: gate, ws: ws.ID, tpl: tpl.Name, owner: m.ID}
+}
+
+// startScan runs one scan and returns once its listing is held open. The
+// cleanup waits too, so an assertion that fails before waitScan cannot leave
+// the scan goroutine blocked in the gate or racing the store close.
+func (e *gateEnv) startScan(t *testing.T) {
+	t.Helper()
+	e.scanned = make(chan error, 1)
+	go func() { e.scanned <- e.svc.scan(context.Background(), false) }()
+	t.Cleanup(func() { _ = e.waitScan() })
+	<-e.gate.listed
+}
+
+func (e *gateEnv) waitScan() error {
+	e.waitOnce.Do(func() {
+		e.gate.open()
+		e.scanErr = <-e.scanned
+	})
+	return e.scanErr
+}
+
+// A schedule saved while a scan's listing is in flight is missing from that
+// listing and present in the timer map. Pruning the map against the stale
+// listing would drop the slot SaveSchedule just seeded, and the next scan
+// would re-seed it from a later now - silently moving the first fire a slot
+// out, or losing it entirely against a clock that is not advancing.
+func TestScheduleSavedDuringAScanKeepsItsSeededSlot(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
+	e := newGateEnv(t, clock)
+
+	e.startScan(t)
+	saved, err := e.svc.SaveSchedule(context.Background(), e.ws, e.tpl, "* * * * *", e.owner)
+	if err != nil {
+		t.Fatalf("SaveSchedule: %v", err)
+	}
+	if scanErr := e.waitScan(); scanErr != nil {
+		t.Fatalf("scan: %v", scanErr)
+	}
+
+	if next := e.svc.nextFire(saved.Schedule.ID); !next.Equal(saved.Next) {
+		t.Fatalf("next fire after the scan = %v, want the seeded %v", next, saved.Next)
+	}
+}
+
+// Re-saving a schedule with a new rule lands in the same window from the
+// other side: the stale listing carries the old rule and the timer carries
+// the new one, so the schedule is present in both and the prune guard alone
+// does not cover it. Rebuilding the timer from the stale row would throw
+// away the slot SaveSchedule just returned, reporting the old rule's next
+// fire everywhere it is shown and skipping the new rule's first slot when it
+// falls before the next scan.
+func TestScheduleRuleChangedDuringAScanKeepsItsSeededSlot(t *testing.T) {
+	ctx := context.Background()
+	clock := &fakeClock{t: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
+	e := newGateEnv(t, clock)
+
+	first, err := e.svc.SaveSchedule(ctx, e.ws, e.tpl, "0 4 * * *", e.owner)
+	if err != nil {
+		t.Fatalf("SaveSchedule: %v", err)
+	}
+	e.startScan(t)
+	resaved, err := e.svc.SaveSchedule(ctx, e.ws, e.tpl, "0 5 * * *", e.owner)
+	if err != nil {
+		t.Fatalf("re-save SaveSchedule: %v", err)
+	}
+	if scanErr := e.waitScan(); scanErr != nil {
+		t.Fatalf("scan: %v", scanErr)
+	}
+
+	// A re-save upserts on the template, so this is the same schedule with a
+	// new rule rather than a new row the prune guard would already cover.
+	if resaved.Schedule.ID != first.Schedule.ID {
+		t.Fatalf("re-saved schedule id = %q, want the upserted %q", resaved.Schedule.ID, first.Schedule.ID)
+	}
+	if next := e.svc.nextFire(resaved.Schedule.ID); !next.Equal(resaved.Next) {
+		t.Fatalf("next fire after the scan = %v, want the seeded %v", next, resaved.Next)
+	}
+}
