@@ -48,6 +48,13 @@ make test-scripts
 make public-audit
 ```
 
+The Android shell builds and tests in a container pinned by digest, so it
+needs Docker and nothing else:
+
+```sh
+make android
+```
+
 The integration suite needs Docker and real git:
 
 ```sh
@@ -140,6 +147,7 @@ feat(cli)!: drop the aether dash command
 - `internal/` contains the server, protocol, storage, runtime, and dashboard
   packages.
 - `web/` contains the embedded dashboard source.
+- `desktop/` and `android/` are the two thin shells around the dashboard.
 - `docs/` contains public operational and protocol documentation.
 
 `CLAUDE.md` carries the same public guidance for tools that look for that file.

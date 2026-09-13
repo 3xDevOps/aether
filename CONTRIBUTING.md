@@ -17,7 +17,7 @@ coding agents, built as a Go server, a Go CLI, and an embedded web dashboard.
 | Go | 1.25+ | Server and CLI |
 | GNU make | any recent | Build and checks |
 | Bun | 1.3+ | Dashboard build and tests |
-| Docker | recent | Integration tests and server runtime |
+| Docker | recent | Integration tests, server runtime, and the Android APK build |
 | git | recent | Integration tests and workspace transport |
 | Node | 22+ | Next dashboard build and dev server, plus desktop installers from `desktop/` |
 
@@ -45,6 +45,12 @@ make vet
 make lint
 make test
 make public-audit
+```
+
+The Android shell has its own build and tests, in a container:
+
+```sh
+make android
 ```
 
 `make lint` runs golangci-lint under the toolchain pinned in `go.mod`, the same
@@ -138,6 +144,50 @@ desktop app's into `desktop/build/`, the web app manifest's and the iOS
 home-screen one into `web/public/icons/`, and the phone app's launcher icons
 into `android/app/src/main/res/mipmap-*`. Regenerate them all with `python3
 scripts/make-icons.py` after the mark changes, and commit what it wrote.
+
+### Android shell
+
+`android/` is a Kotlin WebView shell around the server-hosted dashboard; see
+[docs/install.md](docs/install.md#android-app) for what it does. No Android
+SDK is installed on any machine, contributor or runner. The APK is built in a
+container the `Makefile` pins by digest (`ghcr.io/cirruslabs/android-sdk:36`:
+JDK 21, the API 36 platform, build-tools 36.0.0, licenses pre-accepted), which
+is what CI and the release job use too, so a local build and a released one
+run the same toolchain:
+
+```sh
+make android
+```
+
+That runs the app's JUnit tests and writes `dist/aether-android-unsigned.apk`.
+With signing variables in the environment it writes `dist/aether-android.apk`
+instead and fails unless `apksigner verify` passes:
+
+```sh
+ANDROID_KEYSTORE_FILE=/path/outside/the/checkout/throwaway.jks \
+ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=... \
+  make android
+```
+
+Generate a throwaway keystore with `keytool -genkeypair -keyalg RSA -keysize
+2048` and keep it outside the checkout. The release keystore is never on a
+developer machine: the release workflow decodes it from `ANDROID_KEYSTORE_B64`
+into the runner's temp directory and deletes it afterwards
+([docs/install.md](docs/install.md#releases)).
+
+`make release` builds the APK as part of the matrix, so it needs Docker as
+well as Go, Node and Bun.
+
+Gradle's caches live in `~/.cache/aether/android-gradle`; set
+`ANDROID_GRADLE_HOME` to move them. The wrapper and its distribution checksum
+are committed, and every plugin and library version is pinned in
+`android/gradle/libs.versions.toml`. AGP carries its own Kotlin compiler, so
+there is no separate Kotlin plugin version. `androidx.core` is held at the
+newest release that compiles against API 36, because that is the only platform
+the container carries; a newer one fails the build with the SDK level it wants.
+
+Android Studio opens `android/` directly and uses its own SDK. Nothing in the
+app depends on the container beyond the platform version.
 
 ## Development deploy
 

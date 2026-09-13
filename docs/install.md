@@ -680,6 +680,57 @@ is on your `PATH`; `aether version` prints the commit it was built from.
 Building installers (`.dmg`, `.exe`, AppImage) from a checkout and code signing
 are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
+## Android app
+
+Optional: a shell app that opens the server-hosted dashboard full screen on a
+phone. Every release carries `aether-android.apk` in its assets and in
+`checksums.txt`. It is not on the Play Store.
+
+The app holds no logic and no credential. It is a WebView locked to one HTTPS
+origin, so identity stays the phone's own tailnet login, resolved by the server
+on every request ([networking.md](networking.md#the-dashboard)). Two things
+have to be true first: the server has `web-port` set, and the phone is signed
+in to the same tailnet.
+
+1. Open the release page in the phone's browser and download
+   `aether-android.apk`. Check it against its line in `checksums.txt` if you
+   want to.
+2. Android asks once for permission to install apps from that browser. Allow
+   it, then open the downloaded file.
+3. The first screen asks for the server name. Type its MagicDNS name, for
+   example `my-server.tailnet-name.ts.net`. A pasted
+   `https://my-server.tailnet-name.ts.net/` works too, and a port other than
+   443 goes on the end: `my-server.tailnet-name.ts.net:8443`. `http://` is
+   refused rather than upgraded.
+4. The dashboard opens at the board, already identified. There is no sign-in.
+
+To change the address later, long-press the app icon and pick **Server
+address**. An address that does not resolve leaves the WebView's own error page
+on screen, which names what actually failed, with a **Server address** button
+on it.
+
+`aether://run/<id>` opens the app on that run, the same link the desktop shell
+handles.
+
+The back gesture walks the dashboard's history and then sends the app to the
+background instead of closing it, so a terminal keeps its scrollback. Links
+that leave the dashboard, such as an agent's OAuth page, open in the phone's
+browser.
+
+**Updates install over the old version**, because every release is signed with
+the same key. An APK built from a checkout is signed with a different key or
+not at all, so Android refuses it as an update; uninstall first, which also
+drops the stored server name.
+
+The app needs a WebView from Chromium 136 or newer to paint under the status
+and navigation bars the way the dashboard expects. On an older one the app
+pads for those bars itself, which costs the edge-to-edge look and nothing
+else. WebView updates through the Play Store independently of the Android
+version.
+
+Building the APK from a checkout is in
+[CONTRIBUTING.md](../CONTRIBUTING.md#android-shell).
+
 ## Server prerequisites
 
 - **Linux.** Windows and macOS are client platforms.
@@ -1113,6 +1164,17 @@ runs the unit tests, cross-compiles the full matrix with `make release`, writes
 `checksums.txt`, and uploads the binaries and standard image. Only an admin
 publisher runs this release job on the self-hosted runner labeled `moss`;
 other publishers are skipped.
+
+`make release` also builds and signs the [Android app](#android-app) in a
+pinned SDK container, so the release needs Docker on the runner and four
+repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
+base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
+`ANDROID_KEY_PASSWORD`. The workflow decodes the keystore into the runner's
+temp directory, deletes it when the build ends, and fails before building
+anything if a secret is missing - an unsigned APK is worse than no APK,
+because nothing can update over it. `apksigner verify` has to pass before the
+assets are uploaded. Keep the keystore: losing it means no published release
+can ever update an installed app again.
 
 If the release workflow fails after building, rerun it for the published
 release. The publisher uploads missing assets to the existing release and

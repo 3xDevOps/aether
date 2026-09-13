@@ -2235,3 +2235,22 @@ journalctl -u aether-server -f
 
 Prerequisites and the refusals a bad tailnet setup produces are in
 [networking.md](networking.md#the-dashboard).
+
+The [Android app](install.md#android-app) is the same page in a WebView, so
+the same expectations hold there. It is worth checking separately for two
+things the browser does not exercise: whether the title bar and status bar
+clear the system bars, which depends on the WebView forwarding safe-area
+insets, and whether the soft keyboard shortens the layout rather than covering
+it.
+
+```sh
+make android-debug
+adb install -r dist/aether-android-debug.apk
+```
+
+A debug APK allows `chrome://inspect` from a computer on the same USB
+connection, which is how to read the page's console and its computed
+`env(safe-area-inset-*)` values on the device. A release APK does not. The
+shell falls back to padding for the system bars itself on a WebView older
+than Chromium 136, so check `chrome://version` on the phone before
+concluding the page is wrong.
