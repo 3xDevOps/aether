@@ -141,8 +141,9 @@ from real runners; treat cross-builds as test artifacts.
 
 Every icon Aether ships is generated from `web/public/aether-mark.png` - the
 desktop app's into `desktop/build/`, the web app manifest's and the iOS
-home-screen one into `web/public/icons/`, and the phone app's launcher icons
-into `android/app/src/main/res/mipmap-*`. Regenerate them all with `python3
+home-screen one into `web/public/icons/`, the phone app's launcher icons
+into `android/app/src/main/res/mipmap-*`, and the Play listing's feature
+graphic into `android/listing/`. Regenerate them all with `python3
 scripts/make-icons.py` after the mark changes, and commit what it wrote.
 
 ### Android shell
@@ -188,6 +189,13 @@ part of `make test-scripts`, covers the mapping and its ordering.
 
 `make release` builds the APK as part of the matrix, so it needs Docker as
 well as Go, Node and Bun.
+
+The Play listing's texts, reviewer instructions, data safety answers and
+feature graphic live in `android/listing/`
+([its README](android/listing/README.md) maps each to a console field), and
+the privacy policy the listing and the app link to is
+[docs/privacy.md](docs/privacy.md). A change to what the app stores or sends
+changes all three.
 
 Gradle's caches live in `~/.cache/aether/android-gradle`; set
 `ANDROID_GRADLE_HOME` to move them. The wrapper and its distribution checksum
