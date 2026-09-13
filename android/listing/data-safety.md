@@ -12,6 +12,13 @@ to the member's server is declared as collected, even though the publisher
 never receives it. Declaring it cannot be held against the app; leaving it out
 can.
 
+What the dashboard keeps on the phone itself - its appearance settings, the
+last workspace and board grouping, the harness last launched per agent
+account, dismissed update notices - is not declared: "User data accessed by
+your app that is only processed locally on the user's device and not sent off
+device does not need to be disclosed." [docs/privacy.md](../../docs/privacy.md)
+lists it in full.
+
 ## Overview
 
 | Question | Answer |

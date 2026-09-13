@@ -15,9 +15,16 @@ about this policy go to <https://github.com/3xDevOps/Aether/issues>.
 - **The server name you type on the first screen**, in the app's private
   storage. Nothing else the app writes is its own.
 - **The WebView's ordinary cache** of the dashboard's files, and the
-  dashboard's own local storage of your view preferences: theme, terminal font
-  size, dock heights, sidebar width, the workspace you were last in. Both are
-  private to the app and last until you uninstall it.
+  dashboard's own local record of how you use it. That record holds how the
+  dashboard looks (theme, sidebar width and whether it is collapsed, terminal
+  font size, dock heights, diff wrapping); where you were (the workspace you
+  last opened, how the board is grouped, whether you take control of a
+  terminal when you open one); which harness you last launched for each of
+  your agent accounts; which update notices you dismissed, by version; and
+  the setup wizard's progress, which stays empty on a phone because that
+  wizard only runs in the desktop `aether gui`. The dashboard writes it,
+  nothing reads it but the dashboard, and it lasts until you uninstall the
+  app. Both are private to the app.
 
 No account, password, token, cookie or key is stored. There is no sign-in:
 the phone's Tailscale login identifies it to your server
