@@ -7,6 +7,7 @@
     <string name="setup_label">Server name</string>
     <string name="setup_hint">my-server.tailnet-name.ts.net</string>
     <string name="setup_open">Open dashboard</string>
+    <string name="setup_privacy">The app stores the server name and sends nothing anywhere but that server. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md</string>
 
     <string name="server_address">Server address</string>
     <string name="server_address_short">Server</string>

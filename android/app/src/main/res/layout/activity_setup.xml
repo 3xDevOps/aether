@@ -60,5 +60,15 @@
             android:layout_marginTop="24dp"
             android:minHeight="48dp"
             android:text="@string/setup_open" />
+
+        <!-- Google Play requires a privacy policy link inside the app, and
+             this screen is the only one the shell draws itself. -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:autoLink="web"
+            android:text="@string/setup_privacy"
+            android:textAppearance="?android:attr/textAppearanceSmall" />
     </LinearLayout>
 </ScrollView>
