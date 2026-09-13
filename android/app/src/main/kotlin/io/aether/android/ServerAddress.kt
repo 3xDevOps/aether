@@ -65,6 +65,12 @@ fun isDashboardUrl(base: String, target: String): Boolean {
 }
 
 private fun origin(url: String): String? {
+    // java.net.URI refuses characters Chromium leaves unescaped in a query or
+    // fragment ("[", "]", "|", "^", "{", "}"), so a same-origin link carrying
+    // one reads as off-origin and opens in the phone's browser. No dashboard
+    // URL carries them - its routing lives in the store, not the path. The
+    // fix, if one ever does, is to percent-encode before parsing: android.net
+    // .Uri would parse them but is not available to these unit tests.
     val uri =
         try {
             URI(url)
