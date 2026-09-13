@@ -292,15 +292,17 @@ identify its callers.
   listener: the address screen refuses a `http://` URL, the app's network
   security config forbids cleartext for the whole process, and the WebView
   refuses mixed content. Certificate errors are never offered to the user to
-  click through. A navigation off the dashboard's origin, `target=_blank`
-  included, is handed to the phone's browser instead of being loaded with the
-  member's tailnet position behind it, and a scheme that is neither - an
-  `intent://` URL that would start another app with page-chosen extras - is
-  dropped. WebView Safe Browsing is turned off in the manifest, because it
-  checks every navigation's URL hash prefixes through Play services: on a
-  WebView that only ever loads the member's own server it would send that
-  server's tailnet name off the phone and protect nothing, while the browser
-  that gets every other link runs its own.
+  click through. A link or script navigation off the dashboard's origin,
+  `target=_blank` included, is handed to the phone's browser instead of being
+  loaded with the member's tailnet position behind it, and a scheme that is
+  neither - an `intent://` URL that would start another app with page-chosen
+  extras - is dropped. WebView Safe Browsing is turned off in the manifest.
+  It matches each URL against a hash-prefix list held on the device and, on a
+  match, asks Google about that 4-byte prefix - never the URL or the host. On
+  a WebView that only ever loads the member's own server it protects nothing,
+  because every other link goes to the phone's browser, which runs its own
+  check; off is the setting under which nothing about a navigation reaches
+  Play services at all.
 
 ### Both
 

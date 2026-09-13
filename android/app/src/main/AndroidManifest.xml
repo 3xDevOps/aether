@@ -14,12 +14,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Aether">
 
-        <!-- Safe Browsing checks a URL's hash prefixes through Play services.
-             This WebView only ever loads one origin, the member's own server,
-             and hands every other link to the phone's browser - which runs
-             its own Safe Browsing. Leaving it on would send the tailnet name
-             of a private server off the phone and protect nothing
-             (docs/security.md). -->
+        <!-- Safe Browsing matches each URL against a hash-prefix list held
+             on the device and, on a match, asks Google about that 4-byte
+             prefix - never the URL or the host. This WebView only ever loads
+             one origin, the member's own server, and hands every other link
+             to the phone's browser, which runs its own check, so it protects
+             nothing here; off is the setting under which no navigation
+             reaches Play services at all (docs/security.md). -->
         <meta-data
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="false" />
