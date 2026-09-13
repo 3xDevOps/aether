@@ -135,7 +135,8 @@ from real runners; treat cross-builds as test artifacts.
 
 Every icon Aether ships is generated from `web/public/aether-mark.png` - the
 desktop app's into `desktop/build/`, the web app manifest's and the iOS
-home-screen one into `web/public/icons/`. Regenerate them all with `python3
+home-screen one into `web/public/icons/`, and the phone app's launcher icons
+into `android/app/src/main/res/mipmap-*`. Regenerate them all with `python3
 scripts/make-icons.py` after the mark changes, and commit what it wrote.
 
 ## Development deploy

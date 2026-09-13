@@ -1,0 +1,18 @@
+# Everything the Android shell resolves is pinned here. No version ranges: the
+# APK has to be reproducible from a tag. AGP carries its own Kotlin compiler
+# since 9.0, so there is no Kotlin plugin version to keep in step with it.
+[versions]
+agp = "9.4.0"
+androidx-activity = "1.13.0"
+# 1.18.0 is the newest androidx.core that compiles against the API 36
+# platform the pinned container carries; 1.19.0 demands API 37.
+androidx-core = "1.18.0"
+junit = "4.13.2"
+
+[libraries]
+androidx-activity = { module = "androidx.activity:activity", version.ref = "androidx-activity" }
+androidx-core = { module = "androidx.core:core", version.ref = "androidx-core" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The WebView fills the window edge to edge; the dashboard pads itself back
+     out of the cutout and the navigation bar with env(safe-area-inset-*). The
+     button is the way back to the setup screen when a load fails, and sits
+     over the WebView's own error page rather than replacing it. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background">
+
+    <WebView
+        android:id="@+id/web"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <Button
+        android:id="@+id/change_server"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_margin="@dimen/edge_margin"
+        android:text="@string/server_address"
+        android:visibility="gone" />
+</FrameLayout>

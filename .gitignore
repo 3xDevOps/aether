@@ -56,6 +56,13 @@ desktop/node_modules/
 desktop/dist/
 desktop/package-lock.json
 
+# Android shell. Gradle's outputs and caches stay out of git; the wrapper, its
+# distribution checksum and the generated launcher icons are committed.
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
 # Editor/IDE
 # .idea/
 # .vscode/

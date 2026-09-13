@@ -65,7 +65,46 @@ WIN_MAJOR   = $(word 1,$(subst ., ,$(WIN_VERSION)))
 WIN_MINOR   = $(word 2,$(subst ., ,$(WIN_VERSION)))
 WIN_PATCH   = $(word 3,$(subst ., ,$(WIN_VERSION)))
 
-.PHONY: all build test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard release deploy clean
+# The Android shell. No runner has an Android SDK and none should install one,
+# so the APK is built in a container pinned by digest - the same one a
+# contributor builds in. Gradle's dependency cache lives outside the tree and
+# survives between builds. See docs/install.md and CONTRIBUTING.md.
+ANDROID_IMAGE       := ghcr.io/cirruslabs/android-sdk@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
+ANDROID_GRADLE_HOME ?= $(HOME)/.cache/aether/android-gradle
+ANDROID_APKSIGNER   := /opt/android-sdk-linux/build-tools/36.0.0/apksigner
+
+# The container runs as the invoking user so build outputs are not root-owned,
+# which leaves HOME unwritable - Gradle needs both HOME and GRADLE_USER_HOME
+# pointed at the mounted cache.
+ANDROID_RUN = docker run --rm \
+	-u $$(id -u):$$(id -g) \
+	-v '$(CURDIR)/android':/src -w /src \
+	-v '$(ANDROID_GRADLE_HOME)':/gradle \
+	-e HOME=/gradle -e GRADLE_USER_HOME=/gradle
+
+# versionCode has to rise with every release and cannot be derived from the
+# tag, because alphas of one version share its x.y.z. The tagged commit's
+# count rises monotonically and is the same number on a rebuild of that
+# commit. Assigned lazily - only `android` reads it.
+ANDROID_VERSION_CODE = $(or $(shell git rev-list --count HEAD 2>/dev/null),1)
+
+# Release signing comes from the environment, never the tree: a keystore path
+# and the three secrets beside it. Without them the APK comes out unsigned and
+# is named for it, so a PR's build can never be mistaken for a release asset.
+# The release workflow refuses to run at all when the secrets are missing.
+ifneq ($(ANDROID_KEYSTORE_FILE),)
+ANDROID_SIGNING := -v '$(ANDROID_KEYSTORE_FILE)':/keystore:ro \
+	-e ANDROID_KEYSTORE_FILE=/keystore \
+	-e ANDROID_KEYSTORE_PASSWORD -e ANDROID_KEY_ALIAS -e ANDROID_KEY_PASSWORD
+ANDROID_APK   := aether-android.apk
+ANDROID_BUILT := app-release.apk
+else
+ANDROID_SIGNING :=
+ANDROID_APK   := aether-android-unsigned.apk
+ANDROID_BUILT := app-release-unsigned.apk
+endif
+
+.PHONY: all build test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
 
 all: build
 
@@ -125,6 +164,36 @@ public-audit:
 # The server binary embeds web/dist (web/embed.go), so the static dashboard
 # export is built before Go compiles. Bun installs dependencies; Node runs the
 # Next build.
+# The Android shell's unit tests and release APK, built in the pinned SDK
+# container.
+android:
+	@mkdir -p $(DIST) '$(ANDROID_GRADLE_HOME)'
+	@if [ -n '$(ANDROID_KEYSTORE_FILE)' ] && [ ! -f '$(ANDROID_KEYSTORE_FILE)' ]; then \
+		echo 'make android: ANDROID_KEYSTORE_FILE does not name a file: $(ANDROID_KEYSTORE_FILE)' >&2; \
+		exit 1; \
+	fi
+	$(ANDROID_RUN) $(ANDROID_SIGNING) $(ANDROID_IMAGE) \
+		./gradlew --console=plain test assembleRelease \
+			'-PaetherVersionName=$(VERSION)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)
+	cp android/app/build/outputs/apk/release/$(ANDROID_BUILT) $(DIST)/$(ANDROID_APK)
+	@if [ -n '$(ANDROID_SIGNING)' ]; then \
+		docker run --rm -v '$(CURDIR)/$(DIST)':/dist $(ANDROID_IMAGE) \
+			$(ANDROID_APKSIGNER) verify --print-certs -v -Werr /dist/$(ANDROID_APK) || exit 1; \
+	else \
+		echo 'make android: no ANDROID_KEYSTORE_FILE in the environment, so $(DIST)/$(ANDROID_APK) is unsigned and cannot be installed or released'; \
+	fi
+
+# A debuggable APK for a real phone. Gradle signs it with its own debug key,
+# so `adb install` takes it and `chrome://inspect` can attach to its WebView -
+# neither of which an unsigned release APK allows. It never updates over a
+# released install, and a released APK never updates over it.
+# See docs/dashboard-frontend.md.
+android-debug:
+	@mkdir -p $(DIST) '$(ANDROID_GRADLE_HOME)'
+	$(ANDROID_RUN) $(ANDROID_IMAGE) ./gradlew --console=plain assembleDebug
+	cp android/app/build/outputs/apk/debug/app-debug.apk $(DIST)/aether-android-debug.apk
+	@echo 'built $(DIST)/aether-android-debug.apk; install it with: adb install -r $(DIST)/aether-android-debug.apk'
+
 dashboard:
 	@command -v $(BUN) >/dev/null 2>&1 || { \
 		echo "make dashboard: $(BUN) not found - install Bun 1.3+ (https://bun.sh) to build the dashboard in web/"; \
@@ -170,6 +239,8 @@ release: dashboard
 		echo "building $$out"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether || exit 1; \
 	done
+	@$(MAKE) android
 
 clean:
-	rm -rf $(DIST) cmd/aether/resource_windows_*.syso
+	rm -rf $(DIST) cmd/aether/resource_windows_*.syso \
+		android/.gradle android/build android/app/build

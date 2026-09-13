@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- allowBackup is off because the only stored state is the server
+         address, which the first-run screen asks for anyway. -->
+    <application
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Aether">
+
+        <!-- singleTask so an aether://run/<id> link reuses the running window
+             instead of stacking another WebView. The config changes are
+             handled in place: recreating the Activity would reload the
+             dashboard and lose the terminal's scrollback on every rotation
+             and every switch between light and dark. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="run"
+                    android:scheme="aether" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Exported because the launcher process starts it from the static
+             shortcut. It reads no intent extras and holds no authority: the
+             worst another app can do is show this form. -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+</manifest>
