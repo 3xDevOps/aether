@@ -34,9 +34,10 @@ test('a phone is served everything it needs to install the dashboard', async ({
     '/manifest.webmanifest',
   )
 
-  // `page.request` carries none of the page's context, which is the point:
-  // the browser fetches these before anyone is signed in, and the installed
-  // app starts at `/` with no token in the URL.
+  // The gui gateway authenticates by a bearer header or a `?token=` query,
+  // and these requests carry neither - which is the shape that matters: a
+  // browser fetches the manifest and the icons before anyone is signed in,
+  // and the installed app starts at `/` with no token in the URL.
   const origin = new URL(alice.url).origin
   const response = await page.request.get(origin + '/manifest.webmanifest')
   expect(response.status()).toBe(200)
@@ -62,7 +63,8 @@ test('a phone is served everything it needs to install the dashboard', async ({
     expect(image.headers()['content-type'], icon.src).toBe('image/png')
   }
 
-  // iOS reads no manifest; its home-screen icon is the link tag alone.
+  // Safari reads the manifest but prefers an `apple-touch-icon` over its
+  // icons, so the link tag is what an iPhone actually puts on a home screen.
   const apple = '/icons/apple-touch-icon.png'
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', apple)
   expect((await page.request.get(origin + apple)).status()).toBe(200)

@@ -151,17 +151,33 @@ collect a metadata route that has not declared itself static, which is what the
 `export const dynamic = 'force-static'` in it is for.
 
 It declares `display: standalone` and `start_url: '/'`, and names four icons
-from `web/public/icons/`: 192px and 512px in both `any` and `maskable`. Those
-two sizes are what Chrome requires before it offers to install an app. No
-service worker ships - Chrome stopped requiring one for the install entry in
-version 108 on Android and 112 on desktop, and the dashboard could not cache
-anyway, because it lives inside the server binary and has to change with it.
+from `web/public/icons/`: 192px and 512px in both `any` and `maskable`. 192 and
+512 are the pair Chrome and MDN document; what the installability check
+enforces is lower - one `any` icon of at least 144px - so shipping both
+documented sizes is belt and braces. No service worker ships. Chromium's
+installability check no longer looks for one; the post announcing the removal
+([update-install-criteria](https://developer.chrome.com/blog/update-install-criteria))
+scopes it to installing "from the menu, since version 108 on mobile and 112 on
+Desktop". The dashboard could not cache anyway, because it lives inside the
+server binary and has to change with it.
+
+**Both mobile browsers read the manifest.** Safari has since iOS 11.3
+(`display`, `name`, `short_name`, `start_url`, `scope`), with `theme_color`
+since 15 and `icons` since 15.4, so an iPhone's standalone window comes from
+the manifest, not from the layout's Apple meta tags. Those tags cover what a
+manifest cannot say: the status bar style, which needs
+`apple-mobile-web-app-capable` spelled out by hand because Next 16 emits only
+the unprefixed `mobile-web-app-capable`. `web/public/icons/apple-touch-icon.png`
+stays because Safari prefers it over the manifest icons.
 
 A manifest carries one `theme_color` where the layout's viewport export carries
 one per colour scheme, so both read `web/src/app/theme-color.ts` and the
-manifest takes the dark value. iOS reads no manifest at all: the layout's
-`appleWebApp` metadata says the same things again as meta tags, and
-`web/public/icons/apple-touch-icon.png` is its home-screen icon.
+manifest takes the dark value. `background_color` is the separate
+`iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
+an icon on it, and any other value would leave the icon's tile showing as a
+square. That hex is deliberately darker than the dashboard's own dark
+`--background`, `#1f1f1f` - a launcher icon has to read as an object against a
+wallpaper - so the splash lightens slightly as the SPA paints over it.
 
 Every icon is generated from `web/public/aether-mark.png` by `python3
 scripts/make-icons.py`, the same script that writes the desktop app's, and the
