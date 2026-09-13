@@ -457,10 +457,10 @@ func New(cfg Config) (*Scheduler, error) {
 
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverRuns(ctx); err != nil {
-		return err
+		return recoveryError(ctx, err)
 	}
 	if err := s.recoverTerminals(ctx); err != nil {
-		return err
+		return recoveryError(ctx, err)
 	}
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
@@ -490,6 +490,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.sweepCheckouts(ctx)
 		}
 	}
+}
+
+// recoveryError drops a recovery failure that the caller's own shutdown
+// caused. Cancelling the scheduler's context aborts the store calls a
+// recovery pass runs under, and a caller that stopped the scheduler must see
+// that as the clean shutdown the Start loop reports, not as a failed start.
+func recoveryError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
 
 // Close stops supervision and the Start loops. Containers keep running.

@@ -34,6 +34,19 @@ func startScheduler(t *testing.T, sched *Scheduler) {
 	t.Cleanup(func() { cancel(); <-done })
 }
 
+// TestStartCancelledDuringRecoveryIsACleanStop pins that a shutdown landing
+// inside the recovery pass reports what the Start loop reports for a
+// shutdown: nothing. The aborted store call is the caller stopping the
+// scheduler, not a scheduler that failed to start.
+func TestStartCancelledDuringRecoveryIsACleanStop(t *testing.T) {
+	e := newTestEnv(t, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := e.sched.Start(ctx); err != nil {
+		t.Fatalf("Start after shutdown = %v, want nil", err)
+	}
+}
+
 func TestRebootRecoveryResumesSupervision(t *testing.T) {
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
@@ -1315,6 +1328,15 @@ func TestRetainedTUIRebootsAndReopensSameContainer(t *testing.T) {
 
 	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	startScheduler(t, s2)
+	// Relaunch adopts a retained sidecar on its own, so waiting for recovery
+	// to adopt it first is what makes this the reboot path and not that
+	// fallback.
+	waitFor(t, "retained terminal adopted by recovery", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		owner := s2.runs[run.ID]
+		return owner != nil && owner.retained
+	})
 	reopened, err := s2.Relaunch(ctx, run.ID, e.member.ID)
 	if err != nil {
 		t.Fatalf("Relaunch after reboot: %v", err)
