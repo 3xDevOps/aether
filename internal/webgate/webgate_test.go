@@ -77,6 +77,31 @@ func TestStaticHandlerFallback(t *testing.T) {
 	}
 }
 
+// The home-screen install turns on the content type of two files a browser
+// fetches without being asked to, so both are pinned here.
+func TestStaticHandlerContentTypes(t *testing.T) {
+	spa := fstest.MapFS{
+		"index.html":           {Data: []byte("<!doctype html>spa")},
+		"manifest.webmanifest": {Data: []byte(`{"name":"Aether"}`)},
+		"icons/icon-192.png":   {Data: []byte("\x89PNG\r\n\x1a\n")},
+	}
+	h := StaticHandler(spa)
+	for path, want := range map[string]string{
+		"/manifest.webmanifest": "application/manifest+json",
+		"/icons/icon-192.png":   "image/png",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s = %d, want 200", path, rec.Code)
+			continue
+		}
+		if got := rec.Header().Get("Content-Type"); got != want {
+			t.Errorf("%s content type = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestStaticHandlerNotBuilt(t *testing.T) {
 	rec := httptest.NewRecorder()
 	StaticHandler(fstest.MapFS{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))

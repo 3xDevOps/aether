@@ -133,9 +133,10 @@ certificate: cross-built Windows and macOS artifacts are unsigned, trip
 SmartScreen and Gatekeeper, and auto-update refuses them. Ship signed builds
 from real runners; treat cross-builds as test artifacts.
 
-The app icon is generated from `web/public/aether-mark.png` into
-`desktop/build/`; regenerate with `python3 desktop/build/make-icons.py` after
-the mark changes.
+Every icon Aether ships is generated from `web/public/aether-mark.png` - the
+desktop app's into `desktop/build/`, the web app manifest's and the iOS
+home-screen one into `web/public/icons/`. Regenerate them all with `python3
+scripts/make-icons.py` after the mark changes, and commit what it wrote.
 
 ## Development deploy
 

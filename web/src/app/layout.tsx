@@ -1,10 +1,22 @@
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import '../index.css'
+import { themeColor } from './theme-color'
 
+/**
+ * `appleWebApp` is what an iPhone reads when someone picks Share > Add to
+ * Home Screen; iOS has no manifest support, so the name, the standalone
+ * window and the icon all have to be said again in meta tags.
+ * `black-translucent` puts the shell under the status bar, which is the half
+ * of `viewport-fit=cover` iOS needs, and the safe-area padding already in the
+ * title bar pads it back out.
+ */
 export const metadata: Metadata = {
   title: 'Aether',
   description: 'Aether developer workbench',
+  applicationName: 'Aether',
+  icons: { apple: '/icons/apple-touch-icon.png' },
+  appleWebApp: { capable: true, title: 'Aether', statusBarStyle: 'black-translucent' },
 }
 
 /**
@@ -27,8 +39,8 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f8f8f8' },
-    { media: '(prefers-color-scheme: dark)', color: '#181818' },
+    { media: '(prefers-color-scheme: light)', color: themeColor.light },
+    { media: '(prefers-color-scheme: dark)', color: themeColor.dark },
   ],
 }
 

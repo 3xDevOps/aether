@@ -143,6 +143,31 @@ invariant is kept by two placeholder files:
 `web/dist/.gitkeep`. A binary built without running the web build serves the
 gateway's "dashboard not built" response rather than a blank page.
 
+### The web app manifest
+
+`web/src/app/manifest.ts` is a Next metadata file, so the export writes
+`/manifest.webmanifest` and links it from the page. A static export refuses to
+collect a metadata route that has not declared itself static, which is what the
+`export const dynamic = 'force-static'` in it is for.
+
+It declares `display: standalone` and `start_url: '/'`, and names four icons
+from `web/public/icons/`: 192px and 512px in both `any` and `maskable`. Those
+two sizes are what Chrome requires before it offers to install an app. No
+service worker ships - Chrome stopped requiring one for the install entry in
+version 108 on Android and 112 on desktop, and the dashboard could not cache
+anyway, because it lives inside the server binary and has to change with it.
+
+A manifest carries one `theme_color` where the layout's viewport export carries
+one per colour scheme, so both read `web/src/app/theme-color.ts` and the
+manifest takes the dark value. iOS reads no manifest at all: the layout's
+`appleWebApp` metadata says the same things again as meta tags, and
+`web/public/icons/apple-touch-icon.png` is its home-screen icon.
+
+Every icon is generated from `web/public/aether-mark.png` by `python3
+scripts/make-icons.py`, the same script that writes the desktop app's, and the
+output is committed. Maskable icons and the iOS icon are square and full-bleed
+because the platform applies its own mask; the rest carry the rounded tile.
+
 CI installs Bun with `oven-sh/setup-bun` (version pinned in `web/.bun-version`)
 in jobs that run `make build` or `make release`, plus a dashboard job that
 typechecks and tests the SPA on its own.
@@ -2166,7 +2191,16 @@ same tailnet. Expect the board as the first screen, already identified by
 WhoIs: no onboarding wizard, no Settings, no link chip, no update banner, and
 no pull, forward or sync controls, because the descriptor carries no `local`
 verbs. Files and configuration editing remain available through the
-server-hosted gateway. Watch what the server saw with:
+server-hosted gateway.
+
+The installed app is a manual check too, because no browser lets a test
+emulate the `display-mode: standalone` a real install gives. On Android,
+Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
+Add to Home Screen**. The icon that lands on the home screen should be the
+Aether mark on a dark tile, and opening it should give a full-screen dashboard
+with the shell's own title bar and status bar, safe-area padding intact under
+the notch, and the soft keyboard still shortening the layout rather than
+covering it. Watch what the server saw with:
 
 ```sh
 journalctl -u aether-server -f
