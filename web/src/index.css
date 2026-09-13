@@ -68,6 +68,13 @@
      a 44px control does not fit in a 22px bar. */
   --title-bar-height: 35px;
   --status-bar-height: 22px;
+
+  /* The top safe-area inset, named because more than the top edge itself
+     measures from it: an installed iOS app draws its status bar over the
+     page, so the title bar grows by this and everything anchored under the
+     bar drops by it too. The `0px` fallback keeps the `calc()` heights valid
+     where `env()` is unsupported; a bare `env()` would void them. */
+  --safe-top: env(safe-area-inset-top, 0px);
   --font-pixel: 'VT323', monospace;
   --font-sans: system-ui, Ubuntu, 'Droid Sans', sans-serif;
   --font-mono: 'JetBrainsMono NFM', ui-monospace, SFMono-Regular, monospace;

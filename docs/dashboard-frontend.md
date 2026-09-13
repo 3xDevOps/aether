@@ -371,10 +371,12 @@ visible to already-running processes immediately; a tool may need to reload.
 
 `src/components/shell/title-bar.tsx` renders the browser and Electron
 title/command bar at 35px. The command center names the active workspace and
-opens the existing command palette through `togglePalette(true)`. The bar pads
-itself with `env(safe-area-inset-left/right)` so a landscape notch cannot sit
-over it; the inset is 0 on every screen without one, and the Electron traffic
-light inset above wins where it applies.
+opens the existing command palette through `togglePalette(true)`. It is the
+top edge of the shell, so it pads itself with `env(safe-area-inset-left/right)`
+against a landscape notch and grows by `--safe-top` under the status bar an
+installed iOS app paints over the page, padding its controls back below it.
+Every inset is 0 on a screen without one, and the Electron traffic light inset
+above wins where it applies.
 
 In Electron the window is frameless, so the SPA draws the bar and its native
 controls: on Windows and Linux, minimize, maximize/restore and close are wired
@@ -424,11 +426,15 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
   own width rather than a desktop-sized canvas scaled down.
 - `viewport-fit=cover` - the shell paints under the notch and the home
   indicator, and the chrome that touches those edges pads itself back out with
-  `env(safe-area-inset-*)`: the title bar sideways, the status bar and its
-  details popup downwards, the sidebar drawer on all three edges it reaches,
-  since it is the one surface that spans a screen corner to corner, and the
-  row holding the activity rail on the left, which is the edge a landscape
-  notch covers when the drawer is not up. A surface that pads itself keeps
+  `env(safe-area-inset-*)`: the title bar sideways and downwards, the status
+  bar and its details popup downwards, the sidebar drawer on all three edges
+  it reaches, since it is the one surface that spans a screen corner to
+  corner, and the row holding the activity rail on the left, which is the edge
+  a landscape notch covers when the drawer is not up. The top inset is the one
+  a surface away from that edge also has to read, because an installed iOS app
+  asks for a `black-translucent` status bar and gets the whole screen: it is
+  `--safe-top` in `src/index.css`, and the title bar's height, the palette's
+  drop from under it and a top-anchored dialog's 1rem gap all count it. A surface that pads itself keeps
   painting to the edge and insets only what it holds, so the notch shows the
   bar's own colour rather than a gap. Every inset is 0 where there is none, so
   nothing guards them. Toasts sit above the status bar rather than against the
@@ -480,14 +486,19 @@ fits inside them. A row that has to line up with a bar reads the token - the
 title bar and the sidebar's workspace switcher, the status bar with every
 control and readout in it, the command palette's drop from under the title
 bar - and so does every offset measured from one: the update banner cap and
-the toast offset. Add a coarse size to a control in a fixed-height row only
-together with the row, or the control grows out of the bar that holds it.
+the toast offset. `--safe-top` is the third token of this kind: the top
+safe-area inset under a name, so that a surface measuring from the title bar
+can add the same amount the bar itself grew by. It carries a `0px` fallback
+because a bare `env()` in a browser without it would void every `calc()`
+height that reads it. Add a coarse size to a control in a fixed-height row
+only together with the row, or the control grows out of the bar that holds
+it.
 
-Dialogs anchor to the top (`top-4`) below `sm` and centre from `sm` up. Where
-`interactive-widget` is ignored, a centred fixed dialog sits behind the
-keyboard; anchored to the top it stays in the visual viewport, and a dialog
-taller than the screen is clamped by `max-h-[calc(100dvh-2rem)]` and scrolls
-inside itself. `sm` is a width breakpoint, so a desktop window narrower than
+Dialogs anchor to the top (1rem plus `--safe-top`) below `sm` and centre from
+`sm` up. Where `interactive-widget` is ignored, a centred fixed dialog sits
+behind the keyboard; anchored to the top it stays in the visual viewport, and
+a dialog taller than the screen is clamped to the viewport less that gap and
+scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower than
 640px is treated as a phone here too.
 
 - **Update notices** keep the message, status icon and action hierarchy visible.

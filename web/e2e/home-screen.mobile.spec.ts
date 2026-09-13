@@ -77,3 +77,43 @@ test('a phone is served everything it needs to install the dashboard', async ({
   )
   expect(overflow).toBe(0)
 })
+
+/**
+ * What an installed iPhone app takes for its status bar. `env()` cannot be
+ * driven from a test - no viewport, media or CDP emulation sets a safe-area
+ * inset - so the inset arrives the way the shell reads it, through the
+ * `--safe-top` custom property the layout's `env()` feeds.
+ */
+const statusBar = 59
+
+test('the title bar keeps its controls out from under a phone status bar', async ({
+  page,
+  aether,
+}) => {
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+
+  await page.goto(alice.url)
+  const bar = page.getByRole('banner')
+  const bare = (await bar.boundingBox())?.height
+  if (!bare) throw new Error('the title bar did not render')
+
+  await page.addStyleTag({ content: `:root { --safe-top: ${statusBar}px }` })
+
+  // The bar grows by the inset rather than moving down, so it still paints to
+  // the top edge and the status bar sits on its own colour.
+  await expect
+    .poll(async () => (await bar.boundingBox())?.height)
+    .toBe(bare + statusBar)
+  const trigger = page.getByRole('button', { name: 'Commands' })
+  expect((await trigger.boundingBox())?.y ?? -1).toBeGreaterThanOrEqual(statusBar)
+
+  // Everything that hangs from the bar drops with it.
+  await trigger.tap()
+  const palette = page.getByRole('dialog', { name: 'Command Palette' })
+  await expect(palette).toBeVisible()
+  await expect
+    .poll(async () => (await palette.boundingBox())?.y ?? -1)
+    .toBeGreaterThanOrEqual(bare + statusBar)
+})

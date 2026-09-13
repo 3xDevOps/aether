@@ -49,7 +49,9 @@ function DialogOverlay({
  * Anchored to the top until `sm`, centred above it. A centred dialog on a
  * phone puts its footer under the soft keyboard even after the layout
  * viewport shrinks; anchored to the top, the dialog shortens from the bottom
- * and its own scroll reaches the footer.
+ * and its own scroll reaches the footer. The top anchor is measured from
+ * under the status bar an installed iOS app paints over the page, so the
+ * 1rem gap and the height cap both count `--safe-top`.
  */
 function DialogContent({
   className,
@@ -67,7 +69,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          'fixed top-4 left-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-0 gap-3 overflow-y-auto rounded-[4px] border bg-popover p-4 text-popover-foreground duration-150 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none sm:top-[50%] sm:max-w-lg sm:translate-y-[-50%]',
+          'fixed top-[calc(1rem_+_var(--safe-top))] left-[50%] z-50 grid max-h-[calc(100dvh_-_2rem_-_var(--safe-top))] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-0 gap-3 overflow-y-auto rounded-[4px] border bg-popover p-4 text-popover-foreground duration-150 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none sm:top-[50%] sm:max-w-lg sm:translate-y-[-50%]',
           className,
         )}
         {...props}

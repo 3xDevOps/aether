@@ -266,7 +266,7 @@ export function Sidebar() {
               // viewport-fit=cover puts this under the notch and the home
               // indicator, so it paints to the edges and insets what it
               // holds, the way the title bar and status bar do.
-              className="fixed inset-y-0 left-0 z-50 flex max-w-full bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-left motion-reduce:animate-none"
+              className="fixed inset-y-0 left-0 z-50 flex max-w-full bg-sidebar pt-[var(--safe-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-left motion-reduce:animate-none"
             >
               <DialogPrimitive.Title className="sr-only">Runs</DialogPrimitive.Title>
               {nav}
