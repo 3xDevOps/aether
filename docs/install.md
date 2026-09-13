@@ -722,7 +722,7 @@ the same key. An APK built from a checkout is signed with a different key or
 not at all, so Android refuses it as an update; uninstall first, which also
 drops the stored server name.
 
-The app needs a WebView from Chromium 136 or newer to paint under the status
+The app needs a WebView from Chromium 140 or newer to paint under the status
 and navigation bars the way the dashboard expects. On an older one the app
 pads for those bars itself, which costs the edge-to-edge look and nothing
 else. WebView updates through the Play Store independently of the Android

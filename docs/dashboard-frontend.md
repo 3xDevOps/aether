@@ -2261,5 +2261,5 @@ A debug APK allows `chrome://inspect` from a computer on the same USB
 connection, which is how to read the page's console and its computed
 `env(safe-area-inset-*)` values on the device. A release APK does not. The
 shell falls back to padding for the system bars itself on a WebView older
-than Chromium 136, so check `chrome://version` on the phone before
+than Chromium 140, so check `chrome://version` on the phone before
 concluding the page is wrong.
