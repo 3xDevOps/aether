@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The dashboard is HTTPS on the tailnet and the shell carries a member's
-     whole authority, so there is no cleartext path at all. The durable
-     mechanism: android:usesCleartextTraffic is ignored for apps targeting
-     API 38 and above. -->
+     whole authority, so there is no cleartext path at all. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
 </network-security-config>
