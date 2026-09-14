@@ -14,6 +14,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -27,6 +28,7 @@ import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import java.io.ByteArrayInputStream
 
 /**
  * The whole shell: one WebView on the dashboard the server hosts on the
@@ -41,7 +43,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var changeServer: Button
     private lateinit var pickFiles: ActivityResultLauncher<Intent>
 
-    /** The dashboard the WebView is on, so a changed address reloads it. */
+    /**
+     * The dashboard the WebView is on, so a changed address reloads it.
+     * Volatile because `shouldInterceptRequest` reads it off the WebView's
+     * own thread, and a stale null there would refuse the dashboard itself.
+     */
+    @Volatile
     private var loaded: String? = null
     private var fileChooser: ValueCallback<Array<Uri>>? = null
 
@@ -212,18 +219,36 @@ class MainActivity : ComponentActivity() {
                     return decision != Navigation.LOAD
                 }
 
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? {
+                    val target = request.url
+                    if (
+                        !refusesRequest(
+                            loaded,
+                            target.toString(),
+                            target.scheme?.lowercase(),
+                            request.isForMainFrame,
+                        )
+                    ) {
+                        return null
+                    }
+                    // Runs on the WebView's own thread, before the request is
+                    // sent: nothing of the member's reaches the other origin.
+                    return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                }
+
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                     changeServer.visibility = View.GONE
-                    val decision = startedNavigationFor(loaded, url)
-                    if (decision == Navigation.LOAD) return
-                    // A POST never reaches shouldOverrideUrlLoading, so this
-                    // is where a form submitted off-origin is caught. The
-                    // document may already have committed, which leaves the
-                    // WebView blank once the load is stopped, so the
-                    // dashboard is put back; loading from inside this
-                    // callback has to wait for the next loop turn.
+                    if (startedOnDashboard(loaded, url)) return
+                    // The refused request still commits, on the blank
+                    // document it was answered with, so the dashboard goes
+                    // back on screen. Not handed to the browser: nothing that
+                    // arrives here was a link anyone tapped, or the gate in
+                    // shouldOverrideUrlLoading would have taken it. Loading
+                    // from inside this callback waits for the next loop turn.
                     view.stopLoading()
-                    if (decision == Navigation.EXTERNAL) openExternally(Uri.parse(url))
                     loaded?.let { dashboard -> view.post { view.loadUrl(dashboard) } }
                 }
 
@@ -280,6 +305,10 @@ class MainActivity : ComponentActivity() {
      * `aether://run/<id>` link names.
      */
     private fun open(base: String, intent: Intent?) {
+        // From here the new address is what every gate judges against, so
+        // whatever the old one still has in flight stops before its commit
+        // can be read as an escape off the dashboard.
+        if (base != loaded) web.stopLoading()
         val link = intent?.dataString?.let { deepLinkUrl(base, it) }
         if (link != null) {
             loaded = base

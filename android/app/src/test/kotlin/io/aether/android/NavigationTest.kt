@@ -1,6 +1,8 @@
 package io.aether.android
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private const val BASE = "https://my-server.ts.net/"
@@ -8,6 +10,9 @@ private const val BASE = "https://my-server.ts.net/"
 class NavigationTest {
     private fun mainFrame(url: String, scheme: String?) =
         navigationFor(BASE, url, scheme, mainFrame = true)
+
+    private fun refuses(url: String, scheme: String?) =
+        refusesRequest(BASE, url, scheme, mainFrame = true)
 
     @Test
     fun theDashboardStaysInTheWebView() {
@@ -67,14 +72,47 @@ class NavigationTest {
     }
 
     @Test
-    fun aLoadAlreadyUnderWayIsJudgedTheSameWay() {
+    fun anOffOriginMainFrameRequestIsRefusedBeforeItIsSent() {
         // WebView skips shouldOverrideUrlLoading for a POST, so this is the
         // gate a form submitted off-origin meets instead.
-        assertEquals(Navigation.LOAD, startedNavigationFor(BASE, "https://my-server.ts.net/board"))
-        assertEquals(Navigation.LOAD, startedNavigationFor(BASE, "about:blank"))
-        assertEquals(Navigation.EXTERNAL, startedNavigationFor(BASE, "https://phish.example/"))
-        assertEquals(Navigation.EXTERNAL, startedNavigationFor(BASE, "https://my-server.ts.net:8443/"))
-        // No scheme to read is no origin to match.
-        assertEquals(Navigation.DROP, startedNavigationFor(BASE, "not a url"))
+        assertTrue(refuses("https://phish.example/", "https"))
+        assertTrue(refuses("http://phish.example/", "http"))
+        // Another port on the same host is another origin.
+        assertTrue(refuses("https://my-server.ts.net:8443/", "https"))
+    }
+
+    @Test
+    fun aRequestThisGateCannotJudgeIsLeftToTheOthers() {
+        // Only http and https reach the network, and the gate in
+        // shouldOverrideUrlLoading has already dropped every other scheme.
+        assertFalse(refuses("intent://scan#Intent;scheme=zxing;end", "intent"))
+        assertFalse(refuses("not a url", null))
+    }
+
+    @Test
+    fun theDashboardsOwnRequestsAreNeverRefused() {
+        assertFalse(refuses("https://my-server.ts.net/api/v1/run.list", "https"))
+        assertFalse(refuses("https://MY-SERVER.ts.net:443/board", "https"))
+        // A subresource is the dashboard fetching its own files, and the
+        // page's own schemes put nothing on the wire.
+        assertFalse(
+            refusesRequest(BASE, "https://fonts.example/x.woff2", "https", mainFrame = false),
+        )
+        assertFalse(refuses("blob:https://my-server.ts.net/a-diff", "blob"))
+        assertFalse(refuses("data:text/plain,log", "data"))
+    }
+
+    @Test
+    fun withoutADashboardEveryMainFrameRequestIsRefused() {
+        assertTrue(refusesRequest(null, "https://my-server.ts.net/", "https", mainFrame = true))
+    }
+
+    @Test
+    fun aLoadAlreadyUnderWayIsJudgedTheSameWay() {
+        assertTrue(startedOnDashboard(BASE, "https://my-server.ts.net/board"))
+        assertTrue(startedOnDashboard(BASE, "about:blank"))
+        assertFalse(startedOnDashboard(BASE, "https://phish.example/"))
+        assertFalse(startedOnDashboard(BASE, "https://my-server.ts.net:8443/"))
+        assertFalse(startedOnDashboard(BASE, "not a url"))
     }
 }
