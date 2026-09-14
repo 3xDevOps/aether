@@ -15,6 +15,18 @@ import { useStore } from '@/store'
 import { approvalsForRun } from '@/store/approvals'
 import type { RunRecord } from '@/store/runs'
 
+const lifecycleLabel: Record<RunRecord['status'], string> = {
+  queued: 'Queued',
+  provisioning: 'Provisioning',
+  running: 'Running',
+  'needs-attention': 'Needs attention',
+  completed: 'Completed',
+  merged: 'Merged',
+  abandoned: 'Abandoned',
+  failed: 'Failed',
+  interrupted: 'Interrupted',
+}
+
 /**
  * One run, as it appears on the board. Another feature contributes to the
  * card through the slots (`card:badges`, `card:chips`, `card:footer`); the
@@ -29,12 +41,29 @@ export function RunCard({ card }: { card: BoardCard }) {
   const { run, state, owner, unseen, paused } = card
   const navigate = useStore((s) => s.navigate)
   const branchRef = useRef<HTMLSpanElement>(null)
-  // An approval pause fires no run.status event, so the run's reason stays
-  // empty; the pending question itself is the summary the card needs then.
+  const unansweredCount =
+    state === 'needs-attention' ? Math.max(0, run.unanswered_questions ?? 0) : 0
+  const questionAction =
+    unansweredCount > 0
+      ? `${unansweredCount} unanswered ${
+          unansweredCount === 1 ? 'question' : 'questions'
+        } - open Run Room to answer`
+      : ''
+  const finishedQuestion =
+    Boolean(questionAction) &&
+    (run.status === 'completed' ||
+      run.status === 'merged' ||
+      run.status === 'abandoned' ||
+      run.status === 'failed' ||
+      run.status === 'interrupted')
+  // An unanswered question is the action the member needs to take. A failed
+  // run can also carry a lifecycle reason, but that reason belongs below the
+  // action rather than replacing it.
   const summary = useStore((s) =>
-    state === 'needs-attention' && !run.reason
+    questionAction ||
+    (state === 'needs-attention' && !run.reason
       ? (approvalsForRun(s.inbox, run.id)[0]?.action ?? '')
-      : run.reason,
+      : run.reason ?? ''),
   )
   const handleCardClick = (event: MouseEvent<HTMLElement>) => {
     const target = event.target
@@ -126,9 +155,10 @@ export function RunCard({ card }: { card: BoardCard }) {
         </div>
       </div>
 
-      {state === 'needs-attention' && summary && (
+      {state === 'needs-attention' && (summary || finishedQuestion) && (
         <div className="mt-2 border-l-2 border-state-needs-attention/60 bg-state-needs-attention/10 px-2.5 py-1.5">
-          <p className="break-words text-xs leading-4 text-foreground/85">{summary}</p>
+          {summary && <p className="break-words text-xs leading-4 text-foreground/85">{summary}</p>}
+          {finishedQuestion && <p className="mt-1 break-words text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}{run.reason ? ` - ${run.reason}` : ''}</p>}
         </div>
       )}
 

@@ -142,7 +142,9 @@ func TestIntegrationServerGateway(t *testing.T) {
 	// Attach with write and talk to the agent through the socket.
 	attach := dialWS(t, ctx, web.URL, "/ws/attach/"+launched.Run.ID)
 	defer func() { _ = attach.CloseNow() }()
-	if err := wsjson.Write(ctx, attach, protocol.DashAttachRequest{Write: true, Cols: 120, Rows: 30}); err != nil {
+	if err := wsjson.Write(ctx, attach, protocol.DashAttachRequest{
+		Write: true, Cols: 120, Rows: 30, ControlSessionID: "server-gateway-e2e",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var attachAck protocol.AttachResponse

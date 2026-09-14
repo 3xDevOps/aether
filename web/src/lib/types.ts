@@ -32,11 +32,12 @@ export interface Run {
   started_at: string | null
   finished_at: string | null
   profile_snapshot_id?: string
+  /** Server-computed unanswered room questions; absent on older gateways. */
+  unanswered_questions?: number
   /** Last run.status reason, sanitized like the event payload. */
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
-  /** Immutable provenance for the workspace base used by this run. */
   base_commit?: string
   base_branch?: string
   base_source?: string
@@ -135,6 +136,90 @@ export interface Event {
   type: string
   payload: unknown
 }
+export type RoomMessageKind =
+  | 'comment'
+  | 'steer_request'
+  | 'question'
+  | 'reply'
+  | 'system'
+
+export type RoomMessageState =
+  | 'queued'
+  | 'sent'
+  | 'not_sent'
+  | 'uncertain'
+  | 'denied'
+  | 'cancelled'
+
+export interface RoomMessageAnchor {
+  kind?: string
+  path?: string
+  start_line?: number
+  end_line?: number
+  transcript_offset?: number
+}
+
+export interface RoomMessageFailure {
+  code?: string
+  message?: string
+  retryable?: boolean
+}
+
+export interface RoomMessage {
+  id: string
+  workspace_id: string
+  run_id: string
+  actor_id: string
+  actor_display_name?: string
+  kind: RoomMessageKind
+  body: string
+  attachments?: string[]
+  anchor?: RoomMessageAnchor
+  correlation_id?: string
+  idempotency_key?: string
+  state: RoomMessageState
+  deliver_after?: string
+  decided_by?: string
+  decided_at?: string
+  delivered_at?: string
+  failure?: RoomMessageFailure
+  created_at: string
+  updated_at: string
+}
+
+export interface RoomMessageListResult {
+  messages: RoomMessage[]
+  next_before?: string
+}
+
+export interface RoomController {
+  member_id: string
+  connected: boolean
+  acquired_at: string
+  expires_at?: string
+}
+
+export interface RoomStatusResult {
+  workspace_id: string
+  run_id: string
+  protected: boolean
+  controller?: RoomController
+  watchers: string[]
+  queued_steers: number
+}
+
+export interface RoomPostResult {
+  message: RoomMessage
+  receipt?: RoomDeliveryReceipt
+}
+
+export interface RoomDecideResult {
+  message: RoomMessage
+  receipt?: RoomDeliveryReceipt
+}
+
+export type RoomDeliveryReceipt = 'sent' | 'not_sent' | 'uncertain'
+
 
 export interface RunStatusPayload {
   from?: RunStatus

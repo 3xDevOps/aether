@@ -24,6 +24,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		AgentEventPayload{Kind: AgentToolCall, Tool: "Bash", ToolUseID: "toolu_1", Detail: "go test ./..."},
 		ProfilePayload{Member: "mem_1", Harness: "claude", SnapshotID: "snap_1", Action: ProfileActionPut},
 		SyncConflictPayload{RunID: "r1", SyncSessionID: "sync_1", Files: []string{"main.go"}, Members: []domain.MemberID{"m1", "m2"}},
+		RoomMessagePayload{MessageID: "msg_1", WorkspaceID: "ws_1", RunID: "r1", ActorID: "mem_1", Kind: "note", State: "visible",
+			CorrelationID: "corr_1", AttachmentCount: 2, HasAnchor: true},
 		OverlapPayload{With: []OverlapPeer{{RunID: "r2", Files: []string{"main.go"}}}},
 		BudgetPayload{State: BudgetExceeded, SpendUSD: 12.5, LimitUSD: 10, WarnUSD: 8,
 			UnmeteredRuns: 2, Reason: "new run refused"},

@@ -241,7 +241,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	}
 
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: launched.Run.ID, Message: "done",
+		RunID: launched.Run.ID, Message: "done", IdempotencyKey: "serverupdate-done",
 	}, nil); err != nil {
 		t.Fatalf("run.inject harness completion: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestIntegrationServerUpdateAppliesWhenIdle(t *testing.T) {
 	// remains active until the operator explicitly resolves it.
 	att.waitOutput(t, "[aether] harness exited with code 0")
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: launched.Run.ID, Message: "printf 'update-login-shell-ready\\n'",
+		RunID: launched.Run.ID, Message: "printf 'update-login-shell-ready\\n'", IdempotencyKey: "serverupdate-login",
 	}, nil); err != nil {
 		t.Fatalf("run.inject login-shell probe: %v", err)
 	}

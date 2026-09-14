@@ -78,7 +78,10 @@ export function board(s: BoardInput): BoardData {
 
   for (const run of Object.values(s.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
-    const state = runState(run.status, s.pending.has(run.id))
+    const state = runState(
+      run.status,
+      s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
+    )
     columns[bucketOf(state)].push({
       run,
       state,

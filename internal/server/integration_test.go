@@ -162,7 +162,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 
 	// Inject through the control channel; the agent echoes it back.
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: run.ID, Message: "ping-e2e",
+		RunID: run.ID, Message: "ping-e2e", IdempotencyKey: "integration-ping",
 	}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	// before asking the scheduler to close the run.
 	att.waitOutput(t, "[aether] harness exited with code 0")
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: run.ID, Message: "printf 'e2e-login-shell-ready\\n'",
+		RunID: run.ID, Message: "printf 'e2e-login-shell-ready\\n'", IdempotencyKey: "integration-login",
 	}, nil); err != nil {
 		t.Fatalf("run.inject login-shell probe: %v", err)
 	}
@@ -578,7 +578,10 @@ func tryAttach(t *testing.T, client *ssh.Client, runID string) (*attachConn, err
 	if err = sess.RequestSubsystem(protocol.SubsystemAttach); err != nil {
 		t.Fatalf("aether-attach subsystem: %v", err)
 	}
-	header, err := json.Marshal(protocol.AttachRequest{RunID: runID})
+	header, err := json.Marshal(protocol.AttachRequest{
+		RunID:            runID,
+		ControlSessionID: "integration-" + runID,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

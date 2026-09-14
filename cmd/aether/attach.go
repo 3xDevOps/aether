@@ -58,10 +58,16 @@ func openAttach(conn *cli.Conn, runID string, cols, rows uint, readOnly bool, sh
 	if shell != "" {
 		readOnly = false
 	}
-	req := protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows, ReadOnly: readOnly, Shell: shell}
+	req := protocol.AttachRequest{
+		RunID: runID, Cols: cols, Rows: rows, ReadOnly: readOnly, Shell: shell,
+		ControlSessionID: cli.NewControlSessionID(),
+	}
 	stream, ack, err := conn.AttachStream(req)
 	if err == nil {
 		return stream, ack.Replay, nil
+	}
+	if ack.Code == protocol.CodeConflict {
+		return nil, 0, fmt.Errorf("attach refused: %s (use an explicit takeover request)", ack.Error)
 	}
 	if shell != "" || readOnly || ack.OK || ack.Code != protocol.CodeDenied {
 		return nil, 0, err

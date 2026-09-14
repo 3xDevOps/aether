@@ -12,6 +12,12 @@ import (
 )
 
 // Runs
+// RunWorktreeStore exposes the narrow compare-and-clear used by checkout GC.
+// It cannot overwrite ownership or another lifecycle update with a stale
+// full run snapshot.
+type RunWorktreeStore interface {
+	ClearRunWorktree(context.Context, domain.RunID, string, domain.RunStatus) error
+}
 
 func validateRun(r *domain.Run, op string) error {
 	if !r.Status.Valid() {
@@ -81,7 +87,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt); err != nil {
+		&r.BaseSource, &baseCheckedAt, &r.UnansweredQuestions); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -96,14 +102,36 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	return &r, nil
 }
 
-const runCols = `id, workspace_id, member_id, account_member_id, task, harness, mode, status,
-	reason, branch, worktree, protected, created_at, started_at, finished_at, profile_snapshot_id,
-	title, last_commit, last_commit_at, harness_session_id, base_commit, base_branch, base_source,
-	base_checked_at`
+const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, runs.task, runs.harness, runs.mode, runs.status,
+	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
+	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
+	runs.base_checked_at`
+
+// runSnapshotQuery returns one grouped query for a run snapshot. Questions
+// with a denied/cancelled state are not actionable, and a correlated reply
+// removes its question from the count. Keeping this in the run read means
+// list and single-run snapshots cannot disagree, without walking room history
+// once per run.
+func runSnapshotQuery(where string) string {
+	return `SELECT ` + runCols + `, COUNT(question.id)
+		FROM runs
+		LEFT JOIN room_messages question
+			ON question.run_id = runs.id
+			AND question.kind = 'question'
+			AND question.state NOT IN ('denied', 'cancelled')
+			AND NOT EXISTS (
+				SELECT 1 FROM room_messages reply
+				WHERE reply.run_id = question.run_id
+				  AND reply.kind = 'reply'
+				  AND reply.correlation_id = question.id
+			)
+		WHERE ` + where + `
+		GROUP BY runs.id`
+}
 
 func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	r, err := scanRun(d.db.QueryRowContext(ctx,
-		`SELECT `+runCols+` FROM runs WHERE id = ?`, id))
+		runSnapshotQuery(`runs.id = ?`), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -115,7 +143,7 @@ func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 
 func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+runCols+` FROM runs WHERE workspace_id = ? ORDER BY id`, id)
+		runSnapshotQuery(`runs.workspace_id = ?`)+` ORDER BY runs.id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs by workspace: %w", err)
 	}
@@ -124,7 +152,7 @@ func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]
 
 func (d *DB) ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+runCols+` FROM runs WHERE member_id = ? ORDER BY id`, id)
+		runSnapshotQuery(`runs.member_id = ?`)+` ORDER BY runs.id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("store: list runs by member: %w", err)
 	}
@@ -145,9 +173,9 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 		}
 	}
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+runCols+` FROM runs WHERE status IN (`+
+		runSnapshotQuery(`runs.status IN (`+
 			strings.Join(placeholders, ", ")+
-			`) ORDER BY id`, args...)
+			`)`)+` ORDER BY runs.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list active runs: %w", err)
 	}
@@ -192,6 +220,36 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
 	}
 	return err
+}
+
+// ClearRunWorktree clears only a checkout path that still has the expected
+// terminal status and value. A concurrent ownership transfer therefore
+// survives even when GC started from an older run snapshot.
+func (d *DB) ClearRunWorktree(ctx context.Context, id domain.RunID, expected string, status domain.RunStatus) error {
+	if !status.Valid() {
+		return fmt.Errorf("store: clear run worktree: invalid status %q", status)
+	}
+	result, err := d.db.ExecContext(ctx,
+		`UPDATE runs SET worktree = ? WHERE id = ? AND worktree = ? AND status = ?`,
+		"", id, expected, status)
+	if err != nil {
+		return fmt.Errorf("store: clear run worktree: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: clear run worktree: %w", err)
+	}
+	if affected > 0 {
+		return nil
+	}
+	current, err := d.GetRun(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current.Worktree == "" {
+		return nil
+	}
+	return ErrConflict
 }
 
 // UpdateRunCommit updates only the metadata for the latest published branch

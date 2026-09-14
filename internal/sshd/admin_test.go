@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func addMember(t *testing.T, e *testEnv, name string, role domain.Role, pending bool) (ssh.Signer, *domain.Member) {
@@ -173,6 +174,49 @@ func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 	want := "terminal-stop:" + string(target.ID)
 	if len(calls) == 0 || calls[len(calls)-1] != want {
 		t.Fatalf("RunController calls = %v, want final %q", calls, want)
+	}
+}
+
+func TestMemberRemoveAllowsRoomOnlyParticipant(t *testing.T) {
+	e := newTestEnv(t, nil)
+	_, target := addMember(t, e, "Room participant", domain.RoleCollaborator, false)
+	rooms, ok := e.srv.cfg.Services.Rooms.(*persistentRoomService)
+	if !ok {
+		t.Fatal("room service is not persistent")
+	}
+	roomDB, ok := rooms.db.(interface {
+		CreateRoomMessage(context.Context, *store.RoomMessage) error
+		GetRoomMessage(context.Context, string) (*store.RoomMessage, error)
+	})
+	if !ok {
+		t.Fatal("room service store has no room persistence")
+	}
+	message := &store.RoomMessage{
+		WorkspaceID:    e.ws.ID,
+		RunID:          e.run.ID,
+		ActorID:        target.ID,
+		Kind:           store.RoomMessageComment,
+		Body:           "historical note",
+		IdempotencyKey: "member-remove-room-only",
+	}
+	if err := roomDB.CreateRoomMessage(context.Background(), message); err != nil {
+		t.Fatalf("CreateRoomMessage: %v", err)
+	}
+
+	if err := controlClient(t, e).Call(protocol.MethodMemberRemove,
+		protocol.MemberRemoveParams{MemberID: string(target.ID)}, nil); err != nil {
+		t.Fatalf("member.remove with room-only history: %v", err)
+	}
+	if _, err := e.store.GetMemberByPublicKey(context.Background(), target.PublicKey); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("public-key lookup after member.remove: %v, want ErrNotFound", err)
+	}
+	got, err := roomDB.GetRoomMessage(context.Background(), message.ID)
+	if err != nil {
+		t.Fatalf("GetRoomMessage after member.remove: %v", err)
+	}
+	if got.ActorID != target.ID || got.ActorDisplayName != target.DisplayName {
+		t.Fatalf("room attribution after member.remove = %q/%q, want %q/%q",
+			got.ActorID, got.ActorDisplayName, target.ID, target.DisplayName)
 	}
 }
 

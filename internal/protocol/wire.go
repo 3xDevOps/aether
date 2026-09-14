@@ -37,6 +37,10 @@ type Run struct {
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
+	// UnansweredQuestions is server-computed in run snapshots. It is always
+	// present on modern gateways, including zero; web clients keep the field
+	// optional so snapshots from older gateways remain valid.
+	UnansweredQuestions int `json:"unanswered_questions"`
 	// BaseCommit, BaseBranch, BaseSource, and BaseCheckedAt are the
 	// immutable base provenance captured for this run.
 	BaseCommit    string  `json:"base_commit,omitempty"`
@@ -118,28 +122,29 @@ func rfc3339ValuePtr(t time.Time) *string {
 // RunFromDomain converts a domain run to its wire form.
 func RunFromDomain(r *domain.Run) Run {
 	return Run{
-		ID:                string(r.ID),
-		WorkspaceID:       string(r.WorkspaceID),
-		MemberID:          string(r.MemberID),
-		AccountMemberID:   string(r.AccountMember()),
-		Task:              r.Task,
-		Title:             r.Title,
-		Harness:           r.Harness,
-		Mode:              string(r.Mode),
-		Status:            string(r.Status),
-		Reason:            r.Reason,
-		Branch:            r.Branch,
-		LastCommit:        r.LastCommit,
-		LastCommitAt:      rfc3339ValuePtr(r.LastCommitAt),
-		Protected:         r.Protected,
-		CreatedAt:         rfc3339(r.CreatedAt),
-		StartedAt:         rfc3339Ptr(r.StartedAt),
-		FinishedAt:        rfc3339Ptr(r.FinishedAt),
-		ProfileSnapshotID: string(r.ProfileSnapshotID),
-		BaseCommit:        r.BaseCommit,
-		BaseBranch:        r.BaseBranch,
-		BaseSource:        r.BaseSource,
-		BaseCheckedAt:     rfc3339ValuePtr(r.BaseCheckedAt),
+		ID:                  string(r.ID),
+		WorkspaceID:         string(r.WorkspaceID),
+		MemberID:            string(r.MemberID),
+		AccountMemberID:     string(r.AccountMember()),
+		Task:                r.Task,
+		Title:               r.Title,
+		Harness:             r.Harness,
+		Mode:                string(r.Mode),
+		Status:              string(r.Status),
+		Reason:              r.Reason,
+		Branch:              r.Branch,
+		LastCommit:          r.LastCommit,
+		LastCommitAt:        rfc3339ValuePtr(r.LastCommitAt),
+		Protected:           r.Protected,
+		CreatedAt:           rfc3339(r.CreatedAt),
+		StartedAt:           rfc3339Ptr(r.StartedAt),
+		FinishedAt:          rfc3339Ptr(r.FinishedAt),
+		ProfileSnapshotID:   string(r.ProfileSnapshotID),
+		UnansweredQuestions: r.UnansweredQuestions,
+		BaseCommit:          r.BaseCommit,
+		BaseBranch:          r.BaseBranch,
+		BaseSource:          r.BaseSource,
+		BaseCheckedAt:       rfc3339ValuePtr(r.BaseCheckedAt),
 	}
 }
 
@@ -328,10 +333,12 @@ type RunResult struct {
 	Run Run `json:"run"`
 }
 
-// RunInjectParams are the params of run.inject.
+// RunInjectParams are the params of run.inject. IdempotencyKey is supplied
+// by the caller and makes a retry return the original room mutation.
 type RunInjectParams struct {
-	RunID   string `json:"run_id"`
-	Message string `json:"message"`
+	RunID          string `json:"run_id"`
+	Message        string `json:"message"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 // RunCloseParams are the params of run.close; Outcome is "merged" or
@@ -427,15 +434,20 @@ type AttachRequest struct {
 	// client already holds this session's screen and is reattaching only
 	// to change what it may do. The ack reports a replay of zero and the
 	// client keeps what it has, which is what makes taking control a
-	// change of state rather than a redraw. A client asks for it only
-	// while its previous attach was still live, so an attach that follows
-	// a drop - where the screen may have moved on without it - still gets
-	// the full replay.
+	// change of state rather than a redraw.
 	Resume bool `json:"resume,omitempty"`
 	// Cursor is how much of the session's output this client already has,
 	// taken from the ack it is resuming from. The session replays exactly
 	// what followed it, so nothing produced during the reattach is lost.
 	Cursor uint64 `json:"cursor,omitempty"`
+	// ControlSessionID identifies one logical client tab across reconnects.
+	ControlSessionID string `json:"control_session_id,omitempty"`
+	// ControlGeneration is the fenced generation the client expects.
+	ControlGeneration uint64 `json:"control_generation,omitempty"`
+	// Takeover explicitly displaces another controller.
+	Takeover bool `json:"takeover,omitempty"`
+	// ReleaseControl releases this session's controller lease.
+	ReleaseControl bool `json:"release_control,omitempty"`
 }
 
 // AttachResponse acknowledges an AttachRequest with the session's live
@@ -456,16 +468,23 @@ type AttachResponse struct {
 	// what this client missed, false when the session could not serve
 	// from its cursor and the replay is the whole scrollback instead -
 	// which the client has to clear its screen for.
-	Resumed bool   `json:"resumed,omitempty"`
-	Code    int    `json:"code,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Resumed bool `json:"resumed,omitempty"`
+	// ControllerID is the member currently holding writable control.
+	ControllerID string `json:"controller_id,omitempty"`
+	// ControlGeneration is the fenced lease generation.
+	ControlGeneration uint64 `json:"control_generation,omitempty"`
+	// ControlExpiresAt is the RFC3339 expiry of the active controller lease.
+	ControlExpiresAt string `json:"control_expires_at,omitempty"`
+	// HasControl reports whether this attachment owns the active lease.
+	HasControl bool   `json:"has_control,omitempty"`
+	Code       int    `json:"code,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // Exit statuses of the attach subsystem. 0 is the run's terminal session
-// ending and 1 an attach that failed after its ack; these two name the
-// server dropping a live attach because its authorization re-check
-// failed, so a client can say why it was detached instead of only that
-// it was.
+// ending and 1 an attach that failed after its ack; these statuses name the
+// server dropping a live attach because its authorization re-check failed,
+// so a client can say why it was detached instead of only that it was.
 const (
 	// AttachExitSteerRevoked: a write attach lost the steer capability
 	// (role change, handoff, run protection, or the workspace's steering
@@ -474,6 +493,11 @@ const (
 	// AttachExitMembershipRevoked: the member was removed or set back to
 	// pending. Every attach of theirs ends, read-only ones included.
 	AttachExitMembershipRevoked = 4
+	// AttachExitControlRevoked: another browser tab explicitly took over
+	// writable control, or the current control lease was released or expired.
+	// The displaced client may reconnect as a read-only mirror and ask for
+	// control again; this is not a permission withdrawal.
+	AttachExitControlRevoked = 5
 )
 
 // RemoteExitError is a subsystem stream ending with a nonzero exit status:

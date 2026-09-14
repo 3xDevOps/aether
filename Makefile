@@ -132,7 +132,7 @@ test:
 # carry them - the unit tests are `make test`'s job. CI shards it: set
 # INTEGRATION_PKGS to run one package, INTEGRATION_SKIP to run all but some.
 test-integration:
-	go test -race -tags integration $(INTEGRATION_PKGS)
+	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS)
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on

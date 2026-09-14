@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -11,8 +12,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 // revocableEnv is gatedEnv with a fast re-validation clock.
@@ -84,6 +87,63 @@ func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, wi
 	if _, err := ch.Write([]byte(header + "\n")); err != nil {
 		t.Fatalf("write header: %v", err)
 	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	return rawAttachConn{ch: ch, r: r, exit: exitCh}, ack
+}
+func rawAttachRequest(t *testing.T, e *testEnv, signer ssh.Signer, req protocol.AttachRequest, withPTY bool) (rawAttachConn, protocol.AttachResponse) {
+	t.Helper()
+	client, err := e.dialWith(signer, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ch, reqs, err := client.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatalf("open channel: %v", err)
+	}
+	t.Cleanup(func() { _ = ch.Close() })
+	exitCh := make(chan uint32, 1)
+	go func() {
+		defer close(exitCh)
+		for request := range reqs {
+			if request.Type == "exit-status" {
+				var p struct{ Status uint32 }
+				if ssh.Unmarshal(request.Payload, &p) == nil {
+					select {
+					case exitCh <- p.Status:
+					default:
+					}
+				}
+			}
+			if request.WantReply {
+				_ = request.Reply(false, nil)
+			}
+		}
+	}()
+	if withPTY {
+		ptyReq := struct {
+			Term          string
+			Cols, Rows    uint32
+			Width, Height uint32
+			Modes         string
+		}{Term: "xterm", Cols: 80, Rows: 24}
+		if ok, rerr := ch.SendRequest("pty-req", true, ssh.Marshal(&ptyReq)); rerr != nil || !ok {
+			t.Fatalf("pty-req: ok=%v err=%v", ok, rerr)
+		}
+	}
+	if ok, rerr := ch.SendRequest("subsystem", true, ssh.Marshal(&struct{ Name string }{protocol.SubsystemAttach})); rerr != nil || !ok {
+		t.Fatalf("subsystem: ok=%v err=%v", ok, rerr)
+	}
+	req.RunID = string(e.run.ID)
+	header, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal attach header: %v", err)
+	}
+	if _, err := ch.Write(append(header, '\n')); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	r := bufio.NewReader(ch)
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
 	return rawAttachConn{ch: ch, r: r, exit: exitCh}, ack
@@ -199,6 +259,260 @@ func (c rawAttachConn) expectOpen(t *testing.T, d time.Duration) {
 		t.Fatalf("attach ended (exit-status %d, sent %v), want it kept open", st, ok)
 	case <-time.After(d):
 	}
+}
+
+func controlAttachEnv(t *testing.T) *testEnv {
+	t.Helper()
+	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 10 * time.Millisecond })
+	e.srv.cfg.Control = control.New(control.Config{})
+	e.pty.gate = NewWriteGate(e.store)
+	return e
+}
+
+func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
+	t.Run("two tabs same member", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "tab-a"}, true)
+		if !firstAck.OK || !firstAck.HasControl || firstAck.ControlGeneration == 0 {
+			t.Fatalf("first ack = %+v, want held control", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+		_, secondAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "tab-b"}, true)
+		if secondAck.OK || secondAck.Code != protocol.CodeConflict {
+			t.Fatalf("second tab ack = %+v, want occupied conflict", secondAck)
+		}
+	})
+
+	t.Run("two members", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		otherSigner, other := addMember(t, e, "Other", domain.RoleCollaborator, false)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "member-a"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+		_, secondAck := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{ControlSessionID: "member-b"}, true)
+		if secondAck.OK || secondAck.Code != protocol.CodeConflict {
+			t.Fatalf("other member ack = %+v, want occupied conflict", secondAck)
+		}
+		_ = other
+	})
+
+	t.Run("explicit takeover displaces writer", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "old-tab"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		second, secondAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "new-tab", Takeover: true,
+		}, true)
+		if !secondAck.OK || !secondAck.HasControl || secondAck.ControlGeneration <= firstAck.ControlGeneration {
+			t.Fatalf("takeover ack = %+v, first = %+v", secondAck, firstAck)
+		}
+		first.expectExit(t, protocol.AttachExitControlRevoked)
+		_ = second.ch.Close()
+	})
+
+	t.Run("same session forced reconnect fences old transport", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "same-tab"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		second, secondAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "same-tab", ControlGeneration: firstAck.ControlGeneration, Takeover: true,
+		}, true)
+		if !secondAck.OK || !secondAck.HasControl || secondAck.ControlGeneration <= firstAck.ControlGeneration {
+			t.Fatalf("forced reconnect ack = %+v, first = %+v", secondAck, firstAck)
+		}
+		first.expectExit(t, protocol.AttachExitControlRevoked)
+		second.typeAndEcho(t, "still-writable")
+		_ = second.ch.Close()
+	})
+
+	t.Run("delayed fence cancellation spares replacement generation", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "reused-tab"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		displaced, err := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), func() error { return nil })
+		if err != nil || displaced == nil {
+			t.Fatalf("atomic revoke = displaced %+v, error %v", displaced, err)
+		}
+
+		replacement, replacementAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "reused-tab"}, true)
+		if !replacementAck.OK || !replacementAck.HasControl || replacementAck.ControlGeneration <= firstAck.ControlGeneration {
+			t.Fatalf("replacement ack = %+v, first = %+v", replacementAck, firstAck)
+		}
+		e.srv.cancelControlAttach(string(e.run.ID), displaced.SessionID, displaced.Generation, errAttachControlRevoked)
+		replacement.expectOpen(t, 50*time.Millisecond)
+		replacement.typeAndEcho(t, "still-writable")
+		_ = first.ch.Close()
+		_ = replacement.ch.Close()
+	})
+
+	t.Run("late registration observes revoked generation", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		acquired, _, err := e.srv.cfg.Control.Acquire(
+			string(e.run.ID), string(e.member.ID), "late-tab", false,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if displaced, revokeErr := e.srv.cfg.Control.AdmitRevoke(string(e.run.ID), func() error { return nil }); revokeErr != nil || displaced == nil {
+			t.Fatalf("atomic revoke = displaced %+v, error %v", displaced, revokeErr)
+		}
+
+		attachCtx, cancel := context.WithCancelCause(context.Background())
+		id, registerErr := e.srv.registerControlAttach(string(e.run.ID), acquired.SessionID, acquired.Generation, cancel)
+		defer e.srv.unregisterControlAttach(string(e.run.ID), acquired.SessionID, id)
+		if !errors.Is(registerErr, control.ErrStale) {
+			t.Fatalf("register error = %v, want %v", registerErr, control.ErrStale)
+		}
+		select {
+		case <-attachCtx.Done():
+			if !errors.Is(context.Cause(attachCtx), errAttachControlRevoked) {
+				t.Fatalf("cancellation cause = %v, want %v", context.Cause(attachCtx), errAttachControlRevoked)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("late stale transport was not cancelled")
+		}
+	})
+
+	t.Run("same tab reconnects within lease window", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "reconnect-tab"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		_ = first.ch.Close()
+		time.Sleep(20 * time.Millisecond)
+		second, secondAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "reconnect-tab", ControlGeneration: firstAck.ControlGeneration,
+		}, true)
+		if !secondAck.OK || !secondAck.HasControl || secondAck.ControlGeneration != firstAck.ControlGeneration {
+			t.Fatalf("reconnect ack = %+v, first = %+v", secondAck, firstAck)
+		}
+		_ = second.ch.Close()
+	})
+
+	t.Run("release fences writer", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "release-tab"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		_, releaseAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "release-tab", ControlGeneration: firstAck.ControlGeneration,
+			ReleaseControl: true,
+		}, false)
+		if !releaseAck.OK || releaseAck.HasControl {
+			t.Fatalf("release ack = %+v, want successful release", releaseAck)
+		}
+		first.expectExit(t, protocol.AttachExitControlRevoked)
+	})
+
+	t.Run("release requires authenticated member and generation", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "member-release"}, true)
+		if !firstAck.OK {
+			t.Fatalf("first ack = %+v", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+		otherSigner, _ := addMember(t, e, "Other release", domain.RoleCollaborator, false)
+		_, crossMemberAck := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
+			ControlSessionID: "member-release", ControlGeneration: firstAck.ControlGeneration,
+			ReleaseControl: true,
+		}, false)
+		if crossMemberAck.OK || crossMemberAck.Code != protocol.CodeConflict {
+			t.Fatalf("cross-member release ack = %+v, want conflict", crossMemberAck)
+		}
+		_, omittedGenerationAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "member-release", ReleaseControl: true,
+		}, false)
+		if omittedGenerationAck.OK || omittedGenerationAck.Code != protocol.CodeInvalidParams {
+			t.Fatalf("omitted-generation release ack = %+v, want invalid params", omittedGenerationAck)
+		}
+		status, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+		if !ok || status.MemberID != e.member.ID || status.Generation != firstAck.ControlGeneration {
+			t.Fatalf("lease after refused releases = %+v/%v, want member %q generation %d", status, ok, e.member.ID, firstAck.ControlGeneration)
+		}
+	})
+
+	t.Run("read-only watcher sees controller without acquiring", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "writer"}, true)
+		if !firstAck.OK {
+			t.Fatalf("writer ack = %+v", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+		watcher, watcherAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "watcher", ReadOnly: true,
+		}, true)
+		if !watcherAck.OK || watcherAck.HasControl || watcherAck.ControllerID != string(e.member.ID) {
+			t.Fatalf("watcher ack = %+v, want read-only controller status", watcherAck)
+		}
+		_ = watcher.ch.Close()
+		first.typeAndEcho(t, "still-live")
+	})
+}
+
+func TestOccupiedRunShellRemainsAvailableAsMirror(t *testing.T) {
+	e := controlAttachEnv(t)
+	first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "incumbent"}, true)
+	if !firstAck.OK {
+		t.Fatalf("incumbent ack = %+v", firstAck)
+	}
+	defer func() { _ = first.ch.Close() }()
+	otherSigner, _ := addMember(t, e, "Shell member", domain.RoleCollaborator, false)
+	_, ack := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
+		ControlSessionID: "shell-writer", Shell: "shared",
+	}, true)
+	if ack.OK || ack.Code != protocol.CodeConflict {
+		t.Fatalf("occupied shell ack = %+v, want conflict", ack)
+	}
+	for _, call := range e.runs.Calls() {
+		if call == "run-shell-stop:"+string(e.run.ID)+":shared" {
+			t.Fatalf("occupied shell was destroyed instead of retained for a mirror: %v", e.runs.Calls())
+		}
+	}
+	mirror, mirrorAck := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
+		ControlSessionID: "shell-writer", Shell: "shared", ReadOnly: true,
+	}, true)
+	if !mirrorAck.OK || mirrorAck.HasControl || mirrorAck.ControllerID != string(e.member.ID) {
+		t.Fatalf("shell mirror ack = %+v, want current controller without control", mirrorAck)
+	}
+	_ = mirror.ch.Close()
+}
+
+func TestAttachTakeoverDoesNotEvictBeforeLateAdmission(t *testing.T) {
+	e := controlAttachEnv(t)
+	first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "incumbent"}, true)
+	if !firstAck.OK || !firstAck.HasControl {
+		t.Fatalf("incumbent ack = %+v, want held control", firstAck)
+	}
+	defer func() { _ = first.ch.Close() }()
+
+	e.pty.mu.Lock()
+	e.pty.gate = func(context.Context, domain.MemberID, ptyhost.SessionKey) error {
+		return errors.New("late attach authorization failure")
+	}
+	e.pty.mu.Unlock()
+
+	_, takeoverAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+		ControlSessionID: "takeover",
+		Takeover:         true,
+	}, true)
+	if takeoverAck.OK {
+		t.Fatalf("late-gated takeover ack = %+v, want refusal", takeoverAck)
+	}
+	snap, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+	if !ok || snap.SessionID != "incumbent" || snap.Generation != firstAck.ControlGeneration {
+		t.Fatalf("controller after late rejection = %+v/%v, want incumbent generation %d", snap, ok, firstAck.ControlGeneration)
+	}
+	first.typeAndEcho(t, "incumbent-still-live")
 }
 
 func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {

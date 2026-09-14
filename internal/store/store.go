@@ -149,6 +149,7 @@ type Store interface {
 	TemplateStore
 	CostStore
 	ServerUpdateStore
+	CollaborationStore
 
 	Close() error
 }

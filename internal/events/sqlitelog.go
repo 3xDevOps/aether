@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -58,7 +59,9 @@ func OpenSQLiteLog(path string) (*SQLiteLog, error) {
 	return &SQLiteLog{db: db}, nil
 }
 
-// Append implements EventLog.
+// Append implements EventLog. Repeating an identical event ID is safe and
+// reports ErrEventAlreadyExists so a publisher can reconcile uncertain
+// commits; reusing an ID for different content is a hard collision.
 func (l *SQLiteLog) Append(ctx context.Context, e Event) error {
 	if e.Payload == nil {
 		return ErrNoPayload
@@ -72,10 +75,53 @@ func (l *SQLiteLog) Append(ctx context.Context, e Event) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.Seq, e.ID, e.Time.UnixNano(), string(e.WorkspaceID), string(e.RunID),
 		string(e.ActorID), string(e.Type), string(body))
-	if err != nil {
+	if err == nil {
+		return nil
+	}
+	existing, lookupErr := l.Get(ctx, e.ID)
+	if lookupErr != nil {
 		return fmt.Errorf("events: append event %d: %w", e.Seq, err)
 	}
-	return nil
+	if sameEvent(existing, e) {
+		return ErrEventAlreadyExists
+	}
+	return ErrEventIDConflict
+}
+
+// Get returns one event by its stable event ID.
+func (l *SQLiteLog) Get(ctx context.Context, id string) (Event, error) {
+	if id == "" {
+		return Event{}, ErrEventNotFound
+	}
+	var (
+		e       Event
+		ts      int64
+		ws      string
+		run     string
+		actor   string
+		typ     string
+		payload []byte
+	)
+	err := l.db.QueryRowContext(ctx,
+		`SELECT seq, id, ts, workspace_id, run_id, actor_id, type, payload
+		 FROM events WHERE id = ?`, id,
+	).Scan(&e.Seq, &e.ID, &ts, &ws, &run, &actor, &typ, &payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Event{}, ErrEventNotFound
+	}
+	if err != nil {
+		return Event{}, fmt.Errorf("events: get event %q: %w", id, err)
+	}
+	e.Time = time.Unix(0, ts).UTC()
+	e.WorkspaceID = domain.WorkspaceID(ws)
+	e.RunID = domain.RunID(run)
+	e.ActorID = domain.MemberID(actor)
+	e.Type = Type(typ)
+	e.Payload, err = DecodePayload(e.Type, payload)
+	if err != nil {
+		return Event{}, err
+	}
+	return e, nil
 }
 
 // Read implements EventLog.

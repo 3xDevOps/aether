@@ -26,6 +26,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/mirror"
 	"github.com/3xDevOps/Aether/internal/profile"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -661,7 +662,7 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 		t.Fatalf("harness status count = %d, output = %q", got, p.output.String())
 	}
 	time.Sleep(100 * time.Millisecond)
-	_, _ = p.master.Write([]byte("printf 'after-term\\n'\n"))
+	_, _ = p.master.Write([]byte("printf 'after-%s\\n' term\n"))
 	time.Sleep(100 * time.Millisecond)
 	p.drainOutput()
 	if strings.Contains(p.output.String(), "after-term") {
@@ -702,7 +703,7 @@ func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 	if strings.Contains(p.output.String(), "[aether] harness exited with code") {
 		t.Fatalf("signal shutdown printed normal harness status: output = %q", p.output.String())
 	}
-	_, _ = p.master.Write([]byte("printf 'after-signal\\n'\n"))
+	_, _ = p.master.Write([]byte("printf 'after-%s\\n' signal\n"))
 	time.Sleep(100 * time.Millisecond)
 	p.drainOutput()
 	if strings.Contains(p.output.String(), "after-signal") {
@@ -1234,8 +1235,8 @@ func TestInvalidAPITransitions(t *testing.T) {
 	if err := e.sched.Pause(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Pause on finished run: %v, want ErrInvalidTransition", err)
 	}
-	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi"); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("Inject on finished run: %v, want ErrInvalidTransition", err)
+	if err := e.sched.Inject(ctx, run.ID, e.member.ID, "hi"); !errors.Is(err, ptyhost.ErrNoSession) {
+		t.Fatalf("Inject on finished run: %v, want ErrNoSession", err)
 	}
 }
 

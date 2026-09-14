@@ -71,7 +71,7 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 	// would drop this stream under the member typing into it.
 	release := s.cfg.Runs.HoldShell()
 	defer release()
-	conn := newAttachConn(ch, r, ack, req.Framed)
+	conn := newAttachConn(ch, r, ack, req.Framed, nil)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- s.cfg.PTY.Attach(attachCtx, ptyhost.TerminalSession(member, tab), ptyhost.AttachClient{

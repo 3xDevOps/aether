@@ -18,4 +18,10 @@ describe('run presentation', () => {
     expect(runState('needs-attention')).toBe('needs-attention')
     expect(runState('completed')).toBe('done')
   })
+
+  it('keeps unanswered work in Needs you after a terminal lifecycle', () => {
+    for (const status of ['failed', 'completed', 'merged', 'abandoned'] as const) {
+      expect(runState(status, true)).toBe('needs-attention')
+    }
+  })
 })

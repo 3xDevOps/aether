@@ -3,6 +3,7 @@
 // and the description. The team view also asks for a jump-to-run button;
 // the Events tab is already pinned to one run and leaves it off.
 
+import type { ReactNode } from 'react'
 import { Chip } from '@/components/ui/heroui'
 import { typeLabel, type EventType } from '@/lib/events'
 import { budgetStateLabel, money, timeAgo } from '@/lib/format'
@@ -71,7 +72,7 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
  * describer without a name in `eventLabel`, or a name without a describer, is a
  * compile error rather than a row that renders half of itself.
  */
-const describers: Record<EventType, (p: Record<string, unknown>) => string> = {
+const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> = {
   'run.status': (p) => join([p.to, p.reason]),
   'run.deleted': () => 'record removed',
   'run.protected': (p) => (p.protected ? 'protected' : 'unprotected'),
@@ -87,12 +88,14 @@ const describers: Record<EventType, (p: Record<string, unknown>) => string> = {
   'git.branch': (p) => join([p.branch, p.commit]),
   'sync.conflict': (p) => suffix(fileCount(p.files), 'in conflict'),
   'server.update': (p) => join([p.phase, p.version, p.detail]),
+  'workspace.room_message': (p) => join([p.kind, p.state, p.message_id]),
 }
 
-function describe(event: Event): string {
+function describe(event: Event): ReactNode {
   if (!Object.hasOwn(describers, event.type)) return ''
   return describers[event.type as EventType]((event.payload ?? {}) as Record<string, unknown>)
 }
+
 
 // An absent or empty `with` means the run's overlaps cleared.
 function overlapLine(peers: unknown): string {

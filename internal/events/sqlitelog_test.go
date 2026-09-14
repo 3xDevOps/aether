@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -201,5 +202,34 @@ func TestSQLiteLogAppendDuplicateSeqFails(t *testing.T) {
 	appendN(t, log, e)
 	if err := log.Append(context.Background(), e); err == nil {
 		t.Fatal("duplicate seq append succeeded, want error")
+	}
+}
+
+func TestSQLiteLogAppendIDempotencyDistinguishesCollision(t *testing.T) {
+	log := newTestLog(t)
+	ctx := context.Background()
+	e := logEvent(1, "w1", "r1", PresencePayload{State: PresenceOnline})
+	appendN(t, log, e)
+	if err := log.Append(ctx, e); !errors.Is(err, ErrEventAlreadyExists) {
+		t.Fatalf("same event append = %v, want ErrEventAlreadyExists", err)
+	}
+	conflict := e
+	conflict.WorkspaceID = "w2"
+	if err := log.Append(ctx, conflict); !errors.Is(err, ErrEventIDConflict) {
+		t.Fatalf("conflicting event ID append = %v, want ErrEventIDConflict", err)
+	}
+	got, err := log.Get(ctx, e.ID)
+	if err != nil || got.Seq != e.Seq {
+		t.Fatalf("lookup after idempotent append = %+v (err %v), want original", got, err)
+	}
+}
+
+func TestSQLiteLogGetPreservesQueryError(t *testing.T) {
+	log := newTestLog(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := log.Get(ctx, "event-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("get after cancellation = %v, want context.Canceled", err)
 	}
 }

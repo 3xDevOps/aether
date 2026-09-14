@@ -138,6 +138,48 @@ func (s *sink) Bytes() []byte {
 	return append([]byte(nil), s.buf.Bytes()...)
 }
 
+type cancelOnceStdin struct {
+	mu      sync.Mutex
+	started chan struct{}
+	calls   int
+	closed  bool
+	buf     bytes.Buffer
+}
+
+func (w *cancelOnceStdin) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *cancelOnceStdin) WriteContext(ctx context.Context, p []byte) (int, error) {
+	w.mu.Lock()
+	w.calls++
+	first := w.calls == 1
+	if first {
+		close(w.started)
+	}
+	w.mu.Unlock()
+	if first {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	return w.Write(p)
+}
+
+func (w *cancelOnceStdin) Close() error {
+	w.mu.Lock()
+	w.closed = true
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *cancelOnceStdin) snapshot() (string, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String(), w.closed
+}
+
 type testConn struct {
 	r io.Reader
 	w io.Writer
@@ -324,6 +366,41 @@ func TestAttachPassthroughAndReattach(t *testing.T) {
 	}
 	if got := b.out.String(); got != "alphabetagamma" {
 		t.Fatalf("second client output = %q", got)
+	}
+}
+func TestAttachInputGuardFencesBufferedInput(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	stdin := att.captureStdin()
+	run := domain.RunID("run-guard")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	guardCalls := 0
+	conn := &testConn{r: strings.NewReader("stale"), w: &sink{}}
+	guardErr := errors.New("stale control generation")
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(context.Background(), RunSession(run), AttachClient{
+			Member: "m1", Cols: 80, Rows: 24, InputGuard: func() error {
+				guardCalls++
+				if guardCalls > 1 {
+					return guardErr
+				}
+				return nil
+			},
+		}, conn, nil)
+	}()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, guardErr) {
+			t.Fatalf("Attach = %v, want guard error", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("guarded attach did not terminate")
+	}
+	if got := stdin.String(); got != "" {
+		t.Fatalf("stale input reached PTY: %q", got)
 	}
 }
 
@@ -594,6 +671,41 @@ func TestInjectAndTranscriptReplay(t *testing.T) {
 	// Injection reached the process input exactly once, banner excluded.
 	if got := stdin.String(); got != "fix the tests\r" {
 		t.Fatalf("stdin = %q, want single injected message", got)
+	}
+}
+
+func TestCancelledInjectionLeavesSharedStdinWritable(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-cancel-write")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	writer := &cancelOnceStdin{started: make(chan struct{})}
+	session := h.lookup(RunSession(run))
+	session.mu.Lock()
+	session.stdin = writer
+	session.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() {
+		first <- h.Inject(ctx, RunSession(run), "Ana", "", "first", "\r")
+	}()
+	<-writer.started
+	cancel()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Inject = %v, want context.Canceled", err)
+	}
+	if body, closed := writer.snapshot(); body != "" || closed {
+		t.Fatalf("stdin after cancellation = %q, closed=%v", body, closed)
+	}
+
+	if err := h.Inject(context.Background(), RunSession(run), "Ana", "", "second", "\r"); err != nil {
+		t.Fatalf("later Inject = %v", err)
+	}
+	if body, closed := writer.snapshot(); body != "second\r" || closed {
+		t.Fatalf("stdin after later input = %q, closed=%v", body, closed)
 	}
 }
 
@@ -892,6 +1004,9 @@ func TestWriteGate(t *testing.T) {
 	}
 
 	err := h.Attach(context.Background(), RunSession(run), AttachClient{Member: "bad", Cols: 80, Rows: 24}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil)
+	if got := att.sizeCalls(); len(got) != 1 || got[0] != [2]uint{120, 30} {
+		t.Fatalf("refused writer changed geometry: %v", got)
+	}
 	if !errors.Is(err, ErrWriteDenied) {
 		t.Fatalf("write attach = %v, want ErrWriteDenied", err)
 	}
@@ -1509,6 +1624,10 @@ func TestStartSessionReplacesEndedSession(t *testing.T) {
 	if err := h.StartSession(context.Background(), key, first); err != nil {
 		t.Fatalf("first StartSession: %v", err)
 	}
+	firstGeneration := h.SessionGeneration(key)
+	if firstGeneration == 0 {
+		t.Fatal("first session generation is zero")
+	}
 	first.writeOutput(t, "old shell output\n")
 	waitFor(t, "first output recorded", func() bool {
 		ts, ok := h.LastOutput(key)
@@ -1525,12 +1644,23 @@ func TestStartSessionReplacesEndedSession(t *testing.T) {
 	if err := h.StartSession(context.Background(), key, second); err != nil {
 		t.Fatalf("reopen StartSession: %v", err)
 	}
+	secondGeneration := h.SessionGeneration(key)
+	if secondGeneration == 0 || secondGeneration == firstGeneration {
+		t.Fatalf("replacement generation = %d, want nonzero and different from %d", secondGeneration, firstGeneration)
+	}
+	if err := h.Attach(context.Background(), key, AttachClient{
+		Member: "m1", Cols: 120, Rows: 30, SessionGeneration: firstGeneration,
+	}, &testConn{r: strings.NewReader(""), w: &sink{}}, nil); !errors.Is(err, ErrSessionReplaced) {
+		t.Fatalf("stale reservation attach = %v, want ErrSessionReplaced", err)
+	}
 	second.writeOutput(t, "new shell\n")
 	out := &sink{}
 	kr, kw := io.Pipe()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- h.Attach(context.Background(), key, AttachClient{Member: "m1", Cols: 120, Rows: 30}, &testConn{r: kr, w: out}, nil)
+		errCh <- h.Attach(context.Background(), key, AttachClient{
+			Member: "m1", Cols: 120, Rows: 30, SessionGeneration: secondGeneration,
+		}, &testConn{r: kr, w: out}, nil)
 	}()
 	t.Cleanup(func() {
 		_ = kw.Close()

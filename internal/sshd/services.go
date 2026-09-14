@@ -27,4 +27,6 @@ type Services struct {
 	// Mirrors configures and refreshes workspace upstream mirrors and captures
 	// immutable base provenance for launches.
 	Mirrors MirrorService
+	// Rooms is the durable run-room collaboration service.
+	Rooms RoomService
 }

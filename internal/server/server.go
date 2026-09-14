@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/gitengine"
@@ -139,6 +140,7 @@ type Server struct {
 	pty      *ptyhost.Host
 	sched    *scheduler.Scheduler
 	adapters *adapter.Manager
+	control  *control.Service
 	ssh      *sshd.Server
 	web      *servergw.Gateway
 	tailnet  servergw.Tailnet
@@ -278,6 +280,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
+	s.control = control.New(control.Config{})
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
@@ -324,6 +327,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Git:               lazyGit{s.git},
 		PTY:               s.pty,
 		Runs:              s.sched,
+		Control:           s.control,
 		Homes:             homes,
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
@@ -342,6 +346,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Runs:    s.sched,
 		Git:     s.git,
 		PTY:     s.pty,
+		Control: s.control,
 		SSH:     &sshCfg,
 	}); err != nil {
 		return nil, err

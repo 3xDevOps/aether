@@ -71,6 +71,9 @@ func (e *Engine) readRunMeta(run domain.RunID) (runMeta, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return runMeta{}, fmt.Errorf("%w: %w", ErrRunMetadataNotFound, err)
+		}
 		return runMeta{}, fmt.Errorf("gitengine: run %s has no identity record: %w", run, err)
 	}
 	var meta runMeta
@@ -387,12 +390,19 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit
 
 	ref := "refs/heads/" + meta.Branch
 	before, _ := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", ref)
-	if _, fetchErr := e.git(ctx, repo, "fetch", "--quiet", checkout, "+"+ref+":"+ref); fetchErr != nil {
-		return "", fetchErr
+	head, scratch, err := e.checkoutHeadSource(ctx, run, checkout, ref)
+	if err != nil {
+		return "", err
+	}
+	if _, fetchErr := e.git(ctx, repo, "fetch", "--quiet", scratch, "+"+ref+":"+ref); fetchErr != nil {
+		return "", fmt.Errorf("gitengine: publish run branch %s: %w", run, fetchErr)
 	}
 	after, err := e.git(ctx, repo, "rev-parse", "--verify", ref)
 	if err != nil {
 		return "", err
+	}
+	if after != head {
+		return "", fmt.Errorf("gitengine: published run branch %s resolved to %s, want %s", run, after, head)
 	}
 	if after != before {
 		e.publishBranch(ctx, run, after)

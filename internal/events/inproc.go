@@ -71,9 +71,45 @@ func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 	if b.closed {
 		return Event{}, ErrBusClosed
 	}
+	if e.ID != "" && b.log != nil {
+		if lookup, ok := b.log.(EventLogByID); ok {
+			existing, err := lookup.Get(ctx, e.ID)
+			switch {
+			case err == nil:
+				if !sameEvent(existing, e) {
+					return Event{}, ErrEventIDConflict
+				}
+				return existing, nil
+			case !errors.Is(err, ErrEventNotFound):
+				return Event{}, fmt.Errorf("events: look up event %s: %w", e.ID, err)
+			}
+		}
+	}
 	e.Seq = b.seq + 1
 	if b.log != nil {
 		if err := b.log.Append(ctx, e); err != nil {
+			if errors.Is(err, ErrEventAlreadyExists) {
+				if lookup, ok := b.log.(EventLogByID); ok {
+					existing, lookupErr := lookup.Get(ctx, e.ID)
+					if lookupErr == nil && sameEvent(existing, e) {
+						return existing, nil
+					}
+					if lookupErr == nil {
+						return Event{}, ErrEventIDConflict
+					}
+				} else {
+					// EventLog implementations only return
+					// ErrEventAlreadyExists after comparing the full
+					// event, so this is a safe reconciliation even
+					// when they do not expose lookup. Refresh the
+					// cursor so a later event does not skip a sequence.
+					if last, lastErr := b.log.LastSeq(ctx); lastErr == nil {
+						b.seq = last
+						e.Seq = last
+					}
+					return e, nil
+				}
+			}
 			// The driver can report an error (e.g. a context
 			// cancellation) after the row actually committed. Re-sync
 			// the cursor from the log so the next publish never reuses

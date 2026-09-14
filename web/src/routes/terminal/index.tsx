@@ -15,11 +15,13 @@ import { cn } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import {
   type Attachment,
+  type ControlMetadata,
   codeUnavailable,
   connectAttach,
   replayGate,
 } from '@/routes/terminal/attach'
 import { RunDock } from '@/routes/terminal/run-dock'
+import { RunRoom } from '@/routes/terminal/run-room'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -70,6 +72,9 @@ function TerminalView({ params }: RouteProps) {
   // Only a missing session says anything about the run itself; every other
   // refusal is about this attach and speaks for itself.
   const [sessionMissing, setSessionMissing] = useState(false)
+  const [controlMetadata, setControlMetadata] = useState<ControlMetadata | undefined>()
+  const runStatusRef = useRef(run?.status)
+  runStatusRef.current = run?.status
   const attachRef = useRef<Attachment | null>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
   const terminalRef = useRef<XtermController['terminal']>(null)
@@ -126,11 +131,12 @@ function TerminalView({ params }: RouteProps) {
     // mirror is what a member opening their own run there wants.
     const ownerSteering =
       !phone &&
-      (run?.status === 'running' || run?.status === 'needs-attention') &&
+      steerable &&
       run?.member_id === self.id
     setTerminal(runID, { ...initialTerminal, write: ownerSteering })
     writeRef.current = ownerSteering
     askedForControl.current = false
+    setControlMetadata(undefined)
     setSessionMissing(false)
 
     // No session exists yet to attach to (internal/ptyhost ErrNoSession),
@@ -148,17 +154,15 @@ function TerminalView({ params }: RouteProps) {
       // second copy of the scrollback under the first.
       onAttached: (write, size, resumed) => {
         // The ack carries what the server granted, not what was asked: a
-        // refused request arrives as onWriteDenied instead. Marking control
-        // here rather than on the click keeps a denied first attempt from
-        // silencing the mirror hint for good.
+        // refused request arrives as onWriteDenied instead.
         if (write && askedForControl.current) markControlTaken()
         gate.current.unmute()
-        // A resumed attach brings no replay, so the screen on display is
-        // the only copy of it - and the terminal state behind that screen
-        // is what makes a paste arrive as a paste.
+        // A resumed attach brings no replay, so the screen on display is the
+        // only copy of it.
         setGeometry(size.cols, size.rows, !resumed)
         setTerminal(runID, { message: null, refused: false })
       },
+      onControl: setControlMetadata,
       onState: (connection) => {
         if (connection === 'offline') gate.current.unmute()
         setTerminal(runID, { connection })
@@ -168,8 +172,17 @@ function TerminalView({ params }: RouteProps) {
         setTerminal(runID, { message, refused: true })
       },
       onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
+      onControlLost: () => {
+        // Control is an ephemeral lease, not a permission decision. Drop the
+        // writable preference and any pending request so the reconnect is a
+        // mirror, while leaving the Take control action available.
+        writeRef.current = false
+        askedForControl.current = false
+        setTerminal(runID, { steerDenied: false, write: false })
+        setControlMetadata(undefined)
+      },
       onGeometry: setGeometry,
-      sessionPending: () => run !== undefined && !endedStatuses.includes(run.status),
+      sessionPending: () => runStatusRef.current !== undefined && !endedStatuses.includes(runStatusRef.current),
       geometry,
       wantsWrite: () => writeRef.current,
       follows: () => phone,
@@ -185,9 +198,10 @@ function TerminalView({ params }: RouteProps) {
     geometry,
     setGeometry,
     markControlTaken,
+    setControlMetadata,
     phone,
     run?.member_id,
-    run?.status,
+    steerable,
     runID,
     self.id,
     setTerminal,
@@ -207,14 +221,28 @@ function TerminalView({ params }: RouteProps) {
   if (!run) {
     return <MissingRun />
   }
+  const takeControl = (takeover = false) => {
+    writeRef.current = true
+    askedForControl.current = true
+    setTerminal(runID, { write: true, steerDenied: false })
+    // The server owns the lease. `takeover` is only sent after the room's
+    // confirmation dialog has named the current controller.
+    attachRef.current?.reopen({ resume: true, takeover })
+  }
+
+  const releaseControl = () => {
+    writeRef.current = false
+    askedForControl.current = false
+    setTerminal(runID, { write: false })
+    attachRef.current?.reopen({ resume: true, releaseControl: true })
+  }
 
   const toggleWrite = () => {
-    writeRef.current = !state.write
-    if (writeRef.current) askedForControl.current = true
-    setTerminal(runID, { write: writeRef.current })
-    // Taking control changes what this attach may do, not what it shows,
-    // so it keeps the screen rather than redrawing the whole scrollback.
-    attachRef.current?.reopen({ resume: true })
+    if (state.write) {
+      releaseControl()
+    } else {
+      takeControl()
+    }
   }
 
   const retry = () => {
@@ -288,7 +316,7 @@ function TerminalView({ params }: RouteProps) {
   )
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+    <div className="relative flex h-full min-w-0 flex-col overflow-hidden pr-8">
       <RunHeader run={run} subtitle={run.branch} active="terminal" />
       <div {...runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')}>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
@@ -311,6 +339,14 @@ function TerminalView({ params }: RouteProps) {
           <RunDock runID={runID} />
         </div>
       </div>
+      <RunRoom
+        key={runID}
+        run={run}
+        selfID={self.id}
+        control={controlMetadata}
+        onTakeControl={takeControl}
+        onReleaseControl={releaseControl}
+      />
     </div>
   )
 }

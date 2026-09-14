@@ -311,6 +311,80 @@ describe('board', () => {
     )
     expect(column('Working').getByText('still going')).toBeDefined()
   })
+  it('deals unanswered room questions into Needs you with an action summary', () => {
+    const questionRun = run({
+      id: 'run_room_attention',
+      task: 'answer the room',
+      status: 'running',
+      unanswered_questions: 1,
+      reason: '',
+    })
+    seed([questionRun])
+    render(<Board />)
+
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('answer the room')).toBeDefined()
+    expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+
+    fireEvent.click(needsYou.getByRole('button', { name: 'answer the room' }))
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: questionRun.id },
+    })
+  })
+
+  it('keeps a finished run with unanswered questions in Needs you with lifecycle context', () => {
+    const finished = run({
+      id: 'run_finished_question',
+      task: 'answer after completion',
+      status: 'completed',
+      unanswered_questions: 1,
+      reason: '',
+      finished_at: '2026-08-14T10:30:00Z',
+    })
+    seed([finished])
+    render(<Board />)
+
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('answer after completion')).toBeDefined()
+    expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    expect(needsYou.getByText('Lifecycle: Completed')).toBeDefined()
+    expect(column('Done').queryByText('answer after completion')).toBeNull()
+    expect(useStore.getState().runs[finished.id].status).toBe('completed')
+  })
+  it('keeps the unanswered-question action ahead of a failed lifecycle reason', () => {
+    const failed = run({
+      id: 'run_failed_question',
+      task: 'answer after failure',
+      status: 'failed',
+      unanswered_questions: 1,
+      reason: 'agent exited unexpectedly',
+      finished_at: '2026-08-14T10:30:00Z',
+    })
+    seed([failed])
+    render(<Board />)
+
+    const needsYou = column('Needs you')
+    expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    expect(needsYou.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
+  })
+
+  it('pluralizes the unanswered room question summary', () => {
+    const questionRun = run({
+      id: 'run_room_attention_plural',
+      task: 'answer both rooms',
+      status: 'running',
+      unanswered_questions: 2,
+      reason: '',
+    })
+    seed([questionRun])
+    render(<Board />)
+
+    expect(
+      column('Needs you').getByText('2 unanswered questions - open Run Room to answer'),
+    ).toBeDefined()
+  })
+
 
   it('keeps the board identity across an inbox refresh that changed nothing', () => {
     seed([working])

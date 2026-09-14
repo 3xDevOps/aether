@@ -314,9 +314,18 @@ export function TerminalPane({
   // would turn the first character of the next turn at the keyboard into a
   // control code nobody pressed.
   const armCtrl = controller.armCtrl
+  const terminal = controller.terminal
   useEffect(() => {
     if (!writable) armCtrl(false)
   }, [armCtrl, writable])
+  useEffect(() => {
+    if (!terminal) return
+    // xterm's hidden textarea is still focusable on a mirror. Disable its
+    // stdin and blur it so a tap cannot raise a keyboard that has nowhere to
+    // send its input.
+    terminal.options.disableStdin = !writable
+    if (!writable) terminal.blur()
+  }, [terminal, writable])
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-2 coarse:min-h-12">

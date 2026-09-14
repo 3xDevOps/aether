@@ -10,6 +10,7 @@ import { type ConnectionState } from '@/lib/stream'
 import {
   type AttachDataKind,
   type Attachment,
+  type ControlMetadata,
   connectAttach,
   replayGate,
   standardGeometry,
@@ -26,6 +27,7 @@ import {
 
 const maxShellTabs = 4
 const shellRefusal = 'You can view this run but not open a shell in it'
+const shellControlMoved = 'Read-only shell. Another session controls this run.'
 
 interface ShellAttachmentIdentity {
   runID: string
@@ -54,6 +56,9 @@ export function RunDock({ runID }: { runID: string }) {
   const [attachedIdentity, setAttachedIdentity] = useState<ShellAttachmentIdentity | null>(null)
   const currentAttachmentRef = useRef<ShellAttachmentIdentity | null>(null)
   const terminalRef = useRef<XtermController['terminal']>(null)
+  const writeRequested = useRef<Record<string, boolean>>({})
+  const controlHeld = useRef<Record<string, boolean>>({})
+  const [controlState, setControlState] = useState<{ key: string; held: boolean } | null>(null)
   const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
   // Which of the dock's four bodies is on screen. The three that are not the
   // terminal replace one that may have been holding the keyboard: the server
@@ -87,7 +92,13 @@ export function RunDock({ runID }: { runID: string }) {
     onData: (data) => {
       if (!activeTab) return
       const current = currentAttachmentRef.current
-      if (current?.runID !== runID || current.tab !== activeTab || gate.current.muted()) return
+      const key = `${runID}:${activeTab}`
+      if (
+        current?.runID !== runID ||
+        current.tab !== activeTab ||
+        controlHeld.current[key] !== true ||
+        gate.current.muted()
+      ) return
       getShellSocket(runID, activeTab)?.send(data)
     },
     onResize: (cols, rows) => {
@@ -127,6 +138,10 @@ export function RunDock({ runID }: { runID: string }) {
 
     const socketKey = activeTab
     const identity: ShellAttachmentIdentity = { runID, tab: socketKey }
+    const controlKey = `${runID}:${socketKey}`
+    if (writeRequested.current[controlKey] === undefined) {
+      writeRequested.current[controlKey] = true
+    }
     const isCurrent = () => {
       const current = currentAttachmentRef.current
       return current?.runID === identity.runID && current.tab === identity.tab
@@ -166,13 +181,22 @@ export function RunDock({ runID }: { runID: string }) {
       // paused run); a lost steer capability always means the fixed
       // refusal sentence.
       onRefused: refuse,
+      onControl: (metadata: ControlMetadata) => {
+        controlHeld.current[controlKey] = metadata.has_control
+        if (isCurrent()) setControlState({ key: controlKey, held: metadata.has_control })
+      },
+      onControlLost: () => {
+        writeRequested.current[controlKey] = false
+        controlHeld.current[controlKey] = false
+        if (isCurrent()) setControlState({ key: controlKey, held: false })
+      },
       onWriteDenied: () => refuse(shellRefusal),
       onExit: () => {
         clearAttached()
         removeShellTab(runID, socketKey)
       },
       geometry: () => isCurrent() ? geometry() : standardGeometry,
-      wantsWrite: () => true,
+      wantsWrite: () => writeRequested.current[controlKey] !== false,
       follows: () => phone,
       onGeometry: (cols: number, rows: number) => {
         if (isCurrent()) setGeometry(cols, rows)
@@ -215,6 +239,17 @@ export function RunDock({ runID }: { runID: string }) {
     setDockCollapsed(runID, false)
     const opened = openShellTab(runID)
     if (opened) focusTerminal()
+  }
+
+  const activeControlKey = activeTab ? `${runID}:${activeTab}` : ''
+  const activeHasControl =
+    controlState?.key === activeControlKey
+      ? controlState.held
+      : controlHeld.current[activeControlKey] === true
+  const takeShellControl = () => {
+    if (!activeTab) return
+    writeRequested.current[activeControlKey] = true
+    getShellSocket(runID, activeTab)?.reopen({ takeover: true })
   }
 
   return (
@@ -265,18 +300,33 @@ export function RunDock({ runID }: { runID: string }) {
           </Button>
         </div>
       ) : (
-        <TerminalPane
-          controller={controller}
-          className="overflow-auto"
-          imageTarget={runID}
-          imageTargetKey={activeTab ?? undefined}
-          imageUploadEnabled={
-            attachedIdentity !== null &&
-            attachedIdentity.runID === runID &&
-            attachedIdentity.tab === activeTab &&
-            activeTab !== null
-          }
-        />
+        <div className="flex h-full min-h-0 flex-1 flex-col">
+          {!activeHasControl && (
+            <div
+              role="status"
+              className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-toolbar px-3 py-1.5 text-[12px] text-muted-foreground"
+            >
+              <span>{shellControlMoved}</span>
+              <Button type="button" size="sm" onClick={takeShellControl}>
+                Take shell control
+              </Button>
+            </div>
+          )}
+          <TerminalPane
+            controller={controller}
+            writable={activeHasControl}
+            className="min-h-0 flex-1 overflow-auto"
+            imageTarget={runID}
+            imageTargetKey={activeTab ?? undefined}
+            imageUploadEnabled={
+              activeHasControl &&
+              attachedIdentity !== null &&
+              attachedIdentity.runID === runID &&
+              attachedIdentity.tab === activeTab &&
+              activeTab !== null
+            }
+          />
+        </div>
       )}
     </Dock>
   )

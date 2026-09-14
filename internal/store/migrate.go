@@ -715,6 +715,40 @@ ALTER TABLE runs ADD COLUMN base_branch TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN base_source TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN base_checked_at INTEGER;
 `,
+	// v27: durable run-room messages. Bodies and attachments remain bounded
+	// by the collaboration service; this table stores their authoritative
+	// state, idempotency identity, and immutable actor display snapshot.
+	`
+CREATE TABLE room_messages (
+	id                 TEXT PRIMARY KEY,
+	workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	run_id             TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	actor_id           TEXT NOT NULL,
+	actor_display_name TEXT NOT NULL,
+	kind               TEXT NOT NULL CHECK (kind IN ('comment', 'steer_request', 'question', 'reply', 'system')),
+	body               TEXT NOT NULL,
+	attachments        TEXT NOT NULL DEFAULT '[]',
+	anchor             TEXT,
+	correlation_id     TEXT NOT NULL DEFAULT '',
+	idempotency_key    TEXT NOT NULL,
+	state              TEXT NOT NULL CHECK (state IN ('queued', 'sent', 'not_sent', 'uncertain', 'denied', 'cancelled')),
+	deliver_after      INTEGER,
+	decided_by         TEXT NOT NULL DEFAULT '',
+	decided_at         INTEGER,
+	delivered_at       INTEGER,
+	failure            TEXT,
+	created_at         INTEGER NOT NULL,
+	updated_at         INTEGER NOT NULL,
+	UNIQUE (actor_id, run_id, idempotency_key)
+);
+CREATE INDEX idx_room_messages_scope
+	ON room_messages(workspace_id, run_id, created_at DESC, id DESC);
+CREATE INDEX idx_room_messages_state
+	ON room_messages(workspace_id, run_id, state, created_at DESC, id DESC);
+CREATE INDEX idx_room_messages_correlation
+	ON room_messages(workspace_id, correlation_id, created_at DESC)
+	WHERE correlation_id <> '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

@@ -19,6 +19,7 @@ export const eventLabel = {
   'git.branch': 'Branch',
   'sync.conflict': 'Sync conflict',
   'server.update': 'Server update',
+  'workspace.room_message': 'Run Room message',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
 )
 
 // openLegacy builds a database at the given schema version by applying the
@@ -240,35 +239,46 @@ func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
 	}
 
 	// The four session-scoped type strings were renamed with the scope
-	// they name. Reading history back resolves a payload codec by exact
-	// type string, so a row left under its old name does not just read
-	// oddly, it fails the whole page. Read through the real log rather
-	// than raw SQL, which is what catches that.
-	log, err := events.OpenSQLiteLog(path)
-	if err != nil {
-		t.Fatalf("OpenSQLiteLog on the migrated database: %v", err)
-	}
-	defer func() { _ = log.Close() }()
-	page, err := log.Read(context.Background(), events.Filter{Workspace: "w1"}, 0, 0, 100)
+	// they name. Verify the migrated rows directly so this same-package
+	// test does not import the events package (which imports protocol and
+	// would create a cycle back to store).
+	rows, err := db.db.QueryContext(context.Background(),
+		`SELECT type, workspace_id FROM events ORDER BY seq`)
 	if err != nil {
 		t.Fatalf("read migrated history: %v", err)
 	}
-	if len(page) != 5 {
-		t.Fatalf("migrated history = %d events, want 5", len(page))
+	defer func() { _ = rows.Close() }()
+	type migratedEvent struct {
+		typ       string
+		workspace string
 	}
-	want := []events.Type{
-		events.TypeRunStatus,
-		events.TypeTimeline,
-		events.TypeApproval,
-		events.TypePresence,
-		events.TypeBudget,
-	}
-	for i, ev := range page {
-		if ev.Type != want[i] {
-			t.Errorf("event %d type = %q, want %q", i, ev.Type, want[i])
+	var got []migratedEvent
+	for rows.Next() {
+		var ev migratedEvent
+		if err := rows.Scan(&ev.typ, &ev.workspace); err != nil {
+			t.Fatalf("scan migrated history: %v", err)
 		}
-		if ev.WorkspaceID != "w1" {
-			t.Errorf("event %d workspace = %q, want w1", i, ev.WorkspaceID)
+		got = append(got, ev)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read migrated history: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("migrated history = %d events, want 5", len(got))
+	}
+	want := []string{
+		"run.status",
+		"workspace.timeline",
+		"workspace.approval",
+		"workspace.presence",
+		"workspace.budget",
+	}
+	for i, ev := range got {
+		if ev.typ != want[i] {
+			t.Errorf("event %d type = %q, want %q", i, ev.typ, want[i])
+		}
+		if ev.workspace != "w1" {
+			t.Errorf("event %d workspace = %q, want w1", i, ev.workspace)
 		}
 	}
 }

@@ -47,6 +47,11 @@ const (
 // stderr together.
 const execOutputLimit = 1 << 20
 
+// hijackWriteTimeout is the maximum time one physical stdin write may hold a
+// Docker hijack connection. Cancellation only interrupts this write through
+// its deadline; it never closes the shared stdin stream.
+const hijackWriteTimeout = 5 * time.Second
+
 type dockerWaitClient interface {
 	ContainerInspect(context.Context, string) (container.InspectResponse, error)
 	ContainerWait(context.Context, string, container.WaitCondition) (<-chan container.WaitResponse, <-chan error)
@@ -694,15 +699,40 @@ func (a *dockerAttachment) Close() error {
 }
 
 // hijackStdin writes to the container's stdin stream of one attachment.
-// Close half-closes the connection: this attachment supplies no more input,
-// but the container's stdin stays open (StdinOnce is false) so the process
-// does not see EOF and later attachments can keep writing.
+// Close half-closes the connection only for an explicit caller request. The
+// PTY host never uses it for cancellation: WriteContext changes only the
+// write deadline, preserving shared stdin for later inputs and attachments.
 type hijackStdin struct {
 	resp types.HijackedResponse
 }
 
 func (h hijackStdin) Write(p []byte) (int, error) { return h.resp.Conn.Write(p) }
-func (h hijackStdin) Close() error                { return h.resp.CloseWrite() }
+
+func (h hijackStdin) WriteContext(ctx context.Context, p []byte) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deadline := time.Now().Add(hijackWriteTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	if err := h.resp.Conn.SetWriteDeadline(deadline); err != nil {
+		return 0, err
+	}
+	cancelDone := make(chan struct{})
+	stopCancel := context.AfterFunc(ctx, func() {
+		_ = h.resp.Conn.SetWriteDeadline(time.Now())
+		close(cancelDone)
+	})
+	n, err := h.resp.Conn.Write(p)
+	if !stopCancel() {
+		<-cancelDone
+	}
+	_ = h.resp.Conn.SetWriteDeadline(time.Time{})
+	return n, err
+}
+
+func (h hijackStdin) Close() error { return h.resp.CloseWrite() }
 
 // maxStreamBuffer caps how much unread attachment output one stream holds.
 const maxStreamBuffer = 8 << 20

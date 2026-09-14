@@ -27,6 +27,7 @@ const samples: Record<EventType, unknown> = {
   'git.branch': { branch: 'run/1', commit: 'abc1234' },
   'sync.conflict': { files: ['src/a.ts'], run_id: 'run_1' },
   'server.update': { phase: 'applying', version: 'v0.2.0' },
+  'workspace.room_message': { kind: 'comment', state: 'sent', message_id: 'message_1' },
 }
 
 function renderRow(type: string, payload: unknown): HTMLElement {

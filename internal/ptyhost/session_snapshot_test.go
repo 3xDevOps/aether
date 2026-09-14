@@ -120,7 +120,7 @@ func TestResizePendingOverflowPublishesCursorAfterCommit(t *testing.T) {
 	}()
 	<-att.entered
 
-	fill := bytes.Repeat([]byte{'a'}, maxClientBuffer-1)
+	fill := bytes.Repeat([]byte{'a'}, maxClientBuffer)
 	s.deliver(fill)
 	if got := s.ring.written; got != 0 {
 		t.Fatalf("ring cursor advanced while resize was pending: %d", got)
@@ -140,7 +140,7 @@ func TestResizePendingOverflowPublishesCursorAfterCommit(t *testing.T) {
 	close(att.release)
 	<-resizeDone
 	<-outputDone
-	if got, want := s.ring.written, uint64(maxClientBuffer); got != want {
+	if got, want := s.ring.written, uint64(maxClientBuffer+1); got != want {
 		t.Fatalf("ring cursor = %d, want %d after committed handoff", got, want)
 	}
 	if len(s.pendingScreen) != 0 {

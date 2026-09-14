@@ -109,13 +109,47 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last admin"}
 		}
 	}
+	var activeRuns []*domain.Run
+	if s.cfg.Control != nil {
+		var listErr error
+		activeRuns, listErr = s.cfg.Store.ListActiveRuns(ctx)
+		if listErr != nil {
+			return nil, rpcError(listErr)
+		}
+	}
 	// Stop the bind-mounted terminal before deleting its member row. If
 	// cleanup fails, retain the member as the durable recovery path.
-	if err := s.cfg.Runs.StopTerminal(ctx, id); err != nil {
-		return nil, rpcError(fmt.Errorf("member.remove: stop terminal: %w", err))
+	remove := func() error {
+		if err := s.cfg.Runs.StopTerminal(ctx, id); err != nil {
+			return fmt.Errorf("member.remove: stop terminal: %w", err)
+		}
+		return s.cfg.Store.DeleteMember(ctx, id)
 	}
-	if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
-		return nil, rpcError(err)
+	if len(activeRuns) == 0 || s.cfg.Control == nil {
+		if err := remove(); err != nil {
+			return nil, rpcError(err)
+		}
+	} else {
+		removed := false
+		for _, run := range activeRuns {
+			if _, removeErr := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+				if removed {
+					return nil
+				}
+				if err := remove(); err != nil {
+					return err
+				}
+				removed = true
+				return nil
+			}); removeErr != nil {
+				return nil, rpcError(removeErr)
+			}
+		}
+		if !removed {
+			if err := remove(); err != nil {
+				return nil, rpcError(err)
+			}
+		}
 	}
 	if s.cfg.Homes != nil {
 		if err := s.cfg.Homes.Remove(id); err != nil {

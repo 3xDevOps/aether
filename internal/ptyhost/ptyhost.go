@@ -59,10 +59,31 @@ const (
 )
 
 var (
-	ErrNoSession    = errors.New("ptyhost: no session for run")
-	ErrSessionEnded = errors.New("ptyhost: session ended")
-	ErrWriteDenied  = errors.New("ptyhost: write access denied")
+	ErrNoSession       = errors.New("ptyhost: no session for run")
+	ErrSessionEnded    = errors.New("ptyhost: session ended")
+	ErrWriteDenied     = errors.New("ptyhost: write access denied")
+	ErrInvalidRunID    = errors.New("ptyhost: invalid run id")
+	ErrSessionReplaced = errors.New("ptyhost: session was replaced")
 )
+
+func validateRunID(run domain.RunID) error {
+	id := string(run)
+	if id == "" || len(id) > 128 {
+		return ErrInvalidRunID
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return ErrInvalidRunID
+		}
+	}
+	if id[0] == '.' || id[0] == '-' || strings.Contains(id, "..") {
+		return ErrInvalidRunID
+	}
+	return nil
+}
 
 var errHostClosed = errors.New("ptyhost: host closed")
 
@@ -74,11 +95,12 @@ const drainTimeout = 5 * time.Second
 type Host struct {
 	cfg Config
 
-	mu        sync.Mutex
-	sessions  map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
-	starting  map[SessionKey]struct{}
-	snapshots map[SessionKey]*snapshotResult
-	closed    bool
+	mu             sync.Mutex
+	sessions       map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
+	starting       map[SessionKey]struct{}
+	snapshots      map[SessionKey]*snapshotResult
+	nextGeneration uint64
+	closed         bool
 }
 
 type snapshotResult struct {
@@ -240,6 +262,11 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		_ = att.Close()
 		return errHostClosed
 	}
+	h.nextGeneration++
+	if h.nextGeneration == 0 {
+		h.nextGeneration++
+	}
+	s.generation = h.nextGeneration
 	h.sessions[key] = s
 	delete(h.snapshots, key)
 	h.mu.Unlock()
@@ -267,7 +294,10 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	name := filepath.Base(string(run))
+	if err := validateRunID(run); err != nil {
+		return fmt.Errorf("%w: %q", err, run)
+	}
+	name := string(run)
 	patterns := []string{
 		filepath.Join(h.cfg.TranscriptDir, name+".cast"),
 		filepath.Join(h.cfg.TranscriptDir, name+".*.cast"),
@@ -323,6 +353,9 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 // returned before anything is written, so a caller can fall back to its own
 // refusal when no transcript exists.
 func (h *Host) Replay(run domain.RunID) (io.ReadCloser, int, error) {
+	if err := validateRunID(run); err != nil {
+		return nil, 0, fmt.Errorf("%w: %q", err, run)
+	}
 	return openFullCastReplay(h.transcriptPath(RunSession(run)))
 }
 
@@ -332,6 +365,9 @@ func (h *Host) Replay(run domain.RunID) (io.ReadCloser, int, error) {
 // If the session is no longer in memory, the complete cast is reconstructed
 // once and only the compact bytes are cached.
 func (h *Host) Snapshot(run domain.RunID) (ScreenSnapshot, error) {
+	if err := validateRunID(run); err != nil {
+		return ScreenSnapshot{}, fmt.Errorf("%w: %q", err, run)
+	}
 	key := RunSession(run)
 	h.mu.Lock()
 	if s := h.sessions[key]; s != nil {
@@ -374,12 +410,11 @@ func (h *Host) transcriptPath(key SessionKey) string {
 // agent's input, and neither it nor the terminal's echo advances
 // LastOutput. Authorization is the caller's.
 func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor, message, submit string) error {
-	_ = ctx
 	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
-	return s.inject(actorName, actorColor, message, submit)
+	return s.inject(ctx, actorName, actorColor, message, submit)
 }
 
 // ReplayWriter is implemented by an attach conn that needs the replay byte
@@ -402,10 +437,13 @@ func (h *Host) reportInput(key SessionKey, member domain.MemberID) {
 // AttachClient is what one attach declares about itself: the geometry it
 // brings, whether it may write, and whether it follows the session.
 type AttachClient struct {
-	Member   domain.MemberID
-	Cols     uint
-	Rows     uint
-	ReadOnly bool
+	Member domain.MemberID
+	Cols   uint
+	Rows   uint
+	// SessionGeneration fences a shell reservation to the exact PTY process
+	// it admitted. Zero accepts the current process for non-reserved attaches.
+	SessionGeneration uint64
+	ReadOnly          bool
 	// Snapshot asks for a compact current-screen replay rather than the raw
 	// retained output ring. The dashboard sets this; CLI and screenless taps
 	// leave it false.
@@ -416,7 +454,7 @@ type AttachClient struct {
 	// told the size it should draw at, at attach and at every change.
 	Follow bool
 	// Resume attaches without the scrollback replay. The client already
-	// holds this session's screen and its terminal state, so it is sent
+	// holds the session's screen and its terminal state, so it is sent
 	// exactly the bytes that arrived while it was away.
 	Resume bool
 	// Cursor is how much of the session's output this client has already
@@ -424,6 +462,36 @@ type AttachClient struct {
 	// makes the reattach lossless: the session hands back exactly what it
 	// missed, rather than everything or nothing.
 	Cursor uint64
+	// ControlSessionID and ControlGeneration identify the fenced writable
+	// lease. They are carried to the input guard so bytes read before a
+	// takeover cannot be delivered after it.
+	ControlSessionID  string
+	ControlGeneration uint64
+	// Authorize completes the write authorization synchronously before the
+	// client joins the session. It must be bounded.
+	Authorize func() error
+	// OnAttached runs after the client has joined successfully, but before
+	// replay, output, or geometry is written. It is the commit point for
+	// resources reserved while authorization was in flight.
+	OnAttached func()
+	// InputGuard is checked immediately before and after every client read.
+	// It fences stale buffered input after a lease is taken over.
+	InputGuard func() error
+	// InputAdmission wraps the actual PTY acceptance. The callback must invoke
+	// accept while the caller's generation-aware authorization lock is held;
+	// validating before calling it is insufficient.
+	InputAdmission func(accept func() error) error
+}
+
+// ShellTabReservation is the scheduler's ownership token for a shell tab
+// created while an attach is being admitted. Adopt commits the tab to any
+// successful attachment; Rollback is a no-op after adoption and otherwise
+// removes only the shell owned by this reservation.
+type ShellTabReservation interface {
+	// Generation identifies the exact PTY process reserved for attachment.
+	Generation() uint64
+	Adopt()
+	Rollback(context.Context) error
 }
 
 // ResumeWriter is an attach conn that reports how a resume was answered:
@@ -448,17 +516,16 @@ type GeometryWriter interface {
 // or the host closes. Reads from conn are keystrokes (discarded when
 // read-only); writes to conn are raw PTY output, starting with the complete
 // run transcript or the recent scrollback for other session types. resize
-// carries [cols, rows] updates (nil = fixed geometry). Write-mode attaches
-// are checked against the configured Gate.
+// carries [cols, rows] updates (nil = fixed geometry). Write authorization
+// runs synchronously before the client is registered, so a refused writer
+// can never contribute geometry or trigger a resize.
 func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
 	s := h.lookup(key)
 	if s == nil {
 		return ErrNoSession
 	}
-	if !a.ReadOnly && h.cfg.Gate != nil {
-		if err := h.cfg.Gate(ctx, a.Member, key); err != nil {
-			return fmt.Errorf("%w: %v", ErrWriteDenied, err)
-		}
+	if a.SessionGeneration != 0 && s.generation != a.SessionGeneration {
+		return ErrSessionReplaced
 	}
 	if a.Cols == 0 {
 		a.Cols = h.cfg.DefaultCols
@@ -469,9 +536,24 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	if err := validateScreenDimensions(a.Cols, a.Rows); err != nil {
 		return fmt.Errorf("ptyhost: attach screen size: %w", err)
 	}
+	if !a.ReadOnly {
+		if h.cfg.Gate != nil {
+			if err := h.cfg.Gate(ctx, a.Member, key); err != nil {
+				return fmt.Errorf("%w: %v", ErrWriteDenied, err)
+			}
+		}
+		if a.Authorize != nil {
+			if err := a.Authorize(); err != nil {
+				return err
+			}
+		}
+	}
 	c := newClient(conn, a)
 	if err := s.addClient(c); err != nil {
 		return err
+	}
+	if a.OnAttached != nil {
+		a.OnAttached()
 	}
 	defer s.removeClient(c)
 	// The size the session is, not the size this client asked for: the ack
@@ -480,19 +562,46 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	c.tellGeometry(c.replayCols, c.replayRows)
 	c.tellResume()
 
+	readErr := make(chan error, 1)
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
 		buf := make([]byte, readBufferBytes)
 		var scan inputScanner
 		typed := false
+		report := func(err error) {
+			if err != nil && !errors.Is(err, io.EOF) {
+				readErr <- err
+			}
+		}
 		for {
+			if a.InputGuard != nil {
+				if err := a.InputGuard(); err != nil {
+					report(err)
+					return
+				}
+			}
 			n, err := conn.Read(buf)
+			if a.InputGuard != nil {
+				if guardErr := a.InputGuard(); guardErr != nil {
+					report(guardErr)
+					return
+				}
+			}
 			if c.isClosed() {
 				return
 			}
 			if n > 0 && !a.ReadOnly {
-				if !s.writeStdin(buf[:n]) {
+				accept := func() error {
+					return s.writeStdinContext(ctx, buf[:n])
+				}
+				if a.InputAdmission != nil {
+					if admissionErr := a.InputAdmission(accept); admissionErr != nil {
+						report(admissionErr)
+						return
+					}
+				} else if writeErr := accept(); writeErr != nil {
+					report(writeErr)
 					return
 				}
 				if !typed && scan.typed(buf[:n]) {
@@ -501,6 +610,7 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 				}
 			}
 			if err != nil {
+				report(err)
 				return
 			}
 		}
@@ -511,11 +621,20 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	for {
 		select {
 		case <-ctx.Done():
+			// Do not close conn here: the handler must send a reason-specific
+			// exit status before it owns the final channel closure. The
+			// handler's close then unblocks a transport read still in flight.
 			c.close(ctx.Err())
 			return ctx.Err()
 		case <-readDone:
-			c.close(nil)
-			return nil
+			select {
+			case readErr := <-readErr:
+				c.close(readErr)
+				return readErr
+			default:
+				c.close(nil)
+				return nil
+			}
 		case werr := <-writeDone:
 			return werr
 		case <-c.done:
@@ -583,6 +702,19 @@ func (h *Host) unreserve(key SessionKey) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.starting, key)
+}
+
+// SessionGeneration identifies the current process stored at key. It is
+// immutable for that process, so Attach can reject a reservation that raced a
+// replacement under the same public session key.
+func (h *Host) SessionGeneration(key SessionKey) uint64 {
+	h.mu.Lock()
+	s := h.sessions[key]
+	h.mu.Unlock()
+	if s == nil {
+		return 0
+	}
+	return s.generation
 }
 
 // ActiveSessions returns the keys of live sessions with the given prefix.

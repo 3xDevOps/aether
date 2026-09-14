@@ -19,12 +19,15 @@ export type PresentationState =
  * run with one presents as needs-attention.
  */
 export function runState(status: RunStatus, pendingApproval = false): PresentationState {
+  // A question or approval remains actionable after execution stops. Attention
+  // is a presentation overlay; the domain lifecycle below stays untouched.
+  if (pendingApproval) return 'needs-attention'
   switch (status) {
     case 'queued':
     case 'provisioning':
-      return pendingApproval ? 'needs-attention' : 'waiting'
+      return 'waiting'
     case 'running':
-      return pendingApproval ? 'needs-attention' : 'working'
+      return 'working'
     case 'needs-attention':
       return 'needs-attention'
     case 'failed':

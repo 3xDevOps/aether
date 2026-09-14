@@ -7,6 +7,7 @@
 package events
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -61,6 +62,10 @@ const (
 	// local and run-worktree edits to the same paths. The overlay writes
 	// conflict twins and stops; resuming is rerunning `aether sync`.
 	TypeSyncConflict Type = "sync.conflict"
+	// TypeRoomMessage signals a durable run-room message mutation. Its
+	// payload contains refresh metadata only; message bodies and attachments
+	// are fetched through the collaboration API.
+	TypeRoomMessage Type = "workspace.room_message"
 )
 
 // Payload is the typed body of an event. Implementations are plain structs;
@@ -195,16 +200,12 @@ func (ApprovalPayload) EventType() Type { return TypeApproval }
 type TimelineKind string
 
 const (
-	TimelineSteer   TimelineKind = "steer"
-	TimelinePause   TimelineKind = "pause"
-	TimelineResume  TimelineKind = "resume"
-	TimelineKill    TimelineKind = "kill"
-	TimelineHandoff TimelineKind = "handoff"
-	TimelineNote    TimelineKind = "note"
-	// TimelineCoAuthor records a member other than the run's owner steering
-	// it for the first time. From that point the run's commits credit them
-	// with a Co-authored-by trailer, so the act is stamped once, not once
-	// per keystroke.
+	TimelineSteer    TimelineKind = "steer"
+	TimelinePause    TimelineKind = "pause"
+	TimelineResume   TimelineKind = "resume"
+	TimelineKill     TimelineKind = "kill"
+	TimelineHandoff  TimelineKind = "handoff"
+	TimelineNote     TimelineKind = "note"
 	TimelineCoAuthor TimelineKind = "co-author"
 )
 
@@ -302,6 +303,25 @@ type SyncConflictPayload struct {
 
 func (SyncConflictPayload) EventType() Type { return TypeSyncConflict }
 
+// RoomMessagePayload is a dashboard-refresh summary for a room message.
+// Body, attachment references, and anchor details are intentionally absent.
+type RoomMessagePayload struct {
+	MessageID       string             `json:"message_id"`
+	WorkspaceID     domain.WorkspaceID `json:"workspace_id"`
+	RunID           domain.RunID       `json:"run_id"`
+	ActorID         domain.MemberID    `json:"actor_id"`
+	Kind            string             `json:"kind"`
+	State           string             `json:"state"`
+	DeliverAfter    *string            `json:"deliver_after,omitempty"`
+	DecidedBy       domain.MemberID    `json:"decided_by,omitempty"`
+	DecidedAt       *string            `json:"decided_at,omitempty"`
+	CorrelationID   string             `json:"correlation_id,omitempty"`
+	AttachmentCount int                `json:"attachment_count,omitempty"`
+	HasAnchor       bool               `json:"has_anchor,omitempty"`
+}
+
+func (RoomMessagePayload) EventType() Type { return TypeRoomMessage }
+
 func decodeAs[P Payload](data []byte) (Payload, error) {
 	var p P
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -323,6 +343,7 @@ var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeAgentEvent:   decodeAs[AgentEventPayload],
 	TypeProfile:      decodeAs[ProfilePayload],
 	TypeSyncConflict: decodeAs[SyncConflictPayload],
+	TypeRoomMessage:  decodeAs[RoomMessagePayload],
 }
 
 // registerPayload registers the decoder for a payload type declared
@@ -347,6 +368,21 @@ func DecodePayload(t Type, data []byte) (Payload, error) {
 		return nil, fmt.Errorf("events: decode %q payload: %w", t, err)
 	}
 	return p, nil
+}
+
+// sameEvent compares the immutable identity and payload of two events. Seq is
+// intentionally excluded: it is assigned by the bus and a retry may reach a
+// log with a different in-process cursor after a restart.
+func sameEvent(a, b Event) bool {
+	if a.ID != b.ID || !a.Time.Equal(b.Time) ||
+		a.WorkspaceID != b.WorkspaceID || a.RunID != b.RunID ||
+		a.ActorID != b.ActorID || a.Type != b.Type ||
+		a.Payload == nil || b.Payload == nil {
+		return false
+	}
+	left, lerr := json.Marshal(a.Payload)
+	right, rerr := json.Marshal(b.Payload)
+	return lerr == nil && rerr == nil && bytes.Equal(left, right)
 }
 
 func newEventID() string {

@@ -29,6 +29,10 @@ import (
 var (
 	ErrRepoNotFound     = errors.New("gitengine: workspace repo not found")
 	ErrCheckoutNotFound = errors.New("gitengine: run checkout not found")
+	// ErrRunMetadataNotFound reports a missing server-owned run identity
+	// record. Unlike a malformed record, this is a permanently unavailable
+	// source after checkout cleanup.
+	ErrRunMetadataNotFound = errors.New("gitengine: run metadata not found")
 	// ErrInvalidObjectID reports a patch range end that is not a full git
 	// object id, or a range with only one end set.
 	ErrInvalidObjectID = errors.New("gitengine: not a git object id")
@@ -68,20 +72,18 @@ type runInfo struct {
 // Engine is the git engine. Its exported method set satisfies the
 // scheduler's GitEngine and sshd's GitTransport seam interfaces.
 type Engine struct {
-	cfg Config
-
-	// checkoutsRoot pins the configured checkout parent. Individual run
-	// directories are acquired from it with rootfs.OpenRoot so an attacker
-	// cannot swap a checkout's parent between validation and use.
+	cfg           Config
 	checkoutsRoot *os.Root
-
-	mu       sync.Mutex
-	watches  map[domain.RunID]*diffWatch
-	registry map[domain.RunID]runInfo
-	closed   bool
+	mu            sync.Mutex
+	watches       map[domain.RunID]*diffWatch
+	registry      map[domain.RunID]runInfo
+	closed        bool
 	// fileWriteMu serializes read/compare/replace and bare ref CAS so two
 	// browser saves cannot overwrite one another within this engine.
 	fileWriteMu sync.Mutex
+	// snapshotLocks serialize every writer of a run's persistent snapshot
+	// index, including the diff watcher and evidence capture.
+	snapshotLocks map[domain.RunID]*sync.Mutex
 }
 
 // New validates cfg, applies defaults, and creates the repos and checkouts
@@ -116,6 +118,7 @@ func New(cfg Config) (*Engine, error) {
 		checkoutsRoot: checkoutsRoot,
 		watches:       make(map[domain.RunID]*diffWatch),
 		registry:      make(map[domain.RunID]runInfo),
+		snapshotLocks: make(map[domain.RunID]*sync.Mutex),
 	}, nil
 }
 

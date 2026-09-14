@@ -106,8 +106,43 @@ func (s *Server) accountRevoke(ctx context.Context, member domain.MemberID, raw 
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	if err := s.cfg.Store.RevokeAccountShare(ctx, member, grantee); err != nil {
-		return nil, rpcError(err)
+	var activeRuns []*domain.Run
+	if s.cfg.Control != nil {
+		var err error
+		activeRuns, err = s.cfg.Store.ListActiveRuns(ctx)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+	}
+	revoke := func() error { return s.cfg.Store.RevokeAccountShare(ctx, member, grantee) }
+	if len(activeRuns) == 0 || s.cfg.Control == nil {
+		if err := revoke(); err != nil {
+			return nil, rpcError(err)
+		}
+	} else {
+		revoked := false
+		for _, run := range activeRuns {
+			if run.MemberID != grantee || run.AccountMember() != member {
+				continue
+			}
+			if _, err := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+				if revoked {
+					return nil
+				}
+				if err := revoke(); err != nil {
+					return err
+				}
+				revoked = true
+				return nil
+			}); err != nil {
+				return nil, rpcError(err)
+			}
+		}
+		if !revoked {
+			if err := revoke(); err != nil {
+				return nil, rpcError(err)
+			}
+		}
 	}
 	return struct{}{}, nil
 }

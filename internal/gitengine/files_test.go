@@ -170,7 +170,7 @@ func TestListCheckoutSkipsMissingAndSymlinkLeaves(t *testing.T) {
 	gitFileTest(t, source, "init", "-q", "-b", "main")
 	gitFileTest(t, source, "config", "user.name", "Files Test")
 	gitFileTest(t, source, "config", "user.email", "files@example.test")
-	for name, body := range map[string]string{"keep.txt": "keep\n", "deleted.txt": "gone\n"} {
+	for name, body := range map[string]string{" leading.txt": "space\n", "keep.txt": "keep\n", "deleted.txt": "gone\n"} {
 		if writeErr := os.WriteFile(filepath.Join(source, name), []byte(body), 0o644); writeErr != nil {
 			t.Fatalf("write %s: %v", name, writeErr)
 		}
@@ -193,8 +193,9 @@ func TestListCheckoutSkipsMissingAndSymlinkLeaves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTree: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Name != "keep.txt" || entries[0].Kind != "file" {
-		t.Fatalf("ListTree = %+v, want only keep.txt", entries)
+	if len(entries) != 2 || entries[0].Name != " leading.txt" || entries[0].Kind != "file" ||
+		entries[1].Name != "keep.txt" || entries[1].Kind != "file" {
+		t.Fatalf("ListTree = %+v, want leading.txt and keep.txt", entries)
 	}
 }
 

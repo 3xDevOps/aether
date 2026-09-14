@@ -4,6 +4,8 @@ import type {
   Approval,
   BudgetReport,
   Member,
+  RoomMessage,
+  RoomStatusResult,
   Run,
   Schedule,
   ServerInfo,
@@ -12,7 +14,6 @@ import type {
   UpdateStatus,
   Workspace,
 } from '@/lib/types'
-
 export const alice: Member = {
   id: 'mem_alice',
   display_name: 'Alice',
@@ -186,6 +187,22 @@ export function serverUpdateStatus(
     ...over,
   }
 }
+export function roomMessage(over: Partial<RoomMessage> = {}): RoomMessage {
+  return {
+    id: 'message_1',
+    workspace_id: workspace.id,
+    run_id: 'run_1',
+    actor_id: alice.id,
+    kind: 'comment',
+    body: 'hello',
+    state: 'sent',
+    created_at: '2026-08-14T10:00:00Z',
+    updated_at: '2026-08-14T10:00:00Z',
+    ...over,
+  }
+}
+
+
 
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
@@ -203,9 +220,19 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runDelete: vi.fn(async () => ({})),
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),
-    runInject: vi.fn(async () => ({})),
+    runInject: vi.fn(async () => ({ message: roomMessage({ kind: 'steer_request', state: 'queued' }) })),
     runClose: vi.fn(async () => run({ status: 'merged' })),
     runHandoff: vi.fn(async () => ({})),
+    runRoomList: vi.fn(async () => ({ messages: [] })),
+    runRoomStatus: vi.fn(async (): Promise<RoomStatusResult> => ({
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      protected: false,
+      watchers: [],
+      queued_steers: 0,
+    })),
+    runRoomPost: vi.fn(async () => ({ message: roomMessage() })),
+    runRoomDecide: vi.fn(async () => ({ message: roomMessage({ state: 'denied' }) })),
     approvalList: vi.fn(async () => []),
     approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),

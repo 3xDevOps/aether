@@ -88,7 +88,8 @@ func rpcError(err error) *protocol.Error {
 		case errors.Is(err, store.ErrNotFound):
 			code = protocol.CodeNotFound
 		case errors.Is(err, store.ErrConflict), errors.Is(err, store.ErrInUse),
-			errors.Is(err, scheduler.ErrRunShellTabLimit):
+			errors.Is(err, scheduler.ErrRunShellTabLimit),
+			errors.Is(err, ptyhost.ErrSessionReplaced):
 			code = protocol.CodeConflict
 		case errors.Is(err, scheduler.ErrInvalidRunShellTab), errors.Is(err, scheduler.ErrInvalidTerminalTab):
 			code = protocol.CodeInvalidParams

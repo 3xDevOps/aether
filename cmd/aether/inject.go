@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -21,8 +22,9 @@ func runInject(args []string) error {
 	}
 	return withControl(func(c *protocol.Client) error {
 		return c.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-			RunID:   args[0],
-			Message: strings.Join(args[1:], " "),
+			RunID:          args[0],
+			Message:        strings.Join(args[1:], " "),
+			IdempotencyKey: cli.NewControlSessionID(),
 		}, nil)
 	})
 }
