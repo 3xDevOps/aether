@@ -24,6 +24,7 @@ func controlClient(t *testing.T, e *testEnv) *protocol.Client {
 }
 
 func TestAuthKnownKeyAndServerInfo(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	var info protocol.ServerInfoResult
@@ -42,6 +43,7 @@ func TestAuthKnownKeyAndServerInfo(t *testing.T) {
 }
 
 func TestAuthUnknownKeyRejected(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	var banner strings.Builder
 	client, err := e.dialWith(newSigner(t), &banner)
@@ -55,6 +57,7 @@ func TestAuthUnknownKeyRejected(t *testing.T) {
 }
 
 func TestControlListsAndGets(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -129,6 +132,7 @@ func TestControlListsAndGets(t *testing.T) {
 }
 
 func TestControlRunLifecycleMethods(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -191,6 +195,7 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 // the agent's interactive TUI) and refused in headless mode, which has no
 // interactive surface to type into.
 func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -214,6 +219,7 @@ func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
 }
 
 func TestControlHandoffAndPull(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	other := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#3cb44b", Role: domain.RoleCollaborator}
 	if err := e.store.CreateMember(context.Background(), other); err != nil {
@@ -261,6 +267,7 @@ func TestControlHandoffAndPull(t *testing.T) {
 }
 
 func TestControlErrorMapping(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -300,6 +307,7 @@ func TestControlErrorMapping(t *testing.T) {
 }
 
 func TestControlFramingErrors(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemControl, nil)
 	r := bufio.NewReader(pipe)
@@ -340,6 +348,7 @@ func TestControlFramingErrors(t *testing.T) {
 // lines that size before the per-method pending gate ever runs; approval
 // must lift the cap on the connection the pending member already holds.
 func TestPendingMemberOversizedLineRefused(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfiles(t))
 	pat, pending := addMember(t, e, "Pat", domain.RoleCollaborator, true)
 	client, err := e.dialWith(pat, nil)
@@ -381,6 +390,7 @@ func TestPendingMemberOversizedLineRefused(t *testing.T) {
 // The pending gate must be re-checked per read, not once at channel open,
 // so an approval reaches a connection that is already parked on a read.
 func TestPendingConnectionUnblockedByApproval(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pat, pending := addMember(t, e, "Pat", domain.RoleCollaborator, true)
 	c := controlAs(t, e, pat)

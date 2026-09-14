@@ -22,9 +22,10 @@ const (
 	retainedCloseReason       = "closed; retained container"
 	retainedExpiredReason     = "retained container expired"
 	retainedUnavailableReason = "retained container unavailable"
-	// exitProbeTimeout is the short non-destructive Wait window used on
-	// startup to learn whether a container already exited before attach.
-	exitProbeTimeout = 2 * time.Second
+	// defaultExitProbeTimeout is Config.ExitProbeTimeout's default: the
+	// short non-destructive Wait window used on startup to learn whether a
+	// container already exited before attach.
+	defaultExitProbeTimeout = 2 * time.Second
 )
 
 func retainedTransitionError() error {
@@ -991,7 +992,7 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		s.finalizeObservedExit(ctx, r, sc)
 		return
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, exitProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ExitProbeTimeout)
 	st, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
 	cancel()
 	switch {

@@ -35,6 +35,7 @@ func (f *fakeFiles) FileDiff(context.Context, domain.RunID, string) (gitengine.P
 }
 
 func TestFilesReadRejectsUnsafePathAsInvalidParams(t *testing.T) {
+	t.Parallel()
 	reader := &fakeFiles{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
 	c := controlClient(t, e)
@@ -54,6 +55,7 @@ func TestFilesReadRejectsUnsafePathAsInvalidParams(t *testing.T) {
 }
 
 func TestFilesReadDoesNotEchoServicePath(t *testing.T) {
+	t.Parallel()
 	reader := &fakeFiles{readErr: errors.New("open /var/lib/aether/checkouts/run: permission denied")}
 	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
 	c := controlClient(t, e)
@@ -70,6 +72,7 @@ func TestFilesReadDoesNotEchoServicePath(t *testing.T) {
 	}
 }
 func TestFilesWriteRequiresRunOrWorkspaceWritePermission(t *testing.T) {
+	t.Parallel()
 	reader := &fakeFiles{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
 	viewerSigner, _ := addMember(t, e, "Viewer", domain.RoleViewer, false)

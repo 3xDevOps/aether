@@ -89,6 +89,7 @@ func mirrorRPCState(id domain.WorkspaceID) domain.WorkspaceMirror {
 }
 
 func TestWorkspaceMirrorAdminOnlyAndLocalStatus(t *testing.T) {
+	t.Parallel()
 	fake := &mirrorRPCFake{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Mirrors = fake })
 	collabSigner, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
@@ -124,6 +125,7 @@ func TestWorkspaceMirrorAdminOnlyAndLocalStatus(t *testing.T) {
 }
 
 func TestWorkspaceMirrorLifecycleAndSanitizedTimeline(t *testing.T) {
+	t.Parallel()
 	fake := &mirrorRPCFake{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Mirrors = fake })
 	fake.result = mirrorservice.Result{
@@ -186,6 +188,7 @@ func TestWorkspaceMirrorLifecycleAndSanitizedTimeline(t *testing.T) {
 }
 
 func TestWorkspaceMirrorInputValidation(t *testing.T) {
+	t.Parallel()
 	fake := &mirrorRPCFake{}
 	e := newTestEnv(t, func(c *Config) { c.Services.Mirrors = fake })
 	client := controlClient(t, e)
@@ -201,6 +204,7 @@ func TestWorkspaceMirrorInputValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := client.Call(tc.method, tc.params, nil)
 			if err == nil || wireErrOf(t, err).Code != protocol.CodeInvalidParams {
 				t.Fatalf("error = %v, want invalid params", err)

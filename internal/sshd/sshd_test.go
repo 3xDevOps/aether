@@ -778,6 +778,7 @@ func openSubsystem(t *testing.T, client *ssh.Client, name string, setup func(*ss
 	return p
 }
 func TestWriteGateAllowsNonRunSessionKeys(t *testing.T) {
+	t.Parallel()
 	gate := NewWriteGate(nil)
 	if err := gate(t.Context(), "member", ptyhost.TerminalSession("member", "main")); err != nil {
 		t.Fatalf("terminal session gate = %v, want nil", err)

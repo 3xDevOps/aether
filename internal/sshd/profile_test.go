@@ -45,6 +45,7 @@ func withProfilesHomes(t *testing.T) func(*Config) {
 }
 
 func TestProfilePushStatusDeltaAndErrors(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfiles(t))
 	c := controlClient(t, e)
 
@@ -106,6 +107,7 @@ func TestProfilePushStatusDeltaAndErrors(t *testing.T) {
 }
 
 func TestProfileAllowSecretCreatesTimelineAudit(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfiles(t))
 	sub, err := e.bus.Subscribe(context.Background(), events.SubscribeOptions{
 		Filter: events.Filter{Workspace: e.ws.ID, Types: []events.Type{events.TypeTimeline}},
@@ -141,6 +143,7 @@ func TestProfileAllowSecretCreatesTimelineAudit(t *testing.T) {
 }
 
 func TestProfileRollbackDoesNotMutateRunPin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfiles(t))
 	c := controlClient(t, e)
 	var first, second protocol.ProfilePushResult
@@ -186,6 +189,7 @@ func TestProfileRollbackDoesNotMutateRunPin(t *testing.T) {
 }
 
 func TestProfilePushAndRollbackMaterializeMemberHome(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfilesHomes(t))
 	c := controlClient(t, e)
 	var first, second protocol.ProfilePushResult
@@ -228,6 +232,7 @@ func TestProfilePushAndRollbackMaterializeMemberHome(t *testing.T) {
 }
 
 func TestProfilePushWithoutHomesSkipsMaterialization(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfiles(t))
 	c := controlClient(t, e)
 	if err := c.Call(protocol.MethodProfilePush, protocol.ProfilePushParams{
@@ -239,6 +244,7 @@ func TestProfilePushWithoutHomesSkipsMaterialization(t *testing.T) {
 }
 
 func TestProfileErrorMapping(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		err  error
 		code int
@@ -256,6 +262,7 @@ func TestProfileErrorMapping(t *testing.T) {
 }
 
 func TestProfilePushSecretRequiresAllowAndWorkspace(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withProfiles(t))
 	c := controlClient(t, e)
 	secret := []byte("This settings file embeds token=QmFzZTY0c2VjcmV0LWFldGhlci10ZXN0LTQy")

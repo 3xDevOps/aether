@@ -42,6 +42,7 @@ func wireErrOf(t *testing.T, err error) *protocol.Error {
 }
 
 func TestRunPatchReturnsDiffAndTruncation(t *testing.T) {
+	t.Parallel()
 	patcher := &fakePatcher{patch: gitengine.Patch{
 		Base:      "abc123",
 		Text:      "diff --git a/main.go b/main.go\n",
@@ -81,6 +82,7 @@ func TestRunPatchReturnsDiffAndTruncation(t *testing.T) {
 // reaches the engine, and the two ways it can fail are told apart on the
 // wire so the dashboard can say which one happened.
 func TestRunPatchSnapshotRange(t *testing.T) {
+	t.Parallel()
 	patcher := &fakePatcher{patch: gitengine.Patch{Base: "aaa", Text: "diff --git a/x b/x\n"}}
 	e := newTestEnv(t, func(c *Config) { c.Services.Patch = patcher })
 	c := controlClient(t, e)
@@ -114,6 +116,7 @@ func TestRunPatchSnapshotRange(t *testing.T) {
 }
 
 func TestRunPatchWithoutSeamIsUnavailable(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	err := c.Call(protocol.MethodRunPatch, protocol.RunIDParams{RunID: string(e.run.ID)}, nil)
@@ -123,6 +126,7 @@ func TestRunPatchWithoutSeamIsUnavailable(t *testing.T) {
 }
 
 func TestServerDiskRoundTripsUsage(t *testing.T) {
+	t.Parallel()
 	reader := &fakeDisk{usage: disk.Usage{
 		FreeBytes:       1,
 		UsedBytes:       2,
@@ -161,6 +165,7 @@ func TestServerDiskRoundTripsUsage(t *testing.T) {
 }
 
 func TestServerDiskWithoutSeamIsUnavailable(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	err := c.Call(protocol.MethodServerDisk, nil, nil)

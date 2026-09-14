@@ -245,6 +245,7 @@ func TestSyncPinsSessionIdentifierAgainstTraversal(t *testing.T) {
 // syncSessionID must reject anything that is not plainly one path
 // element, so a future run-ID format cannot reintroduce the traversal.
 func TestSyncSessionIDRejectsPathElements(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []domain.RunID{
 		"", "..", "../../tmp/owned", "a/b", `a\b`, "a.b", "a:b", "a b",
 		domain.RunID(strings.Repeat("a", 65)),
@@ -341,6 +342,7 @@ func TestSyncPinsConfigurationAgainstHostileClient(t *testing.T) {
 // scan above proves the VCS half end to end; this covers the rest of the
 // policy without needing a live filesystem effect for each knob.
 func TestSyncPinOverwritesEverySecurityRelevantField(t *testing.T) {
+	t.Parallel()
 	s := &rootPinningStream{root: "/srv/worktree", session: "aether-run1"}
 	req := hostileInit("/etc", "../../owned", &synchronization.Configuration{
 		IgnoreVCSMode:        ignore.IgnoreVCSMode_IgnoreVCSModePropagate,
@@ -498,6 +500,7 @@ func TestSyncRevokesStreamWhenMemberIsRemoved(t *testing.T) {
 // prefix alone, up to 100 MiB, before reading any of the message. The
 // bridge must reject an oversized frame instead of allocating for it.
 func TestSyncRejectsOversizedInitFrame(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	h := dialHostileSync(t, e, e.signer, e.run.ID)
 	defer h.Close()
@@ -518,6 +521,7 @@ func TestSyncRejectsOversizedInitFrame(t *testing.T) {
 // profile pushes, which would let one sync channel buffer that much
 // before the run ID is even parsed.
 func TestSyncRejectsOversizedHeader(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	client, err := e.dialWith(e.signer, nil)
 	if err != nil {
@@ -545,7 +549,18 @@ func TestSyncRejectsOversizedHeader(t *testing.T) {
 // handshake deadline an authenticated member can pin a channel (and its
 // goroutine) forever by never finishing the setup.
 func TestSyncBoundsSlowHandshake(t *testing.T) {
-	e := newTestEnv(t, func(c *Config) { c.syncHandshakeTimeout = 300 * time.Millisecond })
+	t.Parallel()
+	// syncHandshakeTimeout is a setup precondition here, not the property
+	// under test: both assertions below wait on a fixed 15s ceiling
+	// decoupled from this value, so the test proves a deadline exists and
+	// is enforced, not that it is exactly this many milliseconds. It only
+	// needs to be short enough to keep the test fast and long enough that
+	// dialHostileSync's own ack/compression exchange - which must finish
+	// inside it before the deliberate stall even starts - is not itself
+	// mistaken for the stall on a host running this suite's ~190 parallel
+	// tests, where that legitimate exchange can take longer than a couple
+	// hundred milliseconds to get scheduled.
+	e := newTestEnv(t, func(c *Config) { c.syncHandshakeTimeout = 2 * time.Second })
 	worktree := t.TempDir()
 	e.run.Worktree = worktree
 	e.run.Status = domain.RunNeedsAttention
@@ -584,6 +599,7 @@ func TestSyncBoundsSlowHandshake(t *testing.T) {
 // A member cannot fan out unbounded concurrent sync channels: each one
 // owns a mutagen endpoint with watcher and staging goroutines.
 func TestSyncCapsConcurrentChannelsPerMember(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	client, err := e.dialWith(e.signer, nil)
 	if err != nil {
@@ -615,6 +631,7 @@ func TestSyncCapsConcurrentChannelsPerMember(t *testing.T) {
 // conflict report can be. Paths that escape the sync root, or carry
 // terminal control sequences, are not conflict reports.
 func TestSyncConflictRejectsHostilePayloads(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	c := controlAs(t, e, e.signer)
 	for _, tc := range []struct {
@@ -660,6 +677,7 @@ func TestSyncConflictRejectsHostilePayloads(t *testing.T) {
 // notice on the workspace timeline the run owner never learns their
 // worktree is half-synced.
 func TestSyncConflictNotifiesAffectedMembersOnTimeline(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 

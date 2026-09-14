@@ -23,6 +23,7 @@ func (s *stubUpdates) Tick(context.Context) {
 // while somebody is working. That remains true while an alive agent is
 // stalled at needs-attention; it can resume and its terminal is still live.
 func TestBusyCountsAWorkingRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if got := e.sched.Busy(t.Context()); !got.Idle() {
 		t.Fatalf("busy on an empty scheduler = %+v, want idle", got)
@@ -55,6 +56,7 @@ func TestBusyCountsAWorkingRun(t *testing.T) {
 // an update back. Pause is a flag, not a status, so the run is still
 // `running` in the store and this is the only thing that separates them.
 func TestBusyDoesNotCountAPausedRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, c := e.launchFake(t, "pause me")
 	defer c.exitNow(0)
@@ -90,6 +92,7 @@ func TestBusyDoesNotCountAPausedRun(t *testing.T) {
 // it holds an update back the way a working run does. The counter's next
 // producer is the member terminal (Step 2); workspace shells are gone.
 func TestBusyCountsAnOpenInteractiveShell(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	release := e.sched.holdShell()
 	got := e.sched.Busy(t.Context())
@@ -105,6 +108,7 @@ func TestBusyCountsAnOpenInteractiveShell(t *testing.T) {
 // The poll loop is what drives a scheduled update, so it must give the
 // service a turn every interval.
 func TestPollLoopTicksTheUpdateService(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.PollInterval = 10 * time.Millisecond })
 	svc := &stubUpdates{ticks: make(chan struct{}, 4)}
 	e.sched.UseUpdates(svc)
@@ -122,6 +126,7 @@ func TestPollLoopTicksTheUpdateService(t *testing.T) {
 
 // Without an attached service the poll loop simply has nothing to tell.
 func TestPollLoopWithoutTheUpdateService(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.sched.tickUpdates(t.Context())
 }

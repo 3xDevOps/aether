@@ -20,6 +20,7 @@ import (
 // does, so every gate those enforce holds for a phone too.
 
 func TestLocalCallDispatchesWithThePendingGate(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	l := e.srv.Local(e.member.ID)
@@ -51,6 +52,7 @@ func TestLocalCallDispatchesWithThePendingGate(t *testing.T) {
 }
 
 func TestLocalAttachRunsTheAttachHandler(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	e.pty.replay = []byte("scrollback")
@@ -102,6 +104,7 @@ func TestLocalAttachRunsTheAttachHandler(t *testing.T) {
 }
 
 func TestLocalAttachEndsWithTheRevocationExitStatus(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 20 * time.Millisecond })
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 	_ = collab
@@ -121,6 +124,7 @@ func TestLocalAttachEndsWithTheRevocationExitStatus(t *testing.T) {
 }
 
 func TestLocalEventsEndWhenMembershipIsRevoked(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 20 * time.Millisecond })
 	_, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 	stream, err := e.srv.Local(cm.ID).Events(context.Background(), protocol.SubscribeRequest{WorkspaceID: string(e.ws.ID)})
@@ -144,6 +148,7 @@ func TestLocalEventsEndWhenMembershipIsRevoked(t *testing.T) {
 }
 
 func TestLocalEventsStreamsTheBus(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	stream, err := e.srv.Local(e.member.ID).Events(ctx, protocol.SubscribeRequest{WorkspaceID: string(e.ws.ID)})
@@ -180,6 +185,7 @@ func TestLocalEventsStreamsTheBus(t *testing.T) {
 }
 
 func TestLocalTerminalRunsTheTerminalHandler(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	term, ack, err := e.srv.Local(e.member.ID).Terminal(context.Background(), protocol.TerminalRequest{Tab: "main", Cols: 90, Rows: 30})
 	if err != nil {
@@ -199,6 +205,7 @@ func TestLocalTerminalRunsTheTerminalHandler(t *testing.T) {
 }
 
 func TestWebIdentityNamesWhyHTTPCannotBeIdentified(t *testing.T) {
+	t.Parallel()
 	keyOnly := newTestEnv(t, nil)
 	if err := keyOnly.srv.WebIdentity(); err == nil || !strings.Contains(err.Error(), "tailscaled") {
 		t.Fatalf("key-only server: %v, want the missing-tailscaled reason", err)
@@ -217,6 +224,7 @@ func TestWebIdentityNamesWhyHTTPCannotBeIdentified(t *testing.T) {
 }
 
 func TestTailnetMemberMapsAddressesLikeSSHAuth(t *testing.T) {
+	t.Parallel()
 	whois := &fakeWhoIs{id: WhoIsIdentity{Login: "alice@example.com", NodeID: "node-1"}}
 	e := newFreshTestEnv(t, func(c *Config) { c.WhoIs = whois })
 	ctx := context.Background()
@@ -260,6 +268,7 @@ func TestTailnetMemberMapsAddressesLikeSSHAuth(t *testing.T) {
 // The in-process client is the server-hosted dashboard's transport; the
 // SSH one is covered in transport_test.go.
 func TestLocalAttachFollowsTheSessionGeometry(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.session = [2]uint{132, 43}
 	e.pty.tell = make(chan [2]uint, 1)

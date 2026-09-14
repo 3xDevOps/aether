@@ -46,6 +46,7 @@ func updateEnv(t *testing.T, svc *stubUpdates) *testEnv {
 }
 
 func TestServerUpdateRequiresAdmin(t *testing.T) {
+	t.Parallel()
 	svc := &stubUpdates{calls: make(chan protocol.ServerUpdateParams, 1)}
 	e := updateEnv(t, svc)
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
@@ -67,6 +68,7 @@ func TestServerUpdateRequiresAdmin(t *testing.T) {
 // is behind" banner should learn whether an admin can press the button or
 // has to run the commands on the host.
 func TestServerUpdateStatusIsReadableByAnyMember(t *testing.T) {
+	t.Parallel()
 	svc := &stubUpdates{status: protocol.ServerUpdateStatusResult{
 		ServerVersion:   "v0.1.0",
 		Latest:          "v0.2.0",
@@ -90,6 +92,7 @@ func TestServerUpdateStatusIsReadableByAnyMember(t *testing.T) {
 // restart from a dropped connection. The stub blocks in the restart, so a
 // Call that returns proves the response went out first.
 func TestServerUpdateRestartsOnlyAfterTheResponse(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	restarted := make(chan struct{})
 	svc := &stubUpdates{
@@ -130,6 +133,7 @@ func TestServerUpdateRestartsOnlyAfterTheResponse(t *testing.T) {
 // commands to run on the host, the same pair server.update_status returns
 // as manual_commands.
 func TestServerUpdateIncapableNamesTheManualCommands(t *testing.T) {
+	t.Parallel()
 	e := updateEnv(t, &stubUpdates{err: serverupdate.ErrIncapable})
 
 	err := controlClient(t, e).Call(protocol.MethodServerUpdate,
@@ -146,6 +150,7 @@ func TestServerUpdateIncapableNamesTheManualCommands(t *testing.T) {
 }
 
 func TestServerUpdateBadTagIsInvalidParams(t *testing.T) {
+	t.Parallel()
 	e := updateEnv(t, &stubUpdates{err: serverupdate.ErrBadTag})
 
 	err := controlClient(t, e).Call(protocol.MethodServerUpdate,
@@ -159,6 +164,7 @@ func TestServerUpdateBadTagIsInvalidParams(t *testing.T) {
 // A server assembled without the service says so rather than pretending
 // the method does not exist.
 func TestServerUpdateUnavailableWithoutTheService(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	for _, method := range []string{protocol.MethodServerUpdate, protocol.MethodServerUpdateStatus} {
@@ -182,6 +188,7 @@ func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
 // old image with its one update slot held for the rest of the process's
 // life, and no way for anyone to clear it.
 func TestRespondRestartsEvenWhenTheWriteFails(t *testing.T) {
+	t.Parallel()
 	ran := false
 	slot := &afterResponse{fn: func() { ran = true }}
 	want := errors.New("channel closed")
@@ -197,6 +204,7 @@ func TestRespondRestartsEvenWhenTheWriteFails(t *testing.T) {
 
 // The ordinary path still writes first and defers second.
 func TestRespondWritesBeforeTheDeferredWork(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	var order []string
 	slot := &afterResponse{fn: func() { order = append(order, "deferred") }}
@@ -215,6 +223,7 @@ func TestRespondWritesBeforeTheDeferredWork(t *testing.T) {
 
 // A slot no handler filled is simply not run.
 func TestRespondWithNothingDeferred(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	if err := respond(&out, protocol.Response{JSONRPC: "2.0"}, &afterResponse{}); err != nil {
 		t.Fatalf("respond: %v", err)
@@ -223,6 +232,7 @@ func TestRespondWithNothingDeferred(t *testing.T) {
 
 // Every role below admin is refused, not just the collaborator default.
 func TestServerUpdateDeniedForEveryNonAdminRole(t *testing.T) {
+	t.Parallel()
 	svc := &stubUpdates{calls: make(chan protocol.ServerUpdateParams, 1)}
 	e := updateEnv(t, svc)
 	for name, role := range map[string]domain.Role{
@@ -243,6 +253,7 @@ func TestServerUpdateDeniedForEveryNonAdminRole(t *testing.T) {
 // A member awaiting approval reaches no method but server.info, the status
 // method included.
 func TestServerUpdatePendingMemberIsDeniedBothMethods(t *testing.T) {
+	t.Parallel()
 	e := updateEnv(t, &stubUpdates{})
 	signer, _ := addMember(t, e, "Pat", domain.RoleAdmin, true)
 	c := controlAs(t, e, signer)
@@ -254,6 +265,7 @@ func TestServerUpdatePendingMemberIsDeniedBothMethods(t *testing.T) {
 
 // Removing a member revokes the connection they already hold.
 func TestServerUpdateRemovedMemberIsDenied(t *testing.T) {
+	t.Parallel()
 	e := updateEnv(t, &stubUpdates{})
 	signer, member := addMember(t, e, "Gone", domain.RoleAdmin, false)
 	c := controlAs(t, e, signer)

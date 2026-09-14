@@ -17,10 +17,10 @@ import (
 // the run is still provisioning (e.g. mid image pull) terminates the run:
 // abandoned is terminal, the launch fails, and no container survives.
 func TestKillDuringProvisioning(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	ctx := t.Context()
-	t.Setenv(fakeAgentEnv, "fake-agent {task}")
 
 	provisioning := make(chan struct{})
 	release := make(chan struct{})
@@ -81,6 +81,7 @@ func TestKillDuringProvisioning(t *testing.T) {
 // completed run resolve to one terminal status. Kill may lose after another
 // terminal transition wins.
 func TestConcurrentCloseAndKill(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -115,6 +116,7 @@ func TestConcurrentCloseAndKill(t *testing.T) {
 	}
 }
 func TestKillSucceedsWhenContainerIsAlreadyGone(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.stopErr = runtime.ErrNotFound
 	run, c := e.launchFake(t, "already gone")
@@ -131,6 +133,7 @@ func TestKillSucceedsWhenContainerIsAlreadyGone(t *testing.T) {
 // resumes: the durable kill_requested flag is the whole point of the
 // sidecar (§6.6).
 func TestRecoveryReissuesPersistedKill(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 
@@ -169,6 +172,7 @@ func TestRecoveryReissuesPersistedKill(t *testing.T) {
 // container it names instead of leaking it (the wide crash window spans
 // Attach/StartSession/StartDiffWatch).
 func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -230,6 +234,7 @@ func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
 // removes a checkout an active (relaunched) run is still working in, even
 // when the old terminal row that names it has expired.
 func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.CheckoutTTL = time.Hour
 	})
@@ -282,6 +287,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 // TestSweepRechecksInMemoryLifecycle prevents checkout GC from trusting a
 // stale terminal row after the same run has been reopened in memory.
 func TestSweepSkipsReopenedCheckoutFromStaleTerminalSnapshot(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.CheckoutTTL = time.Hour
 	})
@@ -331,6 +337,7 @@ func TestSweepSkipsReopenedCheckoutFromStaleTerminalSnapshot(t *testing.T) {
 // flight is reflected in the recorded outcome: the run lands abandoned,
 // not parked at needs-attention.
 func TestKillRacingAgentExit(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	ctx := t.Context()

@@ -8,6 +8,7 @@ import (
 )
 
 func TestRecordCommitPersistsMetadata(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	r := &domain.Run{
 		WorkspaceID: e.ws.ID,
