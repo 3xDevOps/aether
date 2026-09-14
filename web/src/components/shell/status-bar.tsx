@@ -35,11 +35,13 @@ const connectionDot: Record<ConnectionState, string> = {
 
 // Which hop is down decides what an operator does next: a dead local
 // network needs wifi or a VPN back, a dead gateway origin needs its process
-// restarted, and a dead SSH hop needs the server or the tunnel looked at
-// while the gateway keeps retrying on its own.
+// restarted, a phone off the tailnet needs Tailscale or the server host, and
+// a dead SSH hop needs the server or the tunnel looked at while the gateway
+// keeps retrying on its own.
 const unreachableLabel: Record<UnreachableKind, string> = {
   network: 'this computer is offline - reconnect to wifi or your VPN',
   gateway: 'dashboard gateway is gone - restart aether gui',
+  tailnet: 'no answer from your server - check Tailscale and the server host',
   server: 'server unreachable over SSH - check the server and network; retrying',
   refused: 'the gateway refused this device - it is not identified as a member',
   identity: 'the server cannot identify this device - check tailscaled on the server host',

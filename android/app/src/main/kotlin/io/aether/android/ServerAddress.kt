@@ -1,10 +1,16 @@
 package io.aether.android
 
+import androidx.annotation.StringRes
 import java.net.URI
 import java.net.URISyntaxException
 
-/** What a typed server address was rejected for, in words the setup screen shows. */
-class ServerAddressError(message: String) : IllegalArgumentException(message)
+/**
+ * What a typed server address was rejected for. The screen that shows it
+ * resolves [reason] against its resources, so the sentences stay in
+ * `strings.xml` with the rest of the app's text.
+ */
+class ServerAddressError(@get:StringRes val reason: Int, vararg val detail: String) :
+    IllegalArgumentException()
 
 /**
  * The dashboard URL a typed server address points at.
@@ -18,7 +24,7 @@ class ServerAddressError(message: String) : IllegalArgumentException(message)
 fun dashboardUrl(raw: String): String {
     val typed = raw.trim()
     if (typed.isEmpty()) {
-        throw ServerAddressError("Enter the server's tailnet name, for example my-server.tailnet-name.ts.net")
+        throw ServerAddressError(R.string.address_error_empty)
     }
     // A bare MagicDNS name has no scheme, and URI would read `host:443` as
     // one, so the scheme is supplied before parsing rather than guessed after.
@@ -27,25 +33,23 @@ fun dashboardUrl(raw: String): String {
         try {
             URI(absolute)
         } catch (e: URISyntaxException) {
-            throw ServerAddressError("Not a server address: ${e.reason}")
+            throw ServerAddressError(R.string.address_error_unparseable, e.reason.orEmpty())
         }
 
     val scheme = uri.scheme?.lowercase()
     if (scheme != "https") {
-        throw ServerAddressError(
-            "The dashboard is served over HTTPS only. Enter the server's tailnet name, or an https:// address.",
-        )
+        throw ServerAddressError(R.string.address_error_https_only)
     }
     if (uri.userInfo != null) {
-        throw ServerAddressError("A server address carries no username or password.")
+        throw ServerAddressError(R.string.address_error_credentials)
     }
     val host = uri.host
     if (host.isNullOrEmpty()) {
-        throw ServerAddressError("No server name in \"$typed\".")
+        throw ServerAddressError(R.string.address_error_no_host, typed)
     }
     val port = uri.port
     if (port == 0 || port > 65535) {
-        throw ServerAddressError("Port $port is not a port.")
+        throw ServerAddressError(R.string.address_error_port, port.toString())
     }
 
     val authority = if (port == -1) host else "$host:$port"

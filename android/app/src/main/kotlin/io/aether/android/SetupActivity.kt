@@ -47,7 +47,7 @@ class SetupActivity : ComponentActivity() {
                 try {
                     dashboardUrl(address.text.toString())
                 } catch (e: ServerAddressError) {
-                    error.text = e.message
+                    error.text = getString(e.reason, *e.detail)
                     error.visibility = View.VISIBLE
                     return
                 }

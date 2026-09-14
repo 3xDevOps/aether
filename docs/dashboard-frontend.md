@@ -591,13 +591,20 @@ run's wire `paused` field, skipping runs that do not carry it.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop
-  failed picks the copy: `network` says this computer is offline, `server`
-  says the server did not answer through the selected transport, `gateway`
-  says the local `aether gui` process stopped answering, and an access refusal
-  preserves the gateway's own reason. The gateway's message appears in an
-  initially open "Technical details" disclosure, and the page suppresses the
-  toast that would otherwise repeat it. Retry clears connection state and
-  remounts the subscribe-and-hydrate cycle rather than reloading the page.
+  failed picks the copy: `network` says this machine has no network at all
+  and names wifi and a VPN, `server` says the server did not answer through
+  the selected transport, `gateway` says the local `aether gui` process
+  stopped answering, `tailnet` says the phone got no answer from the server
+  that serves it the page, and an access refusal preserves the gateway's own
+  reason. A fetch that got no answer at all is `gateway` only on the desktop
+  origin, where that process can be restarted; on the server gateway it is
+  `tailnet`, because the page came over the tailnet and there is no local
+  process to blame and no wifi advice to give. The capabilities probe records
+  which gateway serves the page before hydration runs, so the first failure
+  is classified too. The gateway's message appears in an initially open
+  "Technical details" disclosure, and the page suppresses the toast that
+  would otherwise repeat it. Retry clears connection state and remounts the
+  subscribe-and-hydrate cycle rather than reloading the page.
 - **A local token refusal is reported as access failure, not an unreachable
   server.** `connect` reads `GET /api/v1/capabilities` before it opens the
   stream, and a `401` there means the local gateway refused its token. The

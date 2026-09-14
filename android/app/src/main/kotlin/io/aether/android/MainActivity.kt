@@ -5,13 +5,16 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.ConsoleMessage
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -25,6 +28,7 @@ import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import java.io.ByteArrayInputStream
 
 /**
  * The whole shell: one WebView on the dashboard the server hosts on the
@@ -39,12 +43,69 @@ class MainActivity : ComponentActivity() {
     private lateinit var changeServer: Button
     private lateinit var pickFiles: ActivityResultLauncher<Intent>
 
-    /** The dashboard the WebView is on, so a changed address reloads it. */
+    /**
+     * The dashboard the WebView is on, so a changed address reloads it.
+     * Volatile because `shouldInterceptRequest` reads it off the WebView's
+     * own thread, and a stale null there would refuse the dashboard itself.
+     */
+    @Volatile
     private var loaded: String? = null
     private var fileChooser: ValueCallback<Array<Uri>>? = null
 
+    /**
+     * Whether the platform backgrounds this window itself when back is
+     * pressed with no history left.
+     *
+     * It does that only from API 31, and only for a task whose root was
+     * started from the launcher: `shouldMoveTaskToBack` wants both a home
+     * launch source and a main intent. The session SetupActivity hands over
+     * has neither, and there the platform finishes the window instead,
+     * taking the WebView and the terminal's scrollback with it. Decided once
+     * from the intent that created this window, because that is what the
+     * platform reads.
+     *
+     * The test below is `ActivityRecord.isMainIntent`, clause for clause: a
+     * looser one would stand the callback down for an intent the platform
+     * then refuses to background.
+     */
+    private var platformBackgroundsUs = false
+
+    /**
+     * Set when a refused off-origin load has to be undone, so the recovery
+     * load can drop the blank entry the refusal committed. Without that,
+     * back walks into it, the gate refuses it again, and the member can
+     * never leave.
+     */
+    private var clearHistoryOnLoad = false
+
+    /**
+     * Back walks the dashboard's own history and then leaves the app running:
+     * finishing would drop the terminal's scrollback on the way to the home
+     * screen. Where the platform does that itself the callback stands down at
+     * the root, so the predictive back-to-home animation runs.
+     */
+    private val back =
+        object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (web.canGoBack()) web.goBack() else moveTaskToBack(true)
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before setContentView, which instantiates the WebView: a fresh
+        // install has nothing to open, and inflating the WebView first paints
+        // an empty window on the way to the setup form. A deep link that
+        // arrives before an address is set is dropped here - setup is a
+        // separate Activity, and carrying the link through it would have to
+        // survive the member abandoning that screen. Tapping the link again
+        // after setup works.
+        val base = storedDashboardUrl()
+        if (base == null) {
+            openSetup()
+            finish()
+            return
+        }
         WindowCompat.enableEdgeToEdge(window)
         setContentView(R.layout.activity_main)
         web = findViewById(R.id.web)
@@ -63,29 +124,30 @@ class MainActivity : ComponentActivity() {
         applyInsets()
         configureWebView()
 
-        onBackPressedDispatcher.addCallback(
-            this,
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    // The dashboard pushes its own history, so back walks it
-                    // and then leaves the app running: finishing would drop
-                    // the terminal's scrollback on the way to the home screen.
-                    if (web.canGoBack()) web.goBack() else moveTaskToBack(true)
-                }
-            },
-        )
+        platformBackgroundsUs =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                intent?.action == Intent.ACTION_MAIN &&
+                intent.categories?.size == 1 &&
+                intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
+                intent.data == null &&
+                intent.type == null
+        back.isEnabled = !platformBackgroundsUs
+        onBackPressedDispatcher.addCallback(this, back)
 
         // A task Android recreates after killing the process is handed its
         // root intent again, so a shell first launched from an
         // aether://run link would reopen that run on every return. The link
         // is one-shot here, as it is in the dashboard.
-        open(if (savedInstanceState == null) intent else null)
+        open(base, if (savedInstanceState == null) intent else null)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        open(intent)
+        // SetupActivity stores the address before it starts this window, so a
+        // changed address is already here to reload.
+        val base = storedDashboardUrl() ?: return
+        open(base, intent)
     }
 
     /**
@@ -146,11 +208,10 @@ class MainActivity : ComponentActivity() {
             allowFileAccess = false
             allowContentAccess = false
         }
+        val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         // Lets `chrome://inspect` attach to a debuggable build; a release
         // build stays closed. See docs/dashboard-frontend.md.
-        WebView.setWebContentsDebuggingEnabled(
-            applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
-        )
+        WebView.setWebContentsDebuggingEnabled(debuggable)
 
         web.webViewClient =
             object : WebViewClient() {
@@ -173,8 +234,55 @@ class MainActivity : ComponentActivity() {
                     return decision != Navigation.LOAD
                 }
 
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? {
+                    val target = request.url
+                    if (
+                        !refusesRequest(
+                            loaded,
+                            target.toString(),
+                            target.scheme?.lowercase(),
+                            request.isForMainFrame,
+                        )
+                    ) {
+                        return null
+                    }
+                    // Runs on the WebView's own thread, before the request is
+                    // sent: nothing of the member's reaches the other origin.
+                    return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                }
+
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                     changeServer.visibility = View.GONE
+                    if (startedOnDashboard(loaded, url)) return
+                    // The refused request still commits, on the blank
+                    // document it was answered with, so the dashboard goes
+                    // back on screen. Not handed to the browser: nothing that
+                    // arrives here was a link anyone tapped, or the gate in
+                    // shouldOverrideUrlLoading would have taken it. Loading
+                    // from inside this callback waits for the next loop turn.
+                    view.stopLoading()
+                    loaded?.let { dashboard ->
+                        clearHistoryOnLoad = true
+                        view.post { view.loadUrl(dashboard) }
+                    }
+                }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (!clearHistoryOnLoad) return
+                    clearHistoryOnLoad = false
+                    view.clearHistory()
+                    syncBackCallback()
+                }
+
+                override fun doUpdateVisitedHistory(
+                    view: WebView,
+                    url: String,
+                    isReload: Boolean,
+                ) {
+                    syncBackCallback()
                 }
 
                 override fun onReceivedError(
@@ -192,6 +300,11 @@ class MainActivity : ComponentActivity() {
 
         web.webChromeClient =
             object : WebChromeClient() {
+                // Returning true says the message is handled, which keeps the
+                // page's console out of logcat. A debug build keeps it there,
+                // where `adb logcat` is the point.
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean = !debuggable
+
                 override fun onShowFileChooser(
                     view: WebView,
                     callback: ValueCallback<Array<Uri>>,
@@ -213,20 +326,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Point the WebView at the stored dashboard, or at the run an
+     * Point the WebView at the dashboard at [base], or at the run an
      * `aether://run/<id>` link names.
      */
-    private fun open(intent: Intent?) {
-        val base = storedDashboardUrl()
-        if (base == null) {
-            // A deep link that arrives before a server address is set is
-            // dropped here: setup is a separate Activity, and carrying the
-            // link through it would have to survive the member abandoning
-            // that screen. Tapping the link again after setup works.
-            openSetup()
-            finish()
-            return
-        }
+    private fun open(base: String, intent: Intent?) {
+        // From here the new address is what every gate judges against, so
+        // whatever the old one still has in flight stops before its commit
+        // can be read as an escape off the dashboard.
+        if (base != loaded) web.stopLoading()
         val link = intent?.dataString?.let { deepLinkUrl(base, it) }
         if (link != null) {
             loaded = base
@@ -237,6 +344,14 @@ class MainActivity : ComponentActivity() {
             loaded = base
             web.loadUrl(base)
         }
+    }
+
+    /**
+     * Keeps the callback's claim on the gesture matched to the history the
+     * WebView actually has, wherever that history changes.
+     */
+    private fun syncBackCallback() {
+        if (platformBackgroundsUs) back.isEnabled = web.canGoBack()
     }
 
     private fun openSetup() {

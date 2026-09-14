@@ -37,16 +37,26 @@ management.
 
 | Category | Type | What it is |
 | --- | --- | --- |
-| Messages | Other in-app messages | What the member types into an agent's terminal and the instructions sent to a run |
+| App activity | Other user-generated content | What the member types into an agent's terminal and the instructions sent to a run. Play defines the type as "any other user-generated content not listed here, or in any other section"; terminal input and run instructions are content the member writes, not messages addressed to another person |
+| App activity | Other actions | Approvals, run launches and the other controls the dashboard sends the server |
+| App activity | App interactions | Whether you are online and which runs you have open, shown to your teammates (`aether who`) |
 | Photos and videos | Photos | An image the member picks to paste into a terminal; on a phone the picker opens the gallery. It is the dashboard's only upload reachable from the phone: the onboarding profile import exists only on the local `aether gui` gateway |
 | Files and docs | Files and docs | The contents of files edited in the dashboard's Files editor |
-| App activity | Other user-generated content | Approvals, run launches and the other controls the dashboard sends the server |
+
+**Not shared** holds because of Play's user-initiated exemption,
+"Transferring user data to a third party based on a specific user-initiated
+action, where the user reasonably expects the data to be shared": the team or
+employer running the server is a third party, but the member types that
+server's name and every transmission above is something they typed, picked or
+tapped.
 
 Not collected, so leave unticked: Location, Personal info (the app sends no
 name, email or ID; the server learns the tailnet login from Tailscale, not
-from the app), Financial info, Health and fitness, Videos, Audio, Calendar,
-Contacts, Web browsing, App info and performance (no crash logs or
-diagnostics leave the phone), Device or other IDs.
+from the app), Financial info, Health and fitness, Messages (the app has no
+messaging feature; what a member writes goes to an agent, and is declared
+above as user-generated content that their teammates can also see), Videos,
+Audio, Calendar, Contacts, Web browsing, App info and performance (no crash
+logs or diagnostics leave the phone), Device or other IDs.
 
 ## Other declarations on the same page
 
@@ -55,7 +65,7 @@ diagnostics leave the phone), Device or other IDs.
 | Ads | No, the app contains no ads |
 | Advertising ID | Not used; the manifest declares no `com.google.android.gms.permission.AD_ID` |
 | Target audience | 18 and over; not designed for children |
-| Content rating questionnaire | Utility / productivity; no user-generated content shared publicly, no violence, no gambling |
+| Content rating questionnaire | Utility / productivity; no violence, no gambling. Users **can** communicate and share content with other users: shared live terminals, injected banners, coordination messages and approvals, all restricted to members an administrator invited to the server. Expect the "Users Interact" descriptor. Nothing is shared publicly |
 | News app | No |
 | Government app | No |
 | Financial features | None |

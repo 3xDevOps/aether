@@ -13,10 +13,19 @@ import type { SliceCreator } from '@/store/slice'
  * `network`: this machine has no usable network at all - DNS is dead, or
  * there is no route to the host. Nothing on the server side is implicated.
  * `gateway`: the HTTP origin itself is gone - the `aether gui` process that
- * serves the page died - so nothing answers at all.
+ * serves the page died - so nothing answers at all. Desktop only: it is the
+ * only gateway the user can restart.
+ * `tailnet`: the same silence on a phone, where the server itself serves the
+ * page over the tailnet, so the hop that died is the tailnet or the host.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
-export type UnreachableKind = 'network' | 'gateway' | 'server' | 'refused' | 'identity'
+export type UnreachableKind =
+  | 'network'
+  | 'gateway'
+  | 'tailnet'
+  | 'server'
+  | 'refused'
+  | 'identity'
 
 /** The order the phases of one update run in. A terminal phase - failed
  * or cancelled - is not in it: those always win. */

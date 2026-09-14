@@ -83,6 +83,14 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # full history so git describe stamps the tag
+
+      # Before any toolchain and any build. The Android versionCode is derived
+      # from the tag, and `make release` only reaches that derivation in its
+      # last step - so a tag such as v0.5 used to fail after the whole matrix
+      # was built, leaving the published release with no assets and
+      # /releases/latest pointing at it until a human deleted both.
+      - name: Validate the release tag
+        run: sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -104,12 +112,17 @@ jobs:
       # dist/aether-android.aab in its pinned SDK container, and fails the
       # release if either does not verify. They land before the checksums, so
       # the glob below covers them.
+      # VERSION is the release tag itself, not `git describe`: with two tags
+      # on one commit describe can pick the other one, and the artifacts would
+      # be stamped for a release nobody published. The step above has already
+      # rejected any tag that is not vMAJOR.MINOR.PATCH with an optional
+      # pre-release suffix, so the name is safe to hand to a shell.
       - name: Cross-compile the release matrix
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: make release
+        run: make release VERSION="$GITHUB_REF_NAME"
       # The runner is self-hosted, so RUNNER_TEMP is not wiped for us.
       - name: Remove the signing keystore
         if: always()

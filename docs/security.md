@@ -299,7 +299,21 @@ identify its callers.
   `target=_blank` included, is handed to the phone's browser instead of being
   loaded with the member's tailnet position behind it, and a scheme that is
   neither - an `intent://` URL that would start another app with page-chosen
-  extras - is dropped. WebView Safe Browsing is turned off in the manifest.
+  extras - is dropped. WebView does not run that check for a POST, so a form
+  on the page could otherwise submit to any origin. Two more gates catch
+  that. `shouldInterceptRequest` runs before the request is sent and answers
+  an off-origin main-frame request with an empty response, so neither the
+  form's fields nor the member's tailnet position reaches the other origin.
+  The refused navigation still commits, on that empty document, so
+  `onPageStarted` puts the dashboard back; it hands nothing to the browser,
+  because anything arriving there was not a link the member tapped.
+  Subresources are untouched: those are the dashboard loading its own files.
+  Nothing the app stores leaves it through Google's cloud backup or through
+  device-to-device transfer: the app opts out of both, naming every domain
+  it can store in, because the backup agent walks each one separately. In a
+  release build the page's console output is not written to logcat, where
+  any app holding `READ_LOGS`, or a connected `adb`, would read it. WebView
+  Safe Browsing is turned off in the manifest.
   It matches each URL against a hash-prefix list held on the device and, on a
   match, asks Google about that 4-byte prefix - never the URL or the host. On
   a WebView that only ever loads the member's own server it protects nothing,

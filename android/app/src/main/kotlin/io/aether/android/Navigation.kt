@@ -1,5 +1,8 @@
 package io.aether.android
 
+import java.net.URI
+import java.net.URISyntaxException
+
 /** What the shell does with a navigation the page started. */
 enum class Navigation {
     /** Let the WebView load it: the dashboard, and the page's own blob: and data: URLs. */
@@ -40,4 +43,43 @@ fun navigationFor(base: String?, url: String, scheme: String?, mainFrame: Boolea
     if (base != null && isDashboardUrl(base, url)) return Navigation.LOAD
     if (!mainFrame) return Navigation.DROP
     return Navigation.EXTERNAL
+}
+
+/**
+ * Whether a request the WebView is about to send must be refused outright.
+ *
+ * WebView does not call `shouldOverrideUrlLoading` for a POST, so a form on
+ * the page reaches any origin without passing that gate.
+ * `shouldInterceptRequest` is called for one, and before anything goes on the
+ * wire, so a main-frame request off the dashboard's origin is refused here
+ * rather than after its response has committed.
+ *
+ * Only main-frame http and https: a subresource is the dashboard loading its
+ * own fonts and images, and the page's own `blob:` and `data:` URLs carry no
+ * request at all.
+ */
+fun refusesRequest(base: String?, url: String, scheme: String?, mainFrame: Boolean): Boolean {
+    if (!mainFrame) return false
+    if (scheme != "http" && scheme != "https") return false
+    return base == null || !isDashboardUrl(base, url)
+}
+
+/**
+ * Whether a main-frame load that has already started is still on the
+ * dashboard.
+ *
+ * [refusesRequest] empties the response of an off-origin POST, but the
+ * navigation still commits, on a blank document. This runs from
+ * `onPageStarted`, which is handed the URL as a string and nothing else, and
+ * is what puts the dashboard back. An unparseable URL has no origin to match,
+ * so it is not the dashboard - the same reading [isDashboardUrl] takes.
+ */
+fun startedOnDashboard(base: String?, url: String): Boolean {
+    val scheme =
+        try {
+            URI(url).scheme?.lowercase()
+        } catch (_: URISyntaxException) {
+            null
+        }
+    return navigationFor(base, url, scheme, mainFrame = true) == Navigation.LOAD
 }

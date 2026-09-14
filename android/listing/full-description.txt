@@ -11,6 +11,6 @@ From the phone you can:
 
 What it needs: an Aether server on your Tailscale network with its dashboard turned on, and this phone signed in to the same tailnet. There is no account and no password. Tailscale identifies the phone, and the server decides what it may do.
 
-What it does not do: the app talks only to the server you name, over HTTPS. Nothing is sent to the publisher. No ads, no analytics, no tracking. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md
+What it does not do: the app talks only to the server you name, over HTTPS. What the Data safety card lists as collected is what you type, pick or tap in the dashboard, and it goes to that one server - the one you or your team run - and nowhere else. Nothing is sent to the publisher. No ads, no analytics, no tracking. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md
 
-Aether is free software under the GPL-3.0. Source, documentation and the server: https://github.com/3xDevOps/Aether
+Aether is open source under the GPL-3.0. Source, documentation and the server: https://github.com/3xDevOps/Aether

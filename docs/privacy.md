@@ -29,7 +29,9 @@ about this policy go to <https://github.com/3xDevOps/Aether/issues>.
 No account, password, token, cookie or key is stored. There is no sign-in:
 the phone's Tailscale login identifies it to your server
 ([networking.md](networking.md#the-dashboard)). Uninstalling the app deletes
-everything above.
+everything above. None of it is backed up: the app opts out of Google's cloud
+backup and of device-to-device transfer, so setting up a new phone asks for
+the server name again.
 
 ## What leaves the phone
 
@@ -47,11 +49,26 @@ everything above.
 - **Your identity reaches the server through Tailscale, not through the
   app.** The server asks its own tailscaled which tailnet login owns the
   connecting device. The app sends no name, email, or identifier of its own.
+- **Your server records you as a member on the app's first request.** From
+  that answer it stores your tailnet login, which is an email address, and a
+  display name taken from the part before the `@`, and writes one log line
+  carrying that login and your device's Tailscale node ID. The record is how
+  your administrator approves you and how your teammates see who did what
+  ([teams.md](teams.md#roles)). It is kept by your own server, not by the
+  publisher, and lasts until an administrator removes it.
+- **Your teammates see when you are online and what you have open.** The
+  dashboard reports to the server, every few seconds, that you are there and
+  which run you are watching; the other members of that server see it
+  ([teams.md](teams.md)). It is not kept as history.
 - **To nobody else.** The app has no analytics, no crash reporting, no
   advertising, and no third-party library that talks to a network. WebView
   Safe Browsing is turned off in the app, so no visited URL, and no hash of
   one, is sent to Google. A link that leaves the dashboard opens in the
   phone's browser, under that browser's own policy.
+
+Everything above goes to one server, the one you typed in, and stops there.
+Nothing is sold, and nothing is handed to anyone the server's administrator
+has not made a member of it.
 
 ## Permissions
 
@@ -64,13 +81,24 @@ which no other app can hold and which grants nothing.
 - On the phone: uninstall the app.
 - On the server: the server's administrator owns the data directory and can
   delete a run, a member home, or the whole directory
-  ([install.md](install.md#uninstalling)). The publisher holds no copy and
-  cannot delete anything on your behalf.
+  ([install.md](install.md#uninstalling)). `aether member remove` destroys
+  your environment terminal, deletes your member record and erases your
+  member home. It refuses while anything still points at you - a run you
+  launched, a schedule you own, or an agent profile you pushed - so an
+  administrator deletes those first; what a run wrote stays in the data
+  directory until it is deleted too ([teams.md](teams.md#roles)). The
+  publisher holds no copy and cannot delete anything on your behalf.
 
 ## Children
 
 The app is not directed at children and has no age-specific content or
 features.
+
+## Licence and open source notices
+
+The app and the dashboard are under the GPL-3.0, and the libraries they use
+are listed with their licences in [notices.md](notices.md). The app's first
+screen links to both that page and the licence text.
 
 ## Changes
 
