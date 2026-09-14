@@ -9,6 +9,7 @@ import (
 )
 
 func TestAccountSharesAreDirectionalAndCascade(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	owner := mustCreateMember(t, db)
@@ -53,6 +54,7 @@ func TestAccountSharesAreDirectionalAndCascade(t *testing.T) {
 }
 
 func TestSharedRunKeepsAccountMemberInUse(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	workspace := mustCreateWorkspace(t, db)
@@ -74,6 +76,7 @@ func TestSharedRunKeepsAccountMemberInUse(t *testing.T) {
 }
 
 func TestRunAccountMemberRoundTrips(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	workspace := mustCreateWorkspace(t, db)

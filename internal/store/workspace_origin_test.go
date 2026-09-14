@@ -13,6 +13,7 @@ import (
 // mutator, and a full update: it survives, it clears, and setting it
 // touches nothing else.
 func TestWorkspaceOriginRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -80,6 +81,7 @@ func TestWorkspaceOriginRoundTrip(t *testing.T) {
 // database: rows written before the column existed come back with an
 // empty origin rather than failing the scan.
 func TestWorkspaceOriginMigrationDefaultsEmpty(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 22)
 	if _, err := raw.Exec(`

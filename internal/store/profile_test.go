@@ -10,6 +10,7 @@ import (
 )
 
 func TestProfileSnapshotCRUD(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -67,6 +68,7 @@ func TestProfileSnapshotCRUD(t *testing.T) {
 }
 
 func TestProfileRetentionAndRollback(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -113,6 +115,7 @@ func TestProfileRetentionAndRollback(t *testing.T) {
 }
 
 func TestSetRunProfileSnapshot(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -136,6 +139,7 @@ func TestSetRunProfileSnapshot(t *testing.T) {
 }
 
 func TestProfileBlobDedup(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -158,6 +162,7 @@ func TestProfileBlobDedup(t *testing.T) {
 }
 
 func TestPruneKeepsPinnedRunSnapshot(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -189,6 +194,7 @@ func TestPruneKeepsPinnedRunSnapshot(t *testing.T) {
 }
 
 func TestProfileSnapshotEmptyFile(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)

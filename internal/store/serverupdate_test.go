@@ -6,6 +6,7 @@ import (
 )
 
 func TestServerUpdateStartsEmpty(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	got, err := db.GetServerUpdate(t.Context())
 	if err != nil {
@@ -17,6 +18,7 @@ func TestServerUpdateStartsEmpty(t *testing.T) {
 }
 
 func TestPendingServerUpdateReplacesAndClears(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := t.Context()
 	at := time.Now().UTC().Truncate(time.Millisecond)
@@ -53,6 +55,7 @@ func TestPendingServerUpdateReplacesAndClears(t *testing.T) {
 }
 
 func TestSetLastServerUpdateClearsPending(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := t.Context()
 	at := time.Now().UTC().Truncate(time.Millisecond)
@@ -84,6 +87,7 @@ func TestSetLastServerUpdateClearsPending(t *testing.T) {
 }
 
 func TestSetPendingServerUpdateRejectsEmptyVersion(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	if err := db.SetPendingServerUpdate(t.Context(), &PendingServerUpdate{RequestedBy: "mem_1"}); err == nil {
 		t.Fatal("expected an error for a pending update with no version")

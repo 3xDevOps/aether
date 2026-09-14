@@ -20,6 +20,7 @@ const costSchemaVersion = 6
 // metered result replaces anything stored, an unmetered marker never
 // overwrites real numbers, whichever order they arrive in.
 func TestRunCostMeteredWins(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -83,6 +84,7 @@ func TestRunCostMeteredWins(t *testing.T) {
 // but contribute no numbers, and rows from another or empty workspace do not
 // leak into the result.
 func TestSummarizeRunCostsMatchesRollupSemantics(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w1 := mustCreateWorkspace(t, db)
@@ -163,6 +165,7 @@ func TestSummarizeRunCostsMatchesRollupSemantics(t *testing.T) {
 // TestWorkspaceBudgetRoundTrip covers the budget row: upsert, validation,
 // and clearing.
 func TestWorkspaceBudgetRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -220,6 +223,7 @@ func TestWorkspaceBudgetRoundTrip(t *testing.T) {
 // version before the cost migration, seeds rows, then opens it: the
 // upgrade must add the cost tables without disturbing what is there.
 func TestCostMigrationUpgradesExistingDatabase(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

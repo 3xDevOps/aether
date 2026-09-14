@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunBaseProvenanceRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	workspace := mustCreateWorkspace(t, db)
@@ -83,6 +84,7 @@ func assertRunBaseProvenance(t *testing.T, got, want *domain.Run) {
 }
 
 func TestRunBaseProvenanceMigrationFromV25(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 25)
 	key := testKey(t, "legacy")

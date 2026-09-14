@@ -19,6 +19,7 @@ const approvalsSchemaVersion = 5
 // contract: create, list by decision, decide once, and the conflict a
 // second decision raises.
 func TestApprovalInboxRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -74,6 +75,7 @@ func TestApprovalInboxRoundTrip(t *testing.T) {
 // schema version behind the approvals slot, seeds rows, then opens it:
 // the upgrade must add the inbox without losing anything.
 func TestApprovalsMigrationUpgradesPreviousVersion(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

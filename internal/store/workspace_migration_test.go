@@ -43,6 +43,7 @@ func openLegacy(t *testing.T, path string, n int) *sql.DB {
 // Open with the same rows hanging off workspaces, and with no sessions table
 // left behind.
 func TestSessionCollapseMigrationRehomesEveryRow(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 11)
 	key := testKey(t, "")
@@ -183,6 +184,7 @@ func TestSessionCollapseMigrationRehomesEveryRow(t *testing.T) {
 // the collapse: persisted events are scoped by workspace afterwards, and a
 // database that never opened an event log still migrates.
 func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 11)
 	if _, err := raw.Exec(`
@@ -275,6 +277,7 @@ func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
 // ordering: store.Open runs before the event log is ever created, so the
 // migration must tolerate a database with no events table.
 func TestSessionCollapseMigrationWithoutEventLog(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 11)
 	if _, err := raw.Exec(`
@@ -304,6 +307,7 @@ func TestSessionCollapseMigrationWithoutEventLog(t *testing.T) {
 	}
 }
 func TestMemberHomeMigrationDropsLegacyTables(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 13)
 	if _, err := raw.Exec(`
@@ -386,6 +390,7 @@ func TestMemberHomeMigrationDropsLegacyTables(t *testing.T) {
 	}
 }
 func TestWorkspaceEnvironmentMigrationDropsLegacyImageColumns(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 18)
 	if _, err := raw.Exec(`

@@ -22,6 +22,7 @@ const coordSchemaVersion = 8
 // a batch is delivered once under one token, redelivered under the same
 // token until acknowledged, and only then makes way for the next batch.
 func TestRunMailboxDeliveryTokens(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -96,6 +97,7 @@ func TestRunMailboxDeliveryTokens(t *testing.T) {
 // TestRunMailboxInboxCap proves the depth cap is enforced by the insert
 // itself and names the condition, and that acknowledging frees room.
 func TestRunMailboxInboxCap(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -129,6 +131,7 @@ func TestRunMailboxInboxCap(t *testing.T) {
 // TestRunMailboxRejectsUnknownRuns proves the foreign keys surface as the
 // store's own sentinel rather than a driver error.
 func TestRunMailboxRejectsUnknownRuns(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -149,6 +152,7 @@ func TestRunMailboxRejectsUnknownRuns(t *testing.T) {
 // must add run_messages without losing anything, and a delivery token
 // written before the restart must still bind its batch after it.
 func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {
@@ -229,7 +233,8 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 // because the event log shares aether.db - fails that upgrade with
 // SQLITE_BUSY_SNAPSHOT, and the driver's busy handler does not retry it.
 func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "aether.db")
+	t.Parallel()
+	path := templateDBPath(t)
 	reader, err := Open(path)
 	if err != nil {
 		t.Fatalf("open reader: %v", err)
@@ -302,6 +307,7 @@ func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
 // acknowledged alike - so the table does not grow for the life of the
 // database.
 func TestDeleteRunMessagesRetiresTheWholeMailbox(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)

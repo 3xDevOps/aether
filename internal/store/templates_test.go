@@ -22,6 +22,7 @@ const templatesSchemaVersion = 7
 // template rule, the fired stamp, and the cascade that takes a schedule
 // down with its template.
 func TestTemplateAndScheduleRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -113,6 +114,7 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 // schema version behind the templates slot, seeds rows, then opens it:
 // the upgrade must add templates and schedules without losing anything.
 func TestTemplatesMigrationUpgradesPreviousVersion(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

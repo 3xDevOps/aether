@@ -9,6 +9,7 @@ import (
 )
 
 func TestRunTitleMigrationAndScan(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
