@@ -1,0 +1,48 @@
+name: Go build cache
+description: >
+  Restore Go's module and build caches on every run, and save them only
+  after a push to main. A pull_request_target run's GITHUB_REF is the base
+  branch, so a cache a PR saved would land in main's cache scope and could
+  poison the build main's release binaries compile from; restoring carries
+  no such risk, since a PR run cannot change what main reads later. Used
+  after actions/setup-go with its own cache disabled, once per Go job.
+inputs:
+  mode:
+    description: "restore or save"
+    required: true
+runs:
+  using: composite
+  steps:
+    # actions/cache stores paths relative to the workspace, and the self-hosted
+    # container and a hosted VM lay `go env`'s defaults out differently, hence
+    # runner.environment in the key (same convention as the Playwright cache).
+    - name: Resolve Go cache paths
+      id: paths
+      shell: bash
+      run: |
+        echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+    # The save key carries the commit sha so every push refreshes the cache
+    # instead of reusing a stale one from the first commit that ever hashed
+    # to this go.sum (actions/cache/save never overwrites an existing key).
+    # Restore falls back through the sha-less prefixes to find the newest
+    # match for the same go.sum, then any go.sum, on a cache miss.
+    - name: Restore Go cache
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ steps.paths.outputs.mod }}
+          ${{ steps.paths.outputs.build }}
+        key: go-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('go.sum') }}-
+          go-${{ runner.os }}-${{ runner.environment }}-
+    - name: Save Go cache
+      if: inputs.mode == 'save' && github.event_name == 'push'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ steps.paths.outputs.mod }}
+          ${{ steps.paths.outputs.build }}
+        key: go-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
