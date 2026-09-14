@@ -52,7 +52,9 @@ func (s *failingActiveRunsStore) ListActiveRuns(context.Context) ([]*domain.Run,
 // only raced still has to be reported: Server.Run names whatever Start
 // returns as the reason the server went down.
 func TestStartCancelledDuringRecoveryIsACleanStop(t *testing.T) {
+	t.Parallel()
 	t.Run("cancellation", func(t *testing.T) {
+		t.Parallel()
 		e := newTestEnv(t, nil)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -62,6 +64,7 @@ func TestStartCancelledDuringRecoveryIsACleanStop(t *testing.T) {
 	})
 
 	t.Run("backend failure during the same shutdown", func(t *testing.T) {
+		t.Parallel()
 		diskErr := errors.New("disk I/O error")
 		e := newTestEnv(t, func(c *Config) {
 			c.Store = &failingActiveRunsStore{Store: c.Store, err: diskErr}
@@ -75,6 +78,7 @@ func TestStartCancelledDuringRecoveryIsACleanStop(t *testing.T) {
 }
 
 func TestRebootRecoveryResumesSupervision(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 
@@ -123,6 +127,7 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 // publish under the run row's workspace - the subscription here is
 // workspace-filtered, so receiving the exit event is the proof.
 func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 
@@ -163,6 +168,7 @@ func TestRecoveryOfLegacySidecarKeepsWorkspaceScope(t *testing.T) {
 }
 
 func TestRecoveryOfLegacySidecarCapturesHomeForImages(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, container := e.launchFake(t, "legacy image")
 	container.mu.Lock()
@@ -225,6 +231,7 @@ func (p *gatedRecoveryPTY) StartSession(ctx context.Context, key ptyhost.Session
 }
 
 func TestRecoveryPublishesRunBeforePTYStartReturns(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "publish before pty return")
 	if err := e.sched.Close(); err != nil {
@@ -251,6 +258,7 @@ func TestRecoveryPublishesRunBeforePTYStartReturns(t *testing.T) {
 }
 
 func TestRebootRecoveryContainerGone(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 
@@ -287,6 +295,7 @@ func TestRebootRecoveryContainerGone(t *testing.T) {
 }
 
 func TestRebootRecoveryQueuedAndMissingSidecar(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -315,6 +324,7 @@ func TestRebootRecoveryQueuedAndMissingSidecar(t *testing.T) {
 // container carries the run ID as its creation key, so recovery finds and
 // destroys it instead of leaking a running agent into the checkout.
 func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -347,6 +357,7 @@ func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 }
 
 func TestRecoveryUnstartedDestroyFailureRetainsPendingOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	r := &domain.Run{
@@ -414,6 +425,7 @@ func TestRecoveryUnstartedDestroyFailureRetainsPendingOwner(t *testing.T) {
 }
 
 func TestRecoveryUnstartedLookupFailureKeepsSyntheticOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	r := &domain.Run{
@@ -469,6 +481,7 @@ func TestRecoveryUnstartedLookupFailureKeepsSyntheticOwner(t *testing.T) {
 }
 
 func TestTerminalCreationKeyFailureInstallsSyntheticRetryOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "synthetic creation-key cleanup")
@@ -527,6 +540,7 @@ func TestTerminalCreationKeyFailureInstallsSyntheticRetryOwner(t *testing.T) {
 }
 
 func TestCheckoutGC(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.CheckoutTTL = time.Hour
 	})
@@ -582,6 +596,7 @@ func TestCheckoutGC(t *testing.T) {
 }
 
 func TestRecoveryProbeErrorRetainsRunAndContainer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "inconclusive recovery")
 	if err := e.sched.Close(); err != nil {
@@ -616,6 +631,7 @@ func TestRecoveryProbeErrorRetainsRunAndContainer(t *testing.T) {
 }
 
 func TestCloseRunReconcilesInconclusiveRecoveryOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = -time.Second
 	})
@@ -649,6 +665,7 @@ func TestCloseRunReconcilesInconclusiveRecoveryOwner(t *testing.T) {
 }
 
 func TestRetainedProbeErrorAdoptsOwnerForSweep(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -700,6 +717,7 @@ func TestRetainedProbeErrorAdoptsOwnerForSweep(t *testing.T) {
 }
 
 func TestCrashExitBeforeMarker(t *testing.T) {
+	t.Parallel()
 	// (a) Runtime has recorded exit, no exit_observed marker yet: the
 	// startup probe finalizes the original outcome once.
 	e := newTestEnv(t, nil)
@@ -738,6 +756,7 @@ func TestCrashExitBeforeMarker(t *testing.T) {
 }
 
 func TestCrashExitAfterMarkerBeforeStatus(t *testing.T) {
+	t.Parallel()
 	// (b) Marker fsynced, commit/status not done: startup finalizes from
 	// the marker once with the original outcome.
 	e := newTestEnv(t, nil)
@@ -784,6 +803,7 @@ func TestCrashExitAfterMarkerBeforeStatus(t *testing.T) {
 }
 
 func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
+	t.Parallel()
 	// (c) Status already completed, destroy not done: cleanup the leftover
 	// container without reattaching or marking the run interrupted.
 	e := newTestEnv(t, nil)
@@ -838,6 +858,7 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 }
 
 func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -880,6 +901,7 @@ func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
 }
 
 func TestRetainedExpiryDestroysContainerAndHidesRelaunch(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -912,6 +934,7 @@ func TestRetainedExpiryDestroysContainerAndHidesRelaunch(t *testing.T) {
 }
 
 func TestNegativeRetentionDestroysAndRejectsRelaunch(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -972,6 +995,12 @@ type destroyRetryRuntime struct {
 	failures int
 	destroys int
 	waits    int
+	// hold, when non-nil, blocks the retry destroy (the second call and
+	// on) until the test closes it. Without this, a check made in the
+	// window between the first failure and the sweep's own retry can lose
+	// that race under scheduling pressure: the retry succeeds and removes
+	// the container before the check runs.
+	hold chan struct{}
 }
 
 func (r *destroyRetryRuntime) Destroy(ctx context.Context, id runtime.ID) error {
@@ -982,7 +1011,15 @@ func (r *destroyRetryRuntime) Destroy(ctx context.Context, id runtime.ID) error 
 		r.mu.Unlock()
 		return errors.New("destroy temporarily unavailable")
 	}
+	hold := r.hold
 	r.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return r.Runtime.Destroy(ctx, id)
 }
 
@@ -1142,6 +1179,7 @@ func (r *creationKeyFailureRuntime) setFindErr(err error) {
 	r.mu.Unlock()
 }
 func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 		cfg.PollInterval = 200 * time.Millisecond
@@ -1156,7 +1194,7 @@ func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {
 	}
 
 	e.cfg.RunContainerTTL = -time.Second
-	retry := &destroyRetryRuntime{Runtime: e.rt}
+	retry := &destroyRetryRuntime{Runtime: e.rt, hold: make(chan struct{})}
 	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	s2.cfg.Runtime = retry
 	startScheduler(t, s2)
@@ -1185,6 +1223,7 @@ func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {
 		t.Fatalf("retry sidecar = %+v, want due retained owner", sc)
 	}
 
+	close(retry.hold)
 	waitFor(t, "sweep destroy retry", func() bool {
 		return e.rt.byName(string(run.ID)) == nil
 	})
@@ -1215,6 +1254,7 @@ func TestBootRetainedDestroyFailureRetriesOnSweep(t *testing.T) {
 }
 
 func TestBootExitedRetainedDestroyFailureAdoptsDueOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -1273,6 +1313,7 @@ func TestBootExitedRetainedDestroyFailureAdoptsDueOwner(t *testing.T) {
 }
 
 func TestFailedTerminalDestroyRebootsWithRetryOwnership(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "recovery build")))
 	coord, binDir := withCoordination(t, e)
 	ctx := t.Context()
@@ -1341,6 +1382,7 @@ func TestFailedTerminalDestroyRebootsWithRetryOwnership(t *testing.T) {
 }
 
 func TestRetainedTUIRebootsAndReopensSameContainer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -1389,6 +1431,7 @@ func (r *resumeFailureRuntime) Resume(ctx context.Context, id runtime.ID) error 
 }
 
 func TestRelaunchRestoresTerminalRowWhenResumeFails(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -1431,6 +1474,7 @@ func TestRelaunchRestoresTerminalRowWhenResumeFails(t *testing.T) {
 }
 
 func TestRelaunchRollbackStoreUpdateFailureKeepsActiveOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -1482,6 +1526,7 @@ func TestRelaunchRollbackStoreUpdateFailureKeepsActiveOwner(t *testing.T) {
 }
 
 func TestRelaunchRollbackSidecarFailureKeepsActiveOwnerAcrossReboot(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -1563,6 +1608,7 @@ func TestRelaunchRollbackSidecarFailureKeepsActiveOwnerAcrossReboot(t *testing.T
 }
 
 func TestRelaunchPauseFailureKeepsPromotedRunningOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -1616,8 +1662,13 @@ func TestRelaunchPauseFailureKeepsPromotedRunningOwner(t *testing.T) {
 }
 
 func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
+		// The barrier below holds the probe open until CloseRun has run;
+		// the default test probe timeout is far shorter than that and
+		// would race the barrier's own release.
+		cfg.ExitProbeTimeout = waitTimeout
 	})
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "close wins recovery attach")
@@ -1665,6 +1716,9 @@ func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
 	if got := e.rt.attachCount(); got != beforeAttach {
 		t.Fatalf("recovery attached after Close won: attaches %d -> %d", beforeAttach, got)
 	}
+	// CloseRun returning does not mean its own Wait owner has started yet -
+	// that runs on a goroutine CloseRun hands off to, not before it returns.
+	waitFor(t, "Close's own Wait owner", func() bool { return barrier.waitCount() == 2 })
 	if got := barrier.waitCount(); got != 2 {
 		t.Fatalf("Wait owners/calls = %d, want probe plus Close owner", got)
 	}
@@ -1684,6 +1738,7 @@ func TestRecoveryAttachDoesNotReplaceCloseOwner(t *testing.T) {
 	}
 }
 func TestRecoveryPTYFailureKeepsOwnerForDelete(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "recovery PTY failure")
@@ -1796,6 +1851,7 @@ func TestRecoveryPTYFailureKeepsOwnerForDelete(t *testing.T) {
 // waiting again, a repaint while the member types still does not release
 // it.
 func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour
@@ -1847,6 +1903,7 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 // full-screen TUI paints at once - reads as work resuming and hands the
 // run back to the agent it is still waiting for.
 func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour
@@ -1897,6 +1954,7 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 // time to measure those frames against, the first two of them would read
 // as the next turn and hand the run back to an agent that is waiting.
 func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour

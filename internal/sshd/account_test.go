@@ -76,6 +76,7 @@ func launchParams(t *testing.T, workspace domain.WorkspaceID, account domain.Mem
 }
 
 func TestSharedAccountLaunchRequiresOwnerGrant(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	grantee := &domain.Member{
@@ -119,6 +120,7 @@ func TestSharedAccountLaunchRequiresOwnerGrant(t *testing.T) {
 }
 
 func TestLaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
@@ -167,6 +169,7 @@ func TestLaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 }
 
 func TestLaunchAdmissionSerializesAccountRevoke(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
@@ -218,6 +221,7 @@ func TestLaunchAdmissionSerializesAccountRevoke(t *testing.T) {
 // Relaunch reuses the retained container, so a handoff cannot silently
 // authorize access to an unshared backing account.
 func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
@@ -268,6 +272,7 @@ func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
 // A completed account-share revoke must win before retained-run admission's
 // fresh authorization check; the scheduler must never see the denied run.
 func TestRelaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
@@ -329,6 +334,7 @@ func TestRelaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 // Once retained-run admission enters Runs.Relaunch, a steering-policy revoke
 // waits for that admission boundary instead of returning while it is in flight.
 func TestRelaunchAdmissionSerializesWorkspaceSteerRevocation(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
@@ -392,6 +398,7 @@ func TestRelaunchAdmissionSerializesWorkspaceSteerRevocation(t *testing.T) {
 }
 
 func TestAccountShareCannotTargetSelfOrPendingMember(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if _, perr := e.srv.accountShare(ctx, e.member.ID, accountParams(t, e.member.ID)); perr == nil || perr.Code != protocol.CodeInvalidParams {

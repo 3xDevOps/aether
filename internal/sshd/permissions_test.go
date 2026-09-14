@@ -60,6 +60,7 @@ func wantDenied(t *testing.T, err error, what string) {
 
 // A viewer cannot write to a PTY but read-only attach stays open.
 func TestViewerReadOnlyAttachAllowedWriteDenied(t *testing.T) {
+	t.Parallel()
 	e := gatedEnv(t)
 	e.pty.replay = []byte("out")
 	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
@@ -75,6 +76,7 @@ func TestViewerReadOnlyAttachAllowedWriteDenied(t *testing.T) {
 
 // A collaborator can write to another member's PTY by default.
 func TestCollaboratorWriteAttachAllowedByDefault(t *testing.T) {
+	t.Parallel()
 	e := gatedEnv(t)
 	e.pty.replay = []byte("out")
 	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
@@ -87,6 +89,7 @@ func TestCollaboratorWriteAttachAllowedByDefault(t *testing.T) {
 // A collaborator can kill another member's run by default; a viewer
 // cannot kill, delete, or launch anything.
 func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
@@ -108,6 +111,7 @@ func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
 // A protected run rejects non-owner steer and kill, even for
 // collaborators, while the owner and admins stay unaffected.
 func TestProtectedRunRestrictsToOwnerAndAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
@@ -141,6 +145,7 @@ func TestProtectedRunRestrictsToOwnerAndAdmin(t *testing.T) {
 // A run.protect request that passed its outer guard must re-check ownership
 // after a queued handoff commits while it waits for authorizationMu.
 func TestRunProtectRechecksOwnerAfterHandoff(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, owner := addMember(t, e, "Owner", domain.RoleCollaborator, false)
@@ -201,6 +206,7 @@ func TestRunProtectRechecksOwnerAfterHandoff(t *testing.T) {
 // workspace.settings must re-check the caller after waiting for the
 // authorization lock; a demoted former admin cannot mutate policy.
 func TestWorkspaceSettingsRechecksAdminAfterDemotion(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, _ = addMember(t, e, "Second admin", domain.RoleAdmin, false)
@@ -242,6 +248,7 @@ func TestWorkspaceSettingsRechecksAdminAfterDemotion(t *testing.T) {
 // steer_others=admins_only blocks a collaborator from steering or killing
 // another member's run but leaves their own runs steerable.
 func TestSteerOthersAdminsOnly(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
@@ -302,6 +309,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 // owner may hand off, and the handoff lands on the timeline attributed to
 // the acting member.
 func TestHandoffOwnerOrAdminOnly(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
@@ -371,6 +379,7 @@ func TestHandoffOwnerOrAdminOnly(t *testing.T) {
 // or to a member awaiting approval would orphan it, so both are refused
 // before ownership moves.
 func TestHandoffRecipientMustBeAbleToOwnRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, viewer := addMember(t, e, "Vera", domain.RoleViewer, false)
@@ -412,6 +421,7 @@ func TestHandoffRecipientMustBeAbleToOwnRun(t *testing.T) {
 
 // The run.protect event and timeline note are attributed to the acting member.
 func TestRunProtectPublishesEvents(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub, err := e.bus.Subscribe(context.Background(), events.SubscribeOptions{
 		Filter: events.Filter{Types: []events.Type{events.TypeTimeline, events.TypeRunProtected}},
@@ -461,6 +471,7 @@ func TestRunProtectPublishesEvents(t *testing.T) {
 // Wire round trip: protected and steer_others appear on run.get and
 // workspace.get results.
 func TestPermissionFieldsOnWire(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	if err := e.store.SetRunProtected(ctx, e.run.ID, true); err != nil {
@@ -489,6 +500,7 @@ func TestPermissionFieldsOnWire(t *testing.T) {
 // The write gate resolves fresh state per attach: revoking a member mid
 // flight denies the next write attach.
 func TestWriteGateChecksFreshRole(t *testing.T) {
+	t.Parallel()
 	e := gatedEnv(t)
 	e.pty.replay = []byte("out")
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
@@ -510,6 +522,7 @@ func TestWriteGateChecksFreshRole(t *testing.T) {
 // Guards surface store failures faithfully: an unknown run under a guard
 // is CodeNotFound, not a denial.
 func TestGuardUnknownRunIsNotFound(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	err := c.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: "run_missing"}, nil)

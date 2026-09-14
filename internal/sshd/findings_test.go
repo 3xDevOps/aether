@@ -57,6 +57,7 @@ func (b *scriptedBus) Subscribe(context.Context, events.SubscribeOptions) (event
 // without writing any post-gap event, or the client's resubscribe cursor
 // permanently skips the dropped event.
 func TestEventsDropClosesBeforePostGapWrite(t *testing.T) {
+	t.Parallel()
 	sub := newScriptedSub()
 	var inner events.Bus
 	e := newTestEnv(t, func(c *Config) {
@@ -129,6 +130,7 @@ func TestEventsDropClosesBeforePostGapWrite(t *testing.T) {
 // client that half-closes its write side (stdin EOF) must keep receiving
 // events - per the contract only closing the channel unsubscribes.
 func TestEventsSurviveStdinHalfClose(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemEvents, nil)
 	r := bufio.NewReader(pipe)
@@ -163,6 +165,7 @@ func TestEventsSurviveStdinHalfClose(t *testing.T) {
 // canceling the Serve context must terminate established connections,
 // not just the accept loop.
 func TestServeContextCancelClosesConnections(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemControl, nil)
 	c := protocol.NewClient(pipe)
@@ -193,6 +196,7 @@ func TestServeContextCancelClosesConnections(t *testing.T) {
 // to distinguish the failure from a clean session end (which is
 // exit-status 0).
 func TestAttachLateErrorReportsFailure(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errWriteDenied)
 	e.pty.mu.Lock()
@@ -265,6 +269,7 @@ func TestAttachLateErrorReportsFailure(t *testing.T) {
 // TCP client that stalls mid-handshake must be disconnected once the
 // handshake deadline passes.
 func TestHandshakeDeadline(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.handshakeTimeout = 200 * time.Millisecond })
 	conn, err := net.Dial("tcp", e.addr)
 	if err != nil {
@@ -288,6 +293,7 @@ func TestHandshakeDeadline(t *testing.T) {
 // with the cap saturated by a stalled pre-auth connection, further
 // connections are shed immediately instead of pinning goroutines.
 func TestHandshakeCap(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
 		c.handshakeTimeout = 10 * time.Second
 		c.maxHandshakes = 1
@@ -323,6 +329,7 @@ func TestHandshakeCap(t *testing.T) {
 // deleting a member must cut off their established connection's control
 // RPCs, git transport, and attach - not just future handshakes.
 func TestRemovedMemberLosesAccess(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	signer := newSigner(t)
 	ghost := &domain.Member{
@@ -394,6 +401,7 @@ func (b *blockingRuns) LaunchWithOptions(ctx context.Context, workspace domain.W
 // into a seam collaborator, so the wired server can close the scheduler,
 // store, and git engine afterwards without racing live handlers.
 func TestCloseWaitsForInFlightHandlers(t *testing.T) {
+	t.Parallel()
 	br := &blockingRuns{fakeRuns: &fakeRuns{}, entered: make(chan struct{}), release: make(chan struct{})}
 	e := newTestEnv(t, func(c *Config) { c.Runs = br })
 	c := controlClient(t, e)

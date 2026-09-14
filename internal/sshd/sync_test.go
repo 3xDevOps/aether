@@ -52,6 +52,7 @@ func syncEnv(t *testing.T) (*testEnv, string) {
 }
 
 func TestSyncRefusesInvalidRequests(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	if ack := syncAck(t, e, e.signer, "", false); ack.OK || ack.Code != protocol.CodeInvalidParams {
 		t.Fatalf("empty run_id ack = %+v, want invalid params", ack)
@@ -62,6 +63,7 @@ func TestSyncRefusesInvalidRequests(t *testing.T) {
 }
 
 func TestSyncRefusesMidWriteUnlessForced(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	e.run.Status = domain.RunRunning
 	if err := e.store.UpdateRun(context.Background(), e.run); err != nil {
@@ -76,6 +78,7 @@ func TestSyncRefusesMidWriteUnlessForced(t *testing.T) {
 }
 
 func TestSyncRefusesTerminalRunAndMissingWorktree(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	e.run.Status = domain.RunMerged
 	now := time.Now().UTC()
@@ -101,6 +104,7 @@ func TestSyncRefusesTerminalRunAndMissingWorktree(t *testing.T) {
 // are denied, collaborators pass, and a protected run shuts
 // non-owner-non-admin collaborators out.
 func TestSyncGatedOnSteer(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
 	if ack := syncAck(t, e, viewer, e.run.ID, false); ack.OK || ack.Code != protocol.CodeDenied {
@@ -127,6 +131,7 @@ func TestSyncGatedOnSteer(t *testing.T) {
 
 // sync.conflict publishes the typed event to both members through the bus.
 func TestSyncConflictMethodPublishesEvent(t *testing.T) {
+	t.Parallel()
 	e, _ := syncEnv(t)
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 
@@ -281,6 +286,8 @@ func waitForPath(t *testing.T, path string) {
 // End-to-end overlay through the real subsystem: local edits propagate to
 // the worktree and worktree edits propagate back.
 func TestSyncOverlayPropagatesBothWays(t *testing.T) {
+	// Not parallel: a real mutagen two-way sync with live filesystem
+	// watchers is timing-sensitive under heavy scheduling contention.
 	e, worktree := syncEnv(t)
 	localDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(localDir, "local.txt"), []byte("from local"), 0o644); err != nil {
@@ -310,6 +317,8 @@ func TestSyncOverlayPropagatesBothWays(t *testing.T) {
 // Concurrent conflicting edits pause the overlay, preserve the local side
 // as a conflict twin, and leave the worktree version canonical.
 func TestSyncOverlayConflictPausesAndPreservesTwin(t *testing.T) {
+	// Not parallel: a real mutagen two-way sync with live filesystem
+	// watchers is timing-sensitive under heavy scheduling contention.
 	e, worktree := syncEnv(t)
 	localDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(localDir, "shared.txt"), []byte("base"), 0o644); err != nil {
@@ -366,6 +375,8 @@ func TestSyncOverlayConflictPausesAndPreservesTwin(t *testing.T) {
 // The overlay never touches version control state: a .git directory in
 // the worktree is invisible to the sync.
 func TestSyncOverlayIgnoresGitState(t *testing.T) {
+	// Not parallel: a real mutagen two-way sync with live filesystem
+	// watchers is timing-sensitive under heavy scheduling contention.
 	e, worktree := syncEnv(t)
 	gitDir := filepath.Join(worktree, ".git")
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {

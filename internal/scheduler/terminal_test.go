@@ -15,6 +15,7 @@ import (
 )
 
 func TestBuildTerminalPlanWithoutWorkspace(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	plan, err := e.sched.BuildEnvironmentPlan(context.Background(), nil, nil, e.member, profileForTerminalTest(), EnvironmentPurposeTerminal)
 	if err != nil {
@@ -35,6 +36,7 @@ func TestBuildTerminalPlanWithoutWorkspace(t *testing.T) {
 }
 
 func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	terminal, err := e.sched.EnsureTerminal(context.Background(), e.member.ID)
 	if err != nil {
@@ -59,6 +61,7 @@ func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
 }
 
 func TestRecoveredTerminalUsesCapturedUserAndHomeForImages(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
@@ -176,6 +179,7 @@ func assertCleanupPendingTerminalIsNotLive(t *testing.T, e *testEnv) {
 }
 
 func TestRecoveredTerminalAttachFailurePreservesAndRetries(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
@@ -241,6 +245,7 @@ func TestRecoveredTerminalAttachFailurePreservesAndRetries(t *testing.T) {
 }
 
 func TestRecoveredTerminalPutFailurePreservesAndRetries(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
@@ -296,6 +301,7 @@ func TestRecoveredTerminalPutFailurePreservesAndRetries(t *testing.T) {
 }
 
 func TestRecoverTerminalWithoutRowAdoptsCreationKeySurvivor(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	failing := &failingPutTerminalStore{Store: e.db, fail: true}
 	e.sched.cfg.Store = failing
@@ -364,6 +370,7 @@ func TestRecoverTerminalWithoutRowAdoptsCreationKeySurvivor(t *testing.T) {
 }
 
 func TestRecoverTerminalWithoutRowAndSurvivorDoesNotCreate(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	if err := s2.recoverTerminals(t.Context()); err != nil {
@@ -382,6 +389,7 @@ func TestRecoverTerminalWithoutRowAndSurvivorDoesNotCreate(t *testing.T) {
 }
 
 func TestRecoveredTerminalProbeFailurePreservesAndRetries(t *testing.T) {
+	t.Parallel()
 
 	e := newTestEnv(t, nil)
 	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
@@ -439,6 +447,7 @@ func TestRecoveredTerminalProbeFailurePreservesAndRetries(t *testing.T) {
 }
 
 func TestRecoverTerminalWithoutRowFindFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	failing := &failingPutTerminalStore{Store: e.db, fail: true}
 	e.sched.cfg.Store = failing
@@ -471,6 +480,7 @@ func TestRecoverTerminalWithoutRowFindFailureFailsClosed(t *testing.T) {
 }
 
 func TestTerminalContainerAddrReturnsLiveContainerIP(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.containerIP = "192.0.2.44"
 	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
@@ -492,6 +502,7 @@ func TestTerminalContainerAddrReturnsLiveContainerIP(t *testing.T) {
 }
 
 func TestEnsureTerminalTabRetriesShellFallback(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	if _, err := e.sched.EnsureTerminal(context.Background(), e.member.ID); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
@@ -520,6 +531,7 @@ func TestEnsureTerminalTabRetriesShellFallback(t *testing.T) {
 // the next open: the exited container is destroyed, the row pruned, and
 // EnsureTerminal creates a new container instead of adopting the corpse.
 func TestEnsureTerminalRecreatesAfterMainShellExit(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	first, err := e.sched.EnsureTerminal(context.Background(), e.member.ID)
 	if err != nil {
@@ -556,6 +568,7 @@ func profileForTerminalTest() harness.Profile {
 }
 
 func TestEnsureTerminalTabLimit(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	for _, tab := range []string{"t1", "t2", "t3", "t4", "t5"} {
 		if err := e.sched.EnsureTerminalTab(context.Background(), e.member.ID, tab, 80, 24); err != nil {
@@ -568,6 +581,7 @@ func TestEnsureTerminalTabLimit(t *testing.T) {
 }
 
 func TestSuperviseTerminalRetriesTransportErrorUntilExit(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	rt := newScriptedWaitRuntime(e.rt)
 	e.sched.cfg.Runtime = rt
@@ -609,6 +623,7 @@ func TestSuperviseTerminalRetriesTransportErrorUntilExit(t *testing.T) {
 }
 
 func TestSuperviseTerminalMissingContainerPrunesState(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
@@ -632,6 +647,7 @@ func TestSuperviseTerminalMissingContainerPrunesState(t *testing.T) {
 }
 
 func TestExitedTerminalCleanupRetainsStateForRetry(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	waitRuntime := newScriptedWaitRuntime(e.rt)
 	runtimeWithFailure := &failingDestroyRuntime{

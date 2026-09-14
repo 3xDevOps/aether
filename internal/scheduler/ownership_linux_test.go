@@ -18,6 +18,7 @@ import (
 // while ordinary checkout files, directories, and the credential home are
 // handed to the run user. Requires root (chown to another uid).
 func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() != 0 {
 		t.Skip("ownership pass needs root to chown")
 	}
@@ -119,6 +120,7 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 
 // TestApplyRunOwnershipRootIsNoop pins that root runs skip the pass.
 func TestApplyRunOwnershipRootIsNoop(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, nil, ""); err != nil {
 		t.Fatalf("applyRunOwnership(root): %v", err)

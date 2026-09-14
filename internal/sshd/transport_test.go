@@ -20,6 +20,7 @@ import (
 )
 
 func TestGitExecUploadPack(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	client := e.dial(t)
 	sess, err := client.NewSession()
@@ -57,6 +58,7 @@ func TestGitExecUploadPack(t *testing.T) {
 }
 
 func TestGitExecUnknownWorkspace(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sess, err := e.dial(t).NewSession()
 	if err != nil {
@@ -111,6 +113,7 @@ func gitExecAs(t *testing.T, e *testEnv, signer ssh.Signer, cmd string) (int, st
 // boundary as the control channel: a viewer may fetch but not push, and
 // the denial happens before the git seam is touched.
 func TestGitPushDeniedForViewer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	viewer, _ := addMember(t, e, "vera", domain.RoleViewer, false)
 
@@ -137,6 +140,7 @@ func TestGitPushDeniedForViewer(t *testing.T) {
 // TestGitPushAllowedForCollaborator is the positive half of the boundary:
 // the gate must not block members who legitimately push.
 func TestGitPushAllowedForCollaborator(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	collab, _ := addMember(t, e, "cass", domain.RoleCollaborator, false)
 
@@ -149,6 +153,7 @@ func TestGitPushAllowedForCollaborator(t *testing.T) {
 }
 
 func TestExecAndShellRejected(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	client := e.dial(t)
 
@@ -181,6 +186,7 @@ func TestExecAndShellRejected(t *testing.T) {
 }
 
 func TestEventsSubscribeAndStream(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemEvents, nil)
 	r := bufio.NewReader(pipe)
@@ -227,6 +233,7 @@ func TestEventsSubscribeAndStream(t *testing.T) {
 }
 
 func TestEventsReplayWithoutLog(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemEvents, nil)
 	r := bufio.NewReader(pipe)
@@ -265,6 +272,7 @@ func readJSONLine(t *testing.T, r *bufio.Reader, v any) {
 }
 
 func TestAttachRoundTrip(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.replay = []byte("scrollback$ ")
 
@@ -340,6 +348,7 @@ func wantPresence(t *testing.T, sub events.Subscription, state events.PresenceSt
 }
 
 func TestAttachWithoutPTYReqIsReadOnly(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.replay = []byte("out")
 	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
@@ -359,6 +368,7 @@ func TestAttachWithoutPTYReqIsReadOnly(t *testing.T) {
 }
 
 func TestAttachErrors(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 
 	// Unknown run.
@@ -401,6 +411,7 @@ func TestAttachErrors(t *testing.T) {
 }
 
 func TestWindowChangeFeedsResize(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.replay = []byte("x")
 	var sess *ssh.Session
@@ -442,6 +453,7 @@ func TestWindowChangeFeedsResize(t *testing.T) {
 // and ends cleanly, instead of a refusal the dashboard can only retry
 // forever.
 func TestAttachReplaysFinishedRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
 	e.pty.setTranscript(e.run.ID, []byte("recorded output"))
@@ -472,6 +484,7 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 }
 
 func TestAttachFinishedRunUsesFramedTranscript(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
 	e.pty.setTranscript(e.run.ID, []byte("complete recorded output"))
@@ -507,6 +520,7 @@ func TestAttachFinishedRunUsesFramedTranscript(t *testing.T) {
 // finished run whose transcript predates recording keeps the no-session
 // refusal instead of a bogus empty replay.
 func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
 	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
@@ -532,6 +546,7 @@ func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
 // internal/cli uses - an ssh.Session would swallow the request before a
 // client could inspect the stream.
 func TestAttachFollowerIsToldTheSessionGeometry(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.session = [2]uint{132, 43}
 	e.pty.tell = make(chan [2]uint, 1)

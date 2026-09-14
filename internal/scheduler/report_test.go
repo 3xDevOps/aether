@@ -72,6 +72,7 @@ func (e *testEnv) startStalls(t *testing.T) {
 // gave - long before any stall threshold - a repaint while the member
 // types does not un-park it, and the agent's own next turn does.
 func TestAgentWaitingParksAndResumes(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour
@@ -152,9 +153,10 @@ func expectNoStatusEvent(t *testing.T, sub events.Subscription, run domain.RunID
 // waiting for, and a harness without a full reporter still comes back on
 // activity alone.
 func TestAgentWaitingReplacesAStallReason(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 40 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
@@ -205,9 +207,16 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 // A run whose agent said it was working and then went silent parks as a
 // stall, with the reason that says so.
 func TestAgentWorkingStillStalls(t *testing.T) {
+	t.Parallel()
+	// A tight threshold left no margin for the initial ReportAgentState
+	// call itself: under heavy scheduling contention it can be delayed
+	// past the point where the run has already stalled on its own, so
+	// that one report both un-parks the run (reason "agent resumed") and
+	// leaves nothing for the later pump-driven resume to do. 500ms/20ms
+	// gives the report call a realistic amount of headroom.
 	e := newReportingEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 40 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
@@ -237,11 +246,14 @@ func TestAgentWorkingStillStalls(t *testing.T) {
 // activity. Otherwise the poll that follows a resumed run re-parks it as
 // stalled, and every tool call flips the run card twice.
 func TestWorkingReportOutlastsTheNextPoll(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Long enough that several polls run before the threshold is a
-		// stall again, short enough to park the launched run quickly.
-		cfg.StallThreshold = 200 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		// stall again, short enough to park the launched run quickly, and
+		// with enough margin over PollInterval that scheduling contention
+		// cannot make a genuinely fresh report read as stale.
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
@@ -280,6 +292,7 @@ func pump(t *testing.T, c *fakeContainer) func() {
 // inside a container, so a report for a run that is gone or finished is an
 // error with enough context to read, not a status write.
 func TestReportAgentStateRefusesRunsItDoesNotSupervise(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	working := agentstatus.Report{State: agentstatus.Working}
 
@@ -300,6 +313,7 @@ func TestReportAgentStateRefusesRunsItDoesNotSupervise(t *testing.T) {
 // report says what the run already says, so it costs no store write and no
 // event; a report that changes the reason still lands.
 func TestRepeatedWaitingReportIsNotNews(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = time.Hour
 		cfg.PollInterval = 10 * time.Millisecond
@@ -337,9 +351,10 @@ func TestRepeatedWaitingReportIsNotNews(t *testing.T) {
 // left to correct it: silence from a container the member froze is not a
 // stall either.
 func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 40 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	e.startStalls(t)
 	run, _ := e.launchReporting(t)
@@ -359,7 +374,7 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 	}
 	// Well past the stall threshold: the run stays parked for the reason
 	// the agent gave, and the silence heuristic does not relabel it.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
 	r, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
@@ -378,6 +393,7 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 // frames may hand the run back to an agent that is waiting - however many
 // polls those frames happen to span.
 func TestTurnEndReportComesBackOnActivity(t *testing.T) {
+	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) {
 		// Far longer than the test: nothing here is a stall.
 		cfg.StallThreshold = time.Hour

@@ -11,6 +11,7 @@ import (
 )
 
 func TestMemberColor(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = filepath.Join(t.TempDir(), "invites") })
 	bobSigner, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	bobC := controlAs(t, e, bobSigner)

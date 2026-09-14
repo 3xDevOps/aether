@@ -74,6 +74,7 @@ func templateEnv(t *testing.T, clock *testClock) *testEnv {
 // immutable provenance carried by their captured runs. Then the collaborator
 // is demoted and the schedule stops firing.
 func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T) {
+	t.Parallel()
 	clock := &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
 	e := templateEnv(t, clock)
 	ctx := context.Background()

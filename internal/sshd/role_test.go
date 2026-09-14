@@ -12,6 +12,7 @@ import (
 
 // A non-admin cannot change anyone's role, their own included.
 func TestMemberRoleRequiresAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	bobSigner, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	bobC := controlAs(t, e, bobSigner)
@@ -32,6 +33,7 @@ func TestMemberRoleRequiresAdmin(t *testing.T) {
 // An admin promotes a collaborator to admin and demotes them to viewer;
 // both land in the store and come back on the wire.
 func TestMemberRolePromoteAndDemote(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
@@ -75,6 +77,7 @@ func TestMemberRolePromoteAndDemote(t *testing.T) {
 
 // Setting a member to the role they already hold succeeds unchanged.
 func TestMemberRoleIdempotent(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
@@ -92,6 +95,7 @@ func TestMemberRoleIdempotent(t *testing.T) {
 
 // The deployment must keep one member able to administer it.
 func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	adminC := controlClient(t, e)
 
@@ -116,6 +120,7 @@ func TestMemberRoleRefusesDemotingLastAdmin(t *testing.T) {
 
 // A pending member's role may be set: approval and role are orthogonal.
 func TestMemberRolePendingMember(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, pending := addMember(t, e, "Pat", domain.RoleViewer, true)
 	adminC := controlClient(t, e)
@@ -133,6 +138,7 @@ func TestMemberRolePendingMember(t *testing.T) {
 
 // Bad input is rejected before anything is written.
 func TestMemberRoleRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	adminC := controlClient(t, e)
@@ -149,6 +155,7 @@ func TestMemberRoleRejectsBadInput(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var pe *protocol.Error
 			err := adminC.Call(protocol.MethodMemberRole, tc.params, nil)
 			if !errors.As(err, &pe) || pe.Code != tc.code {
@@ -163,6 +170,7 @@ func TestMemberRoleRejectsBadInput(t *testing.T) {
 // serialization both calls count two admins, both proceed, and the
 // deployment is left with none and no way to administer it again.
 func TestConcurrentDemotionsKeepAnAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	// e.member is the seeded admin; Bea is the second one.
 	beaSigner, bea := addMember(t, e, "Bea", domain.RoleAdmin, false)

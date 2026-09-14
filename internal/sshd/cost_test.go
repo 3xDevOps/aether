@@ -36,6 +36,7 @@ func costEnv(t *testing.T) *testEnv {
 // run already running finishes untouched and keeps its metered record,
 // and an admin's override admits the next run.
 func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
+	t.Parallel()
 	e := costEnv(t)
 	ctx := context.Background()
 	control := controlAs(t, e, e.signer)
@@ -176,6 +177,7 @@ func TestWorkspaceBudgetRefusesNewRunsUntilAdminOverrides(t *testing.T) {
 // A run whose harness has no adapter is recorded as unmetered when it
 // finishes - not as free - and every surface that reports it says so.
 func TestRunWithoutAdapterIsUnmeteredNotZero(t *testing.T) {
+	t.Parallel()
 	e := costEnv(t)
 	ctx := context.Background()
 	control := controlAs(t, e, e.signer)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunShellErrorsMapToWireCodes(t *testing.T) {
+	t.Parallel()
 	if got := rpcError(scheduler.ErrInvalidRunShellTab).Code; got != protocol.CodeInvalidParams {
 		t.Fatalf("invalid tab code = %d, want %d", got, protocol.CodeInvalidParams)
 	}

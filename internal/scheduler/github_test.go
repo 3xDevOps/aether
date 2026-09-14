@@ -47,6 +47,7 @@ func requireSSHKeygen(t *testing.T) {
 }
 
 func TestConnectGitHubNeedsARunningTerminal(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
 	if !errors.Is(err, ErrTerminalNotRunning) {
@@ -55,6 +56,7 @@ func TestConnectGitHubNeedsARunningTerminal(t *testing.T) {
 }
 
 func TestConnectGitHubReportsAnUnfinishedLogin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"timeout","active":true,"login":"octocat"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -83,6 +85,7 @@ func TestConnectGitHubReportsAnUnfinishedLogin(t *testing.T) {
 }
 
 func TestConnectGitHubSurfacesSetupGitFailure(t *testing.T) {
+	t.Parallel()
 	requireSSHKeygen(t)
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -107,6 +110,7 @@ func TestConnectGitHubSurfacesSetupGitFailure(t *testing.T) {
 }
 
 func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
+	t.Parallel()
 	requireSSHKeygen(t)
 	e := newTestEnv(t, nil)
 	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
@@ -217,6 +221,7 @@ func homeKeyFingerprint(t *testing.T, e *testEnv) string {
 // complaint in the entry. That sentence is what the member needs, not the
 // JSON it arrived in.
 func TestConnectGitHubReportsTheAccountsOwnError(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"error","active":true,"login":"octocat","error":"HTTP 401: Bad credentials"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -248,6 +253,7 @@ func TestConnectGitHubReportsTheAccountsOwnError(t *testing.T) {
 // step, after the home had been rewritten. It is refused first, with the
 // command that fixes it.
 func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -288,6 +294,7 @@ func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
 // steps, so the connection is only reported once the account lists the
 // fingerprint the member's own private key produces.
 func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
+	t.Parallel()
 	requireSSHKeygen(t)
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -318,6 +325,7 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 // container cannot run; now the refusal names both halves of the remedy -
 // the admin's and their own - and keeps the container's own line.
 func TestConnectGitHubReportsAMissingGh(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
@@ -356,6 +364,7 @@ func TestConnectGitHubReportsAMissingGh(t *testing.T) {
 // to be reported as a failed login, which sent the member back to a login
 // that was already good.
 func TestConnectGitHubReportsAGhTooOldForTheLoginCheck(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
@@ -388,6 +397,7 @@ func TestConnectGitHubReportsAGhTooOldForTheLoginCheck(t *testing.T) {
 // that account. Dropping --active is what makes the entry visible at all,
 // so the check has to accept it.
 func TestConnectGitHubAcceptsTheOnlyAccountOnTheHost(t *testing.T) {
+	t.Parallel()
 	requireSSHKeygen(t)
 	e := newTestEnv(t, nil)
 	const output = `{"hosts":{"github.com":[{"state":"success","login":"octocat","scopes":"repo, admin:ssh_signing_key"}]}}`
@@ -418,6 +428,7 @@ func TestConnectGitHubAcceptsTheOnlyAccountOnTheHost(t *testing.T) {
 // a non-zero exit is a fatal error and never a missing login. Reporting it
 // as one would be the same lie in a narrower place.
 func TestConnectGitHubDoesNotReadAFatalStatusAsNoLogin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	const output = "error connecting to api.github.com"
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -441,6 +452,7 @@ func TestConnectGitHubDoesNotReadAFatalStatusAsNoLogin(t *testing.T) {
 // A gh whose version line this cannot read is not an old gh. Refusing it
 // would repeat the bug: a working login blamed on something else.
 func TestConnectGitHubTrustsAGhWithAnUnreadableVersion(t *testing.T) {
+	t.Parallel()
 	requireSSHKeygen(t)
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
@@ -465,6 +477,7 @@ func TestConnectGitHubTrustsAGhWithAnUnreadableVersion(t *testing.T) {
 // The connect refuses a container the standard image has moved out from
 // under with the same one-step answer the probe gives, not the admin's.
 func TestConnectGitHubSendsAStaleContainerToReopen(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
@@ -498,6 +511,7 @@ func TestConnectGitHubSendsAStaleContainerToReopen(t *testing.T) {
 // A member on their own saved image is not told to throw it away: the
 // refusal offers the way out that keeps it first.
 func TestConnectGitHubKeepsASavedEnvironmentOnOffer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, "aether/member-test:1"); err != nil {
 		t.Fatalf("UpdateMemberImage: %v", err)
@@ -560,6 +574,7 @@ func TestConnectGitHubStopsAtItsDeadline(t *testing.T) {
 // The end-of-run commit is signed with the run owner's key once they have
 // one, and stays unsigned before that.
 func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "add OAuth login")
 
@@ -584,6 +599,7 @@ func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
 // A key the agent has corrupted from inside its own run costs the
 // signature, not the commit.
 func TestCommitAllCommitsWithAnUnusableKey(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "add OAuth login")
 	home, err := e.cfg.Homes.Path(e.member.ID)

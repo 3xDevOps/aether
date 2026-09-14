@@ -129,6 +129,7 @@ func mountFor(spec runtime.Spec, containerPath string) (runtime.Mount, bool) {
 // durable before the container exists, and both are cleaned up only after
 // the container is destroyed.
 func TestRunCarriesCoordinationAssets(t *testing.T) {
+	t.Parallel()
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
 	coord, binDir := withCoordination(t, e)
@@ -197,6 +198,7 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 // references, so a build a surviving container still holds is kept and one
 // nothing names is collected.
 func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "current build")))
 	_, binDir := withCoordination(t, e)
 
@@ -255,8 +257,10 @@ func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
 // Both shapes of reporter registration are overridden: claude's arguments
 // and opencode's environment.
 func TestArgvOverrideDropsRegistryRegistration(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"claude", "opencode"} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			shim := name + "-shim"
 			s := &Scheduler{harnesses: map[string]HarnessSpec{
 				name: {TUIArgs: []string{shim, harness.TaskPlaceholder}},
@@ -292,6 +296,7 @@ func TestArgvOverrideDropsRegistryRegistration(t *testing.T) {
 // without coordination, and the reason is on the run's timeline rather than
 // in a log nobody reads.
 func TestStagingIsFailClosed(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(filepath.Join(t.TempDir(), "not-a-binary")))
 	withCoordination(t, e)
 	sub := e.subscribe(t)
@@ -314,6 +319,7 @@ func TestStagingIsFailClosed(t *testing.T) {
 // and turning it on afterwards does not pretend an existing container has
 // them.
 func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "current build")))
 
 	binDir := filepath.Join(t.TempDir(), "runtime", "bin")

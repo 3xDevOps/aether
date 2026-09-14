@@ -16,6 +16,7 @@ import (
 // unusable URL never reaches the store, and every change lands on the
 // workspace timeline.
 func TestWorkspaceOrigin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)

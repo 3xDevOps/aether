@@ -21,6 +21,7 @@ type forwardTestPayload struct {
 }
 
 func TestDirectTCPIPOwnerEchoAndHalfClose(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -91,6 +92,7 @@ func TestDirectTCPIPOwnerEchoAndHalfClose(t *testing.T) {
 	}
 }
 func TestDirectTCPIPFullDisconnectReleasesBackend(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -231,6 +233,7 @@ func TestDirectTCPIPFullDisconnectReleasesBackend(t *testing.T) {
 	}
 }
 func TestDirectTCPIPDisconnectCancelsAddressResolution(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	started, release, canceled := e.runs.blockContainerAddr()
 	defer func() {
@@ -279,6 +282,7 @@ func TestDirectTCPIPDisconnectCancelsAddressResolution(t *testing.T) {
 }
 
 func TestDirectTCPIPTerminalTarget(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -325,6 +329,8 @@ func TestDirectTCPIPTerminalTarget(t *testing.T) {
 }
 
 func TestDirectTCPIPTerminalRevokesOnMembershipChange(t *testing.T) {
+	// Serial: asserts revocation latency against a 50ms cadence, which
+	// parallel load would blur.
 	for _, tc := range []struct {
 		name   string
 		revoke func(*testing.T, *testEnv, *domain.Member)
@@ -348,6 +354,8 @@ func TestDirectTCPIPTerminalRevokesOnMembershipChange(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// Serial: asserts revocation latency against a 50ms cadence,
+			// which parallel load would blur.
 			e := newTestEnv(t, func(c *Config) {
 				c.revalidateInterval = 50 * time.Millisecond
 			})
@@ -374,6 +382,8 @@ func TestDirectTCPIPTerminalRevokesOnMembershipChange(t *testing.T) {
 }
 
 func TestDirectTCPIPRunRevokesOnSteerLoss(t *testing.T) {
+	// Serial: asserts revocation latency against a 50ms cadence, which
+	// parallel load would blur.
 	e := newTestEnv(t, func(c *Config) {
 		c.revalidateInterval = 50 * time.Millisecond
 	})
@@ -401,18 +411,21 @@ func TestDirectTCPIPRunRevokesOnSteerLoss(t *testing.T) {
 }
 
 func TestDirectTCPIPRejectsUnavailableTerminal(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.runs.terminalAddrErr = errors.New("not running")
 	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "terminal", DestPort: 1}, "environment terminal is not running")
 }
 
 func TestDirectTCPIPRejectsUnknownRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	client := e.dial(t)
 	assertForwardRejected(t, client, forwardTestPayload{DestHost: "run:missing", DestPort: 1}, "run not found")
 }
 
 func TestDirectTCPIPRejectsProtectedRunCollaborator(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.store.SetRunProtected(t.Context(), e.run.ID, true); err != nil {
 		t.Fatalf("protect run: %v", err)
@@ -427,11 +440,13 @@ func TestDirectTCPIPRejectsProtectedRunCollaborator(t *testing.T) {
 }
 
 func TestDirectTCPIPRejectsNonRunDestination(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	assertForwardRejected(t, e.dial(t), forwardTestPayload{DestHost: "127.0.0.1", DestPort: 1}, "port forwarding targets must be run:<run-id> or terminal")
 }
 
 func TestDirectTCPIPRejectsViewer(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	signer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
 	client, err := e.dialWith(signer, nil)
@@ -479,6 +494,10 @@ func openDirectTCPIPChannel(t *testing.T, e *testEnv, signer ssh.Signer, payload
 	return ch
 }
 
+// waitForwardClosed asserts the revalidation goroutine notices and closes
+// ch within 4x interval: the property under test is that revocation is
+// prompt, not merely eventual, so the caller must not run parallel with
+// the rest of the package - see the "serial" comments on its callers.
 func waitForwardClosed(t *testing.T, ch ssh.Channel, interval time.Duration) {
 	t.Helper()
 	closed := make(chan error, 1)

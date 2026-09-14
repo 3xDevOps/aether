@@ -27,6 +27,7 @@ func storeMemberDefinition(t *testing.T, e *testEnv, member domain.MemberID, def
 // definitions shape argv inside the member's own container, so they are
 // member-scoped, never global.
 func TestMemberHarnessDefinitionResolution(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
 		Name:            "aider",
@@ -62,6 +63,7 @@ func TestMemberHarnessDefinitionResolution(t *testing.T) {
 // - omp is the case that happened - are still in the store, and there is no
 // command that removes them. They stay inert: the launch uses the registry.
 func TestShippedNameWinsOverAStoredDefinition(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
 		Name:            "omp",
@@ -91,6 +93,7 @@ func TestShippedNameWinsOverAStoredDefinition(t *testing.T) {
 // The server-wide admin spec pins a name for everyone; a member definition
 // must not override it.
 func TestServerSpecWinsOverMemberDefinition(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{
 			"aider": {
@@ -115,6 +118,7 @@ func TestServerSpecWinsOverMemberDefinition(t *testing.T) {
 // A stored blob that fails validation (schema drift, hand-edited row) must
 // fail the launch loudly, never resolve to a half-usable profile.
 func TestCorruptMemberDefinitionFails(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	row := &store.HarnessDefinition{MemberID: e.member.ID, Name: "aider", Definition: []byte(`{"Name":"aider"}`)}
 	if err := e.db.UpsertHarnessDefinition(t.Context(), row); err != nil {
@@ -126,6 +130,7 @@ func TestCorruptMemberDefinitionFails(t *testing.T) {
 }
 
 func TestUnknownHarnessErrorNamesAgentAdd(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, _, err := e.sched.command(t.Context(), e.member.ID, "nope", domain.LaunchTUI, "x")
 	if err == nil {

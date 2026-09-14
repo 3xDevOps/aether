@@ -18,6 +18,7 @@ import (
 // does: two runs owned by different members edit the same file, both rows
 // flag it naming the other member, and the flag clears when one finishes.
 func TestConflictRadarFlagsBothRunsAndClears(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	log, err := events.OpenSQLiteLog(filepath.Join(dir, "events.db"))

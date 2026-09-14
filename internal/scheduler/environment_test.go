@@ -13,6 +13,7 @@ import (
 )
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
+	t.Parallel()
 	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
@@ -43,6 +44,7 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 }
 
 func TestBuildEnvironmentPlanUsesStandardImageAndToolsFirstPath(t *testing.T) {
+	t.Parallel()
 	s := &Scheduler{cfg: Config{StandardImage: "standard:latest"}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
 		Variables: map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
@@ -63,6 +65,7 @@ func TestBuildEnvironmentPlanUsesStandardImageAndToolsFirstPath(t *testing.T) {
 	}
 }
 func TestBuildEnvironmentPlanUsesSavedMemberImage(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	const saved = "aether/member-saved:123"
 	e.member.Image = saved
@@ -82,6 +85,7 @@ func TestBuildEnvironmentPlanUsesSavedMemberImage(t *testing.T) {
 }
 
 func TestBuildEnvironmentPlanRejectsMissingSavedMemberImage(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.StandardImage = "standard:latest" })
 	const saved = "aether/member-missing:123"
 	e.member.Image = saved
@@ -101,6 +105,7 @@ func TestBuildEnvironmentPlanRejectsMissingSavedMemberImage(t *testing.T) {
 // harness; the environment terminal passes an empty profile and gets none
 // of this.
 func TestBuildEnvironmentPlanAppliesHarnessLaunchEnv(t *testing.T) {
+	t.Parallel()
 	s := &Scheduler{cfg: Config{StandardImage: "standard:latest"}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
 		Variables: map[string]string{"IS_SANDBOX": "0"},

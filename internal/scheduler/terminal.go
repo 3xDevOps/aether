@@ -431,7 +431,7 @@ type terminalAdoption struct {
 // recreates the environment. The probe mirrors recoverSupervised: a short
 // non-destructive Wait whose deadline means "still running".
 func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member, row *domain.Terminal, cid runtime.ID) (*terminalAdoption, bool, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, exitProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ExitProbeTimeout)
 	_, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
 	cancel()
 	switch {
