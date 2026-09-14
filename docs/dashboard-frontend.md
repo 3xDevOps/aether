@@ -1259,7 +1259,6 @@ replaces the terminal with the gateway's own error instead.
   interface also supports `rebind()` and `reopen()`: a persistent dock socket
   can keep its transport while a newly mounted host supplies current
   callbacks.
-
 - **Steer on entry.** The agent header requests `write` on the first attach
   and the active button carries a short pulse animation; the toggle
   reattaches rather than upgrading in place. Until the member has taken
@@ -1330,20 +1329,14 @@ replaces the terminal with the gateway's own error instead.
   every reconnect, so those stop the loop and surface the reason. A refusal
   frame arrives with its own 1008 close, which is why the client reacts to the
   code only when no refusal preceded it.
-- **Fresh opens receive a screen, not a timelapse.** The server maintains a
-  headless xterm state and serializes the current screen with at most 200
-  scrollback lines for dashboard attachments, including finished runs. The
-  browser resets once and mutes terminal replies only until that compact
-  snapshot parses. Taking control and handing it back instead preserve the
-  screen with `resume` and receive only missing bytes from the raw 1 MiB ring.
-  Raw CLI attachments and screenless adapter taps retain their raw replay.
-- **History does not touch the live terminal.** The run terminal's **History**
-  control opens a separate recording player. `api.runRecording()` fetches an
-  authenticated snapshot containing all preserved casts, including earlier
-  server incarnations. The player is loaded only for that dialog and applies
-  recorded geometry while seeking through earlier screens. Closing aborts the
-  request and disposes the player without remounting the live xterm or changing
-  its attach permissions.
+- **Fresh run opens receive the complete transcript.** The server streams every
+  retained raw output segment, including earlier server incarnations, before
+  live output. The browser resets once and mutes terminal replies until that
+  replay parses. xterm keeps the replay in scrollback and retains lines cleared
+  by full-screen redraws. Taking control and handing it back instead preserve
+  the existing screen with `resume` and receive only missing bytes from the raw
+  1 MiB ring. Reusable shell terminals still use the server's compact current
+  screen when a full transcript does not apply.
 - **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
   chains zoom, find, and `clipboardKeys` in that order; the first to claim a
   key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but

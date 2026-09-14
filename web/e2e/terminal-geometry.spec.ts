@@ -69,7 +69,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
   }
 })
 
-test('fresh runs show the current prompt while History keeps the complete recording', async ({
+test('fresh runs replay complete history in terminal scrollback', async ({
   page,
   aether,
 }) => {
@@ -190,10 +190,7 @@ done
   const rows = page.locator('.xterm-rows')
   await expect(rows).toContainText(currentPrompt, { timeout: 30_000 })
   await expect(rows).not.toContainText(firstOutput)
-  await expect.poll(() => browserReplayBytes, { timeout: 10_000 }).toBeGreaterThan(0)
-  // The fresh framed attach carries a compact screen, not the old redraw
-  // transcript. Leave a generous margin over a 200-line, 80-column screen.
-  expect(browserReplayBytes).toBeLessThan(512 * 1024)
+  await expect.poll(() => browserReplayBytes, { timeout: 30_000 }).toBeGreaterThan(1_048_576)
 
   const screen = page.locator('.xterm-screen')
   await screen.click()
@@ -206,20 +203,10 @@ done
   expect(Date.now() - sentAt).toBeLessThan(15_000)
   await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Open complete terminal history' }).click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toBeVisible()
-  const historyTerminal = dialog.locator('.ap-term-text')
-  await expect(dialog.getByRole('button', { name: 'Play', exact: true })).toBeVisible({
-    timeout: 30_000,
-  })
-  await dialog.getByRole('button', { name: 'Play', exact: true }).click()
-  await expect(historyTerminal).toContainText(firstOutput, { timeout: 30_000 })
-  await dialog.getByRole('button', { name: 'Beginning', exact: true }).click()
-  await expect(historyTerminal).toContainText(firstOutput, { timeout: 30_000 })
-
-  await dialog.getByRole('button', { name: 'Back to live', exact: true }).click()
-  await expect(dialog).toBeHidden()
-  await expect(rows).toContainText(currentPrompt)
-  await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
+  await page.keyboard.press('Control+Shift+F')
+  const find = page.getByLabel('Find in terminal')
+  await find.fill(firstOutput)
+  await find.press('Enter')
+  await expect(page.locator('.xterm-selection div').first()).toBeVisible()
+  await expect(page.getByText('No matches')).toBeHidden()
 })

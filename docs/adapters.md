@@ -93,7 +93,7 @@ workspace and run IDs.
    own IDs on the payload (`ToolUseID`) instead of keeping a map.
 4. **Summarize, do not transcribe.** `Detail` is a short human-readable line
    for the timeline, truncated by the adapter (the Claude adapter caps it at
-   256 bytes). The full output already lives in the PTY recording.
+   256 bytes). The full output already lives in the PTY transcript.
 
 ### What to emit
 

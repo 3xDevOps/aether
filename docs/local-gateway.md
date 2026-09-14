@@ -1002,17 +1002,15 @@ needs.
    A later accepted resize arrives after that screen's replay bytes.
    The optional `replay` value counts the binary bytes preceding live output;
    clients mute terminal-generated replies until those bytes have been parsed.
-   For a fresh dashboard attach these bytes are a compact current-screen
-   snapshot with up to 200 recent scrollback lines, not the old redraw log.
-   It restores cursor, colours, screen buffers, and terminal modes. A successful
-   resume instead supplies only the missing raw output. `cursor` counts original
-   session output, independently of the snapshot's encoded length, and is what
-   a later `resume` sends back.
+   For a fresh run attach these bytes are the complete retained raw transcript,
+   including segments from earlier server incarnations. A successful resume
+   instead supplies only the missing raw output. `cursor` counts original
+   session output and is what a later `resume` sends back.
    A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is
    refused with `-32000`.
-   A finished run supplies its compact final screen read-only, ending with the
+   A finished run supplies its complete transcript read-only, ending with the
    session-end close below. A `queued`,
    `provisioning` or `running` run with no session is refused with `-32004`
    rather than held open - the container is still being built, or recovery is
@@ -1067,19 +1065,6 @@ needs.
 
 Closing the socket detaches; the run is unaffected.
 
-#### Complete run recording
-
-`GET /api/v1/run/{run}/recording` returns an asciicast v2 snapshot of all
-recorded output, including preserved transcripts from before server restarts.
-It uses the same authentication and run-read authorization as an attach, but
-does not join, resize, or write to the live PTY. The response is streamed with
-`Cache-Control: no-store`; it is not limited to the live replay ring. Missing
-recordings and authorization failures use the normal JSON error envelope.
-
-Internally, the gateway requests `recording:true` on the attach subsystem.
-The ack must confirm `"recording":true`; its bytes are a finite recording, never
-a live stream. An older server that does not acknowledge recording mode is
-refused with an explicit update error.
 Ordinary dashboard attachments request `framed:true` and require the server
 to confirm it in the ack. An older server that ignores the request is refused
 with an update error rather than having raw bytes decoded as terminal records.
@@ -1087,8 +1072,8 @@ After the ack, an `o` byte and four-byte big-endian payload length precede each
 output record; a `g` byte and two four-byte big-endian dimensions form a
 geometry record. The gateway decodes these sequentially into WebSocket frames.
 Replay counts exclude frame headers. Resume cursors count original session
-output, not the compact snapshot bytes.
-CLI attachments do not request framing and retain their raw terminal stream.
+output. CLI attachments do not request framing and retain their raw terminal
+stream.
 
 #### Run shell tabs
 

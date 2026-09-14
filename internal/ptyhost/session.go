@@ -51,11 +51,13 @@ type pendingOutputEvent struct {
 }
 
 // session is one persistent PTY session: the adopted attachment, its pump,
-// the replay ring, the transcript, and the attached clients.
+// transcript history, bounded replay ring for non-run terminals, and attached
+// clients.
 type session struct {
-	run SessionKey
-	att runtime.Attachment
-	tr  *castWriter
+	run     SessionKey
+	att     runtime.Attachment
+	tr      *castWriter
+	history []castSegment
 
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser
@@ -423,17 +425,25 @@ func (s *session) addClient(c *client) error {
 		if c.resume {
 			if missed, ok := s.ring.since(c.cursor); ok &&
 				(!c.snapshot || len(missed) == 0 || c.cursor >= s.lastResizeCursor) {
-				c.replay = missed
+				c.setReplay(missed)
 				c.resumed = true
 			}
 		}
-		if !c.resumed && c.snapshot {
-			c.replay = makeScreenSnapshot(s.screen, s.modes).Data
-		} else if !c.resumed {
-			// Everyone else rebuilds from the ring, which is a byte tail:
-			// modes the agent set at startup are long gone from it, and the
-			// preamble puts them back ahead of the replay.
-			c.replay = append(s.modes.preamble(), s.ring.bytes()...)
+		if !c.resumed {
+			if _, isRun := s.run.Run(); isRun {
+				replay, replayBytes, err := s.tr.snapshot(s.history)
+				if err != nil {
+					s.mu.Unlock()
+					return fmt.Errorf("ptyhost: snapshot run transcript: %w", err)
+				}
+				c.replay = replay
+				c.replayBytes = replayBytes
+			} else if c.snapshot {
+				c.setReplay(makeScreenSnapshot(s.screen, s.modes).Data)
+			} else {
+				// A raw byte tail no longer carries modes set at startup.
+				c.setReplay(append(s.modes.preamble(), s.ring.bytes()...))
+			}
 		}
 		// Where the replay leaves this client, so it can say where it got
 		// to if it comes back.

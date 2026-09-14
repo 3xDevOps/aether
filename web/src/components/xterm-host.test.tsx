@@ -78,7 +78,7 @@ describe('xterm links', () => {
 })
 
 describe('xterm replay scrollback', () => {
-  it('keeps the first numbered line after replaying more than 64 KiB', async () => {
+  it('keeps the start of a transcript beyond the former 50,000-row limit', async () => {
     let ready: Terminal | null = null
     render(<Probe onReady={(terminal) => (ready = terminal)} />)
     await waitFor(() => expect(ready).not.toBeNull())
@@ -97,18 +97,30 @@ describe('xterm replay scrollback', () => {
     socket.onmessage?.({ data: JSON.stringify({ ok: true }) })
 
     const replay = Array.from(
-      { length: 5000 },
-      (_, index) => `line ${index + 1} ${'x'.repeat(20)}\r\n`,
+      { length: 50_100 },
+      (_, index) => `line ${index + 1}\r\n`,
     ).join('')
-    expect(new TextEncoder().encode(replay).byteLength).toBeGreaterThan(64 * 1024)
     socket.onmessage?.({ data: new TextEncoder().encode(replay).buffer })
 
     await waitFor(() =>
-      expect(ready?.buffer.active.getLine(0)?.translateToString().trimEnd()).toBe(
-        'line 1 xxxxxxxxxxxxxxxxxxxx',
-      ),
+      expect(ready?.buffer.active.getLine(0)?.translateToString().trimEnd()).toBe('line 1'),
     )
     attachment.close()
+  })
+
+  it('retains a screen cleared by terminal output in normal scrollback', async () => {
+    let ready: Terminal | null = null
+    render(<Probe onReady={(terminal) => (ready = terminal)} />)
+    await waitFor(() => expect(ready).not.toBeNull())
+    const terminal = ready as unknown as Terminal
+
+    await new Promise<void>((resolve) => terminal.write('before clear\r\n', resolve))
+    await new Promise<void>((resolve) => terminal.write('\x1b[2Jafter clear', resolve))
+
+    const lines = Array.from({ length: terminal.buffer.active.length }, (_, index) =>
+      terminal.buffer.active.getLine(index)?.translateToString().trimEnd(),
+    )
+    expect(lines).toContain('before clear')
   })
 })
 

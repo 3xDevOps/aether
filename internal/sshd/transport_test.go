@@ -436,34 +436,6 @@ func TestWindowChangeFeedsResize(t *testing.T) {
 	}
 }
 
-// TestAttachRecordingIsFiniteAndMarked covers the read-only, finite recording
-// branch used by the dashboard's download endpoint.
-func TestAttachRecordingIsFiniteAndMarked(t *testing.T) {
-	e := newTestEnv(t, nil)
-	e.pty.setTranscript(e.run.ID, []byte("recording bytes"))
-
-	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
-	r := bufio.NewReader(pipe)
-	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `","read_only":true,"recording":true}` + "\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	var ack protocol.AttachResponse
-	readJSONLine(t, r, &ack)
-	if !ack.OK || !ack.Recording {
-		t.Fatalf("ack = %+v, want recording", ack)
-	}
-	data := make([]byte, len("recording bytes"))
-	if _, err := io.ReadFull(r, data); err != nil {
-		t.Fatalf("read recording: %v", err)
-	}
-	if string(data) != "recording bytes" {
-		t.Fatalf("recording = %q", data)
-	}
-	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
-		t.Fatalf("after recording read = %v, want EOF", err)
-	}
-}
-
 // TestAttachReplaysFinishedRun pins the raw transcript replay path: a run the
 // PTY host has no session for but whose transcript was recorded - which is
 // every finished run - attaches as a read-only stream of the recorded output
@@ -484,8 +456,8 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	}
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
-	if !ack.OK || ack.Cols != 80 || ack.Rows != 24 {
-		t.Fatalf("ack = %+v, want ok with default geometry", ack)
+	if !ack.OK || ack.Cols != 80 || ack.Rows != 24 || ack.Replay != len("recorded output") {
+		t.Fatalf("ack = %+v, want ok with default geometry and full replay length", ack)
 	}
 	buf := make([]byte, len("recorded output"))
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -499,9 +471,10 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	}
 }
 
-func TestAttachFinishedRunUsesFramedSnapshot(t *testing.T) {
+func TestAttachFinishedRunUsesFramedTranscript(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
+	e.pty.setTranscript(e.run.ID, []byte("complete recorded output"))
 	e.pty.snapshots = map[domain.RunID]ptyhost.ScreenSnapshot{
 		e.run.ID: {Cols: 120, Rows: 30, Data: []byte("screen")},
 	}
@@ -516,14 +489,14 @@ func TestAttachFinishedRunUsesFramedSnapshot(t *testing.T) {
 	}
 	var ack protocol.AttachResponse
 	readJSONLine(t, r, &ack)
-	if !ack.OK || ack.Cols != 120 || ack.Rows != 30 || ack.Replay != len("screen") {
-		t.Fatalf("ack = %+v, want framed snapshot geometry and replay length", ack)
+	if !ack.OK || ack.Cols != 120 || ack.Rows != 30 || ack.Replay != len("complete recorded output") {
+		t.Fatalf("ack = %+v, want snapshot geometry and complete transcript length", ack)
 	}
 	reader := &protocol.TerminalReader{Reader: r}
-	buf := make([]byte, 16)
+	buf := make([]byte, 32)
 	n, size, err := reader.Read(buf)
-	if n != len("screen") || string(buf[:n]) != "screen" || size != [2]uint{} || err != nil {
-		t.Fatalf("snapshot record = n=%d size=%v err=%v data=%q", n, size, err, buf[:n])
+	if n != len("complete recorded output") || string(buf[:n]) != "complete recorded output" || size != [2]uint{} || err != nil {
+		t.Fatalf("replay record = n=%d size=%v err=%v data=%q", n, size, err, buf[:n])
 	}
 	if _, _, err := reader.Read(buf); !errors.Is(err, io.EOF) {
 		t.Fatalf("after snapshot read = %v, want EOF", err)

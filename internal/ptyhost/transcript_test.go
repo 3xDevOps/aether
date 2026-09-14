@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,6 +226,24 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 	if got := replayOutput(asides[0]); got != "first-life" {
 		t.Fatalf("preserved transcript = %q, want %q", got, "first-life")
 	}
+
+	replay, replayBytes, err := h.Replay(run)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	got, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatalf("read Replay: %v", err)
+	}
+	if err := replay.Close(); err != nil {
+		t.Fatalf("close Replay: %v", err)
+	}
+	if replayBytes != len(got) {
+		t.Fatalf("Replay byte count = %d, want %d", replayBytes, len(got))
+	}
+	if string(got) != "first-lifesecond-life" {
+		t.Fatalf("full replay = %q, want both transcript incarnations", got)
+	}
 }
 func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tail.cast")
@@ -247,8 +266,8 @@ func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
 	}
 }
 
-func TestRestartSeedsReplayFromTranscriptTail(t *testing.T) {
-	h, _ := newTestHost(t)
+func TestRestartReplaysCompleteTranscriptHistory(t *testing.T) {
+	h, _ := newTestHost(t, func(cfg *Config) { cfg.ReplayBytes = 8 })
 	run := domain.RunID("run-replay-restart")
 	ctx := context.Background()
 
@@ -276,7 +295,7 @@ func TestRestartSeedsReplayFromTranscriptTail(t *testing.T) {
 	})
 	attach := startAttach(t, h, run, "member", 80, 24, false)
 	waitFor(t, "replay output", func() bool {
-		return strings.Contains(attach.out.String(), "first-life\nsecond-life\n")
+		return attach.out.String() == "first-life\nsecond-life\n"
 	})
 	attach.detach()
 	if err := attach.wait(t); err != nil {
@@ -332,8 +351,15 @@ func TestRestartSeedsReplayModesFromTranscriptHistory(t *testing.T) {
 		if err := s.addClient(c); err != nil {
 			t.Fatalf("addClient: %v", err)
 		}
-		if !bytes.HasPrefix(c.replay, []byte("\x1b[?2004h")) {
-			t.Fatalf("recovery %d replay lacks historical mode preamble: %q", restart, c.replay)
+		replay, err := io.ReadAll(c.replay)
+		if err != nil {
+			t.Fatalf("read recovery %d replay: %v", restart, err)
+		}
+		if err := c.replay.Close(); err != nil {
+			t.Fatalf("close recovery %d replay: %v", restart, err)
+		}
+		if !bytes.HasPrefix(replay, []byte("\x1b[?2004h")) {
+			t.Fatalf("recovery %d replay lacks historical mode preamble: %q", restart, replay)
 		}
 		if err := h.StopSession(ctx, RunSession(run)); err != nil {
 			t.Fatal(err)

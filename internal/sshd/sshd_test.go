@@ -104,18 +104,14 @@ type fakePTY struct {
 	tell chan [2]uint
 }
 
-func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, error) {
+func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, int, error) {
 	p.mu.Lock()
 	data, ok := p.transcripts[run]
 	p.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("ptyhost: open transcript: %w", os.ErrNotExist)
+		return nil, 0, fmt.Errorf("ptyhost: open transcript: %w", os.ErrNotExist)
 	}
-	return io.NopCloser(bytes.NewReader(data)), nil
-}
-
-func (p *fakePTY) Recording(run domain.RunID) (io.ReadCloser, error) {
-	return p.Replay(run)
+	return io.NopCloser(bytes.NewReader(data)), len(data), nil
 }
 
 func (p *fakePTY) Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error) {
@@ -152,7 +148,7 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 		// boundary goes out first, then the attach dies.
 		if delay > 0 {
 			if rw, ok := conn.(ptyhost.ReplayWriter); ok {
-				_, _ = rw.WriteReplay(nil)
+				_ = rw.WriteReplay(bytes.NewReader(nil), 0)
 			}
 			time.Sleep(delay)
 		}
@@ -179,7 +175,7 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 	}
 
 	if rw, ok := conn.(ptyhost.ReplayWriter); ok {
-		if _, err := rw.WriteReplay(replay); err != nil {
+		if err := rw.WriteReplay(bytes.NewReader(replay), len(replay)); err != nil {
 			return nil
 		}
 	} else if len(replay) > 0 {

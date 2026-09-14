@@ -15,6 +15,10 @@ import { clipboardKeys } from '@/lib/term-clipboard'
 import { standardGeometry } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 
+// xterm allocates scrollback rows as output arrives; this is its supported
+// maximum, not a preallocated browser buffer.
+const maxTerminalScrollback = 4_294_967_295
+
 export interface XtermOptions {
   enabled?: boolean
   /** Follow the shared PTY without contributing this pane's size. */
@@ -267,7 +271,8 @@ export function useXterm({
       // would throw its scrollback away, so the size is applied below.
       fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
       fontFamily: terminalFontFamily,
-      scrollback: 50_000,
+      scrollback: maxTerminalScrollback,
+      scrollOnEraseInDisplay: true,
       cursorBlink: false,
       linkHandler: { activate: (_event, uri) => openLink(uri) },
     })
