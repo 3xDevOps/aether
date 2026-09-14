@@ -1190,8 +1190,8 @@ the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
 `ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. Generate it
 with `-validity 10950`: `keytool` defaults to 90 days, and Google Play needs
 an upload key whose certificate is still valid after 22 October 2033, with 25
-years or more recommended. Both artifacts have to
-carry that keystore's own certificate before the assets are uploaded:
+years or more recommended. Both artifacts have to carry that keystore's own
+certificate before the assets are uploaded:
 [`scripts/android-verify-signature.sh`](../scripts/android-verify-signature.sh)
 reads the expected SHA-256 fingerprint out of the keystore with `keytool` and
 compares it with what `apksigner` prints for the APK and what `keytool

@@ -309,11 +309,11 @@ identify its callers.
   because anything arriving there was not a link the member tapped.
   Subresources are untouched: those are the dashboard loading its own files.
   Nothing the app stores leaves it through Google's cloud backup or through
-  device-to-device transfer: the app opts out of both, naming every data
-  domain, because the backup agent walks each one separately. In a release
-  build the page's console output is not written to logcat, where any app
-  holding `READ_LOGS`, or a connected `adb`, would read it. WebView Safe
-  Browsing is turned off in the manifest.
+  device-to-device transfer: the app opts out of both, naming every domain
+  it can store in, because the backup agent walks each one separately. In a
+  release build the page's console output is not written to logcat, where
+  any app holding `READ_LOGS`, or a connected `adb`, would read it. WebView
+  Safe Browsing is turned off in the manifest.
   It matches each URL against a hash-prefix list held on the device and, on a
   match, asks Google about that 4-byte prefix - never the URL or the host. On
   a WebView that only ever loads the member's own server it protects nothing,

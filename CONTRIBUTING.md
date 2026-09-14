@@ -152,11 +152,11 @@ which fontTools cannot read the woff2 the banner's type comes from.
 
 `android/` is a Kotlin WebView shell around the server-hosted dashboard; see
 [docs/install.md](docs/install.md#android-app) for what it does. No Android
-SDK is installed on any machine, contributor or runner. The APK is built in a
-container the `Makefile` pins by digest (`ghcr.io/cirruslabs/android-sdk:36`:
-JDK 21, the API 36 platform, build-tools 36.0.0, licenses pre-accepted), which
-is what CI and the release job use too, so a local build and a released one
-run the same toolchain:
+SDK is installed on any machine, contributor or runner. The APK is built in
+`ghcr.io/cirruslabs/android-sdk` (JDK 21, the API 36 platform, build-tools
+36.0.0, licenses pre-accepted), whose digest the `Makefile` pins rather than
+its moving `:36` tag. CI and the release job use the same line, so a local
+build and a released one run the same toolchain:
 
 ```sh
 make android

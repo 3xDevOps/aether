@@ -83,8 +83,9 @@ which no other app can hold and which grants nothing.
   delete a run, a member home, or the whole directory
   ([install.md](install.md#uninstalling)). `aether member remove` destroys
   your environment terminal, deletes your member record and erases your
-  member home. It refuses while any run you launched still exists, so an
-  administrator deletes those runs first; what they wrote stays in the data
+  member home. It refuses while anything still points at you - a run you
+  launched, a schedule you own, or an agent profile you pushed - so an
+  administrator deletes those first; what a run wrote stays in the data
   directory until it is deleted too ([teams.md](teams.md#roles)). The
   publisher holds no copy and cannot delete anything on your behalf.
 

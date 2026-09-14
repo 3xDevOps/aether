@@ -106,10 +106,11 @@ attach is re-checked every few seconds and dropped when steer goes away -
 and destroys that member's environment terminal, then deletes the member row
 and erases their member home. If cleanup fails, the command returns the
 runtime error and leaves the member in place so an admin can retry. **It
-refuses while the member still owns a run** - runs reference the member with
-no cascade, so the delete returns `in use` - and an admin deletes those runs
-first; what a run wrote stays in the data directory until the run is deleted.
-A successful removal ends every attach and live sync of theirs.
+refuses while any row still references the member** - runs, schedules and
+pushed profile snapshots reference members with no cascade, so the delete
+returns `in use` - and an admin deletes those first; what a run wrote stays
+in the data directory until the run is deleted. A successful removal ends
+every attach and live sync of theirs.
 
 Setting someone to the role they already hold is a harmless no-op, and a
 pending member's role can be changed before they are approved - approval and
