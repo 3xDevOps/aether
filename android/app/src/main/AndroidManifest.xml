@@ -6,7 +6,7 @@
     <!-- allowBackup is off because the only stored state is the server
          address, which the first-run screen asks for anyway. It does not
          cover device-to-device transfer on Android 12 and newer, so the
-         extraction rules exclude everything from that too. -->
+         extraction rules exclude every domain from that too. -->
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

@@ -1,14 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- On Android 12 and newer, allowBackup="false" stops cloud backup but, on
-     devices from some manufacturers, not device-to-device transfer. `path="."`
-     under the app's root directory is every file the app has, which is the
-     server name in shared preferences and the WebView's cache of the
-     dashboard. See docs/privacy.md. -->
+     devices from some manufacturers, not device-to-device transfer.
+
+     The backup agent walks each domain separately and matches a manifest
+     exclude by exact canonical path, so an exclude on the root domain prunes
+     only the root walk: shared_prefs, where the server name lives, has its
+     own walk and needs its own line. Every domain is named here so a file
+     the app has not written yet is excluded too. See docs/privacy.md. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="external" path="." />
     </cloud-backup>
     <device-transfer>
         <exclude domain="root" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="external" path="." />
     </device-transfer>
 </data-extraction-rules>
