@@ -203,7 +203,7 @@ replaced, allowing the server to reject commands from an obsolete assignment.
 
 ## 5. Refined feature specification
 
-### F1. Run Rooms: controlled collaboration
+### F1. Run Rework: controlled collaboration
 
 **Purpose:** several humans can contribute to one live run without becoming
 competing invisible input sources. A Run Room is the collaborative view of an
@@ -213,13 +213,13 @@ existing run, not another execution object.
 
 - Each run exposes who is watching, who is controlling, its shared conversation,
   and open blockers.
-- Use **Watching** and **Controlling** rather than selectable observing,
-  reviewing, driving, and waiting modes.
-- Collaborators can comment; viewers remain read-only.
-- Use one plain-text conversation. Posting a comment does not steer the agent;
-  **Send to agent** is explicit and requires current control.
-- A teammate's comment can be sent by the controller. Preserve its original
-  author, the sending controller, and any edited revision.
+- Collaborators can comment and send to agent; viewers remain read-only.
+- A sidebar on the right, initially collapsed, can be pulled up and serve as a feature rich chatroom. Comments and Injections both get sent and displayed here. 
+	- Comments are cosmetic - they are, as their name suggests, intended for a way for humans in the run to send each other messages. 
+	- Steer Requests are send to agent instructions that will be injected directly to steer the agent from someone who doesn't have full native active steering control over the agent's terminal.
+		- Obviously, steer requests won't work if the run is under protected status. Injection attempts for the run should be removed immediately after the run owner clicks "protect run"
+		- Steer requests from other collaborators cannot influence the session immediately. By default, Injection requests displayed as queued in the chat and have a 45 second countdown (make a visual for this on the UI) before they are injected officially to the agent. During this time, the current control user of the run have the option to deny the injection or to approve it for injection immediately.  
+	- The same "image upload" logic for the terminal should apply here. Steer requests can contain references to images, in which case users can upload images to the server and the server will convert the image to a persistent file so that the eventual message sent to the agent represents the image as /path/to/image.png  
 - Use **Take control** and **Release control**. No request queue or token-passing
   ceremony initially.
 - Taking occupied control requires a clear confirmation and notifies the current
@@ -227,7 +227,7 @@ existing run, not another execution object.
 - A solo user gets uncontended control through the interaction, without a
   separate request/approval step.
 
-One current control lease authorizes interactive steering. The server records
+One current control lease authorizes full terminal interactive steering. The server records
 its holder and authority generation, and rejects stale input after transfer,
 revocation, or expiry. These details stay out of the everyday interaction.
 Control is session-bound: a second tab or connection does not become another
@@ -237,54 +237,21 @@ A documented reconnect window expires disconnected control. Reconnection does
 not restore control that somebody else acquired or replay raw input. Losing
 control leaves observation available when the member still has view access.
 
-The enforcement inventory must include:
-
-- agent-terminal input;
-- injected instructions;
-- writable run shells;
-- live overlays and other Aether-mediated writes into the run;
-- forwarded services that expose control or mutation paths.
-
-A shell or forwarded application is not safely read-only merely because its
-entry point is on an observation screen. Authorization must hold when input is
-accepted, not only when a connection opens.
-
 The promise is **serialized Aether-mediated human control**, not prevention of
 every mutation by a process that already has filesystem or credential access.
 
 #### Conversation, input, and interruption
 
-Remove mandatory observation/question/directive/blocker classifications from the
-human composer. Agent-to-agent questions can still use structured correlation
+Agent-to-agent injections and questions can still use structured correlation
 through the CLI in F4; that is not a reason to burden everyday conversation.
-
-Keep `aether inject <run> "<instruction>"` send-or-refuse. An unavailable control
-lease produces an actionable error, not a success response for an undelivered
-suggestion. Unsent comments remain discussion until someone explicitly sends
-them; they do not form an automatically drained steering queue.
-
-A **blocker** records an impediment, its owner, and its resolution condition.
-Raising it is separate from **Pause**. A comment saying stop must not accidentally
-acquire denial-of-service authority or pretend to be an execution barrier.
-An authorized pause may accompany a blocker. Resume respects actual enforced
-holds; not every open question freezes execution.
-
 #### Delivery contract
 
 Persist instruction identity and authorization before attempting input. Report
 **Sent**, **Not sent**, or **Delivery uncertain**, separately from agent replies.
 
-For a raw pseudo-terminal (PTY), Sent means the input transport accepted the
-complete instruction, not that the agent answered or obeyed. A partial write or
-crash can leave uncertain delivery; do not silently resend consequential input.
+#### Steering Delivery Rework
 
-Serialize injection with terminal input, but do not assume serialization reveals
-the harness's editor state. Never append an injected instruction into a partially
-typed prompt or erase that prompt silently. Where a harness cannot establish a
-safe handover, show the actual limitation and require the controller to resolve
-it through the terminal. Preserve attribution without terminal control sequences
-in member-supplied names or text.
-
+Rework the current approach and serialize injection and steering messages with hooks instead of standard input. Write a hook (or multiple hooks if the file is incompatible with multiple cli agents) that is compatible with most mainstream coding agents that will programmatically allow us to steer and inject messages into sessions in the most streamlined way possible. Document how users are able to install this hook. 
 #### Human versus integrator control
 
 An authorized integrator may hold steering authority over its workers. A human
@@ -296,25 +263,6 @@ it does not stop unrelated workers or undo work already accepted by the agent.
 Emergency stop remains independent of the driver lease. Administrative stop
 authority must not silently become credential-use authority. Taking control
 never grants additional account permissions.
-
-#### Annotations
-
-Ship retained diff and transcript anchors first:
-
-- diff: snapshot/tree, path, side, range;
-- terminal: retained transcript segment and offsets, not changing screen rows;
-- later preview capture: captured image/state, capture time, and associated run
-  snapshot.
-
-A changing browser URL is not a stable annotation target. Browser capture can
-follow after basic annotations; annotation does not automatically steer the
-agent. Missing evidence is labeled rather than pointing to different content.
-
-**Acceptance:** two clients race for control; only one wins. The old client
-cannot keep steering through an existing connection. A reconnect does not replay
-raw input. A non-controller's failed injection is not presented as sent. Human
-takeover prevents integrator steering from bypassing it. A comment still opens
-the original diff after later edits, or explicitly reports it unavailable.
 
 ### F2. Evidence packets, handoffs, and forks
 
@@ -517,6 +465,7 @@ worker or integrator agent
        authority, tasks, messages, evidence
 ```
 
+- agents will invoke this tool as `aether-internal`
 - Automatically stage a version-matched CLI and coordination instructions into
   participating containers.
 - Do not require manual skill installation, identity flags, or human login.
@@ -533,21 +482,20 @@ runs, but refuse mission operations whose required interface cannot be provided.
 
 #### Proposed command surface
 
-Use a namespace such as **`aether coord`**; `aether agent` already manages
-installed harnesses. These are proposed command families, not existing commands
+Use a namespace such as **`aether-internal`**; These are proposed command families, not existing commands
 or frozen flags.
 
-| Command family | Purpose |
-|---|---|
-| `status --json` | Own identity, current assignment, capabilities, and coordinator. |
-| `skill` | Version-matched instructions for the caller's actual worker or integrator assignment. |
-| `task show` / `task propose` | Inspect the current task or propose additional work. |
-| `send` | Attributed messages to authorized peers. |
-| `inbox --wait` / `inbox --ack` | Bounded waiting, replay, and explicit acknowledgement. |
-| `ask` / `reply` | Durable, correlated questions and answers. |
-| `report` | Submit an attempt outcome with evidence references. |
-| `worker start` / `worker list` / `worker inspect` | Integrator-controlled execution and inspection. |
-| `worker cancel` / `worker retry` | Explicit cancellation and authorized replacement attempts. |
+| Command family                                    | Purpose                                                                               |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `status --json`                                   | Own identity, current assignment, capabilities, and coordinator.                      |
+| `skill`                                           | Version-matched instructions for the caller's actual worker or integrator assignment. |
+| `task show` / `task propose`                      | Inspect the current task or propose additional work.                                  |
+| `send`                                            | Attributed messages to authorized peers.                                              |
+| `inbox --wait` / `inbox --ack`                    | Bounded waiting, replay, and explicit acknowledgement.                                |
+| `ask` / `reply`                                   | Durable, correlated questions and answers.                                            |
+| `report`                                          | Submit an attempt outcome with evidence references.                                   |
+| `worker start` / `worker list` / `worker inspect` | Integrator-controlled execution and inspection.                                       |
+| `worker cancel` / `worker retry`                  | Explicit cancellation and authorized replacement attempts.                            |
 
 Keep the worker's normal loop small: inspect assignment, communicate, ask,
 report. Integrators receive additional worker-management commands. Routine
@@ -617,31 +565,31 @@ duplicate workers. A stale worker cannot report completion for a replacement
 attempt. A worker cannot forge integrator authority. Settled runtime resources
 can be released automatically without losing unaccepted work or retained results.
 
-### F5. Missions with a real integrator
+### F5.  Agent Swarms with a centralized Integrator
 
-**Purpose:** coordinate an outcome spanning multiple runs without turning Aether
-into another project-management system users must maintain.
+**Purpose:** coordinate an outcome spanning multiple parallel or sequential runs without turning Aether into another project-management system users must maintain.
 
 #### Human workflow
 
-The human supplies an objective and reviews the proposed work and execution
-limits. The integrator handles decomposition, dispatch, coordination, and
+The human supplies an objective to a main integrator agent and clicks "Launch Swarm". The integrator handles decomposition, dispatch, coordination, and
 integration inside that authorization. The human can inspect progress, take
 control, answer consequential questions, and review the proposed delivery.
 
 No general-purpose task-graph editor or separately configurable coordinator role
 is required initially. Ordinary single-agent runs remain ordinary runs.
 
+Essentially, this allows an agent to act as the leader for a swarm of agents through orchestration capabilities. 
+
 #### Minimal internal object model
 
-| Object | Meaning |
-|---|---|
-| Mission | Objective, accountable human, permitted scope, limits, and acceptance policy. |
-| Task | Durable work item with dependencies and required evidence. |
-| Attempt | One authorized execution of that task, backed by an Aether Run. |
-| Integrator assignment | Currently authorized coordinating run and its authority generation. |
-| Gate | Specific decision or evidence requirement. |
-| Submission | Proposed result tied to an exact artifact revision. |
+| Object                | Meaning                                                                       |
+| --------------------- | ----------------------------------------------------------------------------- |
+| Mission               | Objective, accountable human, permitted scope, limits, and acceptance policy. |
+| Task                  | Durable work item with dependencies and required evidence.                    |
+| Attempt               | One authorized execution of that task, backed by an Aether Run.               |
+| Integrator assignment | Currently authorized coordinating run and its authority generation.           |
+| Gate                  | Specific decision or evidence requirement.                                    |
+| Submission            | Proposed result tied to an exact artifact revision.                           |
 
 Do not rename Aether's existing Run to match Orca's different terminology.
 Start with one workspace/repository per mission. Cross-repository missions are
@@ -695,7 +643,7 @@ permissions. One agent both orchestrates and integrates initially.
 
 It can:
 
-- dispatch approved work;
+- dispatch approved work to sessions;
 - create or refine tasks within an authorized scope;
 - route questions and negotiate ownership;
 - assess evidence under the mission's acceptance policy and request rework;
@@ -801,7 +749,7 @@ being discarded or silently accepted.
 ### F7. Swarm templates
 
 **Purpose:** repeat a proven collaboration pattern. A swarm template is a saved
-mission configuration, not a separate lifecycle or scheduling system.
+swarm mission configuration, not a separate lifecycle or scheduling system.
 
 A template instantiates:
 
