@@ -182,10 +182,9 @@ public-audit:
 # The Android shell's unit tests, release APK and app bundle, built in the
 # pinned SDK container. The APK is for direct installs; the bundle is what
 # Google Play takes (docs/install.md). Both are signed with the same key.
-# apksigner does not read bundles, so the bundle is checked with jarsigner,
-# which exits 0 for an unsigned file and only says so; the grep is what
-# turns that into a failure. Its -strict would refuse every Android key,
-# which is self-signed by nature.
+# scripts/android-verify-signature.sh runs in the same container, which is
+# where apksigner, jarsigner and keytool live, and is given the keystore the
+# build was handed so it can check who actually signed the two artifacts.
 android:
 	@mkdir -p $(DIST) '$(ANDROID_GRADLE_HOME)'
 	@if [ -n '$(ANDROID_KEYSTORE_FILE)' ] && [ ! -f '$(ANDROID_KEYSTORE_FILE)' ]; then \
@@ -199,9 +198,10 @@ android:
 	cp android/app/build/outputs/apk/release/$(ANDROID_BUILT) $(DIST)/$(ANDROID_APK)
 	cp android/app/build/outputs/bundle/release/app-release.aab $(DIST)/$(ANDROID_AAB)
 	@if [ -n '$(ANDROID_SIGNING)' ]; then \
-		docker run --rm -v '$(CURDIR)/$(DIST)':/dist $(ANDROID_IMAGE) sh -c \
-			'$(ANDROID_APKSIGNER) verify --print-certs -v -Werr /dist/$(ANDROID_APK) \
-			&& jarsigner -verify /dist/$(ANDROID_AAB) | tee /dev/stderr | grep -q "^jar verified"' || exit 1; \
+		docker run --rm -v '$(CURDIR)/$(DIST)':/dist:ro \
+			-v '$(CURDIR)/scripts':/scripts:ro $(ANDROID_SIGNING) \
+			-e APKSIGNER=$(ANDROID_APKSIGNER) $(ANDROID_IMAGE) \
+			sh /scripts/android-verify-signature.sh /dist/$(ANDROID_APK) /dist/$(ANDROID_AAB) || exit 1; \
 	else \
 		echo 'make android: no ANDROID_KEYSTORE_FILE in the environment, so $(DIST)/$(ANDROID_APK) and $(DIST)/$(ANDROID_AAB) are unsigned and cannot be installed or released'; \
 	fi
