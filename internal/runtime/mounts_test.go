@@ -124,6 +124,12 @@ func TestValidateMountsRejects(t *testing.T) {
 		{"reserved opt subpath", []Mount{
 			{HostPath: e.credDir, ContainerPath: "/opt/aether/bin"},
 		}, e.policy(), "reserved"},
+		{"reserved coordination CLI target", []Mount{
+			{HostPath: e.credDir, ContainerPath: "/usr/local/bin/aether-internal"},
+		}, e.policy(), "reserved"},
+		{"uncanonical reserved coordination CLI target", []Mount{
+			{HostPath: e.credDir, ContainerPath: "/usr/local/bin/../bin/aether-internal"},
+		}, e.policy(), "reserved"},
 		{"target equals worktree", []Mount{
 			{HostPath: e.credDir, ContainerPath: "/workspace"},
 		}, e.policy(), "worktree"},

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
+	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -518,5 +520,45 @@ func TestReadExecOutput(t *testing.T) {
 	}
 	if len(stdout) > execOutputLimit {
 		t.Errorf("buffered %d bytes, want no more than %d", len(stdout), execOutputLimit)
+	}
+}
+
+func TestHijackStdinCancellationDoesNotCloseSharedConnection(t *testing.T) {
+	reader, writer := net.Pipe()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	stdin := hijackStdin{resp: dockertypes.HijackedResponse{Conn: writer}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() {
+		_, err := stdin.WriteContext(ctx, []byte("blocked"))
+		first <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-first:
+		if err == nil {
+			t.Fatal("cancelled WriteContext succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled WriteContext remained blocked")
+	}
+
+	read := make(chan string, 1)
+	go func() {
+		buf := make([]byte, len("second"))
+		if _, err := io.ReadFull(reader, buf); err != nil {
+			read <- "read error: " + err.Error()
+			return
+		}
+		read <- string(buf)
+	}()
+	if _, err := stdin.Write([]byte("second")); err != nil {
+		t.Fatalf("later Write = %v", err)
+	}
+	if got := <-read; got != "second" {
+		t.Fatalf("later read = %q, want second", got)
 	}
 }

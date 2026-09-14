@@ -10,9 +10,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordcli"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -21,6 +23,9 @@ import (
 )
 
 func main() {
+	if filepath.Base(os.Args[0]) == "aether-internal" {
+		os.Exit(coordcli.Main(os.Args[1:]))
+	}
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)

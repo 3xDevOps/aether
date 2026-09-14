@@ -164,7 +164,7 @@ func TestBridgeAgainstRealCoordination(t *testing.T) {
 
 	const body = "only adding an import - going ahead"
 	var sent protocol.CoordSendResult
-	callTool(t, agentB, toolSend, protocol.CoordSendParams{ToRunID: string(stack.runA), Body: body}, &sent)
+	callTool(t, agentB, toolSend, protocol.CoordSendParams{ToRunID: string(stack.runA), Body: body, IdempotencyKey: "bridge-send"}, &sent)
 	if sent.MessageID == "" {
 		t.Fatal("send returned no message id")
 	}
@@ -205,7 +205,7 @@ func TestRealBatchRedeliversWhenTheResponseIsLost(t *testing.T) {
 
 	agentB := session(t, stack.sockB, nil)
 	var sent protocol.CoordSendResult
-	callTool(t, agentB, toolSend, protocol.CoordSendParams{ToRunID: string(stack.runA), Body: body}, &sent)
+	callTool(t, agentB, toolSend, protocol.CoordSendParams{ToRunID: string(stack.runA), Body: body, IdempotencyKey: "lost-response-send"}, &sent)
 
 	// The only message that can carry the body is the inbox response, so
 	// failing on it drops exactly the response and nothing else.
@@ -248,7 +248,7 @@ func TestRealCancelledInboxNeverLosesAMessage(t *testing.T) {
 
 	agentB := session(t, stack.sockB, nil)
 	var sent protocol.CoordSendResult
-	callTool(t, agentB, toolSend, protocol.CoordSendParams{ToRunID: string(stack.runA), Body: body}, &sent)
+	callTool(t, agentB, toolSend, protocol.CoordSendParams{ToRunID: string(stack.runA), Body: body, IdempotencyKey: "cancelled-inbox-send"}, &sent)
 
 	agentA := session(t, stack.sockA, nil)
 	delivered := 0

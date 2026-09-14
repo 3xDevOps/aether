@@ -25,7 +25,7 @@ type fakeCoordSocket struct {
 func newFakeCoordSocket(t *testing.T) *fakeCoordSocket {
 	t.Helper()
 	f := &fakeCoordSocket{
-		path:     filepath.Join(t.TempDir(), "coord2.sock"),
+		path:     filepath.Join(t.TempDir(), "coord3.sock"),
 		requests: make(chan protocol.Request, 4),
 	}
 	l, err := net.Listen("unix", f.path)

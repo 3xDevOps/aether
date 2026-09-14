@@ -1,309 +1,172 @@
 # The MCP bridge
 
-Host side of coordination: `coordination.md`.
+Aether's MCP bridge is the optional in-container interface to the same
+coordination service exposed by `/usr/local/bin/aether-internal`. It does not
+add a second protocol or authority layer. Both interfaces speak coordination
+wire v3 over the run's Unix socket.
 
-An agent reaches its coordination mailbox through three MCP tools. The
-thing serving them is the Aether server's own binary, staged and
-bind-mounted read-only into the run container and launched by the harness
-as a stdio MCP server (`aether-server mcp`, a hidden subcommand no operator
-runs). It is built on the official Go MCP SDK; there is no hand-rolled MCP
-framing anywhere.
-
-The same binary and the same socket carry one thing that is not a tool at
-all: the agent's own status reports (`aether-server report`, below).
-
-## What the container gets
+The server stages a version-matched copy of its own binary and mounts it
+read-only at both executable paths:
 
 ```
-/opt/aether/aether-server         read-only  the staged bridge binary
-/run/aether/                      read-only  the run's coordination directory
-/run/aether/mcp.json              read-only  the MCP server config, for a registered harness
-/run/aether/claude-settings.json  read-only  the status-reporter hooks, for an interactive claude run
-/run/aether/opencode-status.js    read-only  the status-reporter plugin, for an interactive opencode run
-/run/aether/status.ts             read-only  the status-reporter extension, for an interactive pi or omp run
-/run/aether/co-authors            read-only  the trailers to end commits with
-/run/aether/coord2.sock                      the socket the bridge dials (wire v2)
+/opt/aether/aether-server         hidden MCP entry point and lifecycle hook
+/usr/local/bin/aether-internal    agent-facing coordination CLI
 ```
 
-The binary and the directory are the two mounts, and both are Aether-owned
-container paths. `runtime.ValidateMounts` refuses any caller-supplied mount
-that targets or nests under them, which is what guarantees a credential home
-or member configuration cannot shadow either one. They are therefore built
-from server-constructed paths and appended after the caller's mounts have
-been validated.
-
-Nothing else crosses the boundary. No token enters the container: the
-socket is the run's identity, and the mount is the only thing that grants
-access to it.
-
-## The three tools
-
-| Tool | Coordination method | Result |
-| --- | --- | --- |
-| `aether_status` | `coord.status` | own identity, the peers this run may message, the files each pair shares, the unread count |
-| `aether_send` | `coord.send` | the new message id |
-| `aether_inbox` | `coord.inbox` | one batch of messages, oldest first |
-
-The mapping is 1:1 and the tool set is closed - there is no fourth tool,
-and nothing reachable here touches a control verb, git, or another run's
-transcript.
-
-The socket's *method* set has a fourth entry, `run.report`, which no tool
-reaches. See "The status reporter" below.
-
-### Acknowledgement stays below MCP
-
-`coord.inbox` acknowledges the previous batch with an opaque token. That
-token is never exposed to the agent: an agent that could present one could
-retire a peer's message it had not read, and at-least-once delivery is the
-one guarantee the mailbox makes.
-
-The bridge holds the token instead, and promotes it only once the batch it
-names has actually reached the agent - that is, once the MCP response
-carrying the batch has been written.
-
-Every staged token is keyed to the JSON-RPC id of the call that fetched it,
-and only that call's own response can promote it. This is the safety
-property the whole design rests on: inbox handlers really do run
-concurrently, and a call the client abandons keeps running to its own
-timeout, so a token that was not keyed to its own call could be promoted by
-a *different* call's response and acknowledge a batch that reached nobody.
-MCP does not hand a tool handler the id of the request underneath it, so
-the bridge stamps it into the call's `_meta` on the way past and reads it
-back out in the handler.
-
-A single slot keeps inbox calls to one socket round trip at a time. The
-handler claims it, not the transport's reader: the reader is the SDK's one
-decoder goroutine, and waiting there would stall the whole MCP session -
-including the cancellation that would end the wait.
-
-Anything short of a completed write leaves the token unpromoted: a failed
-write, a tool error, a cancelled call, a killed bridge. The batch is then
-still unacknowledged and the next read delivers it again. A read that
-returned nothing leaves the bridge holding no token at all.
-
-Cancellation gets a second defence, because a context that is cancelled
-does not un-read a batch the socket has already handed over: the round trip
-itself is aborted when the call's context ends, so an abandoned call
-normally takes delivery of nothing at all, and a token it staged before the
-cancellation arrived is discarded rather than promoted.
-
-### Failures
-
-Every local socket failure - a missing socket, a refused connection, an EOF
-or broken pipe because the server restarted, or a connection refused over
-the per-run connection cap - is reported as an MCP **tool error** carrying
-Aether `CodeUnavailable` (-32004), in the message text and under the
-`aether/error_code` result metadata key. Errors the server itself returned
-(`CodeDenied` for a peer that is not an authorized overlap, `CodeConflict`
-for a full inbox or an exceeded rate, and the rest of `coordination.md`'s
-table) pass through the same way with their own code.
-
-The code deliberately does not go in the MCP envelope's own error field:
-the JSON-RPC layer under MCP reserves that range for transport states
-(-32004 there means "the server is closing"), so an Aether code put there
-would tear the MCP session down instead of telling the agent what
-happened.
-
-### Connections
-
-The bridge dials the socket per tool call and closes it again. A server
-restart rebinds the socket to a new inode, so a held connection would have
-to be re-dialled anyway; dialing per call also keeps the bridge inside the
-server's per-run connection cap and well under its idle read deadline
-without any reconnection bookkeeping. A tool call made while the socket is
-missing returns `CodeUnavailable`; the next one, after the listener is
-back, simply works.
-
-## Harness registration
-
-Reaching the bridge is per-harness, and the harness registry
-(`internal/harness`) owns it. A launch profile carries one field for it -
-the flag its CLI takes for an externally supplied MCP server config. Claude
-Code sets `--mcp-config`; every other shipped profile leaves it empty.
-
-For a run whose profile carries the flag, provisioning writes the config
-into the run's coordination directory and appends the flag pointing at it,
-so the container is launched as:
+It also mounts the run's coordination directory read-only:
 
 ```
-claude --dangerously-skip-permissions "<task>" --mcp-config /run/aether/mcp.json
+/run/aether/coord3.sock           this run's v3 socket
+/run/aether/mcp.json              optional harness MCP configuration
+/run/aether/co-authors            server-generated commit trailers
 ```
+
+The executable mounts use the same verified bytes. They are server-constructed
+assets, not caller-provided mounts. Caller mounts cannot target or nest under
+`/run/aether`, `/opt/aether`, or `/usr/local/bin/aether-internal`, so a profile,
+credential home, or worktree cannot shadow them. If staging or verification
+fails, Aether mounts neither coordination surface and records coordination as
+unavailable instead of handing a container an unverified binary.
+
+The socket is the only identity and authentication boundary. The bridge has
+no token, login, run-ID, or credential option. A connection to
+`/run/aether/coord3.sock` is the run that owns that socket. No caller-supplied
+sender identity is sent in a tool parameter.
+
+## Registration and discovery
+
+A harness profile that supports an externally supplied MCP configuration is
+registered automatically at launch. The server writes `mcp.json` into the run
+coordination directory and appends the profile's MCP flag. Claude Code is the
+shipped profile with this registration:
+
+```sh
+claude --dangerously-skip-permissions "Describe the assigned change" \
+  --mcp-config /run/aether/mcp.json
+```
+
+The generated configuration is:
 
 ```json
 {"mcpServers":{"aether":{"type":"stdio","command":"/opt/aether/aether-server","args":["mcp"]}}}
 ```
 
-The config is server-written and read-only (0444), and it lives beside the
-socket in `/run/aether`. Nothing is written into the worktree - an
-`.mcp.json` there would show up in the run's diff - and the member's
-configuration home is never modified by this bridge.
+The config and executable are read-only. Nothing is written into the
+worktree or the member's configuration home. A harness without MCP
+registration still receives the overlap notice, but it does not receive these
+tools. A run started without the registration cannot gain it without a
+relaunch.
 
-A harness with no registration is provisioned exactly like any other run,
-mounts and all; it is simply never told about the bridge, and degrades to
-the overlap notice in its terminal. The arguments and the config are
-decided at launch, so a run that was started without them can only gain
-them by being relaunched.
-
-The status reporter is registered the same way and in the same directory,
-for an interactive run only: a profile that carries a reporter gets
-whatever asset it needs written there, and the harness is pointed at it in
-whatever shape its CLI takes - `claude` by the appended `--settings`
-argument, `pi` and `omp` by `-e` at the shared extension, `opencode` by
-`OPENCODE_CONFIG_CONTENT` in the launch environment, because it has no
-flag for a plugin. Not every reporter needs an asset at all: `codex`
-carries its whole reporter in a `-c` configuration override.
-
-An argv override in the server config (scheduler `Harnesses`) is respected
-verbatim: the registry's MCP flag, its status arguments and its status
-environment all belong to the CLI the registry ships, and nothing checks
-that an overridden command still is that CLI, so none of them reaches it.
-The overridden harness degrades to notice-only coordination and to the
-stall threshold the same way.
-
-## Other MCP services
-
-This bridge is Aether's run-coordination MCP service only. It is not a
-general-purpose proxy for vendor tools or for MCP services named in a member's
-configuration. A copied local MCP setting still needs its executable or
-service available in the remote runtime image and its own authentication.
-Inside a run, `localhost` means that remote runtime, not the operator's laptop.
-Aether does not install or forward an arbitrary local MCP process.
-
-
-### What the end-to-end tests cover
-
-The coordination E2E (`internal/server`, `integration` tag) has a host half
-and a container half.
-
-The host half runs against the in-process runtime: the launch wiring, the
-config document, the argument, all three kill-switch positions, and a real
-MCP client driving the real bridge over a real coordination socket into the
-real mailbox and workspace timeline.
-
-The container half runs against real Docker. Its failure mode is the reason
-it exists: a run that cannot reach the bridge degrades to notice-only,
-which is a legal state, so nothing short of a positive assertion would
-catch a broken mount, a binary that will not execute, or a permission a
-non-root agent does not have. It asserts the two binds are realized and
-read-only, that the staged binary runs as
-`/opt/aether/aether-server mcp` under a non-root container user, and that
-two overlapping runs complete a status/send/inbox round trip through it.
-See docs/testing.md for how it stages a binary that really has the
-subcommand. The real-harness smoke tests
-(`internal/harness/smoke_integration_test.go`) cover the argv half against
-the actual CLIs.
-
-## The status reporter
-
-`run.report` is the fourth method on the socket and the only one an agent
-does not call through a tool. It carries two fields - a state, `working` or
-`waiting`, and the user-visible reason - and returns an empty object. The
-run is the socket it arrived on, exactly as for the three mailbox methods.
-
-What calls it is the harness's own lifecycle callback, running
-`/opt/aether/aether-server report <harness>`. Each CLI hands its callback a
-different shape, so the subcommand takes four:
+A coordinated task-bearing run also receives this short discovery instruction
+in its launch prompt:
 
 ```
-aether-server report claude                              # hook event JSON on stdin
-aether-server report codex '<notify JSON>'               # the payload as the one argument
-aether-server report pi --event <name> [--tool <n>]      # pi and omp, from the shared extension
-aether-server report opencode --event <name> [--status <type>]
+Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
 ```
 
-That subcommand is hidden like `mcp`: no operator runs it. It maps the
-event, dials the socket, and exits 0 whatever happens - an unmapped event
-never dials at all, and a failure is one line on stderr. A callback that
-breaks or slows the agent would be worse than a run card that is briefly
-wrong. Where that line surfaces is the harness's own shape too. Claude
-Code and Codex show a callback's stderr only for a non-zero exit, so it
-sits in the transcript. pi's and omp's extension reads the reporter's
-stderr itself and prints the run's first failure as one
-`[aether] status report failed:` warning, then stays quiet. opencode's
-plugin reads it too, but writes that first failure into opencode's own log
-(`~/.local/share/opencode/log/`) - an `ERROR` line whose message starts
-`status reporter:` - instead of printing it: opencode's TUI owns the
-terminal for the whole run, so anything written there would corrupt the
-screen rather than tell anyone anything.
+The instruction is the automatic discovery path for harnesses with or without
+MCP. It does not install a skill package and does not carry an identity claim.
+See [coordination.md](coordination.md) for the CLI commands and wire limits.
 
-Reading the event and the round trip that follows share one budget, set
-under the timeout the harness gives the callback, so a harness that hands
-over an open pipe cannot leave the reporter waiting on it either. A payload past
-the reporter's size cap is reported on stderr rather than truncated: half a
-JSON document maps to nothing, which would look exactly like an event Aether
-ignores.
+## MCP tools and exact parity
 
-Which harnesses have a reporter, what each is pointed at, and what each
-state does to the run: [harnesses.md](harnesses.md) and
-[failure-handling.md](failure-handling.md).
+The bridge exposes exactly six tools. Their parameters, receipts, authorization
+rules, size limits, idempotency behavior, and durable storage are the
+corresponding v3 coordination methods, not MCP-specific variants.
 
-The wire method set is closed all the same: `run.report` is four of four,
-and nothing else - no control verb, no git, no other run's transcript - is
-reachable from inside a container.
+| MCP tool | v3 method | Parameters | Result |
+| --- | --- | --- | --- |
+| `aether_status` | `coord.status` | none | v3 identity, assignment, authorized peers, unread count, capabilities |
+| `aether_send` | `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id` |
+| `aether_inbox` | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | `messages`, `ack_token` |
+| `aether_ask` | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id` |
+| `aether_reply` | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
+| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 
-## Staging the binary
+MCP returns the structured v3 result directly. The CLI wraps the same result
+in its `schema_version` and `ok` JSON envelope; this presentation difference
+does not change the operation or receipt.
 
-The server stages its own binary - `/proc/self/exe`, or whatever
-`scheduler.Config.ServerBinary` names - at
-`<data>/runtime/bin/aether-server-<sha256>`:
+`aether_send`, `aether_ask`, `aether_reply`, and `aether_report` require an
+explicit `idempotency_key`; the bridge never invents one. For a retry after a
+timeout or lost response, provide the same key and the same semantic inputs.
+A different payload under an existing key is a conflict.
 
-- the running binary is hashed, and a staged copy that already matches its
-  digest is reused;
-- otherwise it is copied to a temp file in the same directory, made `0555`,
-  fsynced, renamed into place, and the directory fsynced;
-- the staged file is hashed again before it is ever mounted.
+`aether_inbox` is at-least-once. The returned `ack_token` identifies exactly
+the returned batch. Supplying it on the next call acknowledges that batch;
+without it, the batch remains available. The bridge carries forward the last
+acknowledgement token that reached the MCP stream when the next call omits
+`ack_token`, while an explicit token remains supported. A cancelled call,
+failed response write, or bridge process exit does not promote a staged token,
+so the batch is delivered again. `wait_seconds` requests one bounded server
+wait from 0 through 30 seconds; it is not an unbounded poll.
 
-Content addressing is what lets a container outlive an upgrade: a run
-provisioned against one build keeps mounting exactly those bytes after the
-server binary underneath has been replaced.
+`aether_ask` returns a durable `question_id`. `aether_reply` takes that ID
+instead of a target run ID and routes only to the original question sender.
+The question establishes the reply relationship, so a reply can land after
+ordinary overlap grace expires; it cannot authorize an unrelated message or
+cross a workspace boundary.
 
-**Fail-closed.** If staging, hashing, or verification fails, the run gets no
-coordination at all - no bridge mount, no coordination mount - and the
-reason is recorded on the run's timeline. A mount that could not be
-verified is never handed to a container. The run itself still launches:
-coordination is advisory, and an agent without the bridge still sees the
-overlap notice in its terminal, which is exactly the notice-only
-degradation a harness without MCP support gets.
+`aether_report` accepts only `success`, `failure`, or `blocked` and requires a
+non-empty summary. Before the server accepts it, Aether captures the run's
+evidence, including a private Git evidence commit and a PTY transcript capped
+at 16 MiB. The retained packet records factual context, provenance,
+unresolved facts, and a next action, with explicit unavailable or truncated
+sources. Evidence expires after 30 days. It is not an atomic environment
+snapshot and does not assert that the outcome was verified. A failed capture
+or persistence step leaves the outcome unaccepted and the runtime recoverable.
 
-## Durability and cleanup
+## MCP errors
 
-Before the container is created, the run's sidecar
-(`<data>/scheduler/<run-id>.json`) records the staged digest and path and
-the coordination directory (the socket file's name, not the sidecar, is
-what records the wire version). That write is the reference that keeps the staged
-binary alive, and it happens first on purpose: a crash between staging and
-the container existing must not leave a container holding bytes nothing
-claims.
+Coordination failures are returned as MCP tool results with `isError`, not as
+MCP session-level JSON-RPC failures. Aether's numeric code is in the result
+metadata key `aether/error_code`; the text includes the method-qualified
+message. Local socket failures such as a missing listener, EOF, broken pipe,
+or a connection-cap refusal map to `CodeUnavailable` (`-32004`). Server
+responses preserve their own Aether codes, including `CodeDenied` (`-32001`),
+`CodeConflict` (`-32003`), `CodeNotFound` (`-32000`), and
+`CodeInvalidParams` (`-32602`). This keeps an operation failure actionable
+without tearing down the MCP session.
 
-The sidecars are the whole reference set, so they are also how recovery
-rebuilds it. On startup, after runs have been reconciled against their
-containers, any staged binary no surviving sidecar names is deleted. Once
-this process has staged, its own build is additionally retained; a copy the
-previous process left with no referencing sidecar is collected like any
-other, and the next launch simply re-stages the same bytes.
+The method set is closed. The bridge cannot invoke a control verb, steer a
+terminal, read Git, or access another run's transcript. Human steering still
+uses Aether's host-side serialized PTY input path; MCP is not an inbound
+terminal hook.
 
-Staging and collection are serialized against each other, so a collection
-can never delete a binary a concurrent launch has just verified and is
-about to mount. It also means any dot-prefixed temp file a collection sees
-is the leftover of an install killed mid-copy, never a copy in flight, and
-those are reclaimed too.
+## `run.report` is not `coord.report`
 
-A run's assets are released only after its container has been destroyed:
-the sidecar is removed (an atomic unlink), the state directory is fsynced,
-the coordination directory is released and its mailbox rows deleted, and
-only then are unreferenced staged binaries collected.
+`aether_report` is the MCP spelling of durable `coord.report`, and has the
+same evidence-before-acceptance behavior as `aether-internal report`.
 
-## Kill switch
+The staged binary at `/opt/aether/aether-server` also retains the separate
+harness lifecycle command:
 
-With `--conflict-coordination=false` the scheduler is never given the
-coordination seam: nothing is staged, no directory is provisioned, no
-mounts are added, and nothing already on disk is collected. Assets a
-previous process left inside a live container stay exactly where they are
-and go inert - `coord` unlinks the sockets behind them, so a bridge still
-running in there gets `CodeUnavailable` and nothing else.
+```sh
+printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
+/opt/aether/aether-server report codex '{"type":"agent-turn-complete"}'
+/opt/aether/aether-server report pi --event session.idle
+/opt/aether/aether-server report opencode --event session.idle
+```
 
-Turning it back on affects new containers only. A run created while the
-switch was off has no mounts, no config, no `--mcp-config` or `--settings`
-argument, no `OPENCODE_CONFIG_CONTENT`, and cannot gain them; it stays
-notice-only, and judged on silence alone, until it is relaunched.
+These callbacks invoke wire method `run.report` and update only the run's
+current `working` or `waiting` status. They are not an agent outcome, are not
+an MCP tool, and do not create a durable report or evidence receipt. Harness
+callbacks are hidden lifecycle plumbing, not commands for an operator or
+worker to run. The callback exits promptly even when status reporting is
+unavailable so it cannot block the harness.
+
+## Staging, retention, and shutdown
+
+The staged binary is content-addressed. A run keeps the exact verified bytes
+used at provisioning, even if the server binary is upgraded later. Aether
+records the staged digest and coordination directory in the run sidecar before
+creating the container, and recovery rebuilds the listener from surviving
+sidecars.
+
+Active runs and retained terminal TUI runs keep their socket, unread mailbox,
+and MCP assets through a server restart. When the container is destroyed,
+Aether releases the coordination directory and mailbox after required evidence
+capture. With `--conflict-coordination=false`, new runs receive no bridge
+mount, CLI mount, socket, or MCP configuration. Existing mounted assets become
+inert and coordination calls return unavailable; the conflict radar itself
+continues to operate.

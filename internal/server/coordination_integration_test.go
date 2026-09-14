@@ -93,13 +93,12 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 	attA.waitOutput(t, "inbox:"+bodyB)
 	attB.waitOutput(t, "inbox:"+bodyA)
 
-	// The whole exchange is on the workspace timeline - the notice each run
-	// was given and the message each one sent - attributed to the owner of
-	// the run it happened to.
-	waitEvent(t, sub, &seen, "run A's notice entry", coordNoticeNote(runA.ID, e.ada.id, runB.ID))
-	waitEvent(t, sub, &seen, "run B's notice entry", coordNoticeNote(runB.ID, e.bo.id, runA.ID))
-	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, e.ada.id, runB.ID))
-	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, e.bo.id, runA.ID))
+	// The whole exchange is on the workspace timeline under the run where
+	// each server-originated notice or message happened.
+	waitEvent(t, sub, &seen, "run A's notice entry", coordNoticeNote(runA.ID, runB.ID))
+	waitEvent(t, sub, &seen, "run B's notice entry", coordNoticeNote(runB.ID, runA.ID))
+	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, runB.ID))
+	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, runA.ID))
 
 	// The unregistered harness never joined the conversation.
 	if out := attC.output(); strings.Contains(out, "inbox:") || strings.Contains(out, "sent:") {
@@ -570,22 +569,22 @@ func waitOverlap(t *testing.T, ctrl *protocol.Client, run, peer string) {
 	t.Fatalf("the radar never reported run %s overlapping run %s", run, peer)
 }
 
-// coordNote matches the timeline entry a coordination message leaves on
-// the sending run, attributed to that run's owner.
-func coordNote(run string, actor domain.MemberID, to string) func(events.Event) bool {
-	return timelineNote(run, actor, "coordination message to run "+to+": ")
+// coordNote matches the server-originated timeline entry a coordination
+// message leaves on the sending run.
+func coordNote(run, to string) func(events.Event) bool {
+	return timelineNote(run, "coordination message to run "+to+": ")
 }
 
-// coordNoticeNote matches the timeline entry the overlap notice leaves on
-// the run it was delivered to, attributed to that run's owner.
-func coordNoticeNote(run string, actor domain.MemberID, peer string) func(events.Event) bool {
-	return timelineNote(run, actor, "coordination notice: run "+peer+" is also editing ")
+// coordNoticeNote matches the server-originated timeline entry the overlap
+// notice leaves on the run it was delivered to.
+func coordNoticeNote(run, peer string) func(events.Event) bool {
+	return timelineNote(run, "coordination notice: run "+peer+" is also editing ")
 }
 
-func timelineNote(run string, actor domain.MemberID, prefix string) func(events.Event) bool {
+func timelineNote(run, prefix string) func(events.Event) bool {
 	return func(e events.Event) bool {
 		p, ok := e.Payload.(events.TimelinePayload)
-		return ok && string(e.RunID) == run && e.ActorID == actor &&
+		return ok && string(e.RunID) == run && e.ActorID == "" &&
 			p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, prefix)
 	}
 }

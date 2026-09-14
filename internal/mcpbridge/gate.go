@@ -50,12 +50,12 @@ type gate struct {
 	order   []jsonrpc.ID
 	// cancelled marks calls the client has abandoned. Their response may
 	// still be written - a cancelled context does not un-read a batch the
-	// socket already handed over - and the client discards it, so their
-	// token must never be promoted.
-	cancelled      map[jsonrpc.ID]bool
-	cancelledOrder []jsonrpc.ID
-	active         jsonrpc.ID
-	held           bool
+	// socket already handed over - and their token must never be promoted.
+	// Cancellation state is never evicted while a call is in flight. It is
+	// retired when the handler releases or its response is observed.
+	cancelled map[jsonrpc.ID]bool
+	active    jsonrpc.ID
+	held      bool
 }
 
 // maxPending bounds the staged tokens held for responses that have not been
@@ -95,13 +95,16 @@ func (g *gate) claim(ctx context.Context, id jsonrpc.ID) error {
 	return nil
 }
 
-// release hands the slot back once this call's socket round trip is done.
-// Its staged token stays behind, waiting for the response to be written.
 func (g *gate) release(id jsonrpc.ID) {
 	g.mu.Lock()
 	if g.held && g.active == id {
 		g.active, g.held = jsonrpc.ID{}, false
 	}
+	// Once the handler has released the slot, a late stage cannot pass the
+	// held/active check. Retire its cancellation tombstone now; retaining
+	// only retired pending responses keeps cancellation metadata bounded by
+	// the handler lifetime rather than by an arbitrary count.
+	delete(g.cancelled, id)
 	g.mu.Unlock()
 	<-g.slot
 }
@@ -142,16 +145,15 @@ func (g *gate) finish(id jsonrpc.ID, delivered bool) {
 		delete(g.pending, id)
 		g.order = withoutID(g.order, id)
 	}
-	if g.cancelled[id] {
-		delete(g.cancelled, id)
-		g.cancelledOrder = withoutID(g.cancelledOrder, id)
-	}
+	delete(g.cancelled, id)
 }
 
 // cancel marks a call abandoned and drops anything it staged. It is
 // deliberately not a slot release: the handler still holds the slot until
 // its own round trip returns, so a late socket answer cannot land in the
-// next call's place.
+// next call's place. Cancellation tombstones remain for the full handler
+// lifetime; evicting them by count could let a 9th pipelined cancellation
+// promote an earlier call after its context eventually returns.
 func (g *gate) cancel(id jsonrpc.ID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -159,14 +161,7 @@ func (g *gate) cancel(id jsonrpc.ID) {
 		delete(g.pending, id)
 		g.order = withoutID(g.order, id)
 	}
-	if !g.cancelled[id] {
-		g.cancelled[id] = true
-		g.cancelledOrder = append(g.cancelledOrder, id)
-	}
-	for len(g.cancelledOrder) > maxPending {
-		delete(g.cancelled, g.cancelledOrder[0])
-		g.cancelledOrder = g.cancelledOrder[1:]
-	}
+	g.cancelled[id] = true
 }
 
 func withoutID(ids []jsonrpc.ID, id jsonrpc.ID) []jsonrpc.ID {

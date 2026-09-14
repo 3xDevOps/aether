@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -24,6 +26,7 @@ func init() {
 		}
 		svc, err := coord.New(coord.Config{
 			Dir:              filepath.Join(d.DataDir, "coord"),
+			Disabled:         d.Config.CoordinationDisabled,
 			Store:            d.Store,
 			RetainsContainer: d.Runs.RetainsContainer,
 			Mail:             mail,
@@ -32,8 +35,12 @@ func init() {
 			PTY:              d.PTY,
 			// The scheduler is the single writer of run statuses, so the
 			// agent's own status reports land on it.
-			Reports:  d.Runs,
-			Disabled: d.Config.CoordinationDisabled,
+			Reports: d.Runs,
+			// coord.report captures evidence before accepting the durable
+			// outcome; the coordination service publishes its evidence event
+			// only after finalization.
+			Evidence:        coordEvidenceCapture{service: d.Evidence},
+			EvidencePackets: d.Store,
 		})
 		if err != nil {
 			return nil, err
@@ -48,6 +55,20 @@ func init() {
 		}
 		return svc, nil
 	})
+}
+
+// coordEvidenceCapture keeps the report seam narrow. Publication is owned by
+// coord.CoordReport and happens only after its durable finalization; capturing
+// alone must never create an externally visible event.
+type coordEvidenceCapture struct {
+	service *evidence.Service
+}
+
+func (c coordEvidenceCapture) Capture(ctx context.Context, req evidence.Request) (protocol.EvidencePacket, error) {
+	if c.service == nil {
+		return protocol.EvidencePacket{}, errors.New("server: evidence service is unavailable")
+	}
+	return c.service.Capture(ctx, req)
 }
 
 // lazyRadar reads the conflict radar seam at call time. The overlap index

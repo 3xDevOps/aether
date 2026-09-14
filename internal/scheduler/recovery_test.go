@@ -1993,3 +1993,31 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 	// Output still arriving well past the redraw is the agent working.
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 }
+
+func TestRecoveryEvidenceUsesPublishedTipIdentity(t *testing.T) {
+	e := newTestEnv(t, nil)
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	run, _ := e.launchFake(t, "recover published tip")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	s2 := e.newScheduler(t, newFakeRuntime(), newFakePTY())
+	s2.UseEvidence(capture)
+	t.Cleanup(func() { _ = s2.Close() })
+	if err := s2.recoverRuns(t.Context()); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if row.Status != domain.RunInterrupted || row.LastCommit != "tip" {
+		t.Fatalf("recovered run = %+v, want interrupted with published tip", row)
+	}
+	request := capture.lastRequest()
+	want := "finish:" + string(run.ID) + ":tip:interrupted"
+	if request.IdempotencyKey != want {
+		t.Fatalf("recovery evidence key = %q, want %q", request.IdempotencyKey, want)
+	}
+}

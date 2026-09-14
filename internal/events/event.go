@@ -209,6 +209,9 @@ const (
 	TimelineKill    TimelineKind = "kill"
 	TimelineHandoff TimelineKind = "handoff"
 	TimelineNote    TimelineKind = "note"
+	// TimelineReport records a run-authenticated durable outcome. The
+	// envelope's ActorID is intentionally empty for run/server origins.
+	TimelineReport TimelineKind = "report"
 	// TimelineCoAuthor records a member other than the run's owner steering
 	// it for the first time. From that point the run's commits credit them
 	// with a Co-authored-by trailer, so the act is stamped once, not once
@@ -223,6 +226,13 @@ type TimelinePayload struct {
 	Kind TimelineKind `json:"kind"`
 	// Message is the entry body, e.g. the injected instruction text.
 	Message string `json:"message,omitempty"`
+	// Report fields are populated only for TimelineReport. They are bounded
+	// projections; the durable report/evidence APIs remain authoritative.
+	ReportID     string   `json:"report_id,omitempty"`
+	Outcome      string   `json:"outcome,omitempty"`
+	Summary      string   `json:"summary,omitempty"`
+	NextAction   string   `json:"next_action,omitempty"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
 }
 
 func (TimelinePayload) EventType() Type { return TypeTimeline }

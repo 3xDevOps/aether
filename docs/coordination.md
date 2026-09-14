@@ -1,235 +1,292 @@
 # Conflict coordination
 
+Aether's conflict radar identifies active runs that edit the same files. When
+coordination is enabled, each run also gets a small, durable channel for
+communicating with the other runs that the radar authorizes. The channel is
+advisory: it does not lock files, pause work, or decide which change wins.
 
-The conflict radar (`internal/overlap`) detects that two active runs are
-editing the same file. Coordination gives those two agents a bounded
-channel to settle it themselves: one advisory notice in each terminal, and
-a small run-to-run mailbox reachable on a per-run unix socket.
+## Run-mounted surfaces
 
-Nothing here blocks, locks, or arbitrates. The radar chips stay up for the
-humans either way.
-
-## Server data directory
+The server keeps coordination data below its private data directory:
 
 ```
-<data>/coord/                       0700  coordination root, server-private
-<data>/coord/<run-id>/              0755  bind-mounted into the run container
-<data>/coord/<run-id>/coord2.sock   0666  the coordination socket (wire v2)
-<data>/coord/<run-id>/mcp.json      0444  harness config, written at provision
-<data>/coord/<run-id>/co-authors    0444  who to credit, rewritten as they join
+<data>/coord/                       0700  coordination root
+<data>/coord/<run-id>/              0755  one run's coordination directory
+<data>/coord/<run-id>/coord3.sock   0666  the v3 coordination socket
+<data>/coord/<run-id>/mcp.json      0444  optional MCP server configuration
+<data>/coord/<run-id>/co-authors    0444  server-generated commit trailers
 ```
 
-The per-run directory is what the container sees (at `/run/aether`), and
-the agent inside it is not root - hence the traversable directory and the
-world-writable socket. The mount is the whole authentication: whoever
-connects on a run's socket *is* that run, so no token ever enters a
-container. The coordination root above it stays 0700 so nothing on the
-host can reach another run's socket by walking the tree.
+Inside a container, the run directory appears at `/run/aether`. Only
+`coord3.sock` is served. A socket from an older wire version is not rebound;
+affected runs must be relaunched with the current server.
 
-`mcp.json` is written only for a run whose harness profile registers MCP;
-its content belongs to the harness registry (`mcp-bridge.md`).
+The server also mounts one verified, read-only staged binary at both of these
+paths:
 
-`co-authors` holds one `Co-authored-by: Name <email>` line per member the
-run involves - its owner, and everyone who has steered it by injecting a
-message or typing into its own agent terminal - less the address the
-container already authors as. A trailer matching the container's frozen
-`GIT_AUTHOR_EMAIL` is left out, so the agent is never told to credit itself,
-and the owner is on the list only once that address stops being theirs. The
-agent is told in its task prompt to read `/run/aether/co-authors` before
-each commit and to end every commit message, and the description of any pull
-request it opens, with exactly those lines; a missing or empty file means it
-adds none, so a run whose provisioning failed asks the agent for nothing.
-Opening that pull request is something the agent can do from the run itself
-once the member has connected GitHub: the checkout's `origin` points at the
-workspace's upstream repository when one was recorded, and the member home
-carries the gh login (see
-[environment-home.md](environment-home.md#connect-github)).
-Provisioning writes the list as it stands, so a recovered run starts with
-the steerers it already had rather than empty. A retained close and relaunch
-keep the same run row and `run_steerers` entries, so existing steerers remain
-after close, reboot and relaunch; no new run row is created. It is rewritten
-each time someone new steers, when a member already on it changes their git
-identity mid-run, and on every handoff, which adds the outgoing owner as a
-steerer and puts the incoming one on the list because the container still
-authors as whoever launched it. So an agent re-reads it rather than caching
-it. Each rewrite is a temp file and a rename, so a reader never catches the
-path missing. Like `mcp.json` it is read-only in the container: who is
-credited is the server's answer, not the agent's. The same trailers go on the
-commits Aether makes itself at run end, so the branch is credited whether or
-not the agent cooperated - see [teams.md](teams.md).
+```
+/opt/aether/aether-server
+/usr/local/bin/aether-internal
+```
 
-For an active run, and for a live TUI container explicitly closed as merged
-or abandoned, the socket file and mailbox deliberately survive process
-shutdown and server reboot. The socket's presence records that the run was
-provisioned, and its name is the wire version its container was provisioned
-against. Close leaves the same run row, checkout, container and coordination
-assets in place for `--run-container-ttl` (default `1h`; a negative value
-means no retention); `run.relaunch` reopens that exact retained TUI run rather
-than creating another one. Expiry, Kill or Delete release the socket and
-mailbox only after destruction of the retained container is confirmed.
+The first path serves the hidden MCP entry point and the existing harness
+lifecycle hook. The second path is the agent-facing coordination CLI. The
+coordination directory and both executable mounts are constructed by Aether,
+not requested by a run.
 
-## Restart recovery
+The container has no coordination token or identity flag. The mounted socket
+is the identity: a connection accepted by a run's socket is treated as that
+run. `aether-internal` has no socket, run-identity, login, or credential
+option and always uses `/run/aether/coord3.sock`.
 
-On start the server walks `<data>/coord/`:
+Caller-supplied mounts are validated before these mounts are appended. A
+caller mount may not target or nest under `/run/aether`, `/opt/aether`, or
+`/usr/local/bin/aether-internal`, so a credential home, profile, or worktree
+cannot shadow the socket or either executable. The server fails closed if it
+cannot stage and verify its binary. In that case the run still launches, but
+coordination is unavailable and the terminal receives only the normal overlap
+notice.
 
-- **Coordination enabled.** An active run or a retained terminal TUI run has
-  any retired wire version's socket unlinked, then every socket still on disk
-  for a version this server speaks rebound - the socket files are the record
-  of what was provisioned - and the rebind creates a new inode, which is what
-  makes a bridge holding the old one redial. A run that is neither active nor
-  retained has its directory removed and its mailbox rows deleted. Retained
-  ownership is reconciled on boot; expiry is swept within at most one minute,
-  and an expired or unavailable run cannot be relaunched.
-- **Coordination disabled.** Old sockets are unlinked and nothing is
-  recreated. The directory and its read-only config stay where a live or
-  retained container has them mounted; they are simply inert.
+## Wire v3
 
-## Wire v2
+The socket carries JSON-RPC 2.0 requests and responses, one request per NDJSON
+line. The coordination method set is exactly:
 
-Three methods, served as JSON-RPC 2.0 over the NDJSON framing the control
-channel uses (`internal/protocol`). Nothing else is reachable: no control
-verb, no git, no other run's transcript.
-
-| Method | Params | Result |
+| Method | Parameters | Result |
 | --- | --- | --- |
-| `coord.status` | none | `wire_version`, own `run_id`, `workspace_id` and `member_id`, the peers this run may message (state `active` or `grace` with an expiry), and the unread count |
-| `coord.send` | `to_run_id`, `body` | `message_id` |
-| `coord.inbox` | optional `ack_token` | one batch of `messages` plus the `ack_token` that binds it |
+| `coord.status` | none | v3 wire version, this run's identity and assignment, authorized peers, unread count, and capabilities |
+| `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id` |
+| `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages` and the `ack_token` for that batch |
+| `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id` |
+| `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
+| `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
 
-The exact bytes are pinned by the golden fixtures in
-`internal/protocol/testdata/coord-v2/`.
+`coord.status` reports `wire_version: "v3"`, the run, workspace, and member
+IDs, the recorded task, each currently authorized peer, and all six
+capabilities. The sender is never a parameter. A run can message only a peer
+in the same workspace that the radar currently marks as overlapping, or a
+peer in its ten-minute overlap grace period. A question reply is the one
+correlation exception: `coord.reply` identifies its destination from the
+question and remains allowed for that question even after ordinary overlap
+grace expires. It cannot be used to send an unrelated message or cross a
+workspace boundary.
 
-The socket name carries the wire version, so a container provisioned before
-the v2 cutover holds a bridge dialling `coord.sock` and finds nothing: recovery
-unlinks a retired socket rather than binding it, and the run's coordination
-reports itself unavailable instead of answering in a shape that bridge cannot
-read.
+A run may open conversations with at most eight distinct peers. Existing
+conversations remain usable when this limit has been reached. The server
+also enforces these bounds:
 
-### Connection limits
+- message, question, and reply bodies are at most 4 KiB;
+- status returns at most 32 peers and 16 files per peer, with total and
+  truncation metadata; task and path strings are capped at 512 bytes;
+- idempotency keys are at most 256 bytes and may not contain control lines;
+- an inbox holds at most 100 unacknowledged messages;
+- sends allow a burst of five, then one message per five seconds;
+- inbox reads allow a burst of ten, then one read per second;
+- every non-empty, bounded request line consumes a per-run transport budget
+  of 30 requests per burst, refilling at one request per second. This charge
+  happens before JSON, method, or parameter parsing, so malformed and unknown
+  requests cannot bypass it;
+- `wait_seconds` is a server-side wait from 0 through 30 seconds;
+- each run socket accepts at most 16 concurrent connections, and inactive
+  connections are reaped after five minutes;
+- each request line is limited to 64 KiB;
 
-The agent behind the socket is only semi-trusted, so its connections are
-bounded like everything else it can spend:
+The method set is closed. A connection cannot invoke a control verb, access
+Git, read another run's transcript, or address a run outside the authorized
+peer set.
 
-- **16 concurrent connections per run socket.** Anything past that is
-  closed immediately rather than queued, so one run cannot take the server
-  to its file descriptor limit and break the SSH listener with it.
-- **5 minutes idle.** The deadline is reset on every request, so an active
-  bridge is never cut off; one that connects and then goes silent is
-  dropped and simply redials on its next tool call. The same bound arms
-  every response write, so a connection that stops reading responses is
-  dropped too instead of wedging its handler.
-- **64 KiB per request line**, well above the 4 KiB body cap plus JSON
-  escaping.
+## Delivery, acknowledgement, and retries
 
-A bridge dials per tool call and redials after EOF, so it holds one
-connection at a time; these limits are far above anything normal use
-reaches.
+Delivery is at least once. An inbox read returns one oldest-first batch and an
+opaque `ack_token`. Omitting `ack_token` on the next read acknowledges nothing,
+so the same batch and token can be delivered again. Supplying the token on the
+next read acknowledges exactly that batch while fetching the next batch. An
+empty inbox has no token. Tokens are durable across server restarts while the
+run's container and coordination data are retained.
 
-### Authorization
+`coord.send`, `coord.ask`, `coord.reply`, and `coord.report` are mutations and
+require an explicit idempotency key on the wire. Repeating a mutation with the
+same key and the same semantic inputs returns its original receipt; reusing a
+key with different inputs is a conflict. MCP callers must supply the key.
+The CLI generates one only when `--idempotency-key` is omitted and prints
+`idempotency-key: ...` to stderr before the network call; save and reuse that
+value if the response is lost.
 
-A run may only message a peer the radar currently has it in file conflict
-with, or had until less than 10 minutes ago (the grace window, so an
-in-flight reply still lands). A clearing the radar witnesses live anchors
-the window at that moment; one it only finds by re-reading the overlap
-index anchors at the last time the pair was seen overlapping instead, so a
-late discovery never opens a fresh window. Grace state, like the peer cap
-and the rate buckets, lives in process memory: a restart clears it, so a
-window that straddles the restart is not honoured on the other side.
-Anything else is `CodeDenied`.
-This is what keeps the
-mailbox from becoming a general agent-to-agent channel. Overlaps are
-workspace-scoped by construction, so a target in another workspace can never
-pass the check, whoever owns the two runs.
+A successful receipt means the server durably stored the operation. It does
+not mean that a peer has read the message or understood it. A timed-out
+request may have succeeded; retry it with the same idempotency key and use the
+returned receipt.
 
-**The edge is agent-derived, so a run may reach 8 peers at most.** The
-radar computes an overlap by intersecting the two runs' own diff
-snapshots, and a run controls its own: one that touches every tracked file
-has a file set that is a superset of everyone else's, and the radar then
-reports it as overlapping with every active run in the workspace. Nothing
-here can tell that apart from a genuinely wide refactor, and a size
-threshold would only misfire on the honest one, so what is bounded is the
-reach rather than the edge. Each run may open a conversation with 8
-distinct peers; the ninth is refused `CodeConflict`. Messages to a peer it
-has already messaged are unaffected. Like the send-rate bucket, the count
-is per process and a restart clears it.
+Accepted messages, questions, and replies are attributed to their originating
+run and appended to the workspace timeline. These coordination notices are
+server-originated events with an empty actor identity; ownership changes cannot
+rewrite their historical attribution. The timeline records durable server
+acceptance; it does not imply that the recipient has read the item.
 
-### Delivery
+## `aether-internal` CLI
 
-At-least-once. Each read delivers a batch under one opaque, run-scoped
-token and returns that token; the batch leaves the unread set only when a
-later read presents it. A token that is absent, unknown, or another run's
-acknowledges nothing, and an outstanding batch is returned again under its
-original token until it is acknowledged - so a response lost between the
-server and the agent costs a duplicate, never a silently dropped "I'll
-wait". Tokens live in `run_messages`, so they survive a restart.
+A task-bearing coordinated run receives this launch instruction automatically:
 
-The rows are retired with their reader only after the run no longer owns a
-container. `Release` stops the run's listeners, removes its coordination
-directory and deletes its mailbox; retention expiry, Kill and Delete call it
-only after destruction is confirmed. Recovery performs the same removal for
-a run that is neither active nor retained. A retained close therefore keeps
-the socket and unread mailbox rows through close and reboot, and a relaunch
-continues with those same coordination surfaces. The timeline notes remain
-the audit trail.
+```
+Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
+```
 
-### Caps and failures
+No skill package, manual identity argument, or credential setup is required.
+Run `skill` before acting so the assignment and capabilities come from current
+server state rather than copied prompt text.
 
-| Condition | Code |
+All commands below run inside the container. Every command except `skill`
+writes one JSON object followed by a newline. Successful commands use this
+shape:
+
+```json
+{"schema_version":"v3","ok":true,"result":{}}
+```
+
+Failures use the same envelope with an `error` object:
+
+```json
+{"schema_version":"v3","ok":false,"error":{"code":-32001,"message":"..."}}
+```
+
+Use `error.code` for branching. The message is method-qualified and suitable
+for logs. The process exits with 0 on success, 1 for an internal failure, 2
+for usage or protocol input errors, 3 for denied, conflicting, or invalid
+state, and 4 when a run or coordination surface is not found or available.
+
+The stable error codes are:
+
+| Code | Meaning |
 | --- | --- |
-| Body over 4 KiB, missing target, self-send | `CodeInvalidParams` |
-| Unknown run | `CodeNotFound` |
-| Target has finished | `CodeUnavailable` |
-| Target inbox at 100 unacknowledged messages | `CodeConflict` |
-| Send rate exceeded (burst 5, one per 5 s) | `CodeConflict` |
-| Inbox read rate exceeded (burst 10, one per second) | `CodeConflict` |
-| Sender already talking to 8 distinct peers | `CodeConflict` |
-| Peer is not an authorized overlap | `CodeDenied` |
-| Coordination disabled | `CodeUnavailable` |
+| `-32700` | parse error |
+| `-32600` | invalid request |
+| `-32601` | method not found |
+| `-32602` | invalid parameters |
+| `-32603` | internal failure |
+| `-32000` | run or other resource not found |
+| `-32001` | denied |
+| `-32002` | invalid state |
+| `-32003` | conflict or limit reached |
+| `-32004` | unavailable |
 
-## Notice and audit
+### Inspect the assignment and peers
 
-The first overlap between a pair injects one banner into each agent's
-terminal through the existing inject path, naming the peer run, its owner,
-its task, and the shared files. The owner's display name, the task, and
-each shared path render quoted, so member-, agent- or repo-chosen text
-cannot smuggle control sequences into the terminal or the reading agent's
-stdin. It fires once per pair and re-arms after the overlap clears.
-Delivery is best-effort and event-driven: a banner that cannot be injected
-because the run has no live terminal yet is retried on the next overlap
-change, so an overlap first seen in a restart window whose file set never
-changes again can go unannounced - the radar chip still stands for the
-humans either way.
+```sh
+/usr/local/bin/aether-internal status --json
+/usr/local/bin/aether-internal skill
+```
 
-Both halves are audited on the workspace timeline, as notes attributed to
-the owner of the run each one belongs to: a delivered notice
-(`coordination notice: run <peer> is also editing <files>`) on the run that
-was told, and every message (`coordination message to run <peer>: <body>`)
-on the run that sent it. Both runs of an authorized pair are in the same
-workspace, so one note per exchange reaches the humans supervising either
-side. A notice is stamped only once its banner has actually reached a
-terminal, so the feed never says an agent was told when its run had no live
-terminal to tell.
+`status` requires `--json`; `skill` takes no arguments and prints the current
+v3 assignment plus the short coordination workflow.
 
-## Kill switch
+### Send a message
 
-`--conflict-coordination=false` (server config `CoordinationDisabled`)
-turns the feature off: no notices, no listeners, no directories, no
-mailbox writes, no timeline entries, and every `coord.*` call fails
-`CodeUnavailable` before it touches anything. The radar and its chips are
-unaffected. With no per-run directory there is no `co-authors` file either,
-so the agent is not asked for the trailers; Aether's own commits still
-carry them.
+```sh
+/usr/local/bin/aether-internal send \
+  --to run-peer \
+  --body 'I am editing src/example.go.' \
+  --idempotency-key send-example-1
+```
 
-It also removes the agent status reporter, which rides the same socket and
-the same mounts: with coordination off, an agent cannot tell the server it
-is waiting, and `needs-attention` comes only from the stall threshold. See
-[harnesses.md](harnesses.md).
+The result contains `message_id`. `--body-file path` reads a body from a
+file, and `--body-file -` reads it from standard input. A body can also be
+provided as the positional text after the peer run ID.
 
-## Not in this component
+### Read and acknowledge the inbox
 
-This package owns the host side and the wire. The read-only container
-mounts, the staged bridge binary, and the in-container MCP server that
-turns these three methods into agent tools live in `internal/mcpbridge`
-and the scheduler's coordination lifecycle - see `mcp-bridge.md`, whose
-"Harness registration" section covers the per-harness launch-profile field
-that points an agent at the bridge.
+```sh
+/usr/local/bin/aether-internal inbox --wait 30
+/usr/local/bin/aether-internal inbox --ack ack-example-1 --wait 30
+```
+
+Use the `ack_token` returned by the first command as the value of `--ack` on
+the next command. `--wait` asks the server to wait once for up to 30 seconds
+when no message is ready; it is not a client polling loop. If the process or
+connection ends before the result is consumed, do not acknowledge the token
+and read again.
+
+### Ask a question and reply
+
+```sh
+/usr/local/bin/aether-internal ask \
+  --to run-peer \
+  --body 'May I update src/example.go?' \
+  --idempotency-key ask-example-1
+
+/usr/local/bin/aether-internal reply \
+  --question-id question-example-1 \
+  --body 'Yes, proceed.' \
+  --idempotency-key reply-example-1
+```
+
+The first command returns the durable `question_id`. Use that value with
+`--question-id` when replying; a reply does not take a target run ID. `ask`
+and `reply` accept the same `--body-file` and standard-input forms as `send`.
+The example IDs are ordinary non-secret values. Replace them with the peer
+run ID and question ID returned by the run's own status and inbox results.
+
+### Report an outcome
+
+```sh
+/usr/local/bin/aether-internal report \
+  --outcome success \
+  --summary 'Completed the assigned change.' \
+  --evidence-ref evidence-example-1 \
+  --idempotency-key report-example-1
+```
+
+`--outcome` is exactly one of `success`, `failure`, or `blocked`. A non-empty
+summary is required. `--evidence-ref` may be repeated, and `--summary-file`
+accepts a file or `-` for standard input. The result contains a durable
+`report_id` and the server-created `evidence_ref`.
+
+Before accepting `coord.report`, Aether captures evidence for the run. The
+capture retains a private Git evidence commit and the PTY transcript up to
+16 MiB, then stores factual context, provenance, unresolved facts, and a next
+action with the report. Evidence is retained for 30 days. Unavailable or
+truncated sources are recorded explicitly. The capture is not an atomic
+environment snapshot and does not claim that the reported work was verified.
+If capture or durable storage fails, the outcome is not accepted, and the
+runtime resources remain recoverable.
+
+Finalization and event publication are crash-safe. Finalization writes a
+durable pending publication row and a deterministic evidence-event ID. The
+event is appended before the report is marked published; if an append result
+is uncertain, retrying the same ID reconciles the existing event rather than
+creating a duplicate. Pending rows are traversed with a stable cursor and
+wraparound, while attempts, next-attempt time, and the last error are durable.
+Transient failures remain eligible for service-lifetime retries; permanent
+event conflicts are quarantined with their error visible for operators. A
+caller may therefore receive an internal or unavailable error after capture
+while the finalized report remains retryable under its original idempotency key.
+
+The shipped CLI and MCP bridge allow the full two-minute evidence-capture
+budget plus a small framing margin (and still honor an earlier caller
+deadline). Captures from 30 through 120 seconds are reachable without
+changing the socket protocol.
+
+## Lifecycle status is separate
+
+`coord.report` is the durable worker outcome described above. It is exposed
+through `aether-internal report` and the MCP tool `aether_report`.
+
+`run.report` is different. It is the harness lifecycle hook that updates the
+run's transient `working` or `waiting` status. Harness callbacks invoke it by
+running `/opt/aether/aether-server report <harness>` over the same run socket.
+It is not an agent outcome, is not exposed as an `aether-internal` command, and
+has no durable evidence receipt. A lifecycle callback may fail without
+blocking the agent; the run then falls back to its normal stall handling.
+
+Coordination also does not provide a universal inbound terminal hook. When a
+human steers a run, Aether delivers the request through the harness's
+serialized PTY input path and records the delivery separately.
+
+## Retention and shutdown
+
+Active runs and explicitly retained terminal TUI runs keep their socket,
+unread mailbox, and timeline entries through a server restart. Recovery
+rebinds `coord3.sock` for those runs. When a run's container is destroyed,
+Aether releases the coordination directory and mailbox after any required
+evidence capture has completed. With `--conflict-coordination=false`, no new
+coordination socket or mounts are created and every coordination request is
+unavailable; the conflict radar itself remains active.

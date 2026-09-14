@@ -86,7 +86,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 
 	var sent protocol.CoordSendResult
 	if serr := clientA.Call(protocol.MethodCoordSend,
-		protocol.CoordSendParams{ToRunID: string(b), Body: "rewriting login(); ~10 min"}, &sent); serr != nil {
+		sendParams(b, "rewriting login(); ~10 min"), &sent); serr != nil {
 		t.Fatalf("coord.send: %v", serr)
 	}
 	if sent.MessageID == "" {
@@ -112,8 +112,8 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	select {
 	case e := <-timeline.Events():
 		p, ok := e.Payload.(events.TimelinePayload)
-		if !ok || e.RunID != a || e.ActorID == "" {
-			t.Fatalf("timeline event = %+v, want the send attributed to run %s's owner", e, a)
+		if !ok || e.RunID != a || e.ActorID != "" {
+			t.Fatalf("timeline event = %+v, want the server-originated send on run %s", e, a)
 		}
 		if p.Kind != events.TimelineNote {
 			t.Fatalf("timeline kind = %q, want a note", p.Kind)
@@ -168,7 +168,7 @@ func TestLostResponseRedelivers(t *testing.T) {
 	if _, err := h.svc.Provision(ctx, b, nil); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "going ahead"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "going ahead")); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -257,16 +257,12 @@ func TestRestartRecovery(t *testing.T) {
 			}
 		}
 		h.peers.pair(sender, retained, "src/auth.go")
-		if _, err := h.svc.Send(ctx, sender, protocol.CoordSendParams{
-			ToRunID: string(retained), Body: "keep this mailbox",
-		}); err != nil {
+		if _, err := h.svc.Send(ctx, sender, sendParams(retained, "keep this mailbox")); err != nil {
 			t.Fatalf("Send(retained): %v", err)
 		}
 		h.advance(sendRefill)
 		h.peers.pair(sender, expired, "src/auth.go")
-		if _, err := h.svc.Send(ctx, sender, protocol.CoordSendParams{
-			ToRunID: string(expired), Body: "retire this mailbox",
-		}); err != nil {
+		if _, err := h.svc.Send(ctx, sender, sendParams(expired, "retire this mailbox")); err != nil {
 			t.Fatalf("Send(expired): %v", err)
 		}
 		for _, r := range []domain.RunID{retained, expired} {

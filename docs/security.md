@@ -453,7 +453,7 @@ and wire) and `docs/mcp-bridge.md` (the in-container half); the operator-facing
 stances are these.
 
 - **The mount is the authentication, so no token enters a container.** Each run
-  gets its own socket at `/run/aether/coord2.sock`; whoever connects on it *is*
+  gets its own socket at `/run/aether/coord3.sock`; whoever connects on it *is*
   that run. There is nothing inside the container to steal, and nothing to
   rotate. The host-side modes (`0700` on the coordination root, `0755` on the
   per-run directory, `0666` on the socket, `0444` on the config and the
@@ -462,11 +462,11 @@ stances are these.
   control. Both container paths are reserved:
   `runtime.ValidateMounts` refuses any caller-supplied mount that targets or
   nests under them, so a credential home cannot shadow either.
-- **The socket exposes three methods and no control verbs.** `coord.status`,
-  `coord.send`, `coord.inbox`, and nothing else - no `run.kill`, no git, no
-  other run's transcript. Messages are capped at 4 KiB, rate-limited per run,
-  bounded at 100 unread per inbox, and every one is recorded on the workspace
-  timeline.
+- **The socket exposes six methods and no control verbs.** `coord.status`,
+  `coord.send`, `coord.inbox`, `coord.ask`, `coord.reply`, and `coord.report`
+  are the complete set - no `run.kill`, no git, no other run's transcript.
+  Messages are capped at 4 KiB, rate-limited per run, bounded at 100 unread per
+  inbox, and every one is recorded on the workspace timeline.
 - **A run can widen its own peer set, and the cap is what bounds it.** The
   overlap that authorizes a message is computed from the two runs' own diff
   snapshots, so a run that touches every tracked file is reported as

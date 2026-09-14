@@ -373,6 +373,40 @@ func TestEvidenceTombstoneCursorAndPublicationOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestCoordReportEvidenceOwnsPublicationOutbox(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	packet := &EvidencePacket{
+		WorkspaceID:      workspace.ID,
+		RunID:            run.ID,
+		Origin:           EvidenceOrigin{Kind: EvidenceOriginRun, ID: string(run.ID)},
+		Trigger:          EvidenceReport,
+		Objective:        "coord report",
+		PublicationOwner: EvidencePublicationOwnerCoordReport,
+		IdempotencyKey:   "coord-report-evidence",
+	}
+	if err := db.CreateEvidencePacket(ctx, packet); err != nil {
+		t.Fatalf("CreateEvidencePacket: %v", err)
+	}
+	published, _, err := db.ListPendingEvidencePublications(ctx, time.Now().UTC(), "", 10)
+	if err != nil {
+		t.Fatalf("ListPendingEvidencePublications: %v", err)
+	}
+	if len(published) != 0 {
+		t.Fatalf("coord report evidence publications = %+v, want none", published)
+	}
+	got, err := db.GetEvidencePacket(ctx, packet.ID)
+	if err != nil {
+		t.Fatalf("GetEvidencePacket: %v", err)
+	}
+	if got.PublicationOwner != EvidencePublicationOwnerCoordReport {
+		t.Fatalf("stored publication owner = %q, want coord_report", got.PublicationOwner)
+	}
+}
+
 func TestRoomOnlyMessagesAreFinalAndNotModeratable(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

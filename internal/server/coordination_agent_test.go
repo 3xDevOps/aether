@@ -124,7 +124,7 @@ func (a coordAgent) coordinate(ctx context.Context, c *e2eContainer) {
 	}
 	var sent protocol.CoordSendResult
 	if _, serr := callTool(ctx, cs, toolSend, protocol.CoordSendParams{
-		ToRunID: peer.RunID, Body: a.body,
+		ToRunID: peer.RunID, Body: a.body, IdempotencyKey: "e2e-send-" + c.spec.Env["AETHER_RUN_ID"],
 	}, &sent); serr != nil {
 		c.output("agent-error: " + serr.Error() + "\r\n")
 		return

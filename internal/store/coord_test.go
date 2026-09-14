@@ -14,9 +14,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// coordSchemaVersion is the migration slot the run_messages table
-// occupies; the upgrade test builds the schema one version behind it.
-const coordSchemaVersion = 8
+// coordSchemaVersion is the migration slot that adds the v3 coordination
+// metadata, durable peer accounting, outcome reservations, and fair outbox
+// retry state.
+const coordSchemaVersion = 29
 
 // TestRunMailboxDeliveryTokens covers the whole at-least-once contract:
 // a batch is delivered once under one token, redelivered under the same
@@ -128,6 +129,111 @@ func TestRunMailboxInboxCap(t *testing.T) {
 	}
 }
 
+func TestAppendRunMessageWithPeerConvergesConcurrentSameKey(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	const callers = 32
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	ids := make(chan string, callers)
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			<-start
+			msg := &RunMessage{
+				WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID,
+				Body: "same", Kind: RunMessageKindQuestion, IdempotencyKey: "same-key",
+			}
+			_, err := db.AppendRunMessageWithPeer(ctx, msg, callers, 8, true)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- msg.ID
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	close(ids)
+	for err := range errs {
+		t.Fatalf("concurrent same-key append: %v", err)
+	}
+	var wantID string
+	for id := range ids {
+		if wantID == "" {
+			wantID = id
+		} else if id != wantID {
+			t.Fatalf("same key converged to IDs %q and %q", wantID, id)
+		}
+	}
+	var messages, peers int
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM run_messages WHERE from_run = ? AND idempotency_key = ?`,
+		from.ID, "same-key").Scan(&messages); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM coord_peers WHERE from_run = ? AND to_run = ?`,
+		from.ID, to.ID).Scan(&peers); err != nil {
+		t.Fatalf("count peers: %v", err)
+	}
+	if messages != 1 || peers != 1 {
+		t.Fatalf("durable counts = messages %d, peers %d; want one each", messages, peers)
+	}
+}
+
+func TestAppendRunMessageWithPeerRejectsConcurrentCrossKindReuse(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for _, kind := range []RunMessageKind{RunMessageKindMessage, RunMessageKindQuestion} {
+		kind := kind
+		go func() {
+			defer wg.Done()
+			<-start
+			msg := &RunMessage{
+				WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID,
+				Body: "cross-kind", Kind: kind, IdempotencyKey: "cross-kind-key",
+			}
+			_, err := db.AppendRunMessageWithPeer(ctx, msg, 10, 8, true)
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	var successes, conflicts int
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrIdempotencyConflict):
+			conflicts++
+		default:
+			t.Fatalf("cross-kind concurrent append error = %v, want conflict", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("cross-kind results = successes %d, conflicts %d; want one each", successes, conflicts)
+	}
+}
+
 // TestRunMailboxRejectsUnknownRuns proves the foreign keys surface as the
 // store's own sentinel rather than a driver error.
 func TestRunMailboxRejectsUnknownRuns(t *testing.T) {
@@ -175,14 +281,14 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 	if _, execErr := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, color, role, created_at)
 			VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
-		INSERT INTO workspaces (id, name, image, env, setup_script, created_at)
-			VALUES ('w1', 'proj', 'img', '{}', '', 1);
-		INSERT INTO sessions (id, workspace_id, name, base_branch, created_at)
-			VALUES ('s1', 'w1', 'effort', 'main', 1);
-		INSERT INTO runs (id, session_id, member_id, task, harness, mode, status, branch, worktree, created_at)
-			VALUES ('r1', 's1', 'm1', 'a', 'claude', 'tui', 'running', 'b', 'w', 1);
-		INSERT INTO runs (id, session_id, member_id, task, harness, mode, status, branch, worktree, created_at)
-			VALUES ('r2', 's1', 'm1', 'b', 'claude', 'tui', 'running', 'b', 'w', 1);
+		INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
+			VALUES ('w1', 'proj', 1, '{}', 'main', '', '');
+		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, branch, worktree, created_at)
+			VALUES ('r1', 'w1', 'm1', 'a', 'claude', 'tui', 'running', 'b', 'w', 1);
+		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, branch, worktree, created_at)
+			VALUES ('r2', 'w1', 'm1', 'b', 'claude', 'tui', 'running', 'b', 'w', 1);
+		INSERT INTO run_messages (id, workspace_id, from_run, to_run, body, created_at)
+			VALUES ('legacy-msg', 'w1', 'r1', 'r2', 'legacy', 1);
 	`, testKey(t, "")); execErr != nil {
 		t.Fatalf("seed rows: %v", execErr)
 	}
@@ -196,6 +302,36 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	ctx := context.Background()
+	var version int
+	if versionErr := db.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); versionErr != nil {
+		t.Fatalf("read schema version: %v", versionErr)
+	}
+	if version != coordSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, coordSchemaVersion)
+	}
+	var kind, correlationID, idempotencyKey string
+	if metadataErr := db.db.QueryRow(`SELECT kind, correlation_id, idempotency_key FROM run_messages WHERE id = 'legacy-msg'`).
+		Scan(&kind, &correlationID, &idempotencyKey); metadataErr != nil {
+		t.Fatalf("inspect migrated mailbox row: %v", metadataErr)
+	}
+	if kind != string(RunMessageKindMessage) || correlationID != "" || idempotencyKey != "" {
+		t.Fatalf("migrated mailbox metadata = %q, %q, %q; want message and empty metadata",
+			kind, correlationID, idempotencyKey)
+	}
+	var legacyAudits int
+	if legacyErr := db.db.QueryRow(`SELECT count(*) FROM coord_audit_publications WHERE message_id = 'legacy-msg'`).Scan(&legacyAudits); legacyErr != nil {
+		t.Fatalf("inspect legacy audit backfill: %v", legacyErr)
+	}
+	if legacyAudits != 0 {
+		t.Fatalf("legacy audit rows = %d, want 0; v2 messages were already audited", legacyAudits)
+	}
+	var reports int
+	if reportsErr := db.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'coord_reports'`).Scan(&reports); reportsErr != nil {
+		t.Fatalf("inspect coord_reports table: %v", reportsErr)
+	}
+	if reports != 1 {
+		t.Fatalf("coord_reports table count = %d, want 1", reports)
+	}
 
 	if _, gerr := db.GetWorkspace(ctx, "w1"); gerr != nil {
 		t.Fatalf("GetWorkspace after migration: %v", gerr)
@@ -302,11 +438,11 @@ func TestDeliverRunMessagesSurvivesConcurrentCommits(t *testing.T) {
 	}
 }
 
-// TestDeleteRunMessagesRetiresTheWholeMailbox proves release-time cleanup
-// removes every row addressed to the run - undelivered, delivered, and
-// acknowledged alike - so the table does not grow for the life of the
-// database.
-func TestDeleteRunMessagesRetiresTheWholeMailbox(t *testing.T) {
+// TestDeleteRunMessagesRetiresOnlyTheRecipientInbox proves release-time
+// cleanup removes every row addressed to the run - undelivered, delivered,
+// and acknowledged alike - while preserving the run's outbound unread
+// message for its peer.
+func TestDeleteRunMessagesRetiresOnlyTheRecipientInbox(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -320,6 +456,10 @@ func TestDeleteRunMessagesRetiresTheWholeMailbox(t *testing.T) {
 		if err := db.AppendRunMessage(ctx, msg, 100); err != nil {
 			t.Fatalf("AppendRunMessage(%s): %v", body, err)
 		}
+	}
+	outbound := &RunMessage{WorkspaceID: w.ID, FromRun: to.ID, ToRun: from.ID, Body: "still deliver this"}
+	if err := db.AppendRunMessage(ctx, outbound, 100); err != nil {
+		t.Fatalf("AppendRunMessage(outbound): %v", err)
 	}
 	// Deliver and acknowledge the first batch so acked rows exist too.
 	_, token, err := db.DeliverRunMessages(ctx, to.ID, "", 1)
@@ -336,9 +476,242 @@ func TestDeleteRunMessagesRetiresTheWholeMailbox(t *testing.T) {
 	var n int
 	if err := db.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM run_messages WHERE to_run = ?`, to.ID).Scan(&n); err != nil {
-		t.Fatalf("count rows: %v", err)
+		t.Fatalf("count recipient rows: %v", err)
 	}
 	if n != 0 {
-		t.Fatalf("rows after delete = %d, want 0", n)
+		t.Fatalf("recipient rows after delete = %d, want 0", n)
+	}
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM run_messages WHERE id = ?`, outbound.ID).Scan(&n); err != nil {
+		t.Fatalf("count outbound row: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("outbound row after recipient release = %d, want 1", n)
+	}
+}
+func TestCoordAuditSnapshotSurvivesMailboxAndRunRetirement(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	published := &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID,
+		Body: "already published audit",
+	}
+	pending := &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID,
+		Body: "immutable audit projection",
+	}
+	for _, msg := range []*RunMessage{published, pending} {
+		if err := db.AppendRunMessage(ctx, msg, 100); err != nil {
+			t.Fatalf("AppendRunMessage: %v", err)
+		}
+	}
+	pub, err := db.GetCoordAuditPublication(ctx, pending.ID)
+	if err != nil {
+		t.Fatalf("GetCoordAuditPublication: %v", err)
+	}
+	if pub.WorkspaceID != pending.WorkspaceID || pub.FromRun != pending.FromRun ||
+		pub.ToRun != pending.ToRun || pub.Body != pending.Body {
+		t.Fatalf("audit snapshot = %+v, want immutable message projection", pub)
+	}
+	if markErr := db.MarkCoordAuditPublished(ctx, published.ID, CoordAuditEventID(published.ID)); markErr != nil {
+		t.Fatalf("MarkCoordAuditPublished: %v", markErr)
+	}
+	if deleteErr := db.DeleteRunMessages(ctx, to.ID); deleteErr != nil {
+		t.Fatalf("DeleteRunMessages: %v", deleteErr)
+	}
+	if _, getErr := db.GetCoordAuditPublication(ctx, published.ID); !errors.Is(getErr, ErrNotFound) {
+		t.Fatalf("published audit after inbox retirement = %v, want ErrNotFound", getErr)
+	}
+	if deleteErr := db.DeleteRun(ctx, to.ID); deleteErr != nil {
+		t.Fatalf("DeleteRun: %v", deleteErr)
+	}
+	pub, err = db.GetCoordAuditPublication(ctx, pending.ID)
+	if err != nil {
+		t.Fatalf("pending audit after mailbox/run retirement: %v", err)
+	}
+	if pub.Body != pending.Body {
+		t.Fatalf("retained audit body = %q, want %q", pub.Body, pending.Body)
+	}
+	if err := db.MarkCoordAuditPublished(ctx, pending.ID, pub.EventID); err != nil {
+		t.Fatalf("MarkCoordAuditPublished after retirement: %v", err)
+	}
+	if _, err := db.ListPendingCoordAuditPublications(ctx, 10); err != nil {
+		t.Fatalf("ListPendingCoordAuditPublications cleanup: %v", err)
+	}
+	if _, err := db.GetCoordAuditPublication(ctx, pending.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("published orphan audit = %v, want ErrNotFound after cleanup", err)
+	}
+}
+
+func TestRunMailboxV3MetadataAndIdempotency(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	first := &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "question",
+		Kind: RunMessageKindQuestion, IdempotencyKey: "question-1",
+	}
+	if err := db.AppendRunMessage(ctx, first, 100); err != nil {
+		t.Fatalf("AppendRunMessage: %v", err)
+	}
+	if first.ID == "" || first.CorrelationID != first.ID {
+		t.Fatalf("question metadata = %+v, want self correlation", first)
+	}
+	retry := &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "question",
+		Kind: RunMessageKindQuestion, IdempotencyKey: "question-1",
+	}
+	if err := db.AppendRunMessage(ctx, retry, 100); err != nil {
+		t.Fatalf("idempotent retry: %v", err)
+	}
+	if retry.ID != first.ID || retry.Body != first.Body || retry.CorrelationID != first.CorrelationID {
+		t.Fatalf("retry = %+v, want original question", retry)
+	}
+	if err := db.AppendRunMessage(ctx, &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "changed",
+		Kind: RunMessageKindQuestion, IdempotencyKey: "question-1",
+	}, 100); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("changed retry error = %v, want ErrIdempotencyConflict", err)
+	}
+	got, err := db.GetQuestion(ctx, first.ID)
+	if err != nil || got.CorrelationID != first.ID {
+		t.Fatalf("GetQuestion = %+v (err %v), want persisted correlation", got, err)
+	}
+}
+
+func TestRunMailboxRejectsCrossKindIdempotency(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	if err := db.AppendRunMessage(ctx, &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "ask",
+		Kind: RunMessageKindQuestion, IdempotencyKey: "shared-key",
+	}, 100); err != nil {
+		t.Fatalf("question: %v", err)
+	}
+	err := db.AppendRunMessage(ctx, &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: to.ID, Body: "send",
+		Kind: RunMessageKindMessage, IdempotencyKey: "shared-key",
+	}, 100)
+	if !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("cross-kind idempotency = %v, want ErrIdempotencyConflict", err)
+	}
+}
+
+func TestCoordPeerAccountingIsAtomicAndSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "aether.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	blocker := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	targets := make([]*domain.Run, 0, 9)
+	for range 9 {
+		targets = append(targets, mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning))
+	}
+	// A failed enqueue must roll back its peer row.
+	if appendErr := db.AppendRunMessage(ctx, &RunMessage{
+		WorkspaceID: w.ID, FromRun: blocker.ID, ToRun: targets[0].ID, Body: "fills inbox",
+	}, 1); appendErr != nil {
+		t.Fatalf("fill target inbox: %v", appendErr)
+	}
+	created, err := db.AppendRunMessageWithPeer(ctx, &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: targets[0].ID, Body: "must retry",
+	}, 1, 8, true)
+	if created || !errors.Is(err, ErrInboxFull) {
+		t.Fatalf("failed peer enqueue = created %v, err %v; want no peer and ErrInboxFull", created, err)
+	}
+	var peers int
+	if peerCountErr := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM coord_peers WHERE from_run = ?`, from.ID).Scan(&peers); peerCountErr != nil {
+		t.Fatalf("count rolled-back peers: %v", peerCountErr)
+	}
+	if peers != 0 {
+		t.Fatalf("peer rows after failed enqueue = %d, want 0", peers)
+	}
+	for i, target := range targets[:8] {
+		msg := &RunMessage{
+			WorkspaceID: w.ID, FromRun: from.ID, ToRun: target.ID, Body: fmt.Sprintf("peer-%d", i),
+			IdempotencyKey: fmt.Sprintf("peer-%d", i),
+		}
+		peerCreated, peerErr := db.AppendRunMessageWithPeer(ctx, msg, 100, 8, true)
+		if !peerCreated || peerErr != nil {
+			t.Fatalf("peer %d enqueue = created %v, err %v", i, peerCreated, peerErr)
+		}
+	}
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("close: %v", closeErr)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	created, err = db.AppendRunMessageWithPeer(ctx, &RunMessage{
+		WorkspaceID: w.ID, FromRun: from.ID, ToRun: targets[8].ID, Body: "ninth",
+		IdempotencyKey: "peer-8",
+	}, 100, 8, true)
+	if created || !errors.Is(err, ErrCoordPeerLimit) {
+		t.Fatalf("ninth peer after restart = created %v, err %v; want durable cap", created, err)
+	}
+}
+
+func TestCoordReportPersistenceAndIdempotency(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	report := &CoordReport{
+		WorkspaceID: w.ID, RunID: run.ID, Outcome: "blocked",
+		Summary: "waiting for review", EvidenceRefs: []string{"ev_1", "ev_2"},
+		IdempotencyKey: "report-1",
+	}
+	if err := db.AppendCoordReport(ctx, report); err != nil {
+		t.Fatalf("AppendCoordReport: %v", err)
+	}
+	retry := &CoordReport{
+		WorkspaceID: w.ID, RunID: run.ID, Outcome: "blocked",
+		Summary: "waiting for review", EvidenceRefs: []string{"ev_1", "ev_2"},
+		IdempotencyKey: "report-1",
+	}
+	if err := db.AppendCoordReport(ctx, retry); err != nil {
+		t.Fatalf("idempotent report retry: %v", err)
+	}
+	if retry.ID != report.ID || retry.Outcome != report.Outcome ||
+		len(retry.EvidenceRefs) != len(report.EvidenceRefs) {
+		t.Fatalf("retry = %+v, want original report", retry)
+	}
+	if err := db.AppendCoordReport(ctx, &CoordReport{
+		WorkspaceID: w.ID, RunID: run.ID, Outcome: "success",
+		Summary: "must not replace", IdempotencyKey: "report-1",
+	}); !errors.Is(err, ErrCoordReportIdempotencyConflict) {
+		t.Fatalf("changed report retry error = %v, want ErrCoordReportIdempotencyConflict", err)
+	}
+	got, err := db.GetCoordReport(ctx, report.ID)
+	if err != nil || got.Outcome != "blocked" || len(got.EvidenceRefs) != 2 {
+		t.Fatalf("GetCoordReport = %+v (err %v), want persisted outcome", got, err)
+	}
+	if err := db.AppendCoordReport(ctx, &CoordReport{
+		WorkspaceID: w.ID, RunID: run.ID, Outcome: "unknown",
+		Summary: "bad", IdempotencyKey: "bad",
+	}); err == nil {
+		t.Fatal("invalid outcome accepted")
 	}
 }

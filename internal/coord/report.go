@@ -16,9 +16,8 @@ import (
 const maxReportReason = 256
 
 // ReportSink is where run.report lands: the scheduler, which is the single
-// writer of run statuses. A report is not part of the mailbox, so it is
-// neither rate-limited nor authorized against the radar - it is one cheap
-// call the harness's own hooks make on every turn boundary.
+// writer of run statuses. It uses the same bounded transport budget as other
+// coordination methods, but is not authorized against the radar.
 type ReportSink interface {
 	ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error
 }
@@ -26,12 +25,17 @@ type ReportSink interface {
 // Report answers run.report for run: the agent behind this socket says it
 // is working, or that it needs its member and why.
 func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunReportParams) (protocol.RunReportResult, *protocol.Error) {
+	const method = protocol.MethodRunReport
 	if s.cfg.Disabled {
-		return protocol.RunReportResult{}, unavailable(protocol.MethodRunReport)
+		return protocol.RunReportResult{}, unavailable(method)
 	}
+	if !s.enterRun(run) {
+		return protocol.RunReportResult{}, runClosing(method)
+	}
+	defer s.leaveRun(run)
 	state, ok := agentstatus.ParseState(p.State)
 	if !ok {
-		return protocol.RunReportResult{}, invalidParams(protocol.MethodRunReport,
+		return protocol.RunReportResult{}, invalidParams(method,
 			"state must be \""+string(agentstatus.Working)+"\" or \""+string(agentstatus.Waiting)+"\"")
 	}
 	if s.cfg.Reports == nil {

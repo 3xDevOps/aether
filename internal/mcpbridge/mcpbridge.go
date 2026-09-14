@@ -1,14 +1,12 @@
 // Package mcpbridge is the in-container half of conflict coordination: the
-// stdio MCP server an agent harness launches, mapping exactly three tools -
-// aether_status, aether_send, aether_inbox - onto the coordination wire v1
-// methods served on the run's unix socket (internal/coord).
+// stdio MCP server an agent harness launches, mapping the v3 coordination
+// tools onto the run's unix socket (internal/coord).
 //
 // The bridge is the server's own binary, staged and bind-mounted read-only
-// into the run container, so it long outlives the server process that put
-// it there. It therefore holds no state that a restart could invalidate: it
-// dials the socket per tool call, and the only thing it remembers between
-// calls is the token acknowledging the last inbox batch, which never
-// crosses the MCP boundary.
+// into the run container, so it outlives the server process that put it
+// there. It therefore holds no state that a restart could invalidate: it
+// dials the socket per tool call and lets the coordination service own
+// authorization, persistence, and replay.
 package mcpbridge
 
 import (
@@ -27,8 +25,9 @@ const (
 	// container, read-only. The mount is the whole authentication: whoever
 	// connects on the socket inside it is that run.
 	MountDir = "/run/aether"
-	// BinaryPath is where the staged server binary appears inside its
-	// container, read-only.
+	// BinaryPath is where the version-matched server binary appears in its
+	// container, read-only. It serves MCP and preserves existing run.report
+	// hooks under the historical path.
 	BinaryPath = "/opt/aether/aether-server"
 	// ServerName is the MCP server name a harness config points at.
 	ServerName = "aether"
@@ -61,7 +60,6 @@ func Run(ctx context.Context, cfg Config) error {
 	g := newGate()
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, nil)
 	registerTools(srv, &client{socket: cfg.Socket}, g)
-
 	if err := srv.Run(ctx, &mcp.IOTransport{
 		Reader: g.reader(cfg.In),
 		Writer: g.writer(cfg.Out),

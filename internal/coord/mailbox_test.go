@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -23,7 +25,7 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 	a, b, c := h.run(0), h.run(1), h.run(2)
 
 	send := func(from, to domain.RunID) *protocol.Error {
-		_, err := h.svc.Send(ctx, from, protocol.CoordSendParams{ToRunID: string(to), Body: "ping"})
+		_, err := h.svc.Send(ctx, from, sendParams(to, "ping"))
 		return err
 	}
 
@@ -103,7 +105,7 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 		}
 	}
 	for _, target := range []domain.RunID{b, c} {
-		_, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(target), Body: "ping"})
+		_, serr := h.svc.Send(ctx, a, sendParams(target, "ping"))
 		if listed[string(target)] != (serr == nil) {
 			t.Fatalf("run %s listed=%v but send error=%v", target, listed[string(target)], serr)
 		}
@@ -125,7 +127,7 @@ func TestSendCaps(t *testing.T) {
 		h := newHarness(t, 2)
 		h.peers.pair(h.run(0), h.run(1), "src/auth.go")
 		body := strings.Repeat("x", protocol.CoordMaxBodyBytes+1)
-		_, err := h.svc.Send(ctx, h.run(0), protocol.CoordSendParams{ToRunID: string(h.run(1)), Body: body})
+		_, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), body))
 		if err == nil || err.Code != protocol.CodeInvalidParams ||
 			err.Message != "coord.send: body exceeds 4096 bytes" {
 			t.Fatalf("oversized body = %v, want the pinned CodeInvalidParams", err)
@@ -136,17 +138,17 @@ func TestSendCaps(t *testing.T) {
 		h := newHarness(t, 2)
 		h.peers.pair(h.run(0), h.run(1), "src/auth.go")
 		for i := range sendBurst {
-			if _, err := h.svc.Send(ctx, h.run(0), protocol.CoordSendParams{ToRunID: string(h.run(1)), Body: "ping"}); err != nil {
+			if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), fmt.Sprintf("ping-%d", i))); err != nil {
 				t.Fatalf("send %d within the burst: %v", i, err)
 			}
 		}
-		_, err := h.svc.Send(ctx, h.run(0), protocol.CoordSendParams{ToRunID: string(h.run(1)), Body: "ping"})
+		_, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), "ping-final"))
 		if err == nil || err.Code != protocol.CodeConflict ||
 			err.Message != "coord.send: rate limit exceeded (burst 5, 1 message per 5s)" {
 			t.Fatalf("send past the burst = %v, want the pinned CodeConflict", err)
 		}
 		h.advance(sendRefill)
-		if _, err := h.svc.Send(ctx, h.run(0), protocol.CoordSendParams{ToRunID: string(h.run(1)), Body: "ping"}); err != nil {
+		if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), "ping-refill")); err != nil {
 			t.Fatalf("send after a refill: %v", err)
 		}
 	})
@@ -162,7 +164,7 @@ func TestSendCaps(t *testing.T) {
 				t.Fatalf("seed mailbox: %v", err)
 			}
 		}
-		_, err := h.svc.Send(ctx, h.run(0), protocol.CoordSendParams{ToRunID: string(h.run(1)), Body: "one too many"})
+		_, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), "one too many"))
 		if err == nil || err.Code != protocol.CodeConflict || !strings.Contains(err.Message, "inbox is full") {
 			t.Fatalf("send to a full inbox = %v, want an explicit CodeConflict", err)
 		}
@@ -177,13 +179,13 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 	a, b := h.run(0), h.run(1)
 	h.peers.pair(a, b, "src/auth.go")
 
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(a), Body: "hi"}); err == nil || err.Code != protocol.CodeInvalidParams {
+	if _, err := h.svc.Send(ctx, a, sendParams(a, "hi")); err == nil || err.Code != protocol.CodeInvalidParams {
 		t.Fatalf("self-send = %v, want CodeInvalidParams", err)
 	}
 	if err := h.db.UpdateRunStatus(ctx, b, domain.RunMerged, "", nil, nil); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
-	_, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "hi"})
+	_, err := h.svc.Send(ctx, a, sendParams(b, "hi-finished"))
 	if err == nil || err.Code != protocol.CodeUnavailable ||
 		err.Message != fmt.Sprintf("coord.send: run %s has finished", b) {
 		t.Fatalf("send to a finished run = %v, want CodeUnavailable", err)
@@ -200,7 +202,7 @@ func TestInboxBatchAndTokenSemantics(t *testing.T) {
 	a, b := h.run(0), h.run(1)
 	h.peers.pair(a, b, "src/auth.go")
 
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "first"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "first")); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	first, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{})
@@ -215,7 +217,7 @@ func TestInboxBatchAndTokenSemantics(t *testing.T) {
 	}
 
 	// The response never reached the agent: the retry redelivers.
-	if _, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "second"}); serr != nil {
+	if _, serr := h.svc.Send(ctx, a, sendParams(b, "second")); serr != nil {
 		t.Fatalf("send (second): %v", serr)
 	}
 	retry, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{})
@@ -260,7 +262,7 @@ func TestGraceWindowRunsFromTheLastOverlap(t *testing.T) {
 	a, b := h.run(0), h.run(1)
 
 	h.peers.pair(a, b, "src/auth.go")
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-active")); err != nil {
 		t.Fatalf("send across an active overlap: %v", err)
 	}
 
@@ -269,7 +271,7 @@ func TestGraceWindowRunsFromTheLastOverlap(t *testing.T) {
 	h.peers.clear()
 	h.advance(45 * time.Minute)
 
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err == nil || err.Code != protocol.CodeDenied {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-after-clear")); err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("send %v after the overlap cleared = %v, want CodeDenied", 45*time.Minute, err)
 	}
 	st, err := h.svc.Status(ctx, a)
@@ -290,7 +292,7 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 	a, b, c := h.run(0), h.run(1), h.run(2)
 
 	h.peers.pair(a, b, "src/auth.go")
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-active")); err != nil {
 		t.Fatalf("send across an active overlap: %v", err)
 	}
 
@@ -304,11 +306,11 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 	h.waitForInjections(t, 1)
 
 	h.advance(DefaultGrace - time.Minute)
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-grace")); err != nil {
 		t.Fatalf("send inside the grace window: %v", err)
 	}
 	h.advance(2 * time.Minute)
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err == nil || err.Code != protocol.CodeDenied {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-expired")); err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("send after the grace window = %v, want CodeDenied", err)
 	}
 }
@@ -332,7 +334,7 @@ func TestSendPeerCap(t *testing.T) {
 		// Step the clock so the send rate, a separate cap, is never what
 		// answers here.
 		h.advance(sendRefill)
-		_, err := h.svc.Send(ctx, spray, protocol.CoordSendParams{ToRunID: string(to), Body: "ping"})
+		_, err := h.svc.Send(ctx, spray, sendParams(to, "ping"))
 		return err
 	}
 
@@ -427,7 +429,7 @@ func TestSendStampsOneWorkspaceNote(t *testing.T) {
 	}
 	defer timeline.Close() //nolint:errcheck // test cleanup
 
-	if _, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "hold off on auth.go"}); serr != nil {
+	if _, serr := h.svc.Send(ctx, a, sendParams(b, "hold off on auth.go")); serr != nil {
 		t.Fatalf("Send: %v", serr)
 	}
 
@@ -438,8 +440,8 @@ func TestSendStampsOneWorkspaceNote(t *testing.T) {
 		t.Fatal("the coordination message was never stamped into the timeline")
 	}
 	p, ok := note.Payload.(events.TimelinePayload)
-	if !ok || note.ActorID != h.runs[0].MemberID || note.WorkspaceID != h.workspace || note.RunID != a {
-		t.Fatalf("timeline event = %+v, want a note on the sender's run attributed to its owner", note)
+	if !ok || note.ActorID != "" || note.WorkspaceID != h.workspace || note.RunID != a {
+		t.Fatalf("timeline event = %+v, want a server-originated note on the sender's run", note)
 	}
 	if !strings.Contains(p.Message, "coordination message to run "+string(b)) {
 		t.Fatalf("note = %q, want the outgoing stamp", p.Message)
@@ -447,7 +449,7 @@ func TestSendStampsOneWorkspaceNote(t *testing.T) {
 
 	// A second send is what proves the first left exactly one note: its own
 	// stamp is the next event on the stream, with nothing between them.
-	if _, serr := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "still on it"}); serr != nil {
+	if _, serr := h.svc.Send(ctx, a, sendParams(b, "still on it")); serr != nil {
 		t.Fatalf("second Send: %v", serr)
 	}
 	select {
@@ -472,7 +474,7 @@ func TestWitnessedClearSurvivesAnInterleavedRefresh(t *testing.T) {
 	a, b := h.run(0), h.run(1)
 
 	h.peers.pair(a, b, "src/auth.go")
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-active")); err != nil {
 		t.Fatalf("send across an active overlap: %v", err)
 	}
 	h.advance(45 * time.Minute)
@@ -487,11 +489,325 @@ func TestWitnessedClearSurvivesAnInterleavedRefresh(t *testing.T) {
 	// The in-flight event lands: the clearing was witnessed after all, so
 	// the grace window anchors at the event.
 	h.svc.radar.observe(a, nil)
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "still there?"}); err != nil {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "still there?")); err != nil {
 		t.Fatalf("send inside the witnessed grace window: %v", err)
 	}
 	h.advance(DefaultGrace + time.Minute)
-	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{ToRunID: string(b), Body: "ping"}); err == nil || err.Code != protocol.CodeDenied {
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-expired")); err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("send after the grace window = %v, want CodeDenied", err)
 	}
+}
+
+func TestAskReplyCorrelationAndAuthorization(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
+
+	asked, err := h.svc.Ask(ctx, a, protocol.CoordAskParams{
+		ToRunID: string(b), Body: "May I update auth.go?", IdempotencyKey: "ask-1",
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	inbox, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{})
+	if err != nil || len(inbox.Messages) != 1 {
+		t.Fatalf("question inbox = %+v (err %v)", inbox, err)
+	}
+	if inbox.Messages[0].Kind != protocol.CoordMessageKindQuestion ||
+		inbox.Messages[0].CorrelationID != asked.QuestionID {
+		t.Fatalf("question = %+v, want kind/correlation", inbox.Messages[0])
+	}
+
+	// A correlated reply remains deliverable after the ordinary overlap
+	// grace has expired.
+	h.peers.clear()
+	h.advance(DefaultGrace + radarRefreshInterval)
+	replied, err := h.svc.Reply(ctx, b, protocol.CoordReplyParams{
+		QuestionID: asked.QuestionID, Body: "Yes, proceed.", IdempotencyKey: "reply-1",
+	})
+	if err != nil {
+		t.Fatalf("Reply after grace: %v", err)
+	}
+	if replied.MessageID == "" {
+		t.Fatal("Reply returned no message id")
+	}
+	if _, denied := h.svc.Send(ctx, b, protocol.CoordSendParams{
+		ToRunID: string(a), Body: "unrelated", IdempotencyKey: "send-unrelated",
+	}); denied == nil || denied.Code != protocol.CodeDenied {
+		t.Fatalf("unrelated send after grace = %v, want CodeDenied", denied)
+	}
+	got, err := h.svc.Inbox(ctx, a, protocol.CoordInboxParams{})
+	if err != nil || len(got.Messages) != 1 || got.Messages[0].Kind != protocol.CoordMessageKindReply ||
+		got.Messages[0].CorrelationID != asked.QuestionID {
+		t.Fatalf("reply inbox = %+v (err %v), want correlated reply", got, err)
+	}
+
+	retry, err := h.svc.Reply(ctx, b, protocol.CoordReplyParams{
+		QuestionID: asked.QuestionID, Body: "Yes, proceed.", IdempotencyKey: "reply-1",
+	})
+	if err != nil || retry.MessageID != replied.MessageID {
+		t.Fatalf("idempotent reply = %+v (err %v), want %q", retry, err, replied.MessageID)
+	}
+	if _, err := h.svc.Reply(ctx, b, protocol.CoordReplyParams{
+		QuestionID: asked.QuestionID, Body: "changed on retry", IdempotencyKey: "reply-1",
+	}); err == nil || err.Code != protocol.CodeConflict {
+		t.Fatalf("changed reply retry = %v, want CodeConflict", err)
+	}
+}
+
+func TestInboxWaitWakesOnMessage(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
+	result := make(chan protocol.CoordInboxResult, 1)
+	errs := make(chan *protocol.Error, 1)
+	go func() {
+		got, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{WaitSeconds: 2})
+		result <- got
+		errs <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := h.svc.Send(ctx, a, protocol.CoordSendParams{
+		ToRunID: string(b), Body: "wake", IdempotencyKey: "wake-1",
+	}); err != nil {
+		t.Fatalf("Send wake: %v", err)
+	}
+	select {
+	case got := <-result:
+		if err := <-errs; err != nil || len(got.Messages) != 1 || got.Messages[0].Body != "wake" {
+			t.Fatalf("wait result = %+v (err %v)", got, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("inbox wait did not wake on a newly persisted message")
+	}
+}
+
+// coordReportEvidenceCapture is deliberately deterministic so this test can
+// distinguish one automatic capture from an idempotent retry.
+type coordReportEvidenceCapture struct {
+	id    string
+	calls atomic.Int32
+}
+
+func (c *coordReportEvidenceCapture) Capture(_ context.Context, req evidence.Request) (protocol.EvidencePacket, error) {
+	c.calls.Add(1)
+	return protocol.EvidencePacket{
+		ID:             c.id,
+		RunID:          string(req.RunID),
+		CreatorID:      string(req.CreatorID),
+		Trigger:        protocol.EvidenceReport,
+		IdempotencyKey: req.IdempotencyKey,
+	}, nil
+}
+
+type failingCoordReportReservationStore struct {
+	store.MessageStore
+	err error
+}
+
+func (s *failingCoordReportReservationStore) ReserveCoordReport(context.Context, *store.CoordReport) (bool, error) {
+	return false, s.err
+}
+
+func TestCoordReportStopsBeforeEvidenceCaptureWhenReservationFails(t *testing.T) {
+	capture := &coordReportEvidenceCapture{id: "must-not-capture"}
+	reservationErr := fmt.Errorf("sqlite: database is busy")
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = capture
+		c.Mail = &failingCoordReportReservationStore{MessageStore: c.Mail, err: reservationErr}
+	})
+
+	_, rpcErr := h.svc.CoordReport(context.Background(), h.run(0), protocol.CoordReportParams{
+		Outcome:        protocol.CoordOutcomeFailure,
+		Summary:        "reservation must succeed before capture",
+		IdempotencyKey: "reservation-failure",
+	})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeInternal ||
+		!strings.Contains(rpcErr.Message, reservationErr.Error()) {
+		t.Fatalf("CoordReport reservation failure = %v, want contextual CodeInternal", rpcErr)
+	}
+	if got := capture.calls.Load(); got != 0 {
+		t.Fatalf("evidence captures after reservation failure = %d, want 0", got)
+	}
+}
+
+type coordConflictBus struct{}
+
+func (coordConflictBus) Publish(context.Context, events.Event) (events.Event, error) {
+	return events.Event{}, events.ErrEventIDConflict
+}
+
+func (coordConflictBus) Subscribe(context.Context, events.SubscribeOptions) (events.Subscription, error) {
+	return nil, events.ErrBusClosed
+}
+
+func (coordConflictBus) Close() error { return nil }
+
+func TestCoordReportRejectsEmptyEvidencePacket(t *testing.T) {
+	capture := &coordReportEvidenceCapture{}
+	h := newHarness(t, 1, func(c *Config) { c.Evidence = capture })
+	ctx := context.Background()
+	run := h.run(0)
+	_, err := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "nothing retained",
+		IdempotencyKey: "empty-evidence",
+	})
+	if err == nil || err.Code != protocol.CodeInternal ||
+		!strings.Contains(err.Message, "empty packet id") {
+		t.Fatalf("CoordReport with empty evidence packet = %v, want empty packet id internal error", err)
+	}
+	reserved, lookupErr := h.db.GetCoordReportByIdempotency(ctx, run, "empty-evidence")
+	if lookupErr != nil || reserved.State != store.CoordReportPending {
+		t.Fatalf("empty evidence reservation = %+v (err %v), want retryable pending reservation", reserved, lookupErr)
+	}
+}
+
+func TestCoordReportValidationAndIdempotency(t *testing.T) {
+	capture := &coordReportEvidenceCapture{id: "ev_report_01"}
+	h := newHarness(t, 1, func(c *Config) { c.Evidence = capture })
+	ctx := context.Background()
+	run := h.run(0)
+	first, err := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeBlocked, Summary: "needs review",
+		EvidenceRefs: []string{"ev_01"}, IdempotencyKey: "report-1",
+	})
+	if err != nil || first.ReportID == "" || first.EvidenceRef != capture.id {
+		t.Fatalf("CoordReport = %+v (err %v), want a report and captured evidence ref %q", first, err, capture.id)
+	}
+	retry, err := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeBlocked, Summary: "needs review",
+		EvidenceRefs: []string{"ev_01"}, IdempotencyKey: "report-1",
+	})
+	if err != nil || retry.ReportID != first.ReportID || retry.EvidenceRef != first.EvidenceRef {
+		t.Fatalf("idempotent CoordReport = %+v (err %v), want report %q and evidence ref %q", retry, err, first.ReportID, first.EvidenceRef)
+	}
+	if _, err := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "different",
+		IdempotencyKey: "report-1",
+	}); err == nil || err.Code != protocol.CodeConflict {
+		t.Fatalf("changed CoordReport retry = %v, want CodeConflict", err)
+	}
+	if got := capture.calls.Load(); got != 1 {
+		t.Fatalf("evidence captures = %d, want 1 across initial report and retry", got)
+	}
+	stored, storeErr := h.db.GetCoordReportByIdempotency(ctx, run, "report-1")
+	if storeErr != nil {
+		t.Fatalf("GetCoordReportByIdempotency: %v", storeErr)
+	}
+	if stored.ID != first.ReportID || len(stored.EvidenceRefs) != 2 ||
+		stored.EvidenceRefs[0] != "ev_01" || stored.EvidenceRefs[1] != capture.id {
+		t.Fatalf("durable report = %+v, want report %q with refs [ev_01 %q]", stored, first.ReportID, capture.id)
+	}
+
+	if _, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "another key",
+		IdempotencyKey: "report-2",
+	}); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {
+		t.Fatalf("different-key CoordReport = %v, want CodeConflict", rpcErr)
+	}
+
+	for _, bad := range []protocol.CoordReportParams{
+		{Outcome: "unknown", Summary: "bad", IdempotencyKey: "bad-1"},
+		{Outcome: protocol.CoordOutcomeSuccess, Summary: "bad"},
+		{Outcome: protocol.CoordOutcomeSuccess, Summary: strings.Repeat("x", protocol.CoordMaxSummaryBytes+1), IdempotencyKey: "bad-2"},
+		{Outcome: protocol.CoordOutcomeSuccess, Summary: "too many refs",
+			EvidenceRefs: make([]string, protocol.CoordMaxEvidenceRefs), IdempotencyKey: "bad-refs"},
+	} {
+		if _, err := h.svc.CoordReport(ctx, run, bad); err == nil || err.Code != protocol.CodeInvalidParams {
+			t.Errorf("invalid CoordReport %+v = %v, want CodeInvalidParams", bad, err)
+		}
+	}
+	if got := capture.calls.Load(); got != 1 {
+		t.Fatalf("invalid report requests triggered evidence capture: %d calls, want 1", got)
+	}
+}
+
+func TestCoordReportPublishesEvidenceOnlyAfterFinalizationOnce(t *testing.T) {
+	capture := &coordReportEvidenceCapture{id: "ev_report_event"}
+	h := newHarness(t, 1, func(c *Config) { c.Evidence = capture })
+	ctx := context.Background()
+	run := h.run(0)
+	sub, err := h.bus.Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeEvidencePacket}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close() //nolint:errcheck // test cleanup
+
+	first, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "published once",
+		IdempotencyKey: "report-event",
+	})
+	if rpcErr != nil {
+		t.Fatalf("CoordReport: %v", rpcErr)
+	}
+	select {
+	case event := <-sub.Events():
+		payload, ok := event.Payload.(events.EvidencePacketPayload)
+		if !ok || payload.PacketID != first.EvidenceRef || event.WorkspaceID != h.workspace || event.RunID != run {
+			t.Fatalf("evidence event = %+v, want packet %q on run %s", event, first.EvidenceRef, run)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("coord.report returned without publishing its finalized evidence event")
+	}
+	if _, rpcErr = h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "published once",
+		IdempotencyKey: "report-event",
+	}); rpcErr != nil {
+		t.Fatalf("idempotent CoordReport retry: %v", rpcErr)
+	}
+	select {
+	case event := <-sub.Events():
+		t.Fatalf("idempotent retry published duplicate evidence event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+func TestCoordOutboxQuarantinesEventIDConflict(t *testing.T) {
+	ctx := context.Background()
+	t.Run("report", func(t *testing.T) {
+		capture := &coordReportEvidenceCapture{id: "ev_conflict_report"}
+		h := newHarness(t, 1, func(c *Config) { c.Evidence = capture })
+		h.svc.cfg.Bus = coordConflictBus{}
+		result, rpcErr := h.svc.CoordReport(ctx, h.run(0), protocol.CoordReportParams{
+			Outcome: protocol.CoordOutcomeFailure, Summary: "event collision",
+			IdempotencyKey: "report-event-conflict",
+		})
+		if rpcErr != nil || result.ReportID == "" {
+			t.Fatalf("CoordReport = %+v (err %v), want finalized report with deferred publication", result, rpcErr)
+		}
+		if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
+			t.Fatalf("drain report conflict: %v", err)
+		}
+		pub, err := h.db.GetCoordReportPublication(ctx, result.ReportID)
+		if err != nil {
+			t.Fatalf("GetCoordReportPublication: %v", err)
+		}
+		if pub.QuarantinedAt == nil || pub.QuarantineError == "" || pub.Attempts != 1 {
+			t.Fatalf("report conflict state = %+v, want one quarantined attempt", pub)
+		}
+	})
+	t.Run("audit", func(t *testing.T) {
+		h := newHarness(t, 2)
+		h.svc.cfg.Bus = coordConflictBus{}
+		msg := &store.RunMessage{
+			WorkspaceID: h.workspace, FromRun: h.run(0), ToRun: h.run(1),
+			Body: "event collision",
+		}
+		if err := h.db.AppendRunMessage(ctx, msg, 100); err != nil {
+			t.Fatalf("AppendRunMessage: %v", err)
+		}
+		if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
+			t.Fatalf("drain audit conflict: %v", err)
+		}
+		pub, err := h.db.GetCoordAuditPublication(ctx, msg.ID)
+		if err != nil {
+			t.Fatalf("GetCoordAuditPublication: %v", err)
+		}
+		if pub.QuarantinedAt == nil || pub.QuarantineError == "" || pub.Attempts != 1 {
+			t.Fatalf("audit conflict state = %+v, want one quarantined attempt", pub)
+		}
+	})
 }

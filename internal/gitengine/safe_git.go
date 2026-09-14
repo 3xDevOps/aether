@@ -297,8 +297,7 @@ func (e *Engine) gitWorktree(ctx context.Context, workTree, gitDir, index string
 	argv := []string{
 		"--git-dir", gitDir,
 		"--work-tree", workTree,
-		"-c", "core.bare=false",
-		"-c", "core.worktree=" + workTree,
+		"-c", "safe.directory=*",
 		"-c", "core.quotePath=false",
 		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "core.fsmonitor=false",

@@ -992,7 +992,7 @@ automatic.
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
-| `transcripts/` | Per-run PTY recordings (asciicast v2). |
+| `transcripts/` | Per-run PTY transcripts (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
@@ -1024,7 +1024,7 @@ Three consequences worth knowing:
   `repos/`, and the checkout line is what reclaiming that checkout would give
   back. See [failure-handling.md](failure-handling.md).
 - **Keep the path short.** Per-run coordination sockets live under
-  `coord/<run-id>/coord2.sock`, and unix socket paths have a hard length limit
+  `coord/<run-id>/coord3.sock`, and unix socket paths have a hard length limit
   (about 100 characters). A very deep data directory makes the server log
   `coordination unavailable for this run` and fall back to the overlap notice.
   `/var/lib/aether` is nowhere near the limit.

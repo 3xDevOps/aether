@@ -218,6 +218,48 @@ func (r *radar) authorizedSet(ctx context.Context, run domain.RunID) ([]authoriz
 	return out, nil
 }
 
+// authorizedSetBounded returns a deterministic prefix without allocating a
+// result proportional to the number of overlapping peers. The full set is
+// still used for authorization; only coord.status uses this capped view.
+func (r *radar) authorizedSetBounded(ctx context.Context, run domain.RunID, limit int) ([]authorizedPeer, int, bool, error) {
+	if limit <= 0 {
+		return nil, 0, false, nil
+	}
+	if err := r.refresh(ctx); err != nil {
+		return nil, 0, false, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	peers := r.state[run]
+	total := len(peers)
+	capacity := total
+	if capacity > limit {
+		capacity = limit
+	}
+	out := make([]authorizedPeer, 0, capacity)
+	for id, st := range peers {
+		p := authorizedPeer{run: id, files: st.files, state: protocol.CoordPeerActive}
+		if !st.live {
+			p.state, p.expiry, p.files = protocol.CoordPeerGrace, st.expiry(r.grace), nil
+		}
+		if len(out) < limit {
+			out = append(out, p)
+			continue
+		}
+		worst := 0
+		for i := 1; i < len(out); i++ {
+			if out[worst].run < out[i].run {
+				worst = i
+			}
+		}
+		if p.run < out[worst].run {
+			out[worst] = p
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].run < out[b].run })
+	return out, total, total > len(out), nil
+}
+
 // authorized reports whether from may message to, and under which state.
 // An empty state means the send is denied.
 func (r *radar) authorized(ctx context.Context, from, to domain.RunID) (authorizedPeer, error) {

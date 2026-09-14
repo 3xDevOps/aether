@@ -147,6 +147,7 @@ func handlerPacket(id string, ws domain.WorkspaceID, run domain.RunID, creator d
 		EventBoundary:  1,
 	}
 }
+
 func handlerRoomMessage(id string, ws domain.WorkspaceID, run domain.RunID, actor domain.MemberID) *store.RoomMessage {
 	return &store.RoomMessage{
 		ID:             id,

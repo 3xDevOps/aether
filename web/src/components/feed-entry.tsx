@@ -81,7 +81,7 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
   'run.diff': (p) => suffix(fileCount(p.files), 'changed'),
   'run.cost': (p) => `${p.input_tokens} in, ${p.output_tokens} out`,
   'run.overlap': (p) => overlapLine(p.with),
-  'workspace.timeline': (p) => join([p.kind, p.message]),
+  'workspace.timeline': (p) => timelineLine(p),
   'workspace.approval': (p) => join([p.action, p.decision]),
   'workspace.presence': (p) => join([p.state]),
   'workspace.budget': (p) => budgetLine(p),
@@ -97,6 +97,39 @@ function describe(event: Event): ReactNode {
   return describers[event.type as EventType]((event.payload ?? {}) as Record<string, unknown>)
 }
 
+function timelineLine(p: Record<string, unknown>): ReactNode {
+  if (p.kind !== 'report') return join([p.kind, p.message])
+  const outcome = boundedText(p.outcome, 64)
+  const summary = boundedText(p.summary, 512)
+  const nextAction = boundedText(p.next_action, 512)
+  const reportID = boundedText(p.report_id, 128)
+  const refs = Array.isArray(p.evidence_refs)
+    ? p.evidence_refs
+        .filter((ref): ref is string => typeof ref === 'string' && ref.length > 0)
+        .slice(0, 8)
+        .map((ref) => boundedText(ref, 128))
+    : []
+  return (
+    <span className="inline-flex max-w-full flex-wrap gap-x-2 gap-y-1">
+      {reportID && <span>Report: <code>{reportID}</code></span>}
+      {outcome && <span>Outcome: {outcome}</span>}
+      {summary && <span>Summary: {summary}</span>}
+      {nextAction && <span>Next action: {nextAction}</span>}
+      {refs.length > 0 && (
+        <span>
+          Evidence: {refs.map((ref, index) => (
+            <code key={`${ref}-${index}`} className="mr-1">{ref}</code>
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function boundedText(value: unknown, max: number): string {
+  if (typeof value !== 'string') return ''
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
 
 // An absent or empty `with` means the run's overlaps cleared.
 function overlapLine(peers: unknown): string {
