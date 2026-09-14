@@ -37,6 +37,20 @@ func categoriesByName(p Preview) map[string]Category {
 	return out
 }
 
+// shrinkBudget overrides the per-file and per-snapshot caps for a test
+// that has to overrun them, so a fixture proving the budget accounting
+// does not need megabytes of real content to do it - the scanner's cost
+// grows with content size, and a test writing tens of megabytes to disk
+// is what made this package slow under -race. It restores the real caps
+// on cleanup; a test that calls it must not run with t.Parallel, since
+// the caps are package state.
+func shrinkBudget(t *testing.T, perFile, total int64) {
+	t.Helper()
+	prevFile, prevTotal := maxFileBytes, maxTotalBytes
+	maxFileBytes, maxTotalBytes = perFile, total
+	t.Cleanup(func() { maxFileBytes, maxTotalBytes = prevFile, prevTotal })
+}
+
 func TestInventoryGroupsFilesByCategory(t *testing.T) {
 	root := setupClaudeRoot(t)
 	files := map[string]string{
@@ -300,9 +314,10 @@ func TestInventoryExcludesOversizedFileUnread(t *testing.T) {
 // once the per-snapshot cap is reached, so a preview can never offer an
 // import the server rejects for size.
 func TestInventoryStopsAtTotalBudget(t *testing.T) {
+	shrinkBudget(t, 4096, 81920)
 	root := setupClaudeRoot(t)
 	// Just under the per-file cap each, so the total cap is what bites.
-	body := strings.Repeat("x", profilesvc.MaxFileBytes-1)
+	body := strings.Repeat("x", int(maxFileBytes)-1)
 	for i := range 24 {
 		mustWrite(t, filepath.Join(root, "skills", fmt.Sprintf("s%02d.md", i)), body)
 	}
@@ -311,9 +326,9 @@ func TestInventoryStopsAtTotalBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Bytes > profilesvc.MaxTotalBytes {
+	if preview.Bytes > maxTotalBytes {
 		t.Fatalf("preview promises %d bytes, over the %d-byte snapshot cap",
-			preview.Bytes, profilesvc.MaxTotalBytes)
+			preview.Bytes, maxTotalBytes)
 	}
 	over := 0
 	for _, e := range preview.Excluded {
@@ -353,15 +368,16 @@ func TestInventoryHonorsContextCancellation(t *testing.T) {
 // "skills" and "commands" alphabetically, and together they overrun the
 // budget.
 func TestInventorySpendsBudgetByPriority(t *testing.T) {
+	shrinkBudget(t, 4096, 81920)
 	root := setupClaudeRoot(t)
 	// Just under the per-file cap each, so the snapshot cap is what bites.
-	body := strings.Repeat("x", profilesvc.MaxFileBytes-1)
-	// 15 MiB of plugin cache, sorting before "skills".
+	body := strings.Repeat("x", int(maxFileBytes)-1)
+	// 15 files of plugin cache, sorting before "skills".
 	for i := range 15 {
 		mustWrite(t, filepath.Join(root, "plugins", fmt.Sprintf("p%02d.json", i)), body)
 	}
-	// 15 MiB of loose files, sorting after "skills" but before nothing
-	// that matters - "other" is last by priority either way.
+	// 15 files of loose content, sorting after "skills" but before
+	// nothing that matters - "other" is last by priority either way.
 	for i := range 15 {
 		mustWrite(t, filepath.Join(root, "aaa-notes", fmt.Sprintf("n%02d.txt", i)), body)
 	}
@@ -382,7 +398,7 @@ func TestInventorySpendsBudgetByPriority(t *testing.T) {
 			t.Errorf("no %s survived the budget; carried = %v", want, carried)
 		}
 	}
-	if preview.Bytes > profilesvc.MaxTotalBytes {
+	if preview.Bytes > maxTotalBytes {
 		t.Errorf("preview promises %d bytes, over the cap", preview.Bytes)
 	}
 	// The bulk categories are what gets cut, not the configuration.
@@ -406,20 +422,21 @@ func TestInventorySpendsBudgetByPriority(t *testing.T) {
 // clean file further down was reported over-budget while the snapshot
 // still had room for every byte of it.
 func TestInventoryChargesOnlyCarriedFilesToBudget(t *testing.T) {
+	shrinkBudget(t, 4096, 81920)
 	root := setupClaudeRoot(t)
 	secret, err := os.ReadFile(filepath.Join("testdata", "embedded_token.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Just under the per-file cap each, so the snapshot cap is what bites.
-	const size = profilesvc.MaxFileBytes - 1
+	size := maxFileBytes - 1
 	// Sorts first inside skills/, so it is read before the clean files.
 	mustWrite(t, filepath.Join(root, "skills", "aaa-leak.md"),
-		string(secret)+strings.Repeat("x", size-len(secret)))
+		string(secret)+strings.Repeat("x", int(size)-len(secret)))
 	// Exactly as many clean files as the snapshot cap holds: charging the
 	// flagged file too costs the last one its place.
-	clean := profilesvc.MaxTotalBytes / size
-	body := strings.Repeat("x", size)
+	clean := maxTotalBytes / size
+	body := strings.Repeat("x", int(size))
 	for i := range clean {
 		mustWrite(t, filepath.Join(root, "skills", fmt.Sprintf("s%02d.md", i)), body)
 	}
@@ -433,11 +450,11 @@ func TestInventoryChargesOnlyCarriedFilesToBudget(t *testing.T) {
 			t.Errorf("%s reported over-budget behind a dropped file: %s", e.Path, e.Detail)
 		}
 	}
-	if preview.Files != clean {
+	if preview.Files != int(clean) {
 		t.Errorf("carried %d files, want %d clean skills", preview.Files, clean)
 	}
-	if preview.Bytes != int64(clean)*size {
-		t.Errorf("preview promises %d bytes, want %d", preview.Bytes, int64(clean)*size)
+	if preview.Bytes != clean*size {
+		t.Errorf("preview promises %d bytes, want %d", preview.Bytes, clean*size)
 	}
 	if len(preview.Excluded) != 1 || preview.Excluded[0].Path != "skills/aaa-leak.md" ||
 		preview.Excluded[0].Reason != ExcludeSecret {
