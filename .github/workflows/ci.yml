@@ -131,10 +131,15 @@ jobs:
       # included). Other Linux jobs restore only. The bun cache follows the
       # same rule and the same owner. windows saves its own Go cache: a
       # different runner.os keeps its key from colliding with this one.
+      # Saved on a red run too: a failed test does not invalidate compiled
+      # objects or downloaded modules, and a flaky suite would otherwise leave
+      # every following run cold.
       - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
       - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
 
@@ -464,6 +469,7 @@ jobs:
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
           go test ./cmd/aether $pkgs
       - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
 
