@@ -46,15 +46,27 @@ class MainActivity : ComponentActivity() {
     private var fileChooser: ValueCallback<Array<Uri>>? = null
 
     /**
+     * Whether the platform backgrounds this window itself when back is
+     * pressed with no history left.
+     *
+     * It does that only from API 31, and only for a task whose root was
+     * started from the launcher: `shouldMoveTaskToBack` wants both a home
+     * launch source and an ACTION_MAIN + CATEGORY_LAUNCHER intent. The
+     * session SetupActivity hands over has neither, and there the platform
+     * finishes the window instead, taking the WebView and the terminal's
+     * scrollback with it. Decided once from the intent that created this
+     * window, because that is what the platform reads.
+     */
+    private var platformBackgroundsUs = false
+
+    /**
      * Back walks the dashboard's own history and then leaves the app running:
      * finishing would drop the terminal's scrollback on the way to the home
-     * screen. From API 31 the platform already backgrounds a root launcher
-     * activity, with the predictive back-to-home animation, so the callback
-     * claims the gesture only while there is history to walk; claiming it
-     * unconditionally would turn that animation off.
+     * screen. Where the platform does that itself the callback stands down at
+     * the root, so the predictive back-to-home animation runs.
      */
     private val back =
-        object : OnBackPressedCallback(Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (web.canGoBack()) web.goBack() else moveTaskToBack(true)
             }
@@ -93,6 +105,11 @@ class MainActivity : ComponentActivity() {
         applyInsets()
         configureWebView()
 
+        platformBackgroundsUs =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                intent?.action == Intent.ACTION_MAIN &&
+                intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+        back.isEnabled = !platformBackgroundsUs
         onBackPressedDispatcher.addCallback(this, back)
 
         // A task Android recreates after killing the process is handed its
@@ -215,9 +232,7 @@ class MainActivity : ComponentActivity() {
                     url: String,
                     isReload: Boolean,
                 ) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        back.isEnabled = view.canGoBack()
-                    }
+                    if (platformBackgroundsUs) back.isEnabled = view.canGoBack()
                 }
 
                 override fun onReceivedError(
