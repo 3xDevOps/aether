@@ -393,12 +393,22 @@ jobs:
       # the workspace, so the Makefile's default cache directory is moved into
       # it. A hosted runner and a self-hosted one lay the archive out
       # differently, hence runner.environment in the key.
+      # A fork pull request runs under pull_request_target, where GITHUB_REF
+      # is the default branch: a cache saved there is restored by later runs
+      # on main through the restore-keys prefix, and with org.gradle.caching
+      # on that carries compiled task outputs. Same rule as the setup-go cache
+      # above.
       - uses: actions/cache@v4
+        if: github.event_name != 'pull_request_target'
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
           restore-keys: |
             gradle-${{ runner.os }}-${{ runner.environment }}-
+      # The wrapper jar is committed, and gradle-wrapper.properties pins the
+      # distribution by sha256; this is what checks the jar itself against
+      # Gradle's published checksums before it runs.
+      - uses: gradle/actions/wrapper-validation@v4
       - name: Cross-compile release matrix
         env:
           ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
