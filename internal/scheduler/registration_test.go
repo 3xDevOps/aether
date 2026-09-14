@@ -46,6 +46,7 @@ func (r *recordingCoordinator) file(run domain.RunID, name string) []byte {
 // naming the staged bridge and the argument pointing at it, and one that
 // does not is launched untouched - notice-only, with no config written.
 func TestHarnessMCPRegistration(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
 	coord := &recordingCoordinator{
@@ -97,6 +98,7 @@ func TestHarnessMCPRegistration(t *testing.T) {
 // asset, not the harness name: it is the claim a restart reads back, and
 // the scheduler holds a parked run for its member on the strength of it.
 func TestHarnessStatusReporterRegistration(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
 	coord := &recordingCoordinator{
@@ -187,6 +189,7 @@ func tuiHarnessCommand(t *testing.T, command []string) []string {
 // opencode is told to load it from there, an interactive run alone, without
 // changing the harness command passed through the TUI supervisor.
 func TestOpenCodeStatusReporterRegistration(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
 	coord := &recordingCoordinator{
@@ -259,6 +262,7 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 // one extension file, so each has to be launched with what it was given
 // and recorded as what it can actually say.
 func TestReporterRegistrationPerHarness(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
 	coord := &recordingCoordinator{

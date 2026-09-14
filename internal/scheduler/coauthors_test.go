@@ -49,6 +49,7 @@ func newSteerer(t *testing.T, e *testEnv, name, gitName, gitEmail string) *domai
 // identity is the one the member set, not their display name and internal
 // address.
 func TestLaunchSpecUsesMemberGitIdentity(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
 		t.Fatalf("UpdateMemberGitIdentity: %v", err)
@@ -72,6 +73,7 @@ func TestLaunchSpecUsesMemberGitIdentity(t *testing.T) {
 // them a co-author, stamped on the timeline exactly once however often
 // they type.
 func TestSteeringByTypingIsRecordedOnce(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
 	run, _ := e.launchFake(t, "add OAuth login")
@@ -102,6 +104,7 @@ func TestSteeringByTypingIsRecordedOnce(t *testing.T) {
 // commit is authored as the run owner and carries one trailer per steerer,
 // with the fallback address for a member who set no git email.
 func TestAetherCommitCreditsOwnerAndSteerers(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
 		t.Fatalf("UpdateMemberGitIdentity: %v", err)
@@ -153,6 +156,7 @@ func TestAetherCommitCreditsOwnerAndSteerers(t *testing.T) {
 // contract: the list is in the coordination directory before the container
 // starts, and it is rewritten as steerers join.
 func TestRunCoAuthorsFileTracksSteerers(t *testing.T) {
+	t.Parallel()
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
 	coord, _ := withCoordination(t, e)
@@ -183,6 +187,7 @@ func TestRunCoAuthorsFileTracksSteerers(t *testing.T) {
 // handoff the owner is that address and drops out; after it the incoming
 // owner is on no commit the agent writes unless the file says so.
 func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
+	t.Parallel()
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
 	coord, _ := withCoordination(t, e)
@@ -228,6 +233,7 @@ func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 // trailer says nothing, and one matching the address the commit is
 // already authored as credits the author twice.
 func TestCoAuthorTrailersDedupeByAddress(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	first := newSteerer(t, e, "Bot", "Release Bot", "bot@example.com")
 	second := newSteerer(t, e, "Bot on the laptop", "Release Bot", "BOT@example.com")
@@ -260,6 +266,7 @@ func TestCoAuthorTrailersDedupeByAddress(t *testing.T) {
 // list rewritten, so the agent's next commit credits the address they just
 // gave rather than the aether.local fallback.
 func TestGitIdentityChangeRefreshesLiveRuns(t *testing.T) {
+	t.Parallel()
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
 	coord, _ := withCoordination(t, e)
@@ -297,6 +304,7 @@ func TestGitIdentityChangeRefreshesLiveRuns(t *testing.T) {
 // too, or the container keeps telling the agent to credit the address they
 // have just stopped using.
 func TestGitIdentityChangeReachesARunTakenOverInAHandoff(t *testing.T) {
+	t.Parallel()
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
 	coord, _ := withCoordination(t, e)
@@ -345,6 +353,7 @@ const probeWindow = 250 * time.Millisecond
 // and then writes them, so without a lock around the pair the one that read
 // first can land last and drop whoever it did not see.
 func TestConcurrentSteersBothReachTheCoAuthorList(t *testing.T) {
+	t.Parallel()
 	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
 	e := newTestEnv(t, withServerBinary(staged))
 	coord, _ := withCoordination(t, e)

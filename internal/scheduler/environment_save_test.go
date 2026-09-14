@@ -13,6 +13,7 @@ import (
 )
 
 func TestSaveEnvironmentRequiresRunningTerminal(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
 	if !errors.Is(err, ErrTerminalNotRunning) {
@@ -20,8 +21,21 @@ func TestSaveEnvironmentRequiresRunningTerminal(t *testing.T) {
 	}
 }
 
+// stepClock returns a Config.Now override that starts at time.Now() and
+// advances by step on every call, so two image tags taken moments apart
+// never collide on Unix()'s one-second granularity without a real sleep.
+func stepClock(step time.Duration) func() time.Time {
+	next := time.Now()
+	return func() time.Time {
+		now := next
+		next = next.Add(step)
+		return now
+	}
+}
+
 func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.Now = stepClock(2 * time.Second) })
 	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
@@ -45,7 +59,6 @@ func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 		t.Fatalf("commit calls = %+v, want terminal %q and %q", calls, terminal.ContainerID, first)
 	}
 
-	time.Sleep(1100 * time.Millisecond)
 	second, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
 	if err != nil {
 		t.Fatalf("second SaveEnvironment: %v", err)
@@ -78,6 +91,7 @@ func TestSaveEnvironmentCommitsAndReplacesSavedImage(t *testing.T) {
 }
 
 func TestResetEnvironmentStopsTerminalAndClearsImage(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
@@ -109,6 +123,7 @@ func TestResetEnvironmentStopsTerminalAndClearsImage(t *testing.T) {
 }
 
 func TestResetEnvironmentWithoutTerminalOrImageIsNoop(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.sched.ResetEnvironment(context.Background(), e.member.ID); err != nil {
 		t.Fatalf("ResetEnvironment: %v", err)
@@ -123,7 +138,8 @@ func TestResetEnvironmentWithoutTerminalOrImageIsNoop(t *testing.T) {
 }
 
 func TestSaveEnvironmentRetriesTagsStillInUse(t *testing.T) {
-	e := newTestEnv(t, nil)
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.Now = stepClock(2 * time.Second) })
 	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
@@ -134,7 +150,6 @@ func TestSaveEnvironmentRetriesTagsStillInUse(t *testing.T) {
 	// A run container still holds the first tag when the second save
 	// happens: the daemon refuses the removal, the save still succeeds.
 	e.rt.holdImage(first, true)
-	time.Sleep(1100 * time.Millisecond)
 	second, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
 	if err != nil {
 		t.Fatalf("second SaveEnvironment: %v", err)

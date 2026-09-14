@@ -13,6 +13,7 @@ import (
 )
 
 func TestEnsureRunShellTabStartsBashInWorkspace(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.WorktreeMount = "/workspace" })
 	run, _ := e.launchFake(t, "shell")
 
@@ -30,6 +31,7 @@ func TestEnsureRunShellTabStartsBashInWorkspace(t *testing.T) {
 }
 
 func TestEnsureRunShellTabFallsBackToSh(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "shell fallback")
 	var attempts int
@@ -51,6 +53,7 @@ func TestEnsureRunShellTabFallsBackToSh(t *testing.T) {
 }
 
 func TestEnsureRunShellTabRejectsInvalidAndMissingRuns(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if err := e.sched.EnsureRunShellTab(t.Context(), "missing", "tab", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("missing run error = %v, want ErrNoSession", err)
@@ -62,6 +65,7 @@ func TestEnsureRunShellTabRejectsInvalidAndMissingRuns(t *testing.T) {
 }
 
 func TestEnsureRunShellTabWaitsForRecovery(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "recover shell")
 	e.sched.mu.Lock()
@@ -81,6 +85,7 @@ func TestEnsureRunShellTabWaitsForRecovery(t *testing.T) {
 }
 
 func TestEnsureRunShellTabCreatesAndReconnectsForStalledLiveRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "stalled shell")
 	e.sched.mu.Lock()
@@ -103,6 +108,7 @@ func TestEnsureRunShellTabCreatesAndReconnectsForStalledLiveRun(t *testing.T) {
 }
 
 func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "shell limit")
 	for _, tab := range []string{"one", "two", "three", "four"} {
@@ -122,6 +128,7 @@ func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
 }
 
 func TestEnsureRunShellTabRejectsPausedStalledRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "paused shell")
 	e.sched.mu.Lock()
@@ -138,6 +145,7 @@ func TestEnsureRunShellTabRejectsPausedStalledRun(t *testing.T) {
 }
 
 func TestFinalizeStopsRunShellTabs(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, c := e.launchFake(t, "shell cleanup")
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "cleanup", 80, 24); err != nil {
@@ -156,6 +164,7 @@ func TestFinalizeStopsRunShellTabs(t *testing.T) {
 }
 
 func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, c := e.launchFake(t, "completed shell")
 	c.exitNow(0)
@@ -170,6 +179,7 @@ func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
 }
 
 func TestEnsureRunShellUsesLiveSidecarBeforeRecoveryRegistersRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "recover sidecar shell")
 	e.sched.mu.Lock()

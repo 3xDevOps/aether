@@ -97,6 +97,14 @@ type Config struct {
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
 	RunContainerTTL      time.Duration // default 1h; negative destroys on close
+	// ExitProbeTimeout bounds the short non-destructive Wait recovery uses
+	// on startup to learn whether a container already exited before
+	// attach. Defaults to defaultExitProbeTimeout.
+	ExitProbeTimeout time.Duration
+	// Now returns the current time. Defaults to time.Now; tests override it
+	// to control the second-granularity saved-environment image tag
+	// (environment_save.go) without a real sleep.
+	Now func() time.Time
 	// MinFreeBytes is the free-space floor: a launch or relaunch that
 	// would start below it is refused with ErrDiskFull rather than filling
 	// the disk out from under the runs already on it. Runs already
@@ -414,6 +422,12 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	if cfg.RunContainerTTL == 0 {
 		cfg.RunContainerTTL = DefaultRunContainerTTL
+	}
+	if cfg.ExitProbeTimeout <= 0 {
+		cfg.ExitProbeTimeout = defaultExitProbeTimeout
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
 	harnesses := defaultHarnesses()
 	for name, spec := range cfg.Harnesses {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -30,7 +29,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	tag := fmt.Sprintf("%s:%d", memberImageRepo(member), time.Now().Unix())
+	tag := fmt.Sprintf("%s:%d", memberImageRepo(member), s.cfg.Now().Unix())
 	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}

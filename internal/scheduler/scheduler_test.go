@@ -176,6 +176,20 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		StateDir:      filepath.Join(dir, "scheduler"),
 		Homes:         homes,
 		StandardImage: "busybox:1.36",
+		// The default two-second window exists for a daemon that really
+		// takes that long to answer; the fake runtime never does, so tests
+		// use a probe short enough that a reboot scenario is not the
+		// slowest thing in the package.
+		ExitProbeTimeout: 20 * time.Millisecond,
+		// Gives launchFake (and any other test that just needs a running
+		// fake agent) a real argv without AETHER_FAKE_AGENT: t.Setenv
+		// forbids t.Parallel, and most callers do not care what the
+		// deterministic agent's own argv is. Tests pinning the env
+		// fallback itself still set AETHER_FAKE_AGENT explicitly and stay
+		// serial.
+		Harnesses: map[string]HarnessSpec{
+			"fake": {TUIArgs: []string{"fake-agent", "{task}"}, HeadlessArgs: []string{"fake-agent", "{task}"}},
+		},
 	}
 	if mutate != nil {
 		mutate(&e.cfg)
@@ -221,7 +235,6 @@ func (e *testEnv) subscribe(t *testing.T) events.Subscription {
 // it together with its fake container.
 func (e *testEnv) launchFake(t *testing.T, task string) (*domain.Run, *fakeContainer) {
 	t.Helper()
-	t.Setenv(fakeAgentEnv, "fake-agent {task}")
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "fake", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -251,6 +264,7 @@ func readSavedTerminalImage(t *testing.T, e *testEnv, member domain.MemberID, re
 }
 
 func TestSaveTerminalImageUsesRunAccountHome(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	account := &domain.Member{
 		DisplayName: "Grace", PublicKey: testPublicKey(t),
@@ -259,7 +273,6 @@ func TestSaveTerminalImageUsesRunAccountHome(t *testing.T) {
 	if err := e.db.CreateMember(t.Context(), account); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(fakeAgentEnv, "fake-agent {task}")
 	run, err := e.sched.Launch(
 		t.Context(), e.ws.ID, e.member.ID, account.ID,
 		"save image", "fake", domain.LaunchTUI,
@@ -384,6 +397,7 @@ func sendScriptedWaitOutcome(t *testing.T, rt *scriptedWaitRuntime, outcome scri
 }
 
 func TestHappyPath(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	ctx := t.Context()
@@ -474,6 +488,7 @@ func TestHappyPath(t *testing.T) {
 }
 
 func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-headless", Mode: domain.LaunchHeadless}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
@@ -484,6 +499,7 @@ func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
 }
 
 func TestTUIContainerUsesSafePersistentSupervisor(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-tui", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Mode: domain.LaunchTUI}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
@@ -575,7 +591,7 @@ func startTestPTYProcess(t *testing.T, argv []string) *testPTYProcess {
 
 func (p *testPTYProcess) waitForOutput(t *testing.T, marker string) {
 	t.Helper()
-	timer := time.NewTimer(3 * time.Second)
+	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
 	for !strings.Contains(p.output.String(), marker) {
 		select {
@@ -605,6 +621,7 @@ func (p *testPTYProcess) drainOutput() {
 }
 
 func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
+	t.Parallel()
 	wrapped := wrapTUICommand([]string{"/bin/sh", "-c", "printf 'harness-ready\\n'; IFS= read -r line; printf 'harness-input:%s\\n' \"$line\""})
 	p := startTestPTYProcess(t, wrapped)
 	defer func() {
@@ -635,7 +652,7 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 		if err == nil {
 			t.Fatal("supervisor exited successfully after TERM")
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitTimeout):
 		t.Fatal("supervisor did not exit after TERM reached login shell")
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -653,6 +670,7 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 }
 
 func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
+	t.Parallel()
 	wrapped := wrapTUICommand([]string{"/bin/sh", "-c", "trap 'printf \"harness-%s\\n\" term; exit 0' TERM; printf 'harness-%s\\n' ready; while :; do read -r line; done"})
 	p := startTestPTYProcess(t, wrapped)
 	defer func() {
@@ -669,11 +687,15 @@ func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 		if err == nil {
 			t.Fatal("supervisor exited successfully after TERM")
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(waitTimeout):
 		t.Fatal("supervisor did not exit after TERM reached harness")
 	}
-	time.Sleep(100 * time.Millisecond)
-	p.drainOutput()
+	// The trap is installed before the harness prints "harness-ready", so
+	// its own process already has it by the time that line was observed
+	// above; what a busy host can still delay is this test's reader
+	// goroutine draining the PTY, so wait for the marker instead of a
+	// fixed sleep.
+	p.waitForOutput(t, "harness-term")
 	if got := strings.Count(p.output.String(), "harness-term"); got != 1 {
 		t.Fatalf("harness TERM observations = %d, output = %q", got, p.output.String())
 	}
@@ -689,6 +711,7 @@ func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 }
 
 func TestAgentCrash(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	run, c := e.launchFake(t, "risky refactor\nwith details")
@@ -714,11 +737,11 @@ func TestAgentCrash(t *testing.T) {
 }
 
 func TestProvisioningFailure(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	e.rt.createErr = errors.New("no such image")
 
-	t.Setenv(fakeAgentEnv, "fake-agent")
 	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
 	if err == nil {
 		t.Fatal("Launch succeeded despite runtime failure")
@@ -734,7 +757,11 @@ func TestProvisioningFailure(t *testing.T) {
 }
 
 func TestLaunchValidation(t *testing.T) {
-	e := newTestEnv(t, nil)
+	// The empty-env case below needs the fake harness's shipped empty
+	// definition so it actually falls through to AETHER_FAKE_AGENT.
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.Harnesses = map[string]HarnessSpec{"fake": {}}
+	})
 	ctx := t.Context()
 
 	if _, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "t", "unknown-harness", domain.LaunchTUI); err == nil {
@@ -754,8 +781,8 @@ func TestLaunchValidation(t *testing.T) {
 }
 
 func TestLaunchCapturesAndPinsBaseProvenance(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
-	t.Setenv(fakeAgentEnv, "fake-agent")
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "pinned base", "fake", domain.LaunchTUI)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -782,13 +809,13 @@ func TestLaunchCapturesAndPinsBaseProvenance(t *testing.T) {
 }
 
 func TestLaunchCachedBaseOptionPinsCachedSource(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.base.mu.Lock()
 	e.base.result.Configured = true
 	e.base.result.Cached = true
 	e.base.result.Source = "github.com/acme/project"
 	e.base.mu.Unlock()
-	t.Setenv(fakeAgentEnv, "fake-agent")
 	const cached = testBaseCommit
 	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID,
 		"cached base", "fake", domain.LaunchTUI, domain.LaunchOptions{CachedBase: cached})
@@ -807,6 +834,7 @@ func TestLaunchCachedBaseOptionPinsCachedSource(t *testing.T) {
 }
 
 func TestLaunchCachedBaseOptionRejectsFaultyCapture(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	const cached = testBaseCommit
 	different := strings.Repeat("f", 40)
@@ -820,7 +848,6 @@ func TestLaunchCachedBaseOptionRejectsFaultyCapture(t *testing.T) {
 		Cached:      false,
 	}
 	e.base.mu.Unlock()
-	t.Setenv(fakeAgentEnv, "fake-agent")
 	_, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID,
 		"faulty cached capture", "fake", domain.LaunchTUI, domain.LaunchOptions{CachedBase: cached})
 	if err == nil {
@@ -869,6 +896,7 @@ func TestLaunchCachedBaseOptionRejectsFaultyCapture(t *testing.T) {
 }
 
 func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	cause := errors.New("mirror refresh failed")
 	e.base.mu.Lock()
@@ -881,7 +909,6 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 	}
 	e.base.err = cause
 	e.base.mu.Unlock()
-	t.Setenv(fakeAgentEnv, "fake-agent")
 	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "failed capture", "fake", domain.LaunchTUI)
 	if err == nil {
 		t.Fatal("Launch succeeded despite base capture failure")
@@ -908,6 +935,7 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 }
 
 func TestCommandTemplates(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	argv, profile, err := e.sched.command(t.Context(), e.member.ID, "claude", domain.LaunchHeadless, "do it")
 	if err != nil {
@@ -948,6 +976,7 @@ func TestCommandTemplates(t *testing.T) {
 // the agent's git identity env comes from the owning member and the run
 // ID rides as the creation key for crash recovery.
 func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, c := e.launchFake(t, "identity check")
 
@@ -978,6 +1007,7 @@ func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 }
 
 func TestSharedAccountLaunchUsesAccountHomeAndKeepsActorIdentity(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	account := &domain.Member{
 		DisplayName: "Grace", PublicKey: testPublicKey(t),
@@ -986,7 +1016,6 @@ func TestSharedAccountLaunchUsesAccountHomeAndKeepsActorIdentity(t *testing.T) {
 	if err := e.db.CreateMember(t.Context(), account); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(fakeAgentEnv, "fake-agent {task}")
 	sub := e.subscribe(t)
 	run, err := e.sched.Launch(
 		t.Context(), e.ws.ID, e.member.ID, account.ID,
@@ -1022,6 +1051,7 @@ func TestSharedAccountLaunchUsesAccountHomeAndKeepsActorIdentity(t *testing.T) {
 // TestLaunchMountsPersistentHome pins that every launch for one member uses
 // the same writable server-owned home at the container's HOME.
 func TestLaunchMountsPersistentHome(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
@@ -1057,6 +1087,7 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 // HOME=/home/aether in the container env (Docker leaves HOME wrong for
 // numeric users, and the credential mounts land under that home).
 func TestContainerSpecNonRootHome(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-x", WorkspaceID: e.ws.ID, MemberID: e.member.ID}
 	plan := &EnvironmentPlan{Image: "busybox:1.36", Env: map[string]string{"HOME": "/home/aether"}, User: "1000:1000"}
@@ -1076,6 +1107,7 @@ func TestContainerSpecNonRootHome(t *testing.T) {
 // member, and root runs all pass. The guard is cross-platform; only the
 // chown itself is linux-only.
 func TestReserveRunUserConflict(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	live := &supervised{
 		runID:    "run-live",
@@ -1125,6 +1157,7 @@ func TestReserveRunUserConflict(t *testing.T) {
 }
 
 func TestPendingTerminalReservationBlocksConflictingRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	pending := &terminalSupervision{member: e.member.ID}
 	if err := e.sched.reserveTerminalUser(pending, "1000:1000"); err != nil {
@@ -1142,6 +1175,7 @@ func TestPendingTerminalReservationBlocksConflictingRun(t *testing.T) {
 }
 
 func TestLegalTransitions(t *testing.T) {
+	t.Parallel()
 	allowed := map[[2]domain.RunStatus]bool{}
 	for _, from := range domain.AllRunStatuses {
 		allowed[[2]domain.RunStatus{from, domain.RunMerged}] = true
@@ -1174,6 +1208,7 @@ func TestLegalTransitions(t *testing.T) {
 }
 
 func TestInvalidAPITransitions(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -1205,6 +1240,7 @@ func TestInvalidAPITransitions(t *testing.T) {
 }
 
 func TestDeleteRunRemovesTerminalRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run := &domain.Run{
 		WorkspaceID: e.ws.ID,
@@ -1228,6 +1264,7 @@ func TestDeleteRunRemovesTerminalRun(t *testing.T) {
 }
 
 func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, container := e.launchFake(t, "remove active run")
 
@@ -1246,6 +1283,7 @@ func TestDeleteRunStopsActiveRunBeforeRemovingIt(t *testing.T) {
 }
 
 func TestDeleteRunPublishesDeletedEvent(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	run := &domain.Run{
@@ -1269,12 +1307,13 @@ func TestDeleteRunPublishesDeletedEvent(t *testing.T) {
 		if ev.Type != events.TypeRunDeleted || ev.RunID != run.ID {
 			t.Fatalf("deletion event = %#v, want run.deleted for %s", ev, run.ID)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(waitTimeout):
 		t.Fatal("DeleteRun published no deletion event")
 	}
 }
 
 func TestTaskLine(t *testing.T) {
+	t.Parallel()
 	if got := taskLine("short"); got != "short" {
 		t.Fatalf("taskLine short = %q", got)
 	}
@@ -1288,6 +1327,7 @@ func TestTaskLine(t *testing.T) {
 }
 
 func TestCheckoutTTLDefault(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if got := e.sched.cfg.CheckoutTTL; got != 72*time.Hour {
 		t.Fatalf("default CheckoutTTL = %v, want 72h", got)
@@ -1301,6 +1341,7 @@ func TestCheckoutTTLDefault(t *testing.T) {
 // TestLaunchPinsProfileWithoutMount pins the snapshot for run provenance,
 // while the member home remains the only environment mount.
 func TestLaunchPinsProfileWithoutMount(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
@@ -1336,6 +1377,7 @@ func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 }
 
 func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
 	})
@@ -1357,6 +1399,7 @@ func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
 }
 
 func TestCustomHarnessDefinition(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{
 			"aider": {
@@ -1381,6 +1424,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 	}
 }
 func TestCustomHarnessRequiresDefinition(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.cfg.Harnesses = map[string]HarnessSpec{"aider": {TUIArgs: []string{"aider", "{task}"}}}
 	if _, err := New(e.cfg); err == nil {
@@ -1408,6 +1452,7 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 	}
 }
 func TestContainerAddrReturnsLiveContainerIP(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.containerIP = "192.0.2.44"
 	run, _ := e.launchFake(t, "forward")
@@ -1422,6 +1467,7 @@ func TestContainerAddrReturnsLiveContainerIP(t *testing.T) {
 }
 
 func TestContainerAddrRequiresSupervisedRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.ContainerAddr(t.Context(), "run_missing")
 	if err == nil || err.Error() != "run has no live container" {
@@ -1430,6 +1476,7 @@ func TestContainerAddrRequiresSupervisedRun(t *testing.T) {
 }
 
 func TestSuperviseWaitRetriesTransportErrorUntilExit(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	rt := newScriptedWaitRuntime(e.rt)
@@ -1461,6 +1508,7 @@ func TestSuperviseWaitRetriesTransportErrorUntilExit(t *testing.T) {
 }
 
 func TestSuperviseWaitCancellationDuringRetryLeavesRunLive(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	rt := newScriptedWaitRuntime(e.rt)
 	e.sched.cfg.Runtime = rt

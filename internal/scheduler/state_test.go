@@ -10,6 +10,7 @@ import (
 )
 
 func TestProvisioningFailureReasonRedactsSetupDiagnostics(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	secret := "workspace-secret-9f4d"
@@ -19,7 +20,6 @@ func TestProvisioningFailureReasonRedactsSetupDiagnostics(t *testing.T) {
 		t.Fatalf("UpdateWorkspace: %v", err)
 	}
 	e.rt.startErr = errors.New("runtime: setup script exited 17: + echo " + secret + "\n/srv/aether/run-secret")
-	t.Setenv(fakeAgentEnv, "fake-agent")
 
 	_, launchErr := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", "fake", domain.LaunchTUI)
 	if launchErr == nil {
@@ -46,6 +46,7 @@ func TestProvisioningFailureReasonRedactsSetupDiagnostics(t *testing.T) {
 }
 
 func TestPublicProvisioningReasonPreservesImageFailureClassification(t *testing.T) {
+	t.Parallel()
 	got := publicRunStatusReason("provisioning: create container: no such image")
 	if !strings.Contains(got, "create container") || !strings.Contains(got, "no such image") {
 		t.Fatalf("reason = %q, want non-sensitive image classification", got)

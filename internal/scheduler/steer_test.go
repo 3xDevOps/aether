@@ -41,6 +41,7 @@ func (r *destroyFailureRuntime) Destroy(ctx context.Context, id runtime.ID) erro
 }
 
 func TestKill(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	// Kill publishes its timeline event on one goroutine and the abandoned
@@ -75,9 +76,15 @@ func TestKill(t *testing.T) {
 }
 
 func TestPauseResumeAndStallExemption(t *testing.T) {
+	t.Parallel()
+	// A tight threshold left no room for the Pause call sequence itself:
+	// under heavy scheduling contention it can outrun 60ms before Pause
+	// ever takes effect, stalling the run before there is anything to be
+	// exempt from. 500ms/20ms keeps PollInterval well under StallThreshold
+	// while giving the setup steps a realistic margin.
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 60 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -116,7 +123,7 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 
 	// Paused runs are exempt from stall detection: well past the stall
 	// threshold the run must still be running.
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
 	r, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
@@ -148,9 +155,10 @@ func TestPauseResumeAndStallExemption(t *testing.T) {
 }
 
 func TestStallAndActivityResume(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 60 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -193,9 +201,16 @@ func TestStallAndActivityResume(t *testing.T) {
 }
 
 func TestFileChangeCountsAsActivity(t *testing.T) {
+	t.Parallel()
+	// 80ms/10ms left too little slack between poll ticks: with ~200
+	// parallel tests sharing one P, a delayed tick can outrun the
+	// threshold even though the run is genuinely active, parking it as
+	// stalled. 500ms/20ms keeps the same shape - PollInterval well under
+	// StallThreshold, and the touch loop well past it - with a margin
+	// scheduling jitter cannot close.
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 80 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -210,10 +225,10 @@ func TestFileChangeCountsAsActivity(t *testing.T) {
 
 	run, _ := e.launchFake(t, "task")
 	// Keep touching files (no PTY output): the run must stay running.
-	deadline := time.Now().Add(300 * time.Millisecond)
+	deadline := time.Now().Add(700 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		e.git.touch(run.ID)
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	r, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
@@ -225,6 +240,7 @@ func TestFileChangeCountsAsActivity(t *testing.T) {
 }
 
 func TestInject(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	sub := e.subscribe(t)
 	ctx := t.Context()
@@ -254,6 +270,7 @@ func TestInject(t *testing.T) {
 // second Enter gets it, so steered text reaches the conversation instead
 // of sitting in the agent's input box.
 func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -288,9 +305,10 @@ func TestInjectUsesHarnessSubmitSequence(t *testing.T) {
 // moves to the outcome before any later relaunch, and its exact container is
 // retained until DeleteRun or expiry.
 func TestCloseRunResolvesStalledRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
-		cfg.StallThreshold = 40 * time.Millisecond
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.StallThreshold = 500 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -331,6 +349,7 @@ func TestCloseRunResolvesStalledRun(t *testing.T) {
 // The terminal row remains, but the exact retained container and sidecar are
 // destroyed through the normal retry-owning expiry path.
 func TestKillUnsupervisedRetainedSidecar(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -416,6 +435,7 @@ func activeDestroyPendingRun(t *testing.T, e *testEnv, task string) *domain.Run 
 }
 
 func TestKillUnsupervisedActiveEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -449,6 +469,7 @@ func TestKillUnsupervisedActiveEmptyCIDDestroyPendingSidecar(t *testing.T) {
 }
 
 func TestDeleteUnsupervisedActiveEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -475,6 +496,7 @@ func TestDeleteUnsupervisedActiveEmptyCIDDestroyPendingSidecar(t *testing.T) {
 }
 
 func TestKillUnsupervisedEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -504,6 +526,7 @@ func TestKillUnsupervisedEmptyCIDDestroyPendingSidecar(t *testing.T) {
 }
 
 func TestDeleteUnsupervisedEmptyCIDDestroyPendingSidecar(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
@@ -532,6 +555,7 @@ func TestDeleteUnsupervisedEmptyCIDDestroyPendingSidecar(t *testing.T) {
 // fails, CloseRun must return an error and restore the exact live state rather
 // than publishing a terminal retained promise.
 func TestCloseRunRetainedSidecarFailureRollsBack(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, c := e.launchFake(t, "retained sidecar failure")
@@ -583,6 +607,7 @@ func TestCloseRunRetainedSidecarFailureRollsBack(t *testing.T) {
 }
 
 func TestCloseRunWithoutRetentionCommitsAndPublishes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = -time.Second
 	})
@@ -613,6 +638,7 @@ func TestCloseRunWithoutRetentionCommitsAndPublishes(t *testing.T) {
 }
 
 func TestCloseRunWithoutRetentionRestoresAfterTransitionFailure(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = -time.Second
 	})
@@ -643,6 +669,7 @@ func TestCloseRunWithoutRetentionRestoresAfterTransitionFailure(t *testing.T) {
 // without thawing its container; the interaction surface is restored while
 // the pause flag remains truthful.
 func TestCloseRunRollbackPreservesPrePausedState(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -700,6 +727,7 @@ func TestCloseRunRollbackPreservesPrePausedState(t *testing.T) {
 // A finished run is re-labeled in place by the close disposition, and a
 // second close at the same outcome is a no-op.
 func TestCloseRunRelabelsFinishedRun(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -721,6 +749,7 @@ func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 }
 
 func TestCloseRunRelabelsWhileExitCleanupFinalizes(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	barrier := &destroyBarrierRuntime{
 		Runtime: e.rt,
@@ -753,10 +782,11 @@ func TestCloseRunRelabelsWhileExitCleanupFinalizes(t *testing.T) {
 }
 
 func TestInjectLiveStalledNeedsAttention(t *testing.T) {
-	const stallThreshold = 40 * time.Millisecond
+	t.Parallel()
+	const stallThreshold = 500 * time.Millisecond
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = stallThreshold
-		cfg.PollInterval = 10 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -823,6 +853,7 @@ func TestInjectLiveStalledNeedsAttention(t *testing.T) {
 }
 
 func TestInjectCleanExitedCompleted(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 
@@ -847,6 +878,7 @@ func TestInjectCleanExitedCompleted(t *testing.T) {
 // the container while the delete's own Stop call is in the air, and the
 // delete must still remove the checkout, transcripts, and run record.
 func TestDeleteRunSurvivesKillFinalizingDuringStop(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	run, _ := e.launchFake(t, "delete during kill")
 
@@ -885,6 +917,7 @@ func TestDeleteRunSurvivesKillFinalizingDuringStop(t *testing.T) {
 }
 
 func TestDeleteRunReconcilesRetainedSidecarAfterProbeError(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})

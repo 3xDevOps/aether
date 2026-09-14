@@ -23,6 +23,7 @@ import (
 // The GitHub step probes before it prints the login command, so the screen
 // can replace that command with the one that fixes the environment.
 func TestProbeGitHubCLI(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		saved    string
@@ -171,6 +172,7 @@ func TestProbeGitHubCLI(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, func(c *Config) {
 				if tc.standard != "" {
 					c.StandardImage = tc.standard
@@ -247,6 +249,7 @@ func TestProbeGitHubCLI(t *testing.T) {
 // gh writes its version to stdout and a distribution can warn on stderr;
 // the answer a member reads carries both, on separate lines.
 func TestProbeGitHubCLIJoinsBothStreams(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execStderr = "warning: gh is out of date"
 	e.rt.execHandler = func(_ runtime.ID, _ []string) (int, string, error) {
@@ -267,6 +270,7 @@ func TestProbeGitHubCLIJoinsBothStreams(t *testing.T) {
 // the same gh; the way out is theirs either way, not a reopen that hands
 // back the same filesystem.
 func TestProbeGitHubCLIKeepsASavedEnvironmentOnItsOwnRemedy(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, _ []string) (int, string, error) {
 		return 127, ghNotFound, nil
@@ -294,6 +298,7 @@ func TestProbeGitHubCLIKeepsASavedEnvironmentOnItsOwnRemedy(t *testing.T) {
 // A container left behind by a standard image that has already moved needs
 // only a reopen; nothing recreates it while it runs.
 func TestProbeGitHubCLISendsAStaleContainerToReopen(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, _ []string) (int, string, error) {
 		return 127, ghNotFound, nil
@@ -325,6 +330,7 @@ func TestProbeGitHubCLISendsAStaleContainerToReopen(t *testing.T) {
 // supervision destroyed it - has a name of its own, so the screen can say
 // "open the terminal first" instead of showing an internal error.
 func TestProbeGitHubCLIReportsAContainerThatWentAway(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
@@ -346,6 +352,7 @@ func TestProbeGitHubCLIReportsAContainerThatWentAway(t *testing.T) {
 // behind. Either way the answer describes a container they no longer have,
 // including when that answer was a clean one.
 func TestProbeGitHubCLIReportsATerminalReplacedUnderIt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		code int
@@ -357,6 +364,7 @@ func TestProbeGitHubCLIReportsATerminalReplacedUnderIt(t *testing.T) {
 		{name: "gh answered before it was", out: ghVersionCurrent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, nil)
 			if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
 				t.Fatalf("EnsureTerminal: %v", err)
@@ -381,6 +389,7 @@ func TestProbeGitHubCLIReportsATerminalReplacedUnderIt(t *testing.T) {
 // The probe must answer without one, so it answers here for a member whose
 // recorded image no plan could be built for.
 func TestProbeGitHubCLINeedsNoEnvironmentPlan(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.rt.execHandler = func(_ runtime.ID, _ []string) (int, string, error) {
 		return 0, ghVersionCurrent, nil
@@ -441,6 +450,7 @@ func TestProbeGitHubCLIStopsAtItsDeadline(t *testing.T) {
 // Without a terminal there is no container to ask, and opening one can take
 // an image pull the gateway carrying this call will not wait for.
 func TestProbeGitHubCLINeedsARunningTerminal(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.ProbeGitHubCLI(t.Context(), e.member.ID)
 	if !errors.Is(err, ErrTerminalNotRunning) {
@@ -452,6 +462,7 @@ func TestProbeGitHubCLINeedsARunningTerminal(t *testing.T) {
 // for the single-account answer, and must not turn a failed account into a
 // login.
 func TestActiveGitHubLogin(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		stdout    string
@@ -483,6 +494,7 @@ func TestActiveGitHubLogin(t *testing.T) {
 		{name: "not json", stdout: "unknown flag: --json", wantOK: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			entry, ok := activeGitHubLogin(tc.stdout)
 			if ok != tc.wantOK || entry.Login != tc.wantLogin {
 				t.Errorf("activeGitHubLogin = (%+v, %v), want login %q ok %v", entry, ok, tc.wantLogin, tc.wantOK)
@@ -494,6 +506,7 @@ func TestActiveGitHubLogin(t *testing.T) {
 // Raising the minimum above the gh the standard image ships would tell
 // every member on that image that their environment is broken.
 func TestStandardImageShipsAUsableGh(t *testing.T) {
+	t.Parallel()
 	dockerfile, err := os.ReadFile(filepath.Join("..", "..", "images", "standard", "Dockerfile"))
 	if err != nil {
 		t.Fatalf("read the standard image Dockerfile: %v", err)
