@@ -4,6 +4,31 @@ Everything the Play Console asks for that lives in the repository, so a
 listing can be assembled from a checkout. Nothing here is submitted
 automatically: a person pastes these texts and uploads these files.
 
+## Before you submit
+
+Provision the review tailnet. Play requires working access to anything behind
+a login or a membership
+(<https://support.google.com/googleplay/android-developer/answer/9859455>),
+and an app that only ever shows a setup form and a WebView error is what
+Minimum Functionality rejects
+(<https://support.google.com/googleplay/android-developer/answer/9898783>).
+So before the first submission there must be:
+
+1. A Tailscale account created for the review, whose sign-in details go in the
+   App access form.
+2. A tailnet with that account on it and an always-on machine running
+   `aether-server` with `web-port` set, so the dashboard is served over HTTPS
+   at the machine's MagicDNS name
+   ([docs/install.md](../../docs/install.md#first-boot)).
+3. A member on that server for the review account, approved, with a role that
+   can see runs ([docs/teams.md](../../docs/teams.md)).
+4. A workspace with a few runs in different states, including one with a diff
+   and one waiting on an approval, so the reviewer sees the app working.
+
+Keep it running until the review clears. Fill the account's sign-in details
+and the server's MagicDNS name into [app-access.md](app-access.md)'s
+instruction set 1 at submission; neither value is in the repository.
+
 ## Files
 
 | Console field | Source |
@@ -19,10 +44,19 @@ automatically: a person pastes these texts and uploads these files.
 | Data safety | [data-safety.md](data-safety.md) |
 | Category | Productivity |
 | Contact email | The publisher's support address; not in the repository |
+| Website | <https://github.com/3xDevOps/Aether> |
 | Release file | `aether-android.aab` from the GitHub release, [docs/install.md](../../docs/install.md#releases) |
 
 Play's asset rules are at
 <https://support.google.com/googleplay/android-developer/answer/9866151>.
+
+Once the listing is live, put the store link here and in the two files that
+say the app is not on Play yet, `README.md` at the repository root and
+[docs/install.md](../../docs/install.md):
+
+```
+Play store link: <https://play.google.com/store/apps/details?id=io.aether.android>   PLACEHOLDER - unpublished
+```
 
 ## Screenshots
 
@@ -41,13 +75,93 @@ in this order, so the listing reads as a tour:
 Tablet screenshots are optional and the app declares no tablet-specific
 layout; skip them.
 
+## Alt text
+
+Play asks for it on every graphic: "Alt text is important for screen-reader
+users who cannot see your uploaded assets." Paste these into the Console
+beside each upload, in the same order as the lists above.
+
+| Asset | Alt text |
+| --- | --- |
+| Feature graphic | The Aether mark and wordmark on a blue gradient, above the line "Your coding agents, on your own server" |
+| Screenshot 1 | The Aether board on a phone, runs in columns by what needs attention |
+| Screenshot 2 | A run's terminal filling the phone screen, with the key bar above the keyboard |
+| Screenshot 3 | The approval inbox with one pending request from an agent |
+| Screenshot 4 | A run's diff on the phone, added lines green and removed lines red |
+| Screenshot 5 | The app's first screen, "Aether server", with an empty server name field |
+
+Check the feature graphic's alt text against the file before uploading: if the
+graphic's own line of copy differs from the one quoted here, copy the
+graphic's wording.
+
 ## Signing
 
 The release keystore signs both the APK on the GitHub release and the bundle
 Play takes. On Play it is the **upload key**: Play App Signing re-signs what it
 serves with an app signing key of its own, so an install from Play and an
 install of the GitHub APK are different apps to Android and never update each
-other. Enrolling with the existing key as the app signing key would make them
-one lineage, at the cost of handing that key to Google. Decide on the first
-Play release; it cannot be changed afterwards
+other. Enrolling the existing keystore as the app signing key instead would
+make them one lineage, at the cost of handing that key to Google and of
+losing new Play protections: "Advanced optimizations, certain Play
+enhancements, and security features like Quantum-ready hybrid signing may not
+be available in this configuration."
+
+The choice is a human decision, and the lock point is not the first release of
+any kind: "Advanced developers who want to manage their own key can change
+this default before there is a release rolled out in open testing track or
+production track." Internal and closed testing do not lock it. To change it,
+in the Console: **Protected with Play > Play Store distribution > Go to Play
+app signing**, then **Change the app signing key**, then "Provide a copy of
+your app signing key (following the instructions)"
 (<https://support.google.com/googleplay/android-developer/answer/9842756>).
+
+If Play App Signing is kept, Google also advises that "for maximum security,
+your upload key and app signing key should be different". Today one GitHub
+Actions keystore is both the GitHub release's signing key and the Play upload
+key; a separate upload key would mean a second keystore and a second set of
+release secrets ([docs/install.md](../../docs/install.md#releases)).
+
+## Android developer verification
+
+Needs a human, after the signing choice. Verification links a package name to
+its signing keys: "Package name registration: The process of creating a
+formal, verifiable link between your app's unique package name and signing
+keys", and "You will automatically be registered if you distribute your app
+through Google Play"
+(<https://developer.android.com/developer-verification/guides>).
+
+1. After the first Play release, confirm `io.aether.android` shows
+   **Registered** under Play Console > Android developer verification.
+2. The GitHub release APK is distributed off Play and is signed with the
+   upload key, not Play's app signing key. The Android Developer Console "lets
+   you add and verify multiple signing keys for a single package", so if Play
+   App Signing is kept, register the upload key's certificate as a second key
+   for the package before the 2027 global rollout. Otherwise the two channels
+   are one key and one registration.
+
+## Policy positions
+
+Two policies may be raised at review. Neither needs a code change today; these
+are the answers to give, and the decision stays with the person submitting.
+
+**User Generated Content**
+(<https://support.google.com/googleplay/android-developer/answer/9876937>).
+The policy covers "content that users contribute to an app, and which is
+visible to or accessible by at least a subset of the app's users" and asks for
+an "in-app system for reporting and blocking objectionable UGC and users". It
+names private-group apps explicitly; invite-only is not an exemption. Position:
+content in Aether is visible only to members an administrator invited to that
+one server, administrators remove members and delete runs from the dashboard,
+and nothing is public or discoverable. Build a reporting flow only if Play
+asks for one.
+
+**AI-Generated Content**
+(<https://support.google.com/googleplay/android-developer/answer/14094294>).
+In scope are "text-to-text AI chatbot apps, in which the AI generated chatbot
+interaction is a central feature of the app"; out of scope are "apps that
+merely host AI-generated content and are unable to create content using AI".
+Position: Aether runs no model. The agents are third-party CLIs the user
+installs on their own server under their own vendor login, so the hosting
+exclusion applies. If Play disagrees, the requirement is in-app reporting of
+offensive generated content
+(<https://support.google.com/googleplay/android-developer/answer/13985936>).

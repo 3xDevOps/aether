@@ -686,8 +686,10 @@ Optional: a shell app that opens the server-hosted dashboard full screen on a
 phone. Every release carries two builds of it in its assets and in
 `checksums.txt`: `aether-android.apk` for installing straight from the release
 page, and `aether-android.aab`, the app bundle Google Play takes. It is not on
-Google Play yet; the listing material is in `android/listing/`. What the app
-stores and sends is in [privacy.md](privacy.md).
+Google Play yet; the listing material is in `android/listing/`, and the Play
+link replaces this sentence the day the listing goes live. What the app stores
+and sends is in [privacy.md](privacy.md); the licences it ships under are in
+[notices.md](notices.md).
 
 The app holds no logic and no credential. It is a WebView locked to one HTTPS
 origin, so identity stays the phone's own tailnet login, resolved by the server
@@ -729,8 +731,9 @@ drops the stored server name.
 The app needs a WebView from Chromium 140 or newer to paint under the status
 and navigation bars the way the dashboard expects. On an older one the app
 pads for those bars itself, which costs the edge-to-edge look and nothing
-else. WebView updates through the Play Store independently of the Android
-version.
+else. WebView updates through the Play Store on Android 10 and newer;
+Chromium 139 dropped Android 8 and 9, so a phone on those versions keeps the
+padded layout for good.
 
 Building the APK from a checkout is in
 [CONTRIBUTING.md](../CONTRIBUTING.md#android-shell).
@@ -1163,11 +1166,15 @@ Publish alpha tags as normal releases, not GitHub prereleases, because
 `/releases/latest` endpoint. Do not add `--prerelease` or `--draft`.
 
 Publishing the release runs
-[`.github/workflows/release.yml`](../.github/workflows/release.yml): it vets,
-runs the unit tests, cross-compiles the full matrix with `make release`, writes
-`checksums.txt`, and uploads the binaries and standard image. Only an admin
-publisher runs this release job on the self-hosted runner labeled `moss`;
-other publishers are skipped.
+[`.github/workflows/release.yml`](../.github/workflows/release.yml): it checks
+the four signing secrets, rejects a tag that is not a release tag, vets, runs
+the unit tests, cross-compiles the full matrix with `make release`, writes
+`checksums.txt`, and uploads the binaries and standard image. The first two
+steps run before any toolchain is installed, so a missing secret or a tag such
+as `v0.5` ends the release in seconds instead of after the whole matrix is
+built - which used to leave the published release with no assets and
+`/releases/latest` pointing at it. Only an admin publisher runs this release
+job on the self-hosted runner labeled `moss`; other publishers are skipped.
 
 `make release` also builds and signs the [Android app](#android-app), the
 APK and the app bundle, in a pinned SDK container, so the release needs
@@ -1180,16 +1187,29 @@ first step, so a missing one ends the release in seconds rather than after a
 build - an unsigned APK is worse than no APK, because nothing can update over
 it. A PKCS12 keystore, which is what `keytool` writes, holds one password for
 the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
-`ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. `apksigner
-verify` on the APK and `jarsigner -verify` on the bundle have to pass before
-the assets are uploaded. Keep the keystore: losing it means no published
-release can ever update an installed app again.
+`ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. Both artifacts have to
+carry that keystore's own certificate before the assets are uploaded:
+[`scripts/android-verify-signature.sh`](../scripts/android-verify-signature.sh)
+reads the expected SHA-256 fingerprint out of the keystore with `keytool` and
+compares it with what `apksigner` prints for the APK and what `keytool
+-printcert` prints for the bundle. A valid signature is not enough on its own
+- an artifact signed by anything else would ship under the release name and
+could never install over an existing install. Keep the keystore: losing it
+means no published release can ever update an installed app again.
 
 On Google Play the same keystore is the upload key: Play App Signing re-signs
 what the store serves with a key of its own, so an install from Play and an
-install of the release APK never update each other unless the first Play
-release enrolls this key as the app signing key
-([android/listing/README.md](../android/listing/README.md#signing)).
+install of the release APK never update each other unless this key is enrolled
+as the app signing key. That enrolment is possible only until a release rolls
+out to the open testing or production track - internal and closed testing do
+not lock it - and the path is **Protected with Play > Play Store distribution
+> Go to Play app signing > Change the app signing key**, which asks for a copy
+of the key. Managing the key yourself costs the enhancements Google adds to
+keys it holds, including quantum-ready hybrid signing, and it makes one
+GitHub Actions secret both the upload key and the app signing key, which
+Google advises against. The choice and its trade-offs are in
+[android/listing/README.md](../android/listing/README.md#signing); make it
+before the first open-testing or production rollout.
 
 The APK's versionCode is the only thing Android compares when deciding
 whether an APK is an update, and it comes from the tag, through
@@ -1211,12 +1231,24 @@ So a release tag has to be `vMAJOR.MINOR.PATCH` with an optional
 `-alpha.N`, `-beta.N` or `-rc.N`. A signed build refuses anything else before
 it builds. The ceilings the script enforces - major 209, minor 99, patch 99,
 pre-release number 199 - hold the result under Android's 2100000000 maximum
-and keep one rank from reaching the next. An APK built from a checkout is
-unsigned and carries versionCode 1; it cannot be installed over a release.
+and keep one rank from reaching the next.
+
+An unsigned build takes the same number when the tree's `git describe` output
+is a release tag, and falls back to versionCode 1 when it is not - an untagged
+tree, a tree with uncommitted changes, or `VERSION=` set to something the
+script cannot parse. Either way it is unsigned, so it can never install over a
+release.
+
+versionName is the tag without its leading `v`, because Play prints it in the
+store listing and Android prints it in the phone's app info, where `v0.4.0`
+reads as part of the number. `v0.4.0-alpha.6` ships as versionName
+`0.4.0-alpha.6` and versionCode 400106.
 
 If the release workflow fails after building, rerun it for the published
 release. The publisher uploads missing assets to the existing release and
 replaces same-named assets without changing its release notes.
 
-The version the binaries report comes from `git describe`, so tags must be
-pushed to the repo the workflow checks out, and the checkout uses full history.
+The release workflow stamps the binaries with the release tag itself
+(`make release VERSION="$GITHUB_REF_NAME"`), not with `git describe`, which
+picks one of two tags on the same commit at random. A local build still
+versions itself from `git describe`, so the checkout keeps full history.
