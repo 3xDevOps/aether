@@ -58,11 +58,15 @@ class MainActivity : ComponentActivity() {
      *
      * It does that only from API 31, and only for a task whose root was
      * started from the launcher: `shouldMoveTaskToBack` wants both a home
-     * launch source and an ACTION_MAIN + CATEGORY_LAUNCHER intent. The
-     * session SetupActivity hands over has neither, and there the platform
-     * finishes the window instead, taking the WebView and the terminal's
-     * scrollback with it. Decided once from the intent that created this
-     * window, because that is what the platform reads.
+     * launch source and a main intent. The session SetupActivity hands over
+     * has neither, and there the platform finishes the window instead,
+     * taking the WebView and the terminal's scrollback with it. Decided once
+     * from the intent that created this window, because that is what the
+     * platform reads.
+     *
+     * The test below is `ActivityRecord.isMainIntent`, clause for clause: a
+     * looser one would stand the callback down for an intent the platform
+     * then refuses to background.
      */
     private var platformBackgroundsUs = false
 
@@ -115,7 +119,10 @@ class MainActivity : ComponentActivity() {
         platformBackgroundsUs =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 intent?.action == Intent.ACTION_MAIN &&
-                intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+                intent.categories?.size == 1 &&
+                intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
+                intent.data == null &&
+                intent.type == null
         back.isEnabled = !platformBackgroundsUs
         onBackPressedDispatcher.addCallback(this, back)
 
