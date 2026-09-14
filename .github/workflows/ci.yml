@@ -8,12 +8,19 @@ on:
   # Jobs below explicitly check out the PR head after policy selection.
 permissions:
   contents: read
+# A newer push to a PR cancels that PR's run in flight; pushes to main
+# run to completion so every main commit keeps its own CI verdict and
+# cache write.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 jobs:
   # This job is intentionally hosted and does not check out repository code.
   # PRs require both the event actor and PR author to be admins, so an admin
   # action or rerun cannot elevate a contributor's PR onto self-hosted.
   runner-policy:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       runner: ${{ steps.select.outputs.runner }}
     steps:
@@ -46,6 +53,7 @@ jobs:
   build-and-test:
     needs: runner-policy
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,6 +102,7 @@ jobs:
     needs: runner-policy
     # The selected runner must provide Docker for these real-runtime tests.
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -153,6 +162,7 @@ jobs:
     needs: runner-policy
     # The selected runner must provide Docker for these real-runtime tests.
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -182,6 +192,7 @@ jobs:
   dashboard:
     needs: runner-policy
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,6 +222,7 @@ jobs:
   dashboard-e2e:
     needs: runner-policy
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -270,6 +282,7 @@ jobs:
   desktop:
     needs: runner-policy
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -339,6 +352,7 @@ jobs:
   windows:
     needs: runner-policy
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -444,6 +458,7 @@ jobs:
   windows-defender:
     needs: [runner-policy, release-build]
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:
