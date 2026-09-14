@@ -27,6 +27,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to a PR cancels that PR's run in flight; pushes to main
+# and merge-group entries run to completion, each keeping its own CI
+# verdict (github.ref is already unique per merge-group queue entry).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   install:
     name: install (${{ matrix.shell }}, ${{ matrix.node }})
