@@ -10,18 +10,21 @@ permissions:
   contents: read
 jobs:
   # This job is intentionally hosted and does not check out repository code.
-  # PRs require both the event actor and PR author to be admins, so an admin
+  # It selects the runner and decides whether the release matrix runs. PRs
+  # require both the event actor and PR author to be admins, so an admin
   # action or rerun cannot elevate a contributor's PR onto self-hosted.
   runner-policy:
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.select.outputs.runner }}
+      release: ${{ steps.select.outputs.release }}
     steps:
       - name: Select runner
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           is_admin() {
             permission=$(gh api \
@@ -42,6 +45,24 @@ jobs:
           else
             echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           fi
+
+          # A docs-only pull request skips the release matrix; every other
+          # change is a release input, since the server embeds the dashboard
+          # and the Android shell wraps it. A failed lookup deliberately
+          # runs the release matrix.
+          release=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request_target ]; then
+            if changed=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+              --paginate --jq '.[].filename' 2>/dev/null); then
+              if printf '%s\n' "$changed" | grep -qvE '^docs/|\.md$'; then
+                release=true
+              else
+                release=false
+              fi
+            fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
 
   build-and-test:
     needs: runner-policy
@@ -365,6 +386,7 @@ jobs:
 
   release-build:
     needs: runner-policy
+    if: needs.runner-policy.outputs.release == 'true'
     runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
     # The Android build runs a Gradle daemon in a container; a wedged one
     # would otherwise hold a self-hosted runner for GitHub's six-hour default.
