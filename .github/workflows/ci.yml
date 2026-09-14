@@ -15,12 +15,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 jobs:
-  # This job is intentionally hosted and does not check out repository code.
-  # It selects the runner and decides whether the release matrix runs. PRs
-  # require both the event actor and PR author to be admins, so an admin
-  # action or rerun cannot elevate a contributor's PR onto self-hosted. A
-  # push to main is merged, reviewed code, so it always runs self-hosted;
-  # that also keeps the caches main saves on the layout admin PRs restore.
+  # Keep Linux CI on GitHub-hosted runners while the self-hosted pool is
+  # unavailable. The shared output keeps restoration to one routing change.
   runner-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -28,31 +24,13 @@ jobs:
       runner: ${{ steps.select.outputs.runner }}
       release: ${{ steps.select.outputs.release }}
     steps:
-      - name: Select runner
+      - name: Select GitHub-hosted runner
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          is_admin() {
-            permission=$(gh api \
-              "repos/${GITHUB_REPOSITORY}/collaborators/${1}/permission" \
-              --jq '.permission' 2>/dev/null || true)
-            [ "$permission" = admin ]
-          }
-
-          allowed=false
-          if [ "$GITHUB_EVENT_NAME" = push ] ||
-            { is_admin "$GITHUB_ACTOR" && is_admin "$PR_AUTHOR"; }; then
-            allowed=true
-          fi
-          # A failed lookup deliberately stays on the GitHub-hosted runner.
-          if [ "$allowed" = true ]; then
-            echo 'runner=["self-hosted","Linux","X64","moss"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-          fi
+          echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
 
           # A docs-only pull request skips the release matrix; every other
           # change is a release input, since the server embeds the dashboard
