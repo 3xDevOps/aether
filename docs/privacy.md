@@ -81,11 +81,12 @@ which no other app can hold and which grants nothing.
 - On the phone: uninstall the app.
 - On the server: the server's administrator owns the data directory and can
   delete a run, a member home, or the whole directory
-  ([install.md](install.md#uninstalling)). `aether member remove` deletes your
-  member record and destroys your environment terminal; the runs you launched
-  and what they wrote stay in the data directory until someone deletes those
-  too ([teams.md](teams.md#roles)). The publisher holds no copy and cannot
-  delete anything on your behalf.
+  ([install.md](install.md#uninstalling)). `aether member remove` destroys
+  your environment terminal, deletes your member record and erases your
+  member home. It refuses while any run you launched still exists, so an
+  administrator deletes those runs first; what they wrote stays in the data
+  directory until it is deleted too ([teams.md](teams.md#roles)). The
+  publisher holds no copy and cannot delete anything on your behalf.
 
 ## Children
 

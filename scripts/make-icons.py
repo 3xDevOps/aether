@@ -10,8 +10,9 @@ resolves for every platform, converting the set to .icns for macOS; only
 Windows needs a prebuilt file. Writes web/public/icons/ for the web app
 manifest and the iOS home screen, android/app/src/main/res/mipmap-* for the
 phone app's launcher icon, and android/listing/feature-graphic.png for the
-Play listing. Needs Pillow, and fontTools to read the dashboard's own woff2
-type for the Play banner.
+Play listing. Needs `pillow`, and `fonttools[woff]` to read the dashboard's
+own woff2 type for the Play banner: the extra is brotli, which the plain
+fontTools install leaves out and woff2 cannot be decoded without.
 
 The mark is thin light-blue line art on transparency, so it is composited onto
 a tile in the dashboard's --background color rather than shipped bare:

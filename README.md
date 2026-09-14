@@ -130,7 +130,7 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
 | [Privacy](docs/privacy.md) | What the Android app and the dashboard store and send. |
-| [Notices](docs/notices.md) | The licence Aether ships under and the libraries it uses. |
+| [Notices](docs/notices.md) | The licence Aether ships under and what its artifacts bundle. |
 | [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
 | [Dashboard SPA](docs/dashboard-frontend.md) | The web client's structure. |
 | [Coordination](docs/coordination.md) | How overlapping runs warn and message each other. |

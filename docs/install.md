@@ -731,9 +731,9 @@ drops the stored server name.
 The app needs a WebView from Chromium 140 or newer to paint under the status
 and navigation bars the way the dashboard expects. On an older one the app
 pads for those bars itself, which costs the edge-to-edge look and nothing
-else. WebView updates through the Play Store on Android 10 and newer;
-Chromium 139 dropped Android 8 and 9, so a phone on those versions keeps the
-padded layout for good.
+else. WebView updates through the Play Store on every Android version, but
+Chromium 139 dropped Android 8 and 9, so a phone on those stops at Chromium
+138 and keeps the padded layout for good.
 
 Building the APK from a checkout is in
 [CONTRIBUTING.md](../CONTRIBUTING.md#android-shell).
@@ -1187,7 +1187,10 @@ first step, so a missing one ends the release in seconds rather than after a
 build - an unsigned APK is worse than no APK, because nothing can update over
 it. A PKCS12 keystore, which is what `keytool` writes, holds one password for
 the store and the key, so `ANDROID_KEY_PASSWORD` is the same string as
-`ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. Both artifacts have to
+`ANDROID_KEYSTORE_PASSWORD`; only a keystore made as JKS has two. Generate it
+with `-validity 10950`: `keytool` defaults to 90 days, and Google Play needs
+an upload key whose certificate is still valid after 22 October 2033, with 25
+years or more recommended. Both artifacts have to
 carry that keystore's own certificate before the assets are uploaded:
 [`scripts/android-verify-signature.sh`](../scripts/android-verify-signature.sh)
 reads the expected SHA-256 fingerprint out of the keystore with `keytool` and

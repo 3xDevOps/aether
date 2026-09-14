@@ -144,8 +144,9 @@ desktop app's into `desktop/build/`, the web app manifest's and the iOS
 home-screen one into `web/public/icons/`, the phone app's launcher icons
 into `android/app/src/main/res/mipmap-*`, and the Play listing's feature
 graphic into `android/listing/`. Regenerate them all with `python3
-scripts/make-icons.py`, which needs Pillow and fontTools, after the mark
-changes, and commit what it wrote.
+scripts/make-icons.py` after the mark changes, and commit what it wrote. It
+needs `pillow` and `fonttools[woff]`; the extra pulls in brotli, without
+which fontTools cannot read the woff2 the banner's type comes from.
 
 ### Android shell
 
@@ -188,11 +189,12 @@ directory and deletes it afterwards
 A signed build also needs a release tag, because the APK's versionCode comes
 from it (`scripts/android-version-code.sh`, and
 [docs/install.md](docs/install.md#releases) for the formula): signing an
-untagged tree stops with the tag the script could not parse. An unsigned or debug APK takes the
-same number when `git describe` returns a release tag, and versionCode 1 when
-it does not - an untagged tree, a dirty one, or a `VERSION=` the script cannot
-parse. Neither can install over a release either way. `sh scripts/android-version-code-test.sh`,
-part of `make test-scripts`, covers the mapping and its ordering.
+untagged tree stops with the tag the script could not parse. An unsigned or
+debug APK takes the same number when `git describe` returns a release tag,
+and versionCode 1 when it does not - an untagged tree, a dirty one, or a
+`VERSION=` the script cannot parse. Neither can install over a release either
+way. `sh scripts/android-version-code-test.sh`, part of `make test-scripts`,
+covers the mapping and its ordering.
 
 `make release` builds the APK and the bundle as part of the matrix, so it
 needs Docker as well as Go, Node and Bun.
@@ -234,7 +236,7 @@ rm -rf android/build android/app/build android/.gradle
 GRADLE=$(mktemp -d) && docker run --rm -u "$(id -u):$(id -g)" \
   -v "$PWD/android":/src -w /src -v "$GRADLE":/gradle \
   -e HOME=/gradle -e GRADLE_USER_HOME=/gradle \
-  ghcr.io/cirruslabs/android-sdk:36 \
+  ghcr.io/cirruslabs/android-sdk@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31 \
   ./gradlew --write-verification-metadata sha256 \
     test assembleRelease bundleRelease assembleDebug
 ```
