@@ -99,6 +99,16 @@ type visited struct {
 	Detail  string
 }
 
+// maxFileBytes and maxTotalBytes mirror the server's push caps, so a
+// preview can never promise a file the server would reject. They are
+// vars, not the profilesvc constants directly, so a test can shrink them
+// to keep a budget-exhaustion fixture small; production always runs with
+// the real caps.
+var (
+	maxFileBytes  int64 = profilesvc.MaxFileBytes
+	maxTotalBytes int64 = profilesvc.MaxTotalBytes
+)
+
 // candidate is a file that survived pass one: everything about it is
 // known except its content.
 type candidate struct {
@@ -228,9 +238,9 @@ func classifyRoot(ctx context.Context, root string, prof harness.Profile, matche
 		// scanner, whose cost grows sharply with size. A profile root
 		// holding large agent transcripts is ordinary, so this is the
 		// difference between a preview that answers and one that hangs.
-		if info.Size() > profilesvc.MaxFileBytes {
+		if info.Size() > maxFileBytes {
 			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeTooLarge,
-				Detail: fmt.Sprintf("%d bytes, over the %d-byte limit for one file", info.Size(), profilesvc.MaxFileBytes)})
+				Detail: fmt.Sprintf("%d bytes, over the %d-byte limit for one file", info.Size(), maxFileBytes)})
 		}
 		out = append(out, candidate{
 			rel:      relSlash,
@@ -264,9 +274,9 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if total+c.size > profilesvc.MaxTotalBytes {
+		if total+c.size > maxTotalBytes {
 			err := visit(visited{Rel: c.rel, Abs: c.abs, Size: c.size, Reason: ExcludeOverBudget,
-				Detail: fmt.Sprintf("the %d-byte limit for one snapshot was already reached", profilesvc.MaxTotalBytes)})
+				Detail: fmt.Sprintf("the %d-byte limit for one snapshot was already reached", maxTotalBytes)})
 			if err != nil {
 				return err
 			}
