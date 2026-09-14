@@ -236,15 +236,12 @@ dashboard:
 deploy: dashboard
 	sh scripts/deploy.sh
 
+# The Windows .syso files come first because the Windows CLI builds read
+# them. Each build's output is captured so a failure prints whole.
 release: dashboard
 	@mkdir -p $(DIST)
-	@for platform in $(SERVER_PLATFORMS); do \
-		os=$${platform%/*}; arch=$${platform#*/}; \
-		out=$(DIST)/aether-server-$$os-$$arch; \
-		echo "building $$out"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-server || exit 1; \
-	done
-	@trap 'rm -f cmd/aether/resource_windows_*.syso' EXIT; \
+	@job_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$job_dir" cmd/aether/resource_windows_*.syso' EXIT; \
 	for arch in amd64 arm64; do \
 		if [ $$arch = arm64 ]; then armflag=-arm; else armflag=; fi; \
 		echo "generating cmd/aether/resource_windows_$$arch.syso"; \
@@ -256,13 +253,34 @@ release: dashboard
 			-comment '$(VERSION)' \
 			-o cmd/aether/resource_windows_$$arch.syso $(WINVERSIONINFO) || exit 1; \
 	done; \
+	pids=""; jobs=""; failed=0; \
+	for platform in $(SERVER_PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		name=aether-server-$$os-$$arch; out=$(DIST)/$$name; \
+		echo "building $$out"; \
+		( CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-server \
+			>"$$job_dir/$$name.log" 2>&1 ) & \
+		pids="$$pids $$!"; jobs="$$jobs $$name"; \
+	done; \
 	for platform in $(CLI_PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; \
 		ext=$$([ $$os = windows ] && echo .exe || echo ""); \
-		out=$(DIST)/aether-$$os-$$arch$$ext; \
+		name=aether-$$os-$$arch$$ext; out=$(DIST)/$$name; \
 		echo "building $$out"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether || exit 1; \
-	done
+		( CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether \
+			>"$$job_dir/$$name.log" 2>&1 ) & \
+		pids="$$pids $$!"; jobs="$$jobs $$name"; \
+	done; \
+	set -- $$jobs; \
+	for pid in $$pids; do \
+		name=$$1; shift; \
+		if ! wait $$pid; then \
+			echo "release: build failed: $$name" >&2; \
+			sed 's/^/  /' "$$job_dir/$$name.log" >&2; \
+			failed=1; \
+		fi; \
+	done; \
+	exit $$failed
 	@$(MAKE) android
 
 clean:
