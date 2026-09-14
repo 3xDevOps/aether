@@ -315,6 +315,7 @@ describe('hydrate', () => {
 
   it('classifies a fetch that never got an answer as a dead gateway', async () => {
     const store = createRootStore()
+    store.getState().setCapabilities({ gateway: 'local', methods: ['*'], ws: ['events'] })
     await hydrate(
       store,
       fakeApi({
@@ -327,6 +328,23 @@ describe('hydrate', () => {
 
     expect(store.getState().unreachable).toBe('gateway')
     expect(store.getState().hydrationError).toContain('Failed to fetch')
+  })
+
+  it('classifies a dead fetch on the server gateway as a dead connection', async () => {
+    const store = createRootStore()
+    // The phone reaches the server gateway over the tailnet: there is no
+    // local process to restart, so the same TypeError is a dead link.
+    store.getState().setCapabilities({ gateway: 'server', methods: ['*'], ws: ['events'] })
+    await hydrate(
+      store,
+      fakeApi({
+        serverInfo: vi.fn(async () => {
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+
+    expect(store.getState().unreachable).toBe('network')
   })
 
   it('classifies the gateway naming its SSH backend as a dead server', async () => {
@@ -907,6 +925,27 @@ describe('connect', () => {
     await subscribe()
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     expect(store.getState().streamDead).toBe(false)
+    stop()
+  })
+
+  it('knows which gateway serves the page before the first hydration fails', async () => {
+    // Only the probe read the descriptor; hydration never got far enough to
+    // store it, and without it a phone would be told to restart a desktop
+    // app it does not have.
+    const store = createRootStore()
+    const stop = connect(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => ({ gateway: 'server', methods: ['*'], ws: ['events'] })),
+        serverInfo: vi.fn(async () => {
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+
+    await subscribe()
+    await vi.waitFor(() => expect(store.getState().unreachable).toBe('network'))
+    expect(store.getState().hydrated).toBe(false)
     stop()
   })
 

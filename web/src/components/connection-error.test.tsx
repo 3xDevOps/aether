@@ -13,14 +13,27 @@ describe('ConnectionError', () => {
     expect(retry).toHaveBeenCalledOnce()
   })
 
-  it('blames the local connection, not the server, when the network is down', () => {
+  it('names Tailscale and the server host when nothing left the device', () => {
     render(<ConnectionError kind="network" dead={false} error={null} onRetry={vi.fn()} />)
 
     expect(
-      screen.getByRole('heading', { name: 'This computer is offline' }),
+      screen.getByRole('heading', { name: 'No connection to the server' }),
     ).toBeDefined()
-    // The server is not implicated, so the copy must not send the user to it.
-    expect(screen.queryByText(/aether-server/i)).toBeNull()
+    expect(screen.getByText(/Tailscale is connected/)).toBeDefined()
+    expect(screen.getByText(/server host is running/)).toBeDefined()
+    // This surface may be a phone, which has neither.
+    expect(screen.queryByText(/desktop app/i)).toBeNull()
+    expect(screen.queryByText(/aether gui/i)).toBeNull()
+  })
+
+  it('sends the desktop user back to the gateway they can restart', () => {
+    render(<ConnectionError kind="gateway" dead={false} error={null} onRetry={vi.fn()} />)
+
+    expect(
+      screen.getByRole('heading', { name: 'Cannot reach the dashboard gateway' }),
+    ).toBeDefined()
+    expect(screen.getByText(/Restart the desktop app/)).toBeDefined()
+    expect(screen.getByText('aether gui')).toBeDefined()
   })
 
   it('frames a 403 as the gateway refusing this device and keeps the reason', () => {

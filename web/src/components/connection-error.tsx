@@ -33,9 +33,10 @@ function Cmd({ children }: { children: string }) {
 
 /**
  * One failure, one instruction. Which hop died decides what the user can
- * actually do about it, so each case names that hop and stops: a dead local
- * network is not the server's fault, and telling someone to check a server
- * they never reached sends them to fix the wrong thing.
+ * actually do about it, so each case names that hop and stops. A gateway the
+ * user cannot restart - the server gateway, reached over the tailnet - must
+ * never be described as one they can, which is why `gateway` is the desktop
+ * origin only.
  */
 function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
   if (dead) {
@@ -57,9 +58,9 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
     return {
       icon: WifiOff,
       eyebrow: 'No connection',
-      title: 'This computer is offline',
+      title: 'No connection to the server',
       description:
-        'Your machine could not reach the network at all, so nothing was asked of the server yet. Reconnect to wifi or your VPN, then try again.',
+        'This device could not get a connection out, so nothing was asked of the server. Check that it is online and that Tailscale is connected, and that the server host is running, then try again.',
       action: 'Retry connection',
     }
   }

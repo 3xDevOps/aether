@@ -25,24 +25,31 @@ import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
  * "network unreachable: ..." when this machine never got off its own
  * network stack (DNS dead, no route), "server unreachable: ..." when it did
  * and aether-server did not answer. A fetch that never got an answer at all
- * (a TypeError from fetch) means the gateway origin itself is gone.
+ * (a TypeError from fetch) means the origin serving this page is gone, and
+ * which origin that is decides what the user can do: the desktop gateway is
+ * a process on this machine that can be restarted, while the server gateway
+ * is across the tailnet, so its silence is a dead link or a dead host.
  * Anything else - a 401, a 500 the server produced - is neither.
  */
-function classifyUnreachable(err: unknown): UnreachableKind | null {
+function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | null {
   if (err instanceof ApiError && err.status === 503) {
     if (err.message.includes('network unreachable')) return 'network'
     if (err.message.includes('server unreachable')) return 'server'
   }
-  if (err instanceof TypeError) return 'gateway'
+  if (err instanceof TypeError) {
+    // An unknown gateway is the desktop one: it is the only surface that can
+    // fail before the descriptor is read, since the probe seeds it.
+    return store.getState().capabilities?.gateway === 'server' ? 'network' : 'gateway'
+  }
   return null
 }
 
 
 /** Names why the gateway refused the capabilities probe. */
-function refusalKind(err: ApiError): UnreachableKind | null {
+function refusalKind(err: ApiError, store: RootStore): UnreachableKind | null {
   if (err.status === 403) return 'refused'
   if (err.message.includes('tailnet identity unavailable')) return 'identity'
-  return classifyUnreachable(err)
+  return classifyUnreachable(err, store)
 }
 
 /** Fills the store from the server. False means the server was unreachable. */
@@ -134,7 +141,7 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     // is new. Once the token is known dead, the recorded recovery hint is
     // more useful than this raw failure, so it stays.
     if (!store.getState().streamDead) {
-      s.setUnreachable(classifyUnreachable(err))
+      s.setUnreachable(classifyUnreachable(err, store))
       s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
     }
     return false
@@ -199,7 +206,7 @@ export async function applyEvent(
           // A live delete publishes its final status before run.deleted, so
           // the local removal can make this status fetch return 404.
           if (!(err instanceof ApiError && err.status === 404)) {
-            store.getState().setUnreachable(classifyUnreachable(err))
+            store.getState().setUnreachable(classifyUnreachable(err, store))
             return false
           }
         }
@@ -213,7 +220,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err))
+          store.getState().setUnreachable(classifyUnreachable(err, store))
           return false
         }
       }
@@ -226,7 +233,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err))
+          store.getState().setUnreachable(classifyUnreachable(err, store))
           return false
         }
       }
@@ -253,7 +260,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err))
+          store.getState().setUnreachable(classifyUnreachable(err, store))
           return false
         }
       }
@@ -286,7 +293,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err))
+          store.getState().setUnreachable(classifyUnreachable(err, store))
           return false
         }
       }
@@ -324,7 +331,7 @@ type Probe =
  * only an HTTP body carries, so it is recorded before the stream's own
  * failure can only say "unreachable".
  */
-async function probeGateway(client: Api): Promise<Probe | null> {
+async function probeGateway(store: RootStore, client: Api): Promise<Probe | null> {
   let capabilities: GatewayCapabilities
   try {
     capabilities = await client.capabilities()
@@ -333,6 +340,10 @@ async function probeGateway(client: Api): Promise<Probe | null> {
     if (err instanceof ApiError && (err.status === 403 || err.status === 503)) return { refused: err }
     return null
   }
+  // Hydration writes the same descriptor, but a hydration that never
+  // succeeds writes nothing - and classifying its failure needs to know
+  // which gateway serves the page.
+  store.getState().setCapabilities(capabilities)
   try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
@@ -466,7 +477,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     void load()
   })
 
-  void probeGateway(client).then((probe) => {
+  void probeGateway(store, client).then((probe) => {
     if (disposed) return
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
@@ -484,7 +495,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // the gateway turning this device away, and a 503 naming the tailnet
       // identity is its own daemon not answering; neither is a dead hop.
       const { refused } = probe
-      store.getState().setUnreachable(refusalKind(refused))
+      store.getState().setUnreachable(refusalKind(refused, store))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))
