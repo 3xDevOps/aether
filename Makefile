@@ -150,6 +150,7 @@ test-scripts:
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
 	sh scripts/android-version-code-test.sh
+	sh scripts/android-verify-signature-test.sh
 
 vet:
 	go vet ./...

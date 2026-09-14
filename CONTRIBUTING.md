@@ -194,7 +194,10 @@ debug APK takes the same number when `git describe` returns a release tag,
 and versionCode 1 when it does not - an untagged tree, a dirty one, or a
 `VERSION=` the script cannot parse. Neither can install over a release either
 way. `sh scripts/android-version-code-test.sh`, part of `make test-scripts`,
-covers the mapping and its ordering.
+covers the mapping and its ordering, and
+`sh scripts/android-verify-signature-test.sh` beside it covers what the
+signature check accepts and refuses, with the SDK tools stubbed so it needs
+no keystore.
 
 `make release` builds the APK and the bundle as part of the matrix, so it
 needs Docker as well as Go, Node and Bun.
