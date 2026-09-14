@@ -71,6 +71,14 @@ class MainActivity : ComponentActivity() {
     private var platformBackgroundsUs = false
 
     /**
+     * Set when a refused off-origin load has to be undone, so the recovery
+     * load can drop the blank entry the refusal committed. Without that,
+     * back walks into it, the gate refuses it again, and the member can
+     * never leave.
+     */
+    private var clearHistoryOnLoad = false
+
+    /**
      * Back walks the dashboard's own history and then leaves the app running:
      * finishing would drop the terminal's scrollback on the way to the home
      * screen. Where the platform does that itself the callback stands down at
@@ -256,7 +264,17 @@ class MainActivity : ComponentActivity() {
                     // shouldOverrideUrlLoading would have taken it. Loading
                     // from inside this callback waits for the next loop turn.
                     view.stopLoading()
-                    loaded?.let { dashboard -> view.post { view.loadUrl(dashboard) } }
+                    loaded?.let { dashboard ->
+                        clearHistoryOnLoad = true
+                        view.post { view.loadUrl(dashboard) }
+                    }
+                }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (!clearHistoryOnLoad) return
+                    clearHistoryOnLoad = false
+                    view.clearHistory()
+                    syncBackCallback()
                 }
 
                 override fun doUpdateVisitedHistory(
@@ -264,7 +282,7 @@ class MainActivity : ComponentActivity() {
                     url: String,
                     isReload: Boolean,
                 ) {
-                    if (platformBackgroundsUs) back.isEnabled = view.canGoBack()
+                    syncBackCallback()
                 }
 
                 override fun onReceivedError(
@@ -326,6 +344,14 @@ class MainActivity : ComponentActivity() {
             loaded = base
             web.loadUrl(base)
         }
+    }
+
+    /**
+     * Keeps the callback's claim on the gesture matched to the history the
+     * WebView actually has, wherever that history changes.
+     */
+    private fun syncBackCallback() {
+        if (platformBackgroundsUs) back.isEnabled = web.canGoBack()
     }
 
     private fun openSetup() {
