@@ -94,6 +94,11 @@ ANDROID_RUN = docker run --rm \
 # recipe below. Assigned lazily - only `android` reads it.
 ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh '$(VERSION)' 2>/dev/null),1)
 
+# versionName is a label Android never compares, but Play prints it in the
+# store listing and Android prints it in the phone's app info, where the tag's
+# leading v reads as part of the number.
+ANDROID_VERSION_NAME = $(VERSION:v%=%)
+
 # Release signing comes from the environment, never the tree: a keystore path
 # and the three secrets beside it. Without them the APK and the bundle come
 # out unsigned and are named for it, so a PR's build can never be mistaken for
@@ -190,7 +195,7 @@ android:
 	@[ -z '$(ANDROID_SIGNING)' ] || sh scripts/android-version-code.sh '$(VERSION)' >/dev/null
 	$(ANDROID_RUN) $(ANDROID_SIGNING) $(ANDROID_IMAGE) \
 		./gradlew --console=plain test assembleRelease bundleRelease \
-			'-PaetherVersionName=$(VERSION)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)
+			'-PaetherVersionName=$(ANDROID_VERSION_NAME)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)
 	cp android/app/build/outputs/apk/release/$(ANDROID_BUILT) $(DIST)/$(ANDROID_APK)
 	cp android/app/build/outputs/bundle/release/app-release.aab $(DIST)/$(ANDROID_AAB)
 	@if [ -n '$(ANDROID_SIGNING)' ]; then \
