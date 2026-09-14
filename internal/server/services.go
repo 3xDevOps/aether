@@ -6,6 +6,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -30,11 +31,17 @@ type Deps struct {
 	Store   store.Store
 	Bus     events.Bus
 	Events  events.EventLog
-	Control *control.Service
 	Runs    *scheduler.Scheduler
 	Git     *gitengine.Engine
 	PTY     *ptyhost.Host
 	SSH     *sshd.Config
+
+	// Control is the one process-wide controller lease table. It is shared
+	// by SSH and local attaches and by the room service.
+	Control *control.Service
+	// Evidence is the one durable evidence service shared by lifecycle hooks,
+	// room handoffs, and SSH/local evidence reads.
+	Evidence *evidence.Service
 }
 
 type serviceBuilder struct {

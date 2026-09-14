@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -380,29 +383,218 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
 	}
 	from := run.MemberID
-	if s.cfg.Control != nil {
-		displaced, transferErr := s.cfg.Control.AdmitRevoke(p.RunID, func() error {
-			return s.cfg.Store.TransferRun(ctx, run.ID, to)
+	outbox, ok := s.cfg.Store.(store.HandoffOutboxStore)
+	if !ok {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.handoff: durable handoff outbox is not configured"}
+	}
+	operationID := fmt.Sprintf("handoff-%s-%d-%d", run.ID, time.Now().UTC().UnixNano(), s.handoffSeq.Add(1))
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	transfer := func() error {
+		return outbox.TransferRunWithHandoff(commitCtx, &store.HandoffOutbox{
+			ID: operationID, WorkspaceID: run.WorkspaceID, RunID: run.ID,
+			ActorID: member, FromMemberID: from, ToMemberID: to,
+			EvidenceState:    store.HandoffEvidencePending,
+			PublicationState: store.HandoffPublicationPending,
 		})
+	}
+	if s.cfg.Control != nil {
+		displaced, transferErr := s.cfg.Control.AdmitRevoke(p.RunID, transfer)
 		if transferErr != nil {
 			return nil, rpcError(transferErr)
 		}
 		if displaced != nil {
 			s.cancelControlAttach(p.RunID, displaced.SessionID, displaced.Generation, errAttachControlRevoked)
 		}
-	} else if err := s.cfg.Store.TransferRun(ctx, run.ID, to); err != nil {
+	} else if err := transfer(); err != nil {
 		return nil, rpcError(err)
 	}
-	// The transfer is stamped before the credit it causes, so the feed
-	// reads in the order the two happened.
-	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		WorkspaceID: run.WorkspaceID,
-		RunID:       run.ID,
-		ActorID:     member,
-		Payload:     events.TimelinePayload{Kind: events.TimelineHandoff, Message: p.ToMemberID},
-	})
-	s.cfg.Runs.RecordHandoff(ctx, run.ID, from)
+	// The ownership commit is the handoff's durable linearization point.
+	// Every post-transfer side effect is an outbox phase and may safely be
+	// retried after this handler or the whole server exits.
+	s.recordHandoffContext(commitCtx, operationID, run, member, from, to, outbox)
 	return struct{}{}, nil
+}
+
+type handoffOperationRecorder interface {
+	RecordHandoffOperation(context.Context, domain.RunID, domain.MemberID, string, time.Time) error
+}
+
+const handoffReplayInterval = 5 * time.Second
+
+func (s *Server) recordHandoffContext(ctx context.Context, operationID string, run *domain.Run, actor, from, to domain.MemberID, outbox store.HandoffOutboxStore) {
+	if run == nil {
+		return
+	}
+	h, err := outbox.GetHandoffOutbox(ctx, operationID)
+	if err != nil {
+		slog.Warn("sshd: load handoff outbox after transfer", "operation", operationID, "error", err)
+		return
+	}
+	if h.WorkspaceID == "" {
+		h.WorkspaceID = run.WorkspaceID
+	}
+	if h.RunID == "" {
+		h.RunID = run.ID
+	}
+	if h.ActorID == "" {
+		h.ActorID = actor
+	}
+	if h.FromMemberID == "" {
+		h.FromMemberID = from
+	}
+	if h.ToMemberID == "" {
+		h.ToMemberID = to
+	}
+	s.processHandoffOutbox(ctx, h, outbox, s.cfg.Services.Rooms, handoffEvidenceCapture(s.cfg.Services.Evidence))
+}
+
+func handoffEvidenceCapture(v EvidenceService) EvidenceCaptureService {
+	capture, _ := v.(EvidenceCaptureService)
+	return capture
+}
+
+func (s *Server) replayHandoffOutbox(ctx context.Context, outbox store.HandoffOutboxStore, rooms RoomService, evidenceCapture EvidenceCaptureService) {
+	ticker := time.NewTicker(handoffReplayInterval)
+	defer ticker.Stop()
+	for {
+		s.replayPendingHandoffs(ctx, outbox, rooms, evidenceCapture)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Server) replayPendingHandoffs(ctx context.Context, outbox store.HandoffOutboxStore, rooms RoomService, evidenceCapture EvidenceCaptureService) {
+	if pager, ok := outbox.(store.HandoffOutboxPager); ok {
+		before := ""
+		for {
+			pending, next, err := pager.ListPendingHandoffOutboxPage(ctx, before, store.MaxCollaborationPageSize)
+			if err != nil {
+				slog.Warn("sshd: list pending handoffs", "error", err)
+				return
+			}
+			for _, h := range pending {
+				if h == nil {
+					continue
+				}
+				s.processHandoffOutbox(ctx, h, outbox, rooms, evidenceCapture)
+			}
+			if next == "" || next == before {
+				return
+			}
+			before = next
+		}
+	}
+	pending, err := outbox.ListPendingHandoffOutbox(ctx, store.MaxCollaborationPageSize)
+	if err != nil {
+		slog.Warn("sshd: list pending handoffs", "error", err)
+		return
+	}
+	for _, h := range pending {
+		if h == nil {
+			continue
+		}
+		s.processHandoffOutbox(ctx, h, outbox, rooms, evidenceCapture)
+	}
+}
+
+func (s *Server) processHandoffOutbox(ctx context.Context, h *store.HandoffOutbox, outbox store.HandoffOutboxStore, rooms RoomService, evidenceCapture EvidenceCaptureService) {
+	if h == nil {
+		return
+	}
+	if h.TimelineState == store.HandoffTimelinePending {
+		if _, err := s.cfg.Bus.Publish(ctx, events.Event{
+			ID: "handoff:" + h.ID + ":timeline", Time: h.CreatedAt,
+			WorkspaceID: h.WorkspaceID, RunID: h.RunID, ActorID: h.ActorID,
+			Payload: events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.ToMemberID)},
+		}); err != nil {
+			slog.Warn("sshd: publish handoff timeline", "operation", h.ID, "error", err)
+			return
+		}
+		if err := outbox.MarkHandoffTimeline(ctx, h.ID); err != nil {
+			slog.Warn("sshd: mark handoff timeline", "operation", h.ID, "error", err)
+			return
+		}
+		h.TimelineState = store.HandoffTimelinePublished
+	}
+	if h.CoauthorState == store.HandoffCoauthorPending {
+		if recorder, ok := s.cfg.Runs.(handoffOperationRecorder); ok {
+			if err := recorder.RecordHandoffOperation(ctx, h.RunID, h.FromMemberID, h.ID, h.CreatedAt); err != nil {
+				slog.Warn("sshd: apply handoff co-author", "operation", h.ID, "error", err)
+				return
+			}
+		} else {
+			s.cfg.Runs.RecordHandoff(ctx, h.RunID, h.FromMemberID)
+		}
+		if err := outbox.MarkHandoffCoauthor(ctx, h.ID); err != nil {
+			slog.Warn("sshd: mark handoff co-author", "operation", h.ID, "error", err)
+			return
+		}
+		h.CoauthorState = store.HandoffCoauthorPublished
+	}
+	if h.EvidenceState == store.HandoffEvidencePending {
+		state, packetID, complete := captureHandoffEvidence(ctx, h, evidenceCapture)
+		if !complete {
+			return
+		}
+		if err := outbox.SetHandoffEvidence(ctx, h.ID, packetID, state); err != nil {
+			slog.Warn("sshd: persist handoff evidence state", "operation", h.ID, "error", err)
+			return
+		}
+		h.EvidenceState, h.EvidencePacketID = state, packetID
+	}
+	if h.PublicationState == store.HandoffPublicationPending {
+		if rooms == nil {
+			slog.Warn("sshd: handoff room service unavailable", "operation", h.ID)
+			return
+		}
+		evidenceContext := "evidence unavailable"
+		if h.EvidenceState == store.HandoffEvidenceAvailable && h.EvidencePacketID != "" {
+			evidenceContext = "evidence packet " + h.EvidencePacketID
+		}
+		body := fmt.Sprintf("handoff id=%s actor=%s outgoing=%s incoming=%s; %s",
+			h.ID, h.ActorID, h.FromMemberID, h.ToMemberID, evidenceContext)
+		if _, err := rooms.Post(ctx, collab.MessageInput{
+			WorkspaceID: h.WorkspaceID, RunID: h.RunID, ActorID: h.ActorID,
+			Kind: store.RoomMessageSystem, Body: body, IdempotencyKey: h.ID,
+		}); err != nil {
+			slog.Warn("sshd: publish handoff room record", "operation", h.ID, "error", err)
+			return
+		}
+		if err := outbox.MarkHandoffPublished(ctx, h.ID, h.CreatedAt); err != nil {
+			slog.Warn("sshd: mark handoff publication", "operation", h.ID, "error", err)
+			return
+		}
+	}
+}
+
+func captureHandoffEvidence(ctx context.Context, h *store.HandoffOutbox, capture EvidenceCaptureService) (state, packetID string, complete bool) {
+	if capture == nil {
+		return store.HandoffEvidenceUnavailable, "", true
+	}
+	packet, err := capture.Capture(ctx, evidence.Request{
+		RunID: h.RunID, CreatorID: h.ActorID, Trigger: store.EvidenceHandoff,
+		IdempotencyKey: h.ID,
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) ||
+			errors.Is(err, gitengine.ErrCheckoutNotFound) ||
+			errors.Is(err, gitengine.ErrRunMetadataNotFound) {
+			return store.HandoffEvidenceUnavailable, "", true
+		}
+		// A transport, staging, or database error is operational. Keep the
+		// pending state so the bounded replay worker can retry it.
+		slog.Warn("sshd: handoff evidence capture pending", "operation", h.ID, "error", err)
+		return "", "", false
+	}
+	if packet.ID == "" {
+		slog.Warn("sshd: handoff evidence capture returned no packet", "operation", h.ID)
+		return "", "", false
+	}
+	return store.HandoffEvidenceAvailable, packet.ID, true
 }
 
 func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

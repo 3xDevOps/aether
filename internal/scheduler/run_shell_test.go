@@ -153,14 +153,15 @@ func TestFinalizeStopsRunShellTabs(t *testing.T) {
 	}
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	prefixes := e.pty.stoppedPrefixesSnapshot()
 	want := "run-shell:" + string(run.ID) + ":"
-	for _, prefix := range prefixes {
-		if prefix == want {
-			return
+	waitFor(t, "run shell cleanup", func() bool {
+		for _, prefix := range e.pty.stoppedPrefixesSnapshot() {
+			if prefix == want {
+				return true
+			}
 		}
-	}
-	t.Fatalf("prefix stops = %v, want %q", prefixes, want)
+		return false
+	})
 }
 func TestRunShellReservationAdoptionSurvivesConcurrentRollback(t *testing.T) {
 	e := newTestEnv(t, nil)

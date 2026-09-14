@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -25,12 +28,31 @@ type RoomService interface {
 	Protect(context.Context, domain.RunID, domain.MemberID) error
 }
 
+// EvidenceService is the transport seam for retained evidence metadata and
+// bounded supporting objects. It deliberately exposes no artifact paths.
+type EvidenceService interface {
+	List(context.Context, domain.WorkspaceID, domain.RunID, string, int) (protocol.EvidencePacketListResult, error)
+	Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error)
+	RenderPatch(context.Context, domain.WorkspaceID, string, int) (gitengine.Patch, error)
+	ReadTranscript(context.Context, domain.WorkspaceID, string, int) ([]byte, bool, error)
+}
+
+// EvidenceCaptureService is the optional handoff/report capture half of the
+// evidence seam. Read-only transports do not need to implement it.
+type EvidenceCaptureService interface {
+	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
+}
+
 func init() {
 	registerGuarded(protocol.MethodRunRoomList, permissions.View, roomTarget, (*Server).runRoomList)
 	registerGuarded(protocol.MethodRunRoomStatus, permissions.View, roomTarget, (*Server).runRoomStatus)
 	registerMethod(protocol.MethodRunRoomPost, (*Server).runRoomPost)
 	registerGuarded(protocol.MethodRunRoomDecide, permissions.Steer, roomMessageTarget, (*Server).runRoomDecide)
 
+	registerGuarded(protocol.MethodRunEvidenceList, permissions.View, evidenceListTarget, (*Server).runEvidenceList)
+	registerGuarded(protocol.MethodRunEvidenceGet, permissions.View, evidencePacketTarget, (*Server).runEvidenceGet)
+	registerGuarded(protocol.MethodRunEvidencePatch, permissions.View, evidencePacketTarget, (*Server).runEvidencePatch)
+	registerGuarded(protocol.MethodRunEvidenceTranscript, permissions.View, evidencePacketTarget, (*Server).runEvidenceTranscript)
 }
 
 func (s *Server) rooms() (RoomService, *protocol.Error) {
@@ -39,6 +61,14 @@ func (s *Server) rooms() (RoomService, *protocol.Error) {
 	}
 	return s.cfg.Services.Rooms, nil
 }
+
+func (s *Server) evidence() (EvidenceService, *protocol.Error) {
+	if s.cfg.Services.Evidence == nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "evidence service not configured"}
+	}
+	return s.cfg.Services.Evidence, nil
+}
+
 func roomTarget(s *Server, ctx context.Context, raw json.RawMessage) (permissions.Target, *protocol.Error) {
 	var p struct {
 		WorkspaceID string `json:"workspace_id"`
@@ -59,6 +89,49 @@ func roomTarget(s *Server, ctx context.Context, raw json.RawMessage) (permission
 	}
 	return target, nil
 }
+
+func evidenceListTarget(s *Server, ctx context.Context, raw json.RawMessage) (permissions.Target, *protocol.Error) {
+	var p protocol.RunEvidenceListParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return permissions.Target{}, invalidParams("invalid params: " + err.Error())
+	}
+	if p.WorkspaceID == "" {
+		return permissions.Target{}, invalidParams("workspace_id is required")
+	}
+	if _, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID)); err != nil {
+		return permissions.Target{}, rpcError(err)
+	}
+	if p.RunID == "" {
+		return permissions.Target{Workspace: domain.WorkspaceID(p.WorkspaceID)}, nil
+	}
+	return roomTarget(s, ctx, raw)
+}
+
+func evidencePacketTarget(s *Server, ctx context.Context, raw json.RawMessage) (permissions.Target, *protocol.Error) {
+	var p struct {
+		WorkspaceID string `json:"workspace_id"`
+		PacketID    string `json:"packet_id"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return permissions.Target{}, invalidParams("invalid params: " + err.Error())
+	}
+	if p.WorkspaceID == "" || p.PacketID == "" {
+		return permissions.Target{}, invalidParams("workspace_id and packet_id are required")
+	}
+	packet, err := s.cfg.Store.GetEvidencePacket(ctx, p.PacketID)
+	if err != nil {
+		return permissions.Target{}, rpcError(err)
+	}
+	if packet.WorkspaceID != domain.WorkspaceID(p.WorkspaceID) {
+		return permissions.Target{}, &protocol.Error{Code: protocol.CodeNotFound, Message: "evidence packet not found"}
+	}
+	target, err := resolveRunTarget(ctx, s.cfg.Store, packet.RunID)
+	if err != nil {
+		return permissions.Target{}, rpcError(err)
+	}
+	return target, nil
+}
+
 func roomMessageTarget(s *Server, ctx context.Context, raw json.RawMessage) (permissions.Target, *protocol.Error) {
 	var p protocol.RunRoomDecideParams
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -239,6 +312,99 @@ func roomMutationResult(result collab.Result) protocol.RunRoomPostResult {
 	return out
 }
 
+func (s *Server) runEvidenceList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	ev, perr := s.evidence()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.RunEvidenceListParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
+	}
+	if err := validateCollaborationPage(p.Before, p.Limit); err != nil {
+		return nil, err
+	}
+	result, err := ev.List(ctx, domain.WorkspaceID(p.WorkspaceID), domain.RunID(p.RunID), p.Before, p.Limit)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	return result, nil
+}
+
+func (s *Server) runEvidenceGet(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	ev, perr := s.evidence()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.RunEvidenceGetParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" || p.PacketID == "" {
+		return nil, invalidParams("workspace_id and packet_id are required")
+	}
+	packet, err := ev.Get(ctx, domain.WorkspaceID(p.WorkspaceID), p.PacketID)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	return protocol.RunEvidenceGetResult{Packet: packet}, nil
+}
+
+func (s *Server) runEvidencePatch(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	ev, perr := s.evidence()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.RunEvidencePatchParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" || p.PacketID == "" {
+		return nil, invalidParams("workspace_id and packet_id are required")
+	}
+	if p.MaxBytes < 0 || p.MaxBytes > evidence.DefaultPatchBytes {
+		return nil, invalidParams(fmt.Sprintf("max_bytes must be between 0 and %d", evidence.DefaultPatchBytes))
+	}
+	packet, err := ev.Get(ctx, domain.WorkspaceID(p.WorkspaceID), p.PacketID)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	patch, err := ev.RenderPatch(ctx, domain.WorkspaceID(p.WorkspaceID), p.PacketID, p.MaxBytes)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	return protocol.RunEvidencePatchResult{Packet: packet, Patch: patch.Text, Truncated: patch.Truncated}, nil
+}
+
+func (s *Server) runEvidenceTranscript(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	ev, perr := s.evidence()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.RunEvidenceTranscriptParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" || p.PacketID == "" {
+		return nil, invalidParams("workspace_id and packet_id are required")
+	}
+	if p.MaxBytes < 0 || p.MaxBytes > evidence.MaxTranscriptBytes {
+		return nil, invalidParams(fmt.Sprintf("max_bytes must be between 0 and %d", evidence.MaxTranscriptBytes))
+	}
+	packet, err := ev.Get(ctx, domain.WorkspaceID(p.WorkspaceID), p.PacketID)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	data, truncated, err := ev.ReadTranscript(ctx, domain.WorkspaceID(p.WorkspaceID), p.PacketID, p.MaxBytes)
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	return protocol.RunEvidenceTranscriptResult{Packet: packet, DataBase64: base64.StdEncoding.EncodeToString(data), Truncated: truncated}, nil
+}
+
 func validateCollaborationPage(before string, limit int) *protocol.Error {
 	if len(before) > protocol.CollaborationMaxCursorBytes {
 		return invalidParams("before is too long")
@@ -272,6 +438,10 @@ func collaborationRPCError(err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeDenied, Message: "collaboration operation denied"}
 	case errors.Is(err, collab.ErrInvalidRequest), errors.Is(err, collab.ErrInvalidAttachment), errors.Is(err, collab.ErrInvalidAnchor):
 		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: "invalid collaboration request"}
+	case errors.Is(err, evidence.ErrExpired):
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "evidence packet expired"}
+	case errors.Is(err, evidence.ErrTranscriptUnavailable):
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: "evidence transcript unavailable"}
 	default:
 		return &protocol.Error{Code: protocol.CodeInternal, Message: "collaboration service error"}
 	}

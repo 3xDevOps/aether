@@ -333,21 +333,52 @@ func (e *Engine) gitWorktree(ctx context.Context, workTree, gitDir, index string
 // listings. It reads the agent's current index but never lets Git use the
 // checkout's .git directory as its repository or configuration source.
 func (e *Engine) gitCheckout(ctx context.Context, run domain.RunID, checkout string, args ...string) (string, error) {
-	out, err := e.gitCheckoutRaw(ctx, run, checkout, args...)
+	out, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, args...)
 	return strings.TrimSpace(out), err
 }
 
-func (e *Engine) gitCheckoutRaw(ctx context.Context, run domain.RunID, checkout string, args ...string) (string, error) {
+func (e *Engine) gitCheckoutBounded(ctx context.Context, run domain.RunID, checkout string, limit int, args ...string) (string, bool, error) {
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if _, objectsErr := scratchObjects(store, checkout, run); objectsErr != nil {
-		return "", objectsErr
+		return "", false, objectsErr
 	}
 	index := filepath.Join(checkout, ".git", "index")
-	out, _, err := e.gitWorktree(ctx, checkout, store, index, -1, args...)
-	return out, err
+	out, over, err := e.gitWorktree(ctx, checkout, store, index, limit, args...)
+	return out, over, err
+}
+
+// gitStaged runs a Git command with a server-owned scratch repository,
+// worktree, and index. The checkout's own Git database is never consulted.
+func (e *Engine) gitStaged(ctx context.Context, workTree, index string, limit int, args ...string) (string, bool, error) {
+	return e.gitWorktree(ctx, workTree, filepath.Dir(index), index, limit, args...)
+}
+
+// boundedBuffer keeps the first limit bytes written to it and reports whether
+// anything was dropped. A negative limit means unbounded output.
+type boundedBuffer struct {
+	buf   []byte
+	limit int
+	over  bool
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.limit < 0 {
+		b.buf = append(b.buf, p...)
+		return len(p), nil
+	}
+	switch room := b.limit - len(b.buf); {
+	case room >= len(p):
+		b.buf = append(b.buf, p...)
+	case room > 0:
+		b.buf = append(b.buf, p[:room]...)
+		b.over = true
+	case len(p) > 0:
+		b.over = true
+	}
+	return len(p), nil
 }
 
 func (e *Engine) checkoutRunID(checkout string) (domain.RunID, error) {

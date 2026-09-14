@@ -29,4 +29,6 @@ type Services struct {
 	Mirrors MirrorService
 	// Rooms is the durable run-room collaboration service.
 	Rooms RoomService
+	// Evidence is the durable evidence packet service.
+	Evidence EvidenceService
 }

@@ -213,6 +213,17 @@ func (s *collabStore) DecideRoomMessage(_ context.Context, id string, from, to s
 	m.DecidedAt = &at
 	return true, nil
 }
+func (s *collabStore) CreateEvidencePacket(context.Context, *store.EvidencePacket) error { return nil }
+func (s *collabStore) GetEvidencePacket(context.Context, string) (*store.EvidencePacket, error) {
+	return nil, store.ErrNotFound
+}
+func (s *collabStore) ListEvidencePackets(context.Context, domain.WorkspaceID, domain.RunID, string, int) (*store.EvidencePacketPage, error) {
+	return &store.EvidencePacketPage{}, nil
+}
+func (s *collabStore) ListExpiredEvidencePackets(context.Context, time.Time, int) ([]*store.EvidencePacket, error) {
+	return nil, nil
+}
+func (s *collabStore) DeleteEvidencePacket(context.Context, string) error { return nil }
 func (s *collabStore) GetRun(_ context.Context, id domain.RunID) (*domain.Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

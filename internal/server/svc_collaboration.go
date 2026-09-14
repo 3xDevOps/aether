@@ -38,6 +38,9 @@ func init() {
 		}
 		if d.SSH != nil {
 			d.SSH.Services.Rooms = svc
+			if d.Evidence != nil {
+				d.SSH.Services.Evidence = d.Evidence
+			}
 		}
 		return svc, nil
 	})

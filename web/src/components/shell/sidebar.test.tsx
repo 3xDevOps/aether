@@ -288,6 +288,25 @@ describe('Sidebar', () => {
     expect(screen.getByRole('heading', { name: /^Needs you/ })).toBeDefined()
   })
 
+  it('keeps a finished unanswered run under Needs you', () => {
+    const finished = run({
+      id: 'run_finished_question',
+      task: 'answer after completion',
+      status: 'failed',
+      unanswered_questions: 1,
+    })
+    act(() =>
+      useStore.setState((state) => ({
+        runs: { ...state.runs, [finished.id]: toRecord(finished) },
+      })),
+    )
+    render(<Sidebar />)
+
+    const needsYou = screen.getByRole('button', { name: /^Needs you/, expanded: true })
+    expect(needsYou.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('answer after completion')).toBeDefined()
+  })
+
   it('starts the Done status group collapsed with its run count visible', () => {
     const done = run({
       id: 'run_done',

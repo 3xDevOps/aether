@@ -5,13 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
 // snapshotStoreSuffix names the per-run object store that holds diff
@@ -24,6 +28,12 @@ const snapshotStoreSuffix = ".diffsnap"
 // lastTreeFile records the most recent snapshot tree inside the store, so
 // the interval chain survives a watch restart or a server restart.
 const lastTreeFile = "last"
+
+// MaxEvidenceInputBytes bounds the total regular-file content that one
+// evidence capture may ask Git to retain. A conservative live-checkout
+// preflight runs before staging, and the immutable tree is checked before a
+// retained evidence ref is created.
+const MaxEvidenceInputBytes = 64 << 20
 
 // snapshotStorePath validates run and returns its snapshot store path
 // without checking existence.
@@ -49,6 +59,168 @@ func (e *Engine) snapshotLock(run domain.RunID) *sync.Mutex {
 	return lock
 }
 
+// checkEvidenceCaptureBounds performs the conservative live-checkout
+// preflight for files Git is about to stage: cached tracked paths plus
+// non-ignored untracked paths. Git supplies the set, while the rooted checkout
+// API supplies file metadata without following symlinks or opening special
+// files. The immutable tree is checked again after staging.
+func (e *Engine) checkEvidenceCaptureBounds(ctx context.Context, run domain.RunID, checkout string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if got, err := e.checkoutRunID(checkout); err != nil {
+		return err
+	} else if got != run {
+		return fmt.Errorf("gitengine: checkout %s does not match run %s", checkout, run)
+	}
+	free, err := disk.Free(checkout)
+	if err != nil {
+		return fmt.Errorf("%w: inspect free disk for run %s: %v", ErrEvidenceStorageLimit, run, err)
+	}
+	const listingLimit = MaxEvidenceInputBytes + (1 << 20)
+	listing, over, err := e.gitCheckoutBounded(ctx, run, checkout, listingLimit,
+		"ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		return fmt.Errorf("gitengine: list evidence input for run %s: %w", run, err)
+	}
+	if over {
+		return fmt.Errorf("%w: staged file listing exceeds %d bytes", ErrEvidenceStorageLimit, listingLimit)
+	}
+	root, err := e.openCheckoutRoot(checkout)
+	if err != nil {
+		return fmt.Errorf("gitengine: open checkout for run %s: %w", run, err)
+	}
+	defer func() { _ = root.Close() }()
+	var total uint64
+	seen := make(map[string]struct{})
+	for path := range strings.SplitSeq(listing, "\x00") {
+		if path == "" {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		rel := filepath.FromSlash(path)
+		if filepath.IsAbs(rel) || rel == "." || rel == ".." ||
+			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("gitengine: Git returned an invalid staged path %q", path)
+		}
+		rootPath := filepath.Join(string(run), rel)
+		info, statErr := e.checkoutsRoot.Lstat(rootPath)
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		if statErr != nil {
+			return fmt.Errorf("gitengine: inspect staged file %q: %w", path, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			continue
+		}
+		file, openErr := rootfs.Open(root, path)
+		if errors.Is(openErr, fs.ErrNotExist) {
+			continue
+		}
+		if openErr != nil {
+			return fmt.Errorf("gitengine: open staged file %q: %w", path, openErr)
+		}
+		info, statErr = file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			return fmt.Errorf("gitengine: stat staged file %q: %w", path, statErr)
+		}
+		if !info.Mode().IsRegular() {
+			_ = file.Close()
+			continue
+		}
+		_ = file.Close()
+		if info.Size() < 0 {
+			return fmt.Errorf("gitengine: negative file size for %q", path)
+		}
+		size := uint64(info.Size())
+		if size > MaxEvidenceInputBytes-total {
+			return fmt.Errorf("%w: retained Git input exceeds %d bytes", ErrEvidenceStorageLimit, MaxEvidenceInputBytes)
+		}
+		total += size
+	}
+	if total > free {
+		return fmt.Errorf("%w: retained Git input is %d bytes but only %d bytes are free", ErrEvidenceStorageLimit, total, free)
+	}
+	return nil
+}
+
+// checkEvidenceSnapshotBounds validates the immutable tree produced by
+// writeSnapshotTree. The live checkout can change after the conservative
+// preflight above, but a tree's blob sizes cannot change once Git has written
+// it, so this is the authoritative capture bound.
+func (e *Engine) checkEvidenceSnapshotBounds(ctx context.Context, run domain.RunID, checkout, tree string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validObjectID(tree) {
+		return fmt.Errorf("gitengine: evidence snapshot for run %s returned invalid tree %q", run, tree)
+	}
+	store, err := e.snapshotStorePath(run)
+	if err != nil {
+		return err
+	}
+	const listingLimit = MaxEvidenceInputBytes + (1 << 20)
+	listing, over, err := e.gitBareBounded(ctx, store, listingLimit,
+		"ls-tree", "-r", "-l", "-z", tree, "--")
+	if err != nil {
+		return fmt.Errorf("gitengine: list evidence snapshot for run %s: %w", run, err)
+	}
+	if over {
+		return fmt.Errorf("%w: evidence snapshot listing exceeds %d bytes", ErrEvidenceStorageLimit, listingLimit)
+	}
+	var total uint64
+	for record := range strings.SplitSeq(listing, "\x00") {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		if record == "" {
+			continue
+		}
+		tab := strings.IndexByte(record, '\t')
+		if tab < 0 {
+			return fmt.Errorf("gitengine: malformed evidence snapshot entry %q", record)
+		}
+		fields := strings.Fields(record[:tab])
+		if len(fields) != 4 {
+			return fmt.Errorf("gitengine: malformed evidence snapshot entry %q", record)
+		}
+		// Git trees represent regular files with exactly these modes. Symlink
+		// and gitlink blobs are not regular-file content and match the
+		// preflight policy.
+		if fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") {
+			continue
+		}
+		size, parseErr := strconv.ParseUint(fields[3], 10, 64)
+		if parseErr != nil {
+			return fmt.Errorf("gitengine: parse evidence snapshot size %q: %w", fields[3], parseErr)
+		}
+		if size > MaxEvidenceInputBytes-total {
+			return fmt.Errorf("%w: retained Git input exceeds %d bytes", ErrEvidenceStorageLimit, MaxEvidenceInputBytes)
+		}
+		total += size
+	}
+	free, err := disk.Free(checkout)
+	if err != nil {
+		return fmt.Errorf("%w: inspect free disk for run %s: %v", ErrEvidenceStorageLimit, run, err)
+	}
+	if total > free {
+		return fmt.Errorf("%w: retained Git input is %d bytes but only %d bytes are free", ErrEvidenceStorageLimit, total, free)
+	}
+	return nil
+}
+
+// writeSnapshotTree stages the whole checkout into the run's snapshot store
+// and writes the resulting tree, returning its object id. Every caller uses
+// the same per-run lock so the persistent scratch index and its lock cannot
+// be raced by the diff watcher and evidence capture.
 func (e *Engine) writeSnapshotTree(ctx context.Context, run domain.RunID, checkout string) (string, error) {
 	lock := e.snapshotLock(run)
 	lock.Lock()

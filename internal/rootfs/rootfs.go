@@ -140,7 +140,9 @@ func closeOwned(root *os.Root, owned bool) {
 }
 
 func relativeParts(name string, allowDot bool) ([]string, error) {
-	if name == "" || strings.ContainsRune(name, 0) || strings.Contains(name, "\\") || path.IsAbs(name) {
+	if name == "" || strings.ContainsRune(name, 0) ||
+		(os.IsPathSeparator('\\') && strings.Contains(name, "\\")) ||
+		path.IsAbs(name) {
 		return nil, fs.ErrInvalid
 	}
 	clean := path.Clean(name)

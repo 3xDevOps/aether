@@ -71,19 +71,97 @@ type RoomMessage struct {
 	UpdatedAt        string              `json:"updated_at"`
 }
 
-// RoomMessageListResult carries a bounded page.
+// EvidenceTrigger mirrors the durable evidence packet trigger vocabulary.
+type EvidenceTrigger string
+
+const (
+	EvidenceFinish  EvidenceTrigger = "finish"
+	EvidenceHandoff EvidenceTrigger = "handoff"
+	EvidenceReport  EvidenceTrigger = "report"
+)
+
+type EvidenceOriginKind string
+
+const (
+	EvidenceOriginHuman  EvidenceOriginKind = "human"
+	EvidenceOriginRun    EvidenceOriginKind = "run"
+	EvidenceOriginServer EvidenceOriginKind = "server"
+)
+
+type EvidenceOrigin struct {
+	Kind EvidenceOriginKind `json:"kind"`
+	ID   string             `json:"id"`
+}
+
+type EvidencePacketAvailability string
+
+const (
+	EvidenceAvailable EvidencePacketAvailability = "available"
+	EvidenceExpired   EvidencePacketAvailability = "expired"
+)
+
+type ChangedFileFact struct {
+	Path      string `json:"path"`
+	Status    string `json:"status,omitempty"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+}
+
+type EvidenceSourceFact struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+type EvidencePacket struct {
+	ID                    string                     `json:"id"`
+	WorkspaceID           string                     `json:"workspace_id"`
+	RunID                 string                     `json:"run_id"`
+	Origin                EvidenceOrigin             `json:"origin"`
+	OwnerID               string                     `json:"owner_id,omitempty"`
+	CreatorID             string                     `json:"creator_id,omitempty"`
+	Trigger               EvidenceTrigger            `json:"trigger"`
+	Objective             string                     `json:"objective"`
+	CapturedAt            string                     `json:"captured_at"`
+	ExpiresAt             *string                    `json:"expires_at,omitempty"`
+	Availability          EvidencePacketAvailability `json:"availability"`
+	ExpiredAt             *string                    `json:"expired_at,omitempty"`
+	EventBoundary         uint64                     `json:"event_boundary"`
+	BaseRevision          string                     `json:"base_revision,omitempty"`
+	RetainedRevision      string                     `json:"retained_revision,omitempty"`
+	ChangedFiles          []ChangedFileFact          `json:"changed_files,omitempty"`
+	Sources               []EvidenceSourceFact       `json:"sources,omitempty"`
+	RelatedRoomMessageIDs []string                   `json:"related_room_message_ids,omitempty"`
+	UnresolvedFacts       []string                   `json:"unresolved_facts,omitempty"`
+	NextAction            string                     `json:"next_action,omitempty"`
+	Provenance            string                     `json:"provenance,omitempty"`
+	IdempotencyKey        string                     `json:"idempotency_key,omitempty"`
+	CreatedAt             string                     `json:"created_at"`
+	UpdatedAt             string                     `json:"updated_at"`
+}
+
+// RoomMessageListResult and EvidencePacketListResult carry bounded pages.
 // NextBefore is an opaque cursor returned by the store.
 type RoomMessageListResult struct {
 	Messages   []RoomMessage `json:"messages"`
 	NextBefore string        `json:"next_before,omitempty"`
 }
 
+type EvidencePacketListResult struct {
+	Packets    []EvidencePacket `json:"packets"`
+	NextBefore string           `json:"next_before,omitempty"`
+}
+
 // Human-facing collaboration methods on the control channel.
 const (
-	MethodRunRoomList   = "run.room.list"
-	MethodRunRoomStatus = "run.room.status"
-	MethodRunRoomPost   = "run.room.post"
-	MethodRunRoomDecide = "run.room.decide"
+	MethodRunRoomList           = "run.room.list"
+	MethodRunRoomStatus         = "run.room.status"
+	MethodRunRoomPost           = "run.room.post"
+	MethodRunRoomDecide         = "run.room.decide"
+	MethodRunEvidenceList       = "run.evidence.list"
+	MethodRunEvidenceGet        = "run.evidence.get"
+	MethodRunEvidencePatch      = "run.evidence.patch"
+	MethodRunEvidenceTranscript = "run.evidence.transcript"
 )
 
 // Collaboration list and payload bounds are shared by room and evidence handlers.
@@ -155,6 +233,46 @@ type RunRoomDecideResult struct {
 	Receipt string      `json:"receipt,omitempty"`
 }
 
+type RunEvidenceListParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	RunID       string `json:"run_id,omitempty"`
+	Before      string `json:"before,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+}
+
+type RunEvidenceGetParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	PacketID    string `json:"packet_id"`
+}
+
+type RunEvidencePatchParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	PacketID    string `json:"packet_id"`
+	MaxBytes    int    `json:"max_bytes,omitempty"`
+}
+
+type RunEvidenceTranscriptParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	PacketID    string `json:"packet_id"`
+	MaxBytes    int    `json:"max_bytes,omitempty"`
+}
+
+type RunEvidenceGetResult struct {
+	Packet EvidencePacket `json:"packet"`
+}
+
+type RunEvidencePatchResult struct {
+	Packet    EvidencePacket `json:"packet"`
+	Patch     string         `json:"patch"`
+	Truncated bool           `json:"truncated"`
+}
+
+type RunEvidenceTranscriptResult struct {
+	Packet     EvidencePacket `json:"packet"`
+	DataBase64 string         `json:"data_base64"`
+	Truncated  bool           `json:"truncated"`
+}
+
 func collaborationTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
@@ -183,6 +301,9 @@ func roomMessageFailureFromStore(f *store.RoomMessageFailure) *RoomMessageFailur
 	}
 	return &RoomMessageFailure{Code: f.Code, Message: f.Message, Retryable: f.Retryable}
 }
+func evidenceOriginFromStore(origin store.EvidenceOrigin) EvidenceOrigin {
+	return EvidenceOrigin{Kind: EvidenceOriginKind(origin.Kind), ID: origin.ID}
+}
 
 // RoomMessageFromStore converts a durable message without adding host paths.
 func RoomMessageFromStore(m *store.RoomMessage) RoomMessage {
@@ -203,6 +324,42 @@ func RoomMessageFromStore(m *store.RoomMessage) RoomMessage {
 	}
 }
 
+func changedFileFactFromStore(f store.ChangedFileFact) ChangedFileFact {
+	return ChangedFileFact{Path: f.Path, Status: f.Status, Additions: f.Additions, Deletions: f.Deletions}
+}
+
+func sourceFactFromStore(f store.EvidenceSourceFact) EvidenceSourceFact {
+	return EvidenceSourceFact{Name: f.Name, Available: f.Available, Truncated: f.Truncated, Reason: f.Reason}
+}
+
+// EvidencePacketFromStore converts packet metadata. It never includes the
+// contents of an evidence source or the server's filesystem path.
+func EvidencePacketFromStore(p *store.EvidencePacket) EvidencePacket {
+	if p == nil {
+		return EvidencePacket{}
+	}
+	changed := make([]ChangedFileFact, len(p.ChangedFiles))
+	for i, f := range p.ChangedFiles {
+		changed[i] = changedFileFactFromStore(f)
+	}
+	sources := make([]EvidenceSourceFact, len(p.Sources))
+	for i, f := range p.Sources {
+		sources[i] = sourceFactFromStore(f)
+	}
+	return EvidencePacket{
+		ID: p.ID, WorkspaceID: string(p.WorkspaceID), RunID: string(p.RunID),
+		Origin: evidenceOriginFromStore(p.Origin), OwnerID: string(p.OwnerID), CreatorID: string(p.CreatorID),
+		Trigger: EvidenceTrigger(p.Trigger), Objective: p.Objective, CapturedAt: collaborationTime(p.CapturedAt),
+		ExpiresAt: collaborationTimePtr(p.ExpiresAt), Availability: EvidencePacketAvailability(p.Availability),
+		ExpiredAt: collaborationTimePtr(p.ExpiredAt), EventBoundary: p.EventBoundary,
+		BaseRevision: p.BaseRevision, RetainedRevision: p.RetainedRevision,
+		ChangedFiles: changed, Sources: sources,
+		RelatedRoomMessageIDs: append([]string(nil), p.RelatedRoomMessageIDs...),
+		UnresolvedFacts:       append([]string(nil), p.UnresolvedFacts...), NextAction: p.NextAction,
+		Provenance: p.Provenance, IdempotencyKey: p.IdempotencyKey,
+		CreatedAt: collaborationTime(p.CreatedAt), UpdatedAt: collaborationTime(p.UpdatedAt),
+	}
+}
 func RoomMessagePageFromStore(page *store.RoomMessagePage) RoomMessageListResult {
 	if page == nil {
 		return RoomMessageListResult{}
@@ -210,6 +367,17 @@ func RoomMessagePageFromStore(page *store.RoomMessagePage) RoomMessageListResult
 	out := RoomMessageListResult{Messages: make([]RoomMessage, len(page.Items)), NextBefore: page.NextBefore}
 	for i, m := range page.Items {
 		out.Messages[i] = RoomMessageFromStore(m)
+	}
+	return out
+}
+
+func EvidencePacketPageFromStore(page *store.EvidencePacketPage) EvidencePacketListResult {
+	if page == nil {
+		return EvidencePacketListResult{}
+	}
+	out := EvidencePacketListResult{Packets: make([]EvidencePacket, len(page.Items)), NextBefore: page.NextBefore}
+	for i, p := range page.Items {
+		out.Packets[i] = EvidencePacketFromStore(p)
 	}
 	return out
 }

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import type { RoomMessage, RoomMessageKind, Run } from '@/lib/types'
+import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { MemberAvatar } from '@/routes/board/member-avatar'
 import { useStore } from '@/store'
 const emptyMessages: RoomMessage[] = []
@@ -352,6 +353,13 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     }
   }
 
+  const answerFact = (fact: string) => {
+    markDraftEdited()
+    setMode('comment')
+    setCorrelationID(undefined)
+    setBody(fact)
+    composer.current?.focus()
+  }
 
   return (
     <>
@@ -392,6 +400,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
           <div className="flex flex-wrap items-center gap-1 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
             <span className={status?.protected || run.protected ? 'text-state-warn' : 'text-state-success'}>{status?.protected || run.protected ? 'Protected' : 'Unprotected'}</span>
             {status?.watchers?.length ? <span className="truncate">{status.watchers.map((id) => memberLabel(id, members)).join(', ')}</span> : <span>No watchers reported</span>}
+            <EvidenceDrawer runID={runID} workspaceID={workspaceID} client={client} onAnswer={answerFact} />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
             {error && (

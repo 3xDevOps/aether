@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -196,6 +197,182 @@ func TestCancelQueuedSteerRequestsIsAtomicAndScoped(t *testing.T) {
 	}
 }
 
+func TestEvidencePacketExpiresAtRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunCompleted)
+	expires := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Microsecond)
+	packet := &EvidencePacket{
+		WorkspaceID:    workspace.ID,
+		RunID:          run.ID,
+		CreatorID:      member.ID,
+		Trigger:        EvidenceFinish,
+		Objective:      "release evidence",
+		ExpiresAt:      &expires,
+		IdempotencyKey: "evidence-1",
+	}
+	if err := db.CreateEvidencePacket(ctx, packet); err != nil {
+		t.Fatalf("CreateEvidencePacket: %v", err)
+	}
+	got, err := db.GetEvidencePacket(ctx, packet.ID)
+	if err != nil {
+		t.Fatalf("GetEvidencePacket: %v", err)
+	}
+	if got.ExpiresAt == nil || !got.ExpiresAt.Equal(expires) {
+		t.Fatalf("expires_at = %v, want %v", got.ExpiresAt, expires)
+	}
+}
+
+func TestListExpiredEvidencePacketsFiltersOrdersAndBounds(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunCompleted)
+	cutoff := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	oldest := cutoff.Add(-3 * time.Hour)
+	tied := cutoff.Add(-2 * time.Hour)
+	boundary := cutoff
+	future := cutoff.Add(time.Hour)
+	create := func(key string, expiresAt *time.Time) *EvidencePacket {
+		t.Helper()
+		packet := &EvidencePacket{
+			WorkspaceID:    workspace.ID,
+			RunID:          run.ID,
+			CreatorID:      member.ID,
+			Trigger:        EvidenceReport,
+			Objective:      key,
+			ExpiresAt:      expiresAt,
+			IdempotencyKey: key,
+		}
+		if err := db.CreateEvidencePacket(ctx, packet); err != nil {
+			t.Fatalf("CreateEvidencePacket(%q): %v", key, err)
+		}
+		return packet
+	}
+	nullable := create("nullable", nil)
+	nonExpired := create("non-expired", &future)
+	old := create("old", &oldest)
+	tieA := create("tie-a", &tied)
+	tieB := create("tie-b", &tied)
+	atBoundary := create("boundary", &boundary)
+
+	got, err := db.ListExpiredEvidencePackets(ctx, cutoff, 1000)
+	if err != nil {
+		t.Fatalf("ListExpiredEvidencePackets: %v", err)
+	}
+	expected := []*EvidencePacket{old, tieA, tieB, atBoundary}
+	sort.Slice(expected, func(i, j int) bool {
+		if expected[i].ExpiresAt.Equal(*expected[j].ExpiresAt) {
+			return expected[i].ID < expected[j].ID
+		}
+		return expected[i].ExpiresAt.Before(*expected[j].ExpiresAt)
+	})
+	if len(got) != len(expected) {
+		t.Fatalf("expired packet count = %d, want %d", len(got), len(expected))
+	}
+	for i := range expected {
+		if got[i].ID != expected[i].ID {
+			t.Fatalf("expired packet %d = %q, want %q", i, got[i].ID, expected[i].ID)
+		}
+		if got[i].ID == nullable.ID || got[i].ID == nonExpired.ID {
+			t.Fatalf("expired packet list included excluded packet %q", got[i].ID)
+		}
+	}
+	if got[0].ID != old.ID || got[len(got)-1].ID != atBoundary.ID {
+		t.Fatalf("expired packet ordering/boundary = %q..%q, want %q..%q", got[0].ID, got[len(got)-1].ID, old.ID, atBoundary.ID)
+	}
+}
+
+func TestDeleteEvidencePacketIsIdempotent(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunCompleted)
+	packet := &EvidencePacket{
+		WorkspaceID:    workspace.ID,
+		RunID:          run.ID,
+		CreatorID:      member.ID,
+		Trigger:        EvidenceReport,
+		Objective:      "delete me",
+		IdempotencyKey: "delete-evidence",
+	}
+	if err := db.CreateEvidencePacket(ctx, packet); err != nil {
+		t.Fatalf("CreateEvidencePacket: %v", err)
+	}
+	if err := db.DeleteEvidencePacket(ctx, packet.ID); err != nil {
+		t.Fatalf("first DeleteEvidencePacket: %v", err)
+	}
+	if err := db.DeleteEvidencePacket(ctx, packet.ID); err != nil {
+		t.Fatalf("repeated DeleteEvidencePacket: %v", err)
+	}
+	if _, err := db.GetEvidencePacket(ctx, packet.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetEvidencePacket after delete = %v, want ErrNotFound", err)
+	}
+	if _, err := db.GetRun(ctx, run.ID); err != nil {
+		t.Fatalf("GetRun after packet delete: %v", err)
+	}
+	if _, err := db.GetWorkspace(ctx, workspace.ID); err != nil {
+		t.Fatalf("GetWorkspace after packet delete: %v", err)
+	}
+}
+func TestEvidenceTombstoneCursorAndPublicationOutbox(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunCompleted)
+	newer := time.Date(2026, 9, 14, 2, 0, 0, 0, time.UTC)
+	older := newer.Add(-time.Hour)
+	expiry := newer.Add(-time.Minute)
+	first := &EvidencePacket{
+		WorkspaceID: workspace.ID, RunID: run.ID, CreatorID: member.ID,
+		Trigger: EvidenceFinish, Objective: "newer", CapturedAt: newer,
+		ExpiresAt: &expiry, RetainedRevision: "deadbeef", IdempotencyKey: "tombstone-new",
+		Sources: []EvidenceSourceFact{{Name: "git", Available: true}},
+	}
+	second := &EvidencePacket{
+		WorkspaceID: workspace.ID, RunID: run.ID, CreatorID: member.ID,
+		Trigger: EvidenceFinish, Objective: "older", CapturedAt: older,
+		IdempotencyKey: "tombstone-old",
+	}
+	if err := db.CreateEvidencePacket(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateEvidencePacket(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	at := newer.Add(time.Minute)
+	if err := db.MarkEvidenceExpired(ctx, first.ID, at, []EvidenceSourceFact{{Name: "git", Reason: "retention expired"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetEvidencePacket(ctx, first.ID)
+	if err != nil || got.Availability != EvidenceExpired || got.RetainedRevision != "" || got.ExpiredAt == nil {
+		t.Fatalf("tombstone = %+v, %v", got, err)
+	}
+	page, err := db.ListEvidencePackets(ctx, workspace.ID, run.ID, "", 1)
+	if err != nil || len(page.Items) != 1 || page.NextBefore == "" {
+		t.Fatalf("first evidence page = %+v, %v", page, err)
+	}
+	cursor := page.NextBefore
+	if deleteErr := db.DeleteEvidencePacket(ctx, page.Items[0].ID); deleteErr != nil {
+		t.Fatal(deleteErr)
+	}
+	page, err = db.ListEvidencePackets(ctx, workspace.ID, run.ID, cursor, 1)
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != second.ID {
+		t.Fatalf("stable cursor page = %+v, %v", page, err)
+	}
+	pubs, _, err := db.ListPendingEvidencePublications(ctx, time.Now().UTC(), "", 10)
+	if err != nil || len(pubs) != 1 || pubs[0].PacketID != second.ID {
+		t.Fatalf("pending publications = %+v, %v", pubs, err)
+	}
+	if err := db.MarkEvidencePublicationPublished(ctx, second.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestRoomOnlyMessagesAreFinalAndNotModeratable(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

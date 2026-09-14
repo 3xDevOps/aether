@@ -69,6 +69,7 @@ async function closeFirstRun(page: Page): Promise<void> {
   await dialog.getByRole('button', { name: 'Merged', exact: true }).click()
   await expect(header).toContainText('Done')
   await expect(header).toContainText('closed; retained container')
+  await expect(dialog).toHaveCount(0)
 }
 
 interface Indicator {

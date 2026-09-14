@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // gatedEnv builds a test env whose fakePTY enforces the real write gate
@@ -164,9 +165,10 @@ func TestRunProtectRechecksOwnerAfterHandoff(t *testing.T) {
 	releaseLookup := make(chan struct{})
 	lookupStarted := make(chan struct{})
 	e.srv.cfg.Store = &relaunchRunLookupGate{
-		Store:   e.store,
-		started: lookupStarted,
-		release: releaseLookup,
+		Store:              e.store,
+		HandoffOutboxStore: e.store.(store.HandoffOutboxStore),
+		started:            lookupStarted,
+		release:            releaseLookup,
 	}
 
 	protectDone := make(chan *protocol.Error, 1)

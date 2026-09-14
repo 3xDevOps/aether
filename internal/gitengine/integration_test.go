@@ -1352,6 +1352,9 @@ func TestDiffStatsHostilePaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "日本語.txt"), []byte("a\nb\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(checkout, `literal\backslash.txt`), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// Rename of a tracked file: real paths, never "old => new".
 	if _, err := e.git(ctx, checkout, "mv", "file.txt", "renamed.txt"); err != nil {
 		t.Fatal(err)
@@ -1390,6 +1393,9 @@ func TestDiffStatsHostilePaths(t *testing.T) {
 	}
 	if got["日本語.txt"] != (events.FileDiffStat{Path: "日本語.txt", Additions: 2}) {
 		t.Errorf("non-ASCII untracked stat = %+v (files %+v)", got["日本語.txt"], files)
+	}
+	if got[`literal\backslash.txt`] != (events.FileDiffStat{Path: `literal\backslash.txt`, Additions: 2}) {
+		t.Errorf("backslash untracked stat = %+v (files %+v)", got[`literal\backslash.txt`], files)
 	}
 	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Deletions: 2}) {
 		t.Errorf("rename old-path stat = %+v", got["file.txt"])

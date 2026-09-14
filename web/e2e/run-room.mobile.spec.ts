@@ -131,3 +131,58 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
   }
 })
 
+test('a phone reads retained evidence in a full-width surface', async ({
+  page,
+  aether,
+}) => {
+  const alice = await aether.member('Alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(
+    'workspace.list',
+  )
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id,
+    harness: 'fake',
+    task: 'mobile retained evidence',
+    mode: 'headless',
+  })
+
+  await expect
+    .poll(
+      async () => {
+        const { packets } = await alice.api.rpc<{ packets: unknown[] }>(
+          'run.evidence.list',
+          {
+            workspace_id: workspaces[0].id,
+            run_id: run.id,
+            limit: 50,
+          },
+        )
+        return packets.length
+      },
+      { timeout: 3 * 60 * 1000, intervals: [250, 500, 1_000, 2_000] },
+    )
+    .toBeGreaterThan(0)
+
+  await page.goto(`${alice.url}&run=${run.id}`)
+  await page.getByRole('button', { name: 'Open Run Room' }).tap()
+  const evidence = page.getByRole('region', { name: 'Run evidence' })
+  await evidence.getByRole('button', { name: /^Evidence/ }).tap()
+  const closeEvidence = evidence.getByRole('button', { name: 'Close evidence' })
+  const surface = closeEvidence.locator('xpath=../..')
+  await expect(surface).toBeVisible()
+
+  const viewport = page.viewportSize()
+  const box = await surface.boundingBox()
+  expect(viewport).not.toBeNull()
+  expect(box).not.toBeNull()
+  expect(box?.x).toBe(0)
+  expect(box?.y).toBeGreaterThan(0)
+  expect(box?.width).toBe(viewport?.width)
+  expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(viewport?.height)
+  await expect(evidence.getByRole('button', { name: /^finish capture/ })).toBeVisible()
+  await expect(evidence.getByRole('heading', { name: 'Retained evidence' })).toBeVisible()
+  await closeEvidence.tap()
+  await expect(surface).toBeHidden()
+})

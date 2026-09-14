@@ -200,6 +200,10 @@ type Scheduler struct {
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.
 	coordination *coordination
+	// evidence is the attached durable evidence service (UseEvidence);
+	// nil keeps lifecycle behavior unchanged for deployments that do not
+	// enable Release A evidence capture.
+	evidence EvidenceService
 	// updates is the attached server self-update service (UseUpdates);
 	// nil means a scheduled update never applies.
 	updates UpdateTicker
@@ -268,6 +272,10 @@ type supervised struct {
 	retained         bool
 	retainedUntil    *time.Time
 	destroyPending   bool
+	// evidencePending means terminalization completed but required evidence
+	// capture did not. The sidecar keeps this bit so a same-status retry
+	// resolves the capture before reporting success or releasing sources.
+	evidencePending bool
 	// finalizing reserves the lifecycle transition after the agent exits.
 	// The reservation is brief: finalize's git/runtime/store work runs
 	// without lifecycleMu so Kill can still record cancellation.
@@ -293,6 +301,9 @@ type supervised struct {
 	// before finalize so a crash can resume the original exit.
 	exitObserved bool
 	exitCode     int
+	// evidenceIdentity is the stable finish-capture identity. It is mirrored
+	// to the sidecar so a retry after a crash cannot create another packet.
+	evidenceIdentity string
 	// The coordination assets mounted into this run's container, mirrored
 	// into the sidecar before the container is created (coordination.go).
 	bridgeDigest string
@@ -520,6 +531,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		case <-sweep.C:
 			s.checkStalls(ctx)
 			s.sweepRetained(ctx)
+			s.drainEvidencePublications(ctx)
 			s.tickUpdates(ctx)
 		case <-gcC:
 			s.sweepCheckouts(ctx)
@@ -562,6 +574,15 @@ func (s *Scheduler) Close() error {
 func (s *Scheduler) UseBaseCapture(c BaseCapture) {
 	s.mu.Lock()
 	s.cfg.Bases = c
+	s.mu.Unlock()
+}
+
+// UseEvidence attaches the durable evidence service. The server builder uses
+// this after constructing the scheduler because evidence and lifecycle
+// services are initialized independently.
+func (s *Scheduler) UseEvidence(e EvidenceService) {
+	s.mu.Lock()
+	s.evidence = e
 	s.mu.Unlock()
 }
 

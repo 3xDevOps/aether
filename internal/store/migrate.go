@@ -749,6 +749,92 @@ CREATE INDEX idx_room_messages_correlation
 	ON room_messages(workspace_id, correlation_id, created_at DESC)
 	WHERE correlation_id <> '';
 `,
+	// v28: durable evidence packets and handoff publication state. Evidence
+	// metadata points at retained objects but never stores their contents or
+	// host paths. Handoff rows are an outbox so publication can resume after
+	// a restart without recapturing evidence.
+	`
+CREATE TABLE evidence_packets (
+	id                       TEXT PRIMARY KEY,
+	workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	run_id                   TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	origin_kind              TEXT NOT NULL DEFAULT 'human' CHECK (origin_kind IN ('human', 'run', 'server')),
+	origin_id                TEXT NOT NULL DEFAULT '',
+	owner_id                 TEXT NOT NULL DEFAULT '',
+	creator_id               TEXT NOT NULL DEFAULT '',
+	publication_owner        TEXT NOT NULL DEFAULT 'generic' CHECK (publication_owner IN ('generic', 'coord_report')),
+	trigger                  TEXT NOT NULL CHECK (trigger IN ('finish', 'handoff', 'report')),
+	objective                TEXT NOT NULL,
+	captured_at              INTEGER NOT NULL,
+	expires_at               INTEGER,
+	availability             TEXT NOT NULL DEFAULT 'available' CHECK (availability IN ('available', 'expired')),
+	expired_at               INTEGER,
+	event_boundary           INTEGER NOT NULL DEFAULT 0,
+	base_revision            TEXT NOT NULL DEFAULT '',
+	retained_revision        TEXT NOT NULL DEFAULT '',
+	changed_files            TEXT NOT NULL DEFAULT '[]',
+	sources                  TEXT NOT NULL DEFAULT '[]',
+	related_room_message_ids TEXT NOT NULL DEFAULT '[]',
+	unresolved_facts         TEXT NOT NULL DEFAULT '[]',
+	next_action              TEXT NOT NULL DEFAULT '',
+	provenance               TEXT NOT NULL DEFAULT '',
+	idempotency_key          TEXT NOT NULL,
+	created_at               INTEGER NOT NULL,
+	updated_at               INTEGER NOT NULL,
+	UNIQUE (origin_kind, origin_id, run_id, idempotency_key)
+);
+CREATE INDEX idx_evidence_packets_scope
+	ON evidence_packets(workspace_id, run_id, captured_at DESC, id DESC);
+CREATE INDEX idx_evidence_packets_trigger
+	ON evidence_packets(workspace_id, trigger, captured_at DESC, id DESC);
+CREATE INDEX idx_evidence_packets_expiry
+	ON evidence_packets(availability, expires_at, id);
+CREATE TABLE evidence_publications (
+	packet_id       TEXT PRIMARY KEY REFERENCES evidence_packets(id) ON DELETE CASCADE,
+	event_id        TEXT NOT NULL UNIQUE,
+	attempts        INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at INTEGER NOT NULL,
+	last_error      TEXT NOT NULL DEFAULT '',
+	published_at    INTEGER,
+	created_at      INTEGER NOT NULL,
+	updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_evidence_publications_pending
+	ON evidence_publications(published_at, next_attempt_at, created_at, packet_id);
+CREATE TABLE evidence_staging (
+	id             TEXT PRIMARY KEY,
+	workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	run_id         TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	origin_kind    TEXT NOT NULL DEFAULT 'human' CHECK (origin_kind IN ('human', 'run', 'server')),
+	origin_id      TEXT NOT NULL DEFAULT '',
+	creator_id     TEXT NOT NULL DEFAULT '',
+	idempotency_key TEXT NOT NULL,
+	expires_at     INTEGER NOT NULL,
+	created_at     INTEGER NOT NULL
+);
+CREATE INDEX idx_evidence_staging_expiry
+	ON evidence_staging(expires_at, created_at, id);
+
+CREATE TABLE handoff_outbox (
+	id                 TEXT PRIMARY KEY,
+	workspace_id       TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	run_id             TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	actor_id           TEXT NOT NULL,
+	from_member_id     TEXT NOT NULL,
+	to_member_id       TEXT NOT NULL,
+	evidence_packet_id TEXT NOT NULL DEFAULT '',
+	evidence_state     TEXT NOT NULL CHECK (evidence_state IN ('pending', 'available', 'unavailable')),
+	publication_state  TEXT NOT NULL CHECK (publication_state IN ('pending', 'published')),
+	timeline_state     TEXT NOT NULL DEFAULT 'pending' CHECK (timeline_state IN ('pending', 'published')),
+	coauthor_state     TEXT NOT NULL DEFAULT 'pending' CHECK (coauthor_state IN ('pending', 'published')),
+	created_at         INTEGER NOT NULL,
+	updated_at         INTEGER NOT NULL,
+	published_at       INTEGER
+);
+CREATE INDEX idx_handoff_outbox_pending ON handoff_outbox(publication_state, created_at);
+CREATE INDEX idx_handoff_outbox_phases
+	ON handoff_outbox(timeline_state, coauthor_state, evidence_state, publication_state, created_at);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

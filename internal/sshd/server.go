@@ -150,6 +150,7 @@ type Server struct {
 	// that also need registerMu acquire registerMu first; authorizationMu
 	// paths never acquire registerMu or mu, so the lock order cannot cycle.
 	authorizationMu sync.Mutex
+	handoffSeq      atomic.Uint64
 
 	mu    sync.Mutex
 	ln    net.Listener
@@ -306,6 +307,12 @@ func fingerprintOf(keyLine string) string {
 // Close): the listener and every established connection are closed. A
 // subsequent Close blocks until every handler goroutine has returned.
 func (s *Server) Serve(ctx context.Context) error {
+	outbox, ok := s.cfg.Store.(store.HandoffOutboxStore)
+	if !ok {
+		return errors.New("sshd: handoff outbox store is required")
+	}
+	rooms := s.cfg.Services.Rooms
+	evidenceCapture, _ := s.cfg.Services.Evidence.(EvidenceCaptureService)
 	ln, err := net.Listen("tcp", s.cfg.Addr)
 	if err != nil {
 		return fmt.Errorf("sshd: listen %s: %w", s.cfg.Addr, err)
@@ -320,6 +327,11 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	s.ln = ln
 	s.baseCtx = serveCtx
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.replayHandoffOutbox(serveCtx, outbox, rooms, evidenceCapture)
+	}()
 	s.mu.Unlock()
 
 	stop := context.AfterFunc(ctx, func() { _ = s.Close() })

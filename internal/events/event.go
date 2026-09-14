@@ -66,6 +66,9 @@ const (
 	// payload contains refresh metadata only; message bodies and attachments
 	// are fetched through the collaboration API.
 	TypeRoomMessage Type = "workspace.room_message"
+	// TypeEvidencePacket signals a durable evidence packet mutation. Its
+	// payload contains counts and identifiers, never transcript or diff text.
+	TypeEvidencePacket Type = "workspace.evidence_packet"
 )
 
 // Payload is the typed body of an event. Implementations are plain structs;
@@ -200,12 +203,16 @@ func (ApprovalPayload) EventType() Type { return TypeApproval }
 type TimelineKind string
 
 const (
-	TimelineSteer    TimelineKind = "steer"
-	TimelinePause    TimelineKind = "pause"
-	TimelineResume   TimelineKind = "resume"
-	TimelineKill     TimelineKind = "kill"
-	TimelineHandoff  TimelineKind = "handoff"
-	TimelineNote     TimelineKind = "note"
+	TimelineSteer   TimelineKind = "steer"
+	TimelinePause   TimelineKind = "pause"
+	TimelineResume  TimelineKind = "resume"
+	TimelineKill    TimelineKind = "kill"
+	TimelineHandoff TimelineKind = "handoff"
+	TimelineNote    TimelineKind = "note"
+	// TimelineCoAuthor records a member other than the run's owner steering
+	// it for the first time. From that point the run's commits credit them
+	// with a Co-authored-by trailer, so the act is stamped once, not once
+	// per keystroke.
 	TimelineCoAuthor TimelineKind = "co-author"
 )
 
@@ -322,6 +329,35 @@ type RoomMessagePayload struct {
 
 func (RoomMessagePayload) EventType() Type { return TypeRoomMessage }
 
+// EvidenceOriginPayload identifies the authority that caused capture without
+// coupling the event backbone to protocol or store packages.
+type EvidenceOriginPayload struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+// EvidencePacketPayload is a dashboard-refresh summary. Full transcript and
+// diff content stay behind their source APIs.
+type EvidencePacketPayload struct {
+	PacketID               string                `json:"packet_id"`
+	WorkspaceID            domain.WorkspaceID    `json:"workspace_id"`
+	RunID                  domain.RunID          `json:"run_id"`
+	Origin                 EvidenceOriginPayload `json:"origin"`
+	CreatorID              domain.MemberID       `json:"creator_id,omitempty"`
+	Trigger                string                `json:"trigger"`
+	Availability           string                `json:"availability"`
+	ExpiredAt              *string               `json:"expired_at,omitempty"`
+	EventBoundary          uint64                `json:"event_boundary"`
+	ExpiresAt              *string               `json:"expires_at,omitempty"`
+	ChangedFileCount       int                   `json:"changed_file_count,omitempty"`
+	SourceCount            int                   `json:"source_count,omitempty"`
+	UnavailableSourceCount int                   `json:"unavailable_source_count,omitempty"`
+	TruncatedSourceCount   int                   `json:"truncated_source_count,omitempty"`
+	UnresolvedFactCount    int                   `json:"unresolved_fact_count,omitempty"`
+}
+
+func (EvidencePacketPayload) EventType() Type { return TypeEvidencePacket }
+
 func decodeAs[P Payload](data []byte) (Payload, error) {
 	var p P
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -331,19 +367,20 @@ func decodeAs[P Payload](data []byte) (Payload, error) {
 }
 
 var payloadCodecs = map[Type]func([]byte) (Payload, error){
-	TypeRunStatus:    decodeAs[RunStatusPayload],
-	TypeRunDeleted:   decodeAs[RunDeletedPayload],
-	TypeRunTitle:     decodeAs[RunTitlePayload],
-	TypeRunDiff:      decodeAs[RunDiffPayload],
-	TypeRunCost:      decodeAs[RunCostPayload],
-	TypePresence:     decodeAs[PresencePayload],
-	TypeApproval:     decodeAs[ApprovalPayload],
-	TypeTimeline:     decodeAs[TimelinePayload],
-	TypeGitBranch:    decodeAs[GitBranchPayload],
-	TypeAgentEvent:   decodeAs[AgentEventPayload],
-	TypeProfile:      decodeAs[ProfilePayload],
-	TypeSyncConflict: decodeAs[SyncConflictPayload],
-	TypeRoomMessage:  decodeAs[RoomMessagePayload],
+	TypeRunStatus:      decodeAs[RunStatusPayload],
+	TypeRunDeleted:     decodeAs[RunDeletedPayload],
+	TypeRunTitle:       decodeAs[RunTitlePayload],
+	TypeRunDiff:        decodeAs[RunDiffPayload],
+	TypeRunCost:        decodeAs[RunCostPayload],
+	TypePresence:       decodeAs[PresencePayload],
+	TypeApproval:       decodeAs[ApprovalPayload],
+	TypeTimeline:       decodeAs[TimelinePayload],
+	TypeGitBranch:      decodeAs[GitBranchPayload],
+	TypeAgentEvent:     decodeAs[AgentEventPayload],
+	TypeProfile:        decodeAs[ProfilePayload],
+	TypeSyncConflict:   decodeAs[SyncConflictPayload],
+	TypeRoomMessage:    decodeAs[RoomMessagePayload],
+	TypeEvidencePacket: decodeAs[EvidencePacketPayload],
 }
 
 // registerPayload registers the decoder for a payload type declared

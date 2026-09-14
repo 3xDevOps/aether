@@ -4,8 +4,8 @@ import { RunRoom } from '@/routes/terminal/run-room'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { applyEvent } from '@/store/sync'
 import { useStore } from '@/store'
-import type { Event, RoomMessageListResult, RoomPostResult, RoomStatusResult, Run } from '@/lib/types'
-import { alice, bob, fakeApi, roomMessage, run, workspace } from '@/test/fixtures'
+import type { EvidencePatchResult, Event, RoomMessageListResult, RoomPostResult, RoomStatusResult, Run } from '@/lib/types'
+import { alice, bob, evidencePacket, fakeApi, roomMessage, run, workspace } from '@/test/fixtures'
 
 
 const control: ControlMetadata = {
@@ -38,6 +38,12 @@ function mount(over: Partial<Run> = {}, options: { status?: RoomStatusResult; co
     roomLoading: {},
     roomError: {},
     roomActionError: {},
+    evidencePackets: {},
+    evidencePagination: {},
+    evidenceNextBefore: {},
+    evidenceLoading: {},
+    evidenceError: {},
+    selectedEvidence: {},
   })
   render(<RunRoom run={run(over)} client={client} selfID={alice.id} control={options.control} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
   fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
@@ -53,6 +59,12 @@ beforeEach(() => {
     roomLoading: {},
     roomError: {},
     roomActionError: {},
+    evidencePackets: {},
+    evidencePagination: {},
+    evidenceNextBefore: {},
+    evidenceLoading: {},
+    evidenceError: {},
+    selectedEvidence: {},
   })
 })
 
@@ -483,5 +495,147 @@ describe('Run Room', () => {
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
     expect(post.mock.calls[1][0]).toMatchObject({ body: 'same note', attachments: ['/home/alice/.aether/uploads/image.png'] })
     expect(post.mock.calls[1][0].idempotency_key).not.toBe(post.mock.calls[0][0].idempotency_key)
+  })
+
+  it('does not render a stale patch after selecting another packet', async () => {
+    const packetA = evidencePacket({ id: 'packet_a', objective: 'A' })
+    const packetB = evidencePacket({ id: 'packet_b', objective: 'B' })
+    const first = Promise.withResolvers<EvidencePatchResult>()
+    const second = Promise.withResolvers<EvidencePatchResult>()
+    const client = fakeApi({
+      runEvidenceList: vi.fn(async () => ({ packets: [packetA, packetB] })),
+      runEvidenceGet: vi.fn(async ({ packet_id }) => ({ packet: packet_id === packetA.id ? packetA : packetB })),
+      runEvidencePatch: vi.fn()
+        .mockImplementationOnce(() => first.promise)
+        .mockImplementationOnce(() => second.promise),
+    })
+    mount({}, { client })
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    const packets = await screen.findAllByRole('button', { name: /report capture/ })
+    fireEvent.click(packets[0])
+    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    await waitFor(() => expect(client.runEvidencePatch).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Back to packets' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: /report capture/ }))[1])
+    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    await waitFor(() => expect(client.runEvidencePatch).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      first.resolve({ packet: packetA, patch: 'patch A', truncated: false })
+      await first.promise
+    })
+    expect(screen.queryByText('patch A')).toBeNull()
+    await act(async () => {
+      second.resolve({ packet: packetB, patch: 'patch B', truncated: false })
+      await second.promise
+    })
+    expect(await screen.findByText('patch B')).toBeDefined()
+  })
+
+  it('keeps the selected evidence view when another packet refreshes the list', async () => {
+    const packet = evidencePacket({ id: 'packet_selected' })
+    const newer = evidencePacket({ id: 'packet_newer', captured_at: '2026-08-14T10:01:00Z' })
+    const list = vi.fn()
+      .mockResolvedValueOnce({ packets: [packet] })
+      .mockResolvedValueOnce({ packets: [packet, newer] })
+    const client = fakeApi({
+      runEvidenceList: list,
+      runEvidenceGet: vi.fn(async () => ({ packet })),
+      runEvidencePatch: vi.fn(async () => ({ packet, patch: 'stable patch', truncated: false })),
+    })
+    mount({}, { client })
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    expect(await screen.findByText('stable patch')).toBeDefined()
+
+    const event: Event = {
+      id: 'evidence-refresh',
+      seq: 1,
+      time: '2026-08-14T10:01:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.evidence_packet',
+      payload: {},
+    }
+    await act(async () => {
+      await applyEvent(useStore, event, client)
+    })
+
+    expect(screen.getByRole('tab', { name: 'Patch' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText('stable patch')).toBeDefined()
+  })
+
+  it('offers an explicit retry after the evidence list fails', async () => {
+    const packet = evidencePacket()
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error('evidence unavailable'))
+      .mockResolvedValue({ packets: [packet] })
+    const client = fakeApi({ runEvidenceList: list })
+    mount({}, { client })
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry evidence' }))
+    expect(await screen.findByRole('button', { name: /report capture/ })).toBeDefined()
+  })
+
+
+  it('answers an open question with a correlated reply', async () => {
+    const question = roomMessage({ id: 'question_1', kind: 'question', body: 'Which API should we use?' })
+    useStore.setState({ roomMessages: { run_1: [question] }, roomStatus: { run_1: status() }, members: { [alice.id]: alice, [bob.id]: bob } })
+    const client = fakeApi()
+    render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Run Room message' }), { target: { value: 'Use the existing API client.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'reply', correlation_id: 'question_1' })))
+  })
+  it('prefills an evidence answer as a contextual comment and closes evidence', async () => {
+    const packet = evidencePacket({ unresolved_facts: ['Which branch should be released?'] })
+    const client = fakeApi({
+      runEvidenceList: vi.fn(async () => ({ packets: [packet] })),
+      runEvidenceGet: vi.fn(async () => ({ packet })),
+    })
+    mount({}, { client })
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Answer' }))
+    expect(screen.queryByRole('heading', { name: 'Retained evidence' })).toBeNull()
+    expect((screen.getByRole('textbox', { name: 'Run Room message' }) as HTMLTextAreaElement).value).toBe('Which branch should be released?')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'comment', body: 'Which branch should be released?' })))
+  })
+
+
+  it('inspects retained patch and transcript evidence', async () => {
+    const packet = evidencePacket()
+    const client = fakeApi({
+      runEvidenceList: vi.fn(async () => ({ packets: [packet] })),
+      runEvidenceGet: vi.fn(async () => ({ packet })),
+      runEvidencePatch: vi.fn(async () => ({ packet, patch: 'diff --git a/src/app.ts', truncated: false })),
+      runEvidenceTranscript: vi.fn(async () => ({ packet, data_base64: btoa('agent output'), truncated: false })),
+    })
+    mount({}, { client })
+    fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    expect(await screen.findByText('diff --git a/src/app.ts')).toBeDefined()
+    fireEvent.click(screen.getByRole('tab', { name: 'Transcript' }))
+    expect(await screen.findByText('agent output')).toBeDefined()
+  })
+
+  it('uses a title-bar-inset full viewport sheet on a phone', () => {
+    const original = window.matchMedia
+    window.matchMedia = vi.fn((query: string) => ({ matches: query.includes('max-width: 639px'), media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() })) as typeof window.matchMedia
+    try {
+      mount()
+      const room = screen.getByRole('complementary', { name: 'Run Room' })
+      expect(room.className).toContain('fixed inset-x-0')
+      expect(room.className).toContain('top-[calc(var(--title-bar-height)+var(--safe-top))]')
+      expect(room.className).toContain('bottom-0')
+    } finally {
+      window.matchMedia = original
+    }
   })
 })

@@ -56,6 +56,29 @@ describe('sidebarRuns', () => {
     // Two attention runs now, and the more recent change leads.
     expect(scoped.map((r) => r.run.id)).toEqual(['attention', 'working', 'done'])
   })
+  it('surfaces a running run with unanswered questions as needs-attention', () => {
+    const scoped = sidebarRuns({
+      ...input,
+      runs: {
+        ...input.runs,
+        working: record({ id: 'working', status: 'running', unanswered_questions: 1 }),
+      },
+    })
+    expect(scoped.find((r) => r.run.id === 'working')?.state).toBe('needs-attention')
+  })
+
+  it('keeps a terminal run with unanswered questions in Needs you', () => {
+    const finished = record({
+      id: 'finished-question',
+      status: 'failed',
+      unanswered_questions: 1,
+    })
+    const scoped = sidebarRuns({
+      ...input,
+      runs: { ...input.runs, [finished.id]: finished },
+    })
+    expect(scoped.find((entry) => entry.run.id === finished.id)?.state).toBe('needs-attention')
+  })
 })
 
 describe('sidebarGroups', () => {

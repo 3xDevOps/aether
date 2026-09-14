@@ -15,6 +15,7 @@ import (
 
 type relaunchRunLookupGate struct {
 	store.Store
+	store.HandoffOutboxStore
 	started chan struct{}
 	release <-chan struct{}
 	mu      sync.Mutex
@@ -290,9 +291,10 @@ func TestRelaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 	releaseLookup := make(chan struct{})
 	lookupStarted := make(chan struct{})
 	e.srv.cfg.Store = &relaunchRunLookupGate{
-		Store:   e.store,
-		started: lookupStarted,
-		release: releaseLookup,
+		Store:              e.store,
+		HandoffOutboxStore: e.store.(store.HandoffOutboxStore),
+		started:            lookupStarted,
+		release:            releaseLookup,
 	}
 
 	relaunchDone := make(chan *protocol.Error, 1)

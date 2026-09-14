@@ -303,8 +303,8 @@ commit captured at launch.
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
 | `aether protect` / `unprotect <run>` | Limit steering and killing one run to its owner and admins, whatever the workspace policy says. |
-| `aether handoff <run> <member>` | Transfer ownership and notification routing. Overnight relay work. Refused for a viewer or a pending member, since neither can own a run. The agent account and its cost attribution do not change. |
-| `aether close <run> --outcome merged\|abandoned` | Clear a finished run off the attention board. |
+| `aether handoff <run> <member>` | Transfer ownership and notification routing immediately. The recipient needs no acceptance handshake; Aether records the actor and both owners and captures handoff context. The agent account and its cost attribution do not change. |
+| `aether close <run> --outcome merged\|abandoned` | Record the finish outcome and clear a finished run off the attention board after its automatic evidence capture. |
 | `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any steer-holder can. `--all` includes decided requests. |
 | `aether timeline` | The workspace's whole history; filter with `--run`, `--member`, `--type`, `--limit`, export with `--jsonl`. |
 | `aether cost --runs` | Token spend per member and per run. |
@@ -317,6 +317,47 @@ commit captured at launch.
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admin-only source-mirror lifecycle. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
+
+### Handoff and finishing runs
+
+Handoff is an immediate transfer. `aether handoff <run> <member>` changes the
+run owner and notification routing without waiting for the recipient to accept.
+The timeline and Run Room record the handoff actor, outgoing owner, and incoming
+owner. A system entry points to the handoff evidence packet, or says that
+evidence is unavailable when preservation did not succeed. The transfer does
+not switch the selected agent account or its cost attribution.
+
+Aether captures an evidence packet automatically when a run is handed off and
+when it finishes. The finish capture happens before automatic checkout or
+transcript cleanup. A packet is a factual record of the run at capture time,
+including its objective and identity, capture time and event-log boundary, base
+and retained Git revisions, changed-file facts, source availability, unresolved
+facts, next action, and provenance. Source metadata says when a source is
+unavailable or truncated and gives the reason when one is known.
+
+The packet retains the repository state in a private Git evidence commit, so
+the diff remains available after the live checkout is removed. A rendered patch
+is bounded to 1 MiB per request and reports `truncated` when that bound is
+reached. A copy of the PTY transcript is retained separately, capped at 16 MiB.
+The packet and its retained Git and transcript objects expire after 30 days.
+After expiry they are unavailable rather than silently replaced with a partial
+result.
+
+Evidence is provenance, not independent verification. It records what Aether
+observed or what a harness, agent, or member reported; it does not prove that a
+command succeeded or that the result was reviewed. The Git tree and transcript
+are captured sources, not one atomic snapshot of the container, its processes,
+environment, or credentials. Treat a missing source as unavailable and a
+truncated source as incomplete.
+
+If required preservation fails, Aether reports the failure and keeps the
+recoverable run resources instead of deleting the checkout or transcript
+silently. A handoff itself is not rolled back solely because its evidence
+packet could not be captured. Unresolved facts remain inspectable in the Run
+Room's evidence drawer. Use a fact's **Answer** action to open the composer
+with that fact prefilled, then edit and send a normal room comment. Evidence
+facts do not enter **Needs you**; only unanswered Run Room questions do. This
+is not a separate action inbox, blocker, or task model.
 
 ### Task templates and schedules
 
