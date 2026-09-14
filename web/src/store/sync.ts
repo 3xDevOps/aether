@@ -39,7 +39,7 @@ function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | 
   if (err instanceof TypeError) {
     // An unknown gateway is the desktop one: it is the only surface that can
     // fail before the descriptor is read, since the probe seeds it.
-    return store.getState().capabilities?.gateway === 'server' ? 'network' : 'gateway'
+    return store.getState().capabilities?.gateway === 'server' ? 'tailnet' : 'gateway'
   }
   return null
 }

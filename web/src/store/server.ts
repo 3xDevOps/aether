@@ -10,15 +10,22 @@ import type {
 import type { SliceCreator } from '@/store/slice'
 
 /** Which hop is down when the app cannot reach its data.
- * `network`: the request never got an answer. On the desktop the local
- * gateway says so in a 503 ("network unreachable: ..."), which means DNS is
- * dead or there is no route. On a phone the server itself serves the page,
- * so a fetch that dies outright is the tailnet or the server host.
+ * `network`: this machine has no usable network at all - DNS is dead, or
+ * there is no route to the host. Nothing on the server side is implicated.
  * `gateway`: the HTTP origin itself is gone - the `aether gui` process that
- * serves the page died - so nothing answers at all. Desktop only.
+ * serves the page died - so nothing answers at all. Desktop only: it is the
+ * only gateway the user can restart.
+ * `tailnet`: the same silence on a phone, where the server itself serves the
+ * page over the tailnet, so the hop that died is the tailnet or the host.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). */
-export type UnreachableKind = 'network' | 'gateway' | 'server' | 'refused' | 'identity'
+export type UnreachableKind =
+  | 'network'
+  | 'gateway'
+  | 'tailnet'
+  | 'server'
+  | 'refused'
+  | 'identity'
 
 /** The order the phases of one update run in. A terminal phase - failed
  * or cancelled - is not in it: those always win. */

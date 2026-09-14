@@ -13,15 +13,26 @@ describe('ConnectionError', () => {
     expect(retry).toHaveBeenCalledOnce()
   })
 
-  it('names Tailscale and the server host when nothing left the device', () => {
+  it('blames the local connection, not the server, when the network is down', () => {
     render(<ConnectionError kind="network" dead={false} error={null} onRetry={vi.fn()} />)
 
     expect(
-      screen.getByRole('heading', { name: 'No connection to the server' }),
+      screen.getByRole('heading', { name: 'This computer is offline' }),
     ).toBeDefined()
-    expect(screen.getByText(/Tailscale is connected/)).toBeDefined()
+    // The server is not implicated, so the copy must not send the user to it.
+    expect(screen.queryByText(/aether-server/i)).toBeNull()
+    expect(screen.queryByText(/server host/i)).toBeNull()
+  })
+
+  it('sends a phone to Tailscale and the server host, never to aether gui', () => {
+    render(<ConnectionError kind="tailnet" dead={false} error={null} onRetry={vi.fn()} />)
+
+    expect(
+      screen.getByRole('heading', { name: 'Cannot reach your server over the tailnet' }),
+    ).toBeDefined()
+    expect(screen.getByText(/Tailscale is connected here/)).toBeDefined()
     expect(screen.getByText(/server host is running/)).toBeDefined()
-    // This surface may be a phone, which has neither.
+    // A phone has neither.
     expect(screen.queryByText(/desktop app/i)).toBeNull()
     expect(screen.queryByText(/aether gui/i)).toBeNull()
   })

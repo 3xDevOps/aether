@@ -58,9 +58,20 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
     return {
       icon: WifiOff,
       eyebrow: 'No connection',
-      title: 'No connection to the server',
+      title: 'This computer is offline',
       description:
-        'This device could not get a connection out, so nothing was asked of the server. Check that it is online and that Tailscale is connected, and that the server host is running, then try again.',
+        'Your machine could not reach the network at all, so nothing was asked of the server yet. Reconnect to wifi or your VPN, then try again.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'tailnet') {
+    return {
+      icon: WifiOff,
+      eyebrow: 'Off the tailnet',
+      title: 'Cannot reach your server over the tailnet',
+      description:
+        'The dashboard comes from your server, and this phone got no answer from it. Check that Tailscale is connected here and that the server host is running, then retry.',
       action: 'Retry connection',
     }
   }

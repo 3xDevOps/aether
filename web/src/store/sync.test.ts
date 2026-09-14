@@ -330,10 +330,11 @@ describe('hydrate', () => {
     expect(store.getState().hydrationError).toContain('Failed to fetch')
   })
 
-  it('classifies a dead fetch on the server gateway as a dead connection', async () => {
+  it('classifies a dead fetch on the server gateway as a dead tailnet', async () => {
     const store = createRootStore()
     // The phone reaches the server gateway over the tailnet: there is no
-    // local process to restart, so the same TypeError is a dead link.
+    // local process to restart, so the same TypeError is a dead link. Its
+    // own kind, because the desktop's `network` copy names wifi and a VPN.
     store.getState().setCapabilities({ gateway: 'server', methods: ['*'], ws: ['events'] })
     await hydrate(
       store,
@@ -344,7 +345,7 @@ describe('hydrate', () => {
       }),
     )
 
-    expect(store.getState().unreachable).toBe('network')
+    expect(store.getState().unreachable).toBe('tailnet')
   })
 
   it('classifies the gateway naming its SSH backend as a dead server', async () => {
@@ -944,7 +945,7 @@ describe('connect', () => {
     )
 
     await subscribe()
-    await vi.waitFor(() => expect(store.getState().unreachable).toBe('network'))
+    await vi.waitFor(() => expect(store.getState().unreachable).toBe('tailnet'))
     expect(store.getState().hydrated).toBe(false)
     stop()
   })
