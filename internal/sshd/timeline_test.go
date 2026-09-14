@@ -24,6 +24,7 @@ import (
 // timeline shows the whole history, filters per member, and exports as
 // JSONL that parses back into the same events.
 func TestHandoffAndWorkspaceTimeline(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	log, err := events.OpenSQLiteLog(filepath.Join(dir, "events.db"))
@@ -225,6 +226,7 @@ func eventSeqs(evs []protocol.Event) []string {
 // TestWorkspaceTimelineUnavailableWithoutReader proves the seam degrades
 // like the others rather than panicking when no history is wired.
 func TestWorkspaceTimelineUnavailableWithoutReader(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	err := controlClient(t, e).Call(protocol.MethodWorkspaceTimeline,
 		protocol.WorkspaceTimelineParams{WorkspaceID: string(e.ws.ID)}, nil)

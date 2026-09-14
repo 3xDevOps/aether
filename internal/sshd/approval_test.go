@@ -50,6 +50,7 @@ func eventually(t *testing.T, what string, fn func() bool) {
 // decides it and his watcher indicator shows up on Ada's run while he is
 // attached to it.
 func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
+	t.Parallel()
 	e := inboxEnv(t)
 	ctx := context.Background()
 	bobSigner, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
@@ -197,6 +198,7 @@ func TestApprovalInboxAndWatcherIndicatorAcrossClients(t *testing.T) {
 // Without the service wired the methods degrade to CodeUnavailable
 // instead of failing the connection.
 func TestApprovalMethodsUnavailableWithoutService(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	for _, call := range []struct {

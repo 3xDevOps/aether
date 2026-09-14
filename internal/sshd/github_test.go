@@ -14,6 +14,7 @@ import (
 )
 
 func TestGitHubConnectIsMemberScoped(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -33,6 +34,7 @@ func TestGitHubConnectIsMemberScoped(t *testing.T) {
 // github.probe answers for the caller's own environment terminal and
 // nobody else's, the same way the connect does.
 func TestGitHubProbeIsMemberScoped(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -64,12 +66,14 @@ func TestGitHubProbeIsMemberScoped(t *testing.T) {
 // their login reaches the client as CodeInvalidState, with the remedy in
 // the message.
 func TestGitHubLoginProblemsMapToInvalidState(t *testing.T) {
+	t.Parallel()
 	for _, seam := range []error{
 		scheduler.ErrGitHubNotLoggedIn, scheduler.ErrGitHubScopeMissing,
 		scheduler.ErrGitHubCLIMissing, scheduler.ErrGitHubCLIBroken,
 		scheduler.ErrGitHubCLIOutdated,
 	} {
 		t.Run(seam.Error(), func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, nil)
 			e.runs.setErr(seam)
 			c := controlClient(t, e)
@@ -90,6 +94,7 @@ func TestGitHubLoginProblemsMapToInvalidState(t *testing.T) {
 // .gitconfig - what commits made inside their containers are authored as -
 // in step with the one member.git records.
 func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
+	t.Parallel()
 	homesRoot := filepath.Join(t.TempDir(), "homes")
 	homes, err := memberhome.New(homesRoot)
 	if err != nil {
@@ -120,6 +125,7 @@ func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
 // Without a signing key there is nothing to keep in step, so member.git
 // writes no .gitconfig at all.
 func TestMemberGitLeavesAHomeWithoutASigningKeyAlone(t *testing.T) {
+	t.Parallel()
 	homesRoot := filepath.Join(t.TempDir(), "homes")
 	homes, err := memberhome.New(homesRoot)
 	if err != nil {

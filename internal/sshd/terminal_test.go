@@ -12,6 +12,7 @@ import (
 )
 
 func TestTerminalControlStatusAndStopAreMemberScoped(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 
@@ -32,6 +33,7 @@ func TestTerminalControlStatusAndStopAreMemberScoped(t *testing.T) {
 }
 
 func TestTerminalAdmissionSerializesMemberRemoval(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	_, target := addMember(t, e, "Terminal user", domain.RoleCollaborator, false)
@@ -99,6 +101,7 @@ func TestTerminalAdmissionSerializesMemberRemoval(t *testing.T) {
 }
 
 func TestTerminalEnvironmentSaveAndResetAreMemberScoped(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	var saved protocol.EnvSaveResult
@@ -119,12 +122,14 @@ func TestTerminalEnvironmentSaveAndResetAreMemberScoped(t *testing.T) {
 }
 
 func TestEnvironmentTerminalNotRunningMapsToInvalidState(t *testing.T) {
+	t.Parallel()
 	if e := rpcError(scheduler.ErrTerminalNotRunning); e.Code != protocol.CodeInvalidState {
 		t.Fatalf("terminal not running code = %d, want %d", e.Code, protocol.CodeInvalidState)
 	}
 }
 
 func TestTerminalSentinelsMapToWireCodes(t *testing.T) {
+	t.Parallel()
 	if e := rpcError(scheduler.ErrTerminalTabLimit); e.Code != protocol.CodeInvalidState {
 		t.Fatalf("tab limit code = %d, want %d", e.Code, protocol.CodeInvalidState)
 	}

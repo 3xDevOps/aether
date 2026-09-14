@@ -202,7 +202,9 @@ func (c rawAttachConn) expectOpen(t *testing.T, d time.Duration) {
 }
 
 func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
+	t.Parallel()
 	t.Run("steer", func(t *testing.T) {
+		t.Parallel()
 		e := revocableEnv(t)
 		collab, _ := addMember(t, e, "Shell collaborator", domain.RoleCollaborator, false)
 		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
@@ -222,6 +224,7 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 	})
 
 	t.Run("membership", func(t *testing.T) {
+		t.Parallel()
 		e := revocableEnv(t)
 		collab, cm := addMember(t, e, "Shell viewer", domain.RoleCollaborator, false)
 		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
@@ -238,6 +241,7 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 // A member removed while using their environment terminal loses the socket
 // and receives the membership-revoked exit status.
 func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
+	t.Parallel()
 	e := revocableEnv(t)
 	e.pty.replay = []byte("scrollback")
 	// A fresh collaborator with no runs: deleting the run owner would trip
@@ -269,6 +273,7 @@ func TestTerminalDropsOnMembershipRevocation(t *testing.T) {
 // mid-attach. The re-validation ends the attach with the steer-revoked
 // status; before the demotion the same re-validation left it alone.
 func TestAttachDropsWriterOnDemotion(t *testing.T) {
+	t.Parallel()
 	e := revocableEnv(t)
 	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 
@@ -289,6 +294,7 @@ func TestAttachDropsWriterOnDemotion(t *testing.T) {
 // Every other way a live writer loses steer ends the attach too, and
 // losing the membership ends it with its own status.
 func TestAttachDropsWriterOnEveryRevocationPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cases := []struct {
 		name   string
@@ -343,6 +349,7 @@ func TestAttachDropsWriterOnEveryRevocationPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e := revocableEnv(t)
 			collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 			if tc.setup != nil {
@@ -363,6 +370,7 @@ func TestAttachDropsWriterOnEveryRevocationPath(t *testing.T) {
 // viewer keeps watching through a protection flip, an admins-only policy,
 // and their own demotion. Only losing the membership ends it.
 func TestAttachReadOnlySurvivesSteerLossUntilMembershipGoes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := revocableEnv(t)
 	e.pty.replay = []byte("out")

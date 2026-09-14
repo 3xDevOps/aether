@@ -22,6 +22,7 @@ var onePixelPNG = []byte{
 }
 
 func TestDecodeTerminalImageAcceptsExactDecodedLimit(t *testing.T) {
+	t.Parallel()
 	data := make([]byte, maxTerminalImageBytes)
 	copy(data, onePixelPNG)
 	encoded := base64.StdEncoding.EncodeToString(data)
@@ -35,6 +36,7 @@ func TestDecodeTerminalImageAcceptsExactDecodedLimit(t *testing.T) {
 }
 
 func TestDecodeTerminalImageRejectsInvalidAndOversizedContent(t *testing.T) {
+	t.Parallel()
 	if _, _, err := decodeTerminalImage(base64.StdEncoding.EncodeToString([]byte("not an image"))); err == nil {
 		t.Fatal("invalid image accepted")
 	}
@@ -45,6 +47,7 @@ func TestDecodeTerminalImageRejectsInvalidAndOversizedContent(t *testing.T) {
 }
 
 func TestTerminalImageTargetAuthorization(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	viewerKey, _ := addMember(t, e, "Viewer", "viewer", false)
 	viewer := controlAs(t, e, viewerKey)

@@ -102,6 +102,7 @@ func captureLogs(t *testing.T) *lockedBuffer {
 // Acceptance 1: a fresh connection from a tailnet client with no SSH key
 // bootstraps the admin.
 func TestTailnetBootstrapAdmin(t *testing.T) {
+	// Not parallel: captureLogs swaps the process-wide slog default.
 	logs := captureLogs(t)
 	whois := &fakeWhoIs{id: WhoIsIdentity{Login: "alice@example.com", NodeID: "node-1"}}
 	e := newFreshTestEnv(t, func(c *Config) { c.WhoIs = whois })
@@ -135,6 +136,7 @@ func TestTailnetBootstrapAdmin(t *testing.T) {
 // Acceptance 2: a second tailnet identity lands pending, is denied
 // everything but server.info, and member.approve unblocks it.
 func TestTailnetSecondIdentityPendingThenApproved(t *testing.T) {
+	t.Parallel()
 	whois := &fakeWhoIs{id: WhoIsIdentity{Login: "alice@example.com", NodeID: "node-1"}}
 	e := newFreshTestEnv(t, func(c *Config) { c.WhoIs = whois })
 
@@ -220,6 +222,7 @@ func TestTailnetSecondIdentityPendingThenApproved(t *testing.T) {
 // Acceptance 3: with tailscaled down (resolver errors) key members still
 // connect; tailnet-only members are refused with a clear banner.
 func TestTailnetResolverErrorFallsBackToKeys(t *testing.T) {
+	t.Parallel()
 	whois := &fakeWhoIs{err: errors.New("tailscaled unreachable")}
 	e := newTestEnv(t, func(c *Config) { c.WhoIs = whois })
 
@@ -252,6 +255,7 @@ func TestTailnetResolverErrorFallsBackToKeys(t *testing.T) {
 // Acceptance 4: a tagged node is never mapped through WhoIs - a
 // registered key authenticates it, no key produces the clear banner.
 func TestTailnetTaggedNodeRequiresKey(t *testing.T) {
+	t.Parallel()
 	whois := &fakeWhoIs{id: WhoIsIdentity{NodeID: "node-ci", Tagged: true}}
 	e := newTestEnv(t, func(c *Config) { c.WhoIs = whois })
 
@@ -286,6 +290,7 @@ func TestTailnetTaggedNodeRequiresKey(t *testing.T) {
 // Acceptance 5a: two OS users on one untagged node resolve to the same
 // member, and the audit line records node ID and tailnet login.
 func TestTailnetSameNodeTwoOSUsers(t *testing.T) {
+	// Not parallel: captureLogs swaps the process-wide slog default.
 	logs := captureLogs(t)
 	whois := &fakeWhoIs{id: WhoIsIdentity{Login: "alice@example.com", NodeID: "node-1"}}
 	e := newFreshTestEnv(t, func(c *Config) { c.WhoIs = whois })
@@ -310,6 +315,7 @@ func TestTailnetSameNodeTwoOSUsers(t *testing.T) {
 // Acceptance 5b: with tailnet_require_key on, a tailnet connection
 // without a registered key is refused; with the key it authenticates.
 func TestTailnetRequireKey(t *testing.T) {
+	t.Parallel()
 	whois := &fakeWhoIs{id: WhoIsIdentity{Login: "ada@example.com", NodeID: "node-1"}}
 	e := newTestEnv(t, func(c *Config) {
 		c.WhoIs = whois
@@ -338,6 +344,7 @@ func TestTailnetRequireKey(t *testing.T) {
 // First key to contact a fresh server bootstraps as admin (key-path
 // bootstrap parity with the tailnet path).
 func TestKeyBootstrapAdminOnFreshServer(t *testing.T) {
+	// Not parallel: captureLogs swaps the process-wide slog default.
 	logs := captureLogs(t)
 	e := newFreshTestEnv(t, nil)
 
@@ -370,6 +377,7 @@ func TestKeyBootstrapAdminOnFreshServer(t *testing.T) {
 // could otherwise wedge bootstrap with a key nobody holds. The callback
 // only tags the permissions; the store write happens post-handshake.
 func TestKeyBootstrapProbeIsSideEffectFree(t *testing.T) {
+	t.Parallel()
 	e := newFreshTestEnv(t, nil)
 	key := newSigner(t).PublicKey()
 
@@ -405,6 +413,7 @@ func TestKeyBootstrapProbeIsSideEffectFree(t *testing.T) {
 // LocalWhoIs speaks the LocalAPI whois endpoint over a unix socket and
 // maps person, tagged-node, and failure responses.
 func TestLocalWhoIs(t *testing.T) {
+	t.Parallel()
 	sock := filepath.Join(t.TempDir(), "ts.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -466,6 +475,7 @@ func TestLocalWhoIs(t *testing.T) {
 // The wire Member shape stays pinned for approved members: pending only
 // appears while it is true.
 func TestMemberWireShapePendingOmitted(t *testing.T) {
+	t.Parallel()
 	raw, err := json.Marshal(protocol.MemberFromDomain(&domain.Member{
 		ID: "m_1", DisplayName: "Ada", Color: "#e6194b", Role: domain.RoleAdmin,
 	}))

@@ -43,6 +43,7 @@ func controlAs(t *testing.T, e *testEnv, signer ssh.Signer) *protocol.Client {
 }
 
 func TestAdminRPCDeniedForNonAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = filepath.Join(t.TempDir(), "invites") })
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	c := controlAs(t, e, bob)
@@ -60,6 +61,7 @@ func TestAdminRPCDeniedForNonAdmin(t *testing.T) {
 }
 
 func TestPendingDeniedExceptServerInfo(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = filepath.Join(t.TempDir(), "invites") })
 	pat, pending := addMember(t, e, "Pat", domain.RoleCollaborator, true)
 	c := controlAs(t, e, pat)
@@ -85,6 +87,7 @@ func TestPendingDeniedExceptServerInfo(t *testing.T) {
 }
 
 func TestAdminWorkspaceAddAndInvite(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
 	c := controlClient(t, e)
@@ -129,6 +132,7 @@ func TestAdminWorkspaceAddAndInvite(t *testing.T) {
 }
 
 func TestRefuseDeletingLastAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 	var pe *protocol.Error
@@ -141,6 +145,7 @@ func TestRefuseDeletingLastAdmin(t *testing.T) {
 }
 
 func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
+	t.Parallel()
 	homeRoot := t.TempDir()
 	homes, err := memberhome.New(homeRoot)
 	if err != nil {
@@ -172,6 +177,7 @@ func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 }
 
 func TestMemberRemoveRetainsMemberWhenTerminalCleanupFails(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, target := addMember(t, e, "Target", domain.RoleCollaborator, false)
 	stopErr := errors.New("terminal is still using member credentials")
@@ -190,6 +196,7 @@ func TestMemberRemoveRetainsMemberWhenTerminalCleanupFails(t *testing.T) {
 }
 
 func TestInviteJoinRegistersCollaboratorAndBurns(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
 	code, _, err := mintInvite(dir, time.Hour)
@@ -224,6 +231,7 @@ func TestInviteJoinRegistersCollaboratorAndBurns(t *testing.T) {
 }
 
 func TestInviteProbeIsSideEffectFree(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
 	code, _, err := mintInvite(dir, time.Hour)

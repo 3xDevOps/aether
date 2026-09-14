@@ -8,6 +8,7 @@ import (
 )
 
 func TestMintBurnInvite(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	code, expires, err := mintInvite(dir, time.Hour)
 	if err != nil {
@@ -34,6 +35,7 @@ func TestMintBurnInvite(t *testing.T) {
 }
 
 func TestInviteExpiry(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	code, _, err := mintInvite(dir, time.Millisecond)
 	if err != nil {
@@ -49,6 +51,7 @@ func TestInviteExpiry(t *testing.T) {
 }
 
 func TestParseInviteUser(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		user, code, display string
 		ok                  bool

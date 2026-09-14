@@ -13,6 +13,7 @@ import (
 // whether WhoIs identity auth is active; both stay off the wire when the
 // server is not on a tailnet.
 func TestServerInfoTailnetFields(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, func(c *Config) {
 		c.WhoIs = &fakeWhoIs{err: errors.New("not on a tailnet")}
 		c.TailnetHostname = "box.tail1234.ts.net"
@@ -43,6 +44,7 @@ func TestServerInfoTailnetFields(t *testing.T) {
 
 // Off-tailnet servers omit both fields from the wire entirely.
 func TestServerInfoTailnetFieldsOmitted(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	c := controlClient(t, e)
 

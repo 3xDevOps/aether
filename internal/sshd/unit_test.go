@@ -13,6 +13,7 @@ import (
 )
 
 func TestLoadOrCreateHostKey(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "ssh", "host_ed25519_key")
 	signer, err := LoadOrCreateHostKey(path)
 	if err != nil {
@@ -46,6 +47,7 @@ func TestLoadOrCreateHostKey(t *testing.T) {
 }
 
 func TestLoadOrCreateHostKeyRejectsGarbage(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "host_key")
 	if err := os.WriteFile(path, []byte("not a key"), 0o600); err != nil {
 		t.Fatal(err)
@@ -56,6 +58,7 @@ func TestLoadOrCreateHostKeyRejectsGarbage(t *testing.T) {
 }
 
 func TestParseGitCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		cmd      string
 		op, wsID string
@@ -85,6 +88,7 @@ func TestParseGitCommand(t *testing.T) {
 }
 
 func TestRPCErrorMapping(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		err  error
 		code int

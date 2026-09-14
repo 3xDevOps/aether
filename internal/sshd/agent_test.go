@@ -59,6 +59,7 @@ func shippedAgentNames() []string {
 }
 
 func TestAgentRegisterRoundTripsThroughList(t *testing.T) {
+	t.Parallel()
 	s, member := newAgentTestServer(t)
 	def := validAgentDefinition()
 	result, rpcErr := callAgentRegister(t, s, member.ID, def)
@@ -101,6 +102,7 @@ func TestAgentRegisterRoundTripsThroughList(t *testing.T) {
 }
 
 func TestAgentRegisterRejections(t *testing.T) {
+	t.Parallel()
 	shipped := validAgentDefinition()
 	shipped.Name = "claude"
 	reserved := validAgentDefinition()
@@ -121,6 +123,7 @@ func TestAgentRegisterRejections(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			s, member := newAgentTestServer(t)
 			_, rpcErr := callAgentRegister(t, s, member.ID, tt.def)
 			if rpcErr == nil {
@@ -134,6 +137,7 @@ func TestAgentRegisterRejections(t *testing.T) {
 }
 
 func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
+	t.Parallel()
 	s, member := newAgentTestServer(t)
 	result, rpcErr := s.agentList(context.Background(), member.ID, nil)
 	if rpcErr != nil {
@@ -168,6 +172,7 @@ func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
 }
 
 func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
+	t.Parallel()
 	s, member := newAgentTestServer(t)
 	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
 	if err != nil {
@@ -204,6 +209,7 @@ func TestAgentListReportsExecutablesInTheMemberHome(t *testing.T) {
 }
 
 func TestAgentListResolvesContainerSymlinks(t *testing.T) {
+	t.Parallel()
 	outside := filepath.Join(t.TempDir(), "outside")
 	if err := os.WriteFile(outside, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
@@ -228,6 +234,7 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 		{"home prefix lookalike", "/root-other/tool", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			s, member := newAgentTestServer(t)
 			homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"))
 			if err != nil {
@@ -271,6 +278,7 @@ func TestAgentListResolvesContainerSymlinks(t *testing.T) {
 }
 
 func TestAgentListDiscoversSharedAccountInstallations(t *testing.T) {
+	t.Parallel()
 	s, owner := newAgentTestServer(t)
 	ctx := context.Background()
 	grantee := &domain.Member{DisplayName: "grantee", TailnetLogin: "grantee@example.com", Role: domain.RoleCollaborator}
