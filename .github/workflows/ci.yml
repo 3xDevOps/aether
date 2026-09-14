@@ -393,11 +393,14 @@ jobs:
       # the workspace, so the Makefile's default cache directory is moved into
       # it. A hosted runner and a self-hosted one lay the archive out
       # differently, hence runner.environment in the key.
-      # A fork pull request runs under pull_request_target, where GITHUB_REF
-      # is the default branch: a cache saved there is restored by later runs
-      # on main through the restore-keys prefix, and with org.gradle.caching
-      # on that carries compiled task outputs. Same rule as the setup-go cache
-      # above.
+      # A pull request runs under pull_request_target, where GITHUB_REF is
+      # the default branch: a cache saved there is restored by later runs on
+      # main through the restore-keys prefix, and with org.gradle.caching on
+      # that carries compiled task outputs. Every pull request runs cold on
+      # purpose, not only a fork's: this job cannot tell the two apart before
+      # it has already checked out the PR head, and a cold Gradle resolution
+      # costs about a minute against a 45-minute budget. Same rule as the
+      # setup-go cache above.
       - uses: actions/cache@v4
         if: github.event_name != 'pull_request_target'
         with:
