@@ -31,6 +31,7 @@ func mirrorForWorkspace(id domain.WorkspaceID) *domain.WorkspaceMirror {
 }
 
 func TestWorkspaceMirrorRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	ws := mustCreateWorkspace(t, db)
@@ -58,6 +59,7 @@ func TestWorkspaceMirrorRoundTrip(t *testing.T) {
 }
 
 func TestWorkspaceMirrorListEmpty(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	mirrors, err := db.ListWorkspaceMirrors(context.Background())
 	if err != nil {
@@ -72,6 +74,7 @@ func TestWorkspaceMirrorListEmpty(t *testing.T) {
 }
 
 func TestWorkspaceMirrorListOrderingAndFields(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	firstWorkspace := mustCreateWorkspace(t, db)
@@ -133,6 +136,7 @@ func TestWorkspaceMirrorListOrderingAndFields(t *testing.T) {
 }
 
 func TestWorkspaceMirrorUpsertChangesResult(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	ws := mustCreateWorkspace(t, db)
@@ -182,6 +186,7 @@ func TestWorkspaceMirrorUpsertChangesResult(t *testing.T) {
 }
 
 func TestWorkspaceMirrorDeleteAndLocalOnly(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	ws := mustCreateWorkspace(t, db)
@@ -203,6 +208,7 @@ func TestWorkspaceMirrorDeleteAndLocalOnly(t *testing.T) {
 }
 
 func TestWorkspaceMirrorUnknownWorkspace(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mirrorForWorkspace("missing")
@@ -218,6 +224,7 @@ func TestWorkspaceMirrorUnknownWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceMirrorRejectsInvalidData(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	ws := mustCreateWorkspace(t, db)
@@ -248,6 +255,7 @@ func TestWorkspaceMirrorRejectsInvalidData(t *testing.T) {
 }
 
 func TestWorkspaceMirrorMigrationFromV24(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 24)
 	if _, seedErr := raw.Exec(`INSERT INTO workspaces

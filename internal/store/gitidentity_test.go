@@ -12,6 +12,7 @@ import (
 // they are independent of the display name, and clearing them restores
 // the fallback identity.
 func TestMemberGitIdentityRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -58,6 +59,7 @@ func TestMemberGitIdentityRoundTrip(t *testing.T) {
 // often they steer, the set reads back with their git identity, and it
 // goes away with the run.
 func TestRunSteerers(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -39,9 +40,62 @@ func testKey(t *testing.T, comment string) string {
 	return line
 }
 
+// templateOnce builds the migrated schema exactly once per test binary:
+// replaying all migrations 82 times, once per test, is what makes this
+// package slow under -race. Every other test starts from a byte copy of
+// templateBytes instead of an empty database.
+var (
+	templateOnce  sync.Once
+	templateBytes []byte
+	templateErr   error
+)
+
+// templateDB returns the bytes of a database file already migrated to the
+// current schema.
+func templateDB(t *testing.T) []byte {
+	t.Helper()
+	templateOnce.Do(func() {
+		path := filepath.Join(t.TempDir(), "template.db")
+		db, err := Open(path)
+		if err != nil {
+			templateErr = fmt.Errorf("open template database: %w", err)
+			return
+		}
+		// Merge the WAL back into the main file and close it, so the copy
+		// every test starts from carries no -wal/-shm sidecar.
+		if _, err := db.db.Exec(`PRAGMA journal_mode=DELETE`); err != nil {
+			_ = db.Close()
+			templateErr = fmt.Errorf("checkpoint template database: %w", err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			templateErr = fmt.Errorf("close template database: %w", err)
+			return
+		}
+		templateBytes, templateErr = os.ReadFile(path)
+	})
+	if templateErr != nil {
+		t.Fatalf("build template database: %v", templateErr)
+	}
+	return templateBytes
+}
+
+// templateDBPath copies the shared template database into a fresh path in
+// its own t.TempDir() and returns that path. Open on the copy still runs
+// the migration loop, but every version is already recorded, so it does
+// one cheap read instead of replaying 26 migrations.
+func templateDBPath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "aether.db")
+	if err := os.WriteFile(path, templateDB(t), 0o600); err != nil {
+		t.Fatalf("copy template database: %v", err)
+	}
+	return path
+}
+
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "aether.db"))
+	db, err := Open(templateDBPath(t))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -99,6 +153,7 @@ func mustCreateRun(t *testing.T, db *DB, wid domain.WorkspaceID, mid domain.Memb
 }
 
 func TestNewID(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool)
 	for range 1000 {
 		id, err := newID()
@@ -116,6 +171,7 @@ func TestNewID(t *testing.T) {
 }
 
 func TestMigrationIdempotency(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 
 	db, err := Open(path)
@@ -153,6 +209,7 @@ func TestMigrationIdempotency(t *testing.T) {
 }
 
 func TestRunCommitMigrationAddsColumns(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	rows, err := db.db.Query(`PRAGMA table_info(runs)`)
 	if err != nil {
@@ -189,6 +246,7 @@ func TestRunCommitMigrationAddsColumns(t *testing.T) {
 }
 
 func TestMigrateRejectsNewerSchema(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	if _, err := db.db.Exec(
 		`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`,
@@ -202,6 +260,7 @@ func TestMigrateRejectsNewerSchema(t *testing.T) {
 }
 
 func TestWorkspaceCRUD(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -257,6 +316,7 @@ func TestWorkspaceCRUD(t *testing.T) {
 }
 
 func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := &domain.Workspace{Name: "bare"}
@@ -273,6 +333,7 @@ func TestWorkspaceNilEnvRoundTrip(t *testing.T) {
 }
 
 func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -358,6 +419,7 @@ func TestMemberCRUDAndPublicKeyLookup(t *testing.T) {
 }
 
 func TestMemberInvalidRoleRejected(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := &domain.Member{DisplayName: "X", PublicKey: testKey(t, ""), Color: "#fff", Role: "superuser"}
@@ -372,6 +434,7 @@ func TestMemberInvalidRoleRejected(t *testing.T) {
 }
 
 func TestMemberInvalidPublicKeyRejected(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := &domain.Member{DisplayName: "X", PublicKey: "not a key", Color: "#fff", Role: domain.RoleViewer}
@@ -384,6 +447,7 @@ func TestMemberInvalidPublicKeyRejected(t *testing.T) {
 }
 
 func TestMemberPublicKeyNormalization(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -413,6 +477,7 @@ func TestMemberPublicKeyNormalization(t *testing.T) {
 }
 
 func TestMemberPublicKeyUnique(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	m := mustCreateMember(t, db)
 	dup := &domain.Member{DisplayName: "B", PublicKey: m.PublicKey, Color: "#000", Role: domain.RoleViewer}
@@ -422,6 +487,7 @@ func TestMemberPublicKeyUnique(t *testing.T) {
 }
 
 func TestMemberTailnetIdentity(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -490,6 +556,7 @@ func TestMemberTailnetIdentity(t *testing.T) {
 }
 
 func TestMemberTailnetMigrationPreservesRows(t *testing.T) {
+	t.Parallel()
 	// Build a genuine v1 database (only migration 1 applied, old members
 	// schema with the inline UNIQUE public_key, runs still hanging off a
 	// session), seed a member and a run referencing it, then Open: v2 must
@@ -563,6 +630,7 @@ func TestMemberTailnetMigrationPreservesRows(t *testing.T) {
 }
 
 func TestRunCRUDRoundTripsEveryField(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -621,6 +689,7 @@ func TestRunCRUDRoundTripsEveryField(t *testing.T) {
 }
 
 func TestDeleteRunCleansRunOwnedData(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -682,6 +751,7 @@ func TestDeleteRunCleansRunOwnedData(t *testing.T) {
 }
 
 func TestRunQueries(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -736,6 +806,7 @@ func TestRunQueries(t *testing.T) {
 }
 
 func TestRunInvalidStatusAndModeRejected(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -759,6 +830,7 @@ func TestRunInvalidStatusAndModeRejected(t *testing.T) {
 }
 
 func TestForeignKeyEnforcement(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -786,6 +858,7 @@ func TestForeignKeyEnforcement(t *testing.T) {
 // The database holds credential-home blobs, so neither it nor the WAL
 // sidecars SQLite derives from it may be readable by other local accounts.
 func TestOpenKeepsDatabaseFilesPrivate(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("asserts unix permission bits; NTFS ACLs surface as 0666 through os.FileMode")
 	}
@@ -809,6 +882,10 @@ func TestOpenKeepsDatabaseFilesPrivate(t *testing.T) {
 	}
 }
 
+// TestConcurrentOpen already drives its own contention across 8 goroutines
+// racing to migrate one file; running it under t.Parallel() too stacks that
+// on top of every other package test's CPU use and starves its 5-second
+// migrate deadline on constrained runners, so it stays serial.
 func TestConcurrentOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
 	var wg sync.WaitGroup
@@ -833,6 +910,7 @@ func TestConcurrentOpen(t *testing.T) {
 }
 
 func TestUpdateRunStatus(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -882,6 +960,7 @@ func TestUpdateRunStatus(t *testing.T) {
 }
 
 func TestTransferRun(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -913,6 +992,7 @@ func TestTransferRun(t *testing.T) {
 }
 
 func TestZeroTimeRejected(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -942,6 +1022,7 @@ func TestZeroTimeRejected(t *testing.T) {
 }
 
 func TestUpdatesNeverTouchCreatedAt(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -965,6 +1046,7 @@ func TestUpdatesNeverTouchCreatedAt(t *testing.T) {
 }
 
 func TestCreatedAtPreservedWhenSet(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	want := time.Date(2020, 1, 2, 3, 4, 5, 678900000, time.UTC)
@@ -1025,6 +1107,7 @@ func timePtrEqual(a, b *time.Time) bool {
 }
 
 func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := &domain.Workspace{
@@ -1055,6 +1138,7 @@ func TestWorkspaceEnvironmentUsesFirstClassRepresentation(t *testing.T) {
 }
 
 func TestHarnessDefinitionRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -1081,6 +1165,7 @@ func TestHarnessDefinitionRoundTrip(t *testing.T) {
 }
 
 func TestHarnessDefinitionNotFound(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -1095,6 +1180,7 @@ func TestHarnessDefinitionNotFound(t *testing.T) {
 }
 
 func TestHarnessDefinitionUpsertOverwrites(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	m := mustCreateMember(t, db)
@@ -1129,6 +1215,7 @@ func TestHarnessDefinitionUpsertOverwrites(t *testing.T) {
 }
 
 func TestListHarnessDefinitionsScopedAndSorted(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	a := mustCreateMember(t, db)
@@ -1164,6 +1251,7 @@ func TestListHarnessDefinitionsScopedAndSorted(t *testing.T) {
 }
 
 func TestTerminalPersistence(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	member := mustCreateMember(t, db)
 	started := time.Date(2026, 9, 3, 12, 0, 7, 123, time.UTC)

@@ -14,6 +14,7 @@ import (
 // TestWorkspaceSteerOthersRoundTrip covers create/update/narrow-mutator
 // paths for the steer_others column, plus rejection of undefined values.
 func TestWorkspaceSteerOthersRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -65,6 +66,7 @@ func TestWorkspaceSteerOthersRoundTrip(t *testing.T) {
 // TestWorkspaceBaseBranchDefaults pins the fallback: a workspace created
 // without a base branch gets the default rather than an empty column.
 func TestWorkspaceBaseBranchDefaults(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -100,6 +102,7 @@ func TestWorkspaceBaseBranchDefaults(t *testing.T) {
 
 // TestSetRunProtected covers the narrow protected mutator.
 func TestSetRunProtected(t *testing.T) {
+	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
@@ -144,6 +147,7 @@ func TestSetRunProtected(t *testing.T) {
 // and lose nothing. The seed uses the pre-v12 sessions shape on purpose;
 // the collapse migration rehomes it onto the workspace.
 func TestPermissionsMigrationUpgradesV3(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {
