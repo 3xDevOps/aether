@@ -84,7 +84,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       # `make build` builds the embedded dashboard SPA before Go compiles.
       - uses: actions/setup-node@v4
         with:
@@ -92,6 +95,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+        with:
+          mode: restore
       - name: Public boundary
         run: sh scripts/public-audit.sh
       - name: Check formatting
@@ -102,7 +109,8 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.10.1
-          skip-cache: ${{ github.event_name == 'pull_request_target' }}
+          skip-cache: false
+          skip-save-cache: ${{ github.event_name != 'push' }}
       # Advisory only: the reachable Moby CVEs have no fixed release and
       # govulncheck cannot suppress individual findings, so a hard gate would
       # keep CI permanently red. Read the step output, do not ignore it.
@@ -115,6 +123,19 @@ jobs:
         run: make test-scripts
       - name: Build binaries
         run: make build
+      # Every Linux job shares this Go cache key, and actions/cache/save
+      # rejects a second reservation of the same key, so only one job may
+      # save it - this one, since it is the job every push always runs and
+      # its own steps exercise the widest set of packages (unit tests
+      # included). Other Linux jobs restore only. The bun cache follows the
+      # same rule and the same owner. windows saves its own Go cache: a
+      # different runner.os keeps its key from colliding with this one.
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: save
+      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+        with:
+          mode: save
 
   # Only internal/harness needs the agent images, so it is the only job that
   # waits for them to build; the sharded `integration` jobs below start at
@@ -133,7 +154,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       # The standard image is what runs actually execute on, so the agent
@@ -203,7 +227,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       # The matrix values are literals from this file, which on
       # pull_request_target is the base branch's copy, so a PR cannot change
       # what is interpolated here.
@@ -226,6 +253,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+        with:
+          mode: restore
       - name: Install dependencies
         run: bun install --frozen-lockfile
         working-directory: web
@@ -253,13 +284,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+        with:
+          mode: restore
       - name: Install dependencies
         run: bun install --frozen-lockfile
         working-directory: web
@@ -267,18 +305,17 @@ jobs:
       # run only pays for it when that pin moves. actions/cache stores paths
       # relative to the workspace, so an archive saved on a self-hosted
       # runner unpacks somewhere else on a GitHub-hosted one; keying on the
-      # environment keeps the two layouts apart.
+      # environment keeps the two layouts apart. Restored on every run and
+      # saved only after a push to main, same rule as the Go and bun caches.
       - name: Resolve the pinned Playwright version
         id: playwright
         run: |
           version=$(jq -r '.devDependencies["@playwright/test"]' web/package.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}-${{ github.event.pull_request.head.sha || github.ref_name }}
-          restore-keys: |
-            playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}-
+          key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
       # Runs on a cache hit too: it skips a browser that is already present
       # and installs the system libraries, which the cache never holds. A
       # cache that restored nothing usable then costs a download, never the
@@ -297,6 +334,11 @@ jobs:
           name: playwright-report
           path: web/playwright-report/
           retention-days: 7
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push'
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
 
   # The desktop shell is built the way users build it: `aether gui build`
   # unpacks the sources embedded in the CLI and runs electron-builder.
@@ -313,10 +355,24 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Both `aether gui build` steps below run npm install, the first with
+      # this system npm and the second with a Node the CLI downloads for
+      # itself; npm's cache directory defaults to ~/.npm regardless of which
+      # npm binary runs, so one cache covers both. Restored on every run and
+      # saved only after a push to main, same rule as the Go cache.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.environment }}-
       - name: Install desktop validation tools
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils
       - name: Build the CLI
@@ -366,6 +422,11 @@ jobs:
           find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
             { echo "the downloaded Node has no executable node" >&2; exit 1; }
           test -x ~/.local/share/aether/desktop/aether-desktop
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push'
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
@@ -383,9 +444,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
       # windows-latest defaults to PowerShell, where command substitution and
-      # grep are unavailable. Git Bash is preinstalled.
+      # grep are unavailable. Git Bash is preinstalled, which the go-cache
+      # action also relies on to resolve `go env` cache paths.
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       - name: Client packages build and vet
         shell: bash
         run: |
@@ -397,6 +462,9 @@ jobs:
         run: |
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
           go test ./cmd/aether $pkgs
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: save
 
   release-build:
     needs: runner-policy
@@ -415,13 +483,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: ${{ github.event_name != 'pull_request_target' }}
+          cache: false
+      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+        with:
+          mode: restore
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+        with:
+          mode: restore
       # `make release` builds the Android shell too, in its pinned SDK
       # container, so a broken shell fails the pull request. The container
       # carries the SDK; only Gradle's dependency and distribution caches are
@@ -429,17 +504,13 @@ jobs:
       # the workspace, so the Makefile's default cache directory is moved into
       # it. A hosted runner and a self-hosted one lay the archive out
       # differently, hence runner.environment in the key.
-      # A pull request runs under pull_request_target, where GITHUB_REF is
-      # the default branch: a cache saved there is restored by later runs on
-      # main through the restore-keys prefix, and with org.gradle.caching on
-      # that carries compiled task outputs. Every pull request runs cold on
-      # purpose, not only a fork's. One rule is worth more here than the
-      # saving: a cold Gradle resolution costs about a minute against a
-      # 45-minute budget, and a cache that is warm for some pull requests
-      # and cold for others hides which of the two a green run proved. Same
-      # rule as the setup-go cache above.
-      - uses: actions/cache@v4
-        if: github.event_name != 'pull_request_target'
+      # Restored on every run; saved only after a push to main. A pull
+      # request runs under pull_request_target, where GITHUB_REF is the
+      # default branch, so a cache a pull request saved would land in main's
+      # cache scope and, with org.gradle.caching on, could feed main's build
+      # compiled task outputs from a fork's checkout. Reading main's cache
+      # from a pull request carries no such risk.
+      - uses: actions/cache/restore@v4
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
@@ -464,6 +535,11 @@ jobs:
       - name: Trim the Gradle cache before it is saved
         if: always()
         run: rm -rf .gradle-cache/daemon .gradle-cache/native
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push'
+        with:
+          path: .gradle-cache
+          key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
       - uses: actions/upload-artifact@v4
         with:
           name: binaries
