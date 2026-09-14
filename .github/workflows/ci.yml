@@ -18,7 +18,9 @@ jobs:
   # This job is intentionally hosted and does not check out repository code.
   # It selects the runner and decides whether the release matrix runs. PRs
   # require both the event actor and PR author to be admins, so an admin
-  # action or rerun cannot elevate a contributor's PR onto self-hosted.
+  # action or rerun cannot elevate a contributor's PR onto self-hosted. A
+  # push to main is merged, reviewed code, so it always runs self-hosted;
+  # that also keeps the caches main saves on the layout admin PRs restore.
   runner-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -41,9 +43,8 @@ jobs:
           }
 
           allowed=false
-          if is_admin "$GITHUB_ACTOR" &&
-            { [ "$GITHUB_EVENT_NAME" != pull_request_target ] ||
-              is_admin "$PR_AUTHOR"; }; then
+          if [ "$GITHUB_EVENT_NAME" = push ] ||
+            { is_admin "$GITHUB_ACTOR" && is_admin "$PR_AUTHOR"; }; then
             allowed=true
           fi
           # A failed lookup deliberately stays on the GitHub-hosted runner.
