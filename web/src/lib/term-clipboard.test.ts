@@ -168,6 +168,32 @@ describe('terminal clipboard keys', () => {
     unregisterSecond()
   })
 
+  it('hands copy back to the previous terminal when the active one unregisters', () => {
+    const first = mount('first')
+    const second = mount('second')
+    const firstHost = document.createElement('div')
+    const secondHost = document.createElement('div')
+    document.body.append(firstHost, secondHost)
+    Object.defineProperty(firstHost, 'getClientRects', { value: () => [{}] })
+    Object.defineProperty(secondHost, 'getClientRects', { value: () => [{}] })
+    first.term.onSelectionChange = () => ({ dispose: vi.fn() })
+    second.term.onSelectionChange = () => ({ dispose: vi.fn() })
+    const unregisterFirst = registerTerminalCopy(first.term, firstHost)
+    const unregisterSecond = registerTerminalCopy(second.term, secondHost)
+    firstHost.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    secondHost.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+
+    unregisterSecond()
+    const data = { setData: vi.fn() }
+    const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent
+    Object.defineProperty(event, 'clipboardData', { value: data })
+    document.body.dispatchEvent(event)
+
+    expect(data.setData).toHaveBeenCalledWith('text/plain', 'first')
+    expect(event.defaultPrevented).toBe(true)
+    unregisterFirst()
+  })
+
   it('leaves native DOM selections and editable targets alone', () => {
     const { term } = mount('terminal')
     const host = document.createElement('div')

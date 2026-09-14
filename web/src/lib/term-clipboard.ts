@@ -36,11 +36,26 @@ const IMAGE_TYPES: Record<string, true> = {
 
 let activeCopyTerminal: Terminal | null = null
 
+// Every registered copy target, most recently used last, so an unregistered
+// active terminal can hand Cmd+C to the one the member used before it.
+const copyTargets: { term: Terminal; host: HTMLElement }[] = []
+
+function fallbackCopyTerminal(): Terminal | null {
+  for (let i = copyTargets.length - 1; i >= 0; i--) {
+    const { term, host } = copyTargets[i]
+    if (host.isConnected && host.getClientRects().length > 0) return term
+  }
+  return null
+}
+
 /** Keep native Cmd+C working when a read-only terminal has been blurred. */
 export function registerTerminalCopy(term: Terminal, host: HTMLElement): () => void {
   const owner = host.parentElement ?? host
   const onInteraction = () => {
     activeCopyTerminal = term
+    const at = copyTargets.findIndex((entry) => entry.term === term)
+    if (at !== -1) copyTargets.splice(at, 1)
+    copyTargets.push({ term, host })
   }
   const onCopy = (rawEvent: Event) => {
     if (rawEvent.defaultPrevented || activeCopyTerminal !== term) return
@@ -66,6 +81,7 @@ export function registerTerminalCopy(term: Terminal, host: HTMLElement): () => v
     event.clipboardData.setData('text/plain', text)
     event.preventDefault()
   }
+  copyTargets.push({ term, host })
   host.addEventListener('pointerdown', onInteraction)
   host.addEventListener('focusin', onInteraction)
   const onSelection = term.onSelectionChange(() => {
@@ -77,7 +93,9 @@ export function registerTerminalCopy(term: Terminal, host: HTMLElement): () => v
     host.removeEventListener('focusin', onInteraction)
     onSelection.dispose()
     document.removeEventListener('copy', onCopy)
-    if (activeCopyTerminal === term) activeCopyTerminal = null
+    const at = copyTargets.findIndex((entry) => entry.term === term)
+    if (at !== -1) copyTargets.splice(at, 1)
+    if (activeCopyTerminal === term) activeCopyTerminal = fallbackCopyTerminal()
   }
 }
 
