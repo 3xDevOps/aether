@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"testing"
 
@@ -135,9 +136,22 @@ func TestModePreambleOutlivesTheReplayRing(t *testing.T) {
 	if aerr := s.addClient(c); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
-	if !bytes.HasPrefix(c.replay, []byte("\x1b[?2004h")) {
-		t.Fatalf("replay does not restore bracketed paste: %q", head(c.replay))
+	replay := readClientReplay(t, c)
+	if !bytes.HasPrefix(replay, []byte("\x1b[?2004h")) {
+		t.Fatalf("replay does not restore bracketed paste: %q", head(replay))
 	}
+}
+
+func readClientReplay(t *testing.T, c *client) []byte {
+	t.Helper()
+	replay, err := io.ReadAll(c.replay)
+	if err != nil {
+		t.Fatalf("read replay: %v", err)
+	}
+	if err := c.replay.Close(); err != nil {
+		t.Fatalf("close replay: %v", err)
+	}
+	return replay
 }
 
 func head(p []byte) []byte {
@@ -196,8 +210,9 @@ func TestResumeReplaysOnlyTheGap(t *testing.T) {
 	if aerr := s.addClient(idle); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
-	if !idle.resumed || len(idle.replay) != 0 {
-		t.Fatalf("resume replayed %q, want nothing", idle.replay)
+	idleReplay := readClientReplay(t, idle)
+	if !idle.resumed || len(idleReplay) != 0 {
+		t.Fatalf("resume replayed %q, want nothing", idleReplay)
 	}
 	if s.geoGen != 0 {
 		t.Fatalf("resume at an unchanged size scheduled a redraw (geoGen = %d)", s.geoGen)
@@ -209,8 +224,9 @@ func TestResumeReplaysOnlyTheGap(t *testing.T) {
 	if aerr := s.addClient(behind); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
-	if !behind.resumed || string(behind.replay) != "during the gap" {
-		t.Fatalf("resume replayed %q, want the gap alone", behind.replay)
+	behindReplay := readClientReplay(t, behind)
+	if !behind.resumed || string(behindReplay) != "during the gap" {
+		t.Fatalf("resume replayed %q, want the gap alone", behindReplay)
 	}
 }
 
@@ -234,8 +250,9 @@ func TestResumeFallsBackWhenTheGapIsGone(t *testing.T) {
 	if c.resumed {
 		t.Fatal("a cursor the ring dropped must not report as resumed")
 	}
-	if !bytes.HasPrefix(c.replay, []byte("\x1b[?2004h")) {
-		t.Fatalf("fallback replay lost the mode preamble: %q", head(c.replay))
+	replay := readClientReplay(t, c)
+	if !bytes.HasPrefix(replay, []byte("\x1b[?2004h")) {
+		t.Fatalf("fallback replay lost the mode preamble: %q", head(replay))
 	}
 }
 
@@ -253,7 +270,8 @@ func TestFreshClientStillGetsTheReplay(t *testing.T) {
 	if aerr := s.addClient(fresh); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
-	if fresh.resumed || len(fresh.replay) == 0 {
+	freshReplay := readClientReplay(t, fresh)
+	if fresh.resumed || len(freshReplay) == 0 {
 		t.Fatal("a client that is not resuming must still get the replay")
 	}
 	if fresh.cursor != s.ring.written {

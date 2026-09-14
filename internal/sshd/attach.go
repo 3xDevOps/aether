@@ -13,7 +13,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
@@ -30,9 +29,6 @@ var (
 // one header line, an ack, then either raw bytes or ordered terminal records.
 // Geometry precedence is pty-req > header > 80x24; an attach without pty-req
 // is forced read-only.
-//
-// Recording is a finite, read-only cast export. It never opens a live PTY
-// session and is deliberately kept on the raw stream for the history player.
 func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *sessionState, ch subsystemConn) {
 	defer func() { _ = ch.Close() }()
 	capped := &capReader{r: ch, left: maxSubsystemHeaderBytes}
@@ -60,60 +56,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	if err != nil {
 		e := rpcError(err)
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
-		return
-	}
-	if req.Recording {
-		if req.Shell != "" || req.Framed || req.Resume || req.Cursor != 0 || !req.ReadOnly {
-			_ = writeJSONLine(ch, protocol.AttachResponse{Code: protocol.CodeInvalidParams, Error: "recording requires read_only and cannot be framed, resumed, or shelled"})
-			return
-		}
-		actor, authErr := resolveActor(ctx, s.cfg.Store, member)
-		if authErr == nil {
-			target, targetErr := resolveRunTarget(ctx, s.cfg.Store, run.ID)
-			if targetErr != nil {
-				authErr = targetErr
-			} else {
-				authErr = permissions.Check(permissions.View, actor, target)
-			}
-		}
-		if authErr != nil {
-			e := rpcError(authErr)
-			_ = writeJSONLine(ch, protocol.AttachResponse{Code: e.Code, Error: e.Message})
-			return
-		}
-		rc, recordErr := s.cfg.PTY.Recording(run.ID)
-		if recordErr != nil {
-			e := rpcError(recordErr)
-			_ = writeJSONLine(ch, protocol.AttachResponse{Code: e.Code, Error: e.Message})
-			return
-		}
-		defer func() { _ = rc.Close() }()
-		recordCtx, revoke := context.WithCancelCause(ctx)
-		defer revoke(nil)
-		closeRevoked := func() {
-			status := 1
-			if errors.Is(context.Cause(recordCtx), errAttachMembershipRevoked) {
-				status = protocol.AttachExitMembershipRevoked
-			}
-			ch.exit(status)
-			_ = ch.Close()
-		}
-		stop := context.AfterFunc(recordCtx, closeRevoked)
-		defer stop()
-		s.spawn(func() { s.revokeOnPolicyChange(recordCtx, revoke, member, run.ID, true) })
-		if err := writeJSONLine(ch, protocol.AttachResponse{OK: true, Recording: true}); err != nil {
-			return
-		}
-		_, copyErr := io.Copy(ch, rc)
-		switch {
-		case recordCtx.Err() != nil:
-			closeRevoked()
-		case copyErr != nil:
-			slog.Warn("sshd: stream terminal recording", "run", run.ID, "error", copyErr)
-			ch.exit(1)
-		default:
-			ch.exit(0)
-		}
 		return
 	}
 
@@ -225,36 +167,20 @@ func replayableStatus(st domain.RunStatus) bool {
 	return st.Terminal()
 }
 
-// serveReplay streams a finished run's recorded transcript as the attach's
-// output and ends the channel cleanly (exit-status 0), reporting whether it
-// served. Framed dashboard attaches use the compact final screen, while raw
-// clients retain the historical transcript replay.
+// serveReplay streams a finished run's complete recorded transcript and ends
+// the channel cleanly (exit-status 0), reporting whether it served. A framed
+// dashboard attach still uses the final snapshot's geometry, but its output is
+// the same complete history a raw client receives.
 func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed bool) bool {
 	if framed {
 		snap, err := s.cfg.PTY.Snapshot(run.ID)
 		if err != nil {
-			slog.Warn("sshd: snapshot finished run for attach replay", "run", run.ID, "error", err)
+			slog.Warn("sshd: snapshot finished run geometry", "run", run.ID, "error", err)
 			return false
 		}
-		ack := protocol.AttachResponse{
-			OK: true, Cols: snap.Cols, Rows: snap.Rows, Replay: len(snap.Data),
-			Framed: true,
-		}
-		if err := writeJSONLine(ch, ack); err != nil {
-			return true
-		}
-		if len(snap.Data) > 0 {
-			if _, err := protocol.WriteTerminalOutput(ch, snap.Data); err != nil {
-				slog.Warn("sshd: stream finished run snapshot", "run", run.ID, "error", err)
-				ch.exit(1)
-				return true
-			}
-		}
-		ch.exit(0)
-		return true
+		cols, rows = snap.Cols, snap.Rows
 	}
-
-	rc, err := s.cfg.PTY.Replay(run.ID)
+	rc, replayBytes, err := s.cfg.PTY.Replay(run.ID)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("sshd: open transcript for attach replay", "run", run.ID, "error", err)
@@ -262,10 +188,12 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 		return false
 	}
 	defer func() { _ = rc.Close() }()
-	if err := writeJSONLine(ch, protocol.AttachResponse{OK: true, Cols: cols, Rows: rows}); err != nil {
+	if err := writeJSONLine(ch, protocol.AttachResponse{
+		OK: true, Cols: cols, Rows: rows, Replay: replayBytes, Framed: framed,
+	}); err != nil {
 		return true
 	}
-	if _, err := io.Copy(ch, rc); err != nil {
+	if err := writeTerminalReplay(ch, rc, replayBytes, framed); err != nil {
 		slog.Warn("sshd: stream transcript replay", "run", run.ID, "error", err)
 		ch.exit(1)
 		return true
@@ -411,21 +339,45 @@ func (c *attachConn) setReplayLocked(n int) {
 	}
 }
 
-func (c *attachConn) WriteReplay(p []byte) (int, error) {
+func (c *attachConn) WriteReplay(replay io.Reader, bytes int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.setReplayLocked(len(p))
+	c.setReplayLocked(bytes)
 	c.sendOKLocked()
 	if c.writeErr != nil {
-		return 0, c.writeErr
+		return c.writeErr
 	}
-	if len(p) == 0 {
-		return 0, nil
+	if err := writeTerminalReplay(c.ch, replay, bytes, c.framed); err != nil {
+		c.writeErr = err
+		return err
 	}
-	if c.framed {
-		return protocol.WriteTerminalOutput(c.ch, p)
+	return nil
+}
+
+func writeTerminalReplay(w io.Writer, replay io.Reader, bytes int, framed bool) error {
+	if !framed {
+		written, err := io.CopyN(w, replay, int64(bytes))
+		if err == nil && written != int64(bytes) {
+			return io.ErrUnexpectedEOF
+		}
+		return err
 	}
-	return c.ch.Write(p)
+	buf := make([]byte, 32<<10)
+	remaining := bytes
+	for remaining > 0 {
+		read := len(buf)
+		if read > remaining {
+			read = remaining
+		}
+		if _, err := io.ReadFull(replay, buf[:read]); err != nil {
+			return err
+		}
+		if _, err := protocol.WriteTerminalOutput(w, buf[:read]); err != nil {
+			return err
+		}
+		remaining -= read
+	}
+	return nil
 }
 
 func (c *attachConn) okSent() bool {

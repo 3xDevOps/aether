@@ -10,7 +10,6 @@
 package ptyhost
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -153,6 +152,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		prev.stop()
 	}
 	path := h.transcriptPath(key)
+	_, isRun := key.Run()
 	var err error
 	var seed []byte
 	var modes modeScanner
@@ -189,8 +189,18 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		h.unreserve(key)
 		return err
 	}
+	var history []castSegment
+	if isRun {
+		history, err = priorCastSegments(path)
+		if err != nil {
+			_ = tr.close()
+			screen.dispose()
+			h.unreserve(key)
+			return err
+		}
+	}
 	if recoveredTranscript {
-		tr.output(makeScreenSnapshot(screen, modes).Data)
+		tr.seed(makeScreenSnapshot(screen, modes).Data)
 	}
 	// Initial geometry goes out before the session is attachable, so a
 	// concurrent write-attach clamp can never be overwritten by it.
@@ -199,6 +209,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		run:          key,
 		att:          att,
 		tr:           tr,
+		history:      history,
 		stdin:        att.Stdin(),
 		clients:      make(map[*client]struct{}),
 		ring:         newRing(h.cfg.ReplayBytes),
@@ -305,18 +316,14 @@ func (h *Host) LastOutput(key SessionKey) (time.Time, bool) {
 	return s.lastOutput()
 }
 
-// Replay streams the run's recorded terminal output exactly as the agent
-// wrote it, decoded from the asciinema transcript. It fails with
-// os.ErrNotExist when the run never recorded a transcript - a session that
-// was never started, or an artifact from before recording existed. The
-// error is returned before anything is written, so a caller can fall back
-// to its own refusal when no transcript exists.
-func (h *Host) Replay(run domain.RunID) (io.ReadCloser, error) {
-	f, err := os.Open(h.transcriptPath(RunSession(run)))
-	if err != nil {
-		return nil, fmt.Errorf("ptyhost: open transcript: %w", err)
-	}
-	return &replayReader{f: f, br: bufio.NewReader(f)}, nil
+// Replay streams all of a run's recorded terminal output exactly as the agent
+// wrote it, decoded from every asciinema transcript incarnation. It fails with
+// os.ErrNotExist when the run never recorded a transcript - a session that was
+// never started, or an artifact from before recording existed. The error is
+// returned before anything is written, so a caller can fall back to its own
+// refusal when no transcript exists.
+func (h *Host) Replay(run domain.RunID) (io.ReadCloser, int, error) {
+	return openFullCastReplay(h.transcriptPath(RunSession(run)))
 }
 
 // Snapshot returns the current compact terminal state for a run. Live
@@ -375,11 +382,11 @@ func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor
 	return s.inject(actorName, actorColor, message, submit)
 }
 
-// ReplayWriter is implemented by an attach conn that wants to be told where
-// scrollback replay ends. WriteReplay is called exactly once per attach,
-// before any other Write, possibly with an empty slice.
+// ReplayWriter is implemented by an attach conn that needs the replay byte
+// count before streaming it. WriteReplay is called exactly once per attach,
+// before any other Write, and must consume replay before returning.
 type ReplayWriter interface {
-	WriteReplay(p []byte) (int, error)
+	WriteReplay(replay io.Reader, bytes int) error
 }
 
 // reportInput hands the first keystroke of a write attach to OnInput. The
@@ -439,9 +446,10 @@ type GeometryWriter interface {
 // Attach connects conn to the session's PTY and blocks until conn's read
 // side returns EOF or an error, ctx is done, the session ends (returns nil),
 // or the host closes. Reads from conn are keystrokes (discarded when
-// read-only); writes to conn are raw PTY output, starting with a replay of
-// the recent scrollback. resize carries [cols, rows] updates (nil = fixed
-// geometry). Write-mode attaches are checked against the configured Gate.
+// read-only); writes to conn are raw PTY output, starting with the complete
+// run transcript or the recent scrollback for other session types. resize
+// carries [cols, rows] updates (nil = fixed geometry). Write-mode attaches
+// are checked against the configured Gate.
 func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
 	s := h.lookup(key)
 	if s == nil {

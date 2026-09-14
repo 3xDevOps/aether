@@ -415,8 +415,6 @@ type AttachRequest struct {
 	Rows     uint   `json:"rows,omitempty"`
 	// Framed carries output and geometry in one ordered terminal record stream.
 	Framed bool `json:"framed,omitempty"`
-	// Recording reads the complete recorded run as asciicast without attaching.
-	Recording bool `json:"recording,omitempty"`
 	// Shell names a shell tab inside the run container; write is required.
 	Shell string `json:"shell,omitempty"`
 	// Follow renders the session at the size it already is and imposes
@@ -448,8 +446,6 @@ type AttachResponse struct {
 	Cols   uint `json:"cols,omitempty"`
 	Rows   uint `json:"rows,omitempty"`
 	Framed bool `json:"framed,omitempty"`
-	// Recording confirms this is a finite recording, never a live attach.
-	Recording bool `json:"recording,omitempty"`
 	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
 	Replay int `json:"replay,omitempty"`
 	// Cursor is how much of the session's output this client holds once

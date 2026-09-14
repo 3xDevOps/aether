@@ -128,22 +128,22 @@ type client struct {
 	// far it got, and resumed records whether the ring could still answer
 	// from there - when it could not, the attach falls back to a full
 	// replay and the client has to clear its screen after all.
-	resume     bool
-	cursor     uint64
-	resumed    bool
-	replayCols uint
-	replayRows uint
-	cols       uint // guarded by session.mu
-	rows       uint // guarded by session.mu
-	replay     []byte
-
-	mu     sync.Mutex
-	cond   *sync.Cond
-	events []clientEvent
-	queued int
-	closed bool
-	err    error
-	done   chan struct{}
+	resume      bool
+	cursor      uint64
+	resumed     bool
+	replayCols  uint
+	replayRows  uint
+	cols        uint // guarded by session.mu
+	rows        uint // guarded by session.mu
+	replay      io.ReadCloser
+	replayBytes int
+	mu          sync.Mutex
+	cond        *sync.Cond
+	events      []clientEvent
+	queued      int
+	closed      bool
+	err         error
+	done        chan struct{}
 }
 
 func newClient(conn io.ReadWriter, a AttachClient) *client {
@@ -156,10 +156,16 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		cursor:   a.Cursor,
 		cols:     a.Cols,
 		rows:     a.Rows,
+		replay:   io.NopCloser(bytes.NewReader(nil)),
 		done:     make(chan struct{}),
 	}
 	c.cond = sync.NewCond(&c.mu)
 	return c
+}
+
+func (c *client) setReplay(data []byte) {
+	c.replay = io.NopCloser(bytes.NewReader(data))
+	c.replayBytes = len(data)
 }
 
 func (c *client) isClosed() bool {
@@ -332,16 +338,17 @@ func (c *client) close(err error) {
 func (c *client) writeLoop() error {
 	replay := c.replay
 	c.replay = nil
-	if rw, ok := c.conn.(ReplayWriter); ok {
-		if _, err := rw.WriteReplay(replay); err != nil {
-			c.close(err)
-			return err
+	replayErr := func() error {
+		defer func() { _ = replay.Close() }()
+		if rw, ok := c.conn.(ReplayWriter); ok {
+			return rw.WriteReplay(replay, c.replayBytes)
 		}
-	} else if len(replay) > 0 {
-		if _, err := c.conn.Write(replay); err != nil {
-			c.close(err)
-			return err
-		}
+		_, err := io.Copy(c.conn, replay)
+		return err
+	}()
+	if replayErr != nil {
+		c.close(replayErr)
+		return replayErr
 	}
 	for {
 		c.mu.Lock()

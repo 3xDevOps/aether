@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,13 +34,14 @@ type castHeader struct {
 // UTF-8 are escaped losslessly (see appendCastString), so replay through
 // decodeCastString reproduces the live byte stream exactly.
 type castWriter struct {
-	mu      sync.Mutex
-	f       *os.File
-	bw      *bufio.Writer
-	start   time.Time
-	pending []byte
-	closed  bool
-	stop    chan struct{}
+	mu          sync.Mutex
+	f           *os.File
+	bw          *bufio.Writer
+	start       time.Time
+	pending     []byte
+	outputBytes int
+	closed      bool
+	stop        chan struct{}
 	// path is kept so a marker can still be appended after close, for a
 	// delivery that raced the session's end.
 	path string
@@ -185,7 +188,20 @@ func (w *castWriter) output(p []byte) {
 	w.pending = append([]byte(nil), data[cut:]...)
 	if cut > 0 {
 		w.eventLocked("o", data[:cut])
+		w.outputBytes += cut
 	}
+}
+
+// seed records a compact recovered screen for the next restart. It is applied
+// during screen reconstruction but excluded from raw transcript replay, where
+// emitting it would duplicate output already present in older cast segments.
+func (w *castWriter) seed(p []byte) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || len(p) == 0 {
+		return
+	}
+	w.eventLocked("s", p)
 }
 
 func (w *castWriter) resize(cols, rows uint) {
@@ -236,6 +252,159 @@ func (w *castWriter) lateMarker(text string) {
 
 func (w *castWriter) eventLocked(code string, data []byte) {
 	_, _ = w.bw.Write(castLine(w.start, code, data))
+}
+
+type castSegment struct {
+	path        string
+	fileBytes   int64
+	outputBytes int
+}
+
+// priorCastSegments returns every immutable incarnation renamed aside before
+// the current transcript was opened, oldest first.
+func priorCastSegments(path string) ([]castSegment, error) {
+	paths, err := priorCastPaths(path)
+	if err != nil {
+		return nil, err
+	}
+	segments := make([]castSegment, 0, len(paths))
+	for _, path := range paths {
+		segment, err := inspectCastSegment(path)
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, segment)
+	}
+	return segments, nil
+}
+
+func priorCastPaths(path string) ([]string, error) {
+	matches, err := filepath.Glob(strings.TrimSuffix(path, ".cast") + ".*.cast")
+	if err != nil {
+		return nil, fmt.Errorf("ptyhost: find transcript history: %w", err)
+	}
+	sort.Strings(matches)
+	return matches, nil
+}
+
+func openFullCastReplay(path string) (io.ReadCloser, int, error) {
+	segments, err := priorCastSegments(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	current, err := inspectCastSegment(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	segments = append(segments, current)
+	total := 0
+	for _, segment := range segments {
+		total += segment.outputBytes
+	}
+	return openCastReplay(segments, nil), total, nil
+}
+
+func inspectCastSegment(path string) (castSegment, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return castSegment{}, fmt.Errorf("ptyhost: open transcript: %w", err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return castSegment{}, fmt.Errorf("ptyhost: inspect transcript: %w", err)
+	}
+	r := newReplayReader(f, info.Size())
+	n, readErr := io.Copy(io.Discard, r)
+	closeErr := r.Close()
+	if readErr != nil {
+		return castSegment{}, readErr
+	}
+	if closeErr != nil {
+		return castSegment{}, fmt.Errorf("ptyhost: close transcript: %w", closeErr)
+	}
+	if n > int64(^uint(0)>>1) {
+		return castSegment{}, errors.New("ptyhost: transcript output exceeds platform limits")
+	}
+	return castSegment{path: path, fileBytes: info.Size(), outputBytes: int(n)}, nil
+}
+
+// snapshot flushes the complete output events already accepted by the session
+// and opens an immutable replay through that boundary. The caller holds the
+// session lock, so output arriving after the boundary is queued as live data.
+func (w *castWriter) snapshot(prior []castSegment) (io.ReadCloser, int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil, 0, errors.New("ptyhost: transcript is closed")
+	}
+	if err := w.bw.Flush(); err != nil {
+		return nil, 0, fmt.Errorf("ptyhost: flush transcript replay: %w", err)
+	}
+	info, err := w.f.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("ptyhost: inspect transcript replay: %w", err)
+	}
+	segments := append([]castSegment(nil), prior...)
+	segments = append(segments, castSegment{
+		path:        w.path,
+		fileBytes:   info.Size(),
+		outputBytes: w.outputBytes,
+	})
+	total := len(w.pending)
+	for _, segment := range segments {
+		total += segment.outputBytes
+	}
+	return openCastReplay(segments, w.pending), total, nil
+}
+
+// castReplay holds at most the segment currently being read open. Retained
+// runs may span many server restarts, so opening every cast up front would let
+// one attach consume an unbounded number of file descriptors.
+type castReplay struct {
+	segments []castSegment
+	index    int
+	current  *replayReader
+	tail     *bytes.Reader
+}
+
+func openCastReplay(segments []castSegment, tail []byte) *castReplay {
+	return &castReplay{
+		segments: append([]castSegment(nil), segments...),
+		tail:     bytes.NewReader(append([]byte(nil), tail...)),
+	}
+}
+func (r *castReplay) Read(p []byte) (int, error) {
+	for r.index < len(r.segments) {
+		if r.current == nil {
+			segment := r.segments[r.index]
+			f, err := os.Open(segment.path)
+			if err != nil {
+				return 0, fmt.Errorf("ptyhost: open transcript: %w", err)
+			}
+			r.current = newReplayReader(f, segment.fileBytes)
+		}
+		n, err := r.current.Read(p)
+		if n > 0 {
+			return n, nil
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return 0, err
+		}
+		_ = r.current.Close()
+		r.current = nil
+		r.index++
+	}
+	return r.tail.Read(p)
+}
+func (r *castReplay) Close() error {
+	if r.current == nil {
+		return nil
+	}
+	err := r.current.Close()
+	r.current = nil
+	r.index = len(r.segments)
+	return err
 }
 
 // castLine renders one asciicast event line relative to the recording's start.
@@ -453,6 +622,10 @@ type replayReader struct {
 	br  *bufio.Reader
 	buf []byte
 	err error
+}
+
+func newReplayReader(f *os.File, fileBytes int64) *replayReader {
+	return &replayReader{f: f, br: bufio.NewReader(io.LimitReader(f, fileBytes))}
 }
 
 func (r *replayReader) Read(p []byte) (int, error) {

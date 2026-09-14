@@ -26,9 +26,8 @@ type Backend interface {
 	Terminal(ctx context.Context, req protocol.TerminalRequest) (Terminal, protocol.TerminalResponse, error)
 }
 
-// Terminal is an attached PTY whose wire stream is framed for WebSocket
-// attach and terminal requests. The finite recording endpoint requests its
-// raw stream instead. Its window can be resized while open; a read error of
+// Terminal is an attached PTY whose output and geometry share an ordered
+// framed stream. Its window can be resized while open; a read error of
 // *protocol.RemoteExitError carries the exit status the server ended the
 // attach with.
 type Terminal interface {

@@ -631,7 +631,7 @@ func isIncompleteJSON(err error) bool {
 
 func applyRecordedEvent(screen *terminalScreen, modes *modeScanner, code string, raw json.RawMessage) error {
 	switch code {
-	case "o":
+	case "o", "s":
 		data, err := decodeCastString(raw)
 		if err != nil {
 			return fmt.Errorf("ptyhost: decode transcript output: %w", err)

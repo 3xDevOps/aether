@@ -231,7 +231,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       patch: '',
       truncated: false,
     })),
-    runRecording: vi.fn(async () => ''),
     filesTree: vi.fn(async () => ({ entries: [] })),
     filesRead: vi.fn(async () => ({
       content: '', truncated: false, binary: false, size: 0, revision: '', writable: true,

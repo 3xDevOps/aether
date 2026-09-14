@@ -398,12 +398,13 @@ container immediately. A failed run's partial work is committed as `wip:`.
 ### SSH drop mid-attach
 
 The PTY session belongs to the server, not to the connection, so a dropped
-attach changes nothing about the run: reattaching resumes from the replay
-ring. Input a member typed that the transport never delivered is dropped
-whole. What reaches the agent is always an exact prefix of what the
+attach changes nothing about the run. Reattaching streams the complete recorded
+transcript before live output, including transcript segments preserved across a
+server restart. Input a member typed that the transport never delivered is
+dropped whole. What reaches the agent is always an exact prefix of what the
 connection delivered - never reordered, never duplicated - and a dead
-connection's straggler bytes can never land after the attach unwound, so
-they cannot interleave with the reattach's input.
+connection's straggler bytes can never land after the attach unwound, so they
+cannot interleave with the reattach's input.
 
 ### SSH port-forward disconnect
 

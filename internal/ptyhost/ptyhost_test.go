@@ -30,8 +30,7 @@ type (
 	}
 	sshdPTYAttacher interface {
 		Attach(ctx context.Context, key SessionKey, client AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error
-		Replay(run domain.RunID) (io.ReadCloser, error)
-		Recording(run domain.RunID) (io.ReadCloser, error)
+		Replay(run domain.RunID) (io.ReadCloser, int, error)
 		Snapshot(run domain.RunID) (ScreenSnapshot, error)
 	}
 )
@@ -164,11 +163,18 @@ func (c *replayConn) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (c *replayConn) WriteReplay(p []byte) (int, error) {
+func (c *replayConn) WriteReplay(replay io.Reader, bytes int) error {
+	p, err := io.ReadAll(replay)
+	if err != nil {
+		return err
+	}
+	if len(p) != bytes {
+		return io.ErrUnexpectedEOF
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.replays = append(c.replays, append([]byte(nil), p...))
-	return len(p), nil
+	c.replays = append(c.replays, p)
+	return nil
 }
 
 func (c *replayConn) replayBytes() [][]byte {
@@ -321,7 +327,32 @@ func TestAttachPassthroughAndReattach(t *testing.T) {
 	}
 }
 
-func TestAttachReplayWriterReceivesTailBeforeLiveOutput(t *testing.T) {
+func TestRunAttachReplaysWholeTranscriptBeyondRing(t *testing.T) {
+	h, _ := newTestHost(t, func(cfg *Config) { cfg.ReplayBytes = 8 })
+	att := newFakeAtt()
+	run := domain.RunID("run-full-replay")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	output := "oldest\nmiddle\nnewest\n"
+	att.writeOutput(t, output)
+	s := h.lookup(RunSession(run))
+	waitFor(t, "complete transcript", func() bool {
+		s.tr.mu.Lock()
+		defer s.tr.mu.Unlock()
+		return s.tr.outputBytes == len(output)
+	})
+
+	attach := startAttach(t, h, run, "member", 80, 24, true)
+	waitFor(t, "full replay", func() bool { return attach.out.String() == output })
+	attach.detach()
+	if err := attach.wait(t); err != nil {
+		t.Fatalf("detach returned %v, want nil", err)
+	}
+}
+
+func TestAttachReplayWriterReceivesTranscriptBeforeLiveOutput(t *testing.T) {
 	h, _ := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-replay-writer")
@@ -330,9 +361,9 @@ func TestAttachReplayWriterReceivesTailBeforeLiveOutput(t *testing.T) {
 	}
 	att.writeOutput(t, "scrollback")
 	// The pump delivers output asynchronously; a plain attach observing the
-	// bytes proves they reached the ring before the ReplayWriter attaches.
+	// bytes proves they reached the transcript before the ReplayWriter attaches.
 	probe := startAttach(t, h, run, "probe", 80, 24, true)
-	waitFor(t, "scrollback in ring", func() bool { return probe.out.String() == "scrollback" })
+	waitFor(t, "scrollback in transcript", func() bool { return probe.out.String() == "scrollback" })
 	probe.detach()
 	if err := probe.wait(t); err != nil {
 		t.Fatalf("probe detach returned %v, want nil", err)
@@ -1281,7 +1312,7 @@ func TestStoppedSessionClosesAttachmentAndPreservesReplay(t *testing.T) {
 		t.Fatal("StopSession did not close the runtime attachment")
 	}
 
-	rc, err := h.Replay(run)
+	rc, _, err := h.Replay(run)
 	if err != nil {
 		t.Fatalf("Replay after StopSession: %v", err)
 	}
@@ -1440,7 +1471,14 @@ func TestRemoveRunTranscripts(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	writeRecordingCast(t, dir, "run-1.cast", recordingHeader(1), "[0,\"o\",\"purge-me\"]\n")
+	w, err := newCastWriter(filepath.Join(dir, "run-1.cast"), 80, 24)
+	if err != nil {
+		t.Fatalf("create run transcript: %v", err)
+	}
+	w.output([]byte("purge-me"))
+	if err := w.close(); err != nil {
+		t.Fatalf("close run transcript: %v", err)
+	}
 	if _, err := h.Snapshot("run-1"); err != nil {
 		t.Fatalf("cache cold snapshot: %v", err)
 	}
@@ -1559,7 +1597,7 @@ func TestReplayTranscript(t *testing.T) {
 		t.Fatalf("StopSession: %v", err)
 	}
 
-	rc, err := h.Replay(run)
+	rc, _, err := h.Replay(run)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
@@ -1574,7 +1612,7 @@ func TestReplayTranscript(t *testing.T) {
 		t.Fatalf("replay = %q, want the exact recorded bytes", got)
 	}
 
-	if _, err := h.Replay("run-never"); !errors.Is(err, os.ErrNotExist) {
+	if _, _, err := h.Replay("run-never"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Replay unknown run = %v, want os.ErrNotExist", err)
 	}
 }
