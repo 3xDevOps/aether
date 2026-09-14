@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- On Android 12 and newer, allowBackup="false" stops cloud backup but, on
+     devices from some manufacturers, not device-to-device transfer. `path="."`
+     under the app's root directory is every file the app has, which is the
+     server name in shared preferences and the WebView's cache of the
+     dashboard. See docs/privacy.md. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

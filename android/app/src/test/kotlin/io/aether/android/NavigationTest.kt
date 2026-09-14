@@ -65,4 +65,16 @@ class NavigationTest {
             navigationFor(null, "https://my-server.ts.net/", "https", mainFrame = true),
         )
     }
+
+    @Test
+    fun aLoadAlreadyUnderWayIsJudgedTheSameWay() {
+        // WebView skips shouldOverrideUrlLoading for a POST, so this is the
+        // gate a form submitted off-origin meets instead.
+        assertEquals(Navigation.LOAD, startedNavigationFor(BASE, "https://my-server.ts.net/board"))
+        assertEquals(Navigation.LOAD, startedNavigationFor(BASE, "about:blank"))
+        assertEquals(Navigation.EXTERNAL, startedNavigationFor(BASE, "https://phish.example/"))
+        assertEquals(Navigation.EXTERNAL, startedNavigationFor(BASE, "https://my-server.ts.net:8443/"))
+        // No scheme to read is no origin to match.
+        assertEquals(Navigation.DROP, startedNavigationFor(BASE, "not a url"))
+    }
 }
