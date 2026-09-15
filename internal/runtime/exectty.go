@@ -6,9 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 // execAttachment adapts a hijacked Docker exec connection to Attachment.
@@ -17,13 +15,13 @@ import (
 type execAttachment struct {
 	cli  *client.Client
 	id   string
-	resp types.HijackedResponse
+	resp client.HijackedResponse
 
 	stdout    *streamBuffer
 	closeOnce sync.Once
 }
 
-func newExecAttachment(cli *client.Client, id string, resp types.HijackedResponse) *execAttachment {
+func newExecAttachment(cli *client.Client, id string, resp client.HijackedResponse) *execAttachment {
 	a := &execAttachment{
 		cli:    cli,
 		id:     id,
@@ -42,7 +40,7 @@ func (a *execAttachment) Stdout() io.Reader     { return a.stdout }
 func (a *execAttachment) Stderr() io.Reader     { return emptyReader{} }
 
 func (a *execAttachment) Resize(ctx context.Context, cols, rows uint) error {
-	if err := a.cli.ContainerExecResize(ctx, a.id, container.ResizeOptions{Width: cols, Height: rows}); err != nil {
+	if _, err := a.cli.ExecResize(ctx, a.id, client.ExecResizeOptions{Width: cols, Height: rows}); err != nil {
 		return fmt.Errorf("runtime: exec resize: %w", err)
 	}
 	return nil

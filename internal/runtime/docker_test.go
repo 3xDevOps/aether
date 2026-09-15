@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -13,10 +14,10 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	dockertypes "github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
 )
 
 func TestNewDockerDefaults(t *testing.T) {
@@ -57,19 +58,19 @@ type fakeDockerWaitClient struct {
 	wait    func(context.Context, string, container.WaitCondition) (<-chan container.WaitResponse, <-chan error)
 }
 
-func (f fakeDockerWaitClient) ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error) {
-	return f.inspect(ctx, id)
+func (f fakeDockerWaitClient) ContainerInspect(ctx context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	inspect, err := f.inspect(ctx, id)
+	return client.ContainerInspectResult{Container: inspect}, err
 }
 
-func (f fakeDockerWaitClient) ContainerWait(ctx context.Context, id string, condition container.WaitCondition) (<-chan container.WaitResponse, <-chan error) {
-	return f.wait(ctx, id, condition)
+func (f fakeDockerWaitClient) ContainerWait(ctx context.Context, id string, options client.ContainerWaitOptions) client.ContainerWaitResult {
+	result, err := f.wait(ctx, id, options.Condition)
+	return client.ContainerWaitResult{Result: result, Error: err}
 }
 
 func dockerWaitInspectResponse() container.InspectResponse {
 	return container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{
-			State: &container.State{Status: container.StateRunning},
-		},
+		State: &container.State{Status: container.StateRunning},
 	}
 }
 
@@ -490,15 +491,25 @@ func TestContainerConfigAdditionalMounts(t *testing.T) {
 		t.Errorf("profile mount = %+v", prof)
 	}
 }
+func writeExecFrame(w io.Writer, stream stdcopy.StdType, payload []byte) error {
+	var header [8]byte
+	header[0] = byte(stream)
+	binary.BigEndian.PutUint32(header[4:], uint32(len(payload)))
+	if _, err := w.Write(header[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(payload)
+	return err
+}
 
 // What a container prints is the container's choice, so Exec keeps the
 // two streams apart but stops reading at its cap.
 func TestReadExecOutput(t *testing.T) {
 	var framed bytes.Buffer
-	if _, err := stdcopy.NewStdWriter(&framed, stdcopy.Stdout).Write([]byte("out\n")); err != nil {
+	if err := writeExecFrame(&framed, stdcopy.Stdout, []byte("out\n")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stdcopy.NewStdWriter(&framed, stdcopy.Stderr).Write([]byte("err\n")); err != nil {
+	if err := writeExecFrame(&framed, stdcopy.Stderr, []byte("err\n")); err != nil {
 		t.Fatal(err)
 	}
 	stdout, stderr, err := readExecOutput(bytes.NewReader(framed.Bytes()))
@@ -507,11 +518,10 @@ func TestReadExecOutput(t *testing.T) {
 	}
 
 	var flood bytes.Buffer
-	writer := stdcopy.NewStdWriter(&flood, stdcopy.Stdout)
 	chunk := bytes.Repeat([]byte("y"), 64<<10)
 	for flood.Len() <= execOutputLimit+1 {
-		if _, werr := writer.Write(chunk); werr != nil {
-			t.Fatal(werr)
+		if writeErr := writeExecFrame(&flood, stdcopy.Stdout, chunk); writeErr != nil {
+			t.Fatal(writeErr)
 		}
 	}
 	stdout, _, err = readExecOutput(bytes.NewReader(flood.Bytes()))
@@ -527,7 +537,7 @@ func TestHijackStdinCancellationDoesNotCloseSharedConnection(t *testing.T) {
 	reader, writer := net.Pipe()
 	defer func() { _ = reader.Close() }()
 	defer func() { _ = writer.Close() }()
-	stdin := hijackStdin{resp: dockertypes.HijackedResponse{Conn: writer}}
+	stdin := hijackStdin{resp: client.HijackedResponse{Conn: writer}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	first := make(chan error, 1)

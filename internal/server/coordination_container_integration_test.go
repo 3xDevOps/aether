@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/coordcli"
@@ -165,7 +165,7 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 // the server was told to stage, named by its own content hash.
 func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *client.Client, run, user string) bool {
 	t.Helper()
-	insp, err := cli.ContainerInspect(ctx, containerName(run))
+	insp, err := cli.ContainerInspect(ctx, containerName(run), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect run %s's container: %v", run, err)
 	}
@@ -175,8 +175,8 @@ func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *
 		coordcli.BinaryPath:  resolved(t, staged),
 		mcpbridge.MountDir:   resolved(t, e.coordDir(run)),
 	}
-	realized := make(map[string]container.MountPoint, len(insp.Mounts))
-	for _, m := range insp.Mounts {
+	realized := make(map[string]container.MountPoint, len(insp.Container.Mounts))
+	for _, m := range insp.Container.Mounts {
 		realized[m.Destination] = m
 	}
 	valid := true
@@ -184,7 +184,7 @@ func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *
 		m, ok := realized[target]
 		switch {
 		case !ok:
-			t.Errorf("run %s has no realized mount at %s: %+v", run, target, insp.Mounts)
+			t.Errorf("run %s has no realized mount at %s: %+v", run, target, insp.Container.Mounts)
 			valid = false
 		case m.Source != source:
 			t.Errorf("run %s mount %s comes from %q, want %q", run, target, m.Source, source)

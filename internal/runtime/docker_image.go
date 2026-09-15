@@ -6,9 +6,7 @@ import (
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 const localImageRepo = "aether/"
@@ -32,9 +30,8 @@ func (d *Docker) ImageExists(ctx context.Context, ref string) (bool, error) {
 // Commit snapshots a container as a tagged image without inheriting its
 // interactive shell command.
 func (d *Docker) Commit(ctx context.Context, id ID, tag string) error {
-	_, err := d.cli.ContainerCommit(ctx, string(id), container.CommitOptions{
+	_, err := d.cli.ContainerCommit(ctx, string(id), client.ContainerCommitOptions{
 		Reference: tag,
-		Pause:     true,
 		Changes:   []string{"CMD []", "ENTRYPOINT []"},
 	})
 	if err != nil {
@@ -45,14 +42,14 @@ func (d *Docker) Commit(ctx context.Context, id ID, tag string) error {
 
 // ListImageTags returns every local tag whose repository is repo.
 func (d *Docker) ListImageTags(ctx context.Context, repo string) ([]string, error) {
-	list, err := d.cli.ImageList(ctx, image.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("reference", repo+":*")),
+	list, err := d.cli.ImageList(ctx, client.ImageListOptions{
+		Filters: make(client.Filters).Add("reference", repo+":*"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: list images %s: %w", repo, err)
 	}
 	var tags []string
-	for _, summary := range list {
+	for _, summary := range list.Items {
 		for _, tag := range summary.RepoTags {
 			if strings.HasPrefix(tag, repo+":") {
 				tags = append(tags, tag)
@@ -64,7 +61,7 @@ func (d *Docker) ListImageTags(ctx context.Context, repo string) ([]string, erro
 
 // RemoveImage untags a local image. Removing a missing tag is harmless.
 func (d *Docker) RemoveImage(ctx context.Context, tag string) error {
-	_, err := d.cli.ImageRemove(ctx, tag, image.RemoveOptions{PruneChildren: true})
+	_, err := d.cli.ImageRemove(ctx, tag, client.ImageRemoveOptions{PruneChildren: true})
 	if err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("runtime: remove image %s: %w", tag, err)
 	}

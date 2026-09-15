@@ -17,13 +17,10 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
 )
 
 const (
@@ -53,8 +50,8 @@ const execOutputLimit = 1 << 20
 const hijackWriteTimeout = 5 * time.Second
 
 type dockerWaitClient interface {
-	ContainerInspect(context.Context, string) (container.InspectResponse, error)
-	ContainerWait(context.Context, string, container.WaitCondition) (<-chan container.WaitResponse, <-chan error)
+	ContainerInspect(context.Context, string, client.ContainerInspectOptions) (client.ContainerInspectResult, error)
+	ContainerWait(context.Context, string, client.ContainerWaitOptions) client.ContainerWaitResult
 }
 
 // Docker is the Runtime implementation backed by the local Docker daemon.
@@ -92,7 +89,7 @@ func WithNetworkMode(mode string) DockerOption {
 // (DOCKER_HOST and friends) and negotiates the API version. The connection
 // is lazy: daemon reachability surfaces on first use.
 func NewDocker(opts ...DockerOption) (*Docker, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: docker client: %w", err)
 	}
@@ -116,12 +113,17 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 	if spec.Name != "" {
 		name = d.namePrefix + spec.Name
 	}
-	resp, err := d.cli.ContainerCreate(ctx, cfg, hostCfg, nil, nil, name)
+	createOpts := client.ContainerCreateOptions{
+		Config:     cfg,
+		HostConfig: hostCfg,
+		Name:       name,
+	}
+	resp, err := d.cli.ContainerCreate(ctx, createOpts)
 	if cerrdefs.IsNotFound(err) {
 		if err = d.pull(ctx, spec.Image); err != nil {
 			return "", err
 		}
-		resp, err = d.cli.ContainerCreate(ctx, cfg, hostCfg, nil, nil, name)
+		resp, err = d.cli.ContainerCreate(ctx, createOpts)
 	}
 	if err != nil {
 		return "", fmt.Errorf("runtime: create container: %w", err)
@@ -133,7 +135,7 @@ func (d *Docker) pull(ctx context.Context, ref string) error {
 	if localOnlyImage(ref) {
 		return fmt.Errorf("runtime: image %s is built locally and is missing from the daemon", ref)
 	}
-	rc, err := d.cli.ImagePull(ctx, ref, image.PullOptions{})
+	rc, err := d.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("runtime: pull image %s: %w", ref, err)
 	}
@@ -260,30 +262,38 @@ func nanoCPUs(cores float64) int64 {
 // orchestrator retry against a live run) skips the script: the sentinel on
 // the container filesystem marks it done.
 func (d *Docker) Start(ctx context.Context, id ID) error {
-	info, err := d.cli.ContainerInspect(ctx, string(id))
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("runtime: inspect container: %w", err)
 	}
-	wasRunning := info.State != nil && info.State.Running
-	if err := d.cli.ContainerStart(ctx, string(id), container.StartOptions{}); err != nil {
+	wasRunning := info.Container.State != nil && info.Container.State.Running
+	if _, err := d.cli.ContainerStart(ctx, string(id), client.ContainerStartOptions{}); err != nil {
 		// The daemon may have started the container even though the client
 		// reports an error (a cancelled ctx mid-request); don't leave a
 		// container this call launched running.
 		if !wasRunning {
-			_ = d.cli.ContainerKill(context.WithoutCancel(ctx), string(id), "KILL")
+			_, _ = d.cli.ContainerKill(
+				context.WithoutCancel(ctx),
+				string(id),
+				client.ContainerKillOptions{Signal: "KILL"},
+			)
 		}
 		return fmt.Errorf("runtime: start container: %w", err)
 	}
-	script := info.Config.Labels[labelSetupScript]
+	script := info.Container.Config.Labels[labelSetupScript]
 	if script == "" {
 		return nil
 	}
-	sentinel := info.Config.Labels[labelSetupSentinel]
-	if err := d.runSetup(ctx, id, script, sentinel, info.Config.WorkingDir); err != nil {
+	sentinel := info.Container.Config.Labels[labelSetupSentinel]
+	if err := d.runSetup(ctx, id, script, sentinel, info.Container.Config.WorkingDir); err != nil {
 		// Never kill a run that was already live before this Start call: a
 		// redundant Start must not take down a healthy container.
 		if !wasRunning {
-			_ = d.cli.ContainerKill(context.WithoutCancel(ctx), string(id), "KILL")
+			_, _ = d.cli.ContainerKill(
+				context.WithoutCancel(ctx),
+				string(id),
+				client.ContainerKillOptions{Signal: "KILL"},
+			)
 		}
 		return err
 	}
@@ -332,7 +342,7 @@ func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir 
 // until it finishes or ctx is cancelled, and returns its exit code with
 // stdout and stderr kept apart.
 func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) (int, string, string, error) {
-	created, err := d.cli.ContainerExecCreate(ctx, string(id), container.ExecOptions{
+	created, err := d.cli.ExecCreate(ctx, string(id), client.ExecCreateOptions{
 		Cmd:          cmd,
 		WorkingDir:   workDir,
 		AttachStdout: true,
@@ -341,7 +351,7 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 	if err != nil {
 		return 0, "", "", fmt.Errorf("exec create: %w", err)
 	}
-	att, err := d.cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
+	att, err := d.cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{})
 	if err != nil {
 		return 0, "", "", fmt.Errorf("exec attach: %w", err)
 	}
@@ -365,7 +375,7 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 		return 0, stdout, stderr, fmt.Errorf("exec output: %w", copyErr)
 	}
 	for {
-		ins, err := d.cli.ContainerExecInspect(ctx, created.ID)
+		ins, err := d.cli.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
 		if err != nil {
 			return 0, stdout, stderr, fmt.Errorf("exec inspect: %w", err)
 		}
@@ -412,7 +422,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 
 // Pause implements Runtime via the cgroup freezer (SIGSTOP semantics).
 func (d *Docker) Pause(ctx context.Context, id ID) error {
-	if err := d.cli.ContainerPause(ctx, string(id)); err != nil {
+	if _, err := d.cli.ContainerPause(ctx, string(id), client.ContainerPauseOptions{}); err != nil {
 		return fmt.Errorf("runtime: pause container: %w", err)
 	}
 	return nil
@@ -420,7 +430,7 @@ func (d *Docker) Pause(ctx context.Context, id ID) error {
 
 // Resume implements Runtime.
 func (d *Docker) Resume(ctx context.Context, id ID) error {
-	if err := d.cli.ContainerUnpause(ctx, string(id)); err != nil {
+	if _, err := d.cli.ContainerUnpause(ctx, string(id), client.ContainerUnpauseOptions{}); err != nil {
 		return fmt.Errorf("runtime: resume container: %w", err)
 	}
 	return nil
@@ -429,21 +439,21 @@ func (d *Docker) Resume(ctx context.Context, id ID) error {
 // Stop implements Runtime. A paused container is thawed first so the
 // termination signal can be delivered.
 func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
-	info, err := d.cli.ContainerInspect(ctx, string(id))
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return dockerWaitError("inspect", id, err)
 	}
-	if info.State != nil && info.State.Paused {
-		if err := d.cli.ContainerUnpause(ctx, string(id)); err != nil {
+	if info.Container.State != nil && info.Container.State.Paused {
+		if _, err := d.cli.ContainerUnpause(ctx, string(id), client.ContainerUnpauseOptions{}); err != nil {
 			return fmt.Errorf("runtime: unpause before stop: %w", err)
 		}
 	}
-	var opts container.StopOptions
+	var opts client.ContainerStopOptions
 	if grace >= 0 {
 		secs := int(math.Ceil(grace.Seconds()))
 		opts.Timeout = &secs
 	}
-	if err := d.cli.ContainerStop(ctx, string(id), opts); err != nil {
+	if _, err := d.cli.ContainerStop(ctx, string(id), opts); err != nil {
 		return dockerWaitError("stop", id, err)
 	}
 	return nil
@@ -452,7 +462,7 @@ func (d *Docker) Stop(ctx context.Context, id ID, grace time.Duration) error {
 // Destroy implements Runtime. Removal is forced, so running or paused
 // containers are killed first; a missing container is not an error.
 func (d *Docker) Destroy(ctx context.Context, id ID) error {
-	err := d.cli.ContainerRemove(ctx, string(id), container.RemoveOptions{
+	_, err := d.cli.ContainerRemove(ctx, string(id), client.ContainerRemoveOptions{
 		Force:         true,
 		RemoveVolumes: true,
 	})
@@ -464,12 +474,12 @@ func (d *Docker) Destroy(ctx context.Context, id ID) error {
 
 // Attach implements Runtime.
 func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
-	info, err := d.cli.ContainerInspect(ctx, string(id))
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("runtime: inspect container: %w", err)
 	}
-	tty := info.Config != nil && info.Config.Tty
-	resp, err := d.cli.ContainerAttach(ctx, string(id), container.AttachOptions{
+	tty := info.Container.Config != nil && info.Container.Config.Tty
+	resp, err := d.cli.ContainerAttach(ctx, string(id), client.ContainerAttachOptions{
 		Stream: true,
 		Stdin:  true,
 		Stdout: true,
@@ -478,20 +488,20 @@ func (d *Docker) Attach(ctx context.Context, id ID) (Attachment, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runtime: attach container: %w", err)
 	}
-	return newDockerAttachment(d.cli, string(id), tty, resp), nil
+	return newDockerAttachment(d.cli, string(id), tty, resp.HijackedResponse), nil
 }
 
 // ContainerIP implements Runtime by inspecting the container's network
 // endpoints.
 func (d *Docker) ContainerIP(ctx context.Context, id ID) (string, error) {
-	info, err := d.cli.ContainerInspect(ctx, string(id))
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("runtime: inspect container %q: %w", id, err)
 	}
-	if info.NetworkSettings != nil {
-		for _, network := range info.NetworkSettings.Networks {
-			if network != nil && network.IPAddress != "" {
-				return network.IPAddress, nil
+	if info.Container.NetworkSettings != nil {
+		for _, network := range info.Container.NetworkSettings.Networks {
+			if network != nil && network.IPAddress.IsValid() {
+				return network.IPAddress.String(), nil
 			}
 		}
 	}
@@ -500,28 +510,28 @@ func (d *Docker) ContainerIP(ctx context.Context, id ID) (string, error) {
 
 // ExecTTY opens an additional TTY process inside a running container.
 func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir string, cols, rows uint) (Attachment, error) {
-	opts := container.ExecOptions{
-		Tty:          true,
+	opts := client.ExecCreateOptions{
+		TTY:          true,
 		AttachStdin:  true,
 		AttachStdout: true,
 		Cmd:          argv,
 		WorkingDir:   workDir,
 	}
 	if cols != 0 && rows != 0 {
-		opts.ConsoleSize = &[2]uint{rows, cols}
+		opts.ConsoleSize = client.ConsoleSize{Height: rows, Width: cols}
 	}
-	created, err := d.cli.ContainerExecCreate(ctx, string(id), opts)
+	created, err := d.cli.ExecCreate(ctx, string(id), opts)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: exec create: %w", err)
 	}
-	resp, err := d.cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: true})
+	resp, err := d.cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{TTY: true})
 	if err != nil {
 		if exitErr := d.execExitError(ctx, created.ID); exitErr != nil {
 			return nil, exitErr
 		}
 		return nil, fmt.Errorf("runtime: exec attach: %w", err)
 	}
-	att := newExecAttachment(d.cli, created.ID, resp)
+	att := newExecAttachment(d.cli, created.ID, resp.HijackedResponse)
 	if cols != 0 && rows != 0 {
 		if err := att.Resize(ctx, cols, rows); err != nil {
 			_ = att.Close()
@@ -539,7 +549,7 @@ func (d *Docker) ExecTTY(ctx context.Context, id ID, argv []string, workDir stri
 // execExitError reports an exec that already exited with a
 // missing-executable status (126/127), or nil.
 func (d *Docker) execExitError(ctx context.Context, execID string) error {
-	ins, err := d.cli.ContainerExecInspect(ctx, execID)
+	ins, err := d.cli.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 	if err != nil || ins.Running {
 		return nil
 	}
@@ -553,18 +563,18 @@ func (d *Docker) execExitError(ctx context.Context, execID string) error {
 // for its first run to finish rather than reporting a phantom zero exit.
 func (d *Docker) Wait(ctx context.Context, id ID) (ExitStatus, error) {
 	cond := container.WaitConditionNotRunning
-	info, err := d.waitClient.ContainerInspect(ctx, string(id))
+	info, err := d.waitClient.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return ExitStatus{}, dockerWaitError("inspect", id, err)
 	}
-	if info.State != nil && info.State.Status == container.StateCreated {
+	if info.Container.State != nil && info.Container.State.Status == container.StateCreated {
 		cond = container.WaitConditionNextExit
 	}
-	respCh, errCh := d.waitClient.ContainerWait(ctx, string(id), cond)
+	wait := d.waitClient.ContainerWait(ctx, string(id), client.ContainerWaitOptions{Condition: cond})
 	select {
-	case err := <-errCh:
+	case err := <-wait.Error:
 		return ExitStatus{}, dockerWaitError("wait", id, err)
-	case resp := <-respCh:
+	case resp := <-wait.Result:
 		if resp.Error != nil {
 			return ExitStatus{}, fmt.Errorf("runtime: wait container: %s", resp.Error.Message)
 		}
@@ -583,17 +593,17 @@ func dockerWaitError(action string, id ID, err error) error {
 // was captured at creation time. It deliberately does not resolve the image
 // tag again: recovered callers need the HOME and user of this container.
 func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
-	info, err := d.cli.ContainerInspect(ctx, string(id))
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		return ContainerInfo{}, dockerWaitError("inspect", id, err)
 	}
-	if info.Config == nil {
+	if info.Container.Config == nil {
 		return ContainerInfo{}, fmt.Errorf("runtime: inspect container %q: missing config", id)
 	}
 	return ContainerInfo{
-		Image: info.Config.Image,
-		User:  info.Config.User,
-		Env:   append([]string(nil), info.Config.Env...),
+		Image: info.Container.Config.Image,
+		User:  info.Container.Config.User,
+		Env:   append([]string(nil), info.Container.Config.Env...),
 	}, nil
 }
 
@@ -603,17 +613,17 @@ func (d *Docker) FindByCreationKey(ctx context.Context, key string) (ID, error) 
 	if key == "" {
 		return "", fmt.Errorf("runtime: find by creation key: %w", ErrNotFound)
 	}
-	list, err := d.cli.ContainerList(ctx, container.ListOptions{
+	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", labelCreationKey+"="+key)),
+		Filters: make(client.Filters).Add("label", labelCreationKey+"="+key),
 	})
 	if err != nil {
 		return "", fmt.Errorf("runtime: find by creation key: %w", err)
 	}
-	if len(list) == 0 {
+	if len(list.Items) == 0 {
 		return "", fmt.Errorf("runtime: find by creation key %q: %w", key, ErrNotFound)
 	}
-	return ID(list[0].ID), nil
+	return ID(list.Items[0].ID), nil
 }
 
 // ImageUser reports the user the image is configured to run as (the OCI
@@ -644,13 +654,13 @@ type dockerAttachment struct {
 	cli       *client.Client
 	id        string
 	tty       bool
-	resp      types.HijackedResponse
+	resp      client.HijackedResponse
 	stdout    *streamBuffer
 	stderr    *streamBuffer
 	closeOnce sync.Once
 }
 
-func newDockerAttachment(cli *client.Client, id string, tty bool, resp types.HijackedResponse) *dockerAttachment {
+func newDockerAttachment(cli *client.Client, id string, tty bool, resp client.HijackedResponse) *dockerAttachment {
 	a := &dockerAttachment{
 		cli:    cli,
 		id:     id,
@@ -680,7 +690,7 @@ func (a *dockerAttachment) Resize(ctx context.Context, cols, rows uint) error {
 	if !a.tty {
 		return errors.New("runtime: resize: attachment has no TTY")
 	}
-	err := a.cli.ContainerResize(ctx, a.id, container.ResizeOptions{Width: cols, Height: rows})
+	_, err := a.cli.ContainerResize(ctx, a.id, client.ContainerResizeOptions{Width: cols, Height: rows})
 	if err != nil {
 		return fmt.Errorf("runtime: resize: %w", err)
 	}
@@ -703,7 +713,7 @@ func (a *dockerAttachment) Close() error {
 // PTY host never uses it for cancellation: WriteContext changes only the
 // write deadline, preserving shared stdin for later inputs and attachments.
 type hijackStdin struct {
-	resp types.HijackedResponse
+	resp client.HijackedResponse
 }
 
 func (h hijackStdin) Write(p []byte) (int, error) { return h.resp.Conn.Write(p) }
