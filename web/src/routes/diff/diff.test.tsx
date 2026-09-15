@@ -107,13 +107,13 @@ test('parses a unified diff into files, kinds and counts', () => {
   expect(files[1].lines).toContainEqual({ kind: 'del', text: '-- a comment git did not write' })
 })
 
-test('renders the fetched patch and says when it was cut short', async () => {
+test('renders the complete fetched patch without a truncation notice', async () => {
   seed()
   vi.mocked(api.runPatch).mockResolvedValue({
     run_id: active.id,
     base: 'abcdef1234567890',
     patch,
-    truncated: true,
+    truncated: false,
   })
   renderDiff()
 
@@ -121,7 +121,7 @@ test('renders the fetched patch and says when it was cut short', async () => {
   expect(screen.getByText('notes.md')).toBeTruthy()
   expect(screen.getByText('+new line')).toBeTruthy()
   expect(screen.getByText('abcdef12')).toBeTruthy()
-  expect(screen.getByText(/too large to render in full/)).toBeTruthy()
+  expect(screen.queryByText(/too large to render in full/)).toBeNull()
   expect(api.runPatch).toHaveBeenCalledWith(active.id)
 })
 

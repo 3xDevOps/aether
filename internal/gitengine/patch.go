@@ -9,8 +9,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// DefaultPatchBytes caps rendered patch text when the caller names no
-// limit of its own.
+// DefaultPatchBytes bounds evidence patch output. Run patches use the
+// complete output unless the caller supplies a positive limit.
 const DefaultPatchBytes = 1 << 20
 
 // Patch is one rendered diff of a run checkout, as unified patch text.
@@ -28,7 +28,7 @@ type Patch struct {
 // PatchRequest names one rendering. From and To are empty for the run's
 // current diff against its fork point; set to snapshot trees recorded by
 // run.diff events they render what one interval changed. MaxBytes caps the
-// patch text (DefaultPatchBytes when not positive).
+// patch text when positive; a negative value keeps the complete patch.
 type PatchRequest struct {
 	From     string
 	To       string
@@ -54,8 +54,8 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 		return Patch{}, err
 	}
 	maxBytes := req.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = DefaultPatchBytes
+	if maxBytes == 0 {
+		maxBytes = -1
 	}
 	// Staging re-hashes every untracked file, which the seeded stat cache
 	// cannot cover, so a worktree holding a large un-ignored tree makes this

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -40,6 +41,25 @@ func TestConfigWriteRevisionAndMemberIsolation(t *testing.T) {
 	}
 	if string(got.Content) != "one" || got.Revision != first.Revision {
 		t.Fatalf("member A read = %+v", got)
+	}
+}
+
+func TestConfigReadAndWriteAllowLargeText(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat("model = \"large\"\n", 40_000)
+	created, err := manager.ConfigWrite(context.Background(), "member-a", "claude", ".claude", "settings.toml", []byte(want), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := manager.ConfigRead(context.Background(), "member-a", "claude", ".claude", "settings.toml", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Content) != want || got.Truncated || got.Binary || !got.Writable || got.Revision != created.Revision {
+		t.Fatalf("large config read = %d bytes, truncated %v, binary %v, writable %v, revision %q", len(got.Content), got.Truncated, got.Binary, got.Writable, got.Revision)
 	}
 }
 

@@ -28,10 +28,6 @@ type DiskReader interface {
 	Usage() (disk.Usage, error)
 }
 
-// runPatchMaxBytes caps the diff text one run.patch reply carries. The
-// dashboard renders it inline; a diff past this is downloaded, not read.
-const runPatchMaxBytes = 512 << 10
-
 func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	patcher := s.cfg.Services.Patch
 	if patcher == nil {
@@ -51,7 +47,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	p, err := patcher.RunPatch(ctx, id, gitengine.PatchRequest{
 		From:     req.From,
 		To:       req.To,
-		MaxBytes: runPatchMaxBytes,
+		MaxBytes: -1,
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):

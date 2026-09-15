@@ -340,10 +340,10 @@ across routes, the browser warns before unloading them, and there is no
 autosave or force-save. A failed or stale save keeps the draft; **Reload from
 server** replaces it with current server content.
 
-Configuration editing accepts full UTF-8 text up to 512 KiB. Binary and
-truncated files are read-only. New configuration files accept nested relative
-paths and refuse overwrites. `config.*` methods require `Launch` and target only
-your authenticated member home; there is no admin/member selector. For
+Configuration editing accepts complete UTF-8 text. Binary files are read-only.
+New configuration files accept nested relative paths and refuse overwrites.
+`config.*` methods require `Launch` and target only your authenticated member
+home; there is no admin/member selector. For
 workspace files, **Commit to <branch>** creates one commit on the base branch
 but does not push upstream; live-run writes modify the uncommitted checkout.
 Base saves require **Push** and run saves require **Steer**.

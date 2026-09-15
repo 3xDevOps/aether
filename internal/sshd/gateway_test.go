@@ -41,7 +41,7 @@ func wireErrOf(t *testing.T, err error) *protocol.Error {
 	return pe
 }
 
-func TestRunPatchReturnsDiffAndTruncation(t *testing.T) {
+func TestRunPatchReturnsCompleteDiffRequest(t *testing.T) {
 	t.Parallel()
 	patcher := &fakePatcher{patch: gitengine.Patch{
 		Base:      "abc123",
@@ -56,7 +56,10 @@ func TestRunPatchReturnsDiffAndTruncation(t *testing.T) {
 		t.Fatalf("run.patch: %v", err)
 	}
 	if got.RunID != string(e.run.ID) || got.Base != "abc123" || got.Patch != patcher.patch.Text || !got.Truncated {
-		t.Errorf("run.patch = %+v, want the fake's patch with truncation", got)
+		t.Errorf("run.patch = %+v, want the fake's patch metadata", got)
+	}
+	if patcher.got.MaxBytes != -1 {
+		t.Errorf("run.patch max bytes = %d, want unlimited", patcher.got.MaxBytes)
 	}
 
 	// An unknown run is a NotFound from the store, not a patch failure.

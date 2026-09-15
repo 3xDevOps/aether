@@ -530,9 +530,9 @@ workspace base and live-run files. It has explicit **Save** or
 **Commit to <branch>** actions, Ctrl/Cmd-S, syntax highlighting, find/replace,
 dirty tabs that survive navigation, unload warnings, and no autosave or
 force-save. A failed or stale save keeps the draft; **Reload from server**
-deliberately discards it. Configuration files are full UTF-8 text up to
-512 KiB; binary and truncated files are read-only. New configuration files
-accept nested relative paths and refuse overwrite. Every `config.*` method
+deliberately discards it. Configuration files are complete UTF-8 text; binary
+files are read-only. New configuration files accept nested relative paths and
+refuse overwrite. Every `config.*` method
 requires `Launch` and targets only the authenticated member's own home; an
 admin cannot select another member.
 

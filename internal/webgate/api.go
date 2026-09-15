@@ -19,8 +19,6 @@ const (
 	// Config import carries up to 20 MiB of decoded files in base64 JSON;
 	// leave room for the encoding and request framing.
 	maxConfigImportRequestBody = 30 << 20
-	// JSON escaping can expand the editor's 512 KiB of text sixfold.
-	maxConfigWriteRequestBody = 4 << 20
 )
 
 func requestBodyLimit(method string) int64 {
@@ -30,7 +28,7 @@ func requestBodyLimit(method string) int64 {
 	case protocol.MethodConfigImport:
 		return maxConfigImportRequestBody
 	case protocol.MethodFilesWrite, protocol.MethodConfigWrite:
-		return maxConfigWriteRequestBody
+		return 0
 	default:
 		return MaxRequestBody
 	}
@@ -57,7 +55,11 @@ func (g *Gateway) handleAPI(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, requestBodyLimit(r.PathValue("method"))))
+	bodyReader := io.Reader(r.Body)
+	if limit := requestBodyLimit(r.PathValue("method")); limit > 0 {
+		bodyReader = http.MaxBytesReader(w, r.Body, limit)
+	}
+	body, err := io.ReadAll(bodyReader)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeParse, Message: "read body: " + err.Error()})
 		return

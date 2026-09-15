@@ -29,8 +29,8 @@ type RunPatchResult struct {
 	Base string `json:"base"`
 	// Patch is the unified diff text, empty when nothing changed.
 	Patch string `json:"patch"`
-	// Truncated reports that the diff outgrew the byte limit and Patch
-	// ends early, at the last whole line that fit.
+	// Truncated reports that an explicitly bounded render ended early, at the
+	// last whole line that fit. Dashboard renders are complete.
 	Truncated bool `json:"truncated"`
 }
 

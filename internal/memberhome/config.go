@@ -25,8 +25,6 @@ import (
 )
 
 const (
-	// ConfigMaxFileBytes is the maximum UTF-8 file an editor can read or save.
-	ConfigMaxFileBytes = 512 << 10
 	// ConfigImportMaxFileBytes is the per-file import limit.
 	ConfigImportMaxFileBytes = 1 << 20
 	// ConfigImportMaxBytes is the decoded aggregate import limit.
@@ -71,7 +69,7 @@ type ConfigTreeEntry struct {
 	Size int64
 }
 
-// ConfigRead is the bounded file result used by config.read and config.write.
+// ConfigRead is the file result used by config.read and config.write.
 type ConfigRead struct {
 	Content   []byte
 	Truncated bool
@@ -308,9 +306,8 @@ func (m *Manager) ConfigTree(ctx context.Context, member domain.MemberID, harnes
 	return out, nil
 }
 
-// ConfigRead reads one UTF-8 editor file, returning a bounded read-only view
-// for binary or oversized content rather than handing a browser an unbounded
-// body. Revision is present only for a complete valid UTF-8 file.
+// ConfigRead reads one UTF-8 editor file. Revision is present only for a
+// complete valid UTF-8 file.
 func (m *Manager) ConfigRead(ctx context.Context, member domain.MemberID, harnessName, localRoot, rel string, deny []string) (ConfigRead, error) {
 	unlock, err := m.LockConfigRoot(member, localRoot)
 	if err != nil {
@@ -352,13 +349,12 @@ func (m *Manager) ConfigRead(ctx context.Context, member domain.MemberID, harnes
 	if err = ctx.Err(); err != nil {
 		return ConfigRead{}, err
 	}
-	truncated := info.Size() > ConfigMaxFileBytes
-	content, err := io.ReadAll(io.LimitReader(f, ConfigMaxFileBytes))
+	content, err := io.ReadAll(f)
 	if err != nil {
 		return ConfigRead{}, err
 	}
 	binary := isConfigBinary(content)
-	out := ConfigRead{Content: content, Truncated: truncated, Binary: binary, Size: info.Size(), Writable: !truncated && !binary}
+	out := ConfigRead{Content: content, Binary: binary, Size: info.Size(), Writable: !binary}
 	if out.Writable {
 		out.Revision = revision(content)
 	}
@@ -368,9 +364,6 @@ func (m *Manager) ConfigRead(ctx context.Context, member domain.MemberID, harnes
 // ConfigWrite replaces one editor file after checking its exact-byte revision.
 // An empty revision is accepted only when the file does not yet exist.
 func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harnessName, localRoot, rel string, content []byte, expected string, deny []string) (ConfigRead, error) {
-	if len(content) > ConfigMaxFileBytes {
-		return ConfigRead{}, ErrConfigTooLarge
-	}
 	if isConfigBinary(content) {
 		return ConfigRead{}, ErrConfigBinary
 	}
@@ -419,7 +412,7 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 	case !info.Mode().IsRegular():
 		return ConfigRead{}, ErrConfigDenied
 	default:
-		current, readErr := readConfigBytes(profileRoot, rel, ConfigMaxFileBytes)
+		current, readErr := readConfigBytes(profileRoot, rel, 0)
 		if readErr != nil {
 			return ConfigRead{}, readErr
 		}
@@ -784,10 +777,13 @@ func readConfigBytes(root *os.Root, name string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	if info.Size() > limit {
+	if limit > 0 && info.Size() > limit {
 		return nil, ErrConfigTooLarge
 	}
-	return io.ReadAll(io.LimitReader(f, limit+1))
+	if limit > 0 {
+		return io.ReadAll(io.LimitReader(f, limit+1))
+	}
+	return io.ReadAll(f)
 }
 
 func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode os.FileMode, expected string, requireAbsent bool) error {
@@ -835,7 +831,7 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 		}
 		switch {
 		case expected != "":
-			current, checkErr := readConfigBytes(parent, target, ConfigMaxFileBytes)
+			current, checkErr := readConfigBytes(parent, target, 0)
 			if checkErr != nil || revision(current) != expected {
 				_ = parent.Remove(tmp)
 				return ErrConfigConflict

@@ -38,8 +38,9 @@ type FilesReadParams struct {
 	Path        string `json:"path"`
 }
 
-// FilesReadResult is the reply to files.read. Content is text when Binary is
-// false; clients use Binary to display a notice instead of rendering it.
+// FilesReadResult is the reply to files.read. Content is complete text when
+// Binary is false; clients use Binary to display a notice instead of rendering
+// it. Truncated remains for compatibility with bounded internal callers.
 type FilesReadResult struct {
 	Content   string `json:"content"`
 	Truncated bool   `json:"truncated"`

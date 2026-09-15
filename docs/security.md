@@ -403,9 +403,10 @@ selected regular-file bytes and sends them to the server, where they are
 scanned before writing; a secret finding is therefore not proof that the
 content stayed local. Empty files and arbitrary binary regular bytes are
 preserved under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
-limits. The shared HTTP gateway permits a 30 MiB request for `config.import`,
-4 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods;
-these are framing limits, not larger decoded configuration allowances.
+limits. The shared HTTP gateway permits a 30 MiB request for `config.import`
+and 1 MiB for ordinary methods; `config.write` and `files.write` have no
+separate HTTP body cap. These are framing limits, not larger decoded import
+allowances. The SSH control channel still caps one JSON line at 32 MiB.
 
 Browser metadata is intentionally limited. New imported files are `0644`;
 existing modes are preserved even when the server uses a restrictive umask.
@@ -422,8 +423,8 @@ per-run isolated configuration copy. A snapshot pin records launch provenance,
 not an isolation boundary or a promise that home edits wait for later runs.
 Files edits do not rebuild the installed-agent image.
 
-The Files editor accepts complete UTF-8 text without NUL bytes up to 512 KiB.
-Binary and truncated files are read-only. Run and configuration saves recheck
+The Files editor accepts complete UTF-8 text without NUL bytes. Binary files
+are read-only. Run and configuration saves recheck
 SHA-256 revisions immediately before atomic rename under Aether's root lock;
 base-branch commits compare-and-swap the branch head. These locks do not
 exclude arbitrary live-agent filesystem writers. A stale or failed save leaves

@@ -82,6 +82,23 @@ func TestTerminalImageAPIHasDedicatedBodyLimit(t *testing.T) {
 	}
 }
 
+func TestFileWriteAPIAcceptsLargeEditorBodies(t *testing.T) {
+	backend := &stubBackend{}
+	g, err := New(Config{Authorize: admitAll(backend)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+
+	body := `{"content":"` + strings.Repeat("x", 5<<20) + `"}`
+	if rec := post(g, "/api/v1/config.write", body); rec.Code != http.StatusOK {
+		t.Fatalf("large config.write body = %d: %s", rec.Code, rec.Body)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != protocol.MethodConfigWrite {
+		t.Fatalf("large config.write calls = %+v", backend.calls)
+	}
+}
+
 func TestCapabilitiesFillTheSharedFields(t *testing.T) {
 	g, err := New(Config{
 		Authorize:    admitAll(&stubBackend{}),
