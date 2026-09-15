@@ -59,11 +59,13 @@ const (
 )
 
 var (
-	ErrNoSession       = errors.New("ptyhost: no session for run")
-	ErrSessionEnded    = errors.New("ptyhost: session ended")
-	ErrWriteDenied     = errors.New("ptyhost: write access denied")
-	ErrInvalidRunID    = errors.New("ptyhost: invalid run id")
-	ErrSessionReplaced = errors.New("ptyhost: session was replaced")
+	ErrNoSession         = errors.New("ptyhost: no session for run")
+	ErrSessionEnded      = errors.New("ptyhost: session ended")
+	ErrWriteDenied       = errors.New("ptyhost: write access denied")
+	ErrInvalidRunID      = errors.New("ptyhost: invalid run id")
+	ErrSessionReplaced   = errors.New("ptyhost: session was replaced")
+	errAttachNoAdmission = errors.New("ptyhost: attach commit did not admit client")
+	errAttachRepeated    = errors.New("ptyhost: attach admission called more than once")
 )
 
 func validateRunID(run domain.RunID) error {
@@ -470,9 +472,13 @@ type AttachClient struct {
 	// Authorize completes the write authorization synchronously before the
 	// client joins the session. It must be bounded.
 	Authorize func() error
+	// Commit receives admit, which it must call exactly once to register the
+	// client. Commit must be bounded, must not otherwise re-enter this session,
+	// and must not return an error after admit succeeds.
+	Commit func(admit func() error) error
 	// OnAttached runs after the client has joined successfully, but before
-	// replay, output, or geometry is written. It is the commit point for
-	// resources reserved while authorization was in flight.
+	// replay, output, or geometry is written. It commits resources reserved
+	// while authorization was in flight.
 	OnAttached func()
 	// InputGuard is checked immediately before and after every client read.
 	// It fences stale buffered input after a lease is taken over.
@@ -518,7 +524,9 @@ type GeometryWriter interface {
 // run transcript or the recent scrollback for other session types. resize
 // carries [cols, rows] updates (nil = fixed geometry). Write authorization
 // runs synchronously before the client is registered, so a refused writer
-// can never contribute geometry or trigger a resize.
+// can never contribute geometry or trigger a resize. A Commit hook receives
+// an admit callback and must invoke it exactly once before returning success;
+// the callback runs before attachment callbacks or stream data.
 func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
 	s := h.lookup(key)
 	if s == nil {
@@ -549,8 +557,59 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 		}
 	}
 	c := newClient(conn, a)
-	if err := s.addClient(c); err != nil {
+	var admitMu sync.Mutex
+	admitCalls := 0
+	admitSucceeded := false
+	admitRepeated := false
+	var admitErr error
+	admit := func() error {
+		admitMu.Lock()
+		defer admitMu.Unlock()
+		if admitCalls != 0 {
+			admitRepeated = true
+			return errAttachRepeated
+		}
+		admitCalls = 1
+		admitErr = s.addClientCommitted(ctx, c)
+		if admitErr == nil {
+			admitSucceeded = true
+		}
+		return admitErr
+	}
+	admissionState := func() (calls int, succeeded, repeated bool, err error) {
+		admitMu.Lock()
+		defer admitMu.Unlock()
+		return admitCalls, admitSucceeded, admitRepeated, admitErr
+	}
+	if a.Commit != nil {
+		commitErr := a.Commit(admit)
+		calls, succeeded, repeated, admissionErr := admissionState()
+		if commitErr != nil {
+			if succeeded {
+				s.removeClient(c)
+			}
+			return commitErr
+		}
+		if repeated {
+			if succeeded {
+				s.removeClient(c)
+			}
+			return errAttachRepeated
+		}
+		if calls == 0 {
+			return errAttachNoAdmission
+		}
+		if !succeeded {
+			if admissionErr != nil {
+				return admissionErr
+			}
+			return errAttachNoAdmission
+		}
+	} else if err := admit(); err != nil {
 		return err
+	}
+	if _, succeeded, _, _ := admissionState(); !succeeded {
+		return errAttachNoAdmission
 	}
 	if a.OnAttached != nil {
 		a.OnAttached()

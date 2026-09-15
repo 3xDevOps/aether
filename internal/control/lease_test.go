@@ -172,6 +172,51 @@ func TestReleaseAndFenceAdvanceGeneration(t *testing.T) {
 	}
 }
 
+func TestReleaseAdmittedCommitsOnlyAfterAdmission(t *testing.T) {
+	service := New(Config{})
+	held, _, err := service.Acquire("run-release-admit", "member-1", "session-a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = service.ReleaseAdmitted("run-release-admit", "member-1", held.SessionID, held.Generation, nil)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("nil admission = %v, want ErrInvalid", err)
+	}
+
+	admissionErr := errors.New("replacement admission failed")
+	err = service.ReleaseAdmitted("run-release-admit", "member-1", held.SessionID, held.Generation, func() error {
+		return admissionErr
+	})
+	if !errors.Is(err, admissionErr) {
+		t.Fatalf("failed admission release = %v, want %v", err, admissionErr)
+	}
+	if current, ok := service.Status("run-release-admit"); !ok || current != held {
+		t.Fatalf("lease after failed admission = %+v/%v, want %+v", current, ok, held)
+	}
+
+	admitted := false
+	err = service.ReleaseAdmitted("run-release-admit", "member-1", held.SessionID, held.Generation, func() error {
+		admitted = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("successful admitted release = %v", err)
+	}
+	if !admitted {
+		t.Fatal("release did not run replacement admission")
+	}
+	if _, ok := service.Status("run-release-admit"); ok {
+		t.Fatal("admitted release left the old lease")
+	}
+	fresh, _, err := service.Acquire("run-release-admit", "member-1", "session-b", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Generation != held.Generation+2 {
+		t.Fatalf("post-release generation = %d, want %d", fresh.Generation, held.Generation+2)
+	}
+}
+
 func TestReleaseRequiresMemberAndExplicitGeneration(t *testing.T) {
 	clock := newTestClock()
 	service := New(Config{Now: clock.Now})

@@ -920,8 +920,14 @@ out the rest of a 30-second wait. A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.
-An attach the gateway refused, one parked on a `session ended` close, and a
-run still waiting for its PTY session are not reopened by either event.
+If an attach is still inside its replay boundary when `online` fires, the
+client cancels that parser and drain with an explicit cancellation signal,
+clears the partial operations, and drops the socket while keeping the terminal
+hidden. The replacement attach starts a fresh hidden replay; the incomplete
+prefix is never revealed. If the replacement is finally refused, the client
+settles the replay gate before showing the server's error. An attach the gateway
+refused, one parked on a `session ended` close, and a run still waiting for its
+PTY session are not reopened by either event.
 
 Every live socket - `events`, `attach`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
@@ -987,13 +993,16 @@ needs.
    receive its current-screen replay. Step 2 describes how either replay is
    applied without exposing redraw frames.
 
-   `release_control` combines lease release with this attach. It must carry the
-   current `control_session_id` and nonzero `control_generation`; a successful
-   release fences the displaced writer and continues as the replacement
-   read-only PTY attach on this same request, honoring `resume`/`cursor`,
-   returning one normal attach ack, then streaming output. Invalid, stale, or
-   cross-member release is refused; release is not an acknowledgement-only
-   throwaway connection.
+   `release_control` combines lease release with this attach. At the PTY-host
+   commit boundary, the server holds the run-scoped authority lock, validates
+   the request's session and generation, admits the replacement, then releases
+   and fences the old lease before any replay, output, or geometry is sent. If
+   admission fails, the request is refused while the old writer and lease
+   remain intact. A successful commit cancels the displaced writer, then
+   continues as the replacement read-only PTY attach on this same request,
+   honoring `resume`/`cursor`, returning one normal attach ack, and streaming
+   output. Invalid, stale, or cross-member release is refused; release is not
+   an acknowledgement-only throwaway connection.
 
    `follow` says the client renders the session at the size it already is
    and imposes none of its own, so it is left out of the minimum the PTY is
@@ -1013,25 +1022,28 @@ needs.
    A declared replay length must be a finite, nonnegative safe integer; the
    dashboard turns an invalid declaration into a final visible refusal rather
    than attempting an allocation. Dashboard clients do not allocate
-   `Uint8Array(replay)` or any equivalent
-   browser-sized declared-length buffer. They retain frame-sized output and
-   geometry records in wire order, and pass replay chunks through public xterm
-   write callbacks serially, waiting for each completion before the next
-   record. Live records received while replay is arriving or parsing queue
-   behind the final replay callback. The xterm host remains hidden with CSS
-   visibility and shows **Restoring terminal history** until that callback,
-   then reveals the settled terminal.
+   `Uint8Array(replay)` or any equivalent browser-sized declared-length
+   buffer. They start parsing each arriving frame-sized replay operation
+   immediately through one serial public xterm write chain while the host
+   remains hidden with CSS visibility; they do not retain replay bytes until
+   the full boundary arrives. Each completion is awaited before the next
+   operation, preserving xterm backpressure and wire order. Only the slice
+   containing the exact final replay byte is tagged `replay-end`; live records
+   and geometry received during replay queue behind the replay writes. After
+   the final replay-write callback, the host remains hidden for two
+   `requestAnimationFrame` turns so the xterm DOM paints the settled terminal,
+   then reveals it.
    Every retained transcript byte is fed to xterm. xterm retains normal
    scrollback and rows preserved by its configured full-screen erase behavior;
    control bytes and cursor overwrites affect terminal state but are not
    themselves scrollback rows. Terminal-generated replies and user input stay
-   muted from the ack through the final replay-write completion callback.
+   muted from the ack through the final replay-write callback.
    For a fresh run attach these bytes are the complete retained raw transcript,
    including segments from earlier server incarnations. A successful resume
    supplies only the missing raw output. A failed resume may repeat the
-   complete run transcript, but that fallback uses the same ordered replay
-   transaction. `cursor` counts original session output and is what a later
-   `resume` sends back.
+   complete run transcript, but that fallback uses the same hidden, ordered
+   replay transaction. `cursor` counts original session output and is what a
+   later `resume` sends back.
 
    The server keeps full-transcript replay resource-bounded: it streams retained
    segments lazily, opening and reading at most one segment at a time rather
@@ -1080,10 +1092,12 @@ needs.
    reaches the browser before the repaint drawn at that size. A reattach learns
    the initial size from the ack.
    The ordered stream keeps fresh-run replay and successful resume from
-   exposing intermediate redraw frames: the hidden terminal surface remains
-   in place until final replay parsing completes, and a successful resume keeps
-   the existing screen. Raw screen-bearing attachments request a redraw nudge;
-   adapter taps do not.
+   exposing intermediate redraw frames: each replay operation is parsed
+   serially as it arrives while the terminal remains hidden, and the final
+   replay callback is followed by two `requestAnimationFrame` turns before
+   the settled surface is revealed. A successful resume keeps the existing
+   screen. Raw screen-bearing attachments request a redraw nudge; adapter taps
+   do not.
 
    Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
    across several ordered `input` frames.
@@ -1106,8 +1120,14 @@ an `o` byte and four-byte big-endian payload length precede each output record;
 a `g` byte and two four-byte big-endian dimensions form a geometry record. The
 gateway decodes these sequentially into WebSocket frames. Replay counts exclude
 frame headers. Resume cursors count original session output. The dashboard
-retains frame-sized output and geometry records in wire order, so geometry is
-not applied by an independent pump that could repaint at the wrong size.
+starts each frame-sized replay operation as it arrives, but one serial xterm
+write chain preserves geometry/output wire order and backpressure; it never
+allocates a transcript-sized replay buffer or runs an independent geometry pump.
+For a persistent dashboard dock, `rebind(next)` means that a new terminal host
+has taken over: the client cancels any old replay parser or drain with an
+explicit cancellation signal, drops the old socket, installs the new handlers,
+and starts one fresh full replay after cancellation. The dock does not issue a
+separate reopen after rebind.
 
 CLI attachments do not request framing and retain their raw terminal stream:
 they consume the ack-declared replay byte count, then continue with live bytes.
@@ -1148,13 +1168,16 @@ matching `^[a-z0-9-]{1,32}$`.
    binary frame may straddle that boundary, so the client splits it by the
    count. That declaration must be a finite, nonnegative safe integer; an
    invalid value becomes a final visible refusal rather than an allocation.
-   The dashboard retains frame-sized output and geometry records in wire order,
-   feeds replay chunks through public xterm write callbacks serially, and
-   queues live records behind the final replay callback. It does not allocate a
-   browser-sized buffer from the declared length. The terminal surface stays
-   hidden with CSS visibility and says **Restoring terminal history** until
-   replay parsing completes; terminal-generated replies and user input stay
-   muted through that completion. At most six tabs may be active.
+   The dashboard starts parsing frame-sized replay operations as they arrive,
+   serially through public xterm write callbacks while the terminal surface
+   stays hidden with CSS visibility. It does not retain replay until the full
+   boundary or allocate a browser-sized buffer from the declared length.
+   Only the slice containing the exact final replay byte is tagged
+   `replay-end`; live output and geometry queue behind xterm backpressure.
+   After the final replay callback, two `requestAnimationFrame` turns let the
+   xterm DOM paint the settled state before reveal. Terminal-generated replies
+   and user input stay muted through that callback. At most six tabs may be
+   active.
 3. Output is binary. Input and resize are text frames, and the server's
    `geometry` frame arrives here the same way it does on an attach:
 

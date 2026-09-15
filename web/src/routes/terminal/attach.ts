@@ -112,6 +112,11 @@ export interface AttachHandlers {
    * attach resumes the existing screen or has no transcript to send.
    */
   onReplayStart?: (bytes: number) => void
+  /**
+   * Cancel an in-flight replay without revealing its partial terminal. The
+   * replacement attach will announce the next replay (or a final refusal).
+   */
+  onReplayAbort?: () => void
   /** Lease metadata returned with every successful attach ack. */
   onControl?: (metadata: ControlMetadata) => void
   onState: (state: ConnectionState) => void
@@ -193,23 +198,53 @@ export function replayGate(
   let muted = false
   // A reopen mid-replay leaves callbacks pending in xterm's write queue; the
   // generation lets them expire instead of unmuting the replay that replaced
-  // them.
+  // them. It also guards the two-frame reveal below.
   let generation = 0
+  let pendingReveal: number | null = null
+  const nextFrame = (callback: () => void) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => callback())
+    } else {
+      // jsdom and non-visual embeds have no RAF. Keep the same turn-based
+      // delay there rather than making a replay callback crash the attach.
+      setTimeout(callback, 0)
+    }
+  }
+  const reveal = (current: number) => {
+    if (generation !== current || pendingReveal !== current) return
+    nextFrame(() => {
+      if (generation !== current || pendingReveal !== current) return
+      nextFrame(() => {
+        if (generation !== current || pendingReveal !== current) return
+        pendingReveal = null
+        onReplaying?.(false)
+      })
+    })
+  }
   const start = () => {
     muted = true
     generation++
+    pendingReveal = null
     onReplaying?.(true)
   }
   const unmute = () => {
     muted = false
     generation++
+    pendingReveal = null
     onReplaying?.(false)
+  }
+  const cancel = () => {
+    muted = true
+    generation++
+    pendingReveal = null
+    onReplaying?.(true)
   }
   return {
     muted: () => muted,
     /** Begin a replay before its first binary frame is delivered. */
     start,
     unmute,
+    cancel,
     write: (
       chunk: Uint8Array,
       kind: AttachDataKind,
@@ -229,7 +264,8 @@ export function replayGate(
           completed = true
           if (kind === 'replay-end' && generation === current) {
             muted = false
-            onReplaying?.(false)
+            pendingReveal = current
+            reveal(current)
           }
           resolve()
         }
@@ -283,8 +319,6 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let replayQueue: ReplayOperation[] = []
   let replayQueueOffset = 0
   let replayDraining = false
-  // Number of replay chunks currently waiting for xterm to finish parsing.
-  let replayWrites = 0
   let retryAfterReplay = false
   let pendingReopen:
     | {
@@ -303,15 +337,48 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let controlGeneration = 0
   let hasControl = false
   let drainGeneration = 0
+  let drainAbort: AbortController | null = null
   const replayPending = () =>
-    !replayReady || replayDraining || replayQueueOffset < replayQueue.length || replayWrites > 0
+    !replayReady || replayDraining || replayQueueOffset < replayQueue.length
+
+  const cancelDrain = () => {
+    drainAbort?.abort()
+    drainAbort = null
+    replayDraining = false
+  }
 
   const clearReplay = () => {
+    cancelDrain()
     drainGeneration++
     replayRemaining = 0
     replayReady = true
     replayQueue = []
     replayQueueOffset = 0
+  }
+
+  const waitForDrain = (completion: Promise<void>, signal: AbortSignal): Promise<boolean> => {
+    if (signal.aborted) return Promise.resolve(false)
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false
+      const finish = (value: boolean) => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', abort)
+        resolve(value)
+      }
+      const rejectCompletion = (error: unknown) => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      }
+      const abort = () => finish(false)
+      signal.addEventListener('abort', abort, { once: true })
+      completion.then(
+        () => finish(!signal.aborted),
+        (error) => rejectCompletion(error),
+      )
+    })
   }
 
   const failReplay = (error: unknown) => {
@@ -331,15 +398,37 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     handlers.onState('offline')
   }
 
-  // Once the final replay byte arrives, feed the retained frame slices and
-  // interleaved controls in wire order. Waiting for each replay completion
-  // keeps at most one replay chunk in xterm at a time; live data and geometry
-  // are queued behind a replay that is still being parsed.
+  const failLive = (error: unknown) => {
+    if (refused) return
+    refused = true
+    attached = false
+    waitingForSession = false
+    retryAfterReplay = false
+    pendingReopen = null
+    clearReplay()
+    drop()
+    handlers.onReplayStart?.(0)
+    const detail = error instanceof Error ? error.message : String(error)
+    handlers.onRefused(`terminal live output failed: ${detail}`)
+    handlers.onState('offline')
+  }
+
+  // Feed each replay frame to xterm as soon as it arrives. The queue retains
+  // frame-backed slices only; wire order and xterm's own completion provide
+  // the backpressure instead of waiting for the declared transcript boundary.
   const drainReplay = () => {
-    if (!replayReady || replayDraining || disposed || refused) return
+    if (replayDraining || disposed || refused) return
     replayDraining = true
     const generation = drainGeneration
-    const valid = () => generation === drainGeneration && !disposed && !refused
+    const controller = new AbortController()
+    drainAbort = controller
+    const { signal } = controller
+    const valid = () =>
+      generation === drainGeneration &&
+      drainAbort === controller &&
+      !signal.aborted &&
+      !disposed &&
+      !refused
     void (async () => {
       try {
         while (valid() && replayQueueOffset < replayQueue.length) {
@@ -379,12 +468,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
               return
             }
             try {
-              await (promise ? completion : settledCompletion)
+              const settledResult = promise
+                ? await waitForDrain(Promise.resolve(completion), signal)
+                : await waitForDrain(settledCompletion, signal)
+              if (!settledResult || !valid()) return
             } catch (error) {
               if (valid()) failReplay(error)
               return
             }
-            if (!valid()) return
             continue
           }
 
@@ -397,22 +488,22 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           }
           if (!valid()) return
           if (completion && typeof completion.then === 'function') {
-            replayWrites++
             try {
-              await completion
+              const settled = await waitForDrain(Promise.resolve(completion), signal)
+              if (!settled || !valid()) return
             } catch (error) {
               if (valid()) failReplay(error)
               return
-            } finally {
-              replayWrites--
             }
             if (!valid()) return
           }
         }
       } finally {
+        if (drainAbort !== controller) return
         replayQueue = []
         replayQueueOffset = 0
         replayDraining = false
+        drainAbort = null
         maybeCutover()
       }
     })()
@@ -475,17 +566,16 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         if (replayRemaining > 0) {
           const replayLength = Math.min(chunk.length, replayRemaining)
           if (replayLength > 0) {
+            const reachesBoundary = replayLength === replayRemaining
+            replayRemaining -= replayLength
+            if (replayRemaining === 0) replayReady = true
+            // Tag the exact slice that consumes the declared replay before it
+            // enters the queue. A straddling frame's suffix remains live.
             replayQueue.push({
               type: 'data',
               chunk: chunk.subarray(0, replayLength),
-              kind: 'replay',
+              kind: reachesBoundary ? 'replay-end' : 'replay',
             })
-            replayRemaining -= replayLength
-            if (replayRemaining === 0) {
-              replayReady = true
-              const final = replayQueue[replayQueue.length - 1]
-              if (final?.type === 'data') final.kind = 'replay-end'
-            }
           }
 
           // A frame can straddle the replay/live boundary. Queue its suffix
@@ -496,7 +586,9 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
             cursor += live.length
             replayQueue.push({ type: 'data', chunk: live, kind: 'live' })
           }
-          if (replayReady) drainReplay()
+          // Parsing starts with this frame, even when more replay bytes are
+          // still expected.
+          drainReplay()
           return
         }
 
@@ -507,8 +599,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         } else {
           try {
             handlers.onData?.(chunk, 'live')
-          } catch {
-            // A stale terminal host must not strand reconnect state.
+          } catch (error) {
+            failLive(error)
           }
         }
         return
@@ -557,9 +649,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           drop()
           return
         }
-
-        // The replay is retained as frame slices until its exact byte
-        // boundary arrives. The queue is then drained in wire order.
+        // Retain only frame-backed slices and start draining each frame as it
+        // arrives; the declared boundary tags the final replay slice.
         replayRemaining = replayBytes
         replayReady = replayBytes === 0
         replayQueueOffset = 0
@@ -639,19 +730,20 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       refused = true
       waitingForSession = false
+      clearReplay()
+      handlers.onReplayStart?.(0)
       handlers.onRefused(ack.error ?? 'attach refused', ack.code)
       handlers.onState('offline')
     }
     ws.onclose = (ev) => {
       if (disposed || socket !== ws) return
       socket = null
-      // A close before the exact boundary settles an incomplete parser: its
-      // retained frame slices cannot be presented as a complete transcript.
-      // A drain that already reached the boundary must continue, however, so
-      // its final replay callback can release the input gate.
-      if (!replayReady) {
+      // A close before the exact boundary aborts the hidden transaction; the
+      // replacement attach will announce its own replay or final refusal.
+      const replayAborted = !replayReady
+      if (replayAborted) {
+        handlers.onReplayAbort?.()
         clearReplay()
-        handlers.onReplayStart?.(0)
       }
       const replayBusy = replayPending()
       // asked for after this point would be resuming nothing.
@@ -715,11 +807,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       if (wasAttached && ev.reason === 'session ended') {
         ended = true
+        if (replayAborted) handlers.onReplayStart?.(0)
         handlers.onState('offline')
         return
       }
       if (ev.code === policyClose && !answered) {
         refused = true
+        clearReplay()
+        handlers.onReplayStart?.(0)
         handlers.onRefused(ev.reason || 'the gateway refused the attach')
         handlers.onState('offline')
         return
@@ -802,26 +897,22 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     // budget is four `backoff()` waits because that is what outlives
     // recovery starting the PTY. A wake reopens for free, so without this a
     // burst of app switches would spend all four in a second and report the
-    // wait as a failure. The freeze only delays that reconnect; a run with
-    // no session has nothing to show sooner anyway.
+    // wait as a failure inside a second. The freeze only delays that reconnect;
+    // a run with no session has nothing to show sooner anyway.
     if (waitingForSession) return
     if (timer) clearTimeout(timer)
     timer = null
     attempt = 0
-    // A foreground return leaves an existing socket alone. An online event
-    // may replace it, but never while the replay transaction is draining.
     if (socket && kind === 'visible') return
     if (replayPending()) {
-      if (!replayReady) {
-        clearReplay()
-      }
+      // Never reveal a partial or boundary-complete replay while replacing a
+      // socket. Cancel its drain, keep the current host hidden, and let the
+      // new ack announce one fresh full replay.
+      handlers.onReplayAbort?.()
+      clearReplay()
       drop()
-      retryAfterReplay = true
-      handlers.onState('reconnecting')
-      if (!replayPending()) {
-        retryAfterReplay = false
-        open()
-      }
+      retryAfterReplay = false
+      open()
       return
     }
     // A foreground return leaves any existing socket alone; the tab being
@@ -832,12 +923,27 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     drop()
     open()
   })
-
   open()
-
   return {
     rebind: (next) => {
-      if (!disposed) handlers = next
+      if (disposed) return
+      // A dock remount replaces the xterm host. Keep the replacement hidden
+      // while canceling any old drain, then begin one fresh full replay.
+      handlers = next
+      handlers.onReplayAbort?.()
+      clearReplay()
+      pendingReopen = null
+      retryAfterReplay = false
+      refused = false
+      ended = false
+      attached = false
+      unavailableTries = 0
+      waitingForSession = false
+      attempt = 0
+      if (timer) clearTimeout(timer)
+      timer = null
+      drop()
+      open()
     },
     // A paste arrives as one string that can dwarf the gateway's 64KB frame
     send: (data) => {

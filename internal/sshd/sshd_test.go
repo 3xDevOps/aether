@@ -171,6 +171,13 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 			}
 		}
 	}
+	if client.Commit != nil {
+		if err := client.Commit(func() error {
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	if client.OnAttached != nil {
 		client.OnAttached()
 	}

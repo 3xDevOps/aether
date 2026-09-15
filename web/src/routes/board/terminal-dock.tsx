@@ -221,6 +221,9 @@ export function TerminalDock({
           setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
         }
       },
+      onReplayAbort: () => {
+        if (isCurrent()) gate.current.cancel()
+      },
       onReplayStart: (bytes: number) => {
         if (!isCurrent()) return
         if (bytes > 0) gate.current.start()
@@ -275,7 +278,6 @@ export function TerminalDock({
     setEnvTerminalSocketReady(socketKey, false)
     setAttachedTab(null)
     const unsubscribe = subscribeEnvTerminalSocket(socketKey, gate.current.write)
-    if (existing) attachment.reopen()
     return () => {
       unsubscribe()
       if (activeTabRef.current !== socketKey) unregisterEnvTerminalSocket(socketKey)

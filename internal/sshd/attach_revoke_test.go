@@ -45,6 +45,20 @@ type resumeReleasePTY struct {
 	cursor uint64
 }
 
+// admissionFailurePTY lets release tests fail the PTY-host commit after the
+// control lease has been validated, without mutating the shared fake session.
+type admissionFailurePTY struct {
+	*fakePTY
+	err error
+}
+
+func (p *admissionFailurePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
+	if client.Commit == nil {
+		return p.fakePTY.Attach(ctx, key, client, conn, resize)
+	}
+	return client.Commit(func() error { return p.err })
+}
+
 type resumeReplayConn struct {
 	io.ReadWriter
 	replay ptyhost.ReplayWriter
@@ -493,6 +507,91 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 		}
 		release.expectOpen(t, 50*time.Millisecond)
 		first.expectExit(t, protocol.AttachExitControlRevoked)
+	})
+
+	t.Run("release missing session preserves old authority", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "release-missing-session",
+		}, true)
+		if !firstAck.OK || !firstAck.HasControl {
+			t.Fatalf("first ack = %+v, want held control", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+
+		e.pty.setErr(errNoSession)
+		_, replacementAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID:  "release-missing-session",
+			ControlGeneration: firstAck.ControlGeneration,
+			ReleaseControl:    true,
+		}, true)
+		if replacementAck.OK || replacementAck.Code != protocol.CodeUnavailable {
+			t.Fatalf("missing-session release ack = %+v, want unavailable refusal", replacementAck)
+		}
+		status, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+		if !ok || status.SessionID != "release-missing-session" ||
+			status.Generation != firstAck.ControlGeneration || !status.Connected {
+			t.Fatalf("authority after missing-session release = %+v/%v, want connected old generation %d", status, ok, firstAck.ControlGeneration)
+		}
+		first.typeAndEcho(t, "old-writer-still-admitted")
+	})
+
+	t.Run("release commit admission failure preserves old authority", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "release-commit-failure",
+		}, true)
+		if !firstAck.OK || !firstAck.HasControl {
+			t.Fatalf("first ack = %+v, want held control", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+
+		e.srv.cfg.PTY = &admissionFailurePTY{fakePTY: e.pty, err: ptyhost.ErrSessionEnded}
+		_, replacementAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID:  "release-commit-failure",
+			ControlGeneration: firstAck.ControlGeneration,
+			ReleaseControl:    true,
+		}, true)
+		if replacementAck.OK || replacementAck.Code != protocol.CodeUnavailable {
+			t.Fatalf("commit admission failure ack = %+v, want unavailable refusal", replacementAck)
+		}
+		status, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+		if !ok || status.SessionID != "release-commit-failure" ||
+			status.Generation != firstAck.ControlGeneration || !status.Connected {
+			t.Fatalf("authority after commit admission failure = %+v/%v, want connected old generation %d", status, ok, firstAck.ControlGeneration)
+		}
+		first.typeAndEcho(t, "commit-failed-old-writer-still-admitted")
+	})
+
+	t.Run("release finished-run admission failure does not replay", func(t *testing.T) {
+		e := controlAttachEnv(t)
+		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID: "release-finished-session",
+		}, true)
+		if !firstAck.OK || !firstAck.HasControl {
+			t.Fatalf("first ack = %+v, want held control", firstAck)
+		}
+		defer func() { _ = first.ch.Close() }()
+
+		if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+			t.Fatalf("complete run: %v", err)
+		}
+		e.pty.setTranscript(e.run.ID, []byte("finished transcript must not be replayed"))
+		e.pty.setErr(errNoSession)
+		_, replacementAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID:  "release-finished-session",
+			ControlGeneration: firstAck.ControlGeneration,
+			ReleaseControl:    true,
+		}, true)
+		if replacementAck.OK || replacementAck.Code != protocol.CodeUnavailable {
+			t.Fatalf("finished-run release ack = %+v, want unavailable refusal", replacementAck)
+		}
+		status, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+		if !ok || status.SessionID != "release-finished-session" ||
+			status.Generation != firstAck.ControlGeneration || !status.Connected {
+			t.Fatalf("authority after finished-run release = %+v/%v, want connected old generation %d", status, ok, firstAck.ControlGeneration)
+		}
+		first.typeAndEcho(t, "finished-old-writer-still-admitted")
 	})
 
 	t.Run("release requires authenticated member and generation", func(t *testing.T) {

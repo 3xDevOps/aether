@@ -164,6 +164,7 @@ function TerminalView({ params }: RouteProps) {
         setGeometry(size.cols, size.rows, !resumed)
         setTerminal(runID, { message: null, refused: false })
       },
+      onReplayAbort: () => gate.current.cancel(),
       onReplayStart: (bytes) => {
         if (bytes > 0) gate.current.start()
         else gate.current.unmute()

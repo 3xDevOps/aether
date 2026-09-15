@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -240,6 +241,49 @@ func (c *replayConn) writeBytes() [][]byte {
 }
 
 var _ ReplayWriter = (*replayConn)(nil)
+
+type hookConn struct {
+	mu        sync.Mutex
+	events    []string
+	readReady chan struct{}
+}
+
+func (c *hookConn) record(event string) {
+	c.mu.Lock()
+	c.events = append(c.events, event)
+	c.mu.Unlock()
+}
+
+func (c *hookConn) Read([]byte) (int, error) {
+	if c.readReady != nil {
+		<-c.readReady
+	}
+	return 0, io.EOF
+}
+
+func (c *hookConn) Write(p []byte) (int, error) {
+	c.record("write")
+	return len(p), nil
+}
+func (c *hookConn) WriteReplay(replay io.Reader, _ int) error {
+	c.record("replay")
+	if _, err := io.Copy(io.Discard, replay); err != nil {
+		return err
+	}
+	if c.readReady != nil {
+		close(c.readReady)
+	}
+	return nil
+}
+
+func (c *hookConn) SetGeometry(uint, uint) { c.record("geometry") }
+func (c *hookConn) SetResume(uint64, bool) { c.record("resume") }
+
+func (c *hookConn) eventNames() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.events...)
+}
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -478,6 +522,249 @@ func TestAttachReplayWriterReceivesTranscriptBeforeLiveOutput(t *testing.T) {
 	if err := <-errCh; err != nil {
 		t.Fatalf("attach returned %v, want nil", err)
 	}
+}
+
+func TestAttachCommitHookOrdersCallbacksAndRollsBack(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-commit-hook")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	s := h.lookup(RunSession(run))
+
+	readReady := make(chan struct{})
+	conn := &hookConn{readReady: readReady}
+	var attached bool
+	if err := h.Attach(context.Background(), RunSession(run), AttachClient{
+		Member: "member",
+		Cols:   80,
+		Rows:   24,
+		Commit: func(admit func() error) error {
+			conn.record("commit")
+			return admit()
+		},
+		OnAttached: func() {
+			conn.record("attached")
+			attached = true
+		},
+	}, conn, nil); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	waitFor(t, "replay callback after attach", func() bool {
+		return len(conn.eventNames()) >= 5
+	})
+	events := conn.eventNames()
+	if got, want := strings.Join(events[:5], ","), "commit,attached,geometry,resume,replay"; got != want {
+		t.Fatalf("hook order = %q, want %q", got, want)
+	}
+	if !attached {
+		t.Fatal("OnAttached was not called after a successful commit")
+	}
+	s.mu.Lock()
+	clients := len(s.clients)
+	s.mu.Unlock()
+	if clients != 0 {
+		t.Fatalf("clients after clean attach = %d, want 0", clients)
+	}
+
+	waitFor(t, "first attach geometry settles", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.resizeDone == nil
+	})
+	beforeResize := len(att.sizeCalls())
+	commitErr := errors.New("commit refused")
+	conn = &hookConn{}
+	commitCalls := 0
+	attached = false
+	err := h.Attach(context.Background(), RunSession(run), AttachClient{
+		Member: "member",
+		Cols:   80,
+		Rows:   24,
+		Commit: func(func() error) error {
+			commitCalls++
+			return commitErr
+		},
+		OnAttached: func() { attached = true },
+	}, conn, nil)
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("Attach commit error = %v, want %v", err, commitErr)
+	}
+	if commitCalls != 1 {
+		t.Fatalf("commit calls = %d, want 1", commitCalls)
+	}
+	if attached {
+		t.Fatal("OnAttached ran after a refused commit")
+	}
+	s.mu.Lock()
+	clients = len(s.clients)
+	s.mu.Unlock()
+	if clients != 0 {
+		t.Fatalf("clients after refused attach = %d, want 0", clients)
+	}
+	if got := len(att.sizeCalls()); got != beforeResize {
+		t.Fatalf("resize calls after refused attach = %d, want %d", got, beforeResize)
+	}
+	if events := conn.eventNames(); len(events) != 0 {
+		t.Fatalf("callbacks after refused attach = %v, want none", events)
+	}
+}
+
+func TestAttachCommitWaitHonorsContextCancellation(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := &blockingResizeAtt{
+		fakeAtt: newFakeAtt(),
+		block:   make(chan struct{}, 16),
+		entered: make(chan struct{}, 16),
+	}
+	att.block <- struct{}{} // let the initial StartSession resize through
+	release := sync.OnceFunc(func() { close(att.block) })
+	defer release()
+	run := domain.RunID("run-commit-cancel")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	<-att.entered // initial resize
+
+	existing := startAttach(t, h, run, "existing", 200, 60, true)
+	waitAttached(t, h, run, 1)
+	<-att.entered // existing client resize is now blocked
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	authStarted := make(chan struct{})
+	conn := &hookConn{}
+	commitCalls := 0
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(ctx, RunSession(run), AttachClient{
+			Member: "replacement",
+			Cols:   80,
+			Rows:   24,
+			Authorize: func() error {
+				close(authStarted)
+				return nil
+			},
+			Commit: func(admit func() error) error {
+				commitCalls++
+				return admit()
+			},
+		}, conn, nil)
+	}()
+	select {
+	case <-authStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replacement authorization did not start")
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled replacement = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled replacement remained stuck behind resize")
+	}
+	if commitCalls != 1 {
+		t.Fatalf("commit calls after canceled wait = %d, want 1 callback with canceled admit", commitCalls)
+	}
+	s := h.lookup(RunSession(run))
+	s.mu.Lock()
+	clients := len(s.clients)
+	s.mu.Unlock()
+	if clients != 1 {
+		t.Fatalf("clients after canceled replacement = %d, want existing client only", clients)
+	}
+	_ = existing
+}
+
+func TestReleaseAdmittedPreservesControlThenSessionLockOrder(t *testing.T) {
+	h, _ := newTestHost(t)
+	att := newFakeAtt()
+	run := domain.RunID("run-control-session-locks")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	s := h.lookup(RunSession(run))
+	blockedStdin := &cancelOnceStdin{started: make(chan struct{})}
+	s.mu.Lock()
+	s.stdin = blockedStdin
+	s.mu.Unlock()
+
+	controlService := control.New(control.Config{})
+	old, _, err := controlService.Acquire(string(run), "member", "old", false)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	oldCtx, cancelOld := context.WithCancel(context.Background())
+	defer cancelOld()
+	oldCallback := make(chan struct{})
+	oldDone := make(chan error, 1)
+
+	// Hold the resource lock while old input enters the control admission
+	// callback. It then waits for the session lock, reproducing the edge that
+	// deadlocked when replacement release held session.mu first.
+	s.mu.Lock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			s.mu.Unlock()
+		}
+	}()
+	go func() {
+		oldDone <- controlService.AdmitMember(string(run), "member", "old", old.Generation, func() error {
+			close(oldCallback)
+			return s.writeStdinContext(oldCtx, []byte("blocked"))
+		})
+	}()
+	select {
+	case <-oldCallback:
+	case <-time.After(time.Second):
+		t.Fatal("old input admission did not start")
+	}
+
+	replacement := newClient(&hookConn{}, AttachClient{Cols: 80, Rows: 24})
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseDone <- controlService.ReleaseAdmitted(string(run), "member", "old", old.Generation, func() error {
+			return s.addClientCommitted(context.Background(), replacement)
+		})
+	}()
+	select {
+	case err := <-releaseDone:
+		t.Fatalf("release completed while old input held control: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	s.mu.Unlock()
+	unlocked = true
+
+	select {
+	case <-blockedStdin.started:
+	case <-time.After(time.Second):
+		t.Fatal("old input did not reach the blocked PTY write")
+	}
+	cancelOld()
+	select {
+	case err := <-oldDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("old input = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old input remained blocked after cancellation")
+	}
+	select {
+	case err := <-releaseDone:
+		if err != nil {
+			t.Fatalf("replacement release = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement release remained blocked")
+	}
+	if _, present := controlService.Status(string(run)); present {
+		t.Fatal("old control lease remained after admitted release")
+	}
+	s.removeClient(replacement)
 }
 
 func TestGeometryClampAndRestore(t *testing.T) {

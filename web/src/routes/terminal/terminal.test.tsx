@@ -9,6 +9,7 @@ import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
 import { bob, run, serverInfo } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
+import { fire } from '@/test/wake'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -331,6 +332,42 @@ describe('terminal view', () => {
 
     expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
     expect(host.style.visibility).toBe('')
+    view.unmount()
+  })
+  it('settles the hidden replay overlay when wake replacement is refused', () => {
+    const view = mount({}, { status: 'completed' })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 3,
+          cols: 80,
+          rows: 24,
+          has_control: true,
+          control_generation: 1,
+        }),
+      })
+      socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
+    })
+
+    act(() => fire('online'))
+    const replacement = StubSocket.last()
+    expect(replacement).not.toBe(socket)
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+    act(() => {
+      replacement.onopen?.()
+      replacement.onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32002, error: 'replacement refused' }),
+      })
+    })
+
+    expect(host.style.visibility).toBe('')
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    expect(screen.getByText('replacement refused')).toBeDefined()
     view.unmount()
   })
 

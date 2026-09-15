@@ -194,20 +194,9 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				_ = writeJSONLine(ch, protocol.AttachResponse{Code: protocol.CodeInvalidParams, Error: "control_generation is required"})
 				return
 			}
-			err := s.cfg.Control.Release(req.RunID, member, req.ControlSessionID, req.ControlGeneration)
-			if err != nil {
-				ack := protocol.AttachResponse{OK: false}
-				ack.Code, ack.Error = attachControlError(err)
-				if snap, present := s.cfg.Control.Status(req.RunID); present {
-					s.attachControlAck(&ack, snap, false)
-				}
-				_ = writeJSONLine(ch, ack)
-				return
-			}
-			// Release fences the old generation before this replacement is
-			// admitted. Keep the resume cursor intact, but force the
-			// replacement to remain a read-only mirror.
-			s.cancelControlAttach(req.RunID, req.ControlSessionID, req.ControlGeneration, errAttachControlRevoked)
+			// Release is committed only once the replacement has joined the
+			// PTY host. Keep the old writer and generation intact while any
+			// admission failure is still possible.
 			req.ReadOnly = true
 			req.ReleaseControl = false
 			wantsControl = false
@@ -257,6 +246,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		s.attachControlAck(ack, controlSnap, false)
 	}
 	var controlAcquireErr error
+	var controlCommitErr error
 	attachCtx, revoke := context.WithCancelCause(ctx)
 	defer revoke(nil)
 	// The geometry here is only what this client brings; the PTY host
@@ -293,8 +283,28 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 		return nil
 	}
+	var commit func(func() error) error
 	var beforeAck func() error
 	if releasedControl {
+		commit = func(admit func() error) error {
+			var admissionErr error
+			if err := s.cfg.Control.ReleaseAdmitted(
+				req.RunID, member, req.ControlSessionID, req.ControlGeneration,
+				func() error {
+					admissionErr = admit()
+					return admissionErr
+				},
+			); err != nil {
+				if admissionErr == nil {
+					controlCommitErr = err
+				}
+				return err
+			}
+			// The replacement has joined the PTY host and its lease release
+			// committed. Fence the old transport only after that boundary.
+			s.cancelControlAttach(req.RunID, req.ControlSessionID, req.ControlGeneration, errAttachControlRevoked)
+			return nil
+		}
 		beforeAck = func() error {
 			if current, present := s.cfg.Control.Status(req.RunID); present {
 				s.attachControlAck(ack, current, false)
@@ -353,6 +363,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			Rows:      rows,
 			ReadOnly:  readOnly,
 			Authorize: authorize,
+			Commit:    commit,
 			OnAttached: func() {
 				if shellReservation != nil {
 					shellReservation.Adopt()
@@ -379,6 +390,15 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}
 	if returned && attachErr != nil {
 		if !conn.okSent() {
+			if controlCommitErr != nil {
+				ack := protocol.AttachResponse{OK: false}
+				ack.Code, ack.Error = attachControlError(controlCommitErr)
+				if current, present := s.cfg.Control.Status(req.RunID); present {
+					s.attachControlAck(&ack, current, false)
+				}
+				_ = writeJSONLine(ch, ack)
+				return
+			}
 			if controlAcquireErr != nil {
 				// The member was allowed to create this shell. Keep it alive
 				// when another session owns control so this client can
@@ -391,6 +411,16 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				}
 				ack := protocol.AttachResponse{OK: false}
 				ack.Code, ack.Error = attachControlError(controlAcquireErr)
+				if current, present := s.cfg.Control.Status(req.RunID); present {
+					s.attachControlAck(&ack, current, false)
+				}
+				_ = writeJSONLine(ch, ack)
+				return
+			}
+			if releasedControl {
+				ack := protocol.AttachResponse{OK: false}
+				e := rpcError(attachErr)
+				ack.Code, ack.Error = e.Code, e.Message
 				if current, present := s.cfg.Control.Status(req.RunID); present {
 					s.attachControlAck(&ack, current, false)
 				}

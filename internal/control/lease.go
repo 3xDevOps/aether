@@ -361,6 +361,21 @@ func (s *Service) Disconnect(run, session string, generation uint64) {
 // A disconnected session may release during its reconnect window. The
 // authenticated member, session, and explicit generation must all match.
 func (s *Service) Release(run string, member domain.MemberID, session string, generation uint64) error {
+	return s.releaseAdmitted(run, member, session, generation, nil)
+}
+
+// ReleaseAdmitted releases a lease only after admit succeeds inside the same
+// run-scoped authority boundary. admit must be bounded and must not call back
+// into this Service. It may acquire downstream locks that already follow the
+// control-before-resource lock order.
+func (s *Service) ReleaseAdmitted(run string, member domain.MemberID, session string, generation uint64, admit func() error) error {
+	if admit == nil {
+		return ErrInvalid
+	}
+	return s.releaseAdmitted(run, member, session, generation, admit)
+}
+
+func (s *Service) releaseAdmitted(run string, member domain.MemberID, session string, generation uint64, admit func() error) error {
 	if err := s.validateRunMember(run, string(member)); err != nil {
 		return err
 	}
@@ -383,12 +398,17 @@ func (s *Service) Release(run string, member domain.MemberID, session string, ge
 		current.generation != generation || current.sessionID != session {
 		return ErrStale
 	}
-	if current.generation != ^uint64(0) {
-		// There is no representable generation after the maximum. Removing
-		// this authority is still safe because no later acquire is allowed.
-		if _, genErr := s.nextGenerationLocked(state); genErr != nil {
-			return genErr
+	advance := current.generation != ^uint64(0)
+	if advance && state.generation == ^uint64(0) {
+		return ErrGenerationExhausted
+	}
+	if admit != nil {
+		if err := admit(); err != nil {
+			return err
 		}
+	}
+	if advance {
+		state.generation++
 	}
 	state.current = nil
 	return nil

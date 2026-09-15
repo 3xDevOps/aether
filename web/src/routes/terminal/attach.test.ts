@@ -206,13 +206,64 @@ describe('connectAttach', () => {
       geometry: () => ({ cols: 80, rows: 24 }),
       wantsWrite: () => false,
     })
-    a.reopen()
+    expect(StubSocket.opened).toHaveLength(2)
     StubSocket.last().onopen?.()
     ack()
     StubSocket.last().onmessage?.({ data: new TextEncoder().encode('new host').buffer })
 
     expect(nextAttached).toHaveBeenCalledOnce()
     expect(nextOutput).toEqual(['new host'])
+    a.close()
+  })
+  it('cancels a stale drain and starts one full replay when rebound', async () => {
+    let finishOld!: () => void
+    const oldOutput: string[] = []
+    const nextOutput: string[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (chunk, kind) => {
+        oldOutput.push(`${kind}:${new TextDecoder().decode(chunk)}`)
+        return new Promise<void>((resolve) => {
+          finishOld = resolve
+        })
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3 }) })
+    oldSocket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
+    expect(oldOutput).toEqual(['replay-end:old'])
+
+    a.rebind({
+      onData: (chunk, kind) => {
+        nextOutput.push(`${kind}:${new TextDecoder().decode(chunk)}`)
+      },
+      onAttached: vi.fn(),
+      onState: vi.fn(),
+      onRefused: vi.fn(),
+      onWriteDenied: vi.fn(),
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+
+    expect(oldSocket.closed).toBe(true)
+    expect(StubSocket.opened).toHaveLength(2)
+    const freshSocket = StubSocket.last()
+    freshSocket.onopen?.()
+    expect(freshSocket.frames()[0]).not.toHaveProperty('resume')
+    freshSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3 }) })
+    freshSocket.onmessage?.({ data: new TextEncoder().encode('new').buffer })
+    expect(nextOutput).toEqual(['replay-end:new'])
+
+    finishOld()
+    await Promise.resolve()
+    expect(nextOutput).toEqual(['replay-end:new'])
     a.close()
   })
   it('resumes from where the live output left it, so the gap is asked for', () => {
@@ -274,12 +325,62 @@ describe('connectAttach', () => {
 
     socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
     socket.onmessage?.({ data: new TextEncoder().encode('defg').buffer })
-
     expect(outputKinds).toEqual([
       ['replay', 'abc'],
       ['replay-end', 'de'],
       ['live', 'fg'],
     ])
+    a.close()
+  })
+
+  it('starts replay parsing on each frame before the declared boundary', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ replay: 6 })
+
+    socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
+    expect(outputKinds).toEqual([['replay', 'abc']])
+    socket.onmessage?.({ data: new TextEncoder().encode('def').buffer })
+
+    expect(outputKinds).toEqual([
+      ['replay', 'abc'],
+      ['replay-end', 'def'],
+    ])
+    a.close()
+  })
+
+  it('parses a large partial replay incrementally without making it visible', () => {
+    const visibility: boolean[] = []
+    const parsed: string[] = []
+    const gate = replayGate(
+      (_chunk, done) => {
+        done?.()
+      },
+      (replaying) => visibility.push(replaying),
+    )
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (chunk, kind) => {
+        parsed.push(`${kind}:${new TextDecoder().decode(chunk)}`)
+        return gate.write(chunk, kind)
+      },
+      onAttached: () => {},
+      onReplayStart: (bytes) => (bytes > 0 ? gate.start() : gate.unmute()),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ replay: 786_432 })
+    socket.onmessage?.({ data: new TextEncoder().encode('first frame').buffer })
+
+    expect(parsed).toEqual(['replay:first frame'])
+    expect(visibility).toEqual([true])
+    expect(gate.muted()).toBe(true)
     a.close()
   })
 
@@ -290,7 +391,6 @@ describe('connectAttach', () => {
     ack({ replay: 6 })
 
     socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
-    expect(outputKinds).toEqual([])
     socket.onmessage?.({ data: new TextEncoder().encode('def').buffer })
 
     expect(outputKinds).toEqual([
@@ -400,6 +500,7 @@ describe('connectAttach', () => {
     expect(settled).toHaveLength(1)
     settled[0]()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(events).toEqual(['replay-end:r', 'live:ONE', 'live:TWO'])
     expect(settled).toHaveLength(2)
@@ -463,6 +564,7 @@ describe('connectAttach', () => {
     expect(finish).toHaveLength(1)
     finish[0]()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(events).toEqual(['replay-end:r', 'live:ONE', 'live:TWO'])
     expect(finish).toHaveLength(2)
@@ -491,6 +593,35 @@ describe('connectAttach', () => {
     socket.onmessage?.({ data: new TextEncoder().encode('live').buffer })
 
     expect(callbacks).toEqual([undefined])
+    a.close()
+  })
+  it('turns a direct live rendering throw into a final refusal', () => {
+    const replaySignals: number[] = []
+    let liveFailure: string | null = null
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: () => {
+        throw new Error('live output failed')
+      },
+      onAttached: () => {},
+      onReplayStart: (bytes) => replaySignals.push(bytes),
+      onState: (state) => states.push(state),
+      onRefused: (message) => {
+        liveFailure = message
+      },
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ replay: 0 })
+    socket.onmessage?.({ data: new TextEncoder().encode('live').buffer })
+
+    expect(liveFailure).toBe('terminal live output failed: live output failed')
+    expect(replaySignals).toEqual([0, 0])
+    expect(states.at(-1)).toBe('offline')
+    expect(socket.closed).toBe(true)
     a.close()
   })
 
@@ -527,10 +658,13 @@ describe('connectAttach', () => {
     expect(StubSocket.opened).toHaveLength(1)
     finish[0]()
     await Promise.resolve()
+    await Promise.resolve()
     expect(events).toEqual(['replay:abc', 'replay-end:def'])
     expect(finish).toHaveLength(2)
     expect(StubSocket.opened).toHaveLength(1)
     finish[1]()
+    await Promise.resolve()
+    await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
 
@@ -561,6 +695,7 @@ describe('connectAttach', () => {
 
     expect(StubSocket.opened).toHaveLength(1)
     finishReplay()
+    await Promise.resolve()
     await Promise.resolve()
     expect(StubSocket.opened).toHaveLength(1)
     vi.advanceTimersByTime(60_000)
@@ -677,15 +812,26 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it('aborts an incomplete replay on socket close and releases its gate', () => {
+  it('keeps an incomplete replay hidden across socket close until replacement ack', () => {
     const replaySignals: number[] = []
     const replayed: string[] = []
-    const a = connectAttach(() => '/ws/attach/run_1', {
-      onData: (chunk) => {
+    const visibility: boolean[] = []
+    const gate = replayGate(
+      (chunk, done) => {
         replayed.push(new TextDecoder().decode(chunk))
+        done?.()
       },
+      (replaying) => visibility.push(replaying),
+    )
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: gate.write,
       onAttached: () => {},
-      onReplayStart: (bytes) => replaySignals.push(bytes),
+      onReplayAbort: gate.cancel,
+      onReplayStart: (bytes) => {
+        replaySignals.push(bytes)
+        if (bytes > 0) gate.start()
+        else gate.unmute()
+      },
       onState: (state) => states.push(state),
       onRefused: () => {},
       onWriteDenied: () => {},
@@ -699,9 +845,19 @@ describe('connectAttach', () => {
     socket.onmessage?.({ data: new TextEncoder().encode('a').buffer })
     socket.onclose?.({ code: 1006 })
 
-    expect(replayed).toEqual([])
-    expect(replaySignals).toEqual([2, 0])
+    expect(replayed).toEqual(['a'])
+    expect(replaySignals).toEqual([2])
+    expect(gate.muted()).toBe(true)
+    expect(visibility).toEqual([true, true])
     expect(states.at(-1)).toBe('reconnecting')
+
+    vi.advanceTimersByTime(60_000)
+    expect(StubSocket.opened).toHaveLength(2)
+    StubSocket.last().onopen?.()
+    ack({ replay: 0 })
+    expect(replaySignals).toEqual([2, 0])
+    expect(gate.muted()).toBe(false)
+    expect(visibility).toEqual([true, true, false])
     a.close()
   })
 
@@ -731,6 +887,8 @@ describe('connectAttach', () => {
     expect(gate.muted()).toBe(true)
     finish?.()
     expect(gate.muted()).toBe(false)
+    vi.runAllTimers()
+    expect(gate.muted()).toBe(false)
     a.close()
   })
   it('ignores a stale replay-end callback from an older generation', () => {
@@ -749,6 +907,8 @@ describe('connectAttach', () => {
 
     gate.write(new Uint8Array([2]), 'replay-end')
     done[1]()
+    expect(gate.muted()).toBe(false)
+    vi.runAllTimers()
     expect(gate.muted()).toBe(false)
     expect(visibility).toEqual([true, true, false])
   })
@@ -780,6 +940,7 @@ describe('connectAttach', () => {
     socket.onmessage?.({ data: new TextEncoder().encode('bc').buffer })
     expect(StubSocket.opened).toHaveLength(1)
     finishReplay()
+    await Promise.resolve()
     await Promise.resolve()
 
     expect(StubSocket.opened).toHaveLength(2)
@@ -839,6 +1000,7 @@ describe('connectAttach', () => {
 
     finishReplay()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(StubSocket.opened).toHaveLength(2)
     const replacement = StubSocket.last()
@@ -897,6 +1059,7 @@ describe('connectAttach', () => {
     expect(StubSocket.opened).toHaveLength(1)
 
     finishReplay()
+    await Promise.resolve()
     await Promise.resolve()
 
     expect(StubSocket.opened).toHaveLength(2)
@@ -1224,6 +1387,80 @@ describe('connectAttach', () => {
       a.close()
     },
   )
+  it('cancels an online replay without revealing partial history', () => {
+    const replaySignals: number[] = []
+    const gate = replayGate(() => {})
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: gate.write,
+      onAttached: () => {},
+      onReplayAbort: gate.cancel,
+      onReplayStart: (bytes) => {
+        replaySignals.push(bytes)
+        if (bytes > 0) gate.start()
+        else gate.unmute()
+      },
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ replay: 4 })
+    socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
+    expect(gate.muted()).toBe(true)
+
+    fire('online')
+
+    expect(gate.muted()).toBe(true)
+    expect(socket.closed).toBe(true)
+    expect(StubSocket.opened).toHaveLength(2)
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    ack({ replay: 2 })
+    expect(replaySignals).toEqual([4, 2])
+    expect(gate.muted()).toBe(true)
+    a.close()
+  })
+  it('cancels a boundary-complete drain before online replacement', async () => {
+    let finish!: () => void
+    let aborted = false
+    const replayParsed = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, kind) => (kind === 'replay-end' ? replayParsed : undefined),
+      onAttached: () => {},
+      onReplayAbort: () => {
+        aborted = true
+      },
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ replay: 1 })
+    socket.onmessage?.({ data: new TextEncoder().encode('x').buffer })
+    await Promise.resolve()
+    expect(StubSocket.opened).toHaveLength(1)
+
+    fire('online')
+
+    expect(aborted).toBe(true)
+    expect(socket.closed).toBe(true)
+    expect(StubSocket.opened).toHaveLength(2)
+    finish()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(StubSocket.opened).toHaveLength(2)
+    a.close()
+  })
 
   it('leaves a live attach and a refused one alone when the tab comes back', () => {
     const live = attach()
@@ -1536,25 +1773,40 @@ describe('replayGate', () => {
     expect(gate.muted()).toBe(true)
     done[1]()
     expect(gate.muted()).toBe(false)
+    vi.runAllTimers()
+    expect(gate.muted()).toBe(false)
   })
-
-  it('notifies visibility for positive starts, final parsing, and explicit unmute', () => {
+  it('reveals after two animation frames and ignores stale generations', () => {
     const visibility: boolean[] = []
     const done: Array<() => void> = []
+    const frames: Array<() => void> = []
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => {
+      frames.push(callback)
+      return frames.length
+    })
     const gate = replayGate((_chunk, cb) => {
       if (cb) done.push(cb)
     }, (replaying) => visibility.push(replaying))
 
     gate.start()
-    expect(visibility).toEqual([true])
-    gate.write(new Uint8Array([1]), 'replay')
+    gate.write(new Uint8Array([1]), 'replay-end')
+    gate.start()
     done[0]()
-    expect(visibility).toEqual([true])
+    expect(gate.muted()).toBe(true)
+    expect(visibility).toEqual([true, true])
+
     gate.write(new Uint8Array([2]), 'replay-end')
     done[1]()
-    expect(visibility).toEqual([true, false])
-    gate.unmute()
-    expect(visibility).toEqual([true, false, false])
+    expect(gate.muted()).toBe(false)
+    expect(visibility).toEqual([true, true])
+    expect(frames).toHaveLength(1)
+
+    frames.shift()?.()
+    expect(gate.muted()).toBe(false)
+    expect(frames).toHaveLength(1)
+    frames.shift()?.()
+    expect(gate.muted()).toBe(false)
+    expect(visibility).toEqual([true, true, false])
   })
 
   it('unmutes on demand so a dropped socket mid-replay never leaves input dead', () => {

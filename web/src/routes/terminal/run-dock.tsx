@@ -173,6 +173,9 @@ export function RunDock({ runID }: { runID: string }) {
           setShellRefused(runID, null)
         }
       },
+      onReplayAbort: () => {
+        if (isCurrent()) gate.current.cancel()
+      },
       onReplayStart: (bytes: number) => {
         if (!isCurrent()) return
         if (bytes > 0) gate.current.start()
@@ -219,7 +222,6 @@ export function RunDock({ runID }: { runID: string }) {
 
     clearAttached()
     const unsubscribe = subscribeShellSocket(runID, socketKey, gate.current.write)
-    if (existing) attachment.reopen()
     return () => {
       unsubscribe()
       clearAttached()
