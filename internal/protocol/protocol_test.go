@@ -151,6 +151,17 @@ func TestReadLineEnforcesMaxLine(t *testing.T) {
 	}
 }
 
+func TestResponseLineLimitBoundsBlobMethods(t *testing.T) {
+	for _, method := range []string{MethodRunPatch, MethodFilesRead, MethodFilesDiff, MethodFilesWrite, MethodConfigRead, MethodConfigWrite} {
+		if got := responseLineLimit(method); got != maxBlobResponseBytes {
+			t.Errorf("responseLineLimit(%q) = %d, want %d", method, got, maxBlobResponseBytes)
+		}
+	}
+	if got := responseLineLimit(MethodServerInfo); got != MaxLineBytes {
+		t.Fatalf("responseLineLimit(%q) = %d, want %d", MethodServerInfo, got, MaxLineBytes)
+	}
+}
+
 func TestClientCall(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close() //nolint:errcheck

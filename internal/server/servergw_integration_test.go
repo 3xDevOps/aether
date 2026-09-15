@@ -406,7 +406,7 @@ func TestIntegrationServerGatewayHTTPSConfigImport(t *testing.T) {
 	if status := postJSONClient(t, client, base+"/api/v1/config.read", readParams, &read); status != http.StatusOK {
 		t.Fatalf("Ada config.read status = %d", status)
 	}
-	if read.Size != int64(fileBytes) || !read.Truncated || len(read.Content) != fileBytes/2 {
+	if read.Size != int64(fileBytes) || read.Truncated || read.Content != string(first) {
 		t.Fatalf("Ada config.read metadata = size %d truncated %t content length %d", read.Size, read.Truncated, len(read.Content))
 	}
 

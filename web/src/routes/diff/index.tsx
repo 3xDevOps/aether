@@ -162,11 +162,10 @@ function DiffView({ params }: RouteProps) {
         )}
         {truncated && (
           <p className="shrink-0 border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">
-            This diff is too large to render in full; everything below the cut is
-            missing. Fetch the run branch to read it whole.
+            The server returned an incomplete diff. Refresh it or fetch the run
+            branch to read the complete change.
           </p>
         )}
-
         <div
           className={cn(
             'grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden',

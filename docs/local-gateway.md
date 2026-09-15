@@ -317,9 +317,11 @@ Both transports therefore expose the same API shape and authorization checks.
 `files.tree` and `files.read` address a workspace's base branch when
 `run_id` is omitted, or a live run checkout when it is present. Complete
 valid UTF-8 text without NUL bytes is returned with an exact SHA-256
-`revision` and may be writable. Binary or truncated content is bounded to a
-read-only response with an empty revision. The file/editor limit is 512 KiB;
-the same limit applies to `files.write` and `config.write`.
+`revision` and may be writable. Binary content is read-only with an empty
+revision. File reads, diffs, and editor writes carry complete content up to 64
+MiB. Binary or oversized content is read-only; an oversized response sets
+`truncated:true` and omits its `revision`. The `truncated` field remains in
+the wire shape for compatibility.
 
 `files.write` without `run_id` requires **Push** and creates a one-file commit
 on the workspace base branch; it does not push upstream. With `run_id`, it
@@ -380,9 +382,10 @@ dashboard says that some files may remain and directs the user to inspect
 delivered; the protocol does not claim a stronger delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
-`files.write` and `config.write` at 4 MiB, and `config.import` at 30 MiB.
-The SSH control-channel line cap is 32 MiB; the decoded import limits above
-remain authoritative.
+`files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
+and `config.import` at 30 MiB. The 64 MiB editor file limit remains
+authoritative after JSON decoding. The SSH control-channel line cap is 32 MiB;
+the decoded import limits above remain authoritative.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
@@ -418,9 +421,9 @@ and render a diff the timeline never offered.
   unchanged.
 - `base` is what the patch is measured from: the fork-point commit on a
   cumulative render, the `from` tree on an interval one.
-- `truncated` reports that the diff outgrew the 512 KiB ceiling; `patch` then
-  ends at the last whole line that fit. Read the run branch over git for the
-  rest - the dashboard renders diffs, it does not serve repositories.
+- `patch` contains the complete rendered diff up to 64 MiB. An oversized
+  response sets `truncated:true` and ends at a whole line. The dashboard
+  renders the response inline; it does not serve repositories.
 - `503` with `-32004` when the server has no git engine wired, when the run
   has no checkout left to diff (it finished and was cleaned up), when a
   requested tree is no longer on disk - a run's snapshot objects are removed
@@ -498,9 +501,9 @@ home and returns its absolute path as mounted at `$HOME` in that container.
 The path and filename are server-generated; callers cannot choose a host path
 or ask this method to read an arbitrary path.
 
-- The same 512 KiB diff ceiling applies to `run.patch`; `truncated` reports
-  that the patch ends at the last whole line that fit. `from` and `to` select
-  one interval here exactly as they do on the `GET`.
+- `run.patch` returns the complete rendered diff up to 64 MiB. An oversized
+  response sets `truncated:true` and ends at a whole line.
+  `from` and `to` select one interval here exactly as they do on the `GET`.
 - The read methods answer `-32004` (unavailable) when the read cannot be
   served: `run.patch` when diff rendering is not enabled (no git engine
   wired), when the run has no checkout left to diff, or when a requested tree

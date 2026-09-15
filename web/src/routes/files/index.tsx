@@ -759,7 +759,7 @@ function EditableDocument({
 
   if (!document || document.loading) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">Loading file…</p>
   if (document.binary) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">Binary files cannot be edited.</p>
-  if (document.truncated) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">This file is larger than the 512 KiB editor limit and cannot be edited.</p>
+  if (document.truncated) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">The server returned an incomplete file. Reload before editing.</p>
   return <div ref={host} className="min-h-0 flex-1 overflow-hidden" aria-label="File editor" />
 }
 
@@ -791,7 +791,7 @@ function DiffDocument({ selection, client, epoch }: { selection: WorkspaceSource
   if (!state || state.loading) return <p className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-muted-foreground">Loading diff…</p>
   if (state.error) return <p role="alert" className="flex min-h-0 flex-1 items-center justify-center p-4 text-[12px] text-destructive">{state.error}</p>
   const files = parsePatch(state.patch)
-  return <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{state.truncated && <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">Truncated at 512 KiB</p>}{files.length === 0 ? <p className="p-4 text-[12px] text-muted-foreground">No changes.</p> : <div>{files.map((file) => <FilePatch key={file.path} file={file} wrap={wrap} />)}</div>}</div>
+  return <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{state.truncated && <p className="border-b bg-state-waiting/10 px-3 py-1.5 text-[12px] text-muted-foreground">The server returned an incomplete diff. Refresh before reviewing it.</p>}{files.length === 0 ? <p className="p-4 text-[12px] text-muted-foreground">No changes.</p> : <div>{files.map((file) => <FilePatch key={file.path} file={file} wrap={wrap} />)}</div>}</div>
 }
 
 async function createConfigFile(

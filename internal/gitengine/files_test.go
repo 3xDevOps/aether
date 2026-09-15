@@ -107,7 +107,7 @@ func TestReadFileMarksLateNULBinary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "late.bin"), content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	read, err := e.ReadFileMeta(context.Background(), checkout, "", "late.bin", MaxFileBytes)
+	read, err := e.ReadFileMeta(context.Background(), checkout, "", "late.bin", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestReadFileRunCheckoutShowsUncommittedEdit(t *testing.T) {
 	if writeErr := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("uncommitted\n"), 0o644); writeErr != nil {
 		t.Fatalf("write edit: %v", writeErr)
 	}
-	content, truncated, binary, err := e.ReadFile(ctx, checkout, "", "file.txt", MaxFileBytes)
+	content, truncated, binary, err := e.ReadFile(ctx, checkout, "", "file.txt", -1)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -233,6 +233,37 @@ func TestReadFileRunCheckoutShowsUncommittedEdit(t *testing.T) {
 	}
 	if truncated || binary {
 		t.Errorf("ReadFile metadata = truncated %v, binary %v", truncated, binary)
+	}
+	large := strings.Repeat("run patch content\n", 40_000)
+	if writeErr := os.WriteFile(filepath.Join(checkout, "large.txt"), []byte(large), 0o644); writeErr != nil {
+		t.Fatalf("write large edit: %v", writeErr)
+	}
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
+	if err != nil {
+		t.Fatalf("RunPatch: %v", err)
+	}
+	if patch.Truncated || len(patch.Text) <= 512<<10 || !strings.Contains(patch.Text, "+run patch content") {
+		t.Fatalf("large RunPatch = %d bytes, truncated %v", len(patch.Text), patch.Truncated)
+	}
+}
+
+func TestReadCheckoutFileReturnsCompleteLargeText(t *testing.T) {
+	e := newUnitEngine(t)
+	checkout := fileCheckout(t, e)
+	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat("large file content\n", 40_000)
+	if err := os.WriteFile(filepath.Join(checkout, "large.txt"), []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	read, err := e.ReadFileMeta(context.Background(), checkout, "", "large.txt", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(read.Content) != want || read.Truncated || read.Binary || !read.Writable || read.Revision == "" {
+		t.Fatalf("large read = %d bytes, truncated %v, binary %v, writable %v, revision %q", len(read.Content), read.Truncated, read.Binary, read.Writable, read.Revision)
 	}
 }
 
@@ -247,7 +278,8 @@ func TestListTreeAndFileDiff(t *testing.T) {
 	gitFileTest(t, source, "init", "-q", "-b", "main")
 	gitFileTest(t, source, "config", "user.name", "Files Test")
 	gitFileTest(t, source, "config", "user.email", "files@example.test")
-	for name, body := range map[string]string{"file.txt": "base\n", "pkg/nested.go": "package pkg\n"} {
+	base := strings.Repeat("base line\n", 70_000)
+	for name, body := range map[string]string{"file.txt": base, "pkg/nested.go": "package pkg\n"} {
 		if mkdirErr := os.MkdirAll(filepath.Dir(filepath.Join(source, name)), 0o755); mkdirErr != nil {
 			t.Fatalf("mkdir seed: %v", mkdirErr)
 		}
@@ -279,15 +311,16 @@ func TestListTreeAndFileDiff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
-	if writeErr := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte("edited\n"), 0o644); writeErr != nil {
+	edited := strings.Repeat("edited line\n", 70_000)
+	if writeErr := os.WriteFile(filepath.Join(checkout, "file.txt"), []byte(edited), 0o644); writeErr != nil {
 		t.Fatalf("write edit: %v", writeErr)
 	}
 	patch, err := e.FileDiff(ctx, "run1", "file.txt")
 	if err != nil {
 		t.Fatalf("FileDiff: %v", err)
 	}
-	if patch.Truncated || !strings.Contains(patch.Text, "diff --git a/file.txt b/file.txt") ||
-		!strings.Contains(patch.Text, "+edited") {
+	if patch.Truncated || len(patch.Text) <= 512<<10 || !strings.Contains(patch.Text, "diff --git a/file.txt b/file.txt") ||
+		!strings.Contains(patch.Text, "+edited line") {
 		t.Fatalf("FileDiff = truncated %v, patch %q", patch.Truncated, patch.Text)
 	}
 }
@@ -319,7 +352,7 @@ func TestFilesWriteCheckoutIsAtomicAndRevisionChecked(t *testing.T) {
 	if err = os.Link(filepath.Join(checkout, "run.sh"), filepath.Join(checkout, "copy.sh")); err != nil {
 		t.Fatal(err)
 	}
-	read, err := e.FilesRead(ctx, "ws1", "run1", "", "run.sh", MaxFileBytes)
+	read, err := e.FilesRead(ctx, "ws1", "run1", "", "run.sh", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +373,7 @@ func TestFilesWriteCheckoutIsAtomicAndRevisionChecked(t *testing.T) {
 	if err != nil || string(got) != "outside\n" {
 		t.Fatalf("stale write changed checkout: %q (%v)", got, err)
 	}
-	current, err := e.FilesRead(ctx, "ws1", "run1", "", "run.sh", MaxFileBytes)
+	current, err := e.FilesRead(ctx, "ws1", "run1", "", "run.sh", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,18 +409,18 @@ func TestFilesWriteBasePreservesTreeAndExecutableMode(t *testing.T) {
 	gitFileTest(t, source, "add", "-A")
 	gitFileTest(t, source, "commit", "-q", "-m", "seed")
 	gitFileTest(t, source, "push", "-q", repo, "main")
-	read, err := e.FilesRead(ctx, "ws1", "", "main", "script.sh", MaxFileBytes)
+	read, err := e.FilesRead(ctx, "ws1", "", "main", "script.sh", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = e.FilesWrite(ctx, "ws1", "", "main", "script.sh", []byte("changed\n"), read.Revision, domain.GitIdentity{Name: "Ada", Email: "ada@example.test"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	script, _, _, err := e.ReadFile(ctx, repo, "main", "script.sh", MaxFileBytes)
+	script, _, _, err := e.ReadFile(ctx, repo, "main", "script.sh", -1)
 	if err != nil || string(script) != "changed\n" {
 		t.Fatalf("base script = %q (%v)", script, err)
 	}
-	keep, _, _, err := e.ReadFile(ctx, repo, "main", "keep.txt", MaxFileBytes)
+	keep, _, _, err := e.ReadFile(ctx, repo, "main", "keep.txt", -1)
 	if err != nil || string(keep) != "keep.txt\n" {
 		t.Fatalf("unrelated base file = %q (%v)", keep, err)
 	}

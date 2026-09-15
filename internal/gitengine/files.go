@@ -21,10 +21,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
-// MaxFileBytes is the maximum file or one-file diff response. The dashboard
-// reads files inline and reports that larger files were truncated.
-const MaxFileBytes = 512 << 10
-
 // ErrInvalidPath identifies a client-supplied path that cannot be read or
 // written from a repository or checkout.
 var ErrInvalidPath = errors.New("invalid file path")
@@ -35,6 +31,9 @@ var ErrRevisionConflict = errors.New("gitengine: file revision conflict")
 // ErrWorkspaceMismatch reports that a run does not belong to the addressed
 // workspace. It is intentionally distinct so the RPC can reject bad input.
 var ErrWorkspaceMismatch = errors.New("gitengine: workspace and run do not match")
+
+// MaxFileBytes is the maximum dashboard file response or editor write.
+const MaxFileBytes = 64 << 20
 
 // FileRead is the engine-side file response. Writable is filled by the
 // authenticated server handler; the engine sets it true for a safe file.
@@ -310,11 +309,16 @@ func (e *Engine) readCheckoutFile(checkout, path string, maxBytes int) ([]byte, 
 		}
 		return nil, false, 0, err
 	}
-	content, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
+	var content []byte
+	if maxBytes > 0 {
+		content, err = io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
+	} else {
+		content, err = io.ReadAll(file)
+	}
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("gitengine: read checkout file: %w", err)
 	}
-	truncated := len(content) > maxBytes
+	truncated := maxBytes > 0 && len(content) > maxBytes
 	if truncated {
 		content = content[:maxBytes]
 	}
@@ -456,6 +460,9 @@ func (e *Engine) bareFileEntry(ctx context.Context, repo, ref, name string) (bar
 }
 
 func (e *Engine) readBareFile(ctx context.Context, repo, ref, name string, maxBytes int) ([]byte, bool, int64, error) {
+	if maxBytes <= 0 {
+		maxBytes = MaxFileBytes
+	}
 	entry, err := e.bareFileEntry(ctx, repo, ref, name)
 	if err != nil {
 		return nil, false, 0, err
@@ -480,11 +487,11 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 	if name == "" {
 		return FileRead{}, fmt.Errorf("%w: file path is required", ErrInvalidPath)
 	}
-	if len(content) > MaxFileBytes {
-		return FileRead{}, fmt.Errorf("%w: file exceeds %d bytes", ErrInvalidPath, MaxFileBytes)
-	}
 	if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
 		return FileRead{}, fmt.Errorf("%w: file must be valid UTF-8 text", ErrInvalidPath)
+	}
+	if len(content) > MaxFileBytes {
+		return FileRead{}, fmt.Errorf("%w: file exceeds %d bytes", ErrInvalidPath, MaxFileBytes)
 	}
 	if revision != "" && !validRevision(revision) {
 		return FileRead{}, fmt.Errorf("%w: invalid file revision", ErrInvalidPath)
@@ -630,7 +637,7 @@ func (e *Engine) writeBareFile(ctx context.Context, repo, ref, name string, cont
 		if readErr != nil {
 			return FileRead{}, readErr
 		}
-		if truncated || len(old) > MaxFileBytes || !utf8.Valid(old) || isBinary(old) {
+		if truncated || !utf8.Valid(old) || isBinary(old) {
 			return FileRead{}, ErrRevisionConflict
 		}
 		oldRevision = fileRevision(old)
@@ -784,7 +791,7 @@ func (e *Engine) FileDiff(ctx context.Context, run domain.RunID, path string) (P
 	if _, _, addErr := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); addErr != nil {
 		return Patch{}, addErr
 	}
-	text, truncated, err := e.gitStaged(ctx, checkout, index, MaxFileBytes,
+	text, truncated, err := e.gitStaged(ctx, checkout, index, MaxPatchBytes,
 		"diff", "--cached", "--no-color", "--no-renames", meta.Base, "--", path)
 	if err != nil {
 		return Patch{}, err

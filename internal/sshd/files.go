@@ -22,8 +22,6 @@ type FileReader interface {
 	FileDiff(ctx context.Context, run domain.RunID, path string) (gitengine.Patch, error)
 }
 
-const filesReadMaxBytes = gitengine.MaxFileBytes
-
 func init() {
 	registerGuarded(protocol.MethodFilesTree, permissions.View, filesTarget, (*Server).filesTree)
 	registerGuarded(protocol.MethodFilesRead, permissions.View, filesTarget, (*Server).filesRead)
@@ -113,7 +111,7 @@ func (s *Server) filesRead(ctx context.Context, member domain.MemberID, params j
 		}
 		ref = ws.BaseBranch
 	}
-	result, err := reader.FilesRead(ctx, workspace, domain.RunID(p.RunID), ref, p.Path, filesReadMaxBytes)
+	result, err := reader.FilesRead(ctx, workspace, domain.RunID(p.RunID), ref, p.Path, gitengine.MaxFileBytes)
 	if err != nil {
 		return nil, filesReadError(protocol.MethodFilesRead, p.RunID, err)
 	}

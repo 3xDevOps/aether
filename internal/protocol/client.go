@@ -52,7 +52,7 @@ func (c *Client) Call(method string, params, result any) error {
 		return fmt.Errorf("protocol: write request: %w", werr)
 	}
 
-	respLine, err := ReadLine(c.r)
+	respLine, err := readLine(c.r, responseLineLimit(method))
 	if err != nil {
 		return fmt.Errorf("protocol: read response: %w", err)
 	}
@@ -77,15 +77,33 @@ func (c *Client) Call(method string, params, result any) error {
 // Close closes the underlying stream.
 func (c *Client) Close() error { return c.rwc.Close() }
 
+func responseLineLimit(method string) int {
+	switch method {
+	case MethodRunPatch, MethodFilesRead, MethodFilesDiff, MethodFilesWrite,
+		MethodConfigRead, MethodConfigWrite:
+		return maxBlobResponseBytes
+	default:
+		return MaxLineBytes
+	}
+}
+
+// maxBlobResponseBytes allows worst-case JSON escaping of a 64 MiB file or
+// diff plus response framing while keeping one response bounded.
+const maxBlobResponseBytes = 6*(64<<20) + (1 << 20)
+
 // ReadLine reads one newline-terminated NDJSON frame from r, enforcing
 // MaxLineBytes; the trailing newline is stripped.
 func ReadLine(r *bufio.Reader) ([]byte, error) {
+	return readLine(r, MaxLineBytes)
+}
+
+func readLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
 	var line []byte
 	for {
 		chunk, err := r.ReadSlice('\n')
 		line = append(line, chunk...)
-		if len(line) > MaxLineBytes {
-			return nil, fmt.Errorf("protocol: line exceeds %d bytes", MaxLineBytes)
+		if maxBytes > 0 && len(line) > maxBytes {
+			return nil, fmt.Errorf("protocol: line exceeds %d bytes", maxBytes)
 		}
 		switch err {
 		case nil:

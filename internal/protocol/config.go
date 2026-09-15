@@ -41,8 +41,8 @@ type ConfigReadParams struct {
 	Path    string `json:"path"`
 }
 
-// ConfigFileReadResult follows files.read's content metadata and adds a
-// revision token and writable indicator for optimistic editor saves.
+// ConfigFileReadResult follows files.read's complete-content metadata and
+// adds a revision token and writable indicator for optimistic editor saves.
 type ConfigFileReadResult struct {
 	Content   string `json:"content"`
 	Truncated bool   `json:"truncated"`

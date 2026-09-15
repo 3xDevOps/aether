@@ -22,10 +22,9 @@ export interface PatchFile {
 const fileHeader = /^diff --git /
 
 /**
- * Splits `git diff` output into one entry per file. A truncated patch ends
- * mid-file, which parses to a file with fewer lines rather than an error -
- * the view says the diff was cut short, and everything above the cut still
- * reads.
+ * Splits `git diff` output into one entry per file. Parsing is deliberately
+ * tolerant of incomplete input so a transport or Git error cannot discard
+ * useful lines that arrived before it.
  */
 export function parsePatch(text: string): PatchFile[] {
   const files: PatchFile[] = []
