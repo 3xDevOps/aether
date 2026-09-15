@@ -352,8 +352,8 @@ The tree is a browse pane beside the editor at medium widths. On narrow
 screens it is the first view; selecting a file opens the editor and **Browse**
 returns to the tree. CodeMirror provides syntax highlighting for JSON/JSONC,
 JavaScript/TypeScript, Markdown, Python and TOML, plus find/replace. The
-editor renders complete UTF-8 text without NUL bytes; binary responses remain
-read-only.
+editor renders complete UTF-8 text without NUL bytes up to 64 MiB; binary and
+oversized responses remain read-only.
 
 The action label states the write target: base files show **Commit to
 <branch>**, creating one file commit without pushing upstream; live-run files
@@ -1460,8 +1460,8 @@ both what it renders and the overlap set the conflict chips read.
   diff into files, hunks and line kinds; `patch-view.tsx` paints those kinds.
   The dashboard never edits code, so there is no editor and no language
   grammar - why neither Monaco nor CodeMirror is a dependency. The server
-  sends the complete run diff, and the parser remains tolerant of incomplete
-  input from a failed transport.
+  sends complete run diffs up to 64 MiB, and the parser remains tolerant of
+  incomplete input from a failed transport.
 - **Long lines wrap or scroll, and the pointer picks which first.** Wrapping
   breaks the column alignment a diff is read by, and side-scrolling means
   panning every file section separately - which a phone cannot do well. So

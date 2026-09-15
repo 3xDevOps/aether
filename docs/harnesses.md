@@ -540,9 +540,9 @@ Edits stay as in-memory dirty tabs while you navigate. Save explicitly with
 **Save**, **Commit to <branch>**, or Ctrl/Cmd-S; there is no autosave or
 force-save. Browser navigation warns before unloading dirty buffers.
 
-Configuration files are complete UTF-8 text. Binary files are read-only. New
-configuration files accept nested relative paths and never overwrite an
-existing file. A stale save keeps the draft; reload from the server only when
+Configuration files are complete UTF-8 text up to 64 MiB. Binary and oversized
+files are read-only. New configuration files accept nested relative paths and
+never overwrite an existing file. A stale save keeps the draft; reload from the server only when
 you want to discard it and replace it with current content.
 Every `config.*` method requires `Launch` and addresses only the authenticated
 member's own home; an admin cannot select another member.

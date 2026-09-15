@@ -81,11 +81,15 @@ func responseLineLimit(method string) int {
 	switch method {
 	case MethodRunPatch, MethodFilesRead, MethodFilesDiff, MethodFilesWrite,
 		MethodConfigRead, MethodConfigWrite:
-		return 0
+		return maxBlobResponseBytes
 	default:
 		return MaxLineBytes
 	}
 }
+
+// maxBlobResponseBytes leaves room for JSON framing and escaping around the
+// server's 64 MiB file and diff responses while keeping one response bounded.
+const maxBlobResponseBytes = 128 << 20
 
 // ReadLine reads one newline-terminated NDJSON frame from r, enforcing
 // MaxLineBytes; the trailing newline is stripped.

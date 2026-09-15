@@ -111,7 +111,7 @@ func (s *Server) filesRead(ctx context.Context, member domain.MemberID, params j
 		}
 		ref = ws.BaseBranch
 	}
-	result, err := reader.FilesRead(ctx, workspace, domain.RunID(p.RunID), ref, p.Path, -1)
+	result, err := reader.FilesRead(ctx, workspace, domain.RunID(p.RunID), ref, p.Path, gitengine.MaxFileBytes)
 	if err != nil {
 		return nil, filesReadError(protocol.MethodFilesRead, p.RunID, err)
 	}

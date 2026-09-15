@@ -47,7 +47,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	p, err := patcher.RunPatch(ctx, id, gitengine.PatchRequest{
 		From:     req.From,
 		To:       req.To,
-		MaxBytes: -1,
+		MaxBytes: gitengine.MaxPatchBytes,
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):

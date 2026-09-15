@@ -19,6 +19,9 @@ const (
 	// Config import carries up to 20 MiB of decoded files in base64 JSON;
 	// leave room for the encoding and request framing.
 	maxConfigImportRequestBody = 30 << 20
+	// Editor writes accept content up to the inline file limit plus JSON
+	// framing, while still bounding authenticated request memory.
+	maxEditorWriteRequestBody = 128 << 20
 )
 
 func requestBodyLimit(method string) int64 {
@@ -28,7 +31,7 @@ func requestBodyLimit(method string) int64 {
 	case protocol.MethodConfigImport:
 		return maxConfigImportRequestBody
 	case protocol.MethodFilesWrite, protocol.MethodConfigWrite:
-		return 0
+		return maxEditorWriteRequestBody
 	default:
 		return MaxRequestBody
 	}

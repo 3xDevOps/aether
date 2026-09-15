@@ -273,9 +273,9 @@ pin is audit metadata, not a private writable copy, and changing configuration
 does not rebuild an installed-agent image.
 
 Use **Files** to browse your configuration beside workspace base and live-run
-files. Configuration edits are complete UTF-8 text; binary files are read-only.
-New configuration files accept nested relative paths and refuse to overwrite an
-existing file. Save explicitly with **Save** or
+files. Configuration edits are complete UTF-8 text up to 64 MiB; binary and
+oversized files are read-only. New configuration files accept nested relative
+paths and refuse to overwrite an existing file. Save explicitly with **Save** or
 Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
 before unloading them. There is no autosave or force-save. A failed or stale
 save keeps the draft; **Reload from server** deliberately discards it.

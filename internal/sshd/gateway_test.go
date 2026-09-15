@@ -58,8 +58,8 @@ func TestRunPatchReturnsCompleteDiffRequest(t *testing.T) {
 	if got.RunID != string(e.run.ID) || got.Base != "abc123" || got.Patch != patcher.patch.Text || !got.Truncated {
 		t.Errorf("run.patch = %+v, want the fake's patch metadata", got)
 	}
-	if patcher.got.MaxBytes != -1 {
-		t.Errorf("run.patch max bytes = %d, want unlimited", patcher.got.MaxBytes)
+	if patcher.got.MaxBytes != gitengine.MaxPatchBytes {
+		t.Errorf("run.patch max bytes = %d, want %d", patcher.got.MaxBytes, gitengine.MaxPatchBytes)
 	}
 
 	// An unknown run is a NotFound from the store, not a patch failure.
