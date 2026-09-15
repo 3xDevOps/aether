@@ -14,13 +14,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
 // snapshotTimeout bounds the git work of a single diff snapshot.
@@ -336,12 +336,12 @@ func (w *diffWatch) reconcileIgnoreState(ctx context.Context) {
 // visiting every child; the visible listing keeps all tracked files and
 // files re-included by negation reachable below an ignored parent.
 func (w *diffWatch) loadIgnoreState(ctx context.Context) error {
-	visible, err := w.e.gitCheckoutRaw(ctx, w.run, w.checkout,
+	visible, _, err := w.e.gitCheckoutBounded(ctx, w.run, w.checkout, -1,
 		"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--")
 	if err != nil {
 		return fmt.Errorf("gitengine: list visible paths: %w", err)
 	}
-	ignored, err := w.e.gitCheckoutRaw(ctx, w.run, w.checkout,
+	ignored, _, err := w.e.gitCheckoutBounded(ctx, w.run, w.checkout, -1,
 		"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--")
 	if err != nil {
 		return fmt.Errorf("gitengine: list ignored directories: %w", err)
@@ -815,15 +815,20 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 		del, _ := strconv.Atoi(parts[1])
 		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del})
 	}
-	untracked, err := e.gitCheckoutRaw(ctx, run, checkout, "ls-files", "--others", "--exclude-standard", "-z")
+	untracked, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, err
 	}
+	checkoutRoot, err := os.OpenRoot(checkout)
+	if err != nil {
+		return nil, fmt.Errorf("gitengine: open checkout for diff stats: %w", err)
+	}
+	defer func() { _ = checkoutRoot.Close() }()
 	for path := range strings.SplitSeq(untracked, "\x00") {
 		if path == "" {
 			continue
 		}
-		lines, err := countLines(ctx, filepath.Join(checkout, path))
+		lines, err := countLines(ctx, checkoutRoot, path)
 		if err != nil {
 			continue
 		}
@@ -844,8 +849,8 @@ const countBytesCap = 8 << 20
 // counts). A symlink counts as one line (git's view of its content) and is
 // never followed - the target may be a FIFO or device that would block the
 // watch loop forever. Only regular files are read, capped at countBytesCap.
-func countLines(ctx context.Context, path string) (int, error) {
-	fi, err := os.Lstat(path)
+func countLines(ctx context.Context, root *os.Root, path string) (int, error) {
+	fi, err := root.Lstat(path)
 	if err != nil {
 		return 0, err
 	}
@@ -855,14 +860,11 @@ func countLines(ctx context.Context, path string) (int, error) {
 	if !fi.Mode().IsRegular() {
 		return 0, fmt.Errorf("gitengine: not a regular file: %s", path)
 	}
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := rootfs.Open(root, path)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = f.Close() }()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-		return 0, fmt.Errorf("gitengine: not a regular file: %s", path)
-	}
 	var (
 		buf    [32 * 1024]byte
 		count  int

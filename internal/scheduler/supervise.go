@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // waitRetryInitial and waitRetryMax bound the delay between inconclusive
@@ -147,10 +148,6 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	defer cancel()
 
 	s.cfg.Git.StopDiffWatch(entry.runID)
-	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID)); err != nil {
-		slog.Warn("scheduler: stop pty session", "run", entry.runID, "error", err)
-	}
-	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
 
 	s.mu.Lock()
 	killed, killActor := entry.killRequested, entry.killActor
@@ -160,11 +157,13 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if code == 0 && !killed {
 		msg = "aether: "
 	}
-	if _, err := s.commitAll(ctx, entry.runID, msg+taskLine(entry.task)); err != nil {
-		slog.Warn("scheduler: commit results", "run", entry.runID, "error", err)
+	committed, commitErr := s.commitAll(ctx, entry.runID, msg+taskLine(entry.task))
+	if commitErr != nil {
+		slog.Warn("scheduler: commit results", "run", entry.runID, "error", commitErr)
 	}
-	if _, err := s.cfg.Git.PublishRunBranch(ctx, entry.runID); err != nil {
-		slog.Warn("scheduler: publish run branch", "run", entry.runID, "error", err)
+	published, publishErr := s.cfg.Git.PublishRunBranch(ctx, entry.runID)
+	if publishErr != nil {
+		slog.Warn("scheduler: publish run branch", "run", entry.runID, "error", publishErr)
 	}
 
 	var (
@@ -188,12 +187,44 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	}
 	err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor)
 	s.mu.Unlock()
-	// ErrInvalidTransition means the run already reached a terminal state
-	// (e.g. CloseRun raced the exit); the cleanup below still applies.
 	if err != nil && !errors.Is(err, ErrInvalidTransition) {
 		slog.Warn("scheduler: record exit status", "run", entry.runID, "error", err)
+		// Without a durable terminal row, destruction would orphan the
+		// recoverable checkout and transcript.
+		s.retainAfterEvidenceFailure(entry)
+		return
 	}
 
+	identity := ""
+	s.mu.Lock()
+	if s.runs[entry.runID] == entry {
+		identity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
+		entry.evidenceIdentity = identity
+		entry.evidencePending = false
+		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
+			slog.Warn("scheduler: persist evidence identity", "run", entry.runID, "error", sidecarErr)
+		}
+	}
+	s.mu.Unlock()
+	if identity == "" {
+		identity = finishCaptureIdentity("", published, committed, code)
+	}
+	if captureErr := s.captureFinishEvidence(ctx, entry.runID, to, identity); captureErr != nil {
+		logEvidenceFailure(entry.runID, captureErr)
+		s.retainAfterEvidenceFailure(entry)
+		return
+	}
+
+	// Keep the recording available through the capture above. A process that
+	// exits has already stopped producing PTY bytes, so stopping the session
+	// now cannot change the captured transcript.
+	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(entry.runID)); err != nil {
+		slog.Warn("scheduler: stop pty session", "run", entry.runID, "error", err)
+	}
+	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(entry.runID, "")))
+
+	// ErrInvalidTransition means the run already reached a terminal state
+	// (e.g. CloseRun raced the exit); the cleanup below still applies.
 	if destroyErr := s.cfg.Runtime.Destroy(ctx, entry.containerID); destroyErr != nil &&
 		!errors.Is(destroyErr, runtime.ErrNotFound) {
 		// Keep every ownership reference when destruction is uncertain. The
@@ -205,7 +236,10 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 			entry.retained = true
 			entry.retainedUntil = &now
 			entry.finalizing = false
-			_ = s.writeSidecar(entry.sidecar())
+			if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
+				slog.Warn("scheduler: persist retained sidecar after destroy failure",
+					"run", entry.runID, "error", sidecarErr)
+			}
 		}
 		s.mu.Unlock()
 		slog.Warn("scheduler: destroy container", "run", entry.runID, "error", destroyErr)
@@ -283,7 +317,9 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(entry.runID))
 		if err != nil {
 			if errors.Is(err, runtime.ErrNotFound) {
-				s.preserveRecoveryWork(ctx, entry.runID, entry.task)
+				if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
+					return preserveErr
+				}
 				return s.finishDestroyPending(ctx, entry)
 			}
 			return fmt.Errorf("find destroy-pending container: %w", err)
@@ -301,30 +337,30 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		return fmt.Errorf("destroy-pending container: %w", err)
 	}
-	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
-	if err != nil {
-		return fmt.Errorf("load destroy-pending run: %w", err)
-	}
-	if !run.Status.Terminal() {
-		s.preserveRecoveryWork(ctx, entry.runID, entry.task)
+	if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
+		return preserveErr
 	}
 	return s.finishDestroyPending(ctx, entry)
 }
 
-// expireRetained destroys one retained container idempotently and changes the
-// terminal reason before dropping its sidecar and in-memory supervision.
-// lifecycleMu serializes it with CloseRun and Relaunch.
+// expireRetained serializes expiry against every other operation on a
+// retained run. Evidence capture is performed by expireRetainedLocked before
+// the runtime is released.
 func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error {
+	if entry == nil {
+		return nil
+	}
 	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
 	err := s.expireRetainedLocked(ctx, entry)
-	entry.lifecycleMu.Unlock()
-	if err != nil {
-		s.mu.Lock()
-		retry := s.runs[entry.runID] == entry && entry.retained
-		s.mu.Unlock()
-		if retry {
-			s.startRetainedWaitAfterDestroyFailure(ctx, entry)
-		}
+	if err == nil {
+		return nil
+	}
+	s.mu.Lock()
+	retry := s.runs[entry.runID] == entry && entry.retained && entry.destroyPending
+	s.mu.Unlock()
+	if retry {
+		s.startRetainedWaitAfterDestroyFailure(ctx, entry)
 	}
 	return err
 }
@@ -342,7 +378,21 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	if s.cfg.RunContainerTTL >= 0 && deadline != nil && time.Now().UTC().Before(*deadline) {
 		reason = retainedUnavailableReason
 	}
+	identity := entry.evidenceIdentity
 	s.mu.Unlock()
+
+	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
+	if err != nil {
+		return fmt.Errorf("scheduler: load retained run: %w", err)
+	}
+	if identity == "" {
+		identity = evidenceCommitIdentity(run.LastCommit, "", -1)
+	}
+	if err := s.captureFinishEvidence(ctx, entry.runID, run.Status, identity); err != nil {
+		logEvidenceFailure(entry.runID, err)
+		s.retainAfterEvidenceFailure(entry)
+		return err
+	}
 
 	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		// Keep every ownership reference and make this owner due now. The
@@ -357,8 +407,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	var transitionErr error
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry && entry.retained {
-		if run, err := s.cfg.Store.GetRun(ctx, entry.runID); err == nil &&
-			(run.Status == domain.RunMerged || run.Status == domain.RunAbandoned) {
+		if run.Status == domain.RunMerged || run.Status == domain.RunAbandoned {
 			transitionErr = s.transitionLocked(ctx, entry.runID, run.WorkspaceID, run.Status, run.Status, reason, "")
 		}
 		entry.retained = false
@@ -585,21 +634,48 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 				continue
 			}
 
-			// Keep the per-entry lock through physical reclamation so
-			// relaunch/expiry cannot race a mounted checkout.
-			if err := s.cfg.Git.RemoveRunCheckout(ctx, r.ID); err != nil {
+			// Evidence owns a per-run capture/cleanup lock. Capture both
+			// sources before either is removed; a failed required capture
+			// leaves the checkout and transcript recoverable for retry.
+			identity := fresh.LastCommit
+			if lifecycle != nil {
+				s.mu.Lock()
+				if lifecycle.evidenceIdentity != "" {
+					identity = lifecycle.evidenceIdentity
+				}
+				s.mu.Unlock()
+			}
+			if identity == "" {
+				identity = "none"
+			}
+			cleanup := func(cleanupCtx context.Context) error {
+				if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, r.ID); err != nil {
+					return fmt.Errorf("scheduler: checkout gc: remove run transcripts: %w", err)
+				}
+				if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, r.ID); err != nil {
+					return fmt.Errorf("scheduler: checkout gc: remove run checkout: %w", err)
+				}
+				return nil
+			}
+			if err := s.captureBeforeCleanupEvidence(ctx, r.ID, identity, cleanup); err != nil {
 				if lifecycle != nil {
 					lifecycle.lifecycleMu.Unlock()
 				}
-				slog.Warn("scheduler: checkout gc: remove checkout", "run", r.ID, "error", err)
+				slog.Warn("scheduler: checkout gc: capture before cleanup", "run", r.ID, "error", err)
 				continue
 			}
-			fresh.Worktree = ""
-			if err := s.cfg.Store.UpdateRun(ctx, fresh); err != nil {
+			var clearErr error
+			if clearer, ok := s.cfg.Store.(store.RunWorktreeStore); ok {
+				clearErr = clearer.ClearRunWorktree(ctx, fresh.ID, fresh.Worktree, fresh.Status)
+			} else {
+				fresh.Worktree = ""
+				clearErr = s.cfg.Store.UpdateRun(ctx, fresh)
+			}
+			if clearErr != nil {
 				if lifecycle != nil {
 					lifecycle.lifecycleMu.Unlock()
 				}
-				slog.Warn("scheduler: checkout gc: clear worktree", "run", r.ID, "error", err)
+				slog.Warn("scheduler: checkout gc: clear worktree", "run", r.ID, "error", clearErr)
 				continue
 			}
 			s.removeSidecar(r.ID)

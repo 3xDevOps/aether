@@ -1014,8 +1014,8 @@ needs.
    session-end close below. A `queued`,
    `provisioning` or `running` run with no session is refused with `-32004`
    rather than held open - the container is still being built, or recovery is
-   starting the session - as is a finished run whose transcript predates
-   recording. The refusal is the answer, so a client that means to wait for a
+   starting the session - as is a finished run whose transcript was never
+   persisted. The refusal is the answer, so a client that means to wait for a
    session has to retry rather than expect the socket to stay open.
 3. Server then streams terminal output as **binary** frames.
 4. Client sends **text** control frames:

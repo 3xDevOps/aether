@@ -1,4 +1,8 @@
-import type { RoomMessage, RoomStatusResult } from '@/lib/types'
+import type {
+  EvidencePacket,
+  RoomMessage,
+  RoomStatusResult,
+} from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
 export interface PaginationState {
@@ -15,6 +19,12 @@ export interface CollaborationSlice {
   /** Errors reading room history or status; action failures live separately. */
   roomError: Record<string, string | undefined>
   roomActionError: Record<string, string | undefined>
+  evidencePackets: Record<string, EvidencePacket[]>
+  evidenceNextBefore: Record<string, string | undefined>
+  evidencePagination: Record<string, PaginationState>
+  evidenceLoading: Record<string, boolean | undefined>
+  evidenceError: Record<string, string | undefined>
+  selectedEvidence: Record<string, string | undefined>
   initializeRoomPagination: (runID: string) => void
   setRoomLoading: (runID: string, loading: boolean) => void
   setRoomError: (runID: string, error?: string) => void
@@ -22,6 +32,12 @@ export interface CollaborationSlice {
   setRoomPage: (runID: string, messages: RoomMessage[], nextBefore?: string, append?: boolean) => void
   upsertRoomMessage: (message: RoomMessage) => void
   setRoomStatus: (runID: string, status: RoomStatusResult) => void
+  initializeEvidencePagination: (runID: string) => void
+  setEvidenceLoading: (runID: string, loading: boolean) => void
+  setEvidenceError: (runID: string, error?: string) => void
+  setEvidencePage: (runID: string, packets: EvidencePacket[], nextBefore?: string, append?: boolean) => void
+  upsertEvidencePacket: (packet: EvidencePacket) => void
+  selectEvidence: (runID: string, packetID?: string) => void
 }
 
 const RFC3339_NANO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
@@ -109,6 +125,12 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
   roomLoading: {},
   roomError: {},
   roomActionError: {},
+  evidencePackets: {},
+  evidenceNextBefore: {},
+  evidencePagination: {},
+  evidenceLoading: {},
+  evidenceError: {},
+  selectedEvidence: {},
   initializeRoomPagination: (runID) =>
     set((state) => ({
       roomMessages: state.roomMessages[runID]
@@ -163,7 +185,62 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
     })),
   setRoomStatus: (runID, status) =>
     set((state) => ({ roomStatus: { ...state.roomStatus, [runID]: status } })),
+  initializeEvidencePagination: (runID) =>
+    set((state) => ({
+      evidencePackets: state.evidencePackets[runID]
+        ? state.evidencePackets
+        : { ...state.evidencePackets, [runID]: [] },
+      evidencePagination: state.evidencePagination[runID]
+        ? state.evidencePagination
+        : {
+            ...state.evidencePagination,
+            [runID]: { initialized: false, exhausted: false },
+          },
+    })),
+  setEvidenceLoading: (runID, loading) =>
+    set((state) => ({ evidenceLoading: { ...state.evidenceLoading, [runID]: loading } })),
+  setEvidenceError: (runID, error) =>
+    set((state) => ({ evidenceError: { ...state.evidenceError, [runID]: error } })),
+  setEvidencePage: (runID, packets, nextBefore, append = false) =>
+    set((state) => {
+      const page = pagePagination(
+        state.evidencePagination[runID],
+        state.evidenceNextBefore[runID],
+        nextBefore,
+        append,
+      )
+      return {
+        evidencePackets: {
+          ...state.evidencePackets,
+          [runID]: byCreated(
+            mergeByID(state.evidencePackets[runID] ?? [], packets),
+          ),
+        },
+        evidenceNextBefore: {
+          ...state.evidenceNextBefore,
+          [runID]: page.cursor,
+        },
+        evidencePagination: {
+          ...state.evidencePagination,
+          [runID]: page.pagination,
+        },
+      }
+    }),
+  upsertEvidencePacket: (packet) =>
+    set((state) => ({
+      evidencePackets: {
+        ...state.evidencePackets,
+        [packet.run_id]: byCreated(
+          mergeByID(state.evidencePackets[packet.run_id] ?? [], [packet]),
+        ),
+      },
+    })),
+  selectEvidence: (runID, packetID) =>
+    set((state) => ({
+      selectedEvidence: { ...state.selectedEvidence, [runID]: packetID },
+    })),
 })
+
 export function unansweredQuestions(messages: RoomMessage[]): RoomMessage[] {
   const answered = new Set(
     messages

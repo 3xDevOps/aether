@@ -20,6 +20,7 @@ export const eventLabel = {
   'sync.conflict': 'Sync conflict',
   'server.update': 'Server update',
   'workspace.room_message': 'Run Room message',
+  'workspace.evidence_packet': 'Evidence packet',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel

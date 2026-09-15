@@ -5,9 +5,26 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
+
+// EvidenceService is the scheduler's narrow view of durable evidence
+// capture. The concrete evidence service also exposes list/read operations
+// to transports, but lifecycle code only needs these two run-scoped methods.
+type EvidenceService interface {
+	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
+	CaptureBeforeCleanup(context.Context, evidence.Request, func(context.Context) error) (protocol.EvidencePacket, error)
+}
+
+// EvidencePurger serializes explicit run deletion with evidence capture. The
+// cleanup callback is invoked under the evidence service's per-run lock only
+// after every packet artifact and manifest has been purged.
+type EvidencePurger interface {
+	PurgeRun(context.Context, domain.WorkspaceID, domain.RunID, func(context.Context) error) error
+}
 
 // GitEngine is the scheduler's view of the git engine (*gitengine.Engine).
 type GitEngine interface {

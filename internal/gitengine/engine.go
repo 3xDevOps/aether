@@ -39,6 +39,10 @@ var (
 	// ErrSnapshotTreeMissing reports a well-formed tree id that the run's
 	// snapshot store no longer holds.
 	ErrSnapshotTreeMissing = errors.New("gitengine: snapshot tree not found")
+	// ErrEvidenceStorageLimit reports a capture refused before any retained
+	// ref is created because the agent-controlled input is too large or disk
+	// headroom is insufficient.
+	ErrEvidenceStorageLimit = errors.New("gitengine: evidence storage limit exceeded")
 )
 
 // Config configures an Engine. ReposDir and CheckoutsDir are required; the
@@ -84,6 +88,9 @@ type Engine struct {
 	// snapshotLocks serialize every writer of a run's persistent snapshot
 	// index, including the diff watcher and evidence capture.
 	snapshotLocks map[domain.RunID]*sync.Mutex
+	// repoMaintenanceMu prevents internal repository writers from racing
+	// evidence object pruning and repacking.
+	repoMaintenanceMu sync.Mutex
 }
 
 // New validates cfg, applies defaults, and creates the repos and checkouts

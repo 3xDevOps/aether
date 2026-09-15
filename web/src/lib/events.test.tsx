@@ -28,6 +28,7 @@ const samples: Record<EventType, unknown> = {
   'sync.conflict': { files: ['src/a.ts'], run_id: 'run_1' },
   'server.update': { phase: 'applying', version: 'v0.2.0' },
   'workspace.room_message': { kind: 'comment', state: 'sent', message_id: 'message_1' },
+  'workspace.evidence_packet': { trigger: 'report', packet_id: 'packet_1' },
 }
 
 function renderRow(type: string, payload: unknown): HTMLElement {

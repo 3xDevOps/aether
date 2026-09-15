@@ -159,7 +159,12 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	s.mu.Unlock()
 
 	if r.Status.Terminal() {
-		// A terminal retained row can outlive the in-memory owner during
+		if sc, serr := s.readSidecar(id); serr == nil && sc.EvidencePending {
+			if resolveErr := s.resolveEvidencePending(ctx, id, r.Status, sc.EvidenceIdentity); resolveErr != nil {
+				logEvidenceFailure(id, resolveErr)
+				return resolveErr
+			}
+		}
 		// startup, before recoverRuns has had a chance to adopt its sidecar.
 		// Reuse DeleteRun's reconciliation so Kill has the same durable
 		// ownership and retry behavior instead of treating that row as
@@ -187,13 +192,17 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		return s.Kill(ctx, id, actor)
 	}
 
+	identity := "none"
 	if r.Worktree != "" {
-		if _, cerr := s.commitAll(ctx, id, "wip: "+taskLine(r.Task)); cerr != nil {
+		committed, cerr := s.commitAll(ctx, id, "wip: "+taskLine(r.Task))
+		if cerr != nil {
 			slog.Warn("scheduler: wip commit on kill", "run", id, "error", cerr)
 		}
-		if _, perr := s.cfg.Git.PublishRunBranch(ctx, id); perr != nil {
+		published, perr := s.cfg.Git.PublishRunBranch(ctx, id)
+		if perr != nil {
 			slog.Warn("scheduler: publish branch on kill", "run", id, "error", perr)
 		}
+		identity = evidenceCommitIdentity(published, committed, 137)
 	}
 
 	s.mu.Lock()
@@ -232,6 +241,11 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	s.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if captureErr := s.captureFinishEvidence(ctx, id, domain.RunAbandoned, identity); captureErr != nil {
+		logEvidenceFailure(id, captureErr)
+		s.persistEvidencePending(id, identity)
+		return captureErr
 	}
 	s.removeSidecar(id)
 	s.publishTimeline(ctx, r.WorkspaceID, id, actor, events.TimelineKill, "")
@@ -319,13 +333,26 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		break
 	}
 
-	if err := s.cfg.Git.RemoveRunCheckout(ctx, run); err != nil {
-		return fmt.Errorf("scheduler: delete run checkout: %w", err)
+	removeSources := func(cleanupCtx context.Context) error {
+		if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, run); err != nil {
+			return fmt.Errorf("scheduler: delete run checkout: %w", err)
+		}
+		if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, run); err != nil {
+			return fmt.Errorf("scheduler: delete run transcripts: %w", err)
+		}
+		if err := s.cfg.Store.DeleteRun(cleanupCtx, run); err != nil {
+			return err
+		}
+		return nil
 	}
-	if err := s.cfg.PTY.RemoveRunTranscripts(ctx, run); err != nil {
-		return fmt.Errorf("scheduler: delete run transcripts: %w", err)
-	}
-	if err := s.cfg.Store.DeleteRun(ctx, run); err != nil {
+	s.mu.Lock()
+	service := s.evidence
+	s.mu.Unlock()
+	if purger, ok := service.(EvidencePurger); ok {
+		if err := purger.PurgeRun(ctx, workspace, run, removeSources); err != nil {
+			return fmt.Errorf("scheduler: purge run evidence: %w", err)
+		}
+	} else if err := removeSources(ctx); err != nil {
 		return err
 	}
 	s.publish(ctx, events.Event{
@@ -575,6 +602,14 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 		if serr != nil && !os.IsNotExist(serr) {
 			return fmt.Errorf("scheduler: reconcile close sidecar: %w", serr)
 		}
+		if serr == nil && sc.EvidencePending && sc.ContainerID == "" {
+			identity := sc.EvidenceIdentity
+			if resolveErr := s.resolveEvidencePending(ctx, run, r.Status, identity); resolveErr != nil {
+				logEvidenceFailure(run, resolveErr)
+				return resolveErr
+			}
+			sc.EvidencePending = false
+		}
 		if serr == nil && sc.ContainerID != "" {
 			if sc.RunID != "" && sc.RunID != string(run) {
 				return fmt.Errorf("scheduler: reconcile close sidecar: run ID mismatch")
@@ -602,7 +637,22 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			s.mu.Lock()
 			err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
 			s.mu.Unlock()
-			return err
+			if err != nil {
+				return err
+			}
+			identity := r.LastCommit
+			if sc.EvidenceIdentity != "" {
+				identity = sc.EvidenceIdentity
+			}
+			if identity == "" {
+				identity = "none"
+			}
+			if captureErr := s.captureFinishEvidence(ctx, run, outcome, identity); captureErr != nil {
+				logEvidenceFailure(run, captureErr)
+				s.persistEvidencePending(run, identity)
+				return captureErr
+			}
+			return nil
 		}
 	}
 
@@ -619,25 +669,55 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	}
 	if entry.finalizing {
 		status, workspace := entry.status, entry.workspaceID
+		identity := entry.evidenceIdentity
 		if !status.Terminal() {
 			s.mu.Unlock()
 			return fmt.Errorf("%w: run finalization is in progress", ErrInvalidTransition)
 		}
 		if status == outcome {
+			pending := entry.evidencePending
 			s.mu.Unlock()
+			if !pending {
+				return nil
+			}
+			if err := s.resolveEvidencePending(ctx, run, outcome, identity); err != nil {
+				logEvidenceFailure(run, err)
+				return err
+			}
 			return nil
 		}
 		err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
 		s.mu.Unlock()
-		return err
+		if err != nil {
+			return err
+		}
+		if identity == "" {
+			identity = "none"
+		}
+		if captureErr := s.captureFinishEvidence(ctx, run, outcome, identity); captureErr != nil {
+			logEvidenceFailure(run, captureErr)
+			return captureErr
+		}
+		return nil
 	}
 	status, workspace, cid := entry.status, entry.workspaceID, entry.containerID
 	mode, retained, alreadyPaused := entry.launchMode, entry.retained, entry.paused
-	if status == outcome && (!retained || s.cfg.RunContainerTTL >= 0) {
+	if status == outcome {
+		pending := entry.evidencePending
+		identity := entry.evidenceIdentity
 		s.mu.Unlock()
-		return nil
+		if pending {
+			if err := s.resolveEvidencePending(ctx, run, outcome, identity); err != nil {
+				logEvidenceFailure(run, err)
+				return err
+			}
+		}
+		if !retained || s.cfg.RunContainerTTL >= 0 {
+			return nil
+		}
+	} else {
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
 
 	if retained {
 		// Re-labeling an already closed retained run keeps the same deadline
@@ -678,12 +758,20 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			if outcome == domain.RunMerged {
 				msg = "aether: "
 			}
-			if _, cerr := s.commitAll(ctx, run, msg+taskLine(entry.task)); cerr != nil {
+			committed, cerr := s.commitAll(ctx, run, msg+taskLine(entry.task))
+			if cerr != nil {
 				slog.Warn("scheduler: commit closed TUI run", "run", run, "error", cerr)
 			}
-			if _, perr := s.cfg.Git.PublishRunBranch(ctx, run); perr != nil {
+			published, perr := s.cfg.Git.PublishRunBranch(ctx, run)
+			if perr != nil {
 				slog.Warn("scheduler: publish closed TUI run", "run", run, "error", perr)
 			}
+			identity := finishCaptureIdentity(entry.evidenceIdentity, published, committed, 0)
+			s.mu.Lock()
+			if s.runs[run] == entry {
+				entry.evidenceIdentity = identity
+			}
+			s.mu.Unlock()
 			ttl := s.cfg.RunContainerTTL
 			deadline := time.Now().UTC().Add(ttl)
 			closeReason := retainedCloseReason
@@ -736,6 +824,27 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				}
 				return transitionErr
 			}
+			if captureErr := s.captureFinishEvidence(ctx, run, outcome, identity); captureErr != nil {
+				logEvidenceFailure(run, captureErr)
+				s.mu.Lock()
+				if s.runs[run] == entry {
+					now := time.Now().UTC()
+					entry.retained = true
+					entry.retainedUntil = &now
+					entry.evidencePending = true
+					if ttl < 0 {
+						if transitionErr := s.transitionLocked(ctx, run, workspace, outcome, outcome, retainedCloseReason, actor); transitionErr != nil {
+							slog.Warn("scheduler: retained close transition after evidence capture failure",
+								"run", run, "error", transitionErr)
+						}
+					}
+					if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
+						slog.Warn("scheduler: persist evidence-retained close", "run", run, "error", sidecarErr)
+					}
+				}
+				s.mu.Unlock()
+				return captureErr
+			}
 			if ttl < 0 {
 				s.stopCloseContainer(ctx, cid)
 				s.destroyClosedRetained(ctx, entry)
@@ -743,12 +852,29 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			return nil
 		}
 	}
-	// Headless runs and TUI pause failures are immediate.
+	// Headless runs and TUI pause failures are immediate. Capture the
+	// terminal work before stopping the runtime; a failed capture retains the
+	// owner for the bounded retry sweep.
 	s.mu.Lock()
 	err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
+	if err == nil && entry != nil {
+		entry.evidenceIdentity = "none"
+		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
+			slog.Warn("scheduler: persist close evidence identity", "run", run, "error", sidecarErr)
+		}
+	}
 	s.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if captureErr := s.captureFinishEvidence(ctx, run, outcome, "none"); captureErr != nil {
+		logEvidenceFailure(run, captureErr)
+		if entry != nil {
+			s.retainAfterEvidenceFailure(entry)
+		} else {
+			s.persistEvidencePending(run, "none")
+		}
+		return captureErr
 	}
 	s.stopCloseContainer(ctx, cid)
 	return nil

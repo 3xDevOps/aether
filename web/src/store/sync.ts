@@ -193,6 +193,40 @@ async function reconcileRoomHistory(
   }
 }
 
+/**
+ * Evidence events are summaries by design. Walk every missed page until the
+ * existing cache boundary, so a burst larger than one page remains fillable.
+ */
+async function reconcileEvidenceHistory(
+  store: RootStore,
+  client: Api,
+  workspaceID: string,
+  runID: string,
+): Promise<void> {
+  const cached = store.getState().evidencePackets[runID] ?? []
+  const cachedIDs = new Set(cached.map((packet) => packet.id))
+  const oldestCachedID = cached[0]?.id
+  let before: string | undefined
+  let append = cached.length === 0
+  const visited = new Set<string>()
+
+  while (true) {
+    const page = await client.runEvidenceList({
+      workspace_id: workspaceID,
+      run_id: runID,
+      ...(before === undefined ? {} : { before }),
+      limit: 100,
+    })
+    store.getState().setEvidencePage(runID, page.packets, page.next_before, append)
+    const overlapsBoundary = oldestCachedID
+      ? page.packets.some((packet) => packet.id === oldestCachedID)
+      : page.packets.some((packet) => cachedIDs.has(packet.id))
+    if (overlapsBoundary || !page.next_before || visited.has(page.next_before)) return
+    visited.add(page.next_before)
+    before = page.next_before
+    append = true
+  }
+}
 
 /**
  * Applies one event and reports whether it resolved. Await it, and await it in
@@ -375,6 +409,24 @@ export async function applyEvent(
           .then(() => store.getState().setRoomError(runID))
           .catch((err) => {
             store.getState().setRoomError(
+              runID,
+              err instanceof Error ? err.message : String(err),
+            )
+          })
+      }
+      break
+    }
+    case 'workspace.evidence_packet': {
+      // Evidence events are summaries by design. Refetch every page of an
+      // already visible list until the cache boundary, preserving lazy
+      // loading for runs with no drawer open.
+      const runID = ev.run_id
+      const workspaceID = ev.workspace_id
+      if (runID && workspaceID && store.getState().evidencePackets[runID]) {
+        await reconcileEvidenceHistory(store, client, workspaceID, runID)
+          .then(() => store.getState().setEvidenceError(runID))
+          .catch((err) => {
+            store.getState().setEvidenceError(
               runID,
               err instanceof Error ? err.message : String(err),
             )

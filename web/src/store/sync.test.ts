@@ -8,8 +8,10 @@ import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
   alice,
   bob,
+  evidencePacket,
   fakeApi,
   otherWorkspace,
+  roomMessage,
   run,
   serverInfo as serverInfoFixture,
   workspace,
@@ -71,6 +73,20 @@ describe('hydrate', () => {
     expect(Object.keys(s.members)).toHaveLength(2)
     expect(s.runs.run_1.status).toBe('running')
   })
+  it('hydrates server-computed unanswered question counts with the run snapshot', async () => {
+    const store = createRootStore()
+    await hydrate(
+      store,
+      fakeApi({
+        runList: vi.fn(async () => [
+          run({ id: 'run_1', status: 'running', unanswered_questions: 2 }),
+        ]),
+      }),
+    )
+
+    expect(store.getState().runs.run_1.unanswered_questions).toBe(2)
+  })
+
 
   // Both shells turn `aether://run/<id>` into `<dashboard>?run=<id>`, so the
   // query is the whole deep-link contract on the dashboard's side.
@@ -560,6 +576,180 @@ describe('applyEvent', () => {
     expect(client.runGet).toHaveBeenCalledWith('run_1')
     expect(store.getState().runs.run_1.member_id).toBe(bob.id)
     expect(store.getState().lastSeq).toBe(5)
+  })
+  it('refreshes an unopened run count for question and reply events', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    expect(store.getState().roomMessages.run_1).toBeUndefined()
+
+    const client = fakeApi({
+      runGet: vi
+        .fn()
+        .mockResolvedValueOnce(run({ unanswered_questions: 1 }))
+        .mockResolvedValueOnce(run({ unanswered_questions: 0 })),
+    })
+    const roomEvent = (seq: number, kind: 'question' | 'reply'): Event => ({
+      id: `room-${seq}`,
+      seq,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.room_message',
+      payload: { kind },
+    })
+
+    await applyEvent(store, roomEvent(8, 'question'), client)
+    expect(store.getState().runs.run_1.unanswered_questions).toBe(1)
+    expect(store.getState().roomMessages.run_1).toBeUndefined()
+
+    await applyEvent(store, roomEvent(9, 'reply'), client)
+    expect(store.getState().runs.run_1.unanswered_questions).toBe(0)
+    expect(store.getState().roomMessages.run_1).toBeUndefined()
+    expect(client.runGet).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a question event unresolved when its attention refresh fails', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const client = fakeApi({
+      runGet: vi.fn(async () => {
+        throw new Error('run snapshot unavailable')
+      }),
+    })
+    const event: Event = {
+      id: 'room-refresh-failed',
+      seq: 8,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.room_message',
+      payload: { kind: 'question' },
+    }
+
+    expect(await applyEvent(store, event, client)).toBe(false)
+    expect(store.getState().lastSeq).toBe(0)
+  })
+
+  it('walks disconnected room pages back to the cached boundary before merging', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const message = (index: number) => roomMessage({
+      id: `message-${String(index).padStart(3, '0')}`,
+      body: `message ${index}`,
+      created_at: new Date(Date.UTC(2026, 7, 14, 10, 0, index)).toISOString(),
+    })
+    const cached = Array.from({ length: 100 }, (_, index) => message(index))
+    const arrivals = Array.from({ length: 150 }, (_, index) => message(index + 100))
+    store.getState().initializeRoomPagination('run_1')
+    store.getState().setRoomPage('run_1', cached)
+
+    const list = vi.fn()
+      .mockResolvedValueOnce({ messages: arrivals.slice(50), next_before: 'gap-cursor-1' })
+      .mockResolvedValueOnce({ messages: arrivals.slice(0, 100), next_before: 'gap-cursor-2' })
+      .mockResolvedValueOnce({ messages: cached })
+    const client = fakeApi({ runRoomList: list })
+    const event: Event = {
+      id: 'room-gap',
+      seq: 8,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.room_message',
+      payload: {},
+    }
+
+    expect(await applyEvent(store, event, client)).toBe(true)
+    expect(list.mock.calls.map(([params]) => params.before)).toEqual([
+      undefined,
+      'gap-cursor-1',
+      'gap-cursor-2',
+    ])
+    expect(store.getState().roomMessages.run_1.map((item) => item.id)).toEqual(
+      cached.concat(arrivals).map((item) => item.id),
+    )
+  })
+
+  it('paginates to an old room message before applying a mutable receipt update', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const message = (index: number) => roomMessage({
+      id: `message-${String(index).padStart(3, '0')}`,
+      body: `message ${index}`,
+      created_at: new Date(Date.UTC(2026, 7, 14, 10, 0, index)).toISOString(),
+    })
+    const cached = Array.from({ length: 200 }, (_, index) => message(index))
+    store.getState().initializeRoomPagination('run_1')
+    store.getState().setRoomPage('run_1', cached, 'cached-cursor')
+    const target = cached[50]
+    const updatedTarget = { ...target, state: 'uncertain' as const, updated_at: '2026-08-14T11:00:00Z' }
+    const list = vi.fn()
+      .mockResolvedValueOnce({ messages: cached.slice(100), next_before: 'old-cursor' })
+      .mockResolvedValueOnce({
+        messages: [...cached.slice(0, 50), updatedTarget, ...cached.slice(51, 100)],
+        next_before: 'oldest-cursor',
+      })
+    const client = fakeApi({ runRoomList: list })
+    const event: Event = {
+      id: 'room-old-receipt',
+      seq: 8,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.room_message',
+      payload: { message_id: target.id },
+    }
+
+    expect(await applyEvent(store, event, client)).toBe(true)
+    expect(list.mock.calls.map(([params]) => params.before)).toEqual([undefined, 'old-cursor'])
+    expect(store.getState().roomMessages.run_1.find((item) => item.id === target.id)).toMatchObject({
+      state: 'uncertain',
+      updated_at: '2026-08-14T11:00:00Z',
+    })
+  })
+
+  it('walks every missed evidence page through the cached boundary', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const packet = (index: number) => evidencePacket({
+      id: `packet-${String(index).padStart(3, '0')}`,
+      captured_at: new Date(Date.UTC(2026, 7, 14, 10, 0, index)).toISOString(),
+      created_at: new Date(Date.UTC(2026, 7, 14, 10, 0, index)).toISOString(),
+      updated_at: new Date(Date.UTC(2026, 7, 14, 10, 0, index)).toISOString(),
+    })
+    const cached = Array.from({ length: 100 }, (_, index) => packet(index))
+    const arrivals = Array.from({ length: 150 }, (_, index) => packet(index + 100))
+    store.getState().initializeEvidencePagination('run_1')
+    store.getState().setEvidencePage('run_1', cached, 'cached-evidence-cursor')
+
+    const list = vi.fn()
+      .mockResolvedValueOnce({ packets: arrivals.slice(50), next_before: 'evidence-gap-1' })
+      .mockResolvedValueOnce({ packets: arrivals.slice(0, 100), next_before: 'evidence-gap-2' })
+      .mockResolvedValueOnce({ packets: cached })
+    const client = fakeApi({ runEvidenceList: list })
+    const event: Event = {
+      id: 'evidence-gap',
+      seq: 8,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: '',
+      type: 'workspace.evidence_packet',
+      payload: { packet_id: arrivals[149].id },
+    }
+
+    expect(await applyEvent(store, event, client)).toBe(true)
+    expect(list.mock.calls.map(([params]) => params.before)).toEqual([
+      undefined,
+      'evidence-gap-1',
+      'evidence-gap-2',
+    ])
+    expect(store.getState().evidencePackets.run_1).toHaveLength(250)
+    expect(store.getState().evidenceNextBefore.run_1).toBeUndefined()
+    expect(store.getState().evidencePagination.run_1).toEqual({ initialized: true, exhausted: true })
   })
 
   it('resets the cursor and asks for a fresh snapshot when the log restarts', async () => {

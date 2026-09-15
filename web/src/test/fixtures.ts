@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  EvidencePacket,
   Member,
   RoomMessage,
   RoomStatusResult,
@@ -202,6 +203,21 @@ export function roomMessage(over: Partial<RoomMessage> = {}): RoomMessage {
   }
 }
 
+export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePacket {
+  return {
+    id: 'packet_1',
+    workspace_id: workspace.id,
+    run_id: 'run_1',
+    creator_id: alice.id,
+    trigger: 'report',
+    objective: 'Inspect the change',
+    captured_at: '2026-08-14T10:00:00Z',
+    event_boundary: 1,
+    created_at: '2026-08-14T10:00:00Z',
+    updated_at: '2026-08-14T10:00:00Z',
+    ...over,
+  }
+}
 
 
 /** An Api stub; every method is a spy so tests can assert on calls. */
@@ -233,6 +249,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     runRoomPost: vi.fn(async () => ({ message: roomMessage() })),
     runRoomDecide: vi.fn(async () => ({ message: roomMessage({ state: 'denied' }) })),
+    runEvidenceList: vi.fn(async () => ({ packets: [] })),
+    runEvidenceGet: vi.fn(async () => ({ packet: evidencePacket() })),
+    runEvidencePatch: vi.fn(async () => ({ packet: evidencePacket(), patch: '', truncated: false })),
+    runEvidenceTranscript: vi.fn(async () => ({ packet: evidencePacket(), data_base64: '', truncated: false })),
     approvalList: vi.fn(async () => []),
     approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),

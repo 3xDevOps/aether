@@ -220,6 +220,66 @@ export interface RoomDecideResult {
 
 export type RoomDeliveryReceipt = 'sent' | 'not_sent' | 'uncertain'
 
+export type EvidenceTrigger = 'finish' | 'handoff' | 'report'
+
+export interface ChangedFileFact {
+  path: string
+  status?: string
+  additions?: number
+  deletions?: number
+}
+
+export interface EvidenceSourceFact {
+  name: string
+  available: boolean
+  truncated?: boolean
+  reason?: string
+}
+
+export interface EvidencePacket {
+  id: string
+  workspace_id: string
+  run_id: string
+  creator_id: string
+  trigger: EvidenceTrigger
+  objective: string
+  captured_at: string
+  expires_at?: string
+  event_boundary: number
+  base_revision?: string
+  retained_revision?: string
+  changed_files?: ChangedFileFact[]
+  sources?: EvidenceSourceFact[]
+  related_room_message_ids?: string[]
+  unresolved_facts?: string[]
+  next_action?: string
+  provenance?: string
+  idempotency_key?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface EvidencePacketListResult {
+  packets: EvidencePacket[]
+  next_before?: string
+}
+
+export interface EvidenceGetResult {
+  packet: EvidencePacket
+}
+
+export interface EvidencePatchResult {
+  packet: EvidencePacket
+  patch: string
+  truncated: boolean
+}
+
+export interface EvidenceTranscriptResult {
+  packet: EvidencePacket
+  data_base64: string
+  truncated: boolean
+}
+
 
 export interface RunStatusPayload {
   from?: RunStatus

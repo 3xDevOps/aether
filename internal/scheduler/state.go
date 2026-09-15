@@ -166,6 +166,9 @@ type sidecar struct {
 	// was attempted but not confirmed. Such an owner is retried by the
 	// bounded cleanup sweep before the run is terminalized.
 	DestroyPending bool `json:"destroy_pending,omitempty"`
+	// EvidencePending means terminalization or recovery could not complete
+	// required capture. The sidecar remains as a retryable source of truth.
+	EvidencePending bool `json:"evidence_pending,omitempty"`
 	// RunUser is the resolved numeric "uid:gid" the run's container and
 	// ownership pass use; empty means root. Recovered so the
 	// credential-home ownership guard still sees live runs across a
@@ -193,10 +196,13 @@ type sidecar struct {
 	// finalize. Recovery uses it to resume exit handling without re-attaching.
 	ExitObserved bool `json:"exit_observed"`
 	ExitCode     int  `json:"exit_code"`
-	// The conflict-coordination assets this run's container holds, written
-	// before the container is created. BridgeDigest and BridgePath name
-	// the staged MCP bridge binary and are the reference that keeps it from
-	// being collected; CoordDir is the provisioned coordination directory,
+	// EvidenceIdentity is the stable published-commit (or persisted fallback)
+	// identity used by finish capture. Keeping it in the sidecar lets a
+	// retry after a crash reuse the same packet key.
+	EvidenceIdentity string `json:"evidence_identity,omitempty"`
+	// before the container is created. BridgeDigest and BridgePath name the
+	// staged MCP bridge binary and are the reference that keeps it from being
+	// collected; CoordDir is the provisioned coordination directory,
 	// and its presence is what "this run has coordination" means. All empty
 	// for a run launched with coordination off.
 	BridgeDigest string `json:"bridge_digest,omitempty"`
@@ -204,33 +210,35 @@ type sidecar struct {
 	CoordDir     string `json:"coord_dir,omitempty"`
 	// GitAuthorEmail is the address baked into the container's
 	// GIT_AUTHOR_EMAIL when it was created, kept so a restart still knows
-	// who the agent's own commits are authored as.
+	// who the agent's own commits are.
 	GitAuthorEmail string `json:"git_author_email,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
 func (e *supervised) sidecar() sidecar {
 	return sidecar{
-		RunID:          string(e.runID),
-		ContainerID:    string(e.containerID),
-		WorkspaceID:    string(e.workspaceID),
-		Mode:           e.launchMode,
-		Paused:         e.paused,
-		KillRequested:  e.killRequested,
-		Retained:       e.retained,
-		RetainedUntil:  e.retainedUntil,
-		DestroyPending: e.destroyPending,
-		RunUser:        e.runUser,
-		Home:           e.home,
-		Reporter:       e.reporter,
-		AgentState:     e.agentReport.State,
-		AgentReason:    e.agentReport.Reason,
-		ExitObserved:   e.exitObserved,
-		ExitCode:       e.exitCode,
-		BridgeDigest:   e.bridgeDigest,
-		BridgePath:     e.bridgePath,
-		CoordDir:       e.coordDir,
-		GitAuthorEmail: e.gitAuthorEmail,
+		RunID:            string(e.runID),
+		ContainerID:      string(e.containerID),
+		WorkspaceID:      string(e.workspaceID),
+		Mode:             e.launchMode,
+		Paused:           e.paused,
+		KillRequested:    e.killRequested,
+		Retained:         e.retained,
+		RetainedUntil:    e.retainedUntil,
+		DestroyPending:   e.destroyPending,
+		EvidencePending:  e.evidencePending,
+		RunUser:          e.runUser,
+		Home:             e.home,
+		Reporter:         e.reporter,
+		AgentState:       e.agentReport.State,
+		AgentReason:      e.agentReport.Reason,
+		ExitObserved:     e.exitObserved,
+		ExitCode:         e.exitCode,
+		EvidenceIdentity: e.evidenceIdentity,
+		BridgeDigest:     e.bridgeDigest,
+		BridgePath:       e.bridgePath,
+		CoordDir:         e.coordDir,
+		GitAuthorEmail:   e.gitAuthorEmail,
 	}
 }
 

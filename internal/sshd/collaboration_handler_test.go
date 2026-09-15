@@ -2,13 +2,18 @@ package sshd
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -100,6 +105,48 @@ func (f *persistentRoomService) Deny(ctx context.Context, id string, _ domain.Me
 func (f *persistentRoomService) Protect(ctx context.Context, run domain.RunID, _ domain.MemberID) error {
 	return f.db.SetRunProtected(ctx, run, true)
 }
+
+type handlerEvidenceService struct {
+	packet      protocol.EvidencePacket
+	list        protocol.EvidencePacketListResult
+	patch       gitengine.Patch
+	transcript  []byte
+	capture     protocol.EvidencePacket
+	captureErr  error
+	captureSeen bool
+}
+
+func (f *handlerEvidenceService) List(context.Context, domain.WorkspaceID, domain.RunID, string, int) (protocol.EvidencePacketListResult, error) {
+	return f.list, nil
+}
+
+func (f *handlerEvidenceService) Get(context.Context, domain.WorkspaceID, string) (protocol.EvidencePacket, error) {
+	return f.packet, nil
+}
+
+func (f *handlerEvidenceService) RenderPatch(context.Context, domain.WorkspaceID, string, int) (gitengine.Patch, error) {
+	return f.patch, nil
+}
+
+func (f *handlerEvidenceService) ReadTranscript(context.Context, domain.WorkspaceID, string, int) ([]byte, bool, error) {
+	return f.transcript, false, nil
+}
+func (f *handlerEvidenceService) Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error) {
+	f.captureSeen = true
+	return f.capture, f.captureErr
+}
+
+func handlerPacket(id string, ws domain.WorkspaceID, run domain.RunID, creator domain.MemberID) *store.EvidencePacket {
+	return &store.EvidencePacket{
+		ID:             id,
+		WorkspaceID:    ws,
+		RunID:          run,
+		CreatorID:      creator,
+		Trigger:        store.EvidenceFinish,
+		IdempotencyKey: "packet-" + id,
+		EventBoundary:  1,
+	}
+}
 func handlerRoomMessage(id string, ws domain.WorkspaceID, run domain.RunID, actor domain.MemberID) *store.RoomMessage {
 	return &store.RoomMessage{
 		ID:             id,
@@ -130,6 +177,7 @@ func handlerCallJSON(t *testing.T, e *testEnv, member domain.MemberID, method st
 	}
 	return json.Unmarshal(rawResult, result)
 }
+
 func TestRoomHandlersPermissionsBoundsAndMutations(t *testing.T) {
 	e := newTestEnv(t, nil)
 	rooms := &handlerRoomService{
@@ -234,4 +282,122 @@ func TestRoomStatusAndLegacyInjectAndProtect(t *testing.T) {
 
 func controlSnapshot(member domain.MemberID) control.Snapshot {
 	return control.Snapshot{MemberID: member, AcquiredAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute), SessionID: "private", Generation: 99}
+}
+
+func TestEvidenceHandlersScopeAndBoundedReads(t *testing.T) {
+	e := newTestEnv(t, nil)
+	stored := handlerPacket("packet-1", e.ws.ID, e.run.ID, e.member.ID)
+	if err := e.store.CreateEvidencePacket(context.Background(), stored); err != nil {
+		t.Fatalf("create packet: %v", err)
+	}
+	packet := protocol.EvidencePacketFromStore(stored)
+	evidenceFake := &handlerEvidenceService{
+		packet:     packet,
+		list:       protocol.EvidencePacketListResult{Packets: []protocol.EvidencePacket{packet}},
+		patch:      gitengine.Patch{Text: "diff --git a/a b/a", Truncated: true},
+		transcript: []byte("shell output"),
+	}
+	e.srv.cfg.Services.Evidence = evidenceFake
+
+	var got protocol.RunEvidenceGetResult
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunEvidenceGet, protocol.RunEvidenceGetParams{
+		WorkspaceID: string(e.ws.ID), PacketID: stored.ID,
+	}, &got); err != nil {
+		t.Fatalf("evidence get: %v", err)
+	}
+	if got.Packet.ID != stored.ID {
+		t.Fatalf("evidence packet = %+v", got.Packet)
+	}
+	var patch protocol.RunEvidencePatchResult
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunEvidencePatch, protocol.RunEvidencePatchParams{
+		WorkspaceID: string(e.ws.ID), PacketID: stored.ID, MaxBytes: 128,
+	}, &patch); err != nil {
+		t.Fatalf("evidence patch: %v", err)
+	}
+	if patch.Patch != evidenceFake.patch.Text || !patch.Truncated {
+		t.Fatalf("evidence patch = %+v", patch)
+	}
+	var transcript protocol.RunEvidenceTranscriptResult
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunEvidenceTranscript, protocol.RunEvidenceTranscriptParams{
+		WorkspaceID: string(e.ws.ID), PacketID: stored.ID, MaxBytes: 128,
+	}, &transcript); err != nil {
+		t.Fatalf("evidence transcript: %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(transcript.DataBase64)
+	if err != nil || string(decoded) != string(evidenceFake.transcript) {
+		t.Fatalf("transcript = %q, decode error=%v", transcript.DataBase64, err)
+	}
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunEvidenceTranscript, protocol.RunEvidenceTranscriptParams{
+		WorkspaceID: string(e.ws.ID), PacketID: stored.ID, MaxBytes: evidence.MaxTranscriptBytes + 1,
+	}, nil); err == nil {
+		t.Fatal("oversized transcript read succeeded")
+	}
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunEvidenceGet, protocol.RunEvidenceGetParams{
+		WorkspaceID: "workspace-not-mine", PacketID: stored.ID,
+	}, nil); err == nil {
+		t.Fatal("cross-workspace evidence read succeeded")
+	}
+	var list protocol.EvidencePacketListResult
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunEvidenceList, protocol.RunEvidenceListParams{
+		WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Limit: 1,
+	}, &list); err != nil || len(list.Packets) != 1 {
+		t.Fatalf("evidence list = %+v, err=%v", list, err)
+	}
+}
+
+func TestHandoffPostsImmediateEvidenceContext(t *testing.T) {
+	e := newTestEnv(t, nil)
+	_, recipient := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	rooms := &handlerRoomService{postResult: collab.Result{Message: handlerRoomMessage("handoff-context", e.ws.ID, e.run.ID, e.member.ID)}}
+	capture := &handlerEvidenceService{capture: protocol.EvidencePacket{ID: "handoff-packet"}}
+	e.srv.cfg.Services.Rooms = rooms
+	e.srv.cfg.Services.Evidence = capture
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunHandoff, protocol.RunHandoffParams{
+		RunID: string(e.run.ID), ToMemberID: string(recipient.ID),
+	}, nil); err != nil {
+		t.Fatalf("run.handoff: %v", err)
+	}
+	if !capture.captureSeen || rooms.postInput.Kind != store.RoomMessageSystem || !strings.Contains(rooms.postInput.Body, "handoff-packet") {
+		t.Fatalf("handoff context = capture=%v input=%+v", capture.captureSeen, rooms.postInput)
+	}
+}
+
+func TestHandoffTransientEvidenceRetriesAndPublishesOneRoomRecord(t *testing.T) {
+	e := newTestEnv(t, nil)
+	_, recipient := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	rooms := e.srv.cfg.Services.Rooms
+	capture := &handlerEvidenceService{
+		capture:    protocol.EvidencePacket{ID: "handoff-packet"},
+		captureErr: errors.New("temporary capture failure"),
+	}
+	e.srv.cfg.Services.Evidence = capture
+	if err := handlerCallJSON(t, e, e.member.ID, protocol.MethodRunHandoff, protocol.RunHandoffParams{
+		RunID: string(e.run.ID), ToMemberID: string(recipient.ID),
+	}, nil); err != nil {
+		t.Fatalf("run.handoff: %v", err)
+	}
+	outbox := e.store.(store.HandoffOutboxStore)
+	pending, err := outbox.ListPendingHandoffOutbox(t.Context(), 10)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending handoff after transient capture = %v, err=%v", pending, err)
+	}
+	if pending[0].EvidenceState != store.HandoffEvidencePending ||
+		pending[0].PublicationState != store.HandoffPublicationPending {
+		t.Fatalf("transient capture settled permanently = %+v", pending[0])
+	}
+
+	capture.captureErr = nil
+	e.srv.processHandoffOutbox(t.Context(), pending[0], outbox, rooms, capture)
+	e.srv.processHandoffOutbox(t.Context(), pending[0], outbox, rooms, capture)
+	remaining, err := outbox.ListPendingHandoffOutbox(t.Context(), 10)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("pending handoff after replay = %v, err=%v", remaining, err)
+	}
+	page, err := e.store.ListRoomMessages(t.Context(), e.ws.ID, e.run.ID, "", 10)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("handoff room records = %v, err=%v; duplicate replay", page, err)
+	}
+	if !strings.Contains(page.Items[0].Body, "handoff-packet") {
+		t.Fatalf("handoff room record = %q, want packet attribution", page.Items[0].Body)
+	}
 }

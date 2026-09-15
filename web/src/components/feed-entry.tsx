@@ -89,6 +89,7 @@ const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> =
   'sync.conflict': (p) => suffix(fileCount(p.files), 'in conflict'),
   'server.update': (p) => join([p.phase, p.version, p.detail]),
   'workspace.room_message': (p) => join([p.kind, p.state, p.message_id]),
+  'workspace.evidence_packet': (p) => join([p.trigger, p.packet_id]),
 }
 
 function describe(event: Event): ReactNode {

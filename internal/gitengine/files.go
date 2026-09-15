@@ -159,7 +159,7 @@ func (e *Engine) listCheckout(ctx context.Context, run domain.RunID, checkout, d
 	if dir != "" {
 		args = append(args, "--", strings.TrimSuffix(dir, "/")+"/")
 	}
-	output, err := e.gitCheckoutRaw(ctx, run, checkout, args...)
+	output, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, args...)
 	if err != nil {
 		return nil, err
 	}

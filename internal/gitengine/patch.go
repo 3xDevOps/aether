@@ -1,12 +1,9 @@
 package gitengine
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -149,59 +146,4 @@ func trimToLastLine(text string, truncated bool) string {
 		return text[:i+1]
 	}
 	return text
-}
-
-// gitStaged runs a git command in a run checkout against a scratch index
-// file, capturing at most limit bytes of stdout. It exists beside Engine.git
-// because that one sanitizes the environment away entirely and trims its
-// output: patch text needs the scratch index and object redirection, its
-// own byte ceiling, and its bytes verbatim.
-func (e *Engine) gitStaged(ctx context.Context, dir, index string, limit int, args ...string) (string, bool, error) {
-	// quotePath off keeps non-ASCII paths raw instead of octal-escaped, so a
-	// patch names its files exactly as the -z listings behind run.diff do -
-	// the client matches the two by path.
-	argv := append([]string{"-C", dir, "-c", "safe.directory=*", "-c", "core.quotePath=false"}, args...)
-	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = append(gitEnv(),
-		"GIT_INDEX_FILE="+index,
-		// New objects land beside the scratch index and vanish with it; the
-		// checkout's own database stays readable through the scratch
-		// directory's alternates file but is never written to.
-		"GIT_OBJECT_DIRECTORY="+filepath.Join(filepath.Dir(index), "objects"),
-	)
-	out := &boundedBuffer{limit: limit}
-	var stderr bytes.Buffer
-	cmd.Stdout = out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", false, fmt.Errorf("gitengine: git %s: %w: %s",
-			strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return string(out.buf), out.over, nil
-}
-
-// boundedBuffer keeps the first limit bytes written to it and reports
-// whether anything was dropped. It never errors, so the command it drains
-// runs to completion instead of dying on a broken pipe mid-diff.
-type boundedBuffer struct {
-	buf   []byte
-	limit int
-	over  bool
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if b.limit < 0 {
-		b.buf = append(b.buf, p...)
-		return len(p), nil
-	}
-	switch room := b.limit - len(b.buf); {
-	case room >= len(p):
-		b.buf = append(b.buf, p...)
-	case room > 0:
-		b.buf = append(b.buf, p[:room]...)
-		b.over = true
-	case len(p) > 0:
-		b.over = true
-	}
-	return len(p), nil
 }

@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -100,16 +103,154 @@ type RoomMessage struct {
 	UpdatedAt    time.Time
 }
 
+// EvidenceTrigger identifies why an evidence packet was captured.
+type EvidenceTrigger string
+
+const (
+	EvidenceFinish  EvidenceTrigger = "finish"
+	EvidenceHandoff EvidenceTrigger = "handoff"
+	EvidenceReport  EvidenceTrigger = "report"
+)
+
+func (t EvidenceTrigger) Valid() bool {
+	return t == EvidenceFinish || t == EvidenceHandoff || t == EvidenceReport
+}
+
+// EvidencePublicationOwner identifies the durable owner responsible for
+// publishing a packet's event projection. It is persisted with the packet so
+// capture callers cannot accidentally enqueue a packet into a second outbox.
+type EvidencePublicationOwner string
+
+const (
+	EvidencePublicationOwnerGeneric     EvidencePublicationOwner = "generic"
+	EvidencePublicationOwnerCoordReport EvidencePublicationOwner = "coord_report"
+)
+
+func (o EvidencePublicationOwner) Valid() bool {
+	return o == EvidencePublicationOwnerGeneric || o == EvidencePublicationOwnerCoordReport
+}
+
+// EvidenceOriginKind identifies the authority that caused a packet to be
+// captured. The origin is part of idempotency and audit attribution.
+type EvidenceOriginKind string
+
+const (
+	EvidenceOriginHuman  EvidenceOriginKind = "human"
+	EvidenceOriginRun    EvidenceOriginKind = "run"
+	EvidenceOriginServer EvidenceOriginKind = "server"
+)
+
+// EvidenceOrigin is intentionally small and contains no host paths or
+// untrusted payload. Human and run origins carry their stable IDs; a server
+// origin has an empty ID.
+type EvidenceOrigin struct {
+	Kind EvidenceOriginKind
+	ID   string
+}
+
+func (o EvidenceOrigin) Valid() bool {
+	switch o.Kind {
+	case EvidenceOriginHuman, EvidenceOriginRun:
+		return o.ID != ""
+	case EvidenceOriginServer:
+		return o.ID == ""
+	default:
+		return false
+	}
+}
+
+// EvidencePacketAvailability describes whether retained sources can still be
+// opened. Expired rows remain visible as bounded metadata tombstones.
+type EvidencePacketAvailability string
+
+const (
+	EvidenceAvailable EvidencePacketAvailability = "available"
+	EvidenceExpired   EvidencePacketAvailability = "expired"
+)
+
+// ChangedFileFact is metadata about one changed file. It deliberately does
+// not contain file contents or a host filesystem path.
+type ChangedFileFact struct {
+	Path      string `json:"path"`
+	Status    string `json:"status,omitempty"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+}
+
+// EvidenceSourceFact records source availability independently from content.
+type EvidenceSourceFact struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// EvidencePacket is durable evidence metadata. Large transcript and diff
+// bodies remain in their source systems; this record only keeps bounded facts
+// and references needed to find them again.
+type EvidencePacket struct {
+	ID                    string
+	WorkspaceID           domain.WorkspaceID
+	RunID                 domain.RunID
+	Origin                EvidenceOrigin
+	OwnerID               domain.MemberID
+	CreatorID             domain.MemberID
+	PublicationOwner      EvidencePublicationOwner
+	Trigger               EvidenceTrigger
+	Objective             string
+	CapturedAt            time.Time
+	ExpiresAt             *time.Time
+	Availability          EvidencePacketAvailability
+	ExpiredAt             *time.Time
+	EventBoundary         uint64
+	BaseRevision          string
+	RetainedRevision      string
+	ChangedFiles          []ChangedFileFact
+	Sources               []EvidenceSourceFact
+	RelatedRoomMessageIDs []string
+	UnresolvedFacts       []string
+	NextAction            string
+	Provenance            string
+	IdempotencyKey        string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
+// EvidencePublication is the durable event outbox entry for a packet. The
+// packet remains the source of truth for the bounded event payload.
+type EvidencePublication struct {
+	PacketID      string
+	EventID       string
+	Attempts      int
+	NextAttemptAt time.Time
+	LastError     string
+	PublishedAt   *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 const (
 	// MaxCollaborationPageSize bounds every room and evidence list query.
 	MaxCollaborationPageSize     = 100
 	DefaultCollaborationPageSize = 50
 )
 
-// RoomMessagePage uses an opaque cursor. Items are
+// RoomMessagePage and EvidencePacketPage use an opaque cursor. Items are
 // newest first; NextBefore is empty when the page is exhausted.
 type RoomMessagePage struct {
 	Items      []*RoomMessage
+	NextBefore string
+}
+
+// EvidenceExpiryStore performs durable state transitions for retention. It
+// keeps expired packet metadata visible as tombstones before final purge.
+type EvidenceExpiryStore interface {
+	MarkEvidenceExpired(context.Context, string, time.Time, []EvidenceSourceFact) error
+	PurgeExpiredEvidenceTombstones(context.Context, time.Time, int) (int, error)
+}
+
+type EvidencePacketPage struct {
+	Items      []*EvidencePacket
 	NextBefore string
 }
 
@@ -141,14 +282,61 @@ type RoomMessageStore interface {
 	DecideRoomMessage(context.Context, string, RoomMessageState, RoomMessageState, string, time.Time) (bool, error)
 }
 
+// EvidencePacketStore is the durable evidence packet persistence surface.
+type EvidencePacketStore interface {
+	CreateEvidencePacket(context.Context, *EvidencePacket) error
+	GetEvidencePacket(context.Context, string) (*EvidencePacket, error)
+	ListEvidencePackets(context.Context, domain.WorkspaceID, domain.RunID, string, int) (*EvidencePacketPage, error)
+	ListExpiredEvidencePackets(context.Context, time.Time, int) ([]*EvidencePacket, error)
+	DeleteEvidencePacket(context.Context, string) error
+}
+
+// EvidenceOriginLookup is implemented by stores that scope idempotency by
+// origin kind and origin ID. The legacy member-based lookup remains on the
+// evidence service interface for compatibility with older narrow fakes.
+type EvidenceOriginLookup interface {
+	GetEvidencePacketByOrigin(context.Context, EvidenceOrigin, domain.RunID, string) (*EvidencePacket, error)
+}
+
+// EvidencePublicationStore persists and advances the evidence event outbox.
+type EvidencePublicationStore interface {
+	ListPendingEvidencePublications(context.Context, time.Time, string, int) ([]*EvidencePublication, string, error)
+	MarkEvidencePublicationPublished(context.Context, string, time.Time) error
+	MarkEvidencePublicationFailure(context.Context, string, int, time.Time, string) error
+}
+
+// EvidenceStaging journals private Git refs and transcript files before
+// capture begins. A row is deleted in the same transaction that creates the
+// packet metadata, or by crash cleanup after confirming no packet exists.
+type EvidenceStaging struct {
+	ID             string
+	WorkspaceID    domain.WorkspaceID
+	RunID          domain.RunID
+	Origin         EvidenceOrigin
+	CreatorID      domain.MemberID
+	IdempotencyKey string
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+}
+
+// EvidenceStagingStore is optional on compatibility stores; the SQLite DB
+// implements it so capture can journal and reap artifacts across restarts.
+type EvidenceStagingStore interface {
+	CreateEvidenceStaging(context.Context, *EvidenceStaging) error
+	ListEvidenceStaging(context.Context, time.Time, int) ([]*EvidenceStaging, error)
+	DeleteEvidenceStaging(context.Context, string) error
+}
+
 // CollaborationStore is the durable Release A collaboration surface.
 type CollaborationStore interface {
 	RoomMessageStore
+	EvidencePacketStore
 }
 
 var _ CollaborationStore = (*DB)(nil)
 
 const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at`
+const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at`
 
 func marshalCollaborationJSON(v any, empty string) (string, error) {
 	b, err := json.Marshal(v)
@@ -160,6 +348,7 @@ func marshalCollaborationJSON(v any, empty string) (string, error) {
 	}
 	return string(b), nil
 }
+
 func (d *DB) CreateRoomMessage(ctx context.Context, m *RoomMessage) error {
 	if m == nil || m.WorkspaceID == "" || m.RunID == "" || m.ActorID == "" || m.Kind == "" || m.IdempotencyKey == "" {
 		return errors.New("store: create room message: workspace_id, run_id, actor_id, kind, and idempotency_key are required")
@@ -312,6 +501,36 @@ func (d *DB) ListRoomMessages(ctx context.Context, workspace domain.WorkspaceID,
 		page.NextBefore = page.Items[len(page.Items)-1].ID
 	}
 	return page, nil
+}
+
+// EncodeEvidenceCursor returns a self-contained cursor. It intentionally
+// carries the ordering tuple rather than a packet lookup key so retention
+// tombstones can be purged without invalidating an active traversal.
+func EncodeEvidenceCursor(capturedAt time.Time, id string) string {
+	if capturedAt.IsZero() || id == "" {
+		return ""
+	}
+	raw := strconv.FormatInt(capturedAt.UnixNano(), 10) + ":" + id
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeEvidenceCursor(cursor string) (time.Time, string, bool) {
+	if cursor == "" {
+		return time.Time{}, "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	parts := strings.SplitN(string(raw), ":", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", false
+	}
+	nanos, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || parts[1] == "" {
+		return time.Time{}, "", false
+	}
+	return time.Unix(0, nanos).UTC(), parts[1], true
 }
 
 // ClaimRoomMessage atomically reserves one queued message for delivery. The
@@ -610,6 +829,7 @@ func (d *DB) DecideRoomMessage(ctx context.Context, id string, from, to RoomMess
 	}
 	return false, nil
 }
+
 func scanRoomMessage(row interface{ Scan(...any) error }) (*RoomMessage, error) {
 	var (
 		m            RoomMessage

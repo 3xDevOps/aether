@@ -17,6 +17,10 @@ import type {
   DaemonStatusResult,
   EnvHarnessesResult,
   EnvSaveResult,
+  EvidenceGetResult,
+  EvidencePacketListResult,
+  EvidencePatchResult,
+  EvidenceTranscriptResult,
   GatewayCapabilities,
   GitHubConnectResult,
   GitHubProbeResult,
@@ -337,6 +341,24 @@ export const api = {
     control_session_id: string
     control_generation: number
   }) => call<RoomDecideResult>('run.room.decide', params),
+  runEvidenceList: (params: {
+    workspace_id: string
+    run_id: string
+    before?: string
+    limit?: number
+  }) => call<EvidencePacketListResult>('run.evidence.list', params),
+  runEvidenceGet: (params: { workspace_id: string; packet_id: string }) =>
+    call<EvidenceGetResult>('run.evidence.get', params),
+  runEvidencePatch: (params: {
+    workspace_id: string
+    packet_id: string
+    max_bytes?: number
+  }) => call<EvidencePatchResult>('run.evidence.patch', params),
+  runEvidenceTranscript: (params: {
+    workspace_id: string
+    packet_id: string
+    max_bytes?: number
+  }) => call<EvidenceTranscriptResult>('run.evidence.transcript', params),
   approvalList: (workspaceID: string, all = false) =>
     call<{ approvals: Approval[] }>('approval.list', {
       workspace_id: workspaceID,

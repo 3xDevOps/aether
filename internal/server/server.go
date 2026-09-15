@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
@@ -139,8 +141,9 @@ type Server struct {
 	git      *gitengine.Engine
 	pty      *ptyhost.Host
 	sched    *scheduler.Scheduler
-	adapters *adapter.Manager
 	control  *control.Service
+	evidence *evidence.Service
+	adapters *adapter.Manager
 	ssh      *sshd.Server
 	web      *servergw.Gateway
 	tailnet  servergw.Tailnet
@@ -177,6 +180,16 @@ func forwardRunTitle(setter runTitleSetter, key ptyhost.SessionKey, title string
 		return
 	}
 	setter.SetRunTitle(run, title)
+}
+
+// ptyTranscript adapts the PTY host's complete replay seam to the evidence
+// service's context-free transcript exporter. The byte count belongs to
+// attach framing, not the bounded evidence artifact copy.
+type ptyTranscript struct{ host *ptyhost.Host }
+
+func (p ptyTranscript) Replay(run domain.RunID) (io.ReadCloser, error) {
+	reader, _, err := p.host.Replay(run)
+	return reader, err
 }
 
 // New constructs every component from cfg, fanning the data directory out
@@ -280,7 +293,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
-	s.control = control.New(control.Config{})
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
@@ -305,6 +317,18 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
+	s.control = control.New(control.Config{})
+	if s.evidence, err = evidence.New(evidence.Config{
+		Store:       s.db,
+		Git:         s.git,
+		Runs:        s.db,
+		Transcript:  ptyTranscript{host: s.pty},
+		Events:      s.log,
+		EvidenceDir: filepath.Join(cfg.DataDir, "evidence"),
+	}); err != nil {
+		return nil, err
+	}
+	s.sched.UseEvidence(s.evidence)
 	s.adapters = adapter.NewManager(s.bus, s.db, s.pty)
 	whois := cfg.WhoIs
 	var node reachability.Node
@@ -338,16 +362,17 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Config:            sshd.NewConfigBackend(homes, s.db),
 	}
 	if err = s.buildServices(Deps{
-		Config:  cfg,
-		DataDir: cfg.DataDir,
-		Store:   s.db,
-		Bus:     s.bus,
-		Events:  s.log,
-		Runs:    s.sched,
-		Git:     s.git,
-		PTY:     s.pty,
-		Control: s.control,
-		SSH:     &sshCfg,
+		Config:   cfg,
+		DataDir:  cfg.DataDir,
+		Store:    s.db,
+		Bus:      s.bus,
+		Events:   s.log,
+		Runs:     s.sched,
+		Git:      s.git,
+		PTY:      s.pty,
+		SSH:      &sshCfg,
+		Control:  s.control,
+		Evidence: s.evidence,
 	}); err != nil {
 		return nil, err
 	}
@@ -460,16 +485,18 @@ func (s *Server) Run(ctx context.Context) error {
 	return closeErr
 }
 
-// Close shuts the components down in dependency order: the transports
-// first (no new work arrives; the web gateway before SSH, whose handlers
-// it drives in-process), then the scheduler (supervision loops stop;
-// containers keep running), then the PTY host (transcripts flush), the
-// git engine (diff watchers stop), and finally the bus, event log,
-// runtime, and store. Idempotent.
+// Close shuts the components down in dependency order: the PTY host is
+// closed first so blocked/cancellable injections and attaches are released;
+// transports then stop accepting requests, followed by scheduler/services,
+// the git engine, and finally the bus, event log, runtime, and store.
+// Idempotent.
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		var errs []error
 		closeAll := []func() error{}
+		if s.pty != nil {
+			closeAll = append(closeAll, s.pty.Close)
+		}
 		if s.web != nil {
 			closeAll = append(closeAll, s.web.Close)
 		}
@@ -484,9 +511,6 @@ func (s *Server) Close() error {
 		}
 		// Registered services publish events, so they stop before the bus.
 		closeAll = append(closeAll, s.closeServices()...)
-		if s.pty != nil {
-			closeAll = append(closeAll, s.pty.Close)
-		}
 		if s.git != nil {
 			closeAll = append(closeAll, s.git.Close)
 		}
