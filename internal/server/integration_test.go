@@ -20,9 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -367,7 +365,7 @@ func dockerReachable(t *testing.T) bool {
 
 func newDockerCLI(t *testing.T) *client.Client {
 	t.Helper()
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Fatalf("docker client: %v", err)
 	}
@@ -379,15 +377,15 @@ func labeledContainers(t *testing.T, cli *client.Client, label string) []string 
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	list, err := cli.ContainerList(ctx, container.ListOptions{
+	list, err := cli.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", label)),
+		Filters: make(client.Filters).Add("label", label),
 	})
 	if err != nil {
 		t.Fatalf("list containers by label %q: %v", label, err)
 	}
-	ids := make([]string, 0, len(list))
-	for _, c := range list {
+	ids := make([]string, 0, len(list.Items))
+	for _, c := range list.Items {
 		ids = append(ids, c.ID)
 	}
 	return ids
@@ -399,7 +397,7 @@ func removeLabeledContainers(t *testing.T, cli *client.Client, label string) {
 	defer cancel()
 	for _, id := range labeledContainers(t, cli, label) {
 		t.Logf("removing leaked container %s (label %s)", id, label)
-		if err := cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
+		if _, err := cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true}); err != nil {
 			t.Logf("remove leaked container %s: %v", id, err)
 		}
 	}

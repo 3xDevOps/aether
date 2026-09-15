@@ -16,8 +16,7 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 )
 
 const testImage = "busybox:1.36"
@@ -34,7 +33,7 @@ func newTestDocker(t *testing.T) *Docker {
 		t.Fatalf("NewDocker() error: %v", err)
 	}
 	t.Cleanup(func() { d.Close() })
-	if _, err := d.cli.Ping(t.Context()); err != nil {
+	if _, err := d.cli.Ping(t.Context(), client.PingOptions{}); err != nil {
 		t.Fatalf("docker daemon unreachable (integration tests need real Docker): %v", err)
 	}
 	return d
@@ -69,7 +68,7 @@ func createContainerWithoutInit(t *testing.T, d *Docker, spec Spec) ID {
 	cfg, hostCfg := d.containerConfig(spec)
 	initDisabled := false
 	hostCfg.Init = &initDisabled
-	resp, err := d.cli.ContainerCreate(t.Context(), cfg, hostCfg, nil, nil, d.namePrefix+spec.Name)
+	resp, err := d.cli.ContainerCreate(t.Context(), client.ContainerCreateOptions{Config: cfg, HostConfig: hostCfg, Name: d.namePrefix + spec.Name})
 	if err != nil {
 		t.Fatalf("ContainerCreate() without init: %v", err)
 	}
@@ -176,11 +175,11 @@ func TestDockerLifecycle(t *testing.T) {
 	if err := d.Pause(t.Context(), id); err != nil {
 		t.Fatalf("Pause() error: %v", err)
 	}
-	info, err := d.cli.ContainerInspect(t.Context(), string(id))
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect after pause: %v", err)
 	}
-	if !info.State.Paused {
+	if !info.Container.State.Paused {
 		t.Fatal("container not reported paused after Pause()")
 	}
 	drain(lines, 300*time.Millisecond)
@@ -210,11 +209,11 @@ func TestDockerLifecycle(t *testing.T) {
 	if status.Code == 0 {
 		t.Errorf("Wait().Code = 0, want nonzero for a signalled loop")
 	}
-	info, err = d.cli.ContainerInspect(t.Context(), string(id))
+	info, err = d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect after stop: %v", err)
 	}
-	if info.State.Running {
+	if info.Container.State.Running {
 		t.Fatal("container still running after Stop()")
 	}
 
@@ -222,7 +221,7 @@ func TestDockerLifecycle(t *testing.T) {
 	if err := d.Destroy(t.Context(), id); err != nil {
 		t.Fatalf("Destroy() error: %v", err)
 	}
-	if _, err := d.cli.ContainerInspect(t.Context(), string(id)); err == nil {
+	if _, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{}); err == nil {
 		t.Fatal("container still inspectable after Destroy()")
 	}
 	if err := d.Destroy(t.Context(), id); err != nil {
@@ -245,14 +244,14 @@ func TestDockerResourceLimits(t *testing.T) {
 	}
 	id := createContainer(t, d, spec)
 
-	info, err := d.cli.ContainerInspect(t.Context(), string(id))
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
-	if got := info.HostConfig.NanoCPUs; got != 500_000_000 {
+	if got := info.Container.HostConfig.NanoCPUs; got != 500_000_000 {
 		t.Errorf("NanoCPUs = %d, want 500000000", got)
 	}
-	if got := info.HostConfig.Memory; got != 128<<20 {
+	if got := info.Container.HostConfig.Memory; got != 128<<20 {
 		t.Errorf("Memory = %d, want %d", got, 128<<20)
 	}
 }
@@ -284,11 +283,11 @@ func TestDockerSetupFailure(t *testing.T) {
 			t.Errorf("Start() error %q missing %q", err, want)
 		}
 	}
-	info, ierr := d.cli.ContainerInspect(t.Context(), string(id))
+	info, ierr := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if ierr != nil {
 		t.Fatalf("inspect: %v", ierr)
 	}
-	if info.State.Running {
+	if info.Container.State.Running {
 		t.Error("container still running after failed setup")
 	}
 	if _, serr := os.Stat(filepath.Join(worktree, "main-ran")); serr == nil {
@@ -365,12 +364,12 @@ func TestDockerDetachReattach(t *testing.T) {
 		t.Fatalf("Close() error: %v", err)
 	}
 	time.Sleep(1 * time.Second)
-	info, err := d.cli.ContainerInspect(t.Context(), string(id))
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect after detach: %v", err)
 	}
-	if !info.State.Running {
-		t.Fatalf("container %s after detach, want running: Close() must never stop the container", info.State.Status)
+	if !info.Container.State.Running {
+		t.Fatalf("container %s after detach, want running: Close() must never stop the container", info.Container.State.Status)
 	}
 
 	// Re-attach: stdin still works.
@@ -491,11 +490,11 @@ func TestDockerStartCancelDuringSetup(t *testing.T) {
 
 	deadline := time.After(10 * time.Second)
 	for {
-		info, err := d.cli.ContainerInspect(context.Background(), string(id))
+		info, err := d.cli.ContainerInspect(context.Background(), string(id), client.ContainerInspectOptions{})
 		if err != nil {
 			t.Fatalf("inspect: %v", err)
 		}
-		if !info.State.Running {
+		if !info.Container.State.Running {
 			return
 		}
 		select {
@@ -535,10 +534,9 @@ func TestDockerStartKillsAfterLostStartReply(t *testing.T) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 		},
 	}
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost(client.DefaultDockerHost),
 		client.WithHTTPClient(&http.Client{Transport: &lostStartReplyTransport{base: tr}}),
-		client.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
 		t.Fatalf("client: %v", err)
@@ -551,7 +549,7 @@ func TestDockerStartKillsAfterLostStartReply(t *testing.T) {
 		networkMode: "none",
 	}
 	t.Cleanup(func() { d.Close() })
-	if _, err := d.cli.Ping(t.Context()); err != nil {
+	if _, err := d.cli.Ping(t.Context(), client.PingOptions{}); err != nil {
 		t.Fatalf("docker daemon unreachable (integration tests need real Docker): %v", err)
 	}
 
@@ -569,11 +567,11 @@ func TestDockerStartKillsAfterLostStartReply(t *testing.T) {
 
 	deadline := time.After(10 * time.Second)
 	for {
-		info, err := d.cli.ContainerInspect(context.Background(), string(id))
+		info, err := d.cli.ContainerInspect(context.Background(), string(id), client.ContainerInspectOptions{})
 		if err != nil {
 			t.Fatalf("inspect: %v", err)
 		}
-		if !info.State.Running {
+		if !info.Container.State.Running {
 			return
 		}
 		select {
@@ -609,12 +607,12 @@ func TestDockerStartTwiceSkipsSetup(t *testing.T) {
 	if err := d.Start(t.Context(), id); err != nil {
 		t.Fatalf("second Start() error: %v (setup must not rerun)", err)
 	}
-	info, err := d.cli.ContainerInspect(t.Context(), string(id))
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
-	if !info.State.Running {
-		t.Fatalf("container %s after second Start, want running", info.State.Status)
+	if !info.Container.State.Running {
+		t.Fatalf("container %s after second Start, want running", info.Container.State.Status)
 	}
 }
 
@@ -649,11 +647,11 @@ func TestDockerTTY(t *testing.T) {
 	if err := att.Resize(t.Context(), 120, 40); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
-	info, err := d.cli.ContainerInspect(t.Context(), string(id))
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
-	if !info.Config.Tty {
+	if !info.Container.Config.Tty {
 		t.Error("container created without Tty despite Spec.TTY")
 	}
 }
@@ -666,8 +664,8 @@ func TestDockerPullIfMissing(t *testing.T) {
 	d := newTestDocker(t)
 	const pullImage = "busybox:1.35"
 
-	if _, err := d.cli.ImageRemove(t.Context(), pullImage, image.RemoveOptions{}); err != nil {
-		_, err = d.cli.ImageRemove(t.Context(), pullImage, image.RemoveOptions{Force: true})
+	if _, err := d.cli.ImageRemove(t.Context(), pullImage, client.ImageRemoveOptions{}); err != nil {
+		_, err = d.cli.ImageRemove(t.Context(), pullImage, client.ImageRemoveOptions{Force: true})
 		if err != nil && !cerrdefs.IsNotFound(err) {
 			t.Logf("force remove %s: %v", pullImage, err)
 		}
@@ -743,14 +741,14 @@ func TestDockerAdditionalMounts(t *testing.T) {
 		t.Fatalf("credential write did not persist: %q, %v", got, err)
 	}
 	// The pinned construction is visible on the created container.
-	info, err := d.cli.ContainerInspect(t.Context(), string(id))
+	info, err := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
-	if len(info.HostConfig.Mounts) != 3 {
-		t.Fatalf("Mounts = %v", info.HostConfig.Mounts)
+	if len(info.Container.HostConfig.Mounts) != 3 {
+		t.Fatalf("Mounts = %v", info.Container.HostConfig.Mounts)
 	}
-	for i, m := range info.HostConfig.Mounts {
+	for i, m := range info.Container.HostConfig.Mounts {
 		if m.BindOptions == nil || m.BindOptions.Propagation != "rprivate" {
 			t.Errorf("mount %d propagation = %+v, want rprivate", i, m.BindOptions)
 		}
@@ -1149,12 +1147,12 @@ func TestDockerInitReapsOrphanedDescendants(t *testing.T) {
 	if got := dockerOrphanZombieCount(t, d, controlID, false); got == 0 {
 		t.Fatal("no-init control left no zombies; workload did not exercise orphan reaping")
 	}
-	info, err := d.cli.ContainerInspect(t.Context(), string(controlID))
+	info, err := d.cli.ContainerInspect(t.Context(), string(controlID), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("control inspect after probe: %v", err)
 	}
-	if !info.State.Running {
-		t.Fatalf("control container stopped after probe: %s", info.State.Status)
+	if !info.Container.State.Running {
+		t.Fatalf("control container stopped after probe: %s", info.Container.State.Status)
 	}
 	if err := d.Stop(t.Context(), controlID, 2*time.Second); err != nil {
 		t.Fatalf("control Stop() error: %v", err)
@@ -1184,12 +1182,12 @@ func TestDockerInitReapsOrphanedDescendants(t *testing.T) {
 	if got := dockerOrphanZombieCount(t, d, managedID, true); got != 0 {
 		t.Fatalf("managed orphan probe found %d zombies, want none", got)
 	}
-	info, err = d.cli.ContainerInspect(t.Context(), string(managedID))
+	info, err = d.cli.ContainerInspect(t.Context(), string(managedID), client.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatalf("managed inspect after probe: %v", err)
 	}
-	if !info.State.Running {
-		t.Fatalf("managed container stopped after probe: %s", info.State.Status)
+	if !info.Container.State.Running {
+		t.Fatalf("managed container stopped after probe: %s", info.Container.State.Status)
 	}
 	if err := d.Stop(t.Context(), managedID, 2*time.Second); err != nil {
 		t.Fatalf("managed Stop() error: %v", err)
