@@ -532,6 +532,9 @@ func (s *Server) attachRevocation(ctx context.Context, member domain.MemberID, r
 		return nil
 	}
 	if checkSteer(ctx, s.cfg.Store, member, run) != nil {
+		if s.checkMember(ctx, member) != nil {
+			return errAttachMembershipRevoked
+		}
 		return errAttachSteerRevoked
 	}
 	return nil

@@ -7,12 +7,14 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // The in-process client is the server-hosted dashboard's transport. It
@@ -103,18 +105,41 @@ func TestLocalAttachRunsTheAttachHandler(t *testing.T) {
 	}
 }
 
+type deleteMemberAfterReadStore struct {
+	store.Store
+	member  domain.MemberID
+	armed   atomic.Bool
+	deleted chan error
+}
+
+func (s *deleteMemberAfterReadStore) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
+	member, err := s.Store.GetMember(ctx, id)
+	if err == nil && id == s.member && s.armed.CompareAndSwap(true, false) {
+		s.deleted <- s.Store.DeleteMember(ctx, id)
+	}
+	return member, err
+}
+
 func TestLocalAttachEndsWithTheRevocationExitStatus(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 20 * time.Millisecond })
-	collab, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
-	_ = collab
+	_, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
+	racingStore := &deleteMemberAfterReadStore{
+		Store: e.store, member: cm.ID, deleted: make(chan error, 1),
+	}
+	e.srv.cfg.Store = racingStore
 	term, ack, err := e.srv.Local(cm.ID).Attach(context.Background(), protocol.AttachRequest{RunID: string(e.run.ID), Cols: 80, Rows: 24})
 	if err != nil || !ack.OK {
 		t.Fatalf("attach: ack=%+v err=%v", ack, err)
 	}
-	defer func() { _ = term.Close() }()
-	if derr := e.store.DeleteMember(context.Background(), cm.ID); derr != nil {
-		t.Fatal(derr)
+	racingStore.armed.Store(true)
+	select {
+	case deleteErr := <-racingStore.deleted:
+		if deleteErr != nil {
+			t.Fatal(deleteErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("membership removal was not triggered")
 	}
 	_, err = io.ReadAll(term)
 	var exit *protocol.RemoteExitError
