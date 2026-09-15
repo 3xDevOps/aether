@@ -19,9 +19,9 @@ const (
 	// Config import carries up to 20 MiB of decoded files in base64 JSON;
 	// leave room for the encoding and request framing.
 	maxConfigImportRequestBody = 30 << 20
-	// Editor writes accept content up to the inline file limit plus JSON
-	// framing, while still bounding authenticated request memory.
-	maxEditorWriteRequestBody = 128 << 20
+	// JSON escaping can expand a supported 64 MiB editor document sixfold;
+	// leave room for the remaining request fields while bounding memory.
+	maxEditorWriteRequestBody = 6*(64<<20) + MaxRequestBody
 )
 
 func requestBodyLimit(method string) int64 {

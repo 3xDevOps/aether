@@ -382,10 +382,10 @@ dashboard says that some files may remain and directs the user to inspect
 delivered; the protocol does not claim a stronger delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
-`files.write` and `config.write` at 128 MiB, and `config.import` at 30 MiB.
-The 64 MiB editor file limit remains authoritative after JSON decoding. The
-SSH control-channel line cap is 32 MiB; the decoded import limits above remain
-authoritative.
+`files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
+and `config.import` at 30 MiB. The 64 MiB editor file limit remains
+authoritative after JSON decoding. The SSH control-channel line cap is 32 MiB;
+the decoded import limits above remain authoritative.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
