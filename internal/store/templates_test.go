@@ -114,7 +114,6 @@ func TestTemplateAndScheduleRoundTrip(t *testing.T) {
 // schema version behind the templates slot, seeds rows, then opens it:
 // the upgrade must add templates and schedules without losing anything.
 func TestTemplatesMigrationUpgradesPreviousVersion(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

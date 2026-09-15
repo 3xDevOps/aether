@@ -40,6 +40,10 @@ func testKey(t *testing.T, comment string) string {
 	return line
 }
 
+// Legacy-schema migration tests intentionally stay serial. Concurrent
+// migration replays have panicked inside modernc SQLite's json_valid callback
+// under the race-enabled CI run, even when each test uses a separate file.
+//
 // templateOnce builds the migrated schema exactly once per test binary:
 // replaying all migrations 82 times, once per test, is what makes this
 // package slow under -race. Every other test starts from a byte copy of
@@ -171,7 +175,6 @@ func TestNewID(t *testing.T) {
 }
 
 func TestMigrationIdempotency(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 
 	db, err := Open(path)
@@ -556,7 +559,6 @@ func TestMemberTailnetIdentity(t *testing.T) {
 }
 
 func TestMemberTailnetMigrationPreservesRows(t *testing.T) {
-	t.Parallel()
 	// Build a genuine v1 database (only migration 1 applied, old members
 	// schema with the inline UNIQUE public_key, runs still hanging off a
 	// session), seed a member and a run referencing it, then Open: v2 must

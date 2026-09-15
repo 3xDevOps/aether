@@ -147,7 +147,6 @@ func TestSetRunProtected(t *testing.T) {
 // and lose nothing. The seed uses the pre-v12 sessions shape on purpose;
 // the collapse migration rehomes it onto the workspace.
 func TestPermissionsMigrationUpgradesV3(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {
