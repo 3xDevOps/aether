@@ -417,6 +417,39 @@ func TestAppendErrorAfterCommitDoesNotPoisonSequence(t *testing.T) {
 	}
 }
 
+func TestDeterministicRetryReconcilesCommittedEventWithoutDuplicateFanout(t *testing.T) {
+	log := newTestLog(t)
+	fl := &faultLog{EventLog: log, appendErr: context.Canceled}
+	b := newTestBus(t, fl)
+	sub, err := b.Subscribe(context.Background(), SubscribeOptions{})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close() //nolint:errcheck // test cleanup
+	e := statusEvent("w1", "r1", domain.RunRunning)
+	e.ID, e.Time = "coord-report:retry", time.Unix(0, 123).UTC()
+	if _, publishErr := b.Publish(context.Background(), e); publishErr == nil {
+		t.Fatal("first publish succeeded despite injected post-commit error")
+	}
+	fl.appendErr = nil
+	got, err := b.Publish(context.Background(), e)
+	if err != nil {
+		t.Fatalf("retry publish: %v", err)
+	}
+	if got.ID != e.ID || got.Seq != 1 {
+		t.Fatalf("retry result = %+v, want original event ID and sequence", got)
+	}
+	select {
+	case duplicate := <-sub.Events():
+		t.Fatalf("retry fanned out duplicate event: %+v", duplicate)
+	case <-time.After(50 * time.Millisecond):
+	}
+	stored, err := log.Read(context.Background(), Filter{}, 0, 0, 10)
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("stored events after retry = %d (err %v), want one", len(stored), err)
+	}
+}
+
 func TestSubscriptionClose(t *testing.T) {
 	b := newTestBus(t, nil)
 	sub, err := b.Subscribe(context.Background(), SubscribeOptions{})

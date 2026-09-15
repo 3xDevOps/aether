@@ -15,6 +15,8 @@ while :; do
   if IFS= read -r line; then paint; fi
 done
 `
+const geometrySessionID = 'terminal-geometry-writer'
+const historySessionID = 'terminal-history-writer'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
@@ -34,7 +36,16 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
   try {
     await new Promise<void>((resolve, reject) => {
       writer.addEventListener('error', () => reject(new Error('writer socket failed')))
-      writer.addEventListener('open', () => writer.send(JSON.stringify({ write: true, cols: 60, rows: 18 })))
+      writer.addEventListener('open', () =>
+        writer.send(
+          JSON.stringify({
+            write: true,
+            cols: 60,
+            rows: 18,
+            control_session_id: geometrySessionID,
+          }),
+        ),
+      )
       writer.addEventListener('message', (event) => {
         if (typeof event.data !== 'string') return
         const ack = JSON.parse(event.data)
@@ -58,7 +69,6 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     // into the minimum and stop the shared terminal ever growing again.
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
     await assertGrid(72, 22)
-    await page.getByRole('button', { name: 'Steering', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
     await page.getByRole('tab', { name: 'Overview', exact: true }).click()
@@ -136,7 +146,14 @@ done
         if (!settled) fail(new Error('writer socket closed before the prompt'))
       })
       writer.addEventListener('open', () => {
-        writer.send(JSON.stringify({ write: true, cols: 80, rows: 24 }))
+        writer.send(
+          JSON.stringify({
+            write: true,
+            cols: 80,
+            rows: 24,
+            control_session_id: historySessionID,
+          }),
+        )
       })
       writer.addEventListener('message', (event) => {
         if (typeof event.data === 'string') {
@@ -192,6 +209,15 @@ done
   await expect(rows).not.toContainText(firstOutput)
   await expect.poll(() => browserReplayBytes, { timeout: 30_000 }).toBeGreaterThan(1_048_576)
 
+  const room = page.getByRole('complementary', { name: 'Run Room' })
+  await page.getByRole('button', { name: 'Open Run Room' }).click()
+  await expect(room.getByText(/Controller: /)).toBeVisible()
+  await room.getByRole('button', { name: 'Take control' }).click()
+  const takeover = page.getByRole('dialog', { name: 'Take control of this run?' })
+  await takeover.getByRole('button', { name: 'Take control' }).click()
+  await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
+  await room.getByRole('button', { name: 'Close Run Room' }).click()
+
   const screen = page.locator('.xterm-screen')
   await screen.click()
   const sentAt = Date.now()
@@ -201,7 +227,6 @@ done
     timeout: 15_000,
   })
   expect(Date.now() - sentAt).toBeLessThan(15_000)
-  await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
 
   await page.keyboard.press('Control+Shift+F')
   const find = page.getByLabel('Find in terminal')

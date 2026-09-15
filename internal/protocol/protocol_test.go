@@ -21,6 +21,24 @@ func TestAttachRequestShellWire(t *testing.T) {
 		t.Fatalf("attach request = %s, want shell field", raw)
 	}
 }
+func TestAttachControlLeaseWire(t *testing.T) {
+	req := AttachRequest{
+		RunID: "run-1", ControlSessionID: "tab-1", ControlGeneration: 7,
+		Takeover: true, ReleaseControl: true,
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got AttachRequest
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ControlSessionID != req.ControlSessionID || got.ControlGeneration != req.ControlGeneration ||
+		!got.Takeover || !got.ReleaseControl {
+		t.Fatalf("control attach round trip = %+v, want %+v", got, req)
+	}
+}
 
 func TestRunWireShape(t *testing.T) {
 	created := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
@@ -29,7 +47,7 @@ func TestRunWireShape(t *testing.T) {
 		Title:   "Run title",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning,
 		Branch: "aether/run-1-fix-it", Worktree: "/var/lib/aether/checkouts/run_1",
-		CreatedAt: created,
+		CreatedAt: created, UnansweredQuestions: 2,
 	}
 	raw, err := json.Marshal(RunFromDomain(r))
 	if err != nil {
@@ -39,21 +57,24 @@ func TestRunWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"id", "workspace_id", "member_id", "account_member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused"} {
+	for _, k := range []string{"id", "workspace_id", "member_id", "account_member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused", "unanswered_questions"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("run wire form missing key %q", k)
 		}
 	}
-	// paused is deliberately not omitempty: absence means "gateway too old
-	// to know", so an unpaused run must still serialize paused:false.
-	if len(m) != 14 {
-		t.Errorf("run wire form has %d keys, want 14: %v", len(m), m)
+	// paused and unanswered_questions remain present on modern gateways even
+	// when their values are false/zero; an older gateway may omit the latter.
+	if len(m) != 15 {
+		t.Errorf("run wire form has %d keys, want 15: %v", len(m), m)
 	}
 	if m["title"] != "Run title" {
 		t.Errorf("title = %v, want Run title", m["title"])
 	}
 	if m["created_at"] != "2026-08-09T12:00:00Z" {
 		t.Errorf("created_at = %v, want RFC3339", m["created_at"])
+	}
+	if m["unanswered_questions"] != float64(2) {
+		t.Errorf("unanswered_questions = %v, want 2", m["unanswered_questions"])
 	}
 	if strings.Contains(string(raw), "checkouts") {
 		t.Error("host paths leaked onto the wire")
@@ -64,6 +85,23 @@ func TestRunWireShape(t *testing.T) {
 	raw, _ = json.Marshal(RunFromDomain(r))
 	if !strings.Contains(string(raw), `"started_at":"2026-08-09T12:01:00Z"`) {
 		t.Errorf("started_at not RFC3339: %s", raw)
+	}
+}
+func TestRunInjectParamsWireIncludesCallerKey(t *testing.T) {
+	params := RunInjectParams{RunID: "run-1", Message: "continue", IdempotencyKey: "inject-1"}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got RunInjectParams
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != params {
+		t.Fatalf("run.inject params = %+v, want %+v", got, params)
+	}
+	if !strings.Contains(string(raw), `"idempotency_key":"inject-1"`) {
+		t.Fatalf("run.inject params omitted caller key: %s", raw)
 	}
 }
 

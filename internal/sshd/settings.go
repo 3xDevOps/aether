@@ -3,11 +3,15 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func init() {
@@ -41,8 +45,43 @@ func (s *Server) workspaceSettings(ctx context.Context, member domain.MemberID, 
 	}
 
 	id := domain.WorkspaceID(p.WorkspaceID)
-	if updateErr := s.cfg.Store.SetWorkspaceSteerOthers(ctx, id, p.SteerOthers); updateErr != nil {
-		return nil, rpcError(updateErr)
+	var workspaceRuns []*domain.Run
+	if s.cfg.Control != nil {
+		var listErr error
+		workspaceRuns, listErr = s.cfg.Store.ListRunsByWorkspace(ctx, id)
+		if listErr != nil {
+			return nil, rpcError(listErr)
+		}
+	}
+	update := func() error { return s.cfg.Store.SetWorkspaceSteerOthers(ctx, id, p.SteerOthers) }
+	if s.cfg.Control == nil {
+		if updateErr := update(); updateErr != nil {
+			return nil, rpcError(updateErr)
+		}
+	} else {
+		updated := false
+		for _, run := range workspaceRuns {
+			if run.Status.Terminal() {
+				continue
+			}
+			if _, updateErr := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+				if updated {
+					return nil
+				}
+				if applyErr := update(); applyErr != nil {
+					return applyErr
+				}
+				updated = true
+				return nil
+			}); updateErr != nil {
+				return nil, rpcError(updateErr)
+			}
+		}
+		if !updated {
+			if updateErr := update(); updateErr != nil {
+				return nil, rpcError(updateErr)
+			}
+		}
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, id)
 	if err != nil {
@@ -132,28 +171,72 @@ func (s *Server) runProtect(ctx context.Context, member domain.MemberID, params 
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunProtect + ": " + cerr.Error()}
 	}
 
-	if updateErr := s.cfg.Store.SetRunProtected(ctx, id, p.Protected); updateErr != nil {
-		return nil, rpcError(updateErr)
+	if p.Protected {
+		if rooms := s.cfg.Services.Rooms; rooms != nil {
+			if protectErr := rooms.Protect(ctx, id, member); protectErr != nil {
+				return nil, collaborationRPCError(protectErr)
+			}
+		} else {
+			update := func() error {
+				if atomicStore, ok := s.cfg.Store.(store.RunProtectionStore); ok {
+					_, storeErr := atomicStore.SetRunProtectedAndCancelQueuedSteerRequests(ctx, id, true, member, time.Now().UTC())
+					return storeErr
+				}
+				return s.cfg.Store.SetRunProtected(ctx, id, true)
+			}
+			if s.cfg.Control != nil {
+				if _, protectErr := s.cfg.Control.AdmitRevoke(string(id), update); protectErr != nil {
+					return nil, rpcError(protectErr)
+				}
+			} else if updateErr := update(); updateErr != nil {
+				return nil, rpcError(updateErr)
+			}
+		}
+	} else {
+		update := func() error {
+			if atomicStore, ok := s.cfg.Store.(store.RunProtectionStore); ok {
+				_, storeErr := atomicStore.SetRunProtectedAndCancelQueuedSteerRequests(ctx, id, false, member, time.Now().UTC())
+				return storeErr
+			}
+			return s.cfg.Store.SetRunProtected(ctx, id, false)
+		}
+		if s.cfg.Control != nil {
+			if _, updateErr := s.cfg.Control.AdmitRevoke(string(id), update); updateErr != nil {
+				return nil, rpcError(updateErr)
+			}
+		} else if updateErr := update(); updateErr != nil {
+			return nil, rpcError(updateErr)
+		}
 	}
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		WorkspaceID: run.WorkspaceID,
-		RunID:       run.ID,
-		ActorID:     member,
-		Payload:     events.RunProtectedPayload{Protected: p.Protected},
-	})
-	msg := "run protection disabled"
-	if run.Protected {
-		msg = "run protection enabled"
+	var publicationErrs []error
+	if s.cfg.Bus != nil {
+		if _, publishErr := s.cfg.Bus.Publish(ctx, events.Event{
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			ActorID:     member,
+			Payload:     events.RunProtectedPayload{Protected: p.Protected},
+		}); publishErr != nil {
+			publicationErrs = append(publicationErrs, fmt.Errorf("publish run protection refresh event: %w", publishErr))
+		}
+		msg := "run protection disabled"
+		if run.Protected {
+			msg = "run protection enabled"
+		}
+		if _, publishErr := s.cfg.Bus.Publish(ctx, events.Event{
+			WorkspaceID: run.WorkspaceID,
+			RunID:       run.ID,
+			ActorID:     member,
+			Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: msg},
+		}); publishErr != nil {
+			publicationErrs = append(publicationErrs, fmt.Errorf("publish run protection timeline event: %w", publishErr))
+		}
 	}
-	_, _ = s.cfg.Bus.Publish(ctx, events.Event{
-		WorkspaceID: run.WorkspaceID,
-		RunID:       run.ID,
-		ActorID:     member,
-		Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: msg},
-	})
+	if len(publicationErrs) != 0 {
+		return nil, rpcError(errors.Join(publicationErrs...))
+	}
 	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
 }

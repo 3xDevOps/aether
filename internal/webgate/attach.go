@@ -36,18 +36,30 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		cols, rows = defaultCols, defaultRows
 	}
 	shell := r.URL.Query().Get("shell")
-	allowWrite := req.Write || shell != ""
+	allowWrite := req.Write
 	term, ack, err := s.Backend.Attach(s.Ctx, protocol.AttachRequest{
-		RunID:    r.PathValue("run"),
-		ReadOnly: !allowWrite,
-		Cols:     cols,
-		Rows:     rows,
-		Shell:    shell,
-		Follow:   req.Follow,
-		Resume:   req.Resume,
-		Cursor:   req.Cursor,
-		Framed:   true,
+		RunID:             r.PathValue("run"),
+		ReadOnly:          !allowWrite,
+		Cols:              cols,
+		Rows:              rows,
+		Shell:             shell,
+		Follow:            req.Follow,
+		Resume:            req.Resume,
+		Cursor:            req.Cursor,
+		ControlSessionID:  req.ControlSessionID,
+		ControlGeneration: req.ControlGeneration,
+		Takeover:          req.Takeover,
+		ReleaseControl:    req.ReleaseControl,
+		Framed:            true,
 	})
+	if req.ReleaseControl {
+		_ = s.WriteJSON(ack)
+		if term != nil {
+			_ = term.Close()
+		}
+		_ = s.Conn.Close(websocket.StatusNormalClosure, "control released")
+		return
+	}
 	if err == nil && ack.OK && !ack.Framed {
 		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
 		ack = protocol.AttachResponse{Code: protocol.CodeInternal, Error: err.Error()}
@@ -95,6 +107,8 @@ func attachEndClose(err error) (websocket.StatusCode, string) {
 			return websocket.StatusPolicyViolation, "steer permission withdrawn"
 		case protocol.AttachExitMembershipRevoked:
 			return websocket.StatusPolicyViolation, "membership withdrawn"
+		case protocol.AttachExitControlRevoked:
+			return websocket.StatusPolicyViolation, "control taken over"
 		}
 	}
 	return websocket.StatusInternalError, "attach ended"

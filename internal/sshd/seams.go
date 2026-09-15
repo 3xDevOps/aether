@@ -61,6 +61,8 @@ type RunController interface {
 	// unknown or finished runs report false.
 	Paused(run domain.RunID) bool
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
+	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
+	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// RecordHandoff credits the outgoing owner of a run as a steerer and
 	// refreshes the co-author list its container reads. Called after the
 	// run row already names the new owner.
@@ -68,9 +70,8 @@ type RunController interface {
 	// RefreshMemberCoAuthors rewrites the co-author list of every live run
 	// that credits member, after their git identity changed.
 	RefreshMemberCoAuthors(ctx context.Context, member domain.MemberID)
-	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
-	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error
+	EnsureRunShellTabReserved(ctx context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error)
 	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
 	StopTerminal(ctx context.Context, member domain.MemberID) error

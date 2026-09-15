@@ -616,6 +616,10 @@ type Run struct {
 	StartedAt *time.Time
 	// FinishedAt is when the run reached a terminal status; nil until then.
 	FinishedAt *time.Time
+	// UnansweredQuestions is the number of non-denied, non-cancelled room
+	// questions without a correlated reply. It is populated by run snapshot
+	// reads and is zero for newly-created runs.
+	UnansweredQuestions int
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID

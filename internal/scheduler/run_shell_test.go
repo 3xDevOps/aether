@@ -162,6 +162,27 @@ func TestFinalizeStopsRunShellTabs(t *testing.T) {
 	}
 	t.Fatalf("prefix stops = %v, want %q", prefixes, want)
 }
+func TestRunShellReservationAdoptionSurvivesConcurrentRollback(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "shell reservation")
+
+	first, err := e.sched.EnsureRunShellTabReserved(t.Context(), run.ID, "shared", 80, 24)
+	if err != nil {
+		t.Fatalf("first reservation: %v", err)
+	}
+	second, err := e.sched.EnsureRunShellTabReserved(t.Context(), run.ID, "shared", 80, 24)
+	if err != nil {
+		t.Fatalf("second reservation: %v", err)
+	}
+	if err := first.Rollback(t.Context()); err != nil {
+		t.Fatalf("loser rollback: %v", err)
+	}
+	second.Adopt()
+	active := e.pty.ActiveSessions("run-shell:" + string(run.ID) + ":")
+	if len(active) != 1 || active[0] != ptyhost.RunShellSession(run.ID, "shared") {
+		t.Fatalf("accepted shell was stopped by loser rollback: %v", active)
+	}
+}
 
 func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
 	t.Parallel()

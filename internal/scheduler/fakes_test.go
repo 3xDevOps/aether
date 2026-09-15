@@ -759,17 +759,18 @@ func (g *fakeGit) publishedCount(run domain.RunID) int {
 type fakePTY struct {
 	mu              sync.Mutex
 	sessions        map[ptyhost.SessionKey]*fakePTYSession
+	nextGeneration  uint64
 	injects         []fakeInject
 	stoppedPrefixes []string
 }
 
 type fakePTYSession struct {
-	att runtime.Attachment
-
-	mu    sync.Mutex
-	out   bytes.Buffer
-	last  time.Time
-	ended bool
+	att        runtime.Attachment
+	generation uint64
+	mu         sync.Mutex
+	out        bytes.Buffer
+	last       time.Time
+	ended      bool
 }
 
 type fakeInject struct {
@@ -787,8 +788,9 @@ func newFakePTY() *fakePTY {
 }
 
 func (p *fakePTY) StartSession(_ context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
-	sess := &fakePTYSession{att: att}
 	p.mu.Lock()
+	p.nextGeneration++
+	sess := &fakePTYSession{att: att, generation: p.nextGeneration}
 	p.sessions[key] = sess
 	p.mu.Unlock()
 	go func() {
@@ -810,6 +812,14 @@ func (p *fakePTY) StartSession(_ context.Context, key ptyhost.SessionKey, att ru
 		}
 	}()
 	return nil
+}
+func (p *fakePTY) SessionGeneration(key ptyhost.SessionKey) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if sess := p.sessions[key]; sess != nil {
+		return sess.generation
+	}
+	return 0
 }
 
 func (p *fakePTY) StopSession(_ context.Context, key ptyhost.SessionKey) error {

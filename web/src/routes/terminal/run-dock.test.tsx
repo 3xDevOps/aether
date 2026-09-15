@@ -113,7 +113,7 @@ describe('run-shell dock', () => {
     const shell = StubSocket.last()
     act(() => {
       shell.onopen?.()
-      shell.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      shell.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
     })
     first.unmount()
 
@@ -126,7 +126,7 @@ describe('run-shell dock', () => {
     const reopened = shellsBeforeReopen()[1]
     act(() => {
       reopened.onopen?.()
-      reopened.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      reopened.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 2 }) })
       reopened.onmessage?.({ data: new TextEncoder().encode('remounted shell').buffer })
     })
 
@@ -152,7 +152,7 @@ describe('run-shell dock', () => {
     const oldShell = shellFor('run_1')
     act(() => {
       oldShell?.onopen?.()
-      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
     })
 
     useStore.getState().upsertRun(run({ id: 'run_2' }))
@@ -170,10 +170,10 @@ describe('run-shell dock', () => {
     const currentShell = shellFor('run_2')
     act(() => {
       currentShell?.onopen?.()
-      currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
       currentShell?.onmessage?.({ data: new TextEncoder().encode('B output').buffer })
       // These events belong to run_1, but arrive after run_2 accepted t1.
-      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
       oldShell?.onmessage?.({ data: new TextEncoder().encode('A output').buffer })
       oldShell?.onclose?.({ code: 1000 })
     })
@@ -198,7 +198,7 @@ describe('run-shell dock', () => {
     const terminalDock = within(screen.getByRole('region', { name: 'Terminal dock' }))
     const shellsFor = (tab: string) =>
       StubSocket.opened.filter((socket) => socket.url.includes(`?shell=${tab}`))
-    const accepted = JSON.stringify({ ok: true, replay: 0 })
+    const accepted = JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 })
     const denied = JSON.stringify({ ok: false, code: -32001, error: 'write denied' })
 
     await waitFor(() => expect(shellsFor('t1')).toHaveLength(1))
@@ -245,6 +245,38 @@ describe('run-shell dock', () => {
     view.unmount()
   })
 
+
+  it('reconnects as a mirror after control loss until the user takes over', async () => {
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+
+    const shell = StubSocket.opened[1]
+    act(() => {
+      shell.onopen?.()
+      shell.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 3 }),
+      })
+      shell.onclose?.({ code: 1008, reason: 'control taken over' })
+    })
+
+    expect(screen.getByText('Read-only shell. Another session controls this run.')).toBeDefined()
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(3))
+    const mirror = StubSocket.opened[2]
+    act(() => {
+      mirror.onopen?.()
+    })
+    expect(mirror.frames()[0]).not.toHaveProperty('write')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Take shell control' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(4))
+    const takeover = StubSocket.opened[3]
+    act(() => {
+      takeover.onopen?.()
+    })
+    expect(takeover.frames()[0]).toMatchObject({ write: true, takeover: true })
+    view.unmount()
+  })
   it('waits for pause state instead of offering a rejected shell', () => {
     const view = mount({ status: 'needs-attention' })
     act(() => useStore.setState({ pausedRuns: {} }))

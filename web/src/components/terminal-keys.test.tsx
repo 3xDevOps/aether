@@ -35,6 +35,41 @@ describe('the terminal key bar', () => {
     expect(armCtrl).toHaveBeenCalledWith(false)
   })
 
+  it('keeps xterm and the mobile controls read-only when writable is lost', () => {
+    const original = window.matchMedia
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: query === '(pointer: coarse)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as typeof window.matchMedia
+    try {
+      const terminal = new Terminal()
+      const armCtrl = vi.fn()
+      const props = { controller: controller({ terminal, armCtrl }), writable: true }
+      const view = render(<TerminalPane {...props} />)
+
+      expect(terminal.options.disableStdin).toBe(false)
+      expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
+      view.rerender(<TerminalPane {...props} writable={false} />)
+
+      expect(terminal.options.disableStdin).toBe(true)
+      expect(armCtrl).toHaveBeenCalledWith(false)
+      expect(screen.queryByRole('toolbar', { name: 'Terminal keys' })).toBeNull()
+
+      view.rerender(<TerminalPane {...props} writable />)
+      expect(terminal.options.disableStdin).toBe(false)
+      expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
+      terminal.dispose()
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
   it('sends the bytes a keyboard would for the keys a phone has not got', () => {
     const terminal = new Terminal()
     const sent: string[] = []

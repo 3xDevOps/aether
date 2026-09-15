@@ -868,8 +868,8 @@ func TestInjectCleanExitedCompleted(t *testing.T) {
 	})
 
 	err := e.sched.Inject(ctx, run.ID, e.member.ID, "too late")
-	if !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("Inject completed = %v, want ErrInvalidTransition", err)
+	if !errors.Is(err, ptyhost.ErrNoSession) {
+		t.Fatalf("Inject completed = %v, want ErrNoSession", err)
 	}
 }
 

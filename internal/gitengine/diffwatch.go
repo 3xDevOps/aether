@@ -96,7 +96,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return err
 	}
-	head, err := e.git(ctx, checkout, "rev-parse", "HEAD")
+	head, err := e.checkoutHead(ctx, run, checkout)
 	if err != nil {
 		slog.Warn("gitengine: diff snapshot failed", "run", string(run), "error", err)
 	}
@@ -105,7 +105,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	// so a watch or server restart does not lose an interval boundary.
 	lastTree := e.lastSnapshotTree(run)
 	if lastTree == "" {
-		lastTree, _ = e.git(ctx, checkout, "rev-parse", meta.Base+"^{tree}")
+		lastTree, _ = e.gitCheckout(ctx, run, checkout, "rev-parse", meta.Base+"^{tree}")
 	}
 
 	e.mu.Lock()
@@ -336,12 +336,12 @@ func (w *diffWatch) reconcileIgnoreState(ctx context.Context) {
 // visiting every child; the visible listing keeps all tracked files and
 // files re-included by negation reachable below an ignored parent.
 func (w *diffWatch) loadIgnoreState(ctx context.Context) error {
-	visible, err := w.e.git(ctx, w.checkout,
+	visible, err := w.e.gitCheckoutRaw(ctx, w.run, w.checkout,
 		"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--")
 	if err != nil {
 		return fmt.Errorf("gitengine: list visible paths: %w", err)
 	}
-	ignored, err := w.e.git(ctx, w.checkout,
+	ignored, err := w.e.gitCheckoutRaw(ctx, w.run, w.checkout,
 		"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--")
 	if err != nil {
 		return fmt.Errorf("gitengine: list ignored directories: %w", err)
@@ -695,7 +695,7 @@ func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 
-	files, err := w.e.diffStats(ctx, w.checkout, w.base)
+	files, err := w.e.diffStats(ctx, w.run, w.checkout, w.base)
 	if err != nil {
 		w.warnSnapshot(err)
 		return
@@ -747,7 +747,7 @@ func (w *diffWatch) snapshot() {
 // checkHead publishes a moved checkout HEAD. It returns true when checking
 // HEAD succeeded, including when it did not move.
 func (w *diffWatch) checkHead(ctx context.Context) bool {
-	head, err := w.e.git(ctx, w.checkout, "rev-parse", "HEAD")
+	head, err := w.e.checkoutHead(ctx, w.run, w.checkout)
 	if err != nil {
 		w.warnSnapshot(err)
 		return false
@@ -800,8 +800,8 @@ func (w *diffWatch) warnTree(err error) {
 // paths survive verbatim, and --no-renames so a rename reports its real
 // old and new paths rather than a munged "old => new". Never mutates the
 // index. Sorted by path.
-func (e *Engine) diffStats(ctx context.Context, checkout, base string) ([]events.FileDiffStat, error) {
-	numstat, err := e.git(ctx, checkout, "diff", "--numstat", "--no-renames", "-z", base)
+func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) ([]events.FileDiffStat, error) {
+	numstat, err := e.gitCheckout(ctx, run, checkout, "diff", "--numstat", "--no-renames", "-z", base)
 	if err != nil {
 		return nil, err
 	}
@@ -815,7 +815,7 @@ func (e *Engine) diffStats(ctx context.Context, checkout, base string) ([]events
 		del, _ := strconv.Atoi(parts[1])
 		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del})
 	}
-	untracked, err := e.git(ctx, checkout, "ls-files", "--others", "--exclude-standard", "-z")
+	untracked, err := e.gitCheckoutRaw(ctx, run, checkout, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, err
 	}

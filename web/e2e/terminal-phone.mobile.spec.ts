@@ -12,6 +12,8 @@ import { expect, shrinkToKeyboardHeight, test } from './mobile'
 /** The desktop viewer's window, and so the session's geometry. */
 const desktopCols = 132
 const desktopRows = 43
+const desktopSessionID = 'terminal-phone-desktop'
+const probeSessionID = 'terminal-phone-probe'
 
 interface AttachAck {
   ok: boolean
@@ -71,12 +73,16 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
     write: true,
     cols: desktopCols,
     rows: desktopRows,
+    control_session_id: desktopSessionID,
   })
   expect(desktop.ack.ok).toBe(true)
   // What the session is now, asked of the server rather than inferred: a
   // fresh follow attach is answered with the live PTY geometry.
   const sessionGeometry = async () => {
-    const probe = await attach(alice, run.id, { follow: true })
+    const probe = await attach(alice, run.id, {
+      follow: true,
+      control_session_id: probeSessionID,
+    })
     probe.close()
     return { cols: probe.ack.cols, rows: probe.ack.rows }
   }
@@ -113,10 +119,18 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
     })
   expect(await grid()).toEqual({ cols: desktopCols, pannable: true })
 
-  // Taking control is the whole point: a phone types into the agent without
-  // the agent's screen being resized to fit the phone.
-  await page.getByRole('button', { name: 'Take control' }).tap()
+  // Taking over through Run Room is explicit because the desktop viewer
+  // still owns the controller lease.
+  const room = page.getByRole('complementary', { name: 'Run Room' })
+  await page.getByRole('button', { name: 'Open Run Room' }).tap()
+  await expect(room.getByText(/Controller: /)).toBeVisible()
+  await room.getByRole('button', { name: 'Take control' }).tap()
+  await page
+    .getByRole('dialog', { name: 'Take control of this run?' })
+    .getByRole('button', { name: 'Take control' })
+    .tap()
   await expect(page.getByRole('button', { name: 'Steering' })).toBeVisible()
+  await room.getByRole('button', { name: 'Close Run Room' }).tap()
   await expect(page.getByRole('toolbar', { name: 'Terminal keys' })).toBeVisible()
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
   await expect(rows).toHaveCount(desktopRows)
@@ -138,7 +152,13 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
   // The other way round: the desktop viewer's window changes, and the phone
   // follows it there without reattaching.
   desktop.close()
-  const narrower = await attach(alice, run.id, { write: true, cols: 100, rows: 30 })
+  const narrower = await attach(alice, run.id, {
+    write: true,
+    cols: 100,
+    rows: 30,
+    control_session_id: desktopSessionID,
+    takeover: true,
+  })
   expect(narrower.ack.ok).toBe(true)
   await expect(rows).toHaveCount(30)
   expect(await grid()).toEqual({ cols: 100, pannable: true })

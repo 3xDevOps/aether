@@ -95,14 +95,14 @@ func TestIntegrationChaosRebootSurvivingContainer(t *testing.T) {
 	// the agent answer on a fresh attach, then prove the shell is usable.
 	att = waitAttach(t, client, runID)
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: runID, Message: "resume-probe",
+		RunID: runID, Message: "resume-probe", IdempotencyKey: "reboot-resume-1",
 	}, nil); err != nil {
 		t.Fatalf("run.inject after reboot: %v", err)
 	}
 	waitOutput(t, att, "got:resume-probe")
 	waitOutput(t, att, "[aether] harness exited with code 0")
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: runID, Message: "printf 'reboot-login-shell-ready\\n'",
+		RunID: runID, Message: "printf 'reboot-login-shell-ready\\n'", IdempotencyKey: "reboot-login-1",
 	}, nil); err != nil {
 		t.Fatalf("run.inject in login shell after reboot: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestIntegrationChaosRebootRetainedTUI(t *testing.T) {
 	att = waitAttach(t, client, runID)
 
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: runID, Message: "resume-probe",
+		RunID: runID, Message: "resume-probe", IdempotencyKey: "reboot-resume-2",
 	}, nil); err != nil {
 		t.Fatalf("run.inject after retained relaunch: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestIntegrationChaosRebootRetainedTUI(t *testing.T) {
 	// alive in its reusable login-shell loop.
 	waitOutput(t, att, "[aether] harness exited with code 0")
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: runID, Message: "printf 'reboot-login-shell-ready\\n'",
+		RunID: runID, Message: "printf 'reboot-login-shell-ready\\n'", IdempotencyKey: "reboot-login-2",
 	}, nil); err != nil {
 		t.Fatalf("run.inject in retained login shell: %v", err)
 	}

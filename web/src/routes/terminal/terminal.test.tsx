@@ -98,6 +98,30 @@ describe('terminal view', () => {
     expect(screen.queryByText(hint)).toBeNull()
     view.unmount()
   })
+  it('downgrades a displaced writer to a mirror without permanent denial', () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+
+    fireEvent.click(screen.getByText('Take control'))
+    act(() => {
+      StubSocket.last().onopen?.()
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: true, cols: 80, rows: 24, has_control: true, control_generation: 7 }),
+      })
+    })
+    expect(screen.getByText('Steering')).toBeDefined()
+
+    act(() => StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' }))
+    expect(screen.getByText('Take control')).toBeDefined()
+    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+
+    // The mirror can explicitly ask for control again; reopen clears the
+    // bounded reconnect timer and starts this request immediately.
+    fireEvent.click(screen.getByText('Take control'))
+    act(() => StubSocket.last().onopen?.())
+    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
+    view.unmount()
+  })
 
   it('does not count an owner run automatic steer as taking control', () => {
     const view = mount()
@@ -135,6 +159,22 @@ describe('terminal view', () => {
 
     expect(screen.getByText('Steering')).toBeDefined()
     expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
+    view.unmount()
+  })
+
+  it('keeps one control session across live status transitions', () => {
+    const view = mount()
+    attached()
+    const socket = StubSocket.last()
+    const opened = StubSocket.opened.length
+
+    act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(StubSocket.last()).toBe(socket)
+
+    act(() => useStore.getState().upsertRun(run({ status: 'running' })))
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(StubSocket.last()).toBe(socket)
     view.unmount()
   })
 
@@ -470,7 +510,12 @@ describe('the terminal on a phone', () => {
     // The flag is what keeps this client out of the minimum the PTY is
     // sized to; the geometry beside it is only what a session with no PTY
     // of its own - a finished run's replay - is laid out at.
-    expect(StubSocket.last().frames()[0]).toEqual({ follow: true, cols: 80, rows: 24 })
+    expect(StubSocket.last().frames()[0]).toEqual({
+      follow: true,
+      cols: 80,
+      rows: 24,
+      control_session_id: expect.any(String),
+    })
     await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(132, 43))
     expect(StubSocket.last().frames().some((frame) => 'type' in (frame as object))).toBe(
       false,
@@ -503,6 +548,7 @@ describe('the terminal on a phone', () => {
       cursor: 0,
       cols: 80,
       rows: 24,
+      control_session_id: expect.any(String),
     })
     view.unmount()
   })

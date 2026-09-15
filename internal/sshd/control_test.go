@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func controlClient(t *testing.T, e *testEnv) *protocol.Client {
@@ -152,8 +152,13 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 			t.Fatalf("%s: %v", m, err)
 		}
 	}
-	if err := c.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "focus"}, nil); err != nil {
+	if err := c.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+		RunID: string(e.run.ID), Message: "focus", IdempotencyKey: "control-focus",
+	}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
+	}
+	if rooms, ok := e.srv.cfg.Services.Rooms.(*persistentRoomService); !ok || rooms.last.Kind != store.RoomMessageSteerRequest || rooms.last.Body != "focus" {
+		t.Fatalf("run.inject did not persist a queued steer: %#v", e.srv.cfg.Services.Rooms)
 	}
 	var cr protocol.RunResult
 	if err := c.Call(protocol.MethodRunClose, protocol.RunCloseParams{RunID: string(e.run.ID), Outcome: "merged"}, &cr); err != nil {
@@ -175,7 +180,6 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 		"kill:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"pause:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"resume:" + string(e.run.ID) + ":" + string(e.member.ID),
-		"inject:" + string(e.run.ID) + ":" + string(e.member.ID) + ":focus",
 		"close:" + string(e.run.ID) + ":" + string(e.member.ID) + ":merged",
 		"delete:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"relaunch:" + string(e.run.ID) + ":" + string(e.member.ID),
@@ -220,11 +224,12 @@ func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
 
 func TestControlHandoffAndPull(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
-	other := &domain.Member{DisplayName: "Grace", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#3cb44b", Role: domain.RoleCollaborator}
-	if err := e.store.CreateMember(context.Background(), other); err != nil {
-		t.Fatalf("create member: %v", err)
-	}
+	e := newTestEnv(t, func(c *Config) {
+		c.Control = control.New(control.Config{})
+		c.revalidateInterval = time.Hour
+	})
+	e.pty.gate = NewWriteGate(e.store)
+	otherSigner, other := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	sub, err := e.bus.Subscribe(context.Background(), events.SubscribeOptions{
 		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
 	})
@@ -233,10 +238,22 @@ func TestControlHandoffAndPull(t *testing.T) {
 	}
 	defer sub.Close() //nolint:errcheck
 
+	oldAttach, oldAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "handoff-session"}, true)
+	if !oldAck.OK || !oldAck.HasControl {
+		t.Fatalf("old owner attach = %+v, want held control", oldAck)
+	}
+
 	c := controlClient(t, e)
 	if cerr := c.Call(protocol.MethodRunHandoff, protocol.RunHandoffParams{RunID: string(e.run.ID), ToMemberID: string(other.ID)}, nil); cerr != nil {
 		t.Fatalf("run.handoff: %v", cerr)
 	}
+	oldAttach.expectExit(t, protocol.AttachExitControlRevoked)
+	replacement, replacementAck := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{ControlSessionID: "handoff-session"}, true)
+	if !replacementAck.OK || !replacementAck.HasControl || replacementAck.ControlGeneration <= oldAck.ControlGeneration {
+		t.Fatalf("recipient attach = %+v, old owner = %+v", replacementAck, oldAck)
+	}
+	replacement.typeAndEcho(t, "recipient-controls")
+	_ = replacement.ch.Close()
 	run, err := e.store.GetRun(context.Background(), e.run.ID)
 	if err != nil {
 		t.Fatalf("get run: %v", err)

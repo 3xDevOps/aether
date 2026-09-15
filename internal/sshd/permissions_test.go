@@ -105,7 +105,7 @@ func TestCollaboratorKillsOthersRunViewerDenied(t *testing.T) {
 	wantDenied(t, vc.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
 		WorkspaceID: string(e.ws.ID), Task: "t", Harness: "claude",
 	}, nil), "viewer run.launch")
-	wantDenied(t, vc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "hi"}, nil), "viewer run.inject")
+	wantDenied(t, vc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "hi", IdempotencyKey: "viewer-hi"}, nil), "viewer run.inject")
 }
 
 // A protected run rejects non-owner steer and kill, even for
@@ -131,7 +131,7 @@ func TestProtectedRunRestrictsToOwnerAndAdmin(t *testing.T) {
 	}
 
 	cc := controlAs(t, e, collab)
-	wantDenied(t, cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "x"}, nil), "non-owner steer of protected run")
+	wantDenied(t, cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "x", IdempotencyKey: "protected-x"}, nil), "non-owner steer of protected run")
 	wantDenied(t, cc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "non-owner kill of protected run")
 	// Non-owner cannot toggle protection either.
 	wantDenied(t, cc.Call(protocol.MethodRunProtect, protocol.RunProtectParams{RunID: string(e.run.ID)}, nil), "non-owner run.protect")
@@ -284,7 +284,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 	}
 
 	cc := controlAs(t, e, collab)
-	wantDenied(t, cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "x"}, nil), "admins_only steer of another's run")
+	wantDenied(t, cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(e.run.ID), Message: "x", IdempotencyKey: "other-x"}, nil), "admins_only steer of another's run")
 	wantDenied(t, cc.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: string(e.run.ID)}, nil), "admins_only kill of another's run")
 
 	// Own runs stay steerable under admins_only.
@@ -295,7 +295,7 @@ func TestSteerOthersAdminsOnly(t *testing.T) {
 	if cerr := e.store.CreateRun(ctx, own); cerr != nil {
 		t.Fatalf("create run: %v", cerr)
 	}
-	if err := cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(own.ID), Message: "x"}, nil); err != nil {
+	if err := cc.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(own.ID), Message: "x", IdempotencyKey: "own-x"}, nil); err != nil {
 		t.Fatalf("admins_only steer of own run: %v", err)
 	}
 

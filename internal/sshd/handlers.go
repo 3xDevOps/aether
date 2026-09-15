@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -241,17 +243,36 @@ func (s *Server) runAct(ctx context.Context, member domain.MemberID, params json
 }
 
 func (s *Server) runInject(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	rooms, perr := s.rooms()
+	if perr != nil {
+		return nil, perr
+	}
 	p, perr := decodeParams[protocol.RunInjectParams](params)
 	if perr != nil {
 		return nil, perr
 	}
-	if p.RunID == "" || p.Message == "" {
-		return nil, invalidParams("run_id and message are required")
+	if p.RunID == "" || p.Message == "" || p.IdempotencyKey == "" {
+		return nil, invalidParams("run_id, message, and idempotency_key are required")
 	}
-	if err := s.cfg.Runs.Inject(ctx, domain.RunID(p.RunID), member, p.Message); err != nil {
+	if len(p.IdempotencyKey) > protocol.CollaborationMaxIdempotencyKeyBytes {
+		return nil, invalidParams("idempotency_key is too long")
+	}
+	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
+	if err != nil {
 		return nil, rpcError(err)
 	}
-	return struct{}{}, nil
+	result, err := rooms.Post(ctx, collab.MessageInput{
+		WorkspaceID:    run.WorkspaceID,
+		RunID:          run.ID,
+		ActorID:        member,
+		Kind:           store.RoomMessageSteerRequest,
+		Body:           p.Message,
+		IdempotencyKey: p.IdempotencyKey,
+	})
+	if err != nil {
+		return nil, collaborationRPCError(err)
+	}
+	return roomMutationResult(result), nil
 }
 
 func (s *Server) runClose(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -359,7 +380,17 @@ func (s *Server) runHandoff(ctx context.Context, member domain.MemberID, params 
 		return nil, invalidParams(fmt.Sprintf("cannot hand off to %s: viewers cannot own runs", recipient.DisplayName))
 	}
 	from := run.MemberID
-	if err := s.cfg.Store.TransferRun(ctx, run.ID, to); err != nil {
+	if s.cfg.Control != nil {
+		displaced, transferErr := s.cfg.Control.AdmitRevoke(p.RunID, func() error {
+			return s.cfg.Store.TransferRun(ctx, run.ID, to)
+		})
+		if transferErr != nil {
+			return nil, rpcError(transferErr)
+		}
+		if displaced != nil {
+			s.cancelControlAttach(p.RunID, displaced.SessionID, displaced.Generation, errAttachControlRevoked)
+		}
+	} else if err := s.cfg.Store.TransferRun(ctx, run.ID, to); err != nil {
 		return nil, rpcError(err)
 	}
 	// The transfer is stamped before the credit it causes, so the feed

@@ -82,6 +82,51 @@ func assertRunBaseProvenance(t *testing.T, got, want *domain.Run) {
 		t.Fatalf("base checked at = %v (%v), want %v (UTC)", got.BaseCheckedAt, got.BaseCheckedAt.Location(), want.BaseCheckedAt)
 	}
 }
+func TestRunSnapshotCountsUnansweredQuestions(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+
+	question := &RoomMessage{
+		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID,
+		Kind: RoomMessageQuestion, Body: "Can I proceed?", IdempotencyKey: "question-1",
+	}
+	if err := db.CreateRoomMessage(ctx, question); err != nil {
+		t.Fatalf("CreateRoomMessage question: %v", err)
+	}
+	replied := &RoomMessage{
+		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID,
+		Kind: RoomMessageQuestion, Body: "Already answered", IdempotencyKey: "question-2",
+	}
+	if err := db.CreateRoomMessage(ctx, replied); err != nil {
+		t.Fatalf("CreateRoomMessage second question: %v", err)
+	}
+	reply := &RoomMessage{
+		WorkspaceID: workspace.ID, RunID: run.ID, ActorID: member.ID,
+		Kind: RoomMessageReply, Body: "Yes.", CorrelationID: question.ID,
+		IdempotencyKey: "reply-1",
+	}
+	if err := db.CreateRoomMessage(ctx, reply); err != nil {
+		t.Fatalf("CreateRoomMessage reply: %v", err)
+	}
+
+	got, err := db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.UnansweredQuestions != 1 {
+		t.Fatalf("GetRun unanswered_questions = %d, want 1", got.UnansweredQuestions)
+	}
+	list, err := db.ListRunsByWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatalf("ListRunsByWorkspace: %v", err)
+	}
+	if len(list) != 1 || list[0].UnansweredQuestions != 1 {
+		t.Fatalf("ListRunsByWorkspace unanswered_questions = %+v, want one run with 1", list)
+	}
+}
 
 func TestRunBaseProvenanceMigrationFromV25(t *testing.T) {
 	t.Parallel()
@@ -116,8 +161,8 @@ func TestRunBaseProvenanceMigrationFromV25(t *testing.T) {
 	if queryErr := db.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); queryErr != nil {
 		t.Fatalf("read schema version: %v", queryErr)
 	}
-	if version != 26 {
-		t.Fatalf("schema version = %d, want 26", version)
+	if version != 27 {
+		t.Fatalf("schema version = %d, want 27", version)
 	}
 
 	got, err := db.GetRun(context.Background(), "r1")

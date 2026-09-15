@@ -25,6 +25,7 @@ type GitEngine interface {
 // PTYHost is the scheduler's view of the PTY host (*ptyhost.Host).
 type PTYHost interface {
 	StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error
+	SessionGeneration(key ptyhost.SessionKey) uint64
 	StopSession(ctx context.Context, key ptyhost.SessionKey) error
 	RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	StopSessionsWithPrefix(ctx context.Context, prefix string)

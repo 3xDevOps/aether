@@ -1,4 +1,4 @@
-import { type Attachment, codeDenied, connectAttach, replayGate } from '@/routes/terminal/attach'
+import { type Attachment, type ControlMetadata, codeConflict, codeDenied, connectAttach, replayGate } from '@/routes/terminal/attach'
 import type { ConnectionState } from '@/lib/stream'
 import { StubSocket } from '@/test/stub-socket'
 import { fire } from '@/test/wake'
@@ -10,11 +10,13 @@ let attaches = 0
 let refusal: string | null = null
 let refusalCode: number | undefined
 let denied = false
+let controlLost = false
 let write = false
 let sessionPending = false
 // Every attachment this file opens, closed in afterEach. A test that fails
 // before its own `close()` would otherwise leave its wake listeners on
 // `document` and open a socket during the next test.
+let receivedControl: ControlMetadata | null = null
 let attachments: Attachment[] = []
 
 function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
@@ -25,6 +27,8 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   refusal = null
   refusalCode = undefined
   denied = false
+  controlLost = false
+  receivedControl = null
   const socketURL = typeof url === 'function' ? url : () => url
   const attachment = connectAttach(socketURL, {
     onData: (chunk, kind) => {
@@ -35,6 +39,9 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
     onAttached: () => {
       attaches++
     },
+    onControl: (metadata) => {
+      receivedControl = metadata
+    },
     onState: (s) => states.push(s),
     onRefused: (m, code) => {
       refusal = m
@@ -42,6 +49,10 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
     },
     onWriteDenied: () => {
       denied = true
+      write = false
+    },
+    onControlLost: () => {
+      controlLost = true
       write = false
     },
     sessionPending: () => sessionPending,
@@ -103,7 +114,7 @@ describe('connectAttach', () => {
     socket.onopen?.()
 
     expect(socket.url).toContain('/ws/attach/run_1')
-    expect(socket.frames()[0]).toEqual({ cols: 120, rows: 40 })
+    expect(socket.frames()[0]).toEqual({ cols: 120, rows: 40, control_session_id: expect.any(String) })
 
     ack()
     socket.onmessage?.({ data: new TextEncoder().encode('$ ls\r\n').buffer })
@@ -117,6 +128,56 @@ describe('connectAttach', () => {
     expect(socket.frames()[1]).toEqual({ type: 'input', data: 'x' })
     a.close()
   })
+  it('exposes the lease and fences takeover and release handshakes', () => {
+    write = true
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack({ has_control: true, control_generation: 4 })
+    expect(receivedControl).toMatchObject({
+      control_session_id: a.controlMetadata!().control_session_id,
+      control_generation: 4,
+      has_control: true,
+    })
+    expect(a.controlMetadata!()).toMatchObject({
+      control_session_id: expect.any(String),
+      control_generation: 4,
+      has_control: true,
+    })
+
+    a.reopen({ resume: true })
+    const reconnect = StubSocket.last()
+    reconnect.onopen?.()
+    expect(reconnect.frames()[0]).toMatchObject({
+      write: true,
+      takeover: true,
+      control_session_id: a.controlMetadata!().control_session_id,
+      control_generation: 4,
+    })
+    ack({ has_control: true, control_generation: 5 })
+
+    a.reopen({ resume: true, takeover: true })
+    const takeover = StubSocket.last()
+    takeover.onopen?.()
+    expect(takeover.frames()[0]).toMatchObject({
+      write: true,
+      takeover: true,
+      control_session_id: a.controlMetadata!().control_session_id,
+      control_generation: 5,
+    })
+    ack({ has_control: true, control_generation: 6 })
+
+    a.reopen({ resume: true, releaseControl: true })
+    const release = StubSocket.last()
+    release.onopen?.()
+    expect(release.frames()[0]).toMatchObject({
+      release_control: true,
+      control_session_id: a.controlMetadata!().control_session_id,
+      control_generation: 6,
+    })
+    ack({ has_control: false, control_generation: 6 })
+    expect(a.controlMetadata!().has_control).toBe(false)
+  })
+
   it('rebinds lifecycle callbacks when a persistent socket gets a new host', () => {
     const a = attach()
     StubSocket.last().onopen?.()
@@ -253,6 +314,7 @@ describe('connectAttach', () => {
       cols: 120,
       rows: 40,
       write: true,
+      control_session_id: expect.any(String),
     })
     a.close()
   })
@@ -277,8 +339,71 @@ describe('connectAttach', () => {
     vi.advanceTimersByTime(1000)
     StubSocket.last().onopen?.()
 
-    expect(StubSocket.last().frames()[0]).toEqual({ cols: 120, rows: 40 })
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: expect.any(String),
+    })
     expect(refusal).toBeNull()
+    a.close()
+  })
+
+  it('reconnects as a mirror after an occupied writable lease conflict', () => {
+    write = true
+    const a = attach()
+    StubSocket.last().onopen?.()
+    StubSocket.last().onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: codeConflict,
+        error: 'run.attach: control lease is occupied',
+      }),
+    })
+
+    expect(controlLost).toBe(true)
+    expect(denied).toBe(false)
+    expect(refusal).toBeNull()
+
+    StubSocket.last().onclose?.({ code: 1008 })
+    vi.advanceTimersByTime(1000)
+    StubSocket.last().onopen?.()
+
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: expect.any(String),
+    })
+    expect(refusal).toBeNull()
+    a.close()
+  })
+
+  it('falls back to a mirror if a forced reconnect was already fenced', () => {
+    write = true
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack({ has_control: true, control_generation: 4 })
+
+    a.reopen({ resume: true })
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toMatchObject({
+      write: true,
+      takeover: true,
+      control_generation: 4,
+    })
+    StubSocket.last().onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: codeConflict,
+        error: 'run.attach: control generation is stale',
+      }),
+    })
+    expect(controlLost).toBe(true)
+    expect(refusal).toBeNull()
+
+    StubSocket.last().onclose?.({ code: 1008 })
+    vi.advanceTimersByTime(1000)
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     a.close()
   })
 
@@ -296,7 +421,11 @@ describe('connectAttach', () => {
 
     StubSocket.last().onopen?.()
     ack()
-    expect(StubSocket.last().frames()[0]).toEqual({ cols: 120, rows: 40 })
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: expect.any(String),
+    })
     expect(attaches).toBe(2)
     a.close()
   })
@@ -598,9 +727,44 @@ describe('connectAttach', () => {
     ack()
 
     expect(StubSocket.opened).toHaveLength(2)
-    expect(StubSocket.last().frames()[0]).toEqual({ cols: 120, rows: 40 })
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: expect.any(String),
+    })
     expect(refusal).toBeNull()
     expect(attaches).toBe(2)
+    // Unlike control takeover, an actual permission withdrawal remains
+    // denied on every explicit retry.
+    write = true
+    a.reopen()
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    a.close()
+  })
+  it('reconnects as a mirror after control is taken and can ask again', () => {
+    write = true
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack({ has_control: true, control_generation: 9 })
+
+    StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' })
+    expect(controlLost).toBe(true)
+    expect(receivedControl).toMatchObject({ has_control: false, control_generation: 9 })
+    expect(denied).toBe(false)
+    expect(write).toBe(false)
+
+    vi.advanceTimersByTime(1000)
+    StubSocket.last().onopen?.()
+    ack({ has_control: false, control_generation: 10 })
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+
+    // Control loss is not a permanent permission denial: an explicit retry
+    // asks for writable control again.
+    write = true
+    a.reopen({ resume: true })
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
     a.close()
   })
 

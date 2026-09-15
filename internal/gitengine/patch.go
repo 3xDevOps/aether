@@ -190,6 +190,10 @@ type boundedBuffer struct {
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.limit < 0 {
+		b.buf = append(b.buf, p...)
+		return len(p), nil
+	}
 	switch room := b.limit - len(b.buf); {
 	case room >= len(p):
 		b.buf = append(b.buf, p...)

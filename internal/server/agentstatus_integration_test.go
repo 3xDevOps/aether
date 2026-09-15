@@ -127,7 +127,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 
 	// And it comes back on the agent's own next turn, not on the steer.
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: run.ID, Message: "keep going",
+		RunID: run.ID, Message: "keep going", IdempotencyKey: "agentstatus-keep-going-1",
 	}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	}
 
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: piRun.ID, Message: "keep going",
+		RunID: piRun.ID, Message: "keep going", IdempotencyKey: "agentstatus-keep-going-2",
 	}, nil); err != nil {
 		t.Fatalf("run.inject on the pi run: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 	}
 
 	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: run.ID, Message: "keep going",
+		RunID: run.ID, Message: "keep going", IdempotencyKey: "agentstatus-keep-going-3",
 	}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}

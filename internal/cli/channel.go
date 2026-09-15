@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -179,6 +182,18 @@ func (c *Conn) Control() (*protocol.Client, error) {
 	return protocol.NewClient(stream), nil
 }
 
+// NewControlSessionID returns an opaque identifier stable for one logical
+// attach. Callers retain it across reconnects and generate a new one for a
+// separate tab.
+func NewControlSessionID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		binary.BigEndian.PutUint64(raw[:8], uint64(time.Now().UnixNano()))
+		binary.BigEndian.PutUint64(raw[8:], uint64(time.Now().UnixNano())^uint64(len(raw)))
+	}
+	return hex.EncodeToString(raw[:])
+}
+
 // AttachStream opens the attach subsystem for req and returns the
 // resizable terminal stream alongside the server's ack. A refused ack is
 // returned with the error so callers can forward its code.
@@ -214,7 +229,9 @@ func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, pr
 // Attach opens the attach subsystem for runID with the given geometry and
 // returns the raw PTY stream after a successful ack.
 func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {
-	stream, _, err := c.AttachStream(protocol.AttachRequest{RunID: runID, Cols: cols, Rows: rows})
+	stream, _, err := c.AttachStream(protocol.AttachRequest{
+		RunID: runID, Cols: cols, Rows: rows, ControlSessionID: NewControlSessionID(),
+	})
 	if err != nil {
 		return nil, err
 	}

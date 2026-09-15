@@ -72,6 +72,7 @@ func resolveRunTarget(ctx context.Context, st store.Store, id domain.RunID) (per
 		return permissions.Target{}, err
 	}
 	return permissions.Target{
+		Workspace:   run.WorkspaceID,
 		Owner:       run.MemberID,
 		Protected:   run.Protected,
 		SteerOthers: ws.SteerOthers,

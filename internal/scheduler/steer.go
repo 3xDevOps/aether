@@ -503,14 +503,11 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	}
 	s.mu.Unlock()
 
-	r, err := s.cfg.Store.GetRun(ctx, run)
+	_, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
 		return err
 	}
-	if r.Status == domain.RunNeedsAttention {
-		return fmt.Errorf("%w", ptyhost.ErrNoSession)
-	}
-	return fmt.Errorf("%w: inject requires a running or needs-attention run", ErrInvalidTransition)
+	return fmt.Errorf("%w: inject requires a running or needs-attention run", ptyhost.ErrNoSession)
 }
 
 func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, message string) error {

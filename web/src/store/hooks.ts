@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { pendingApprovalKey } from '@/lib/status'
 import type { GatewayCapabilities, Member } from '@/lib/types'
+import { unansweredQuestions } from '@/store/collaboration'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
@@ -22,12 +23,13 @@ export function usePendingApprovalRuns(): Set<string> {
 function useSidebarInput() {
   const workspace = useStore((s) => s.activeWorkspace)
   const runs = useStore((s) => s.runs)
+  const roomMessages = useStore((s) => s.roomMessages)
   const members = useStore((s) => s.members)
   const groupBy = useStore((s) => s.groupBy)
   const pending = usePendingApprovalRuns()
   return useMemo(
-    () => ({ workspace, runs, members, groupBy, pending }),
-    [workspace, runs, members, groupBy, pending],
+    () => ({ workspace, runs, roomMessages, members, groupBy, pending }),
+    [workspace, runs, roomMessages, members, groupBy, pending],
   )
 }
 
@@ -43,10 +45,28 @@ export function useSidebarGroups(): SidebarGroup[] {
  */
 export function useAttentionCount(): number {
   const input = useSidebarInput()
-  return useMemo(
-    () => sidebarRuns(input).filter((r) => r.state === 'needs-attention').length,
-    [input],
-  )
+  return useMemo(() => {
+    const attentionRunIDs = new Set(
+      sidebarRuns(input)
+        .filter((run) => run.state === 'needs-attention')
+        .map((run) => run.run.id),
+    )
+    for (const run of Object.values(input.runs)) {
+      if (input.workspace && run.workspace_id !== input.workspace) continue
+      if (run.unanswered_questions !== undefined) {
+        // A modern snapshot is authoritative, including zero: do not let a
+        // stale room cache keep attention alive after a reply.
+        if (run.unanswered_questions > 0) attentionRunIDs.add(run.id)
+        continue
+      }
+      // Older gateways omit the count, so retain the room-history fallback
+      // for rooms that have already been opened.
+      if (unansweredQuestions(input.roomMessages[run.id] ?? []).length > 0) {
+        attentionRunIDs.add(run.id)
+      }
+    }
+    return attentionRunIDs.size
+  }, [input])
 }
 
 /** Every run in the active workspace, worst state and most recent change first. */

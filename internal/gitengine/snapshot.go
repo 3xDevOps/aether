@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -34,12 +35,28 @@ func (e *Engine) snapshotStorePath(run domain.RunID) (string, error) {
 	return path + snapshotStoreSuffix, nil
 }
 
-// writeSnapshotTree stages the whole checkout into the run's snapshot store
-// and writes the resulting tree, returning its object id. The store's index
-// is reused across snapshots so staging costs a worktree scan, and the
-// objects written are only the blobs the checkout's own database does not
-// already hold - uncommitted edits - deduplicated by git across snapshots.
+func (e *Engine) snapshotLock(run domain.RunID) *sync.Mutex {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.snapshotLocks == nil {
+		e.snapshotLocks = make(map[domain.RunID]*sync.Mutex)
+	}
+	lock := e.snapshotLocks[run]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		e.snapshotLocks[run] = lock
+	}
+	return lock
+}
+
 func (e *Engine) writeSnapshotTree(ctx context.Context, run domain.RunID, checkout string) (string, error) {
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	return e.writeSnapshotTreeLocked(ctx, run, checkout)
+}
+
+func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, checkout string) (string, error) {
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return "", err

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -156,12 +157,22 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 	}
 	gate := p.gate
 	p.mu.Unlock()
-	// Mirror ptyhost.Host.Attach: the gate runs for write-mode attaches
-	// only and its denial is wrapped in ErrWriteDenied.
-	if !readOnly && gate != nil {
-		if gerr := gate(ctx, member, key); gerr != nil {
-			return fmt.Errorf("%w: %v", errWriteDenied, gerr)
+	// Mirror ptyhost.Host.Attach: the legacy gate can delay while state
+	// changes, then explicit authorization makes the final lease decision.
+	if !readOnly {
+		if gate != nil {
+			if gateErr := gate(ctx, member, key); gateErr != nil {
+				return fmt.Errorf("%w: %v", errWriteDenied, gateErr)
+			}
 		}
+		if client.Authorize != nil {
+			if authErr := client.Authorize(); authErr != nil {
+				return authErr
+			}
+		}
+	}
+	if client.OnAttached != nil {
+		client.OnAttached()
 	}
 	p.mu.Lock()
 	p.cols, p.rows, p.readOnly, p.follow = cols, rows, readOnly, client.Follow
@@ -184,21 +195,50 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 		}
 	}
 
+	readErr := make(chan error, 1)
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
 		buf := make([]byte, 1024)
+		report := func(err error) {
+			if err != nil && !errors.Is(err, io.EOF) {
+				readErr <- err
+			}
+		}
 		for {
+			if client.InputGuard != nil {
+				if guardErr := client.InputGuard(); guardErr != nil {
+					report(guardErr)
+					return
+				}
+			}
 			n, err := conn.Read(buf)
+			if client.InputGuard != nil {
+				if guardErr := client.InputGuard(); guardErr != nil {
+					report(guardErr)
+					return
+				}
+			}
 			if n > 0 {
-				p.mu.Lock()
-				p.input.Write(buf[:n])
-				p.mu.Unlock()
-				if _, werr := conn.Write(append([]byte("echo:"), buf[:n]...)); werr != nil {
+				accept := func() error {
+					p.mu.Lock()
+					p.input.Write(buf[:n])
+					p.mu.Unlock()
+					_, writeErr := conn.Write(append([]byte("echo:"), buf[:n]...))
+					return writeErr
+				}
+				if client.InputAdmission != nil {
+					if admissionErr := client.InputAdmission(accept); admissionErr != nil {
+						report(admissionErr)
+						return
+					}
+				} else if writeErr := accept(); writeErr != nil {
+					report(writeErr)
 					return
 				}
 			}
 			if err != nil {
+				report(err)
 				return
 			}
 		}
@@ -214,7 +254,12 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 			p.resizes = append(p.resizes, sz)
 			p.mu.Unlock()
 		case <-readDone:
-			return nil
+			select {
+			case readErr := <-readErr:
+				return readErr
+			default:
+				return nil
+			}
 		case <-ctx.Done():
 			// Mirror ptyhost.Host.Attach: a canceled context ends the
 			// attach with the context's error.
@@ -487,8 +532,50 @@ func (f *fakeRuns) Relaunch(ctx context.Context, run domain.RunID, actor domain.
 	}, nil
 }
 
+type fakeShellReservation struct {
+	f    *fakeRuns
+	run  domain.RunID
+	tab  string
+	mu   sync.Mutex
+	done bool
+}
+
+func (r *fakeShellReservation) Generation() uint64 {
+	return 1
+}
+
+func (r *fakeShellReservation) Adopt() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.done {
+		return
+	}
+	r.done = true
+}
+
+func (r *fakeShellReservation) Rollback(_ context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.done {
+		return nil
+	}
+	r.done = true
+	return r.f.record(fmt.Sprintf("run-shell-stop:%s:%s", r.run, r.tab))
+}
+
+func (f *fakeRuns) EnsureRunShellTabReserved(_ context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error) {
+	if err := f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows)); err != nil {
+		return nil, err
+	}
+	return &fakeShellReservation{f: f, run: run, tab: tab}, nil
+}
+
 func (f *fakeRuns) EnsureRunShellTab(_ context.Context, run domain.RunID, tab string, cols, rows uint) error {
 	return f.record(fmt.Sprintf("run-shell:%s:%s:%d:%d", run, tab, cols, rows))
+}
+
+func (f *fakeRuns) StopRunShellTab(_ context.Context, run domain.RunID, tab string) error {
+	return f.record(fmt.Sprintf("run-shell-stop:%s:%s", run, tab))
 }
 func (f *fakeRuns) EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
 	if err := f.record(fmt.Sprintf("terminal:%s", member)); err != nil {
@@ -683,6 +770,7 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 		PTY:         e.pty,
 		Runs:        e.runs,
 	}
+	cfg.Services.Rooms = &persistentRoomService{db: db}
 	if mod != nil {
 		mod(&cfg)
 	}

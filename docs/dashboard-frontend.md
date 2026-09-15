@@ -798,11 +798,11 @@ it from the local run map after the server confirms deletion.
   top-centered directly under the 35px titlebar, max 600px, with compact
   bounded rows before the dialog portals to the document.
   It jumps to runs and workspaces - opening a workspace also makes it the
-  active scope, so the sidebar and the board follow - and steers **the run the
-  center view is showing**, any run-detail tab, since it keys on
-  `route.params.runId` rather than on a route name. From the board there is
-  none, so reveal a run first. Its "Go to" group is `src/lib/surfaces.ts`, the
-  same gated list the activity rail renders.
+  active scope, so the sidebar and the board follow - and opens a steer request
+  for **the run the center view is showing**, or any run-detail tab, since it
+  keys on `route.params.runId` rather than on a route name. From the board there
+  is none, so reveal a run first. Its "Go to" group is `src/lib/surfaces.ts`,
+  the same gated list the activity rail renders.
 - **Visible buttons**, so nothing important is reachable only by a shortcut:
   New run in the sidebar header, in the board header and in the notice an
   empty board shows in place of its columns; every view in the sidebar nav;
@@ -832,13 +832,17 @@ mirror source.
 ### The forms
 
 The three verbs that need prose open a dialog rather than calling straight
-through: launch, send a message to the agent, and launch from a template. The
-message form is `inject-dialog.tsx` over `run.inject` - the wire name stays
-`inject`, only the words the member reads changed. The launch and message
-forms are a store dialog (`openPaletteDialog` on the `palette` slice) hosted
-by `AppShell` through `components/palette/dialogs.tsx`, so a button on any
-surface opens one by asking the store, with no dependence on the palette or
-the status bar being on screen. The template form's open state lives with
+through: launch, post a steer request to the agent, and launch from a template.
+The message form is `inject-dialog.tsx` over `run.inject`; each submission
+includes a caller-generated `idempotency_key`, which stays the same when the
+request is retried and changes only after the message payload changes or the
+submission succeeds. The server records that legacy method as a Run Room steer
+request, so it follows the controller lease, 45-second queue, moderation, and
+receipt rules. The launch and message forms are a store dialog
+(`openPaletteDialog` on the `palette` slice) hosted by `AppShell` through
+`components/palette/dialogs.tsx`, so a button on any surface opens one by asking
+the store, with no dependence on the palette or the status bar being on screen.
+The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
 knows only the other two. It lists the active
 workspace's templates over `template.list` and starts the run with
@@ -1087,6 +1091,38 @@ row lit while they move between the tabs. `RunHeader` keeps long task text
 behind a **View full task** disclosure, so its compact summary never discards
 the task.
 
+### Run Room and control lease
+
+`RunRoom` is the collaboration view for the current run. It is mounted beside
+`TerminalView` as a collapsed vertical tab; opening it loads the durable room
+timeline and the current room status. The tab count is derived from the
+collaboration slice's unanswered questions and queued steers.
+
+The server-side lease, reconnect, takeover, steering, protection, attachment,
+and question contract is defined once in
+[Run control and the Run Room](terminal.md#run-control-and-the-run-room).
+Dashboard changes must preserve that contract rather than restating it here.
+
+The dashboard-specific state wiring is:
+
+- `RunRoom` reads `roomMessages`, pagination, loading and action errors, and
+  `roomStatus` from `src/store/collaboration.ts`; it hydrates history and
+  status through `run.room.list` and `run.room.status`, then merges live room
+  events through the normal store sync.
+- The composer calls `run.room.post` for comments, questions, replies, and
+  steer requests. Approval and denial call `run.room.decide` with the control
+  metadata supplied by the terminal attach.
+- `TerminalView` owns the attach callbacks and passes the current
+  `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
+  the agent terminal and exposes its own control action without duplicating
+  room state.
+
+On desktop the open room is a right-side panel capped at 420px. On a phone it
+is a full-viewport sheet; the terminal and room remain separate surfaces while
+sharing the same server state. Questions and queued steers therefore appear in
+the existing run-level count and **Needs you** grouping instead of creating a
+second dashboard inbox.
+
 A run id none of the four tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
 four copies of a sentence with nothing to press. What it says is what the
@@ -1259,25 +1295,21 @@ replaces the terminal with the gateway's own error instead.
   interface also supports `rebind()` and `reopen()`: a persistent dock socket
   can keep its transport while a newly mounted host supplies current
   callbacks.
-- **Steer on entry.** The agent header requests `write` on the first attach
-  and the active button carries a short pulse animation; the toggle
-  reattaches rather than upgrading in place. Until the member has taken
-  control once (`UiSlice.terminalControlTaken`, persisted, and set only when
-  the member asked for control and the attach ack granted it, so neither a
-  refused request nor an owner's automatic steer silences the hint) a live
-  run they are only watching says **Read-only mirror. Take control to type
-  into the agent.** A run that can be steered at all - running, or stalled
-  on a question - says nothing there, and neither does one whose container
-  is still starting, because the spinner already speaks for it. Anything
-  else says **This run is not running** beside the disabled control, as
-  visible text for the same reason the dock's tab ceiling is; a run whose
-  container is still starting says nothing there, because the spinner below
-  already does. Whether the member may steer is the server's answer, never
-  the client's guess: a `-32001` refusal drops the request back to a mirror
-  and disables the toggle. A finished run attaches as a read-only replay of
-  its recorded transcript, which ends with a 1000 close, reason `session
-  ended` - the signal to stop reconnecting rather than loop replay -> EOF ->
-  replay. Every other refusal (unknown run) stops the reconnect loop.
+- **Controller lease and complete replay on entry.** A desktop owner's first
+  attach requests write; the server grants it only when no controller exists.
+  Other members enter as mirrors, and a second tab cannot become a second
+  writer. The toggle reattaches rather than upgrading in place. Until a member
+  has taken control once, a live run opened as a mirror says **Read-only
+  mirror. Take control to type into the agent.** A run that is starting shows
+  its spinner instead; a run that is not steerable says **This run is not
+  running**. Whether a member may steer is the server's answer, never the
+  client's guess: a `-32001` refusal downgrades the attach to a mirror and
+  disables the toggle. An occupied write request is a conflict and needs the
+  Run Room's confirmed takeover. A fresh run attach receives the complete
+  retained transcript in the ordinary terminal, including segments from
+  earlier server incarnations; it ends with a 1000 close, reason `session
+  ended`, so the client stops reconnecting instead of replaying the same bytes
+  again. Every other refusal stops the reconnect loop.
 - **A missing session is not a dead terminal.** `-32004` means the run has
   no PTY session, and `internal/sshd/attach.go` refuses rather than waits
   for one, so the client is what has to tell a container that is still
@@ -1305,16 +1337,16 @@ replaces the terminal with the gateway's own error instead.
   refusal's own code: only a missing session says anything about the run, so
   a revoked token or a withdrawn membership still shows the gateway's own
   message.
-- **Run-shell tabs always write.** The `+` control opens names `t1`, `t2`,
-  `t3`, and `t4`; four is the per-run limit, six is the environment dock's,
-  and `Dock` writes whichever `maxTabs` it was given beside the disabled
-  control - a disabled button shows no tooltip. Each shell attach uses
-  `/ws/attach/<run>?shell=<tab>`, requires write/steer permission, and closes
-  its socket when the tab is closed. `RunDock` exposes an uploaded-image path
-  only while its attached identity still matches the current `{ runID, tab }`.
-  A `-32001` response does not reconnect; the dock replaces the terminal with
-  the sentence **You can view this run but not open a shell in it**. A normal
-  `1000` socket close removes the finished tab.
+- **Run-shell tabs request the controller lease.** The `+` control opens names
+  `t1`, `t2`, `t3`, and `t4`; four is the per-run limit, six is the environment
+  dock's. Each shell attach requires Steer and asks for the same one controller
+  lease, so an occupied shell request is refused rather than becoming another
+  writer. Each uses `/ws/attach/<run>?shell=<tab>` and closes its socket when
+  the tab is closed. `RunDock` exposes an uploaded-image path only while its
+  attached identity still matches the current `{ runID, tab }`. A `-32001`
+  response does not reconnect; the dock replaces the terminal with **You can
+  view this run but not open a shell in it**. A normal `1000` socket close
+  removes the finished tab.
 
 - **Every attach answers for itself.** The agent run slice is reset when the
   view mounts, and a successful attach clears the standing refusal. Otherwise
@@ -1361,9 +1393,10 @@ replaces the terminal with the gateway's own error instead.
   their powerline and devicon glyphs at the same advance as text. The terminal
   opens only once regular and bold faces are loaded, because xterm caches glyph
   metrics synchronously at `open` and would otherwise bake fallback metrics in.
-- **Injections need no client work.** The server writes the attributed
-  member-coloured banner into the PTY stream itself, so it arrives as ANSI and
-  xterm renders it like any other output.
+- **Delivered steers need no extra terminal work.** Once a Run Room steer
+  request is delivered, the server writes the attributed member-coloured banner
+  into the PTY stream itself, so it arrives as ANSI and xterm renders it like
+  any other output.
 - Board cards get no live terminal previews in v1 (spec cut-line).
 
 The terminal's colours are the one place the tokens cannot be used directly:
@@ -1474,6 +1507,11 @@ a view of its own in the shell: they reach the run card and the status bar
 through the slots those surfaces expose, and the two full views are registry
 routes (`approvals`, `timeline`), reached from the sidebar nav and the palette
 like every other view, and gated on the same method the nav gates them on.
+
+The approval inbox is for agent permission and plan approvals. Run Room
+questions and queued steer requests stay contextual to their run. Questions
+contribute to the existing **Needs you** projection, both contribute to the Run
+Room tab count, and neither creates a second action inbox.
 
 - **They refresh from the event cursor, not a timer.** Every event the store
   applies advances `lastSeq`, and that is the only signal available that a

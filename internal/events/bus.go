@@ -20,6 +20,13 @@ var (
 	// persisted log complete, so sequence cursors are durable and replay
 	// can return everything live subscribers saw.
 	ErrNoWorkspace = errors.New("events: event has no workspace scope")
+	// ErrEventAlreadyExists means the event ID already stores an identical
+	// event. It is a successful reconciliation signal for outbox publishers.
+	ErrEventAlreadyExists = errors.New("events: event already exists")
+	// ErrEventIDConflict means an event ID was reused for a different event.
+	ErrEventIDConflict = errors.New("events: event ID collision")
+	// ErrEventNotFound means an event ID is not present in an EventLog.
+	ErrEventNotFound = errors.New("events: event not found")
 )
 
 // Filter selects a subset of the event stream. The zero value matches
@@ -120,6 +127,8 @@ type Bus interface {
 // return events ordered by Seq ascending.
 type EventLog interface {
 	// Append durably stores e. Seq must already be assigned and unique.
+	// Repeating an identical ID returns ErrEventAlreadyExists; reusing an
+	// ID for different event contents returns ErrEventIDConflict.
 	Append(ctx context.Context, e Event) error
 	// Read returns up to limit stored events matching f with
 	// afterSeq < Seq <= uptoSeq, ordered by Seq ascending. uptoSeq zero
@@ -129,4 +138,10 @@ type EventLog interface {
 	LastSeq(ctx context.Context) (uint64, error)
 	// Close releases the log's resources.
 	Close() error
+}
+
+// EventLogByID is the optional lookup seam used to reconcile an event whose
+// append returned an uncertain error or an already-exists result.
+type EventLogByID interface {
+	Get(context.Context, string) (Event, error)
 }

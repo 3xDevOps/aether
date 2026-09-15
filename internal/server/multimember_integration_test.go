@@ -250,7 +250,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	camAtt := openAttach(t, camClient, collab.ID)
 	camAtt.waitOutput(t, "agent-ready")
 	if err := camCtrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: collab.ID, Message: "steer-from-cam",
+		RunID: collab.ID, Message: "steer-from-cam", IdempotencyKey: "multimember-cam-steer",
 	}, nil); err != nil {
 		t.Fatalf("cam run.inject into bo's run: %v", err)
 	}
@@ -292,6 +292,10 @@ func TestIntegrationMultiMember(t *testing.T) {
 	if after.Run.MemberID != cam.ID {
 		t.Fatalf("run owner after handoff = %s, want %s", after.Run.MemberID, cam.ID)
 	}
+	// Ownership changes fence the previous controller generation even when
+	// the incoming owner held it. Reattach under the new generation before
+	// observing further steering.
+	camAtt = waitAttach(t, camClient, collab.ID)
 	handoff := waitEvent(t, sub, &seen, "handoff entry", func(e events.Event) bool {
 		p, ok := e.Payload.(events.TimelinePayload)
 		return ok && string(e.RunID) == collab.ID && e.ActorID == domain.MemberID(bo.ID) &&
@@ -405,7 +409,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	// Bo steers the run they handed away - still allowed as a
 	// collaborator - and the collab agent finishes its turn.
 	if err := boCtrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: collab.ID, Message: "done",
+		RunID: collab.ID, Message: "done", IdempotencyKey: "multimember-bo-done",
 	}, nil); err != nil {
 		t.Fatalf("bo run.inject after handoff: %v", err)
 	}
@@ -414,7 +418,7 @@ func TestIntegrationMultiMember(t *testing.T) {
 	// usable before explicitly closing the run.
 	camAtt.waitOutput(t, "[aether] harness exited with code 0")
 	if err := boCtrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: collab.ID, Message: "printf 'multimember-login-shell-ready\\n'",
+		RunID: collab.ID, Message: "printf 'multimember-login-shell-ready\\n'", IdempotencyKey: "multimember-bo-login",
 	}, nil); err != nil {
 		t.Fatalf("run.inject login-shell probe: %v", err)
 	}

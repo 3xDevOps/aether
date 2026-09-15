@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { clampTerminalFontSize } from '@/lib/term-font'
+import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
@@ -52,6 +53,7 @@ export type RootState = ServerSlice &
   TimelineSlice &
   FilesSlice &
   DiffSlice &
+  CollaborationSlice &
   LocalSlice &
   UiSlice
 
@@ -105,6 +107,7 @@ export function createRootStore() {
         ...createTimelineSlice(...a),
         ...createDiffSlice(...a),
         ...createFilesSlice(...a),
+        ...createCollaborationSlice(...a),
         ...createLocalSlice(...a),
         ...createUiSlice(...a),
       }),

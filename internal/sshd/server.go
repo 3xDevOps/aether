@@ -15,11 +15,13 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
@@ -68,6 +70,10 @@ type Config struct {
 	Git         GitTransport
 	PTY         PTYAttacher
 	Runs        RunController
+	// Control owns the per-run controller lease shared by SSH and local
+	// gateway attaches. Nil preserves deployments without controller
+	// arbitration.
+	Control *control.Service
 
 	// Homes owns the persistent per-member home directories. It is optional
 	// in narrow unit-test configurations.
@@ -154,6 +160,14 @@ type Server struct {
 	closed       bool
 	baseCtx      context.Context
 	baseCancel   context.CancelFunc
+
+	// controlMu lets takeover cancel the displaced transport immediately;
+	// the control service remains the fenced source of truth. Incarnations
+	// prevent an old handler's deferred unregister from deleting a newer
+	// attach that reused the same session ID.
+	controlMu       sync.Mutex
+	controlAttaches map[string]map[string]controlAttach
+	controlAttachID atomic.Uint64
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -184,11 +198,12 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg:          cfg,
-		handshakes:   make(chan struct{}, cfg.maxHandshakes),
-		conns:        make(map[net.Conn]struct{}),
-		syncChannels: make(map[domain.MemberID]int),
-		baseCtx:      context.Background(),
+		cfg:             cfg,
+		handshakes:      make(chan struct{}, cfg.maxHandshakes),
+		conns:           make(map[net.Conn]struct{}),
+		syncChannels:    make(map[domain.MemberID]int),
+		controlAttaches: make(map[string]map[string]controlAttach),
+		baseCtx:         context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
 	if cfg.WhoIs != nil {
@@ -305,7 +320,6 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	s.ln = ln
 	s.baseCtx = serveCtx
-	s.baseCancel = serveCancel
 	s.mu.Unlock()
 
 	stop := context.AfterFunc(ctx, func() { _ = s.Close() })

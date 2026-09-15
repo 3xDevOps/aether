@@ -86,7 +86,11 @@ func (e *Engine) ListTree(ctx context.Context, repoPath, ref, dir string) ([]Tre
 		return nil, err
 	}
 	if e.isCheckout(repoPath) {
-		return e.listCheckout(ctx, repoPath, dir)
+		run, err := e.checkoutRunID(repoPath)
+		if err != nil {
+			return nil, err
+		}
+		return e.listCheckout(ctx, run, repoPath, dir)
 	}
 	return e.listBare(ctx, repoPath, ref, dir)
 }
@@ -150,12 +154,12 @@ func (e *Engine) listBare(ctx context.Context, repoPath, ref, dir string) ([]Tre
 	return sortedTreeEntries(entries), nil
 }
 
-func (e *Engine) listCheckout(ctx context.Context, checkout, dir string) ([]TreeEntry, error) {
+func (e *Engine) listCheckout(ctx context.Context, run domain.RunID, checkout, dir string) ([]TreeEntry, error) {
 	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
 	if dir != "" {
 		args = append(args, "--", strings.TrimSuffix(dir, "/")+"/")
 	}
-	output, err := e.gitBytes(ctx, checkout, args...)
+	output, err := e.gitCheckoutRaw(ctx, run, checkout, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +173,7 @@ func (e *Engine) listCheckout(ctx context.Context, checkout, dir string) ([]Tree
 	if prefix != "" {
 		prefix += "/"
 	}
-	for _, record := range bytes.Split(output, []byte{0}) {
+	for _, record := range bytes.Split([]byte(output), []byte{0}) {
 		if len(record) == 0 {
 			continue
 		}

@@ -28,9 +28,91 @@ identifies the replay byte count, so the dashboard mutes terminal-generated
 replies until that scrollback is parsed. Closing a tab only detaches it;
 opening that tab again reattaches to its shell.
 
-`aether attach` mutes the same window, and does it by discarding: keystrokes
-that arrive before the announced replay has been written to your terminal are
-dropped, not deferred. A terminal answers the device-attribute and colour
+## Run control and the Run Room
+
+A run has one controller session at a time. A member needs the run's **Steer**
+permission to acquire it. Viewing, presence, and run ownership by themselves do
+not grant input access. A writable dashboard terminal, `aether attach`, or run
+shell must acquire the controller lease; read-only attaches may coexist. A
+second tab or connection from the same member is a different session, not a
+second writer.
+
+On a desktop, the owner's first run-terminal attach asks for control
+automatically. The server grants it only when the run is unoccupied. Other
+members start as read-only mirrors. A write request that cannot acquire the
+lease is refused rather than silently becoming a second writer. `aether attach`
+asks for control by default; use `aether attach --read-only <run>` to watch
+deliberately. An occupied attach does not silently displace the current
+controller. Open the Run Room and confirm **Take control** to perform an
+occupied takeover. The confirmation names the current controller; takeover ends
+that writable session and notifies it.
+
+A run shell that cannot acquire the occupied lease remains connected as a
+read-only mirror. Its terminal input and mobile key bar stay disabled; use the
+dock's **Take shell control** action for an explicit takeover.
+
+Control is tied to the logical terminal session. When a controller disconnects,
+the server holds its lease for a **15-second reconnect window**. The same tab or
+connection session can reclaim the lease during that window. The disconnected
+session cannot write while it is away. A different tab cannot inherit it without
+an explicit takeover, and after the window expires a normal acquisition can win.
+**Release control** gives up the lease without changing the screen. Release,
+takeover, protection, permission revocation, and reconnect expiry all fence the
+old authority, so input from an old session is rejected instead of reaching the
+PTY.
+
+Only the run owner or an administrator can enable protection. Enabling
+protection immediately fences the current controller and cancels every queued
+Run Room steer request. While protected, non-owner steering is refused and the
+owner or an administrator must acquire control again before typing. Disabling
+protection does not restore a controller or a cancelled request.
+
+The **Run Room** is the collaboration surface for this run. It starts as a
+collapsed vertical tab on the right of the terminal. The tab count includes
+unanswered questions and queued steer requests. Opening it loads the durable,
+per-run attributed message timeline and the current watcher and controller
+status. Presence is a live view of attached members and does not decide who
+may type.
+
+**Comment** writes to that timeline for people watching the run and never sends
+anything to the agent. **Send to agent** creates a steer request. A request
+made by the current controller session, with its current lease, is eligible for
+immediate PTY delivery. A request from another session, or from a run with no
+current controller, is queued with a **45-second countdown**. The current
+controller can choose **Approve now** or **Deny** during the countdown. When
+the timer expires, Aether attempts delivery and records the result as **Sent**
+(`sent`), **Not sent** (`not_sent`), or **Delivery uncertain** (`uncertain`).
+**Sent** means the PTY write was accepted; it does not mean that the agent read
+or answered the request. Retries use the
+same message identity, so they do not create a second request.
+
+Questions appear in the Run Room where they apply. **Answer** posts a
+correlated reply. The server includes each run's unanswered-question count in
+the normal run snapshot, so a fresh dashboard places that run in **Needs you**
+before anyone opens its room. The card names the run owner and points to the
+Run Room as the action. Questions and queued steers do not create a second
+action inbox.
+
+Room image attachments use the terminal upload rules: each message may include
+up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than 8 MiB.
+Aether validates and stores the bytes in the target account's persistent home,
+then records the generated container-visible
+path with the room message. A local filesystem path from clipboard text is not
+an upload. An attachment is a persistent file reference, not a second input
+channel; steering still reaches every supported harness as serialized text
+written to its run PTY. Aether does not require or provide a universal inbound
+harness hook.
+
+On a desktop the open Run Room is a right-side panel up to 420px wide. On a
+phone it becomes a full-viewport sheet. The phone opens the run terminal as a
+read-only mirror, including a run owned by that member; tap **Take control**
+before the keyboard can send input. Phone terminals follow the already
+acknowledged PTY size and do not resize the shared session.
+
+A writable `aether attach` window mutes the same window, and does it by
+discarding: keystrokes that arrive before the announced replay has been written
+to your terminal are dropped, not deferred.
+A terminal answers the device-attribute and colour
 queries the replayed scrollback still carries, and those answers reach the
 server on the channel keystrokes use, where they would count as steering the
 run. Anything typed - or piped on stdin - in that window goes with them, without
@@ -155,10 +237,12 @@ the session at the size it already is rather than at the phone's own width,
 and pans across it. It follows that size: when someone with a bigger screen
 resizes the terminal, the phone redraws at the new one. Nothing a phone does
 changes that size, watching or steering, so an agent's screen is never
-reflowed for the people watching it on a desktop. A run you own opens there as
-a read-only mirror, where on a desktop it would already be steering; **Take
-control** is a tap. While it is a mirror the terminal takes no input, so
-tapping it does not raise the keyboard.
+reflowed by a phone.
+
+On a phone every run - including one you own - opens as a read-only mirror,
+where on a desktop an unoccupied owner's first attach may already have
+acquired control. **Take control** is a tap. While it is a mirror the terminal
+takes no input, so tapping it does not raise the keyboard.
 
 ### Paste or upload an image
 
@@ -224,7 +308,8 @@ receives only missing bytes.
 After a server restart, Aether reconstructs the screen from recorded output
 and resize events, then carries that state into the next transcript. This
 applies to surviving runs, not only agents started after the update. Output
-that never reached the recording before a crash cannot be reconstructed.
+that was not persisted in the transcript before a crash cannot be
+reconstructed.
 
 ### Control availability
 

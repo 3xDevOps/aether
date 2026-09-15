@@ -191,6 +191,12 @@ func (e *ExecExitError) Error() string {
 	return fmt.Sprintf("runtime: exec exited with status %d", e.Code)
 }
 
+// ContextWriter is an input writer that bounds and interrupts one physical
+// write without closing or half-closing the shared stdin stream.
+type ContextWriter interface {
+	WriteContext(context.Context, []byte) (int, error)
+}
+
 // Attachment is a live stdio stream to a container's main process. A
 // container supports any number of sequential attachments: detaching
 // (Close) and re-attaching later is always safe.

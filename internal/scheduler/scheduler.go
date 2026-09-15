@@ -31,8 +31,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// ErrInvalidTransition is returned when a steering call or lifecycle step
-// would move a run through an illegal status transition.
+// ErrInvalidTransition is returned when a lifecycle step would move a run
+// through an illegal status transition.
 var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
 
 // ErrDiskFull is returned when a new run would start with less free space
@@ -167,8 +167,13 @@ type Scheduler struct {
 	cfg       Config
 	harnesses map[string]HarnessSpec
 
-	// superCtx bounds every supervision goroutine; Close (and Start's ctx
-	// ending) cancels it. Containers are never stopped by cancellation.
+	// recoveryReady closes after startup reconciliation has completed. Room
+	// delivery waits for this boundary so overdue steers cannot claim before
+	// recovered PTY sessions are injectable.
+	recoveryReady     chan struct{}
+	recoveryReadyOnce sync.Once
+	// superCtx bounds every supervision goroutine; each Start/Close
+	// cancellation ends it. Containers are never stopped by cancellation.
 	superCtx    context.Context
 	superCancel context.CancelFunc
 	wg          sync.WaitGroup
@@ -180,15 +185,17 @@ type Scheduler struct {
 	// it cannot remove a row while its checkout is still being created; Kill
 	// records its request for the handoff to transfer into supervision.
 	pending map[domain.RunID]*pendingRun
-	// runShellLocks serializes shell-tab creation per run so the tab cap
-	// cannot be raced past; a hung exec on one run never blocks another.
-	// Entries are created on first use and kept for the scheduler's life.
-	runShellLocks   map[domain.RunID]*sync.Mutex
-	terminalLocks   map[domain.MemberID]*sync.Mutex
-	terminals       map[domain.MemberID]*terminalSupervision
-	credentialUsers map[*credentialUserReservation]struct{}
-	titleMu         sync.Mutex
-	titleUpdates    map[domain.RunID]*pendingRunTitle
+	// runShellLocks serialize shell lifecycle within one run.
+	runShellLocks map[domain.RunID]*sync.Mutex
+	// runShellReservationMu protects the cross-run reservation map. A Go map
+	// cannot be written under independent per-run locks.
+	runShellReservationMu sync.Mutex
+	runShellReservations  map[string]*shellTabState
+	terminalLocks         map[domain.MemberID]*sync.Mutex
+	terminals             map[domain.MemberID]*terminalSupervision
+	credentialUsers       map[*credentialUserReservation]struct{}
+	titleMu               sync.Mutex
+	titleUpdates          map[domain.RunID]*pendingRunTitle
 	// coordination is the attached conflict-coordination service and the
 	// staged-bridge directory (UseCoordination); nil means new containers
 	// get no coordination assets.
@@ -312,6 +319,9 @@ type pendingRun struct {
 func (s *Scheduler) beginPending(run domain.RunID) *pendingRun {
 	pending := &pendingRun{done: make(chan struct{})}
 	s.mu.Lock()
+	if s.pending == nil {
+		s.pending = make(map[domain.RunID]*pendingRun)
+	}
 	s.pending[run] = pending
 	s.mu.Unlock()
 	return pending
@@ -456,17 +466,27 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scheduler{
-		cfg:             cfg,
-		harnesses:       harnesses,
-		superCtx:        ctx,
-		superCancel:     cancel,
-		runs:            make(map[domain.RunID]*supervised),
-		pending:         make(map[domain.RunID]*pendingRun),
-		runShellLocks:   make(map[domain.RunID]*sync.Mutex),
-		terminalLocks:   make(map[domain.MemberID]*sync.Mutex),
-		terminals:       make(map[domain.MemberID]*terminalSupervision),
-		credentialUsers: make(map[*credentialUserReservation]struct{}),
+		cfg:                  cfg,
+		harnesses:            harnesses,
+		superCtx:             ctx,
+		superCancel:          cancel,
+		recoveryReady:        make(chan struct{}),
+		runs:                 make(map[domain.RunID]*supervised),
+		runShellLocks:        make(map[domain.RunID]*sync.Mutex),
+		runShellReservations: make(map[string]*shellTabState),
+		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
+		terminals:            make(map[domain.MemberID]*terminalSupervision),
+		credentialUsers:      make(map[*credentialUserReservation]struct{}),
 	}, nil
+}
+
+// RecoveryReady returns a channel closed once all persisted runtime state has
+// been reconciled and recovered sessions are eligible for injection.
+func (s *Scheduler) RecoveryReady() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.recoveryReady
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
@@ -476,6 +496,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverTerminals(ctx); err != nil {
 		return recoveryError(err)
 	}
+	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
 		interval = time.Minute

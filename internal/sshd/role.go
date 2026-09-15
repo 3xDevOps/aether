@@ -70,9 +70,41 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 		}
 	}
 	was := m.Role
+	var activeRuns []*domain.Run
+	if s.cfg.Control != nil {
+		var listErr error
+		activeRuns, listErr = s.cfg.Store.ListActiveRuns(ctx)
+		if listErr != nil {
+			return nil, rpcError(listErr)
+		}
+	}
 	m.Role = role
-	if uerr := s.cfg.Store.UpdateMember(ctx, m); uerr != nil {
-		return nil, rpcError(uerr)
+	update := func() error { return s.cfg.Store.UpdateMember(ctx, m) }
+	if len(activeRuns) == 0 || s.cfg.Control == nil {
+		if uerr := update(); uerr != nil {
+			return nil, rpcError(uerr)
+		}
+	} else {
+		updated := false
+		for _, run := range activeRuns {
+			if _, uerr := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+				if updated {
+					return nil
+				}
+				if err := update(); err != nil {
+					return err
+				}
+				updated = true
+				return nil
+			}); uerr != nil {
+				return nil, rpcError(uerr)
+			}
+		}
+		if !updated {
+			if uerr := update(); uerr != nil {
+				return nil, rpcError(uerr)
+			}
+		}
 	}
 	slog.Info("sshd: member role changed",
 		"actor", member, "member", m.ID, "from", was, "to", role)

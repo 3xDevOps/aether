@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
+import type { RoomPostResult } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -16,22 +17,48 @@ import { api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
 
+function deliveryLabel(result: RoomPostResult): string {
+  switch (result.receipt ?? result.message.state) {
+    case 'queued':
+      return 'queued'
+    case 'sent':
+      return 'Sent'
+    case 'not_sent':
+      return 'Not sent'
+    case 'uncertain':
+      return 'Delivery uncertain'
+    default:
+      return result.message.state
+  }
+}
+
 export function InjectDialog() {
   const runID = useStore((s) => s.paletteRunID)
   const run = useStore((s) => (s.paletteRunID ? s.runs[s.paletteRunID] : undefined))
   const close = useStore((s) => s.closePaletteDialog)
   const [text, setText] = useState('')
+  const [request, setRequest] = useState<{ payload: string; key: string } | null>(null)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const send = async () => {
     if (!runID) return
+    const payload = text.trim()
+    const nextRequest =
+      request?.payload === payload ? request : { payload, key: crypto.randomUUID() }
+    setRequest(nextRequest)
     setSending(true)
     setError(null)
     try {
-      await api.runInject(runID, text.trim())
+      const result = await api.runInject(runID, payload, nextRequest.key)
+      setRequest(null)
       close()
-      toast.success('Message sent')
+      const label = deliveryLabel(result)
+      if (result.receipt === 'not_sent' || result.receipt === 'uncertain' || result.message.state === 'not_sent' || result.message.state === 'uncertain') {
+        toast.error(label)
+      } else {
+        toast.success(label)
+      }
     } catch (err) {
       setSending(false)
       const detail = `Send failed: ${message(err)}`
@@ -65,7 +92,11 @@ export function InjectDialog() {
             aria-describedby="inject-help"
             placeholder="Steer the agent..."
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              const nextText = e.target.value
+              setText(nextText)
+              setRequest((previous) => (previous && previous.payload !== nextText.trim() ? null : previous))
+            }}
           />
           <p id="inject-help" className="text-xs leading-4 text-muted-foreground">
             This message is added to the run transcript and delivered to the agent.

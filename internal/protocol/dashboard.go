@@ -26,6 +26,12 @@ type DashAttachRequest struct {
 	// Cursor is AttachRequest.Cursor: how much of the output this client
 	// already holds, so a resume replays only what it missed.
 	Cursor uint64 `json:"cursor,omitempty"`
+	// ControlSessionID is stable for one browser terminal tab across
+	// reconnects and distinct for two tabs by the same member.
+	ControlSessionID  string `json:"control_session_id,omitempty"`
+	ControlGeneration uint64 `json:"control_generation,omitempty"`
+	Takeover          bool   `json:"takeover,omitempty"`
+	ReleaseControl    bool   `json:"release_control,omitempty"`
 }
 
 // Control frame kinds on /ws/attach/{run}. Input and resize travel from

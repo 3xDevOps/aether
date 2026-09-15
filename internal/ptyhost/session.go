@@ -54,10 +54,11 @@ type pendingOutputEvent struct {
 // transcript history, bounded replay ring for non-run terminals, and attached
 // clients.
 type session struct {
-	run     SessionKey
-	att     runtime.Attachment
-	tr      *castWriter
-	history []castSegment
+	run        SessionKey
+	generation uint64
+	att        runtime.Attachment
+	tr         *castWriter
+	history    []castSegment
 
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser
@@ -640,31 +641,62 @@ func (s *session) applyResize() {
 	}
 }
 
-// writeStdin forwards keystrokes to the agent; false once the session is
-// over. The terminal echoes them back exactly as it echoes an injected
-// line, so they register the same expectation: a member typing at a hung
-// agent is not the agent talking. stdinMu is held across the registration
-// so the queued echoes stay in the order the writes reach the PTY.
-func (s *session) writeStdin(p []byte) bool {
+// stdinWriteTimeout is an upper bound supplied to context-aware runtime
+// writers even when the caller has no deadline. A canceled attach only
+// interrupts its own physical write; it never closes shared stdin.
+const stdinWriteTimeout = 5 * time.Second
+
+// writeStdinContext is the cancellable injection/input path. Production
+// runtime writers implement runtime.ContextWriter, which interrupts one
+// bounded write by deadline without closing or half-closing shared stdin.
+func (s *session) writeStdinContext(ctx context.Context, p []byte) error {
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
+	return s.writeStdinContextLocked(ctx, p)
+}
+
+func (s *session) writeStdinContextLocked(ctx context.Context, p []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.mu.Lock()
-	if s.ended || s.stopped || s.stdin == nil {
+	if s.stopped || s.stdin == nil {
 		s.mu.Unlock()
-		return false
+		return ErrNoSession
+	}
+	if s.ended {
+		s.mu.Unlock()
+		return ErrSessionEnded
 	}
 	stdin := s.stdin
 	s.expectEcho(p, time.Now())
 	s.mu.Unlock()
 
-	_, err := stdin.Write(p)
+	writeCtx, cancel := context.WithTimeout(ctx, stdinWriteTimeout)
+	defer cancel()
+	var n int
+	var err error
+	if writer, ok := stdin.(runtime.ContextWriter); ok {
+		n, err = writer.WriteContext(writeCtx, p)
+	} else {
+		// Narrow in-process test attachments may only provide io.Writer. They
+		// are not cancellable, but retain the same serialized write path.
+		n, err = stdin.Write(p)
+	}
 	if err != nil {
 		s.dropEcho()
+		return fmt.Errorf("ptyhost: stdin write: %w", err)
 	}
-	return err == nil
+	if n != len(p) {
+		s.dropEcho()
+		return fmt.Errorf("ptyhost: stdin write: %w", io.ErrShortWrite)
+	}
+	return nil
 }
-
-func (s *session) annotateInjection(actorName, actorColor, message string) error {
+func (s *session) annotateInjection(ctx context.Context, actorName, actorColor, message string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	safeActor, safeMessage := bannerText(actorName), bannerText(message)
 	banner := renderBanner(safeActor, actorColor, safeMessage)
 	marker := "inject by " + safeActor + ": " + safeMessage
@@ -686,8 +718,12 @@ func (s *session) annotateInjection(actorName, actorColor, message string) error
 				continue
 			}
 			s.mu.Unlock()
-			<-done
-			continue
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 		if s.resizeActive {
 			s.queuePendingOutputLocked(banner, false, marker)
@@ -708,7 +744,7 @@ func (s *session) annotateInjection(actorName, actorColor, message string) error
 	}
 }
 
-func (s *session) inject(actorName, actorColor, message, submit string) error {
+func (s *session) inject(ctx context.Context, actorName, actorColor, message, submit string) error {
 	line := []byte(message + submit)
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
@@ -721,28 +757,15 @@ func (s *session) inject(actorName, actorColor, message, submit string) error {
 		s.mu.Unlock()
 		return ErrSessionEnded
 	}
-	stdin := s.stdin
 	tr := s.tr
-	// Neither the banner nor the echo the terminal owes us may touch
-	// lastOut: stall detection reads that clock, and counting the server's
-	// own bytes would clear a stall for an agent that never answered.
-	s.expectEcho(line, time.Now())
 	s.mu.Unlock()
-	n, err := stdin.Write(line)
-	if err != nil {
-		s.dropEcho()
-		return fmt.Errorf("ptyhost: inject stdin write: %w", err)
+	if err := s.writeStdinContextLocked(ctx, line); err != nil {
+		return fmt.Errorf("ptyhost: inject: %w", err)
 	}
-	if n != len(line) {
-		s.dropEcho()
-		return fmt.Errorf("ptyhost: inject stdin write: %w", io.ErrShortWrite)
-	}
-	if err := s.annotateInjection(actorName, actorColor, message); err != nil {
+	if err := s.annotateInjection(ctx, actorName, actorColor, message); err != nil {
 		// The write above already accepted the full line: a session that
 		// ended in this window must not turn delivered input into a
 		// reported failure, which would invite a double-submitting retry.
-		// The banner has no viewers on a wound-down session, but the
-		// transcript still takes the attribution marker.
 		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
 			if tr != nil {
 				tr.lateMarker("inject by " + bannerText(actorName) + ": " + bannerText(message))

@@ -10,6 +10,9 @@ import { type ConnectionState, backoff, onWake } from '@/lib/stream'
 /** JSON-RPC "permission denied": a write attach without the steer capability. */
 export const codeDenied = -32001
 
+/** JSON-RPC "conflict": a writable control lease is occupied or stale. */
+export const codeConflict = -32003
+
 /** JSON-RPC "unavailable": the run has no live PTY session. */
 export const codeUnavailable = -32004
 
@@ -47,11 +50,16 @@ interface AttachHeader {
   cursor?: number
   cols: number
   rows: number
+  control_session_id: string
+  control_generation?: number
+  takeover?: boolean
+  release_control?: boolean
 }
 
 /**
  * A text frame from the server: the ack, or - once attached - the one
- * control frame the server sends, the session's new geometry.
+ * control frame the server sends, the session's new geometry and lease
+ * metadata.
  */
 interface AttachFrame {
   type?: string
@@ -63,6 +71,14 @@ interface AttachFrame {
   cursor?: number
   resumed?: boolean
   replay?: number
+  control_generation?: number
+  has_control?: boolean
+}
+
+export interface ControlMetadata {
+  control_session_id: string
+  control_generation: number
+  has_control: boolean
 }
 
 export type AttachDataKind = 'replay' | 'replay-end' | 'live'
@@ -84,6 +100,8 @@ export interface AttachHandlers {
     size: { cols: number; rows: number },
     resumed?: boolean,
   ) => void
+  /** Lease metadata returned with every successful attach ack. */
+  onControl?: (metadata: ControlMetadata) => void
   onState: (state: ConnectionState) => void
   /**
    * The attach was refused for good; no further reconnect is attempted. The
@@ -93,6 +111,12 @@ export interface AttachHandlers {
   onRefused: (message: string, code?: number) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
   onWriteDenied: () => void
+  /**
+   * Another session took or released writable control. This is an ephemeral
+   * lease loss, not a permission denial: the caller clears its writable
+   * preference and reconnects as a mirror so the member can ask again.
+   */
+  onControlLost?: () => void
   /**
    * The session's PTY was resized by whoever does decide its size. Only a
    * follower is sent this, and only after the ack that carried the first
@@ -119,7 +143,6 @@ export interface AttachHandlers {
   /** Whether the caller wants to steer, read at every connect. */
   wantsWrite: () => boolean
 }
-
 export interface Attachment {
   /** Keystrokes for the agent's terminal; dropped while not attached. */
   send: (data: string) => void
@@ -130,7 +153,13 @@ export interface Attachment {
    * honoured only while the current attach is still live, because a
    * reattach after a drop has no idea what it missed.
    */
-  reopen: (options?: { resume?: boolean }) => void
+  reopen: (options?: {
+    resume?: boolean
+    takeover?: boolean
+    releaseControl?: boolean
+  }) => void
+  /** Current tab identity and server-fenced control lease metadata. */
+  controlMetadata?: () => ControlMetadata
   /** Update callbacks when a persistent socket gets a new terminal host. */
   rebind: (handlers: AttachHandlers) => void
   close: () => void
@@ -208,9 +237,19 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // where the replay leaves off and every live byte advances it, so a
   // reattach can ask for exactly what it missed.
   let cursor = 0
+  // Stable for this logical browser tab and intentionally distinct from
+  // another tab by the same member. Reconnects reuse it to resume control.
+  const controlSessionID = crypto.randomUUID()
+  let controlGeneration = 0
+  let hasControl = false
 
-  const open = (resume = false) => {
+  const open = (options: {
+    resume?: boolean
+    takeover?: boolean
+    releaseControl?: boolean
+  } = {}) => {
     if (disposed) return
+    const resume = options.resume ?? false
     attached = false
     waitingForSession = false
     handlers.onState(attempt === 0 ? 'connecting' : 'reconnecting')
@@ -231,9 +270,18 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
 
     ws.onopen = () => {
       const { cols, rows } = handlers.geometry()
-      // A mirror sends no "write" key at all - the read-only header is {}
-      // plus geometry.
-      const header: AttachHeader = { cols, rows }
+      // A mirror sends no "write" key at all; every attach still carries
+      // its stable control-session identity alongside geometry.
+      const header: AttachHeader = {
+        cols,
+        rows,
+        control_session_id: controlSessionID,
+      }
+      if ((askedWrite || options.releaseControl) && hasControl && controlGeneration > 0) {
+        header.control_generation = controlGeneration
+      }
+      if (options.takeover || (askedWrite && hasControl)) header.takeover = true
+      if (options.releaseControl) header.release_control = true
       if (askedWrite) header.write = true
       if (follows) header.follow = true
       if (resume) {
@@ -276,6 +324,17 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       replayRemaining = ack.ok && ack.replay !== undefined && ack.replay > 0 ? ack.replay : 0
       if (ack.ok) {
+        hasControl = ack.has_control === true
+        if (ack.control_generation !== undefined) {
+          controlGeneration = ack.control_generation
+        }
+        handlers.onControl?.({
+          control_session_id: controlSessionID,
+          control_generation: controlGeneration,
+          has_control: hasControl,
+        })
+      }
+      if (ack.ok) {
         attached = true
         attempt = 0
         unavailableTries = 0
@@ -299,7 +358,29 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // A refused write is not a dead attach: drop the request and mirror.
       if (ack.code === codeDenied && askedWrite) {
         writeDenied = true
+        hasControl = false
+        handlers.onControl?.({
+          control_session_id: controlSessionID,
+          control_generation: controlGeneration,
+          has_control: false,
+        })
         handlers.onWriteDenied()
+        attempt = 0
+        return
+      }
+      // An occupied or stale writable lease is an ephemeral control loss, not
+      // a permanent permission decision. This also covers a raced forced
+      // reconnect whose generation was already displaced. Clear the caller's
+      // write preference and reconnect as a mirror so it can still observe
+      // the terminal.
+      if (ack.code === codeConflict && askedWrite) {
+        hasControl = false
+        handlers.onControl?.({
+          control_session_id: controlSessionID,
+          control_generation: controlGeneration,
+          has_control: false,
+        })
+        handlers.onControlLost?.()
         attempt = 0
         return
       }
@@ -344,13 +425,28 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         handlers.onState('offline')
         return
       }
-      // 1008 with no refusal frame is the gateway's authorization watch,
-      // and its reason names which gate fell: a lost steer capability just
-      // downgrades to a mirror, while withdrawn membership refuses every
-      // reconnect. An unnamed one is still refused, with that said plainly
-      // rather than dressed up as a cause we did not read.
       if (ev.code === policyClose && !answered) {
+        if (wasAttached && ev.reason === 'control taken over') {
+          hasControl = false
+          handlers.onControl?.({
+            control_session_id: controlSessionID,
+            control_generation: controlGeneration,
+            has_control: false,
+          })
+          // This loss is ephemeral: clear the caller's write preference but
+          // leave the permanent permission-denied latch untouched.
+          handlers.onControlLost?.()
+          attempt = 0
+          retry()
+          return
+        }
         if (wasAttached && ev.reason === 'steer permission withdrawn') {
+          hasControl = false
+          handlers.onControl?.({
+            control_session_id: controlSessionID,
+            control_generation: controlGeneration,
+            has_control: false,
+          })
           writeDenied = true
           handlers.onWriteDenied()
           attempt = 0
@@ -420,7 +516,6 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (!disposed) handlers = next
     },
     // A paste arrives as one string that can dwarf the gateway's 64KB frame
-    // limit, so large input goes out as several ordered frames.
     send: (data) => {
       for (let at = 0; at < data.length; ) {
         let end = Math.min(at + inputChunk, data.length)
@@ -432,11 +527,19 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
     },
     resize: (cols, rows) => control({ type: 'resize', cols, rows }),
+    controlMetadata: () => ({
+      control_session_id: controlSessionID,
+      control_generation: controlGeneration,
+      has_control: hasControl,
+    }),
     reopen: (options) => {
       if (disposed) return
       // Only a live attach can be resumed: after a drop the screen has
       // moved on without this client, and only a replay can say how.
-      const resume = (options?.resume ?? false) && attached
+      const request = {
+        ...options,
+        resume: (options?.resume ?? false) && attached,
+      }
       if (timer) clearTimeout(timer)
       timer = null
       refused = false
@@ -445,7 +548,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       unavailableTries = 0
       waitingForSession = false
       drop()
-      open(resume)
+      open(request)
     },
     close: () => {
       disposed = true

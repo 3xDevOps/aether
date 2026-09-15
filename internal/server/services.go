@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -29,6 +30,7 @@ type Deps struct {
 	Store   store.Store
 	Bus     events.Bus
 	Events  events.EventLog
+	Control *control.Service
 	Runs    *scheduler.Scheduler
 	Git     *gitengine.Engine
 	PTY     *ptyhost.Host

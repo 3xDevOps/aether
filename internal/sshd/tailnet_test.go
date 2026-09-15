@@ -208,7 +208,7 @@ func TestTailnetSecondIdentityPendingThenApproved(t *testing.T) {
 	if cerr := e.store.CreateRun(context.Background(), run); cerr != nil {
 		t.Fatalf("create run: %v", cerr)
 	}
-	if injectErr := bob.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(run.ID), Message: "go"}, nil); injectErr != nil {
+	if injectErr := bob.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: string(run.ID), Message: "go", IdempotencyKey: "tailnet-go"}, nil); injectErr != nil {
 		t.Fatalf("approved run.inject: %v", injectErr)
 	}
 

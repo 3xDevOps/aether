@@ -277,7 +277,7 @@ func TestEventsRefusalForwardsCode(t *testing.T) {
 	expectClose(t, conn, websocket.StatusPolicyViolation)
 }
 
-func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
+func TestAttachShellQueryPreservesRequestedReadOnly(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
 	b := &wsStubBackend{attachTerm: term, attachAck: protocol.AttachResponse{OK: true, Framed: true, Cols: 80, Rows: 24}}
 	g, base := newWSGateway(t, b)
@@ -288,21 +288,15 @@ func TestAttachShellQueryForcesWriteAndResize(t *testing.T) {
 		t.Fatalf("ack = %+v, want ok", ack)
 	}
 	req := b.recordedAttach()
-	if req.Shell != "tab-1" || req.ReadOnly || req.Cols != 80 || req.Rows != 24 || !req.Framed {
-		t.Fatalf("attach request = %+v, want writable framed shell tab-1 80x24", req)
+	if req.Shell != "tab-1" || !req.ReadOnly || req.Cols != 80 || req.Rows != 24 || !req.Framed {
+		t.Fatalf("attach request = %+v, want read-only framed shell tab-1 80x24", req)
 	}
 
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
 	select {
 	case in := <-term.inputCh:
-		if string(in) != "pwd\n" {
-			t.Fatalf("input = %q, want pwd\\n", in)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("shell input never reached terminal")
-	}
-	select {
+		t.Fatalf("read-only shell input reached terminal: %q", in)
 	case rs := <-term.resizeCh:
 		if rs != [2]uint{132, 43} {
 			t.Fatalf("resize = %v, want [132 43]", rs)

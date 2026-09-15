@@ -12,8 +12,8 @@ import type {
   RunDiffPayload,
   RunProtectedPayload,
   RunStatusPayload,
-  ServerUpdatePayload,
   RunTitlePayload,
+  ServerUpdatePayload,
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
@@ -149,6 +149,52 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
 }
 
 /**
+ * Refetches room history until a page reaches the cache boundary. A realtime
+ * event only names the mutation, so one newest page is not enough when the
+ * client missed a burst larger than that page during a disconnect.
+ */
+async function reconcileRoomHistory(
+  store: RootStore,
+  client: Api,
+  workspaceID: string,
+  runID: string,
+  targetMessageID?: string,
+): Promise<void> {
+  const cached = store.getState().roomMessages[runID] ?? []
+  const cachedIDs = new Set(cached.map((message) => message.id))
+  const oldestCachedID = cached[0]?.id
+  let before: string | undefined
+  let append = cached.length === 0
+  const visited = new Set<string>()
+
+  while (true) {
+    const page = await client.runRoomList({
+      workspace_id: workspaceID,
+      run_id: runID,
+      ...(before === undefined ? {} : { before }),
+      limit: 100,
+    })
+    store.getState().setRoomPage(runID, page.messages, page.next_before, append)
+    const containsTarget = targetMessageID
+      ? page.messages.some((message) => message.id === targetMessageID)
+      : false
+    const overlapsBoundary = oldestCachedID
+      ? page.messages.some((message) => message.id === oldestCachedID)
+      : page.messages.some((message) => cachedIDs.has(message.id))
+    if (
+      containsTarget ||
+      overlapsBoundary ||
+      !page.next_before ||
+      visited.has(page.next_before)
+    ) return
+    visited.add(page.next_before)
+    before = page.next_before
+    append = true
+  }
+}
+
+
+/**
  * Applies one event and reports whether it resolved. Await it, and await it in
  * sequence order: an event about a run the store has never seen has to fetch
  * that run first, and the cursor must never move past an event still waiting
@@ -254,6 +300,10 @@ export async function applyEvent(
       })
       break
     }
+    case 'server.update': {
+      store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
+      break
+    }
     case 'git.branch': {
       const p = ev.payload as GitBranchPayload
       if (!store.getState().runs[ev.run_id]) {
@@ -299,12 +349,37 @@ export async function applyEvent(
       }
       break
     }
-    case 'server.update': {
-      // The server updating itself. It is published once per workspace,
-      // so the same phase lands several times; the slice keeps the
-      // furthest one. The banner and the status bar read it live, and
-      // `restarting` is the last frame before the socket drops.
-      store.getState().applyServerUpdate(ev.payload as ServerUpdatePayload)
+    case 'workspace.room_message': {
+      // Room event payloads intentionally contain no message body. A question
+      // or reply changes the server-computed attention count even when the
+      // room has never been opened; an open room still refreshes its durable
+      // history below.
+      const runID = ev.run_id
+      const workspaceID = ev.workspace_id
+      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string }
+      if (
+        runID &&
+        (payload.kind === 'question' || payload.kind === 'reply')
+      ) {
+        try {
+          store.getState().upsertRun(await client.runGet(runID))
+        } catch (err) {
+          // Without this snapshot the attention badge can remain stale. Leave
+          // the event unresolved so the stream performs authoritative recovery.
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          return false
+        }
+      }
+      if (runID && workspaceID && store.getState().roomMessages[runID]) {
+        await reconcileRoomHistory(store, client, workspaceID, runID, payload.message_id)
+          .then(() => store.getState().setRoomError(runID))
+          .catch((err) => {
+            store.getState().setRoomError(
+              runID,
+              err instanceof Error ? err.message : String(err),
+            )
+          })
+      }
       break
     }
   }

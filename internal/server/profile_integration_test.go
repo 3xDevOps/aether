@@ -198,7 +198,7 @@ func TestIntegrationProfileSyncAndLogins(t *testing.T) {
 
 	// Run 1 reads its config only now - after the v2 push - from the same
 	// persistent home as run 2.
-	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: run1.ID, Message: "go"}, nil); err != nil {
+	if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{RunID: run1.ID, Message: "go", IdempotencyKey: "profile-run1-go"}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}
 	waitRunStatus(t, sub, &seen, run1.ID, domain.RunCompleted)

@@ -31,6 +31,12 @@ import type {
   PullSwitchResult,
   RepoFastForwardResult,
   RepoPushResult,
+  RoomDecideResult,
+  RoomMessageListResult,
+  RoomPostResult,
+  RoomStatusResult,
+  RoomMessageAnchor,
+  RoomMessageKind,
   WorkspaceMirrorAuth,
   WorkspaceMirrorResult,
   FileDiff,
@@ -299,12 +305,38 @@ export const api = {
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
-  runInject: (runID: string, message: string) =>
-    call<unknown>('run.inject', { run_id: runID, message }),
+  runInject: (runID: string, message: string, idempotencyKey: string) =>
+    call<RoomPostResult>('run.inject', { run_id: runID, message, idempotency_key: idempotencyKey }),
   runClose: (runID: string, outcome: 'merged' | 'abandoned') =>
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>
     call<unknown>('run.handoff', { run_id: runID, to_member_id: toMemberID }),
+  runRoomList: (params: {
+    workspace_id: string
+    run_id: string
+    before?: string
+    limit?: number
+  }) => call<RoomMessageListResult>('run.room.list', params),
+  runRoomStatus: (params: { workspace_id: string; run_id: string }) =>
+    call<RoomStatusResult>('run.room.status', params),
+  runRoomPost: (params: {
+    workspace_id: string
+    run_id: string
+    kind: RoomMessageKind
+    body: string
+    attachments?: string[]
+    anchor?: RoomMessageAnchor
+    correlation_id?: string
+    idempotency_key: string
+    control_session_id?: string
+    control_generation?: number
+  }) => call<RoomPostResult>('run.room.post', params),
+  runRoomDecide: (params: {
+    message_id: string
+    decision: 'approve' | 'deny'
+    control_session_id: string
+    control_generation: number
+  }) => call<RoomDecideResult>('run.room.decide', params),
   approvalList: (workspaceID: string, all = false) =>
     call<{ approvals: Approval[] }>('approval.list', {
       workspace_id: workspaceID,

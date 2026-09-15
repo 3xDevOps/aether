@@ -11,7 +11,15 @@ import type * as apiModule from '@/lib/api'
 
 const xterm = vi.hoisted(() => ({
   hostRef: () => {},
-  terminal: { cols: 80, rows: 24, reset: vi.fn(), write: vi.fn(), focus: vi.fn() },
+  terminal: {
+    cols: 80,
+    rows: 24,
+    options: { disableStdin: false },
+    reset: vi.fn(),
+    write: vi.fn(),
+    focus: vi.fn(),
+    blur: vi.fn(),
+  },
   ready: true,
   geometry: () => ({ cols: 80, rows: 24 }),
   setGeometry: vi.fn(),

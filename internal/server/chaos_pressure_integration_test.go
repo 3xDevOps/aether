@@ -80,7 +80,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		att := openAttach(t, env.client, launched.Run.ID)
 		waitOutput(t, att, "agent-ready")
 		if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-			RunID: launched.Run.ID, Message: "finish",
+			RunID: launched.Run.ID, Message: "finish", IdempotencyKey: fmt.Sprintf("pressure-finish-%d", i),
 		}, nil); err != nil {
 			t.Fatalf("run.inject %d: %v", i, err)
 		}
@@ -229,7 +229,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	}
 	retainedAtt = waitAttach(t, env.client, retained.Run.ID)
 	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: retained.Run.ID, Message: "finish",
+		RunID: retained.Run.ID, Message: "finish", IdempotencyKey: "pressure-retained-finish",
 	}, nil); err != nil {
 		t.Fatalf("run.inject retained fixture: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 	// it does not complete the TUI run.
 	waitOutput(t, retainedAtt, "[aether] harness exited with code 0")
 	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: retained.Run.ID, Message: "printf 'pressure-login-shell-ready\\n'",
+		RunID: retained.Run.ID, Message: "printf 'pressure-login-shell-ready\\n'", IdempotencyKey: "pressure-retained-login",
 	}, nil); err != nil {
 		t.Fatalf("run.inject in retained login shell: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 	// Steering it clears the stall: the same loop that parked it puts it
 	// back once the agent is talking again.
 	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: string(runID), Message: "wake",
+		RunID: string(runID), Message: "wake", IdempotencyKey: "pressure-wake",
 	}, nil); err != nil {
 		t.Fatalf("run.inject: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestIntegrationChaosStallUX(t *testing.T) {
 	// line discipline echoes every newline back as CRLF, so the expectation
 	// has to cover the interior one as well as the trailing carriage return.
 	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: string(deafID), Message: "wake\nup",
+		RunID: string(deafID), Message: "wake\nup", IdempotencyKey: "pressure-deaf-wake",
 	}, nil); err != nil {
 		t.Fatalf("run.inject hung agent: %v", err)
 	}

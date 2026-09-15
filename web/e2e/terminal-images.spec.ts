@@ -92,6 +92,7 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   await runDock.getByRole('button', { name: 'Open shell' }).click()
   const screen = runDock.locator('.xterm-screen')
   await expect(screen).toBeVisible({ timeout: 60_000 })
+  await runDock.getByRole('button', { name: 'Take shell control' }).click()
   await expect(
     runDock.getByRole('button', { name: 'Upload image to terminal' }),
   ).toBeEnabled({ timeout: 60_000 })

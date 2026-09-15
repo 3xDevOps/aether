@@ -117,3 +117,37 @@ func TestAttachRelaysOrderedTerminalRecordsToBrowser(t *testing.T) {
 		t.Fatalf("last frame = (%v,%q), want binary new output", typ, data)
 	}
 }
+
+func TestAttachShellMirrorRemainsReadOnly(t *testing.T) {
+	term := newFollowTerminal()
+	backend := &followBackend{term: term}
+	g, err := New(Config{Authorize: admitAll(backend)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+	ts := httptest.NewServer(g)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/attach/run_1?shell=shared", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	if err = wsjson.Write(ctx, conn, protocol.DashAttachRequest{Cols: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	var ack protocol.AttachResponse
+	if err = wsjson.Read(ctx, conn, &ack); err != nil {
+		t.Fatal(err)
+	}
+	if !ack.OK {
+		t.Fatalf("ack = %+v, want success", ack)
+	}
+	if !backend.request.ReadOnly || backend.request.Shell != "shared" {
+		t.Fatalf("attach request = %+v, want read-only shared shell", backend.request)
+	}
+	_ = term.Close()
+}

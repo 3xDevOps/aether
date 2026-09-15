@@ -67,7 +67,10 @@ export function sidebarRuns(s: SidebarInput): SidebarRun[] {
     if (s.workspace && run.workspace_id !== s.workspace) continue
     entries.push({
       run,
-      state: runState(run.status, s.pending.has(run.id)),
+      state: runState(
+        run.status,
+        s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
+      ),
       owner: s.members[run.member_id],
     })
   }
