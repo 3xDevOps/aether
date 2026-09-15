@@ -36,7 +36,10 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		cols, rows = defaultCols, defaultRows
 	}
 	shell := r.URL.Query().Get("shell")
-	allowWrite := req.Write
+	// Releasing control always hands the socket back as a mirror. The
+	// server fences the writer before admitting this replacement, and the
+	// gateway must not forward input while that transition is in flight.
+	allowWrite := req.Write && !req.ReleaseControl
 	term, ack, err := s.Backend.Attach(s.Ctx, protocol.AttachRequest{
 		RunID:             r.PathValue("run"),
 		ReadOnly:          !allowWrite,
@@ -52,14 +55,6 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		ReleaseControl:    req.ReleaseControl,
 		Framed:            true,
 	})
-	if req.ReleaseControl {
-		_ = s.WriteJSON(ack)
-		if term != nil {
-			_ = term.Close()
-		}
-		_ = s.Conn.Close(websocket.StatusNormalClosure, "control released")
-		return
-	}
 	if err == nil && ack.OK && !ack.Framed {
 		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
 		ack = protocol.AttachResponse{Code: protocol.CodeInternal, Error: err.Error()}

@@ -35,17 +35,54 @@ describe('environment terminal slice', () => {
     expect(useStore.getState().envTerminal.activeTab).toBe('main')
   })
 
-  it('delivers environment output kinds to subscribers', () => {
+  it('delivers environment output kinds and settled callbacks to subscribers', () => {
     const received: Array<[Uint8Array, 'replay' | 'replay-end' | 'live']> = []
-    const unsubscribe = subscribeEnvTerminalSocket('main', (chunk, kind) => {
+    let settled: (() => void) | undefined
+    const unsubscribe = subscribeEnvTerminalSocket('main', (chunk, kind, done) => {
       received.push([chunk, kind])
+      settled = done
     })
-    const replay = new Uint8Array([1, 2])
+    const live = new Uint8Array([1, 2])
+    const completion = vi.fn()
 
-    emitEnvTerminalSocketData('main', replay, 'replay-end')
+    emitEnvTerminalSocketData('main', live, 'live', completion)
 
-    expect(received).toEqual([[replay, 'replay-end']])
+    expect(received).toEqual([[live, 'live']])
+    expect(settled).toBe(completion)
+    expect(completion).not.toHaveBeenCalled()
+    settled?.()
+    expect(completion).toHaveBeenCalledOnce()
     unsubscribe()
+
+    const noListenerCompletion = vi.fn()
+    emitEnvTerminalSocketData('main', live, 'live', noListenerCompletion)
+    expect(noListenerCompletion).toHaveBeenCalledOnce()
+  })
+
+  it('waits for every subscriber before reporting replay completion', async () => {
+    const first = Promise.withResolvers<void>()
+    const second = Promise.withResolvers<void>()
+    const firstStop = subscribeEnvTerminalSocket('async', () => first.promise)
+    const secondStop = subscribeEnvTerminalSocket('async', () => second.promise)
+
+    const completion = emitEnvTerminalSocketData('async', new Uint8Array([1]), 'replay-end')
+    expect(completion).toBeInstanceOf(Promise)
+    let finished = false
+    const wait = completion?.then(() => {
+      finished = true
+    })
+
+    await Promise.resolve()
+    expect(finished).toBe(false)
+    first.resolve()
+    await Promise.resolve()
+    expect(finished).toBe(false)
+    second.resolve()
+    await wait
+    expect(finished).toBe(true)
+
+    firstStop()
+    secondStop()
   })
 
   it('sends a complete line through the selected tab socket', () => {

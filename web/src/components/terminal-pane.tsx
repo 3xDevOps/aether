@@ -284,6 +284,7 @@ export function TerminalPane({
   imageTargetKey,
   imageUploadEnabled,
   writable = true,
+  replaying = false,
 }: {
   controller: XtermController
   /** Extra classes for the terminal element itself. */
@@ -300,6 +301,8 @@ export function TerminalPane({
   imageUploadEnabled?: boolean
   /** Whether what is typed here reaches the shell. A mirror shows no keys. */
   writable?: boolean
+  /** Whether replay is still parsing and the terminal surface must stay hidden. */
+  replaying?: boolean
 }) {
   const image = useTerminalImage({
     terminal: controller.terminal,
@@ -345,9 +348,19 @@ export function TerminalPane({
       <div
         ref={controller.hostRef}
         className={cn('min-h-0 flex-1 overflow-hidden bg-background p-2 text-foreground', className)}
+        style={replaying ? { visibility: 'hidden' } : undefined}
       />
       {coarse && writable && <TerminalKeys controller={controller} />}
       {children}
+      {replaying && (
+        <div
+          role="status"
+          aria-label="Restoring terminal history"
+          className="absolute inset-0 z-30 flex items-center justify-center bg-background text-[13px] text-muted-foreground"
+        >
+          Restoring terminal history
+        </div>
+      )}
       {image.dialog}
     </div>
   )
@@ -362,6 +375,7 @@ export function TerminalSpinner({ label }: { label: string }) {
   return (
     <div
       role="status"
+      aria-label={label}
       className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background text-[13px] text-muted-foreground"
     >
       <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />

@@ -268,13 +268,36 @@ describe('xterm host arrival', () => {
 })
 
 /** The pane as the three terminal surfaces render it. */
-function PaneProbe({ onReady }: { onReady: (terminal: Terminal) => void }) {
+function PaneProbe({
+  onReady,
+  replaying = false,
+}: {
+  onReady: (terminal: Terminal) => void
+  replaying?: boolean
+}) {
   const controller = useXterm()
   useEffect(() => {
     if (controller.terminal) onReady(controller.terminal)
   }, [controller.terminal, onReady])
-  return <TerminalPane controller={controller} />
+  return <TerminalPane controller={controller} replaying={replaying} />
 }
+
+describe('terminal replay surface', () => {
+  it('hides the mounted xterm until replay parsing completes', async () => {
+    let ready: Terminal | null = null
+    const view = render(<PaneProbe replaying onReady={(terminal) => (ready = terminal)} />)
+    await waitFor(() => expect(ready).not.toBeNull())
+
+    const host = document.querySelector('.min-h-0.flex-1.overflow-hidden.bg-background') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+
+    view.rerender(<PaneProbe onReady={(terminal) => (ready = terminal)} />)
+    await waitFor(() => expect(host.style.visibility).toBe(''))
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    view.unmount()
+  })
+})
 
 /**
  * xterm delivers browser keys to its own handler before the shell sees them,

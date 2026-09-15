@@ -183,6 +183,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}()
 	_, _, hasClientPTY := st.geometry()
 	wantsControl := !req.ReadOnly && hasClientPTY
+	releasedControl := false
 	if s.cfg.Control != nil {
 		if req.ReleaseControl {
 			if req.ControlSessionID == "" {
@@ -194,18 +195,23 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				return
 			}
 			err := s.cfg.Control.Release(req.RunID, member, req.ControlSessionID, req.ControlGeneration)
-			ack := protocol.AttachResponse{OK: err == nil}
 			if err != nil {
+				ack := protocol.AttachResponse{OK: false}
 				ack.Code, ack.Error = attachControlError(err)
+				if snap, present := s.cfg.Control.Status(req.RunID); present {
+					s.attachControlAck(&ack, snap, false)
+				}
+				_ = writeJSONLine(ch, ack)
+				return
 			}
-			if snap, present := s.cfg.Control.Status(req.RunID); present {
-				s.attachControlAck(&ack, snap, false)
-			}
-			if err == nil {
-				s.cancelControlAttach(req.RunID, req.ControlSessionID, req.ControlGeneration, errAttachControlRevoked)
-			}
-			_ = writeJSONLine(ch, ack)
-			return
+			// Release fences the old generation before this replacement is
+			// admitted. Keep the resume cursor intact, but force the
+			// replacement to remain a read-only mirror.
+			s.cancelControlAttach(req.RunID, req.ControlSessionID, req.ControlGeneration, errAttachControlRevoked)
+			req.ReadOnly = true
+			req.ReleaseControl = false
+			wantsControl = false
+			releasedControl = true
 		}
 		if !wantsControl {
 			if current, present := s.cfg.Control.Status(req.RunID); present {
@@ -287,7 +293,18 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 		return nil
 	}
-	conn := newAttachConn(ch, r, ack, req.Framed, nil)
+	var beforeAck func() error
+	if releasedControl {
+		beforeAck = func() error {
+			if current, present := s.cfg.Control.Status(req.RunID); present {
+				s.attachControlAck(ack, current, false)
+			} else {
+				s.attachControlAck(ack, control.Snapshot{}, false)
+			}
+			return nil
+		}
+	}
+	conn := newAttachConn(ch, r, ack, req.Framed, beforeAck)
 	defer func() {
 		if controlLease == nil {
 			return

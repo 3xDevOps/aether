@@ -1160,12 +1160,16 @@ keyboard stop and overflow scrolling; it does not use a component-level tab
 primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
-toolbar and Find over it. `TerminalTools` in the same module owns the search,
-zoom/reset, copy, copy-last-screen, paste, and `TerminalImageAction` controls;
-the run terminal supplies its connection and steering controls immediately
-after those tools. Terminal tools delegate key behavior to the xterm
-controller and clipboard helpers rather than putting those actions in each
-dock. `useTerminalImage`
+toolbar and Find over it. During replay it receives `replaying={replaying}`:
+the xterm host is hidden with CSS visibility, and the pane says **Restoring
+terminal history** until the final replay write callback. The run terminal,
+run-shell tabs, and environment dock all pass `setReplaying` to their shared
+replay gate, so all three surfaces reveal only a settled terminal.
+`TerminalTools` in the same module owns the search, zoom/reset, copy,
+copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
+supplies its connection and steering controls immediately after those tools.
+Terminal tools delegate key behavior to the xterm controller and clipboard
+helpers rather than putting those actions in each dock. `useTerminalImage`
 owns the hidden file input, preview dialog, validation, upload call, and
 shell-quoted path insertion. Its identity (`terminal`, target, active-tab
 key, and enabled state) plus a generation token rejects a chooser, paste, or
@@ -1280,12 +1284,15 @@ stopped. A stop or reset that fails renders the server's error inside the
 dialog that caused it. When the terminal is running and `saved_image` is
 empty, it shows the hint **Installs here reach agents after you save.** From
 the moment a tab opens until its attach is acked, a spinner covers the
-terminal, because the xterm host is blank until then. The words follow what
-the dock knows: a terminal it has not seen running is **Starting your
-environment container**, which is the wait Docker's container start accounts
-for; a second tab, a tab switch or an expanded dock is **Connecting to your
-environment**, with no container to start. A refused or failed start
-replaces the terminal with the gateway's own error instead.
+terminal. Once an ack declares positive replay, the xterm host remains hidden
+with CSS visibility and the pane says **Restoring terminal history** while
+frame-sized replay records are parsed; it is revealed only after the final
+replay write completes. A zero-length replay unmutes and reveals immediately.
+The words follow what the dock knows: a terminal it has not seen running is
+**Starting your environment container**, which is the wait Docker's container
+start accounts for; a second tab, a tab switch or an expanded dock is
+**Connecting to your environment**, with no container to start. A refused or
+failed start replaces the terminal with the gateway's own error instead.
 
 - **The socket is `attach.ts`**, framework-free and the only part with logic
   worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
@@ -1294,7 +1301,10 @@ replaces the terminal with the gateway's own error instead.
   64 KiB frame cap, never splitting a surrogate pair. Its `Attachment`
   interface also supports `rebind()` and `reopen()`: a persistent dock socket
   can keep its transport while a newly mounted host supplies current
-  callbacks.
+  callbacks. A user-requested `reopen({ resume: true, ... })` while replay is
+  receiving or parsing waits for its write completion callback before replacing
+  the attach; the existing socket and terminal remain authoritative until that
+  callback.
 - **Controller lease and complete replay on entry.** A desktop owner's first
   attach requests write; the server grants it only when no controller exists.
   Other members enter as mirrors, and a second tab cannot become a second
@@ -1305,11 +1315,40 @@ replaces the terminal with the gateway's own error instead.
   running**. Whether a member may steer is the server's answer, never the
   client's guess: a `-32001` refusal downgrades the attach to a mirror and
   disables the toggle. An occupied write request is a conflict and needs the
-  Run Room's confirmed takeover. A fresh run attach receives the complete
-  retained transcript in the ordinary terminal, including segments from
-  earlier server incarnations; it ends with a 1000 close, reason `session
-  ended`, so the client stops reconnecting instead of replaying the same bytes
-  again. Every other refusal stops the reconnect loop.
+  Run Room's confirmed takeover.
+
+  A fresh run attach receives the complete retained transcript in the ordinary
+  terminal, including segments from earlier server incarnations. The ack's
+  `replay` count is the exact replay/live byte boundary, even when a WebSocket
+  frame straddles it. `connectAttach` retains frame-sized output and geometry
+  records in wire order without allocating a `Uint8Array` (or equivalent)
+  whose size is the declared replay length. It parses replay chunks through
+  public xterm write callbacks serially, waiting for each completion before
+  the next record; live output and geometry received during replay queue behind
+  the final replay callback. The hidden `TerminalPane` is revealed only after
+  that callback, so xterm settles on the current screen before live output is
+  presented.
+  Every retained transcript byte is fed to xterm. xterm retains normal
+  scrollback and rows preserved by its configured full-screen erase behavior;
+  control bytes and cursor overwrites affect terminal state but are not
+  themselves scrollback rows. Input and terminal-generated replies remain
+  muted from the ack through the final replay-write completion callback, so
+  historical redraws never appear as playback. There is no separate History
+  player.
+
+  Release control sends `release_control` with the current control session and
+  generation on that same replacement attach request. A successful release
+  fences the displaced writer, continues as the replacement read-only PTY
+  attach on the same request, honors `resume`/`cursor`, returns one normal
+  attach ack, and then streams output. Invalid, stale, or cross-member release
+  is refused. A successful resume supplies only bytes after `cursor` and may
+  replay the complete retained run transcript again; the dashboard applies
+  that fallback through the same segmented ordered transaction. Taking control
+  and releasing it preserve the existing terminal when resume succeeds; when
+  fallback is needed, they still produce no visible historical playback.
+  The server streams retained segments lazily, opening and reading at most one
+  segment at a time, so complete history does not require every segment to be
+  loaded or left open.
 - **A missing session is not a dead terminal.** `-32004` means the run has
   no PTY session, and `internal/sshd/attach.go` refuses rather than waits
   for one, so the client is what has to tell a container that is still
@@ -1361,14 +1400,6 @@ replaces the terminal with the gateway's own error instead.
   every reconnect, so those stop the loop and surface the reason. A refusal
   frame arrives with its own 1008 close, which is why the client reacts to the
   code only when no refusal preceded it.
-- **Fresh run opens receive the complete transcript.** The server streams every
-  retained raw output segment, including earlier server incarnations, before
-  live output. The browser resets once and mutes terminal replies until that
-  replay parses. xterm keeps the replay in scrollback and retains lines cleared
-  by full-screen redraws. Taking control and handing it back instead preserve
-  the existing screen with `resume` and receive only missing bytes from the raw
-  1 MiB ring. Reusable shell terminals still use the server's compact current
-  screen when a full transcript does not apply.
 - **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
   chains zoom, find, and `clipboardKeys` in that order; the first to claim a
   key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but

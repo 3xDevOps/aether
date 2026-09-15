@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,62 @@ type rawAttachConn struct {
 	ch   ssh.Channel
 	r    *bufio.Reader
 	exit <-chan uint32
+}
+
+// resumeReleasePTY makes the fake's current output cursor observable for the
+// release replacement without changing the shared fake used by other tests.
+// A caught-up resume consumes no replay while still allowing the fake attach
+// to exercise its live read/write lifecycle.
+type resumeReleasePTY struct {
+	*fakePTY
+	cursor uint64
+}
+
+type resumeReplayConn struct {
+	io.ReadWriter
+	replay ptyhost.ReplayWriter
+	resume ptyhost.ResumeWriter
+	cursor uint64
+}
+
+func (c *resumeReplayConn) WriteReplay(io.Reader, int) error {
+	c.resume.SetResume(c.cursor, true)
+	return c.replay.WriteReplay(bytes.NewReader(nil), 0)
+}
+
+func (p *resumeReleasePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
+	if client.Resume && client.Cursor == p.cursor {
+		replay, ok := conn.(ptyhost.ReplayWriter)
+		resume, resumed := conn.(ptyhost.ResumeWriter)
+		if ok && resumed {
+			conn = &resumeReplayConn{
+				ReadWriter: conn,
+				replay:     replay,
+				resume:     resume,
+				cursor:     p.cursor,
+			}
+			// Keep the replacement's input path observable. A read-only
+			// client must not admit the bytes, while the connection must
+			// remain able to carry unrelated output.
+			inputSeen := make(chan struct{}, 1)
+			client.InputAdmission = func(accept func() error) error {
+				var err error
+				if !client.ReadOnly {
+					err = accept()
+				}
+				select {
+				case inputSeen <- struct{}{}:
+				default:
+				}
+				return err
+			}
+			go func() {
+				<-inputSeen
+				_, _ = conn.Write([]byte("independent output"))
+			}()
+		}
+	}
+	return p.fakePTY.Attach(ctx, key, client, conn, resize)
 }
 
 func rawAttach(t *testing.T, e *testEnv, signer ssh.Signer, run domain.RunID, withPTY bool, shell ...string) (rawAttachConn, protocol.AttachResponse) {
@@ -397,20 +454,44 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 		}
 		_ = second.ch.Close()
 	})
-
-	t.Run("release fences writer", func(t *testing.T) {
+	t.Run("release fences writer and resumes mirror", func(t *testing.T) {
 		e := controlAttachEnv(t)
+		e.pty.replay = []byte("history that must not be replayed")
 		first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "release-tab"}, true)
 		if !firstAck.OK {
 			t.Fatalf("first ack = %+v", firstAck)
 		}
-		_, releaseAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
-			ControlSessionID: "release-tab", ControlGeneration: firstAck.ControlGeneration,
-			ReleaseControl: true,
-		}, false)
-		if !releaseAck.OK || releaseAck.HasControl {
-			t.Fatalf("release ack = %+v, want successful release", releaseAck)
+		// Install a PTY seam that models the real host's resume decision. It
+		// suppresses only the caught-up replay while preserving live attach
+		// behavior, so this test proves the release request is a replacement
+		// attach rather than a release-only response.
+		e.srv.cfg.PTY = &resumeReleasePTY{fakePTY: e.pty, cursor: firstAck.Cursor}
+		release, releaseAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
+			ControlSessionID:  "release-tab",
+			ControlGeneration: firstAck.ControlGeneration,
+			ReleaseControl:    true,
+			Resume:            true,
+			Cursor:            firstAck.Cursor,
+		}, true)
+		defer func() { _ = release.ch.Close() }()
+		if !releaseAck.OK || releaseAck.HasControl || !releaseAck.Resumed || releaseAck.Replay != 0 {
+			t.Fatalf("release ack = %+v, want resumed read-only mirror with no replay", releaseAck)
 		}
+		if _, err := release.ch.Write([]byte("must-be-dropped")); err != nil {
+			t.Fatalf("write release input: %v", err)
+		}
+		output := make([]byte, len("independent output"))
+		if _, err := io.ReadFull(release.r, output); err != nil {
+			t.Fatalf("read independent output: %v", err)
+		}
+		if string(output) != "independent output" {
+			t.Fatalf("release output = %q, want independent output", output)
+		}
+		_, _, _, input, _ := e.pty.state()
+		if input != "" {
+			t.Fatalf("release mirror admitted input %q", input)
+		}
+		release.expectOpen(t, 50*time.Millisecond)
 		first.expectExit(t, protocol.AttachExitControlRevoked)
 	})
 

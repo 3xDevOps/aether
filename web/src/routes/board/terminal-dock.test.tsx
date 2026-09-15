@@ -8,9 +8,11 @@ import type * as attachModule from '@/routes/terminal/attach'
 import { initialEnvTerminal } from '@/store/env-terminal'
 import { useStore } from '@/store'
 import type * as apiModule from '@/lib/api'
+import { StubSocket } from '@/test/stub-socket'
 
 const xterm = vi.hoisted(() => ({
   hostRef: () => {},
+  input: null as ((data: string) => void) | null,
   terminal: {
     cols: 80,
     rows: 24,
@@ -31,32 +33,42 @@ const xterm = vi.hoisted(() => ({
 
 const attach = vi.hoisted(() => ({
   handlers: null as AttachHandlers | null,
+  send: vi.fn(),
 }))
+
 
 vi.mock('@/components/xterm-host', () => ({
   // A disabled hook has no terminal, which is what a collapsed dock gets and
   // what stops its attach effect from running.
-  useXterm: (options?: { enabled?: boolean }) =>
-    options?.enabled === false ? { ...xterm, terminal: null, ready: false } : xterm,
-}))
-vi.mock('@/routes/terminal/attach', async (importOriginal) => ({
-  ...(await importOriginal<typeof attachModule>()),
-  connectAttach: (
-    _socketURL: () => string,
-    handlers: AttachHandlers,
-  ) => {
-    attach.handlers = handlers
-    return {
-      send: vi.fn(),
-      resize: vi.fn(),
-      reopen: vi.fn(),
-      rebind: (next: AttachHandlers) => {
-        attach.handlers = next
-      },
-      close: vi.fn(),
-    }
+  useXterm: (options?: { enabled?: boolean; onData?: (data: string) => void }) => {
+    xterm.input = options?.enabled === false ? null : (options?.onData ?? null)
+    return options?.enabled === false ? { ...xterm, terminal: null, ready: false } : xterm
   },
 }))
+vi.mock('@/routes/terminal/attach', async (importOriginal) => {
+  const actual = await importOriginal<typeof attachModule>()
+  return {
+    ...actual,
+    connectAttach: (
+      socketURL: () => string,
+      handlers: AttachHandlers,
+    ) => {
+      attach.handlers = handlers
+      const connection = actual.connectAttach(socketURL, handlers)
+      return {
+        ...connection,
+        send: (data: string) => {
+          attach.send(data)
+          connection.send(data)
+        },
+        rebind: (next: AttachHandlers) => {
+          attach.handlers = next
+          connection.rebind(next)
+        },
+      }
+    },
+  }
+})
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
   return {
@@ -73,11 +85,24 @@ vi.mock('@/lib/api', async (importOriginal) => {
 })
 
 
+
 describe('environment terminal dock', () => {
   beforeEach(() => {
     useStore.getState().resetEnvTerminal()
     attach.handlers = null
     vi.clearAllMocks()
+    xterm.terminal.write.mockReset()
+    xterm.input = null
+    vi.mocked(api.terminalStatus).mockReset()
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
+    vi.mocked(api.terminalStop).mockReset()
+    vi.mocked(api.terminalStop).mockResolvedValue({})
+    vi.mocked(api.envSave).mockReset()
+    vi.mocked(api.envSave).mockResolvedValue({ image: 'aether/member-1:123' })
+    vi.mocked(api.envReset).mockReset()
+    vi.mocked(api.envReset).mockResolvedValue({})
+    vi.mocked(api.terminalSocket).mockReset()
+    vi.mocked(api.terminalSocket).mockReturnValue('ws://localhost/ws/terminal?tab=main')
     useStore.setState({
       // The dock ships collapsed; these cases are about what it shows open.
       envTerminal: { ...initialEnvTerminal, collapsed: false },
@@ -86,6 +111,11 @@ describe('environment terminal dock', () => {
       paletteDialog: null,
       paletteForwardTarget: null,
     })
+    StubSocket.install()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('shows the first-open empty state and opens the main tab', async () => {
@@ -125,6 +155,9 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
     await waitFor(() => expect(attach.handlers).not.toBeNull())
     const oldHandlers = attach.handlers
+    const oldSocket = StubSocket.last()
+    const oldMessage = oldSocket.onmessage
+    const oldClose = oldSocket.onclose
     act(() => oldHandlers?.onAttached(true, standardGeometry))
 
     xterm.terminal.write.mockClear()
@@ -132,24 +165,27 @@ describe('environment terminal dock', () => {
     await waitFor(() => {
       expect(useStore.getState().envTerminal.activeTab).toBe('t2')
       expect(attach.handlers).not.toBe(oldHandlers)
+      expect(StubSocket.opened).toHaveLength(2)
     })
     const currentHandlers = attach.handlers
+    const currentSocket = StubSocket.last()
+    const currentMessage = currentSocket.onmessage
     act(() => currentHandlers?.onAttached(true, standardGeometry))
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     const currentOutput = new TextEncoder().encode('current output')
     const oldOutput = new TextEncoder().encode('old output')
     act(() => {
-      currentHandlers?.onData?.(currentOutput, 'live')
-      oldHandlers?.onData?.(oldOutput, 'live')
-      oldHandlers?.onState('offline')
-      oldHandlers?.onExit?.()
+      currentMessage?.({ data: currentOutput.buffer })
+      oldMessage?.({ data: oldOutput.buffer })
+      oldClose?.({ code: 1000 })
     })
 
     expect(useStore.getState().envTerminal.activeTab).toBe('t2')
     expect(screen.queryByRole('status')).toBeNull()
     const writes = xterm.terminal.write.mock.calls.map(([chunk]) => chunk)
-    expect(writes).toEqual([currentOutput])
+    expect(writes).toHaveLength(1)
+    expect(Array.from(writes[0] as Uint8Array)).toEqual(Array.from(currentOutput))
   })
 
   it('opens the environment forward dialog when forwarding is available', async () => {
@@ -169,7 +205,101 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().paletteDialog).toBe('forward')
     expect(useStore.getState().paletteForwardTarget).toBe('terminal')
   })
+  it('mutes input and hides replay until xterm parsing completes', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const socket = StubSocket.last()
 
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }),
+      })
+    })
+    xterm.input?.('allowed before replay')
+    expect(attach.send).toHaveBeenCalledWith('allowed before replay')
+    attach.send.mockClear()
+
+    let finish: (() => void) | undefined
+    xterm.terminal.write.mockImplementation((_chunk: Uint8Array, done?: () => void) => {
+      finish = done
+    })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1 }),
+      })
+    })
+    xterm.input?.('blocked')
+    expect(attach.send).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => socket.onmessage?.({ data: new Uint8Array([1]).buffer }))
+    await waitFor(() => expect(finish).toBeDefined())
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => finish?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(host.style.visibility).toBe('')
+
+    xterm.input?.('allowed')
+    expect(attach.send).toHaveBeenCalledWith('allowed')
+
+    // A resumed attach reports zero replay and must not clear the only
+    // settled copy already on screen.
+    xterm.terminal.reset.mockClear()
+    act(() => attach.handlers?.onAttached?.(true, standardGeometry, true))
+    expect(xterm.terminal.reset).not.toHaveBeenCalled()
+    act(() => attach.handlers?.onReplayStart?.(0))
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    expect(host.style.visibility).toBe('')
+  })
+
+  it('does not let a stale replay callback reveal a newer replay', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+    const socket = StubSocket.last()
+
+    let firstFinish: (() => void) | undefined
+    let secondFinish: (() => void) | undefined
+    xterm.terminal.write
+      .mockImplementationOnce((_chunk: Uint8Array, done?: () => void) => {
+        firstFinish = done
+      })
+      .mockImplementationOnce((_chunk: Uint8Array, done?: () => void) => {
+        secondFinish = done
+      })
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1 }),
+      })
+      socket.onmessage?.({ data: new Uint8Array([1]).buffer })
+    })
+    await waitFor(() => expect(firstFinish).toBeDefined())
+
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1 }),
+      })
+    })
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    act(() => firstFinish?.())
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+
+    act(() => socket.onmessage?.({ data: new Uint8Array([2]).buffer }))
+    await waitFor(() => expect(secondFinish).toBeDefined())
+    act(() => secondFinish?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+  })
   it('confirms before stopping the running environment', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock />)

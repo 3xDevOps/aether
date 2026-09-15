@@ -3,6 +3,7 @@ import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import type { RunStatus } from '@/lib/types'
 import type * as apiModule from '@/lib/api'
+import type * as attachModule from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import {
   initialRunShellDock,
@@ -11,6 +12,32 @@ import {
 } from '@/store/terminal'
 import { run } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
+
+const replayGateCalls = vi.hoisted(() => ({ starts: 0, unmutes: 0 }))
+
+vi.mock('@/routes/terminal/attach', async (importOriginal) => {
+  const actual = await importOriginal<typeof attachModule>()
+  return {
+    ...actual,
+    replayGate: (
+      write: (chunk: Uint8Array, done?: () => void) => void,
+      onReplaying?: (replaying: boolean) => void,
+    ) => {
+      const gate = actual.replayGate(write, onReplaying)
+      return {
+        ...gate,
+        start: () => {
+          replayGateCalls.starts++
+          gate.start()
+        },
+        unmute: () => {
+          replayGateCalls.unmutes++
+          gate.unmute()
+        },
+      }
+    },
+  }
+})
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
@@ -42,6 +69,8 @@ function mount({
   return render(<View params={{ runId: runID }} />)
 }
 beforeEach(() => {
+  replayGateCalls.starts = 0
+  replayGateCalls.unmutes = 0
   for (const runID of ['run_1', 'run_2']) {
     for (const tab of ['t1', 't2', 't3', 't4']) unregisterShellSocket(runID, tab)
   }
@@ -138,6 +167,37 @@ describe('run-shell dock', () => {
       ).toBe(true),
     )
     second.unmount()
+  })
+  it('starts shell replay muting and hiding before the first replay frame', async () => {
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+    const shell = StubSocket.opened[1]
+
+    act(() => {
+      shell.onopen?.()
+      shell.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 3, has_control: true, control_generation: 1 }),
+      })
+    })
+    expect(replayGateCalls.starts).toBe(1)
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    const terminalDockElement = screen.getByRole('region', { name: 'Terminal dock' })
+    const host = terminalDockElement.querySelector(
+      '.min-h-0.flex-1.bg-background',
+    ) as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => {
+      shell.onmessage?.({ data: new TextEncoder().encode('out').buffer })
+    })
+    expect(replayGateCalls.starts).toBe(1)
+
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(host.style.visibility).toBe('')
+    view.unmount()
   })
   it('ignores late callbacks from a prior run sharing the active shell tab', async () => {
     const View = lookupRoute('terminal')
