@@ -411,7 +411,7 @@ done
     }
   }
 
-  await page.keyboard.press('Control+Shift+F')
+  await page.getByRole('button', { name: 'Open terminal search' }).click()
   const find = page.getByLabel('Find in terminal')
   await expect(find).toBeVisible()
   await find.fill(firstOutput)
