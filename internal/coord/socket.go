@@ -22,23 +22,14 @@ import (
 )
 
 const (
-	// SocketName is the coordination socket inside a run's directory. The
-	// name is the wire version's identity: the status result changed shape
-	// at v2, so v2 answers on its own name rather than serving a different
-	// shape on the name a v1 container was provisioned against.
-	//
-	// Every version's name is the same length. A unix socket path is
-	// capped near 108 bytes, and this one already carries the state
-	// directory plus a 26-character run ID, so a longer name would spend
-	// budget that belongs to the operator's data directory.
-	SocketName = "coord2.sock"
-	// legacySocketName is the v1 socket. A container provisioned before
-	// the v2 cutover holds a bridge that dials it, and that bridge speaks
-	// a shape this server no longer produces. Recovery unlinks it instead
-	// of binding it, so the run's coordination reports itself unavailable
-	// - which the agent already handles - rather than reading a status
-	// with fields it cannot see.
-	legacySocketName = "coord.sock"
+	// SocketName is the v3 coordination socket inside a run's directory.
+	// Every wire version has its own name so a stale bridge cannot parse a
+	// newer status or message shape.
+	SocketName = "coord3.sock"
+	// v1 and v2 sockets are retired at the v3 cutover. Recovery unlinks
+	// them instead of serving a shape their bridges cannot parse.
+	legacySocketName   = "coord.sock"
+	previousSocketName = "coord2.sock"
 	// ConfigName is the optional harness config a launch profile points
 	// the agent at. Its content belongs to the harness registry; this
 	// package owns only where it lives and that it is read-only.
@@ -50,17 +41,11 @@ const (
 	CoAuthorsName = "co-authors"
 )
 
-// wireSocketNames are the socket names this server serves, one per
-// coordination wire version it still speaks. Recovery rebinds every name
-// it finds in a surviving run's directory, so a run keeps every wire
-// version its container references and this server still answers.
+// wireSocketNames is the current coordination wire only.
 var wireSocketNames = []string{SocketName}
 
 // retiredSocketNames are wire versions this server no longer speaks.
-// Recovery removes them from a surviving run's directory so a stale
-// bridge fails to connect outright instead of being answered in a shape
-// it cannot parse.
-var retiredSocketNames = []string{legacySocketName}
+var retiredSocketNames = []string{legacySocketName, previousSocketName}
 
 // maxSocketPath is the ceiling on a unix socket path: sun_path holds 108
 // bytes including the terminator, so 107 characters are usable. The
@@ -206,14 +191,15 @@ func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
 	return nil
 }
 
-// Release stops the run's listeners, removes its coordination directory,
-// and retires its mailbox: the run is done reading, so its rows have no
-// reader left. Idempotent, and safe for a run that was never provisioned.
+// Release stops the run's listeners, removes its coordination directory, and
+// retires only that run's inbox. Outbound rows remain durable for peers that
+// still need to read them. Idempotent, and safe for a run never provisioned.
 func (s *Service) Release(run domain.RunID) error {
 	dir, err := s.runDir(run)
 	if err != nil {
 		return err
 	}
+	done := s.closeRun(run)
 	s.mu.Lock()
 	for key, l := range s.listeners {
 		if key.run == run {
@@ -221,12 +207,24 @@ func (s *Service) Release(run domain.RunID) error {
 			delete(s.listeners, key)
 		}
 	}
-	delete(s.buckets, run)
-	delete(s.inboxBuckets, run)
-	delete(s.peers, run)
+	if waiter := s.inboxWaiters[run]; waiter != nil {
+		close(waiter.ch)
+		delete(s.inboxWaiters, run)
+	}
 	delete(s.noticed, run)
 	s.mu.Unlock()
 	s.radar.forget(run)
+	// Existing handlers keep using their scoped buckets and report lock until
+	// they return. Waiting here prevents a late handler from recreating state
+	// after cleanup and never deletes a lock that another handler can hold.
+	<-done
+	s.mu.Lock()
+	delete(s.buckets, run)
+	delete(s.inboxBuckets, run)
+	delete(s.requestBuckets, run)
+	delete(s.reportLocks, run)
+	delete(s.runs, run)
+	s.mu.Unlock()
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("coord: remove %s: %w", dir, err)
 	}
@@ -422,9 +420,11 @@ func (s *Service) accept(l *net.UnixListener, run domain.RunID, slots chan struc
 // responses out, in order. The connection is the run's identity - it
 // arrived on that run's socket - so nothing on the wire names a sender.
 func (s *Service) serve(conn net.Conn, run domain.RunID) {
-	defer conn.Close() //nolint:errcheck // read side of a closing connection
+	defer func() { _ = conn.Close() }()
 	done := make(chan struct{})
 	defer close(done)
+	connCtx, cancel := context.WithCancel(s.serveCtx)
+	defer cancel()
 	// Unblock the read when the service closes; a bridge that never sends
 	// another line must not pin shutdown.
 	go func() {
@@ -434,6 +434,13 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		case <-done:
 		}
 	}()
+	// A report can be in evidence capture while the client disappears. Unix
+	// sockets expose a non-consuming peek that lets the watcher observe that
+	// close without racing the NDJSON reader or stealing a pipelined request.
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go watchConnection(conn, cancel, stopWatch)
+
 	capped := &capReader{r: conn}
 	r := bufio.NewReaderSize(capped, 16<<10)
 	for {
@@ -450,8 +457,31 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		resp := s.handle(s.serveCtx, run, line)
-		if s.serveCtx.Err() != nil {
+		if s.isRunClosing(run) {
+			return
+		}
+		// Charge at the authenticated socket boundary, before parsing the
+		// envelope, method, or params. A malformed request still consumes
+		// transport budget and cannot be used to bypass the limiter.
+		if !s.transportAllowed(run) {
+			resp, ok := rateLimitedResponse(line)
+			if !ok {
+				return
+			}
+			out, merr := json.Marshal(resp)
+			if merr != nil {
+				return
+			}
+			if err = conn.SetWriteDeadline(time.Now().Add(s.cfg.idle)); err != nil {
+				return
+			}
+			if _, err = conn.Write(append(out, '\n')); err != nil {
+				return
+			}
+			continue
+		}
+		resp := s.handle(connCtx, run, line)
+		if connCtx.Err() != nil {
 			return
 		}
 		out, err := json.Marshal(resp)
@@ -462,19 +492,18 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		// requests without ever reading responses fills the socket buffer,
 		// and an unbounded Write would wedge this loop out of the idle
 		// reaper's reach.
-		if err := conn.SetWriteDeadline(time.Now().Add(s.cfg.idle)); err != nil {
+		if err = conn.SetWriteDeadline(time.Now().Add(s.cfg.idle)); err != nil {
 			return
 		}
-		if _, err := conn.Write(append(out, '\n')); err != nil {
+		if _, err = conn.Write(append(out, '\n')); err != nil {
 			return
 		}
 	}
 }
 
 // handle decodes one request and dispatches it. The method set is closed:
-// anything outside the three mailbox methods and run.report is
-// method-not-found, so no control verb is reachable from inside a
-// container.
+// anything outside the coordination methods and run.report is method-not-found,
+// so no control verb is reachable from inside a container.
 func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
 	req, resp, valid := protocol.ParseRequest(line)
 	if !valid {
@@ -495,6 +524,28 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 			return resp
 		}
 		result, rpcErr = s.Send(ctx, run, p)
+	case protocol.MethodCoordAsk:
+		p, perr := decodeParams[protocol.CoordAskParams](req.Method, req.Params)
+		if perr != nil {
+			resp.Error = perr
+			return resp
+		}
+		result, rpcErr = s.Ask(ctx, run, p)
+	case protocol.MethodCoordReply:
+		p, perr := decodeParams[protocol.CoordReplyParams](req.Method, req.Params)
+		if perr != nil {
+			resp.Error = perr
+
+			return resp
+		}
+		result, rpcErr = s.Reply(ctx, run, p)
+	case protocol.MethodCoordReport:
+		p, perr := decodeParams[protocol.CoordReportParams](req.Method, req.Params)
+		if perr != nil {
+			resp.Error = perr
+			return resp
+		}
+		result, rpcErr = s.CoordReport(ctx, run, p)
 	case protocol.MethodCoordInbox:
 		p, perr := decodeParams[protocol.CoordInboxParams](req.Method, req.Params)
 		if perr != nil {
@@ -524,6 +575,15 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 	}
 	resp.Result = raw
 	return resp
+}
+func rateLimitedResponse(line []byte) (protocol.Response, bool) {
+	_, resp, _ := protocol.ParseRequest(line)
+	if len(resp.ID) == 0 || bytes.Equal(bytes.TrimSpace(resp.ID), []byte("null")) {
+		return protocol.Response{}, false
+	}
+	resp.Result = nil
+	resp.Error = transportRateError()
+	return resp, true
 }
 
 // decodeParams is the coordination socket's spelling of

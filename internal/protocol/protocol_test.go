@@ -21,6 +21,7 @@ func TestAttachRequestShellWire(t *testing.T) {
 		t.Fatalf("attach request = %s, want shell field", raw)
 	}
 }
+
 func TestAttachControlLeaseWire(t *testing.T) {
 	req := AttachRequest{
 		RunID: "run-1", ControlSessionID: "tab-1", ControlGeneration: 7,
@@ -87,6 +88,7 @@ func TestRunWireShape(t *testing.T) {
 		t.Errorf("started_at not RFC3339: %s", raw)
 	}
 }
+
 func TestRunInjectParamsWireIncludesCallerKey(t *testing.T) {
 	params := RunInjectParams{RunID: "run-1", Message: "continue", IdempotencyKey: "inject-1"}
 	raw, err := json.Marshal(params)

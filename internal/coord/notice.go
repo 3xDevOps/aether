@@ -65,10 +65,9 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 }
 
 // stampNotice records a delivered notice on the notified run's workspace
-// timeline, attributed to that run's owner - the same audit trail
-// coordination messages leave. It runs only after the banner actually
-// reached the terminal, so the feed says an agent was told rather than
-// that one was meant to be, and a publish failure never unsays it.
+// timeline as a server-originated coordination event. It runs only after the
+// banner actually reached the terminal, so the feed says an agent was told
+// rather than that one was meant to be, and a publish failure never unsays it.
 func (s *Service) stampNotice(ctx context.Context, run domain.RunID, peer events.OverlapPeer) {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
@@ -78,7 +77,7 @@ func (s *Service) stampNotice(ctx context.Context, run domain.RunID, peer events
 	_, err = s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID,
 		RunID:       r.ID,
-		ActorID:     r.MemberID,
+		ActorID:     "",
 		Payload: events.TimelinePayload{
 			Kind: events.TimelineNote,
 			Message: fmt.Sprintf("coordination notice: run %s is also editing %s",

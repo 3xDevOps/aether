@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordcli"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -24,34 +25,42 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// Coordination assets are the two read-only binds that let an agent talk to
-// its overlapping peers: the server's own binary, which serves the MCP
-// bridge inside the container, and the run's coordination directory, which
-// carries the socket the bridge dials.
+// Coordination assets are two read-only bind sources (mounted at three
+// targets) that let an agent talk to its overlapping peers: the server's own
+// binary, which serves the MCP bridge and aether-internal CLI at its new
+// path while remaining available to existing run.report hooks at the legacy
+// path, and the run's coordination directory, which carries the socket the
+// bridge dials.
 //
-// These two mounts deliberately do not go through runtime.ValidateMounts,
-// and routing them through it would be a mistake, not a fix. That validator
-// rejects any target at or under /opt/aether and /run/aether outright,
-// because those prefixes are reserved for exactly these surfaces: the
-// unconditional rejection is what guarantees no credential home, synced
-// profile, or any other caller-supplied mount can ever shadow the bridge or
-// the coordination socket. Relaxing it into an opt-in would trade that
-// guarantee for uniformity nothing here needs.
+// These mounts deliberately do not go through runtime.ValidateMounts, and
+// routing them through it would be a mistake, not a fix. That validator
+// rejects targets at or under /run/aether, /opt/aether, and the reserved
+// /usr/local/bin/aether-internal file outright, because those surfaces are
+// reserved for exactly these assets: the unconditional rejection is what
+// guarantees no credential home, synced profile, or any other caller-supplied
+// mount can ever shadow the bridge, CLI, or coordination socket. Relaxing it
+// into an opt-in would trade that guarantee for uniformity nothing here needs.
 //
-// So the reserved rule protects the targets, and the two mounts are built
-// below from server-constructed paths - never from anything a client or an
-// agent names - and appended after the caller's mounts have been validated.
-// What is left is the source side, which checkCoordinationMounts covers.
+// So the reserved rule protects the targets, and the mounts are built below
+// from server-constructed paths - never from anything a client or an agent
+// names - and appended after the caller's mounts have been validated.
 //
 // The whole thing is fail-closed: a binary that cannot be staged and
 // verified is never mounted. The run still launches - coordination is
 // advisory, and an agent without the bridge still gets the overlap notice -
 // but the failure is recorded on the run's timeline rather than swallowed.
 
-// bridgePrefix names staged binaries. The content hash is the whole
-// identity: a container provisioned against one build keeps its own copy
-// after the server upgrades, and two servers staging the same build share.
+// bridgePrefix names host-staged binaries. Keep this independent from the
+// executable's container identity: existing collectors and upgrades recognize
+// this server-oriented prefix.
 const bridgePrefix = "aether-server-"
+
+// legacyBridgePrefix is the prefix used by the short-lived release that named
+// host files after the container's aether-internal argv0. Existing sidecars
+// can still point at those files while their containers finish.
+const legacyBridgePrefix = "aether-internal-"
+
+var bridgePrefixes = [...]string{bridgePrefix, legacyBridgePrefix}
 
 // bridgeMode is read-execute for everyone and writable by no one. The
 // staged file is also mounted read-only, so this is defence in depth
@@ -59,7 +68,8 @@ const bridgePrefix = "aether-server-"
 const bridgeMode fs.FileMode = 0o555
 
 // bridgeSubcommand is the hidden subcommand the staged binary serves the
-// stdio MCP bridge with (cmd/aether-server).
+// stdio MCP bridge with (cmd/aether-server). The same binary is also invoked
+// directly as aether-internal for shell-capable harnesses via argv0.
 const bridgeSubcommand = "mcp"
 
 // mcpConfigPath is where the harness config written into a run's
@@ -132,12 +142,11 @@ func (s *Scheduler) coordinationSeam() *coordination {
 	return s.coordination
 }
 
-// coordinationMounts stages the bridge, provisions the run's coordination
-// directory, records both in the run's sidecar - all before the container
-// exists - and returns the two read-only mounts plus the launch arguments
-// and environment registering the bridge and the status reporter with the
-// harness. A failure anywhere leaves the run with no coordination and says
-// so on its timeline; it never returns a mount it could not verify.
+// exists - and returns the three read-only mounts (one source is mounted at
+// both executable paths) plus the launch arguments and environment
+// registering the bridge and the status reporter with the harness. A failure
+// anywhere leaves the run with no coordination and says so on its timeline;
+// it never returns a mount it could not verify.
 func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string, map[string]string) {
 	c := s.coordinationSeam()
 	if c == nil {
@@ -223,6 +232,7 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	}
 	mounts = []runtime.Mount{
 		{HostPath: bin, ContainerPath: mcpbridge.BinaryPath, ReadOnly: true},
+		{HostPath: bin, ContainerPath: coordcli.BinaryPath, ReadOnly: true},
 		{HostPath: dir, ContainerPath: mcpbridge.MountDir, ReadOnly: true},
 	}
 	if err = checkCoordinationMounts(mounts); err != nil {
@@ -436,10 +446,23 @@ func (s *Scheduler) collectStagedBridges() {
 	for _, e := range entries {
 		// A dot-prefixed temp file is an install that crashed mid-copy: a
 		// live one cannot be seen here because stage() holds stageMu for
-		// the whole install.
-		orphanedTemp := strings.HasPrefix(e.Name(), "."+bridgePrefix)
-		digest, ok := strings.CutPrefix(e.Name(), bridgePrefix)
-		if !orphanedTemp && (!ok || referenced[digest]) {
+		// the whole install. Recognize both the current and legacy prefixes
+		// so an upgrade cannot strand either kind of staged asset.
+		orphanedTemp := false
+		staged := false
+		digest := ""
+		for _, prefix := range bridgePrefixes {
+			if strings.HasPrefix(e.Name(), "."+prefix) {
+				orphanedTemp = true
+				break
+			}
+			if candidate, ok := strings.CutPrefix(e.Name(), prefix); ok {
+				digest = candidate
+				staged = true
+				break
+			}
+		}
+		if !orphanedTemp && (!staged || referenced[digest]) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(c.binDir, e.Name())); err != nil {

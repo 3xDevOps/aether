@@ -13,6 +13,9 @@ import (
 const (
 	reservedRunPath = "/run/aether"
 	reservedOptPath = "/opt/aether"
+	// reservedCLIPath is a file target rather than a prefix: only the
+	// server-staged aether-internal executable owns this location.
+	reservedCLIPath = "/usr/local/bin/aether-internal"
 )
 
 // dockerSocketPaths are the host spellings of the Docker control socket.
@@ -45,11 +48,11 @@ type MountPolicy struct {
 // an Aether-owned root, sources that are or contain the Docker control
 // socket under any alias, sources that are neither directories nor regular
 // files, duplicate targets, nested targets except the approved
-// child-after-parent pairs, targets under the reserved /run/aether and
-// /opt/aether prefixes, root targets, collisions with the worktree bind on
-// either side, and read-only sources containing another mount's source
-// (Docker's per-bind read-only flag is not recursive and no recursive
-// fallback is used).
+// child-after-parent pairs, targets under the reserved /run/aether, /opt/aether,
+// and /usr/local/bin/aether-internal surfaces, root targets, collisions with the
+// worktree bind on either side, and read-only sources containing another
+// mount's source (Docker's per-bind read-only flag is not recursive and no
+// recursive fallback is used).
 //
 // Validation canonicalizes: on success each mount's HostPath is rewritten
 // in place to its fully resolved source, so the bind Docker later
@@ -88,7 +91,7 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		if target == "/" {
 			return fmt.Errorf("runtime: mount %d: target must not be the container root", i)
 		}
-		for _, reserved := range []string{reservedRunPath, reservedOptPath} {
+		for _, reserved := range []string{reservedRunPath, reservedOptPath, reservedCLIPath} {
 			if target == reserved || underSlash(target, reserved) {
 				return fmt.Errorf("runtime: mount %d: target %q is reserved for aether", i, target)
 			}

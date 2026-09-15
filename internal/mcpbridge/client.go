@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -11,10 +12,46 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// callTimeout bounds one coordination round trip. The socket is local and
-// every method behind it is a small SQLite read or write, so anything
-// slower than this is a server the agent should stop waiting on.
-const callTimeout = 30 * time.Second
+// callMargin covers local dial, SQLite, and response framing work around a
+// server-side inbox long poll or the two-minute evidence capture budget. The
+// ceiling keeps malformed or future wait values from turning one request into
+// an unbounded client call.
+const (
+	callDefaultTimeout  = 30 * time.Second
+	callMargin          = 3 * time.Second
+	callReportTimeout   = 2*time.Minute + callMargin
+	callDeadlineCeiling = callReportTimeout
+)
+
+func callTimeout(method string, params any) time.Duration {
+	timeout := callDefaultTimeout
+	switch method {
+	case protocol.MethodCoordReport:
+		timeout = callReportTimeout
+	case protocol.MethodCoordInbox:
+		timeout = callMargin
+		wait := 0
+		switch p := params.(type) {
+		case protocol.CoordInboxParams:
+			wait = p.WaitSeconds
+		case *protocol.CoordInboxParams:
+			if p != nil {
+				wait = p.WaitSeconds
+			}
+		}
+		if wait < 0 {
+			wait = 0
+		}
+		if wait > protocol.CoordMaxInboxWaitSeconds {
+			wait = protocol.CoordMaxInboxWaitSeconds
+		}
+		timeout += time.Duration(wait) * time.Second
+	}
+	if timeout > callDeadlineCeiling && method != protocol.MethodCoordInbox {
+		return callDeadlineCeiling
+	}
+	return timeout
+}
 
 // Call makes one coordination request on socket and decodes its result
 // into result, which may be nil. It is the same framing the MCP tools use,
@@ -25,7 +62,7 @@ func Call(ctx context.Context, socket, method string, params, result any) error 
 	return (&client{socket: socket}).call(ctx, method, params, result)
 }
 
-// client speaks coordination wire v1 on the run's unix socket.
+// client speaks coordination wire v3 on the run's unix socket.
 //
 // It dials per tool call and closes the connection again. That is the whole
 // reconnection strategy: a server restart rebinds the socket to a new inode,
@@ -56,7 +93,7 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 		return internalError(method, err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	ctx, cancel := context.WithTimeout(ctx, callTimeout(method, params))
 	defer cancel()
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.socket)
@@ -122,4 +159,15 @@ func internalError(method string, cause error) *coordError {
 		Code:    protocol.CodeInternal,
 		Message: fmt.Sprintf("%s: %v", method, cause),
 	}
+}
+
+// ErrorCode classifies an error returned by Call. A zero result means the
+// failure was local to the bridge (for example JSON encoding), rather than a
+// coordination protocol error.
+func ErrorCode(err error) int {
+	var ce *coordError
+	if errors.As(err, &ce) {
+		return ce.Code
+	}
+	return 0
 }

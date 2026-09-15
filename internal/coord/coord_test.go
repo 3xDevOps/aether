@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -149,6 +151,29 @@ type coordHarness struct {
 	clock   time.Time
 }
 
+var testSendSeq atomic.Uint64
+
+type testEvidenceCapture struct {
+	workspace domain.WorkspaceID
+}
+
+func (c testEvidenceCapture) Capture(_ context.Context, req evidence.Request) (protocol.EvidencePacket, error) {
+	return protocol.EvidencePacket{
+		Trigger:        protocol.EvidenceReport,
+		WorkspaceID:    string(c.workspace),
+		RunID:          string(req.RunID),
+		CreatorID:      string(req.CreatorID),
+		IdempotencyKey: req.IdempotencyKey,
+	}, nil
+}
+
+func sendParams(to domain.RunID, body string) protocol.CoordSendParams {
+	return protocol.CoordSendParams{
+		ToRunID: string(to), Body: body,
+		IdempotencyKey: fmt.Sprintf("test-send-%d", testSendSeq.Add(1)),
+	}
+}
+
 func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 	t.Helper()
 	ctx := context.Background()
@@ -203,13 +228,14 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 	}
 
 	cfg := Config{
-		Dir:   filepath.Join(dir, "coord"),
-		Store: db,
-		Mail:  db,
-		Bus:   bus,
-		Peers: h.peers,
-		PTY:   h.pty,
-		now:   h.now,
+		Dir:      filepath.Join(dir, "coord"),
+		Store:    db,
+		Mail:     db,
+		Bus:      bus,
+		Peers:    h.peers,
+		PTY:      h.pty,
+		Evidence: testEvidenceCapture{workspace: ws.ID},
+		now:      h.now,
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -255,7 +281,7 @@ func TestKillSwitchRejectsEveryMethodEarly(t *testing.T) {
 	if _, err := h.svc.Status(ctx, h.run(0)); err == nil || err.Code != protocol.CodeUnavailable {
 		t.Fatalf("Status = %v, want CodeUnavailable", err)
 	}
-	if _, err := h.svc.Send(ctx, h.run(0), protocol.CoordSendParams{ToRunID: string(h.run(1)), Body: "hi"}); err == nil ||
+	if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), "hi")); err == nil ||
 		err.Code != protocol.CodeUnavailable || err.Message != "coord.send: conflict coordination is disabled" {
 		t.Fatalf("Send = %v, want the pinned CodeUnavailable", err)
 	}

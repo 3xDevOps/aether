@@ -338,6 +338,14 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 	}{
 		{`DELETE FROM approvals WHERE run_id = ?`, []any{id}},
 		{`DELETE FROM run_costs WHERE run_id = ?`, []any{id}},
+		// Published audit rows are reconciliation cache and may be removed
+		// with retired mailbox rows. Pending and quarantined rows retain their
+		// immutable event projection after the run is gone.
+		{`DELETE FROM coord_audit_publications
+			WHERE publication_state = ?
+			  AND message_id IN (
+				SELECT id FROM run_messages WHERE from_run = ? OR to_run = ?
+			  )`, []any{CoordAuditPublicationPublished, id, id}},
 		{`DELETE FROM run_messages WHERE from_run = ? OR to_run = ?`, []any{id, id}},
 		{`DELETE FROM run_steerers WHERE run_id = ?`, []any{id}},
 	}

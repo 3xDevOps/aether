@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/coordcli"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -141,6 +142,13 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 	if !ok || !bin.ReadOnly {
 		t.Fatalf("no read-only bridge mount in %+v", container.spec.Mounts)
 	}
+	cli, ok := mountFor(container.spec, coordcli.BinaryPath)
+	if !ok || !cli.ReadOnly {
+		t.Fatalf("no read-only coordination CLI mount in %+v", container.spec.Mounts)
+	}
+	if cli.HostPath != bin.HostPath {
+		t.Fatalf("CLI mount source = %q, want staged bridge source %q", cli.HostPath, bin.HostPath)
+	}
 	dir, ok := mountFor(container.spec, mcpbridge.MountDir)
 	if !ok || !dir.ReadOnly {
 		t.Fatalf("no read-only coordination mount in %+v", container.spec.Mounts)
@@ -210,13 +218,19 @@ func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
 
 	held := filepath.Join(binDir, bridgePrefix+"deadbeef")
 	orphan := filepath.Join(binDir, bridgePrefix+"0badcafe")
-	// A dot-prefixed temp file is what a crash mid-install leaves behind;
-	// no sidecar can ever reference it, so collection reclaims it too.
+	legacyOrphan := filepath.Join(binDir, legacyBridgePrefix+"feedface")
+	// Dot-prefixed temp files are what a crash mid-install leaves behind;
+	// collection reclaims both the current and pre-upgrade forms too.
 	crashed := filepath.Join(binDir, "."+bridgePrefix+"1234abcd")
-	for _, p := range []string{held, orphan, crashed} {
+	legacyCrashed := filepath.Join(binDir, "."+legacyBridgePrefix+"5678abcd")
+	unrelated := filepath.Join(binDir, "not-a-staged-bridge")
+	for _, p := range []string{held, orphan, legacyOrphan, crashed, legacyCrashed} {
 		if werr := os.WriteFile(p, []byte("older build"), 0o555); werr != nil {
 			t.Fatalf("write %s: %v", p, werr)
 		}
+	}
+	if werr := os.WriteFile(unrelated, []byte("leave me alone"), 0o555); werr != nil {
+		t.Fatalf("write unrelated file: %v", werr)
 	}
 	if werr := e.sched.writeSidecar(sidecar{RunID: "run_survivor", BridgeDigest: "deadbeef"}); werr != nil {
 		t.Fatalf("write sidecar: %v", werr)
@@ -228,11 +242,13 @@ func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
 			t.Fatalf("collected a referenced build %s: %v", p, serr)
 		}
 	}
-	if _, serr := os.Stat(orphan); !os.IsNotExist(serr) {
-		t.Fatalf("unreferenced build survived: %v", serr)
+	for _, p := range []string{orphan, legacyOrphan, crashed, legacyCrashed} {
+		if _, serr := os.Stat(p); !os.IsNotExist(serr) {
+			t.Fatalf("unreferenced staged asset survived: %v", serr)
+		}
 	}
-	if _, serr := os.Stat(crashed); !os.IsNotExist(serr) {
-		t.Fatalf("crashed install's temp file survived: %v", serr)
+	if _, serr := os.Stat(unrelated); serr != nil {
+		t.Fatalf("collector touched unrelated file: %v", serr)
 	}
 
 	// The surviving run finishes: its reference goes, and so does the build

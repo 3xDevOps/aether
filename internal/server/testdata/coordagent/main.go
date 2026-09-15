@@ -127,7 +127,9 @@ func coordinate(ctx context.Context) error {
 
 	var sent protocol.CoordSendResult
 	body := "handled by " + status.RunID
-	if err := call(ctx, cs, toolSend, protocol.CoordSendParams{ToRunID: peer.RunID, Body: body}, &sent); err != nil {
+	if err := call(ctx, cs, toolSend, protocol.CoordSendParams{
+		ToRunID: peer.RunID, Body: body, IdempotencyKey: "container-send-" + status.RunID,
+	}, &sent); err != nil {
 		return err
 	}
 	say("sent:%s", sent.MessageID)

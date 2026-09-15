@@ -7,6 +7,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -19,22 +20,27 @@ import (
 var coAuthorsPath = path.Join(mcpbridge.MountDir, coord.CoAuthorsName)
 
 // coAuthorInstruction tells the agent to credit the people steering it.
-// The list changes while the agent works, so the file is the contract and
-// re-reading it is part of the instruction.
+// The list changes while the agent works, so re-reading it is part of the
+// instruction.
 var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
 	". It holds one Co-authored-by trailer per person other than the run owner who has steered this run," +
 	" and it changes while you work. End every commit message you write, and the description of any pull" +
 	" request you open, with exactly those lines. If the file is missing or empty, add nothing."
 
-// withCoAuthorInstruction appends that rule to a task prompt. A taskless
-// launch stays taskless - its placeholder is dropped whole, so there is
-// nowhere to say this - and a run without coordination has no mounted
-// directory to read the file from.
+// coordinationInstruction is deliberately one short, assignment-agnostic
+// launch hint. The CLI fetches the actual assignment and role from live
+// server state, so this prompt never embeds authority or stale task text.
+const coordinationInstruction = "Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome."
+
+// withCoAuthorInstruction appends the coordination discovery hint and the
+// co-author rule to a task prompt. A taskless launch stays taskless - its
+// placeholder is dropped whole, so there is nowhere to say this - and a run
+// without coordination has no mounted directory to read the files from.
 func (s *Scheduler) withCoAuthorInstruction(task string) string {
 	if task == "" || s.coordinationSeam() == nil {
 		return task
 	}
-	return task + "\n\n" + coAuthorInstruction
+	return task + "\n\n" + coordinationInstruction + "\n\n" + coAuthorInstruction
 }
 
 // coAuthorTrailers renders one Co-authored-by line per member in members
@@ -171,6 +177,38 @@ func (s *Scheduler) RecordHandoff(ctx context.Context, run domain.RunID, from do
 	s.refreshCoAuthors(ctx, r)
 }
 
+// RecordHandoffOperation applies the co-author phase of one durable handoff.
+// Both the steerer row and its deterministic timeline entry are idempotent,
+// so a retry after either write boundary converges without duplicate credit.
+func (s *Scheduler) RecordHandoffOperation(ctx context.Context, run domain.RunID, from domain.MemberID, operationID string, at time.Time) error {
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve run after handoff: %w", err)
+	}
+	if operationID == "" {
+		return fmt.Errorf("scheduler: handoff operation ID is required")
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	if from != "" && from != r.MemberID {
+		if _, err := s.cfg.Store.AddRunSteerer(ctx, run, from); err != nil {
+			return fmt.Errorf("scheduler: record outgoing handoff owner: %w", err)
+		}
+		if _, err := s.cfg.Bus.Publish(ctx, events.Event{
+			ID: "handoff:" + operationID + ":coauthor", Time: at,
+			WorkspaceID: r.WorkspaceID, RunID: run, ActorID: from,
+			Payload: events.TimelinePayload{Kind: events.TimelineCoAuthor},
+		}); err != nil {
+			return fmt.Errorf("scheduler: publish handoff co-author: %w", err)
+		}
+	}
+	if err := s.refreshCoAuthorsErr(ctx, r); err != nil {
+		return err
+	}
+	return nil
+}
+
 // RefreshMemberCoAuthors rewrites the co-author list of every live run
 // that credits member, after their git identity changed. It reaches the
 // trailers only: a container's own GIT_AUTHOR_* is fixed when it is
@@ -236,6 +274,15 @@ func (s *Scheduler) addSteerer(ctx context.Context, run *domain.Run, member doma
 // credit the author twice, while the member who took the run over after a
 // handoff is credited nowhere else on those commits.
 func (s *Scheduler) refreshCoAuthors(ctx context.Context, run *domain.Run) {
+	if err := s.refreshCoAuthorsErr(ctx, run); err != nil {
+		slog.Warn("scheduler: refresh co-authors", "run", run.ID, "error", err)
+	}
+}
+
+func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run *domain.Run) error {
+	if run == nil {
+		return nil
+	}
 	c := s.coordinationSeam()
 	s.mu.Lock()
 	entry := s.runs[run.ID]
@@ -245,16 +292,16 @@ func (s *Scheduler) refreshCoAuthors(ctx context.Context, run *domain.Run) {
 	}
 	s.mu.Unlock()
 	if c == nil || dir == "" {
-		return
+		return nil
 	}
 	entry.coAuthorMu.Lock()
 	defer entry.coAuthorMu.Unlock()
 	trailers, err := s.containerCoAuthors(ctx, run, author)
 	if err != nil {
-		slog.Warn("scheduler: resolve co-authors", "run", run.ID, "error", err)
-		return
+		return fmt.Errorf("scheduler: resolve co-authors: %w", err)
 	}
 	if err := c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
-		slog.Warn("scheduler: write run co-authors", "run", run.ID, "error", err)
+		return fmt.Errorf("scheduler: write run co-authors: %w", err)
 	}
+	return nil
 }

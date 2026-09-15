@@ -263,12 +263,22 @@ prompt is then dropped, so `opencode --prompt={task}` leaves whole rather than
 dangling an empty flag. Headless mode has no interactive surface, so it still
 requires a task.
 
-Where conflict coordination is on, the server appends the co-author rule to
-the task before substituting `{task}`, so the agent is told to read
-`/run/aether/co-authors` before each commit. Only the prompt the harness
-receives changes: the stored task, the branch slug, and every CLI and
-dashboard surface keep what the member typed. See
-[coordination.md](coordination.md).
+Where conflict coordination is on and the launch has a task, Aether adds an
+automatic discovery instruction before substituting `{task}`:
+
+```
+Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
+```
+
+The server stages the version-matched `/usr/local/bin/aether-internal` CLI and
+the run's `/run/aether/coord3.sock` automatically. No manual skill install,
+identity flag, or credential setup is needed. The agent should run
+`aether-internal skill` before acting, then use the CLI or the registered MCP
+bridge for coordination and outcome reporting. A taskless TUI launch stays
+taskless and receives no appended instruction. The co-author rule still asks
+the agent to read `/run/aether/co-authors` before each commit. Only the prompt
+the harness receives changes: the stored task, branch slug, and every CLI and
+dashboard surface keep what the member typed. See [coordination.md](coordination.md).
 
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |

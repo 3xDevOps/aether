@@ -5,18 +5,12 @@
 // The radar (internal/overlap) says runs A and B are both editing the
 // same file. This package injects one advisory notice into both agents'
 // terminals, gives each run a private unix socket under the server data
-// directory, and serves exactly three mailbox methods on it -
-// coord.status, coord.send, coord.inbox. The mount is the authentication:
-// whoever connects on a run's socket is that run, so no token ever enters
-// a container.
+// directory, and serves the versioned coordination methods.
 //
-// The same socket carries one method that is not mailbox traffic at all:
-// run.report, which the agent's own status hooks call to say whether it is
-// working or waiting for its member (internal/agentstatus). It is here
-// because the socket is already the run's identity.
-//
-// Nothing here blocks, locks, or arbitrates. A send is authorized only
-// against a live radar overlap (or its grace window), is size-capped,
+// The same socket carries run.report, a harness lifecycle hook. Durable
+// worker outcomes use coord.report and remain available after the request
+// returns. Nothing here blocks, locks, or arbitrates. A send is authorized
+// only against a live radar overlap (or its grace window), is size-capped,
 // rate-limited, depth-capped, and stamped into the workspace timeline;
 // beyond that the agents are on their own, and the radar chips remain the
 // human safety net.
@@ -33,6 +27,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -52,7 +47,23 @@ var (
 	// ErrNoReportSink is returned when run.report arrives with no sink
 	// wired behind it.
 	ErrNoReportSink = errors.New("coord: no agent status sink is attached")
+	// ErrNoEvidenceCapture is returned when coord.report is used without the
+	// mandatory automatic evidence callback.
+	ErrNoEvidenceCapture = errors.New("coord: no evidence capture service is attached")
 )
+
+// EvidenceCapture is the narrow evidence seam needed by coord.report.
+// *evidence.Service satisfies it; keeping the interface here prevents the
+// coordination wire from depending on evidence implementation details.
+type EvidenceCapture interface {
+	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
+}
+
+// EvidencePacketLookup loads retained evidence for publication replay without
+// recapturing or mutating the report.
+type EvidencePacketLookup interface {
+	GetEvidencePacket(context.Context, string) (*store.EvidencePacket, error)
+}
 
 // Runs resolves the runs and members a message is attributed to;
 // satisfied by store.Store.
@@ -99,6 +110,11 @@ type Config struct {
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
 	Reports ReportSink
+	// Evidence captures and durably retains the run state before coord.report
+	// accepts an outcome. It is required for coord.report.
+	Evidence EvidenceCapture
+	// EvidencePackets loads retained packets for pending publication replay.
+	EvidencePackets EvidencePacketLookup
 	// Disabled is the conflict-coordination kill switch. When set, no
 	// notice, listener, directory, mailbox write, or timeline entry
 	// happens, and every coord.* call fails CodeUnavailable.
@@ -121,17 +137,22 @@ type Service struct {
 	// is cancelled by Close.
 	serveCtx context.Context
 	stop     context.CancelFunc
+	sub      events.Subscription
 
-	mu           sync.Mutex
-	listeners    map[socketKey]*net.UnixListener
-	buckets      map[domain.RunID]*bucket
-	inboxBuckets map[domain.RunID]*bucket
-	peers        map[domain.RunID]map[domain.RunID]bool
-	noticed      map[domain.RunID]map[domain.RunID]bool
-	sub          events.Subscription
-	closed       bool
-
-	wg sync.WaitGroup
+	mu             sync.Mutex
+	listeners      map[socketKey]*net.UnixListener
+	buckets        map[domain.RunID]*bucket
+	inboxBuckets   map[domain.RunID]*bucket
+	requestBuckets map[domain.RunID]*bucket
+	inboxWaiters   map[domain.RunID]*inboxWaiter
+	reportLocks    map[domain.RunID]*sync.Mutex
+	reportPackets  map[string]protocol.EvidencePacket
+	noticed        map[domain.RunID]map[domain.RunID]bool
+	runs           map[domain.RunID]*runLifecycle
+	reportCursor   store.CoordOutboxCursor
+	auditCursor    store.CoordOutboxCursor
+	closed         bool
+	wg             sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -139,6 +160,12 @@ type Service struct {
 type socketKey struct {
 	run  domain.RunID
 	name string
+}
+type runLifecycle struct {
+	refs       int
+	closing    bool
+	done       chan struct{}
+	doneClosed bool
 }
 
 // New builds the service; call Start to recover listeners and begin
@@ -158,16 +185,20 @@ func New(cfg Config) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		cfg:          cfg,
-		radar:        newRadar(cfg.Peers, cfg.Grace, cfg.now),
-		now:          cfg.now,
-		serveCtx:     ctx,
-		stop:         cancel,
-		listeners:    make(map[socketKey]*net.UnixListener),
-		buckets:      make(map[domain.RunID]*bucket),
-		inboxBuckets: make(map[domain.RunID]*bucket),
-		peers:        make(map[domain.RunID]map[domain.RunID]bool),
-		noticed:      make(map[domain.RunID]map[domain.RunID]bool),
+		cfg:            cfg,
+		radar:          newRadar(cfg.Peers, cfg.Grace, cfg.now),
+		now:            cfg.now,
+		serveCtx:       ctx,
+		stop:           cancel,
+		listeners:      make(map[socketKey]*net.UnixListener),
+		buckets:        make(map[domain.RunID]*bucket),
+		inboxBuckets:   make(map[domain.RunID]*bucket),
+		requestBuckets: make(map[domain.RunID]*bucket),
+		inboxWaiters:   make(map[domain.RunID]*inboxWaiter),
+		reportLocks:    make(map[domain.RunID]*sync.Mutex),
+		reportPackets:  make(map[string]protocol.EvidencePacket),
+		runs:           make(map[domain.RunID]*runLifecycle),
+		noticed:        make(map[domain.RunID]map[domain.RunID]bool),
 	}, nil
 }
 
@@ -194,14 +225,16 @@ func (s *Service) Start(ctx context.Context) error {
 		return ErrClosed
 	}
 	s.sub = sub
-	// Counted under the same lock as the closed check, so a concurrent
-	// Close cannot finish its Wait before the consumer is tracked.
-	s.wg.Add(1)
+	s.wg.Add(2)
 	s.mu.Unlock()
 
 	go func() {
 		defer s.wg.Done()
 		s.consume(s.serveCtx, sub)
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.retryOutbox()
 	}()
 	return nil
 }
@@ -270,6 +303,75 @@ func (s *Service) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
+}
+
+func (s *Service) enterRun(run domain.RunID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	state := s.runs[run]
+	if state == nil {
+		state = &runLifecycle{done: make(chan struct{})}
+		s.runs[run] = state
+	}
+	if state.closing {
+		return false
+	}
+	state.refs++
+	return true
+}
+
+func (s *Service) leaveRun(run domain.RunID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.runs[run]
+	if state == nil || state.refs == 0 {
+		return
+	}
+	state.refs--
+	if state.closing && state.refs == 0 && !state.doneClosed {
+		close(state.done)
+		state.doneClosed = true
+	}
+}
+
+func (s *Service) closeRun(run domain.RunID) <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.runs[run]
+	if state == nil {
+		state = &runLifecycle{done: make(chan struct{})}
+		s.runs[run] = state
+	}
+	state.closing = true
+	if state.refs == 0 && !state.doneClosed {
+		close(state.done)
+		state.doneClosed = true
+	}
+	return state.done
+}
+
+func runClosing(method string) *protocol.Error {
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run is closing"}
+}
+func (s *Service) isRunClosing(run domain.RunID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.runs[run]
+	return s.closed || (state != nil && state.closing)
+}
+
+func (s *Service) reportLock(run domain.RunID) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock := s.reportLocks[run]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.reportLocks[run] = lock
+	}
+	return lock
 }
 
 // unavailable is the kill switch's answer: every coord.* method fails

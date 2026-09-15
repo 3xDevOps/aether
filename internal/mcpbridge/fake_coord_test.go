@@ -17,7 +17,7 @@ import (
 )
 
 // fakeCoord is a coordination socket that answers with the golden
-// wire-v1 bytes. The bridge inside a container is built against exactly
+// wire-v3 bytes. The bridge inside a container is built against exactly
 // those bytes and outlives the server that wrote them, so a bridge that
 // only ever sees the goldens is the honest test of that promise.
 type fakeCoord struct {
@@ -32,7 +32,7 @@ type fakeCoord struct {
 
 func newFakeCoord(t *testing.T, handler func(protocol.Request) protocol.Response) *fakeCoord {
 	t.Helper()
-	f := &fakeCoord{t: t, path: filepath.Join(t.TempDir(), "coord.sock"), handler: handler}
+	f := &fakeCoord{t: t, path: filepath.Join(t.TempDir(), "coord3.sock"), handler: handler}
 	f.listen()
 	t.Cleanup(f.stop)
 	return f
@@ -173,7 +173,7 @@ func readUntilEmpty(t *testing.T, cs *mcp.ClientSession, out *inboxOutput) {
 // golden reads one of the pinned fixtures.
 func golden(t *testing.T, name string) []protocol.Response {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v2", name))
+	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v3", name))
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}
@@ -192,7 +192,7 @@ func golden(t *testing.T, name string) []protocol.Response {
 // can assert the bridge puts the same bytes on the wire.
 func goldenRequests(t *testing.T) []protocol.Request {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v2", "requests.ndjson"))
+	data, err := os.ReadFile(filepath.Join("..", "protocol", "testdata", "coord-v3", "requests.ndjson"))
 	if err != nil {
 		t.Fatalf("read golden requests: %v", err)
 	}

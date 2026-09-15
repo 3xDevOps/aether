@@ -73,15 +73,12 @@ func decodeStructured(t *testing.T, res *mcp.CallToolResult, out any) {
 	}
 }
 
-// TestBridgeSpeaksGoldenWireV2 drives a real MCP client through all three
-// tools against a coordination socket that answers with nothing but
-// the pinned wire-v2 bytes: the round trip a bridge staged against v2
-// makes when the server it dials has moved on.
-func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
+// TestBridgeSpeaksGoldenWireV3 drives a real MCP client through every v3
+// tool against a coordination socket that answers with pinned wire bytes.
+func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 	success, errorResponses := golden(t, "success.ndjson"), golden(t, "errors.ndjson")
 	requests := goldenRequests(t)
 
-	var inboxCalls int
 	var mu sync.Mutex
 	coord := newFakeCoord(t, func(req protocol.Request) protocol.Response {
 		mu.Lock()
@@ -98,12 +95,21 @@ func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 				return errorResponses[0]
 			}
 			return success[1]
-		case protocol.MethodCoordInbox:
-			inboxCalls++
-			if inboxCalls == 1 {
-				return success[2]
-			}
+		case protocol.MethodCoordAsk:
+			return success[2]
+		case protocol.MethodCoordReply:
 			return success[3]
+		case protocol.MethodCoordInbox:
+			var p protocol.CoordInboxParams
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				t.Errorf("decode inbox params: %v", err)
+			}
+			if p.AckToken != "" {
+				return protocol.Response{Result: json.RawMessage(`{"messages":[]}`)}
+			}
+			return success[4]
+		case protocol.MethodCoordReport:
+			return success[5]
 		}
 		t.Errorf("bridge called %q, which is not on the coordination wire", req.Method)
 		return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
@@ -120,8 +126,9 @@ func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{toolInbox, toolSend, toolStatus}; !slices.Equal(names, want) {
-		t.Fatalf("tools = %v, want exactly %v", names, want)
+	wantTools := []string{toolAsk, toolInbox, toolReply, toolReport, toolSend, toolStatus}
+	if !slices.Equal(names, wantTools) {
+		t.Fatalf("tools = %v, want exactly %v", names, wantTools)
 	}
 
 	var status protocol.CoordStatusResult
@@ -135,19 +142,36 @@ func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 		t.Fatalf("status peers = %+v", status.Peers)
 	}
 
-	// The peers status reports are exactly the peers a send is authorized
-	// against: both the active one and the one inside its grace window go
-	// through, and a run that is on neither list is denied.
 	for _, peer := range status.Peers {
 		var sent protocol.CoordSendResult
 		callTool(t, cs, toolSend, protocol.CoordSendParams{
-			ToRunID: peer.RunID,
-			Body:    "I'm rewriting login(); done in ~10 min.",
+			ToRunID:        peer.RunID,
+			Body:           "I'm rewriting login(); done in ~10 min.",
+			IdempotencyKey: "send-01",
 		}, &sent)
 		if sent.MessageID != "msg_01" {
 			t.Fatalf("send to %s = %+v", peer.RunID, sent)
 		}
 	}
+	var question protocol.CoordAskResult
+	callTool(t, cs, toolAsk, protocol.CoordAskParams{
+		ToRunID:        "run_02",
+		Body:           "Can I change the auth helper?",
+		IdempotencyKey: "ask-01",
+	}, &question)
+	if question.QuestionID != "q_01" {
+		t.Fatalf("ask = %+v", question)
+	}
+	var reply protocol.CoordReplyResult
+	callTool(t, cs, toolReply, protocol.CoordReplyParams{
+		QuestionID:     question.QuestionID,
+		Body:           "Yes, go ahead.",
+		IdempotencyKey: "reply-01",
+	}, &reply)
+	if reply.MessageID != "msg_03" {
+		t.Fatalf("reply = %+v", reply)
+	}
+
 	denied, err := cs.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      toolSend,
 		Arguments: protocol.CoordSendParams{ToRunID: "run_09", Body: "hello"},
@@ -159,50 +183,48 @@ func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 		t.Fatalf("send to a non-peer: code = %d, want %d", code, protocol.CodeDenied)
 	}
 
+	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
 	var inbox inboxOutput
-	res := callTool(t, cs, toolInbox, nil, &inbox)
-	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" || inbox.Messages[0].FromRunID != "run_02" {
+	callTool(t, cs, toolInbox, nil, &inbox)
+	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" || inbox.AckToken != ack {
 		t.Fatalf("inbox = %+v", inbox)
 	}
-	if raw, _ := json.Marshal(res.StructuredContent); jsonHas(raw, "ack_token") {
-		t.Fatalf("inbox result carried the acknowledgement token to the agent: %s", raw)
-	}
-
-	// Reading again acknowledges the batch just delivered. The token is
-	// promoted on the bridge's write path, after this client already has
-	// its result, so a read can race ahead of the promotion and be handed
-	// the same batch again. That redelivery is by design, so retry until
-	// the acknowledgement is on the wire rather than pinning a call count.
-	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
 	inboxes := coord.readUntilAcked(t, cs, ack, &inbox)
 	if len(inboxes) < 2 {
 		t.Fatalf("coordination saw %d inbox calls, want at least 2", len(inboxes))
 	}
-	// requests.ndjson pins both shapes: a read that acknowledges nothing
-	// sends no params at all, and one that acknowledges sends exactly the
-	// token of the batch it received.
-	if string(inboxes[0].Params) != string(requests[2].Params) {
-		t.Fatalf("first inbox params = %q, want %q", inboxes[0].Params, requests[2].Params)
+	var acking protocol.CoordInboxParams
+	if err := json.Unmarshal(inboxes[len(inboxes)-1].Params, &acking); err != nil {
+		t.Fatalf("decode acknowledging inbox params: %v", err)
 	}
-	acking := inboxes[len(inboxes)-1]
-	if string(acking.Params) != string(requests[3].Params) {
-		t.Fatalf("acknowledging inbox params = %q, want %q", acking.Params, requests[3].Params)
+	if acking.AckToken != ack {
+		t.Fatalf("acknowledging inbox params = %+v, want token %q", acking, ack)
 	}
-	// Every read before the acknowledging one is a redelivery, which must
-	// carry no token at all.
-	for i, req := range inboxes[:len(inboxes)-1] {
-		if string(req.Params) != string(requests[2].Params) {
-			t.Fatalf("inbox call %d params = %q, want the no-token shape %q", i, req.Params, requests[2].Params)
-		}
-	}
-	// Once the batch is retired the next read acknowledges nothing again.
 	callTool(t, cs, toolInbox, nil, &inbox)
-	if len(inbox.Messages) != 0 {
-		t.Fatalf("inbox after the acknowledgement = %+v, want empty", inbox)
+	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" {
+		t.Fatalf("inbox after acknowledging the first batch = %+v, want the later queued question to remain", inbox)
 	}
+
+	var report protocol.CoordReportResult
+	callTool(t, cs, toolReport, protocol.CoordReportParams{
+		Outcome:        protocol.CoordOutcomeSuccess,
+		Summary:        "Implemented and verified.",
+		EvidenceRefs:   []string{"ev_01"},
+		IdempotencyKey: "report-01",
+	}, &report)
+	if report.ReportID != "report_01" {
+		t.Fatalf("report = %+v", report)
+	}
+
 	seen := coord.seen()
-	if string(seen[0].Params) != string(requests[0].Params) || seen[0].Method != requests[0].Method {
-		t.Fatalf("status request = %+v, want the golden shape %+v", seen[0], requests[0])
+	methods := make(map[string]bool, len(seen))
+	for _, req := range seen {
+		methods[req.Method] = true
+	}
+	for _, want := range requests {
+		if !methods[want.Method] {
+			t.Fatalf("coordination did not receive %q; requests = %+v", want.Method, seen)
+		}
 	}
 }
 
@@ -213,7 +235,7 @@ func TestBridgeSpeaksGoldenWireV2(t *testing.T) {
 // batch comes back.
 func TestBatchRedeliversWhenTheResponseNeverLands(t *testing.T) {
 	success := golden(t, "success.ndjson")
-	batch := success[2]
+	batch := success[4]
 
 	var mu sync.Mutex
 	var armed bool
@@ -223,13 +245,17 @@ func TestBatchRedeliversWhenTheResponseNeverLands(t *testing.T) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
+		var p protocol.CoordInboxParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeInvalidParams}}
+		}
 		// Unacknowledged batches redeliver: only a read carrying the
 		// token retires one.
-		if len(req.Params) == 0 {
+		if p.AckToken == "" {
 			armed = true
 			return batch
 		}
-		return success[3]
+		return protocol.Response{Result: json.RawMessage(`{"messages":[]}`)}
 	})
 
 	dying := session(t, coord.path, func(dst io.WriteCloser) io.WriteCloser {
@@ -254,7 +280,14 @@ func TestBatchRedeliversWhenTheResponseNeverLands(t *testing.T) {
 		t.Fatalf("redelivered inbox = %+v, want the same batch", inbox)
 	}
 	for _, req := range coord.seen() {
-		if req.Method == protocol.MethodCoordInbox && len(req.Params) != 0 {
+		if req.Method != protocol.MethodCoordInbox {
+			continue
+		}
+		var p protocol.CoordInboxParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			t.Fatalf("decode inbox request: %v", err)
+		}
+		if p.AckToken != "" {
 			t.Fatalf("a batch that never reached the agent was acknowledged: %s", req.Params)
 		}
 	}
@@ -360,6 +393,22 @@ func TestGateNeverPromotesABatchTheAgentDidNotSee(t *testing.T) {
 		if g.token() != "" {
 			t.Fatalf("a cancelled call's token was promoted: %q", g.token())
 		}
+	})
+
+	t.Run("nine pipelined cancellations keep the oldest in flight tombstone", func(t *testing.T) {
+		g := newGate()
+		if err := g.claim(ctx, first); err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		g.cancel(first)
+		for id := 2; id <= 10; id++ {
+			g.cancel(testID(t, float64(id)))
+		}
+		g.stage(first, "token-a")
+		if len(g.pending) != 0 {
+			t.Fatalf("cancelled in-flight call staged after pipelined cancellations: %+v", g.pending)
+		}
+		g.release(first)
 	})
 
 	t.Run("a failed write cannot promote it", func(t *testing.T) {
@@ -471,13 +520,4 @@ func errorCode(t *testing.T, res *mcp.CallToolResult) int {
 		t.Fatalf("%s = %v (%T), want a number", MetaErrorCode, raw, raw)
 	}
 	return int(code)
-}
-
-func jsonHas(raw []byte, key string) bool {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return false
-	}
-	_, ok := obj[key]
-	return ok
 }

@@ -767,10 +767,11 @@ type fakePTY struct {
 type fakePTYSession struct {
 	att        runtime.Attachment
 	generation uint64
-	mu         sync.Mutex
-	out        bytes.Buffer
-	last       time.Time
-	ended      bool
+
+	mu    sync.Mutex
+	out   bytes.Buffer
+	last  time.Time
+	ended bool
 }
 
 type fakeInject struct {
@@ -813,6 +814,7 @@ func (p *fakePTY) StartSession(_ context.Context, key ptyhost.SessionKey, att ru
 	}()
 	return nil
 }
+
 func (p *fakePTY) SessionGeneration(key ptyhost.SessionKey) uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()

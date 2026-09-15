@@ -22,14 +22,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// TestCoordWireV2ErrorsGolden pins testdata/coord-v2/errors.ndjson to the
+// TestCoordWireV3ErrorsGolden pins testdata/coord-v3/errors.ndjson to the
 // bytes the real coordination service produces: each documented failure
 // is provoked against internal/coord and the raw response read off the
 // run's unix socket, so an error string or code changed in the service
 // breaks this golden rather than only the service's own unit tests.
-// requests.ndjson and success.ndjson stay pinned by TestCoordWireV2Golden,
+// requests.ndjson and success.ndjson stay pinned by TestCoordWireV3Golden,
 // which marshals the same structs both endpoints serialize.
-func TestCoordWireV2ErrorsGolden(t *testing.T) {
+func TestCoordWireV3ErrorsGolden(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("coord.Provision binds an AF_UNIX listener and chmods the run directory to 0700 and the socket to 0666")
 	}
@@ -87,30 +87,30 @@ func TestCoordWireV2ErrorsGolden(t *testing.T) {
 		}
 		return bytes.TrimSuffix(resp, []byte("\n"))
 	}
-	send := func(to, body string) protocol.CoordSendParams {
-		return protocol.CoordSendParams{ToRunID: to, Body: body}
+	send := func(to, body, key string) protocol.CoordSendParams {
+		return protocol.CoordSendParams{ToRunID: to, Body: body, IdempotencyKey: key}
 	}
 
 	got := make([][]byte, 0, 8)
 	// 1: the target is alive but shares no overlap edge with the sender.
-	got = append(got, call(1, protocol.MethodCoordSend, send("run_09", "ping")))
+	got = append(got, call(1, protocol.MethodCoordSend, send("run_09", "ping", "unauthorized-1")))
 	// 2: the same target, no longer a run the store knows.
 	runs.del("run_09")
-	got = append(got, call(2, protocol.MethodCoordSend, send("run_09", "ping")))
+	got = append(got, call(2, protocol.MethodCoordSend, send("run_09", "ping", "unknown-2")))
 	// 3: an authorized peer that has finished.
 	runs.set(domain.Run{ID: "run_02", WorkspaceID: "ws_01", MemberID: "mem_02", Status: domain.RunFailed})
-	got = append(got, call(3, protocol.MethodCoordSend, send("run_02", "ping")))
+	got = append(got, call(3, protocol.MethodCoordSend, send("run_02", "ping", "finished-3")))
 	// 4: the peer is back, but its inbox is at the depth cap.
 	runs.set(domain.Run{ID: "run_02", WorkspaceID: "ws_01", MemberID: "mem_02", Status: domain.RunRunning})
-	got = append(got, call(4, protocol.MethodCoordSend, send("run_02", "ping")))
+	got = append(got, call(4, protocol.MethodCoordSend, send("run_02", "ping", "full-4")))
 	// Each send above spent a burst token; spend the last one so the next
 	// send is throttled.
-	call(99, protocol.MethodCoordSend, send("run_09", "ping"))
+	call(99, protocol.MethodCoordSend, send("run_09", "ping", "prime-99"))
 	// 5: over the send rate.
-	got = append(got, call(5, protocol.MethodCoordSend, send("run_02", "ping")))
+	got = append(got, call(5, protocol.MethodCoordSend, send("run_02", "ping", "rate-5")))
 	// 6: an oversized body, refused before the rate limit is consulted.
 	got = append(got, call(6, protocol.MethodCoordSend,
-		send("run_02", strings.Repeat("a", protocol.CoordMaxBodyBytes+1))))
+		send("run_02", strings.Repeat("a", protocol.CoordMaxBodyBytes+1), "oversized-6")))
 	// 7: the kill switch. A disabled service binds no socket, so this is
 	// the one line provoked through the exported method: the error is the
 	// service's, only the envelope is assembled here.
@@ -121,7 +121,7 @@ func TestCoordWireV2ErrorsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("coord.New disabled: %v", err)
 	}
-	_, rpcErr := disabled.Send(ctx, "run_01", send("run_02", "ping"))
+	_, rpcErr := disabled.Send(ctx, "run_01", send("run_02", "ping", "disabled-7"))
 	if rpcErr == nil {
 		t.Fatal("disabled Send succeeded, want an error")
 	}
@@ -146,7 +146,7 @@ func TestCoordWireV2ErrorsGolden(t *testing.T) {
 
 func readGoldenLines(t *testing.T, name string) [][]byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "coord-v2", name))
+	data, err := os.ReadFile(filepath.Join("testdata", "coord-v3", name))
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}
@@ -198,6 +198,10 @@ func (f *wireRuns) del(id domain.RunID) {
 // fullMail is a mailbox at its depth cap. The embedded interface keeps it
 // satisfying store.MessageStore; anything unimplemented panics if reached.
 type fullMail struct{ store.MessageStore }
+
+func (fullMail) GetRunMessageByIdempotency(context.Context, domain.RunID, string) (*store.RunMessage, error) {
+	return nil, store.ErrNotFound
+}
 
 func (fullMail) AppendRunMessage(context.Context, *store.RunMessage, int) error {
 	return store.ErrInboxFull

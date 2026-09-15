@@ -835,6 +835,96 @@ CREATE INDEX idx_handoff_outbox_pending ON handoff_outbox(publication_state, cre
 CREATE INDEX idx_handoff_outbox_phases
 	ON handoff_outbox(timeline_state, coauthor_state, evidence_state, publication_state, created_at);
 `,
+	// v29: coordination metadata, durable one-report reservations, and
+	// persisted peer accounting. Existing mailbox rows retain ordinary
+	// message defaults and no idempotency key.
+	`
+ALTER TABLE run_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'message'
+CHECK (kind IN ('message', 'question', 'reply'));
+ALTER TABLE run_messages ADD COLUMN correlation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE run_messages ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX idx_run_messages_idempotency
+	ON run_messages(from_run, idempotency_key)
+	WHERE idempotency_key <> '';
+CREATE INDEX idx_run_messages_correlation
+	ON run_messages(correlation_id, created_at)
+	WHERE correlation_id <> '';
+
+CREATE TABLE coord_peers (
+	from_run   TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	to_run     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (from_run, to_run),
+	CHECK (from_run <> to_run)
+);
+CREATE INDEX idx_coord_peers_from ON coord_peers(from_run, created_at, to_run);
+
+CREATE TABLE coord_reports (
+	id              TEXT PRIMARY KEY,
+	workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	outcome         TEXT NOT NULL CHECK (outcome IN ('success', 'failure', 'blocked')),
+	summary         TEXT NOT NULL,
+	next_action     TEXT NOT NULL DEFAULT '',
+	evidence_refs   TEXT NOT NULL DEFAULT '[]',
+	input_evidence_refs TEXT NOT NULL DEFAULT '[]',
+	idempotency_key TEXT NOT NULL,
+	state           TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'finalized')),
+	created_at      INTEGER NOT NULL,
+	finalized_at    INTEGER,
+	published_at    INTEGER,
+	UNIQUE (run_id),
+	UNIQUE (run_id, idempotency_key)
+);
+CREATE INDEX idx_coord_reports_run
+	ON coord_reports(workspace_id, run_id, created_at DESC, id DESC);
+CREATE TABLE coord_report_publications (
+	report_id         TEXT PRIMARY KEY REFERENCES coord_reports(id) ON DELETE CASCADE,
+	event_id          TEXT NOT NULL UNIQUE,
+	publication_state TEXT NOT NULL DEFAULT 'pending' CHECK (publication_state IN ('pending', 'published')),
+	attempts          INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at   INTEGER NOT NULL DEFAULT 0,
+	last_error        TEXT NOT NULL DEFAULT '',
+	quarantined_at    INTEGER,
+	quarantine_error  TEXT NOT NULL DEFAULT '',
+	created_at        INTEGER NOT NULL,
+	published_at      INTEGER
+);
+CREATE INDEX idx_coord_report_publications_due
+	ON coord_report_publications(publication_state, quarantined_at, next_attempt_at, created_at, report_id);
+
+CREATE TABLE coord_audit_publications (
+	message_id        TEXT PRIMARY KEY,
+	event_id          TEXT NOT NULL UNIQUE,
+	workspace_id      TEXT NOT NULL,
+	from_run          TEXT NOT NULL,
+	to_run            TEXT NOT NULL,
+	body              TEXT NOT NULL,
+	publication_state TEXT NOT NULL DEFAULT 'pending' CHECK (publication_state IN ('pending', 'published')),
+	attempts          INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at   INTEGER NOT NULL DEFAULT 0,
+	last_error        TEXT NOT NULL DEFAULT '',
+	quarantined_at    INTEGER,
+	quarantine_error  TEXT NOT NULL DEFAULT '',
+	created_at        INTEGER NOT NULL,
+	published_at      INTEGER
+);
+CREATE INDEX idx_coord_audit_publications_due
+	ON coord_audit_publications(publication_state, quarantined_at, next_attempt_at, created_at, message_id);
+
+-- Published rows are only an event-log reconciliation cache. Pending and
+-- quarantined rows retain their immutable projections until an operator can
+-- inspect or retry them, even after mailbox/run retirement.
+DELETE FROM coord_audit_publications
+WHERE publication_state = 'published'
+  AND NOT EXISTS (SELECT 1 FROM run_messages WHERE run_messages.id = coord_audit_publications.message_id);
+
+UPDATE coord_reports SET published_at = NULL WHERE state = 'finalized';
+INSERT OR IGNORE INTO coord_report_publications (report_id, event_id, publication_state, created_at, published_at)
+	SELECT id, 'coord-report:' || id, 'pending', COALESCE(finalized_at, created_at), NULL
+	FROM coord_reports
+	WHERE state = 'finalized';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:
