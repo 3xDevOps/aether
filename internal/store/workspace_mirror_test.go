@@ -255,7 +255,6 @@ func TestWorkspaceMirrorRejectsInvalidData(t *testing.T) {
 }
 
 func TestWorkspaceMirrorMigrationFromV24(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 24)
 	if _, seedErr := raw.Exec(`INSERT INTO workspaces

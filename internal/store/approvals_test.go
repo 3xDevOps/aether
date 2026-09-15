@@ -75,7 +75,6 @@ func TestApprovalInboxRoundTrip(t *testing.T) {
 // schema version behind the approvals slot, seeds rows, then opens it:
 // the upgrade must add the inbox without losing anything.
 func TestApprovalsMigrationUpgradesPreviousVersion(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

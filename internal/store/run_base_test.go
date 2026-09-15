@@ -129,7 +129,6 @@ func TestRunSnapshotCountsUnansweredQuestions(t *testing.T) {
 }
 
 func TestRunBaseProvenanceMigrationFromV25(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 25)
 	key := testKey(t, "legacy")

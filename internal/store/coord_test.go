@@ -258,7 +258,6 @@ func TestRunMailboxRejectsUnknownRuns(t *testing.T) {
 // must add run_messages without losing anything, and a delivery token
 // written before the restart must still bind its batch after it.
 func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
 	if err != nil {

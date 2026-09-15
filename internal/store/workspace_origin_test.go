@@ -81,7 +81,6 @@ func TestWorkspaceOriginRoundTrip(t *testing.T) {
 // database: rows written before the column existed come back with an
 // empty origin rather than failing the scan.
 func TestWorkspaceOriginMigrationDefaultsEmpty(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, 22)
 	if _, err := raw.Exec(`
