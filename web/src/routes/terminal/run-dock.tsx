@@ -54,13 +54,15 @@ export function RunDock({ runID }: { runID: string }) {
     (run?.status === 'running' || run?.status === 'needs-attention') &&
     paused === false
   const [attachedIdentity, setAttachedIdentity] = useState<ShellAttachmentIdentity | null>(null)
+  const [replaying, setReplaying] = useState(false)
   const currentAttachmentRef = useRef<ShellAttachmentIdentity | null>(null)
   const terminalRef = useRef<XtermController['terminal']>(null)
   const writeRequested = useRef<Record<string, boolean>>({})
   const controlHeld = useRef<Record<string, boolean>>({})
   const [controlState, setControlState] = useState<{ key: string; held: boolean } | null>(null)
-  const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
-  // Which of the dock's four bodies is on screen. The three that are not the
+  const gate = useRef(
+    replayGate((chunk, done) => terminalRef.current?.write(chunk, done), setReplaying),
+  )
   // terminal replace one that may have been holding the keyboard: the server
   // refuses a shell, the agent exits the last one, the run stops running.
   // Disposing it leaves focus on <body>, where the next keystroke reaches the
@@ -157,9 +159,9 @@ export function RunDock({ runID }: { runID: string }) {
       unregisterShellSocket(runID, socketKey)
     }
     const handlers = {
-      onData: (chunk: Uint8Array, kind: AttachDataKind) =>
-        emitShellSocketData(runID, socketKey, chunk, kind),
-      onAttached: (_write: boolean, size: { cols: number; rows: number }) => {
+      onData: (chunk: Uint8Array, kind: AttachDataKind, settled?: () => void) =>
+        emitShellSocketData(runID, socketKey, chunk, kind, settled),
+      onAttached: (_write: boolean, size: { cols: number; rows: number }, resumed = false) => {
         // Reattach replay restores the tab's full history, so a tab switch
         // may remount its xterm instead of preserving old instances. A
         // background tab reconnecting must never wipe the active tab or
@@ -167,14 +169,21 @@ export function RunDock({ runID }: { runID: string }) {
         if (isCurrent()) {
           setAttachedIdentity(identity)
           gate.current.unmute()
-          setGeometry(size.cols, size.rows, true)
+          setGeometry(size.cols, size.rows, !resumed)
           setShellRefused(runID, null)
         }
+      },
+      onReplayAbort: () => {
+        if (isCurrent()) gate.current.cancel()
+      },
+      onReplayStart: (bytes: number) => {
+        if (!isCurrent()) return
+        if (bytes > 0) gate.current.start()
+        else gate.current.unmute()
       },
       onState: (connection: ConnectionState) => {
         if (isCurrent()) {
           if (connection !== 'live') setAttachedIdentity(null)
-          if (connection === 'offline') gate.current.unmute()
         }
       },
       // The server's message names the actual limit (steer, tab cap,
@@ -213,7 +222,6 @@ export function RunDock({ runID }: { runID: string }) {
 
     clearAttached()
     const unsubscribe = subscribeShellSocket(runID, socketKey, gate.current.write)
-    if (existing) attachment.reopen()
     return () => {
       unsubscribe()
       clearAttached()
@@ -315,6 +323,7 @@ export function RunDock({ runID }: { runID: string }) {
           <TerminalPane
             controller={controller}
             writable={activeHasControl}
+            replaying={replaying}
             className="min-h-0 flex-1 overflow-auto"
             imageTarget={runID}
             imageTargetKey={activeTab ?? undefined}

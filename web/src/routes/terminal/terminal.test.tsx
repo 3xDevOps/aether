@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import type { Run } from '@/lib/types'
 import type * as apiModule from '@/lib/api'
@@ -9,6 +9,7 @@ import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
 import { bob, run, serverInfo } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
+import { fire } from '@/test/wake'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -256,6 +257,164 @@ describe('terminal view', () => {
     view.unmount()
     open.mockRestore()
   })
+
+  it('keeps a completed session hidden until the final replay callback after going offline', async () => {
+    const write = vi.spyOn(Terminal.prototype, 'write')
+    const callbacks: Array<() => void> = []
+    write.mockImplementation((chunk, done) => {
+      if (chunk instanceof Uint8Array && done) callbacks.push(done)
+    })
+    const view = mount({}, { status: 'completed' })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 3,
+          cols: 80,
+          rows: 24,
+          has_control: true,
+          control_generation: 1,
+        }),
+      })
+    })
+
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    expect(callbacks).toHaveLength(1)
+
+    // A completed session parks offline after the exact replay boundary, but
+    // the pane stays hidden while xterm parses the final replay frame.
+    act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => callbacks[0]?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(host.style.visibility).toBe('')
+    write.mockRestore()
+    view.unmount()
+  })
+  it('reveals a completed session when an offline close aborts before replay ends', () => {
+    const view = mount({}, { status: 'completed' })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 3,
+          cols: 80,
+          rows: 24,
+          has_control: true,
+          control_generation: 1,
+        }),
+      })
+    })
+
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    expect(host.style.visibility).toBe('hidden')
+
+    // No replay-end frame arrived: the close's explicit replay abort settles
+    // the gate instead of leaving an incomplete transcript latched.
+    act(() => {
+      socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
+      socket.onclose?.({ code: 1000, reason: 'session ended' })
+    })
+
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    expect(host.style.visibility).toBe('')
+    view.unmount()
+  })
+  it('settles the hidden replay overlay when wake replacement is refused', () => {
+    const view = mount({}, { status: 'completed' })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 3,
+          cols: 80,
+          rows: 24,
+          has_control: true,
+          control_generation: 1,
+        }),
+      })
+      socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
+    })
+
+    act(() => fire('online'))
+    const replacement = StubSocket.last()
+    expect(replacement).not.toBe(socket)
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+    act(() => {
+      replacement.onopen?.()
+      replacement.onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32002, error: 'replacement refused' }),
+      })
+    })
+
+    expect(host.style.visibility).toBe('')
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    expect(screen.getByText('replacement refused')).toBeDefined()
+    view.unmount()
+  })
+
+  it('preserves existing terminal output when Steering is released with resume', async () => {
+    const reset = vi.spyOn(Terminal.prototype, 'reset')
+    const write = vi.spyOn(Terminal.prototype, 'write')
+    const view = mount()
+    attached({ cols: 20, rows: 4 })
+    const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
+
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: new TextEncoder().encode('existing output').buffer,
+      }),
+    )
+    await vi.waitFor(() => expect(pane()).toContain('existing output'))
+    const resetCount = reset.mock.calls.length
+    const writeCount = write.mock.calls.length
+
+    fireEvent.click(screen.getByText('Steering'))
+    expect(StubSocket.opened).toHaveLength(2)
+    const release = StubSocket.last()
+    act(() => {
+      release.onopen?.()
+      release.onmessage?.({
+        data: JSON.stringify({ ok: true, cols: 20, rows: 4, resumed: true }),
+      })
+    })
+
+    expect(reset.mock.calls).toHaveLength(resetCount)
+    const writesAfterAck = write.mock.calls.slice(writeCount)
+    expect(
+      writesAfterAck.filter(([data]) => typeof data === 'string' ? data.length > 0 : data.byteLength > 0),
+    ).toHaveLength(0)
+    expect(pane()).toContain('existing output')
+    act(() => {
+      release.onmessage?.({
+        data: new TextEncoder().encode('after release').buffer,
+      })
+    })
+    await vi.waitFor(() => expect(pane()).toContain('after release'))
+    expect(pane()).toContain('existing output')
+    reset.mockRestore()
+    write.mockRestore()
+    view.unmount()
+  })
+
 
   it('offers a retry when the attach is refused outright', () => {
     const view = mount()

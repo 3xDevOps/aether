@@ -438,6 +438,70 @@ func TestAttachRefusalForwardsAck(t *testing.T) {
 		t.Fatalf("close reason = %q, want attach refused", reason)
 	}
 }
+
+// TestAttachReleaseStaysConnectedAsMirror proves release is the first half of
+// a normal replacement attach: the backend sees a read-only resumed request,
+// the successful ack is returned, and the same socket continues to pump output.
+func TestAttachReleaseStaysConnectedAsMirror(t *testing.T) {
+	term := newWSStubTerminal(io.EOF)
+	b := &wsStubBackend{
+		attachTerm: term,
+		attachAck: protocol.AttachResponse{
+			OK: true, Framed: true, Resumed: true, Cursor: 42,
+		},
+	}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
+
+	writeWSJSON(t, conn, protocol.DashAttachRequest{
+		Write: true, Resume: true, Cursor: 42,
+		ControlSessionID: "release-tab", ControlGeneration: 7,
+		ReleaseControl: true,
+	})
+	ack := readWSJSON[protocol.AttachResponse](t, conn)
+	if !ack.OK || !ack.Resumed || ack.Replay != 0 || ack.Cursor != 42 {
+		t.Fatalf("release ack = %+v, want resumed zero-replay ack", ack)
+	}
+	req := b.recordedAttach()
+	if !req.ReadOnly || !req.Resume || req.Cursor != 42 || !req.ReleaseControl ||
+		req.ControlSessionID != "release-tab" || req.ControlGeneration != 7 || !req.Framed {
+		t.Fatalf("release attach request = %+v, want read-only resumed framed attach", req)
+	}
+
+	writeWSJSON(t, conn, protocol.DashAttachControl{
+		Type: protocol.DashAttachInput, Data: "must-be-dropped",
+	})
+	// The resize is later on the ordered control stream. Waiting for it
+	// proves the forbidden input has already been processed before inspecting
+	// the terminal's input seam below.
+	writeWSJSON(t, conn, protocol.DashAttachControl{
+		Type: protocol.DashAttachResize, Cols: 132, Rows: 43,
+	})
+	select {
+	case rs := <-term.resizeCh:
+		if rs != [2]uint{132, 43} {
+			t.Fatalf("release mirror resize = %v, want [132 43]", rs)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("release mirror resize never reached terminal")
+	}
+	term.emit([]byte("post-release output"))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	typ, data, err := conn.Read(ctx)
+	cancel()
+	if err != nil || typ != websocket.MessageBinary || string(data) != "post-release output" {
+		t.Fatalf("post-release output frame = %v %q (%v)", typ, data, err)
+	}
+	select {
+	case in := <-term.inputCh:
+		t.Fatalf("release mirror input reached terminal: %q", in)
+	default:
+	}
+
+	term.finish()
+	expectClose(t, conn, websocket.StatusNormalClosure)
+}
+
 func TestTerminalForwardsOutputInputResizeAndClosesCleanly(t *testing.T) {
 	term := newWSStubTerminal(io.EOF)
 	b := &wsStubBackend{terminalTerm: term, terminalAck: protocol.TerminalResponse{OK: true, Framed: true, Tab: "dev", Cols: 100, Rows: 40}}

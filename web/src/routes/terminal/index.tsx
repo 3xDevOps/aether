@@ -73,10 +73,13 @@ function TerminalView({ params }: RouteProps) {
   // refusal is about this attach and speaks for itself.
   const [sessionMissing, setSessionMissing] = useState(false)
   const [controlMetadata, setControlMetadata] = useState<ControlMetadata | undefined>()
+  const [replaying, setReplaying] = useState(false)
   const runStatusRef = useRef(run?.status)
   runStatusRef.current = run?.status
   const attachRef = useRef<Attachment | null>(null)
-  const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
+  const gate = useRef(
+    replayGate((chunk, done) => terminalRef.current?.write(chunk, done), setReplaying),
+  )
   const terminalRef = useRef<XtermController['terminal']>(null)
   // Read at connect time by the attachment, so a toggle takes effect on the
   // reattach without re-running the terminal's own effect.
@@ -150,21 +153,24 @@ function TerminalView({ params }: RouteProps) {
     const attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.current.write,
       // Every attach starts with the server's transcript replay, so the pane
-      // is never blank - and clearing first keeps a reconnect from stacking a
-      // second copy of the scrollback under the first.
+      // is never blank - and clearing first keeps a reconnect from stacking
+      // a second copy of the scrollback under the first.
       onAttached: (write, size, resumed) => {
         // The ack carries what the server granted, not what was asked: a
         // refused request arrives as onWriteDenied instead.
         if (write && askedForControl.current) markControlTaken()
-        gate.current.unmute()
         // A resumed attach brings no replay, so the screen on display is the
         // only copy of it.
         setGeometry(size.cols, size.rows, !resumed)
         setTerminal(runID, { message: null, refused: false })
       },
+      onReplayAbort: () => gate.current.cancel(),
+      onReplayStart: (bytes) => {
+        if (bytes > 0) gate.current.start()
+        else gate.current.unmute()
+      },
       onControl: setControlMetadata,
       onState: (connection) => {
-        if (connection === 'offline') gate.current.unmute()
         setTerminal(runID, { connection })
       },
       onRefused: (message, code) => {
@@ -332,6 +338,7 @@ function TerminalView({ params }: RouteProps) {
               imageUploadEnabled={
                 !starting && state.connection === 'live' && state.write && !state.steerDenied
               }
+              replaying={replaying}
             >
               {starting && <TerminalSpinner label="Starting the run's container" />}
             </TerminalPane>

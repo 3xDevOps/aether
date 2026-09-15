@@ -395,6 +395,19 @@ func (s *session) snapshot() (ScreenSnapshot, error) {
 }
 
 func (s *session) addClient(c *client) error {
+	return s.addClientCommitted(context.Background(), c)
+}
+
+// addClientCommitted admits c while the session lock is held. The caller must
+// invoke this only after any authority lock it needs, preserving the
+// control-then-session lock order. The lock keeps output and geometry from
+// observing a client whose admission has not completed. A canceled context
+// abandons the admission before the client is retained, and no resize is
+// scheduled until the method succeeds.
+func (s *session) addClientCommitted(ctx context.Context, c *client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for {
 		s.mu.Lock()
 		if s.resizeActive || s.resizeDone != nil {
@@ -403,8 +416,18 @@ func (s *session) addClient(c *client) error {
 			// Do not let a fresh attach's replay bypass an active
 			// geometry boundary. Waiting is outside mu so output,
 			// resize completion, and existing clients continue.
-			if done != nil {
-				<-done
+			if done == nil {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					continue
+				}
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 			continue
 		}
@@ -450,6 +473,12 @@ func (s *session) addClient(c *client) error {
 		// to if it comes back.
 		c.cursor = s.ring.written
 		s.clients[c] = struct{}{}
+		if err := ctx.Err(); err != nil {
+			delete(s.clients, c)
+			s.mu.Unlock()
+			c.close(nil)
+			return err
+		}
 		// Any join can change who imposes, not just this client: the mirror
 		// that was alone here a moment ago no longer is. Raw replay needs
 		// a redraw; snapshots and successful resumes already hold the screen.

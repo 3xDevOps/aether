@@ -1,5 +1,5 @@
 import type { TerminalStatusResult } from '@/lib/types'
-import type { AttachDataKind, Attachment } from '@/routes/terminal/attach'
+import type { AttachDataKind, AttachDataResult, Attachment } from '@/routes/terminal/attach'
 import type { SliceCreator } from '@/store/slice'
 
 /** The server's persistent member environment and its attached tabs. */
@@ -26,10 +26,13 @@ export const initialEnvTerminal: EnvTerminalState = {
 export type EnvTerminalSocket = Attachment
 
 const sockets = new Map<string, EnvTerminalSocket>()
-const listeners = new Map<
-  string,
-  Set<(chunk: Uint8Array, kind: AttachDataKind) => void>
->()
+type EnvTerminalDataListener = (
+  chunk: Uint8Array,
+  kind: AttachDataKind,
+  settled?: () => void,
+) => AttachDataResult
+
+const listeners = new Map<string, Set<EnvTerminalDataListener>>()
 const ready = new Set<string>()
 const pendingLines = new Map<string, string[]>()
 const sentLines = new Map<string, Set<string>>()
@@ -75,10 +78,9 @@ export function getEnvTerminalSocket(tab: string): EnvTerminalSocket | undefined
 
 export function subscribeEnvTerminalSocket(
   tab: string,
-  onData: (chunk: Uint8Array, kind: AttachDataKind) => void,
+  onData: EnvTerminalDataListener,
 ): () => void {
-  const bucket =
-    listeners.get(tab) ?? new Set<(chunk: Uint8Array, kind: AttachDataKind) => void>()
+  const bucket = listeners.get(tab) ?? new Set<EnvTerminalDataListener>()
   bucket.add(onData)
   listeners.set(tab, bucket)
   return () => {
@@ -91,9 +93,30 @@ export function emitEnvTerminalSocketData(
   tab: string,
   chunk: Uint8Array,
   kind: AttachDataKind,
-): void {
-  listeners.get(tab)?.forEach((listener) => listener(chunk, kind))
+  settled?: () => void,
+): AttachDataResult {
+  const bucket = listeners.get(tab)
+  if (!bucket || bucket.size === 0) {
+    settled?.()
+    return
+  }
+  let firstAsync: Promise<void> | undefined
+  let asyncResults: Promise<void>[] | undefined
+  for (const listener of bucket) {
+    const result = listener(chunk, kind, settled)
+    if (!result || typeof result.then !== 'function') continue
+    if (!firstAsync) {
+      firstAsync = result
+    } else if (asyncResults) {
+      asyncResults.push(result)
+    } else {
+      asyncResults = [firstAsync, result]
+    }
+  }
+  if (asyncResults) return Promise.all(asyncResults).then(() => undefined)
+  return firstAsync
 }
+
 
 export function unregisterEnvTerminalSocket(tab: string): void {
   sockets.get(tab)?.close()

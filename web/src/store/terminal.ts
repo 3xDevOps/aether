@@ -1,5 +1,5 @@
 import type { ConnectionState } from '@/lib/stream'
-import type { AttachDataKind, Attachment } from '@/routes/terminal/attach'
+import type { AttachDataKind, AttachDataResult, Attachment } from '@/routes/terminal/attach'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -43,9 +43,15 @@ export const initialRunShellDock: RunShellDockState = {
 
 /** The socket handle is deliberately kept outside Zustand's persisted state. */
 export type RunShellSocket = Attachment
+type ShellSocketDataListener = (
+  chunk: Uint8Array,
+  kind: AttachDataKind,
+  settled?: () => void,
+) => AttachDataResult
 
 const shellSockets = new Map<string, RunShellSocket>()
 const shellSocketKey = (runID: string, tab: string) => `${runID}:${tab}`
+
 
 export function registerShellSocket(
   runID: string,
@@ -64,13 +70,12 @@ export function getShellSocket(runID: string, tab: string): RunShellSocket | und
 export function subscribeShellSocket(
   runID: string,
   tab: string,
-  onData: (chunk: Uint8Array, kind: AttachDataKind) => void,
+  onData: ShellSocketDataListener,
 ): () => void {
   // A socket remains owned by this module while the route changes. Output is
   // delivered only to the currently mounted terminal host.
   const key = shellSocketKey(runID, tab)
-  const listeners =
-    shellSocketListeners.get(key) ?? new Set<(chunk: Uint8Array, kind: AttachDataKind) => void>()
+  const listeners = shellSocketListeners.get(key) ?? new Set<ShellSocketDataListener>()
   listeners.add(onData)
   shellSocketListeners.set(key, listeners)
   return () => {
@@ -84,16 +89,33 @@ function emitShellSocketData(
   tab: string,
   chunk: Uint8Array,
   kind: AttachDataKind,
-): void {
-  shellSocketListeners
-    .get(shellSocketKey(runID, tab))
-    ?.forEach((listener) => listener(chunk, kind))
+  settled?: () => void,
+): AttachDataResult {
+  const listeners = shellSocketListeners.get(shellSocketKey(runID, tab))
+  if (!listeners) {
+    settled?.()
+    return
+  }
+
+  let firstCompletion: Promise<void> | undefined
+  let completions: Promise<void>[] | undefined
+  listeners.forEach((listener) => {
+    const completion = listener(chunk, kind, settled)
+    if (!completion || typeof completion.then !== 'function') return
+    const previous = firstCompletion
+    if (!previous) {
+      firstCompletion = completion
+    } else if (!completions) {
+      completions = [previous, completion]
+    } else {
+      completions.push(completion)
+    }
+  })
+  if (completions) return Promise.all(completions).then(() => undefined)
+  return firstCompletion
 }
 
-const shellSocketListeners = new Map<
-  string,
-  Set<(chunk: Uint8Array, kind: AttachDataKind) => void>
->()
+const shellSocketListeners = new Map<string, Set<ShellSocketDataListener>>()
 
 export function unregisterShellSocket(runID: string, tab: string): void {
   const key = shellSocketKey(runID, tab)

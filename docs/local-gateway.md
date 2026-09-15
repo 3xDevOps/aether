@@ -920,8 +920,14 @@ out the rest of a 30-second wait. A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.
-An attach the gateway refused, one parked on a `session ended` close, and a
-run still waiting for its PTY session are not reopened by either event.
+If an attach is still inside its replay boundary when `online` fires, the
+client cancels that parser and drain with an explicit cancellation signal,
+clears the partial operations, and drops the socket while keeping the terminal
+hidden. The replacement attach starts a fresh hidden replay; the incomplete
+prefix is never revealed. If the replacement is finally refused, the client
+settles the replay gate before showing the server's error. An attach the gateway
+refused, one parked on a `session ended` close, and a run still waiting for its
+PTY session are not reopened by either event.
 
 Every live socket - `events`, `attach`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
@@ -977,16 +983,26 @@ needs.
    {"write":true,"follow":true,"cols":80,"rows":24}
    ```
 
-   `resume` asks to reattach without the scrollback replay: the client
-   already holds this session's screen and is reattaching only to change
-   what it may do, which is what the dashboard does when you take control
-   or hand it back. It carries `cursor`, the output count the last ack
-   reported plus every live byte received since, and the replay is exactly
-   what followed it - usually nothing, and never the whole scrollback. The
-   client keeps what is on screen along with the terminal state behind it.
-   The ack answers with `"resumed":true`. If the ring no longer reaches back
-   that far, or the missing output crosses a resize, the server answers
-   `"resumed":false` with a fresh current-screen snapshot.
+   `resume` asks to reattach while preserving the screen the client already
+   holds, avoiding a full scrollback replay when continuity can be proved. It
+   carries `cursor`, the output count the last ack reported plus every live byte
+   received since. When resume is honored, the replay is exactly the bytes
+   after that cursor - usually none - and the ack says `"resumed":true`.
+   When it cannot be honored, the ack says `"resumed":false`: a run attach may
+   receive the complete retained transcript again, while a reusable shell may
+   receive its current-screen replay. Step 2 describes how either replay is
+   applied without exposing redraw frames.
+
+   `release_control` combines lease release with this attach. At the PTY-host
+   commit boundary, the server holds the run-scoped authority lock, validates
+   the request's session and generation, admits the replacement, then releases
+   and fences the old lease before any replay, output, or geometry is sent. If
+   admission fails, the request is refused while the old writer and lease
+   remain intact. A successful commit cancels the displaced writer, then
+   continues as the replacement read-only PTY attach on this same request,
+   honoring `resume`/`cursor`, returning one normal attach ack, and streaming
+   output. Invalid, stale, or cross-member release is refused; release is not
+   an acknowledgement-only throwaway connection.
 
    `follow` says the client renders the session at the size it already is
    and imposes none of its own, so it is left out of the minimum the PTY is
@@ -998,14 +1014,40 @@ needs.
 
 2. Server answers one **text** frame: `{"ok":true,"framed":true,"cols":120,"rows":40,"replay":4096}`,
    or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
-   The ack's geometry is the captured screen's size, not an echo of the header.
-   A later accepted resize arrives after that screen's replay bytes.
-   The optional `replay` value counts the binary bytes preceding live output;
-   clients mute terminal-generated replies until those bytes have been parsed.
+   The ack's geometry is the captured screen's size, not an echo of the
+   header. A later accepted resize arrives after that screen's replay bytes.
+   The optional `replay` value is the exact number of binary output bytes
+   preceding live output. Clients split at that byte boundary even when one
+   binary frame contains the end of replay and the beginning of live output.
+   A declared replay length must be a finite, nonnegative safe integer; the
+   dashboard turns an invalid declaration into a final visible refusal rather
+   than attempting an allocation. Dashboard clients do not allocate
+   `Uint8Array(replay)` or any equivalent browser-sized declared-length
+   buffer. They start parsing each arriving frame-sized replay operation
+   immediately through one serial public xterm write chain while the host
+   remains hidden with CSS visibility; they do not retain replay bytes until
+   the full boundary arrives. Each completion is awaited before the next
+   operation, preserving xterm backpressure and wire order. Only the slice
+   containing the exact final replay byte is tagged `replay-end`; live records
+   and geometry received during replay queue behind the replay writes. After
+   the final replay-write callback, the host remains hidden for two
+   `requestAnimationFrame` turns so the xterm DOM paints the settled terminal,
+   then reveals it.
+   Every retained transcript byte is fed to xterm. xterm retains normal
+   scrollback and rows preserved by its configured full-screen erase behavior;
+   control bytes and cursor overwrites affect terminal state but are not
+   themselves scrollback rows. Terminal-generated replies and user input stay
+   muted from the ack through the final replay-write callback.
    For a fresh run attach these bytes are the complete retained raw transcript,
    including segments from earlier server incarnations. A successful resume
-   instead supplies only the missing raw output. `cursor` counts original
-   session output and is what a later `resume` sends back.
+   supplies only the missing raw output. A failed resume may repeat the
+   complete run transcript, but that fallback uses the same hidden, ordered
+   replay transaction. `cursor` counts original session output and is what a
+   later `resume` sends back.
+
+   The server keeps full-transcript replay resource-bounded: it streams retained
+   segments lazily, opening and reading at most one segment at a time rather
+   than loading the complete history or opening every segment file at once.
    A write attach is refused with `-32001`
    unless the member holds the **steer** capability on that run; dropping
    `"write"` always works for a member who can see the run. An unknown run is
@@ -1017,7 +1059,9 @@ needs.
    starting the session - as is a finished run whose transcript was never
    persisted. The refusal is the answer, so a client that means to wait for a
    session has to retry rather than expect the socket to stay open.
-3. Server then streams terminal output as **binary** frames.
+3. Server then streams terminal output as **binary** frames. The first
+   `replay` bytes are historical output; live output begins at the exact next
+   byte, including when that boundary falls inside a frame.
 4. Client sends **text** control frames:
 
    ```json
@@ -1047,9 +1091,13 @@ needs.
    output use one ordered stream between the server and gateway: a resize
    reaches the browser before the repaint drawn at that size. A reattach learns
    the initial size from the ack.
-
-   Fresh dashboard snapshots and successful resumes need no same-size redraw.
-   Raw screen-bearing attachments request a redraw nudge; adapter taps do not.
+   The ordered stream keeps fresh-run replay and successful resume from
+   exposing intermediate redraw frames: each replay operation is parsed
+   serially as it arrives while the terminal remains hidden, and the final
+   replay callback is followed by two `requestAnimationFrame` turns before
+   the settled surface is revealed. A successful resume keeps the existing
+   screen. Raw screen-bearing attachments request a redraw nudge; adapter taps
+   do not.
 
    Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
    across several ordered `input` frames.
@@ -1065,15 +1113,27 @@ needs.
 
 Closing the socket detaches; the run is unaffected.
 
-Ordinary dashboard attachments request `framed:true` and require the server
-to confirm it in the ack. An older server that ignores the request is refused
-with an update error rather than having raw bytes decoded as terminal records.
-After the ack, an `o` byte and four-byte big-endian payload length precede each
-output record; a `g` byte and two four-byte big-endian dimensions form a
-geometry record. The gateway decodes these sequentially into WebSocket frames.
-Replay counts exclude frame headers. Resume cursors count original session
-output. CLI attachments do not request framing and retain their raw terminal
-stream.
+Dashboard attachments request `framed:true` and require the server to confirm it
+in the ack. An older server that ignores the request is refused with an update
+error rather than having raw bytes decoded as terminal records. After the ack,
+an `o` byte and four-byte big-endian payload length precede each output record;
+a `g` byte and two four-byte big-endian dimensions form a geometry record. The
+gateway decodes these sequentially into WebSocket frames. Replay counts exclude
+frame headers. Resume cursors count original session output. The dashboard
+starts each frame-sized replay operation as it arrives, but one serial xterm
+write chain preserves geometry/output wire order and backpressure; it never
+allocates a transcript-sized replay buffer or runs an independent geometry pump.
+For a persistent dashboard dock, `rebind(next)` means that a new terminal host
+has taken over: the client cancels any old replay parser or drain with an
+explicit cancellation signal, drops the old socket, installs the new handlers,
+and starts one fresh full replay after cancellation. The dock does not issue a
+separate reopen after rebind.
+
+CLI attachments do not request framing and retain their raw terminal stream:
+they consume the ack-declared replay byte count, then continue with live bytes.
+They do not receive the dashboard's segmented, ordered, hidden-surface
+presentation. A writable CLI attach still discards input that arrives before
+its announced replay has been written; it does not defer those keystrokes.
 
 #### Run shell tabs
 
@@ -1103,10 +1163,21 @@ matching `^[a-z0-9-]{1,32}$`.
    member's environment container and the requested shell.
 2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}`
    with the session's live geometry
-   or a JSON error followed by a close. When present, `replay` is the number
-   of binary scrollback bytes that follow the ack before live output; clients
-   should mute terminal-generated replies until those bytes have been parsed.
-   At most six tabs may be active.
+   or a JSON error followed by a close. When present, `replay` is the exact
+   number of binary output bytes that follow the ack before live output. A
+   binary frame may straddle that boundary, so the client splits it by the
+   count. That declaration must be a finite, nonnegative safe integer; an
+   invalid value becomes a final visible refusal rather than an allocation.
+   The dashboard starts parsing frame-sized replay operations as they arrive,
+   serially through public xterm write callbacks while the terminal surface
+   stays hidden with CSS visibility. It does not retain replay until the full
+   boundary or allocate a browser-sized buffer from the declared length.
+   Only the slice containing the exact final replay byte is tagged
+   `replay-end`; live output and geometry queue behind xterm backpressure.
+   After the final replay callback, two `requestAnimationFrame` turns let the
+   xterm DOM paint the settled state before reveal. Terminal-generated replies
+   and user input stay muted through that callback. At most six tabs may be
+   active.
 3. Output is binary. Input and resize are text frames, and the server's
    `geometry` frame arrives here the same way it does on an attach:
 

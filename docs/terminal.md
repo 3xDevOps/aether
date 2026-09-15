@@ -24,9 +24,25 @@ environment container** until the shell attaches, and shows the server's own
 error if the start fails. Later tabs and tab switches reach a container that is
 already up, so those say **Connecting to your environment**. The dock reconnects
 and replays terminal output when the page or network reconnects. The stream ack
-identifies the replay byte count, so the dashboard mutes terminal-generated
-replies until that scrollback is parsed. Closing a tab only detaches it;
-opening that tab again reattaches to its shell.
+names the exact replay byte count, including a boundary that falls inside one
+WebSocket frame. As each frame-sized replay operation arrives, the dashboard
+splits only the boundary-crossing frame and starts one serial xterm write chain
+behind the CSS-hidden surface; it does not retain the replay until the full
+boundary arrives or allocate a browser-sized buffer from the declared length.
+Only the slice containing the exact final replay byte is tagged `replay-end`;
+live output and geometry stay in wire order behind xterm's write backpressure.
+Terminal-generated replies and user input stay muted from the ack through the
+final replay write callback. After that callback, two `requestAnimationFrame`
+turns let the xterm DOM paint the settled state before the surface is revealed.
+Closing a tab only detaches it; opening that tab again reattaches to its shell.
+When a persistent dock host is replaced, `rebind` cancels the old replay drain
+with its cancellation signal, drops the old socket, installs the new handlers,
+and starts one fresh full replay after cancellation; the dock does not issue a
+second reopen. If an `online` wake interrupts an incomplete replay, the client
+cancels its parser and drain with the same cancellation signal, drops that
+socket while keeping the terminal hidden, and reconnects for a fresh hidden
+replay rather than revealing a partial history prefix. A final replacement
+refusal settles the replay gate before its server error is shown.
 
 ## Run control and the Run Room
 
@@ -56,10 +72,18 @@ the server holds its lease for a **15-second reconnect window**. The same tab or
 connection session can reclaim the lease during that window. The disconnected
 session cannot write while it is away. A different tab cannot inherit it without
 an explicit takeover, and after the window expires a normal acquisition can win.
-**Release control** gives up the lease without changing the screen. Release,
-takeover, protection, permission revocation, and reconnect expiry all fence the
-old authority, so input from an old session is rejected instead of reaching the
-PTY.
+**Release control** is a continuous handoff, not an acknowledgement-only call:
+it sends `release_control` with the current session and generation on the
+replacement attach request. At the PTY-host commit boundary, the server holds
+the run-scoped authority lock, admits the replacement, then releases and fences
+the old lease before any replay, output, or geometry is sent. If admission
+fails, the request is refused while the old writer and lease remain intact. On
+a successful commit, the server cancels the old writer; the replacement
+continues as a read-only PTY attach on the same request, honors `resume`/`cursor`,
+returns one normal attach ack, and then streams output. Invalid, stale, or
+cross-member release is refused. A committed release, takeover, protection,
+permission revocation, and reconnect expiry all fence the old authority, so
+input from an old session is rejected instead of reaching the PTY.
 
 Only the run owner or an administrator can enable protection. Enabling
 protection immediately fences the current controller and cancels every queued
@@ -109,15 +133,17 @@ read-only mirror, including a run owned by that member; tap **Take control**
 before the keyboard can send input. Phone terminals follow the already
 acknowledged PTY size and do not resize the shared session.
 
-A writable `aether attach` window mutes the same window, and does it by
-discarding: keystrokes that arrive before the announced replay has been written
-to your terminal are dropped, not deferred.
-A terminal answers the device-attribute and colour
-queries the replayed scrollback still carries, and those answers reach the
-server on the channel keystrokes use, where they would count as steering the
-run. Anything typed - or piped on stdin - in that window goes with them, without
-a message. The client has no other lever: the server decides what counts as
-typing.
+`aether attach` remains a raw terminal stream: it consumes exactly the replay
+byte count announced by the ack before treating following bytes as live. It
+does not use the dashboard's segmented, ordered xterm transaction or hidden
+surface. A writable CLI attach mutes its input by discarding keystrokes that
+arrive before the announced replay has been written to your terminal; they are
+dropped, not deferred.
+Dashboard xterm may answer device-attribute and colour queries encountered while
+parsing replay, but the replay gate mutes those terminal-generated replies along
+with user input until the final replay callback; they do not reach the server.
+The CLI is raw and has no xterm parser, so the announced replay and input
+discard rules above remain in force.
 
 The Agents setup step uses the same dock and types the install command for you.
 Complete the vendor login there, then return to the wizard. Its **I've
@@ -270,10 +296,11 @@ instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
 
-Taking control and handing it back keep the screen you are looking at:
-the terminal reattaches with different permissions rather than redrawing
-its scrollback, so the transition shows nothing beyond the button
-changing.
+Taking control and handing it back normally keep the screen and scrollback you
+are looking at: they are reattaches with different permissions, not a history
+redraw. If resume cannot be honored, the server may send the complete retained
+history again; the dashboard applies that history through the same hidden,
+incremental, ordered transaction, so no historical redraw appears as playback.
 
 ### Earlier output and full TUI history
 
@@ -281,29 +308,56 @@ Opening a run replays its complete retained transcript into the ordinary
 terminal before live output begins. This includes output from earlier server
 incarnations of the same run. There is no separate history player.
 
-The terminal keeps replayed output in its scrollback and preserves lines erased
-by full-screen redraws. Browser memory is the practical limit, so a long or
-redraw-heavy run can take longer to open. Taking control and handing it back
-does not repeat the transcript: that reattach keeps the existing screen and
-receives only output missed during the permission change.
+The ack's replay count is the exact byte boundary between replay and live
+output, including when that boundary falls inside a WebSocket frame. The
+dashboard does not hold replay bytes until that boundary: it retains only the
+current frame-sized output and geometry operations, in wire order, and starts
+parsing each replay operation as it arrives through one serial public xterm
+write chain. It waits for each xterm completion before parsing the next
+operation, preserving xterm backpressure while the terminal surface stays
+hidden. Only the slice containing the exact final replay byte is tagged
+`replay-end`; live output and geometry received during replay remain ordered
+behind the replay writes. The browser never allocates a `Uint8Array` (or
+equivalent) whose size is the declared replay length. After the final replay
+write callback, the reveal waits for two `requestAnimationFrame` turns so the
+xterm DOM paints the settled current screen.
 
-Output not flushed before a crash, or removed with the run's retained
-artifacts, is unavailable.
+Every retained transcript byte is fed to xterm. xterm retains normal scrollback
+and rows preserved by its configured full-screen erase behavior; control bytes
+and cursor overwrites affect terminal state but are not themselves scrollback
+rows. Input and terminal-generated replies stay muted from the ack through the
+final replay-write callback. A resume failure may repeat the complete retained
+run transcript, but the dashboard applies that fallback through the same
+hidden, serial transaction with no visible historical playback.
+
+The server streams a complete transcript lazily, opening and reading at most
+one retained segment at a time. Preserving complete history therefore does not
+load every segment into memory or keep every segment file open. Output not
+flushed before a crash, or removed with the run's retained artifacts, is
+unavailable.
 
 ### Reattaching after an update
 
 Desktop terminals draw at the shared PTY's size, not independently at each
-window's width. A smaller writer can reduce that grid; other viewers adopt
-the resulting size without reporting it back as their own window size.
-Fresh viewers request a redraw even when they cannot resize the session.
+window's width. A smaller writer can reduce that grid; other viewers adopt that
+size without reporting it back as their own window size.
+Fresh viewers request a redraw nudge even when they cannot resize the session;
+the dashboard's hidden, incremental replay transaction keeps that nudge from
+exposing historical redraws as playback.
 
 The server tracks the current screen as output arrives, including its cursor,
 colours, alternate buffer, and terminal modes. It uses that state to preserve
-geometry across attaches and restarts; reusable shell terminals can also use a
-compact current-screen replay. A fresh run attach receives the complete raw
-transcript instead. Input is muted while that replay is parsed. Switching
-between steering and observing still preserves the existing screen and
-receives only missing bytes.
+geometry across attaches and restarts. A fresh run attach receives the complete
+raw transcript instead, including segments from earlier server incarnations.
+Successful resume, including the resumed read-only attach used by Release
+control, preserves the existing screen and receives only bytes after `cursor`.
+If resume cannot be honored, a run attach may receive the complete transcript
+again; the dashboard still applies it through the same hidden, incremental
+ordered transaction and keeps input and terminal replies muted through the
+final replay-write callback. After that callback, two
+`requestAnimationFrame` turns let the xterm DOM paint the settled state before
+reveal. Reusable shell terminals may receive a current-screen replay when
+their session requires it; those records use the same serial transaction.
 
 After a server restart, Aether reconstructs the screen from recorded output
 and resize events, then carries that state into the next transcript. This

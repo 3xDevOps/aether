@@ -52,17 +52,72 @@ describe('run-shell dock state', () => {
     expect(useStore.getState().openShellTab('run_1')).toBe('t1')
   })
 
-  it('delivers shell output kinds to subscribers', () => {
+  it('delivers shell output kinds and settled callbacks to subscribers', () => {
     const received: Array<[Uint8Array, 'replay' | 'replay-end' | 'live']> = []
-    const unsubscribe = subscribeShellSocket('run_1', 't1', (chunk, kind) => {
+    let settled: (() => void) | undefined
+    const unsubscribe = subscribeShellSocket('run_1', 't1', (chunk, kind, done) => {
       received.push([chunk, kind])
+      settled = done
     })
-    const replay = new Uint8Array([1, 2])
+    const live = new Uint8Array([1, 2])
+    const completion = vi.fn()
 
-    emitShellSocketData('run_1', 't1', replay, 'replay-end')
+    expect(emitShellSocketData('run_1', 't1', live, 'live', completion)).toBeUndefined()
 
-    expect(received).toEqual([[replay, 'replay-end']])
+    expect(received).toEqual([[live, 'live']])
+    expect(settled).toBe(completion)
+    expect(completion).not.toHaveBeenCalled()
+    settled?.()
+    expect(completion).toHaveBeenCalledOnce()
     unsubscribe()
+
+    const noListenerCompletion = vi.fn()
+    emitShellSocketData('run_1', 't1', live, 'live', noListenerCompletion)
+    expect(noListenerCompletion).toHaveBeenCalledOnce()
+  })
+
+  it('returns one listener replay completion without wrapping it', async () => {
+    let resolveCompletion!: () => void
+    const completion = new Promise<void>((resolve) => {
+      resolveCompletion = resolve
+    })
+    const unsubscribe = subscribeShellSocket('run_1', 't1', () => completion)
+
+    const result = emitShellSocketData('run_1', 't1', new Uint8Array([1]), 'replay-end')
+
+    expect(result).toBe(completion)
+    resolveCompletion()
+    await result
+    unsubscribe()
+  })
+
+  it('waits for every asynchronous shell listener', async () => {
+    let resolveFirst!: () => void
+    let resolveSecond!: () => void
+    const first = new Promise<void>((resolve) => {
+      resolveFirst = resolve
+    })
+    const second = new Promise<void>((resolve) => {
+      resolveSecond = resolve
+    })
+    const unsubscribeFirst = subscribeShellSocket('run_1', 't1', () => first)
+    const unsubscribeSecond = subscribeShellSocket('run_1', 't1', () => second)
+
+    const result = emitShellSocketData('run_1', 't1', new Uint8Array([1]), 'replay-end')
+
+    if (!result) throw new Error('expected asynchronous shell listener completion')
+    let settled = false
+    void result.then(() => {
+      settled = true
+    })
+    resolveFirst()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    resolveSecond()
+    await result
+    expect(settled).toBe(true)
+    unsubscribeFirst()
+    unsubscribeSecond()
   })
 
   it('records a shell refusal without changing the tab list', () => {

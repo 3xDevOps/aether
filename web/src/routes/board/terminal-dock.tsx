@@ -87,12 +87,14 @@ export function TerminalDock({
   const [resetError, setResetError] = useState<string | null>(null)
   const [statusAttempt, setStatusAttempt] = useState(0)
   const [attachedTab, setAttachedTab] = useState<string | null>(null)
+  const [replaying, setReplaying] = useState(false)
   const activeTab = dock.activeTab
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
-  const gate = useRef(replayGate((chunk, done) => terminalRef.current?.write(chunk, done)))
-
+  const gate = useRef(
+    replayGate((chunk, done) => terminalRef.current?.write(chunk, done), setReplaying),
+  )
   // A member can have this terminal open on more than one screen; a phone
   // follows what the others made it rather than shrinking it for them.
   const phone = useMediaQuery(phoneScreen)
@@ -207,24 +209,31 @@ export function TerminalDock({
     const socketKey = activeTab
     const isCurrent = () => activeTabRef.current === socketKey
     const handlers = {
-      onData: (chunk: Uint8Array, kind: AttachDataKind) =>
-        emitEnvTerminalSocketData(socketKey, chunk, kind),
-      onAttached: (_write: boolean, size: { cols: number; rows: number }) => {
+      onData: (chunk: Uint8Array, kind: AttachDataKind, settled?: () => void) =>
+        emitEnvTerminalSocketData(socketKey, chunk, kind, settled),
+      onAttached: (_write: boolean, size: { cols: number; rows: number }, resumed = false) => {
         if (isCurrent()) {
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
           gate.current.unmute()
-          setGeometry(size.cols, size.rows, true)
+          setGeometry(size.cols, size.rows, !resumed)
           const status = useStore.getState().envTerminal.status
           setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
         }
+      },
+      onReplayAbort: () => {
+        if (isCurrent()) gate.current.cancel()
+      },
+      onReplayStart: (bytes: number) => {
+        if (!isCurrent()) return
+        if (bytes > 0) gate.current.start()
+        else gate.current.unmute()
       },
       onState: (connection: ConnectionState) => {
         if (!isCurrent()) return
         if (connection !== 'live') {
           setEnvTerminalSocketReady(socketKey, false)
           setAttachedTab(null)
-          if (connection === 'offline') gate.current.unmute()
         }
       },
       onRefused: (detail: string) => {
@@ -269,7 +278,6 @@ export function TerminalDock({
     setEnvTerminalSocketReady(socketKey, false)
     setAttachedTab(null)
     const unsubscribe = subscribeEnvTerminalSocket(socketKey, gate.current.write)
-    if (existing) attachment.reopen()
     return () => {
       unsubscribe()
       if (activeTabRef.current !== socketKey) unregisterEnvTerminalSocket(socketKey)
@@ -460,6 +468,7 @@ export function TerminalDock({
               <TerminalPane
                 controller={controller}
                 className="overflow-auto"
+                replaying={replaying}
                 imageTargetKey={activeTab ?? undefined}
                 imageUploadEnabled={attachedTab === activeTab && activeTab !== null}
               >
