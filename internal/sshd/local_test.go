@@ -115,7 +115,7 @@ type deleteMemberAfterReadStore struct {
 func (s *deleteMemberAfterReadStore) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
 	member, err := s.Store.GetMember(ctx, id)
 	if err == nil && id == s.member && s.armed.CompareAndSwap(true, false) {
-		s.deleted <- s.Store.DeleteMember(ctx, id)
+		s.deleted <- s.DeleteMember(ctx, id)
 	}
 	return member, err
 }
