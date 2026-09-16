@@ -57,7 +57,7 @@
 
 /* Design tokens. These values follow VS Code Dark Modern and Light Modern.
    Surface roles stay neutral so adjoining workbench panes read as one
-   workspace; state colors remain separate from interaction blue. */
+   workspace; state colors remain separate from the subdued brand accent. */
 :root {
   color-scheme: light;
   --radius: 2px;
@@ -85,8 +85,8 @@
   --card-foreground: var(--foreground);
   --popover: var(--widget);
   --popover-foreground: var(--foreground);
-  --primary: #005fb8;
-  --primary-hover: #0258a8;
+  --primary: #367f77;
+  --primary-hover: #306f69;
   --primary-foreground: #ffffff;
   --sidebar: #f8f8f8;
   --secondary: #f8f8f8;
@@ -100,7 +100,7 @@
   --border: #e5e5e5;
   /* Modern's #cecece is too faint for a control boundary on white. */
   --input: #949494;
-  --ring: #005fb8;
+  --ring: #367f77;
   --selection: #e8e8e8;
   --selection-foreground: #000000;
   --toolbar-hover: #f2f2f2;
@@ -172,8 +172,8 @@
   --card-foreground: var(--foreground);
   --popover: var(--widget);
   --popover-foreground: var(--foreground);
-  --primary: #0078d4;
-  --primary-hover: #026ec1;
+  --primary: #367f77;
+  --primary-hover: #306f69;
   --primary-foreground: #ffffff;
   --sidebar: #181818;
   --secondary: #2b2b2b;
@@ -187,8 +187,8 @@
   --border: #2b2b2b;
   /* Modern's #3c3c3c is too faint for a control boundary on #313131. */
   --input: #7a7a7a;
-  --ring: #0078d4;
-  --selection: #04395e;
+  --ring: #367f77;
+  --selection: #17413d;
   --selection-foreground: #ffffff;
   --toolbar-hover: #2a2d2e;
   --widget: #202020;
@@ -216,7 +216,7 @@
   --surface-shadow: none;
   --overlay-shadow: 0 4px 12px rgb(0 0 0 / 0.36);
   --accent-soft: color-mix(in srgb, var(--primary) 16%, transparent);
-  --accent-soft-foreground: #4daafc;
+  --accent-soft-foreground: #6ee7d6;
   --success: var(--state-done);
   --success-foreground: #d7f7d2;
   --success-soft: color-mix(in srgb, var(--state-done) 16%, transparent);

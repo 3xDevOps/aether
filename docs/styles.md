@@ -33,14 +33,14 @@ preference remains `system`, `light` or `dark`, with `system` following
 | `--field-placeholder` | `#767676` | `#989898` | Placeholder text |
 | `--border` | `#e5e5e5` | `#2b2b2b` | Pane seams and quiet separators |
 | `--input` | `#949494` | `#7a7a7a` | Contrast-tuned field boundary |
-| `--primary` | `#005fb8` | `#0078d4` | Interaction blue and focus |
-| `--accent-soft-foreground` | `#005fb8` | `#4daafc` | Text on soft accent surfaces; lighter dark-mode blue is separate from the `--primary` button fill |
+| `--primary` | `#367f77` | `#367f77` | Subdued brand teal for interactive fills and focus |
+| `--accent-soft-foreground` | `#367f77` | `#6ee7d6` | Text on soft accent surfaces; dark mode uses the landing-page mint where it has enough contrast |
 | `--success-soft-foreground` | `#1f521f` | `#89d185` | Text on success-soft surfaces; light uses the readable success foreground |
 | `--warning-soft-foreground` | `#5c4500` | `#f5d08a` | Text on warning-soft surfaces; light and dark use the readable warning foreground |
 | `--danger-soft-foreground` | `#a1260d` | `#f48771` | Text on danger-soft surfaces; VS Code error foregrounds keep the label readable |
-| `--primary-hover` | `#0258a8` | `#026ec1` | Primary hover |
+| `--primary-hover` | `#306f69` | `#306f69` | Primary hover |
 | `--toolbar-hover` | `#f2f2f2` | `#2a2d2e` | Flat toolbar and row hover |
-| `--selection` | `#e8e8e8` | `#04395e` | Selected rows and text |
+| `--selection` | `#e8e8e8` | `#17413d` | Selected rows and text |
 | `--selection-foreground` | `#000000` | `#ffffff` | Text on selection |
 
 `@theme` exposes the semantic utilities `bg-selection`,
@@ -49,7 +49,7 @@ alongside the existing background, sidebar, card and field utilities.
 `--input` is intentionally stronger than the reference field-border colours
 where needed to keep the boundary discernible against its field surface.
 Pane seams retain the quieter Modern values and do not need input-border
-contrast. Interaction blue is separate from run status and member attribution.
+contrast. The subdued brand teal is separate from run status and member attribution.
 HeroUI aliases consume these semantics; they do not define a second palette.
 Member colours are the only arbitrary server data applied inline, on avatars
 and attribution rails while text remains token-based.
