@@ -223,6 +223,19 @@ checkout, transcripts and run-owned database records. For an old run it
 removes the checkout and transcripts directly. The run's timeline remains as
 audit history.
 
+`run.archive` also uses the `Kill` capability and accepts
+`{"run_id":"...","archived":true}`. It hides a finished run from the board
+and keeps its data, restorable any time: only a run in a final disposition
+(`merged`, `abandoned`, `failed`, or `interrupted`) can be archived, and
+archiving any other status returns `-32002` naming the run's real status.
+Archiving an already-archived run is a no-op that leaves its timestamp
+unchanged; calling it with `"archived":false` restores the run. The response
+is a `RunResult` whose `run.archived_at` and `run.deletes_at` are set while
+archived and absent otherwise; `deletes_at` is the date the server will
+delete the run (see [failure-handling.md](failure-handling.md#disk-pressure)).
+Both calls publish a `run.archived` event carrying the same two fields -
+null on both means the run was restored - and a matching timeline note.
+
 `run.relaunch` is another proxied control-channel method:
 
 ```sh

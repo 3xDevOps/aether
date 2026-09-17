@@ -30,6 +30,9 @@ const (
 	TypeRunTitle Type = "run.title"
 	// TypeRunProtected carries a run's protection state.
 	TypeRunProtected Type = "run.protected"
+	// TypeRunArchived carries a run's archive state: a nil DeletesAt means
+	// the run was restored.
+	TypeRunArchived Type = "run.archived"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
 	TypeRunDiff Type = "run.diff"
 	// TypeRunCost carries token usage and cost attribution for a run.
@@ -126,6 +129,17 @@ type RunProtectedPayload struct {
 func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
+
+// RunArchivedPayload reports a run's archive state, both RFC3339. A nil
+// ArchivedAt (and DeletesAt) means the run was restored.
+type RunArchivedPayload struct {
+	ArchivedAt *string `json:"archived_at"`
+	DeletesAt  *string `json:"deletes_at"`
+}
+
+func (RunArchivedPayload) EventType() Type { return TypeRunArchived }
+
+func init() { registerPayload[RunArchivedPayload](TypeRunArchived) }
 
 func (RunStatusPayload) EventType() Type { return TypeRunStatus }
 

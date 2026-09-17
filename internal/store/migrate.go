@@ -946,6 +946,12 @@ CREATE TABLE run_cost_deletions (
 	PRIMARY KEY (workspace_id, member_id)
 );
 `,
+	// v31: archived_at hides a finished run from the board; its data is
+	// kept. Nullable with no default, so existing rows read as not
+	// archived.
+	`
+ALTER TABLE runs ADD COLUMN archived_at INTEGER;
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:
