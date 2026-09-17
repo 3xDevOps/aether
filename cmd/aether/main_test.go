@@ -16,7 +16,7 @@ func TestDispatchHelp(t *testing.T) {
 		t.Fatalf("bare aether: %v", err)
 	}
 	help := helpText()
-	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
+	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "archive", "unarchive", "pause", "resume", "inject", "close", "relaunch", "inbox", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
 		if !strings.Contains(help, name) {
 			t.Errorf("help missing %q:\n%s", name, help)
 		}
@@ -92,6 +92,9 @@ func TestSteerUsage(t *testing.T) {
 		{[]string{"kill"}, "usage: aether kill <run-id>"},
 		{[]string{"delete"}, "usage: aether delete <run-id>"},
 		{[]string{"delete", "run-1", "run-2"}, "usage: aether delete <run-id>"},
+		{[]string{"archive"}, "usage: aether archive <run-id>"},
+		{[]string{"archive", "run-1", "run-2"}, "usage: aether archive <run-id>"},
+		{[]string{"unarchive"}, "usage: aether unarchive <run-id>"},
 		{[]string{"pause"}, "usage: aether pause <run-id>"},
 		{[]string{"resume"}, "usage: aether resume <run-id>"},
 		{[]string{"inject"}, "usage: aether inject <run-id> <message...>"},
