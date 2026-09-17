@@ -52,11 +52,7 @@ func (r *Rollup) Add(c *store.RunCost) {
 // measurement.
 func (r Rollup) Advisory() bool { return r.Unmetered > 0 }
 
-// AddSummary folds a store-computed summary into the rollup: the same
-// numeric fields Rollup carries, already aggregated (over live rows, over
-// runs deleted from the workspace, or both). Used where there is no
-// per-run *store.RunCost left to feed Add, such as a deleted run's folded
-// totals.
+// AddSummary folds totals the store already aggregated into the rollup.
 func (r *Rollup) AddSummary(s store.RunCostSummary) {
 	r.Runs += s.Runs
 	r.Metered += s.Metered
@@ -105,10 +101,8 @@ func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
 	return rep
 }
 
-// foldDeleted adds workspace's runs-deleted totals (see store.DeleteRun)
-// into the report: the workspace total, and each contributing member's
-// rollup, creating a member entry when their only remaining record is the
-// folded one. Members stay sorted by ID.
+// foldDeleted adds the totals of deleted runs. A member whose runs are all
+// deleted still gets an entry.
 func (rep *Report) foldDeleted(deleted []*store.MemberCostSummary) {
 	if len(deleted) == 0 {
 		return

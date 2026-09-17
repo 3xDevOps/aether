@@ -69,19 +69,17 @@ type CostStore interface {
 	// unmetered marker cannot erase real numbers.
 	PutRunCost(ctx context.Context, c *RunCost) error
 	GetRunCost(ctx context.Context, run domain.RunID) (*RunCost, error)
-	// ListRunCosts returns a workspace's records, oldest first.
-	ListRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, error)
 	// SummarizeRunCosts returns the same workspace history as a scalar
 	// aggregate using standard SQL SUM semantics, while avoiding allocation
 	// of every record. It includes runs deleted from the workspace (see
 	// DeleteRun), so a deletion cannot lower counted spend or reopen a
 	// budget cap.
 	SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID) (RunCostSummary, error)
-	// ListDeletedRunCosts returns, ordered by member ID, each member's
-	// folded totals from runs deleted out of workspace. A cost report adds
-	// these into its live per-member and workspace rollups so a deletion
-	// cannot lower a member's counted spend either.
-	ListDeletedRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*MemberCostSummary, error)
+	// ListWorkspaceCosts returns a workspace's live records, oldest first,
+	// and each member's folded totals from deleted runs, ordered by member
+	// ID. Both come from one snapshot: DeleteRun moves a run from the first
+	// to the second, and separate reads could count it in both.
+	ListWorkspaceCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, []*MemberCostSummary, error)
 	// SetWorkspaceBudget creates or replaces a workspace's budget.
 	SetWorkspaceBudget(ctx context.Context, b *WorkspaceBudget) error
 	// GetWorkspaceBudget returns ErrNotFound when the workspace has no budget.
@@ -137,15 +135,6 @@ func (d *DB) GetRunCost(ctx context.Context, run domain.RunID) (*RunCost, error)
 	return c, nil
 }
 
-func (d *DB) ListRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, error) {
-	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+runCostCols+` FROM run_costs WHERE workspace_id = ? ORDER BY recorded_at, run_id`, workspace)
-	if err != nil {
-		return nil, fmt.Errorf("store: list run costs: %w", err)
-	}
-	return collect(rows, scanRunCost)
-}
-
 // SummarizeRunCosts returns the aggregate used by budget status and
 // admission. Standard SQL SUM semantics determine the numeric totals while
 // the query avoids allocating one object per historical row. The union
@@ -176,17 +165,33 @@ func (d *DB) SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID
 	return summary, nil
 }
 
-// ListDeletedRunCosts returns run_cost_deletions' rows for workspace: one
-// per member, already folded to the same numeric semantics SummarizeRunCosts
-// uses (an unmetered run contributes to the run counts only).
-func (d *DB) ListDeletedRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*MemberCostSummary, error) {
-	rows, err := d.db.QueryContext(ctx, `
+func (d *DB) ListWorkspaceCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, []*MemberCostSummary, error) {
+	tx, err := d.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: list workspace costs: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+runCostCols+` FROM run_costs WHERE workspace_id = ? ORDER BY recorded_at, run_id`, workspace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: list workspace costs: %w", err)
+	}
+	records, err := collect(rows, scanRunCost)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err = tx.QueryContext(ctx, `
 		SELECT member_id, runs, metered, unmetered, input_tokens, output_tokens, cost_usd
 		FROM run_cost_deletions WHERE workspace_id = ? ORDER BY member_id`, workspace)
 	if err != nil {
-		return nil, fmt.Errorf("store: list deleted run costs: %w", err)
+		return nil, nil, fmt.Errorf("store: list workspace costs: deleted: %w", err)
 	}
-	return collect(rows, scanMemberCostSummary)
+	deleted, err := collect(rows, scanMemberCostSummary)
+	if err != nil {
+		return nil, nil, err
+	}
+	return records, deleted, nil
 }
 
 // foldDeletedRunCostSQL rolls a run's row into its workspace and member's

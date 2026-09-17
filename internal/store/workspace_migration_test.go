@@ -119,9 +119,9 @@ func TestSessionCollapseMigrationRehomesEveryRow(t *testing.T) {
 		t.Fatalf("approvals after migration = %+v", approvals)
 	}
 
-	costs, err := db.ListRunCosts(ctx, "w1")
+	costs, _, err := db.ListWorkspaceCosts(ctx, "w1")
 	if err != nil {
-		t.Fatalf("ListRunCosts: %v", err)
+		t.Fatalf("ListWorkspaceCosts: %v", err)
 	}
 	if len(costs) != 1 || costs[0].WorkspaceID != "w1" || costs[0].InputTokens != 10 {
 		t.Fatalf("run costs after migration = %+v", costs)

@@ -64,9 +64,9 @@ func TestRunCostMeteredWins(t *testing.T) {
 		t.Fatalf("record = %+v, want the metered numbers preserved", got)
 	}
 
-	list, err := db.ListRunCosts(ctx, w.ID)
+	list, _, err := db.ListWorkspaceCosts(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("ListRunCosts: %v", err)
+		t.Fatalf("ListWorkspaceCosts: %v", err)
 	}
 	if len(list) != 1 || list[0].RunID != r.ID {
 		t.Fatalf("list = %+v, want one record for the run", list)
@@ -278,9 +278,9 @@ func TestCostMigrationUpgradesExistingDatabase(t *testing.T) {
 	if err = db.SetWorkspaceBudget(ctx, &WorkspaceBudget{WorkspaceID: "w1", LimitUSD: 10, UpdatedBy: "m1"}); err != nil {
 		t.Fatalf("SetWorkspaceBudget after migration: %v", err)
 	}
-	list, err := db.ListRunCosts(ctx, "w1")
+	list, _, err := db.ListWorkspaceCosts(ctx, "w1")
 	if err != nil || len(list) != 1 {
-		t.Fatalf("ListRunCosts after migration: %v, %+v", err, list)
+		t.Fatalf("ListWorkspaceCosts after migration: %v, %+v", err, list)
 	}
 	summary, err := db.SummarizeRunCosts(ctx, "w1")
 	if err != nil || summary != (RunCostSummary{Runs: 1, Metered: 1, InputTokens: 0, OutputTokens: 0, CostUSD: 1.5}) {
@@ -336,9 +336,9 @@ func TestDeleteRunFoldsCostIntoWorkspaceAndMemberTotals(t *testing.T) {
 	if afterR1 != wantBefore {
 		t.Fatalf("summary after deleting r1 = %+v, want unchanged %+v", afterR1, wantBefore)
 	}
-	deleted, err := db.ListDeletedRunCosts(ctx, w.ID)
+	_, deleted, err := db.ListWorkspaceCosts(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("ListDeletedRunCosts: %v", err)
+		t.Fatalf("ListWorkspaceCosts: %v", err)
 	}
 	if len(deleted) != 1 || deleted[0].MemberID != m1.ID {
 		t.Fatalf("deleted totals = %+v, want one row for m1", deleted)
@@ -349,9 +349,9 @@ func TestDeleteRunFoldsCostIntoWorkspaceAndMemberTotals(t *testing.T) {
 	}
 	// m1's remaining live row (r2) plus the folded total from r1 must equal
 	// what m1 had before anything was deleted.
-	remaining, err := db.ListRunCosts(ctx, w.ID)
+	remaining, _, err := db.ListWorkspaceCosts(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("ListRunCosts: %v", err)
+		t.Fatalf("ListWorkspaceCosts: %v", err)
 	}
 	var m1Live RunCostSummary
 	for _, c := range remaining {
@@ -387,9 +387,9 @@ func TestDeleteRunFoldsCostIntoWorkspaceAndMemberTotals(t *testing.T) {
 	if afterR3 != wantBefore {
 		t.Fatalf("summary after deleting r3 = %+v, want unchanged %+v", afterR3, wantBefore)
 	}
-	deleted, err = db.ListDeletedRunCosts(ctx, w.ID)
+	_, deleted, err = db.ListWorkspaceCosts(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("ListDeletedRunCosts after r3: %v", err)
+		t.Fatalf("ListWorkspaceCosts after r3: %v", err)
 	}
 	if len(deleted) != 2 {
 		t.Fatalf("deleted totals after r3 = %+v, want rows for both members", deleted)
@@ -415,9 +415,9 @@ func TestDeleteRunFoldsCostIntoWorkspaceAndMemberTotals(t *testing.T) {
 	if afterR5 != wantBefore {
 		t.Fatalf("summary after deleting r5 = %+v, want unchanged %+v", afterR5, wantBefore)
 	}
-	deleted, err = db.ListDeletedRunCosts(ctx, w.ID)
+	_, deleted, err = db.ListWorkspaceCosts(ctx, w.ID)
 	if err != nil {
-		t.Fatalf("ListDeletedRunCosts after r5: %v", err)
+		t.Fatalf("ListWorkspaceCosts after r5: %v", err)
 	}
 	if len(deleted) != 2 {
 		t.Fatalf("deleted totals after r5 = %+v, want no new row for a run without a cost record", deleted)
@@ -560,9 +560,9 @@ func TestDeletedRunCostMigrationAddsAccumulator(t *testing.T) {
 	if after != wantBefore {
 		t.Fatalf("summary after delete = %+v, want unchanged %+v", after, wantBefore)
 	}
-	deleted, err := db.ListDeletedRunCosts(ctx, "w1")
+	_, deleted, err := db.ListWorkspaceCosts(ctx, "w1")
 	if err != nil {
-		t.Fatalf("ListDeletedRunCosts: %v", err)
+		t.Fatalf("ListWorkspaceCosts: %v", err)
 	}
 	if len(deleted) != 1 || deleted[0].MemberID != "m1" || deleted[0].RunCostSummary != wantBefore {
 		t.Fatalf("deleted totals = %+v, want one m1 row matching %+v", deleted, wantBefore)

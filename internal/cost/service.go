@@ -250,15 +250,11 @@ func (s *Service) markUnmetered(ctx context.Context, run domain.RunID) {
 // Totals include runs deleted from the workspace (see store.DeleteRun);
 // the per-run listing does not, since that run no longer exists to list.
 func (s *Service) Report(ctx context.Context, workspace domain.WorkspaceID) (Report, error) {
-	records, err := s.store.ListRunCosts(ctx, workspace)
+	records, deleted, err := s.store.ListWorkspaceCosts(ctx, workspace)
 	if err != nil {
 		return Report{}, fmt.Errorf("cost: report %s: %w", workspace, err)
 	}
 	rep := Roll(workspace, records)
-	deleted, err := s.store.ListDeletedRunCosts(ctx, workspace)
-	if err != nil {
-		return Report{}, fmt.Errorf("cost: report %s: %w", workspace, err)
-	}
 	rep.foldDeleted(deleted)
 	return rep, nil
 }
