@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // createRun creates a run owned by e.member directly in status, bypassing
@@ -216,5 +218,43 @@ func TestRelaunchRestoresArchivedRun(t *testing.T) {
 	}
 	if fresh.ArchivedAt != nil {
 		t.Fatalf("relaunched run still archived: %v", fresh.ArchivedAt)
+	}
+}
+
+type failingUpdateRunStore struct {
+	store.Store
+}
+
+func (s *failingUpdateRunStore) UpdateRun(context.Context, *domain.Run) error {
+	return errors.New("test: promotion failed")
+}
+
+func TestRelaunchKeepsArchiveTimerWhenPromotionFails(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "archive then fail relaunch")
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	archived, err := e.sched.SetArchived(ctx, run.ID, e.member.ID, true)
+	if err != nil {
+		t.Fatalf("SetArchived: %v", err)
+	}
+
+	e.sched.cfg.Store = &failingUpdateRunStore{Store: e.db}
+	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); err == nil {
+		t.Fatal("Relaunch succeeded despite promotion failure")
+	}
+
+	fresh, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if fresh.ArchivedAt == nil || !fresh.ArchivedAt.Equal(*archived.ArchivedAt) {
+		t.Fatalf("ArchivedAt after failed relaunch = %v, want %v", fresh.ArchivedAt, archived.ArchivedAt)
 	}
 }

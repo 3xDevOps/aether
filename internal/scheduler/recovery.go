@@ -167,6 +167,13 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		runningRow.ArchivedAt = nil
 	}
 	if updateErr := s.cfg.Store.UpdateRun(ctx, &runningRow); updateErr != nil {
+		if wasArchived {
+			// No restore was published, so clients still show the run as
+			// archived; put the original timer back to match.
+			if _, rearchiveErr := s.cfg.Store.SetRunArchived(context.WithoutCancel(ctx), run, fresh.ArchivedAt); rearchiveErr != nil {
+				updateErr = errors.Join(updateErr, fmt.Errorf("scheduler: re-archive run after failed relaunch: %w", rearchiveErr))
+			}
+		}
 		s.archiveMu.Unlock()
 		return nil, updateErr
 	}
