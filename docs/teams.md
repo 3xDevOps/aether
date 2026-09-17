@@ -483,6 +483,13 @@ At the cap, new runs are refused and running runs finish. Note that runs whose
 harness reports no token usage are counted as *unmetered* - `aether cost` says
 so explicitly, and the totals are a floor rather than the real spend.
 
+Deleting a run keeps its cost counted. `aether delete` removes the run's own
+record, but its numbers stay folded into its workspace's and its member's
+totals, so `aether cost`, `aether budget`, and the cap itself see the same
+spend before and after the delete. Removing the member with `member remove`
+does not clear that folded spend either: it stays in the workspace's total
+under the member's now-gone ID.
+
 ## Agent accounts
 
 Each member runs `aether agent add <name>` once, then opens `aether terminal`
