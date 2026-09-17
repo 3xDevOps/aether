@@ -392,6 +392,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     ]),
     agentRegister: vi.fn(async () => ({})),
     runProtect: vi.fn(async () => ({})),
+    runArchive: vi.fn(async (runID: string, archived: boolean) =>
+      run({
+        id: runID,
+        archived_at: archived ? '2026-08-14T10:00:00Z' : undefined,
+        deletes_at: archived ? '2026-08-28T10:00:00Z' : undefined,
+      }),
+    ),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,

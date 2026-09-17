@@ -8,7 +8,7 @@ import {
   type PresentationState,
 } from '@/lib/status'
 import type { Member } from '@/lib/types'
-import type { RunRecord } from '@/store/runs'
+import { isArchivable, type RunRecord } from '@/store/runs'
 import type { GroupBy } from '@/store/ui'
 
 /**
@@ -65,6 +65,9 @@ export function sidebarRuns(s: SidebarInput): SidebarRun[] {
   const entries: SidebarRun[] = []
   for (const run of Object.values(s.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
+    // A live run can never be hidden, so the archive check only applies
+    // once the run has actually stopped.
+    if (run.archived_at && isArchivable(run.status)) continue
     entries.push({
       run,
       state: runState(

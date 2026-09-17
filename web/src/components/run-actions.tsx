@@ -56,6 +56,8 @@ const primaryCommands: Record<string, true> = {
   close: true,
   kill: true,
   delete: true,
+  archive: true,
+  restore: true,
   relaunch: true,
 }
 
