@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -684,4 +685,59 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// sweepArchived deletes archived runs whose fixed retention period
+// (domain.ArchiveRetention) has elapsed. It keeps no state between ticks:
+// every candidate is re-validated fresh, so a restore or a publish
+// failure only ever costs a retry on the next tick.
+func (s *Scheduler) sweepArchived(ctx context.Context) {
+	cutoff := time.Now().UTC().Add(-domain.ArchiveRetention)
+	candidates, err := s.cfg.Store.ListRunsArchivedBefore(ctx, cutoff)
+	if err != nil {
+		slog.Warn("scheduler: archive sweep: list archived runs", "error", err)
+		return
+	}
+	for _, candidate := range candidates {
+		if err := s.sweepArchivedRun(ctx, candidate.ID, cutoff); err != nil {
+			slog.Warn("scheduler: archive sweep", "run", candidate.ID, "error", err)
+		}
+	}
+}
+
+// sweepArchivedRun holds archiveMu across the re-read and the delete so a
+// restore cannot race it. A run whose reason is retainedCloseReason is
+// skipped: DeleteRun would take its lifecycleMu, which Relaunch takes
+// before archiveMu.
+func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutoff time.Time) error {
+	s.archiveMu.Lock()
+	defer s.archiveMu.Unlock()
+
+	fresh, err := s.cfg.Store.GetRun(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reread run: %w", err)
+	}
+	if fresh.ArchivedAt == nil || fresh.ArchivedAt.After(cutoff) || !fresh.Status.Final() ||
+		fresh.Reason == retainedCloseReason {
+		return nil
+	}
+
+	// Never destroy the only copy of unpublished work unattended: a
+	// checkout that never got a container back after a crash can still
+	// carry commits the branch does not have.
+	if fresh.Worktree != "" {
+		if _, err := s.cfg.Git.PublishRunBranch(ctx, id); err != nil {
+			return fmt.Errorf("publish run branch: %w", err)
+		}
+	}
+
+	if err := s.DeleteRun(ctx, id, ""); err != nil {
+		return fmt.Errorf("delete run: %w", err)
+	}
+	s.publishTimeline(ctx, fresh.WorkspaceID, id, "", events.TimelineNote,
+		"archived run deleted after the retention period")
+	return nil
 }

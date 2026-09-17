@@ -560,6 +560,7 @@ type fakeGit struct {
 	branchCommits     map[domain.WorkspaceID]map[string]string
 	branchLookupErr   error
 	createErr         error
+	publishErr        error
 	createHook        func(run domain.RunID)
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
 	authors           map[domain.RunID][]domain.GitIdentity
@@ -680,6 +681,9 @@ func (g *fakeGit) commitSignings(run domain.RunID) []bool {
 func (g *fakeGit) PublishRunBranch(_ context.Context, run domain.RunID) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.publishErr != nil {
+		return "", g.publishErr
+	}
 	g.published[run]++
 	ws, workspaceOK := g.workspaceByRun[run]
 	branch, branchOK := g.branchByRun[run]
