@@ -1153,28 +1153,31 @@ paused. Delete them once you have salvaged what you want.
 
 ## Releases
 
-Push the tag, then publish an ordinary, non-draft GitHub release for it. Alpha
-versions use the same tag syntax, for example `v0.4.0-alpha.1`:
+Push the tag, then save a draft GitHub release for it. Alpha versions use
+the same tag syntax, for example `v0.4.0-alpha.1`:
 
 ```sh
 git push origin v0.4.0-alpha.1
-gh release create v0.4.0-alpha.1 --title v0.4.0-alpha.1 --generate-notes
+gh release create v0.4.0-alpha.1 --title v0.4.0-alpha.1 --generate-notes --draft
 ```
 
-Publish alpha tags as normal releases, not GitHub prereleases, because
-`scripts/install.sh` and `internal/selfupdate` resolve GitHub's
-`/releases/latest` endpoint. Do not add `--prerelease` or `--draft`.
+Do not add `--prerelease`: `scripts/install.sh` and `internal/selfupdate`
+resolve GitHub's `/releases/latest` endpoint, which skips prereleases, so
+alpha tags ship as normal releases.
 
-Publishing the release runs
+Saving the draft runs
 [`.github/workflows/release.yml`](../.github/workflows/release.yml): it checks
 the four signing secrets, rejects a tag that is not a release tag, vets, runs
 the unit tests, cross-compiles the full matrix with `make release`, writes
-`checksums.txt`, and uploads the binaries and standard image. The first two
-steps run before any toolchain is installed, so a missing secret or a tag such
-as `v0.5` ends the release in seconds instead of after the whole matrix is
-built - which used to leave the published release with no assets and
-`/releases/latest` pointing at it. Only an admin publisher runs this release
-job on the self-hosted runner labeled `moss`; other publishers are skipped.
+`checksums.txt`, uploads the binaries and standard image, and only then
+publishes the draft. `/releases/latest` skips drafts too, so no client sees
+the new tag before its assets exist; publish the release by hand instead and
+an `aether update` that runs during the build finds the tag but no
+`checksums.txt`. The first two steps run before any toolchain is installed,
+so a missing secret or a tag such as `v0.5` ends the release in seconds
+instead of after the whole matrix is built. Only an admin creator runs this
+release job on the self-hosted runner labeled `moss`; other creators are
+skipped.
 
 `make release` also builds and signs the [Android app](#android-app), the
 APK and the app bundle, in a pinned SDK container, so the release needs
@@ -1247,9 +1250,9 @@ store listing and Android prints it in the phone's app info, where `v0.4.0`
 reads as part of the number. `v0.4.0-alpha.6` ships as versionName
 `0.4.0-alpha.6` and versionCode 400106.
 
-If the release workflow fails after building, rerun it for the published
-release. The publisher uploads missing assets to the existing release and
-replaces same-named assets without changing its release notes.
+If the release workflow fails after building, rerun it for the tag. The
+publisher uploads missing assets to the existing draft, replaces same-named
+assets without changing its release notes, and then publishes it.
 
 The release workflow stamps the binaries with the release tag itself
 (`make release VERSION="$GITHUB_REF_NAME"`), not with `git describe`, which

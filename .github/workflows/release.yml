@@ -1,10 +1,13 @@
 name: Release
 
-# Publishing a non-draft GitHub release starts the trusted release workflow.
-# Release events use this workflow from the default branch, not the tag commit.
+# Pushing a release tag starts the trusted release workflow, which creates the
+# GitHub release as a draft and publishes it only once every asset is on it.
+# Until then /releases/latest, which `aether update` resolves, does not see it.
+# A release event would run this file from the default branch instead of the
+# tag commit, but GitHub does not fire one for a draft.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: write

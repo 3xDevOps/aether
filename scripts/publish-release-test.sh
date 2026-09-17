@@ -18,7 +18,7 @@ set -eu
 printf '%s\n' "$*" >>"$GH_LOG"
 case "$1 $2" in
 "release view") [ "${GH_EXISTING:-0}" = 1 ] ;;
-"release create" | "release upload") exit 0 ;;
+"release create" | "release upload" | "release edit") exit 0 ;;
 *) exit 2 ;;
 esac
 EOF
@@ -33,7 +33,8 @@ sh "$script_dir/publish-release.sh" "$tag" "$dist"
 expected="$tmp/expected-create.log"
 printf '%s\n' \
 	"release view $tag" \
-	"release create $tag --title $tag --generate-notes $dist/aether-linux-amd64 $dist/checksums.txt" \
+	"release create $tag --title $tag --generate-notes --draft $dist/aether-linux-amd64 $dist/checksums.txt" \
+	"release edit $tag --draft=false" \
 	>"$expected"
 cmp -s "$expected" "$log"
 
@@ -44,5 +45,6 @@ sh "$script_dir/publish-release.sh" "$tag" "$dist"
 printf '%s\n' \
 	"release view $tag" \
 	"release upload $tag --clobber $dist/aether-linux-amd64 $dist/checksums.txt" \
+	"release edit $tag --draft=false" \
 	>"$expected"
 cmp -s "$expected" "$log"

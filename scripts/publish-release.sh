@@ -20,8 +20,12 @@ if [ ! -e "$1" ]; then
 	exit 1
 fi
 
+# The release is a draft until every asset is on it, so /releases/latest
+# never points at a release whose checksums.txt does not exist yet.
 if gh release view "$tag" >/dev/null 2>&1; then
-	exec gh release upload "$tag" --clobber "$@"
+	gh release upload "$tag" --clobber "$@"
+else
+	gh release create "$tag" --title "$tag" --generate-notes --draft "$@"
 fi
 
-exec gh release create "$tag" --title "$tag" --generate-notes "$@"
+exec gh release edit "$tag" --draft=false
