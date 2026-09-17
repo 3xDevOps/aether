@@ -20,7 +20,7 @@ func runDelete(args []string) error {
 	}
 	return withControl(func(c *protocol.Client) error {
 		if err := c.Call(protocol.MethodRunDelete, protocol.RunIDParams{RunID: args[0]}, nil); err != nil {
-			return err
+			return fmt.Errorf("delete run %q: %w", args[0], err)
 		}
 		fmt.Printf("deleted %s: its checkout, transcript, evidence, and run records are gone; a published run branch stays in the workspace repo\n", args[0])
 		return nil
