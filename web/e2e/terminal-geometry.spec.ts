@@ -198,6 +198,7 @@ done
   const browserAttachAcks: Array<{
     ok?: boolean
     resumed?: boolean
+    resume_id?: string
     replay?: number
     has_control?: boolean
   }> = []
@@ -211,6 +212,7 @@ done
           const ack = JSON.parse(message) as {
             ok?: boolean
             resumed?: boolean
+            resume_id?: string
             replay?: number
             has_control?: boolean
           }
@@ -314,8 +316,31 @@ done
   await expect.poll(() => rows.textContent(), { timeout: 15_000 }).toBe(settledScreen)
   const settledConfirmationCount = countOccurrences(settledScreen, confirmation)
   const settledPromptCount = countOccurrences(settledScreen, currentPrompt)
-  // Release is the second attach transition. Capture the settled viewport
-  // before it and require resume to leave that screen untouched.
+  const attachAckCountBeforeRevisit = browserAttachAcks.length
+  const binaryReplayBytesBeforeRevisit = browserReplayBytes
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click()
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Terminal', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect
+    .poll(() => browserAttachAcks.length, { timeout: 15_000 })
+    .toBe(attachAckCountBeforeRevisit + 1)
+  const revisitAck = browserAttachAcks[browserAttachAcks.length - 1]
+  expect(revisitAck?.ok).toBe(true)
+  expect(revisitAck?.resumed).toBe(true)
+  expect(revisitAck?.resume_id).toEqual(expect.stringMatching(/\S+/))
+  expect(revisitAck?.replay ?? 0).toBe(0)
+  expect(browserReplayBytes).toBe(binaryReplayBytesBeforeRevisit)
+  await expect.poll(() => rows.textContent(), { timeout: 15_000 }).toBe(settledScreen)
+  const revisitedScreen = (await rows.textContent()) ?? ''
+  expect(revisitedScreen).toBe(settledScreen)
+  expect(countOccurrences(revisitedScreen, confirmation)).toBe(settledConfirmationCount)
+  expect(countOccurrences(revisitedScreen, currentPrompt)).toBe(settledPromptCount)
+
+  // Capture the settled viewport before the release transition and require
+  // resume to leave that screen untouched.
   await page.evaluate(() => {
     const browserWindow = window as unknown as {
       __terminalHistoryObserver?: {
@@ -334,6 +359,7 @@ done
   const releaseAck = browserAttachAcks[browserAttachAcks.length - 1]
   expect(releaseAck?.ok).toBe(true)
   expect(releaseAck?.resumed).toBe(true)
+  expect(releaseAck?.resume_id).toEqual(expect.stringMatching(/\S+/))
   expect((releaseAck?.replay ?? 0)).toBe(0)
   expect((releaseAck?.has_control ?? false)).toBe(false)
   const takeControl = page.getByRole('button', { name: 'Take control', exact: true })

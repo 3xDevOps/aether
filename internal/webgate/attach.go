@@ -49,6 +49,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Follow:            req.Follow,
 		Resume:            req.Resume,
 		Cursor:            req.Cursor,
+		ResumeID:          req.ResumeID,
 		ControlSessionID:  req.ControlSessionID,
 		ControlGeneration: req.ControlGeneration,
 		Takeover:          req.Takeover,

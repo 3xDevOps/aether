@@ -7,7 +7,7 @@ let output: string[] = []
 let outputKinds: Array<[string, string]> = []
 let states: ConnectionState[] = []
 let attaches = 0
-let refusal: string | null = null
+let ackIncarnation = 0
 let refusalCode: number | undefined
 let denied = false
 let controlLost = false
@@ -18,6 +18,7 @@ let sessionPending = false
 // `document` and open a socket during the next test.
 let receivedControl: ControlMetadata | null = null
 let attachments: Attachment[] = []
+let refusal: string | null = null
 
 function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
   output = []
@@ -89,8 +90,9 @@ function refuseSession() {
 }
 
 function ack(over: Record<string, unknown> = {}) {
+  const resume_id = `pty-incarnation-${++ackIncarnation}`
   StubSocket.last().onmessage?.({
-    data: JSON.stringify({ ok: true, cols: 120, rows: 40, ...over }),
+    data: JSON.stringify({ ok: true, cols: 120, rows: 40, resume_id, ...over }),
   })
 }
 
@@ -101,6 +103,7 @@ beforeEach(() => {
   outputKinds = []
   states = []
   attaches = 0
+  ackIncarnation = 0
   refusal = null
   refusalCode = undefined
   denied = false
@@ -160,6 +163,9 @@ describe('connectAttach', () => {
     expect(reconnect.frames()[0]).toMatchObject({
       write: true,
       takeover: true,
+      resume: true,
+      resume_id: 'pty-incarnation-1',
+      cursor: 0,
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 4,
     })
@@ -171,6 +177,9 @@ describe('connectAttach', () => {
     expect(takeover.frames()[0]).toMatchObject({
       write: true,
       takeover: true,
+      resume: true,
+      resume_id: 'pty-incarnation-2',
+      cursor: 0,
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 5,
     })
@@ -181,6 +190,9 @@ describe('connectAttach', () => {
     release.onopen?.()
     expect(release.frames()[0]).toMatchObject({
       release_control: true,
+      resume: true,
+      resume_id: 'pty-incarnation-3',
+      cursor: 0,
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 6,
     })
@@ -236,7 +248,7 @@ describe('connectAttach', () => {
     attachments.push(a)
     const oldSocket = StubSocket.last()
     oldSocket.onopen?.()
-    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3 }) })
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3, resume_id: 'pty-incarnation-old' }) })
     oldSocket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
     expect(oldOutput).toEqual(['replay-end:old'])
 
@@ -257,7 +269,7 @@ describe('connectAttach', () => {
     const freshSocket = StubSocket.last()
     freshSocket.onopen?.()
     expect(freshSocket.frames()[0]).not.toHaveProperty('resume')
-    freshSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3 }) })
+    freshSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3, resume_id: 'pty-incarnation-new' }) })
     freshSocket.onmessage?.({ data: new TextEncoder().encode('new').buffer })
     expect(nextOutput).toEqual(['replay-end:new'])
 
@@ -274,9 +286,182 @@ describe('connectAttach', () => {
 
     a.reopen({ resume: true })
     StubSocket.last().onopen?.()
-    expect(StubSocket.last().frames()[0]).toMatchObject({ resume: true, cursor: 105 })
+    expect(StubSocket.last().frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-1',
+      cursor: 105,
+    })
     a.close()
   })
+
+  it('falls back to a full attach when no successful ack supplied a fence', () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({
+      data: JSON.stringify({ ok: true, cursor: 100, replay: 0 }),
+    })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    expect(replacement.frames()[0]).not.toHaveProperty('resume_id')
+    expect(replacement.frames()[0]).not.toHaveProperty('cursor')
+    a.close()
+  })
+
+  it('uses the fallback ack incarnation for the next resume', () => {
+    const a = attach()
+    StubSocket.last().onopen?.()
+    ack({ cursor: 100, resume_id: 'pty-incarnation-a' })
+
+    a.reopen({ resume: true })
+    const attempted = StubSocket.last()
+    attempted.onopen?.()
+    expect(attempted.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-a',
+      cursor: 100,
+    })
+    ack({ cursor: 200, resumed: false, resume_id: 'pty-incarnation-b' })
+
+    a.reopen({ resume: true })
+    const next = StubSocket.last()
+    next.onopen?.()
+    expect(next.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-b',
+      cursor: 200,
+    })
+    a.close()
+  })
+  it('waits for a live settled callback before resuming with its parsed cursor', async () => {
+    let settle!: () => void
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, _kind, done) => {
+        settle = done!
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({ data: JSON.stringify({ ok: true, cursor: 100, replay: 0, resume_id: 'pty-incarnation-a' }) })
+    first.onmessage?.({ data: new TextEncoder().encode('live!').buffer })
+
+    a.reopen({ resume: true })
+    expect(first.closed).toBe(true)
+    expect(StubSocket.opened).toHaveLength(1)
+
+    // The replacement must wait until xterm has parsed all old live bytes.
+    settle()
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-a',
+      cursor: 105,
+    })
+    a.close()
+  })
+
+  it('waits for live parsing before resuming and then sends the parsed cursor', async () => {
+    let settle!: () => void
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, _kind, done) => {
+        settle = done!
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({
+      data: JSON.stringify({ ok: true, cursor: 100, replay: 0, has_control: true, resume_id: 'pty-incarnation-a' }),
+    })
+    const sessionID = a.controlMetadata?.().control_session_id
+    first.onmessage?.({ data: new TextEncoder().encode('live!').buffer })
+
+    a.suspend()
+    a.resume()
+    expect(StubSocket.opened).toHaveLength(1)
+    settle()
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-a',
+      cursor: 105,
+      control_session_id: sessionID,
+    })
+    a.close()
+  })
+
+  it('suspends without retrying or waking a dropped transport', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack()
+
+    a.suspend()
+    expect(socket.closed).toBe(true)
+    fire('visibilitychange')
+    fire('online')
+    vi.advanceTimersByTime(60_000)
+    expect(StubSocket.opened).toHaveLength(1)
+    a.close()
+  })
+
+  it('cancels replay on suspend and resumes with a fresh full replay', async () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    ack({ cursor: 100, replay: 4 })
+    first.onmessage?.({ data: new TextEncoder().encode('old').buffer })
+
+    a.suspend()
+    a.resume()
+    await Promise.resolve()
+    expect(StubSocket.opened).toHaveLength(2)
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    a.close()
+  })
+  it('keeps a socket-aborted replay invalid across suspend and resume', async () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    ack({ cursor: 100, replay: 4 })
+    first.onmessage?.({ data: new TextEncoder().encode('old').buffer })
+    first.onclose?.({ code: 1006, reason: '' })
+
+    // Suspending after the close must not forget that the xterm only parsed a
+    // prefix. The next attach has to replace the screen with a full replay.
+    a.suspend()
+    a.resume()
+    await Promise.resolve()
+    expect(StubSocket.opened).toHaveLength(2)
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    a.close()
+  })
+
 
   it('clears the screen when the server could not serve the resume', () => {
     const resumedFlags: Array<boolean | undefined> = []
@@ -297,7 +482,7 @@ describe('connectAttach', () => {
     StubSocket.last().onopen?.()
     // The ring had dropped the bytes this client was missing.
     StubSocket.last().onmessage?.({
-      data: JSON.stringify({ ok: true, cols: 120, rows: 40, resumed: false }),
+      data: JSON.stringify({ ok: true, cols: 120, rows: 40, resumed: false, resume_id: 'pty-incarnation-b' }),
     })
     expect(resumedFlags[resumedFlags.length - 1]).toBe(false)
     a.close()
@@ -418,7 +603,7 @@ describe('connectAttach', () => {
     const socket = StubSocket.last()
     socket.onopen?.()
     socket.onmessage?.({
-      data: JSON.stringify({ ok: true, cursor: 10, replay: 3, cols: 80, rows: 24 }),
+      data: JSON.stringify({ ok: true, cursor: 10, replay: 3, cols: 80, rows: 24, resume_id: 'pty-incarnation-a' }),
     })
     socket.onmessage?.({ data: new TextEncoder().encode('a').buffer })
     socket.onmessage?.({ data: JSON.stringify({ type: 'geometry', cols: 100, rows: 30, ok: true }) })
@@ -437,7 +622,11 @@ describe('connectAttach', () => {
     a.reopen({ resume: true })
     await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     StubSocket.last().onopen?.()
-    expect(StubSocket.last().frames()[0]).toMatchObject({ resume: true, cursor: 18 })
+    expect(StubSocket.last().frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-a',
+      cursor: 18,
+    })
     a.close()
   })
   it('stops old replay operations when closed during the first callback', async () => {
@@ -492,7 +681,7 @@ describe('connectAttach', () => {
     attachments.push(a)
     const socket = StubSocket.last()
     socket.onopen?.()
-    ack({ replay: 1 })
+    ack({ replay: 1, resume_id: 'pty-incarnation-a' })
     socket.onmessage?.({ data: new TextEncoder().encode('rONE').buffer })
     socket.onmessage?.({ data: new TextEncoder().encode('TWO').buffer })
 
@@ -506,9 +695,18 @@ describe('connectAttach', () => {
     expect(settled).toHaveLength(2)
     settled[1]()
     await Promise.resolve()
+    await Promise.resolve()
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-a',
+      cursor: 6,
+    })
     a.close()
-  })
 
+  })
   it('completes a deferred reopen when queued live output has no handler', () => {
     const a = connectAttach(() => '/ws/attach/run_1', {
       onAttached: () => {},
@@ -522,7 +720,7 @@ describe('connectAttach', () => {
     const socket = StubSocket.last()
     socket.onopen?.()
     socket.onmessage?.({
-      data: JSON.stringify({ ok: true, replay: 1 }),
+      data: JSON.stringify({ ok: true, replay: 1, resume_id: 'pty-incarnation-a' }),
     })
 
     // The reopen is deferred while the replay boundary is still arriving.
@@ -555,7 +753,7 @@ describe('connectAttach', () => {
     const socket = StubSocket.last()
     socket.onopen?.()
     socket.onmessage?.({
-      data: JSON.stringify({ ok: true, replay: 1 }),
+      data: JSON.stringify({ ok: true, replay: 1, resume_id: 'pty-incarnation-a' }),
     })
     socket.onmessage?.({ data: new TextEncoder().encode('rONE').buffer })
     socket.onmessage?.({ data: new TextEncoder().encode('TWO').buffer })
@@ -573,7 +771,7 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it('does not pass a settled callback to ordinary direct live output', () => {
+  it('passes a settled callback to direct live output', () => {
     const callbacks: Array<(() => void) | undefined> = []
     const a = connectAttach(() => '/ws/attach/run_1', {
       onData: (_chunk, _kind, settled) => {
@@ -592,7 +790,7 @@ describe('connectAttach', () => {
     ack({ replay: 0 })
     socket.onmessage?.({ data: new TextEncoder().encode('live').buffer })
 
-    expect(callbacks).toEqual([undefined])
+    expect(callbacks[0]).toEqual(expect.any(Function))
     a.close()
   })
   it('turns a direct live rendering throw into a final refusal', () => {
@@ -647,7 +845,7 @@ describe('connectAttach', () => {
     attachments.push(a)
     const socket = StubSocket.last()
     socket.onopen?.()
-    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 6 }) })
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 6, resume_id: 'pty-incarnation-a' }) })
     socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
     socket.onmessage?.({ data: new TextEncoder().encode('def').buffer })
     socket.onmessage?.({ data: new TextEncoder().encode('live').buffer })
@@ -689,7 +887,7 @@ describe('connectAttach', () => {
     attachments.push(a)
     const socket = StubSocket.last()
     socket.onopen?.()
-    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3 }) })
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 3, resume_id: 'pty-incarnation-a' }) })
     socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
     socket.onclose?.({ code: 1006 })
 
@@ -854,6 +1052,7 @@ describe('connectAttach', () => {
     vi.advanceTimersByTime(60_000)
     expect(StubSocket.opened).toHaveLength(2)
     StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('resume')
     ack({ replay: 0 })
     expect(replaySignals).toEqual([2, 0])
     expect(gate.muted()).toBe(false)
@@ -949,6 +1148,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       release_control: true,
       resume: true,
+      resume_id: 'pty-incarnation-1',
       cursor: 10,
     })
     a.close()
@@ -1130,6 +1330,34 @@ describe('connectAttach', () => {
       write: true,
       control_session_id: expect.any(String),
     })
+    a.close()
+  })
+  it('drops controls while a replacement is connecting or awaiting ack', () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    ack()
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    expect(first.closed).toBe(true)
+    a.send('while connecting')
+    a.resize(90, 30)
+    expect(replacement.sent).toHaveLength(0)
+
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({ resume: true })
+    a.send('before ack')
+    a.resize(91, 31)
+    expect(replacement.sent).toHaveLength(1)
+
+    ack()
+    a.send('after ack')
+    a.resize(92, 32)
+    expect(replacement.frames().slice(1)).toEqual([
+      { type: 'input', data: 'after ack' },
+      { type: 'resize', cols: 92, rows: 32 },
+    ])
     a.close()
   })
 
@@ -1419,6 +1647,7 @@ describe('connectAttach', () => {
     expect(StubSocket.opened).toHaveLength(2)
     const replacement = StubSocket.last()
     replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
     ack({ replay: 2 })
     expect(replaySignals).toEqual([4, 2])
     expect(gate.muted()).toBe(true)

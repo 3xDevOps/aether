@@ -17,6 +17,10 @@ function socket(): EnvTerminalSocket {
     resize: vi.fn(),
     reopen: vi.fn(),
     rebind: vi.fn(),
+    suspend: vi.fn(),
+    resume: vi.fn(),
+    resetWriteDenial: vi.fn(),
+    isEnded: vi.fn(() => false),
     close: vi.fn(),
   }
 }

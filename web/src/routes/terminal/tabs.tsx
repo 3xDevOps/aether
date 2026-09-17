@@ -26,8 +26,9 @@ const panelID = 'run-tab-panel'
 const tabID = (route: string) => `run-tab-${route}`
 
 /**
- * The props the open route spreads on the body under the strip. Only one run
- * route is mounted at a time, so the ids are fixed rather than generated.
+ * The props the active route spreads on the body under the strip. Cached
+ * inactive terminal entries retain only their primary pane, so fixed IDs are
+ * present for one active run-detail route at a time.
  */
 export function runTabPanel(active: string, className: string, scrolls = false) {
   return {

@@ -21,6 +21,30 @@ func TestAttachRequestShellWire(t *testing.T) {
 		t.Fatalf("attach request = %s, want shell field", raw)
 	}
 }
+func TestAttachResumeIDWire(t *testing.T) {
+	req := AttachRequest{RunID: "run-1", Resume: true, Cursor: 17, ResumeID: "pty-incarnation"}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"resume_id":"pty-incarnation"`) {
+		t.Fatalf("attach request = %s, want resume_id field", raw)
+	}
+	var got AttachRequest
+	if unmarshalErr := json.Unmarshal(raw, &got); unmarshalErr != nil {
+		t.Fatal(unmarshalErr)
+	}
+	if got.ResumeID != req.ResumeID {
+		t.Fatalf("attach request resume_id = %q, want %q", got.ResumeID, req.ResumeID)
+	}
+	ack, err := json.Marshal(AttachResponse{OK: true, Cursor: 23, ResumeID: "pty-incarnation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ack), `"resume_id":"pty-incarnation"`) {
+		t.Fatalf("attach response = %s, want resume_id field", ack)
+	}
+}
 
 func TestAttachControlLeaseWire(t *testing.T) {
 	req := AttachRequest{

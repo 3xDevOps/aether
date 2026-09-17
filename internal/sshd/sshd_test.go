@@ -88,6 +88,7 @@ type fakePTY struct {
 	errDelay    time.Duration
 	gate        ptyhost.WriteGate
 	replay      []byte
+	resumeID    string
 	transcripts map[domain.RunID][]byte
 	snapshots   map[domain.RunID]ptyhost.ScreenSnapshot
 	cols        uint
@@ -155,7 +156,7 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 		}
 		return err
 	}
-	gate := p.gate
+	gate, resumeID := p.gate, p.resumeID
 	p.mu.Unlock()
 	// Mirror ptyhost.Host.Attach: the legacy gate can delay while state
 	// changes, then explicit authorization makes the final lease decision.
@@ -191,7 +192,15 @@ func (p *fakePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client pty
 	if hasGeo && session != [2]uint{} {
 		geo.SetGeometry(session[0], session[1])
 	}
-
+	if rw, ok := conn.(ptyhost.ResumeWriter); ok {
+		cursor := uint64(len(replay))
+		resumed := false
+		if client.Resume && client.ResumeID == resumeID && client.Cursor <= cursor {
+			cursor = client.Cursor
+			resumed = true
+		}
+		rw.SetResume(cursor, resumed, resumeID)
+	}
 	if rw, ok := conn.(ptyhost.ReplayWriter); ok {
 		if err := rw.WriteReplay(bytes.NewReader(replay), len(replay)); err != nil {
 			return nil
@@ -722,6 +731,7 @@ func newTestEnvWithSigner(t *testing.T, mod func(*Config), signer ssh.Signer) *t
 
 func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool) *testEnv {
 	t.Helper()
+	ctx := context.Background()
 	dir := t.TempDir()
 	db, err := store.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
@@ -738,12 +748,11 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 		store:  db,
 		bus:    bus,
 		git:    &fakeGit{},
-		pty:    &fakePTY{},
+		pty:    &fakePTY{resumeID: "fake-pty"},
 		runs:   &fakeRuns{},
 		signer: signer,
 	}
 
-	ctx := context.Background()
 	if seed {
 		e.member = &domain.Member{
 			DisplayName: "Ada",

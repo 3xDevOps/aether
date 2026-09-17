@@ -142,7 +142,7 @@ describe('run-shell dock', () => {
     const shell = StubSocket.last()
     act(() => {
       shell.onopen?.()
-      shell.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
+      shell.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
     })
     first.unmount()
 
@@ -155,7 +155,7 @@ describe('run-shell dock', () => {
     const reopened = shellsBeforeReopen()[1]
     act(() => {
       reopened.onopen?.()
-      reopened.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 2 }) })
+      reopened.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 2, resume_id: 'pty-incarnation-shell' }) })
       reopened.onmessage?.({ data: new TextEncoder().encode('remounted shell').buffer })
     })
 
@@ -177,7 +177,7 @@ describe('run-shell dock', () => {
     act(() => {
       shell.onopen?.()
       shell.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 3, has_control: true, control_generation: 1 }),
+        data: JSON.stringify({ ok: true, replay: 3, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
     expect(replayGateCalls.starts).toBe(1)
@@ -212,7 +212,7 @@ describe('run-shell dock', () => {
     const oldShell = shellFor('run_1')
     act(() => {
       oldShell?.onopen?.()
-      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
+      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
     })
 
     useStore.getState().upsertRun(run({ id: 'run_2' }))
@@ -230,10 +230,10 @@ describe('run-shell dock', () => {
     const currentShell = shellFor('run_2')
     act(() => {
       currentShell?.onopen?.()
-      currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
+      currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
       currentShell?.onmessage?.({ data: new TextEncoder().encode('B output').buffer })
       // These events belong to run_1, but arrive after run_2 accepted t1.
-      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }) })
+      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
       oldShell?.onmessage?.({ data: new TextEncoder().encode('A output').buffer })
       oldShell?.onclose?.({ code: 1000 })
     })
@@ -258,7 +258,7 @@ describe('run-shell dock', () => {
     const terminalDock = within(screen.getByRole('region', { name: 'Terminal dock' }))
     const shellsFor = (tab: string) =>
       StubSocket.opened.filter((socket) => socket.url.includes(`?shell=${tab}`))
-    const accepted = JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 })
+    const accepted = JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' })
     const denied = JSON.stringify({ ok: false, code: -32001, error: 'write denied' })
 
     await waitFor(() => expect(shellsFor('t1')).toHaveLength(1))
@@ -315,7 +315,7 @@ describe('run-shell dock', () => {
     act(() => {
       shell.onopen?.()
       shell.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 3 }),
+        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 3, resume_id: 'pty-incarnation-shell' }),
       })
       shell.onclose?.({ code: 1008, reason: 'control taken over' })
     })

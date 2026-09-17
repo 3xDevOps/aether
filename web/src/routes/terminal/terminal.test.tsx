@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
-import type { Run } from '@/lib/types'
 import type * as apiModule from '@/lib/api'
+import type { Run } from '@/lib/types'
+import type { RouteProps } from '@/routes/registry'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
@@ -24,7 +25,11 @@ function terminalRoute() {
   return View
 }
 
-function mount(seed: Partial<TerminalState> = {}, over: Partial<Run> = {}) {
+function mount(
+  seed: Partial<TerminalState> = {},
+  over: Partial<Run> = {},
+  route: Partial<RouteProps> = {},
+) {
   const View = terminalRoute()
   useStore.getState().upsertRun(run(over))
   useStore.setState({
@@ -32,14 +37,14 @@ function mount(seed: Partial<TerminalState> = {}, over: Partial<Run> = {}) {
     terminals: { run_1: { ...initialTerminal, ...seed } },
     terminalControlTaken: false,
   })
-  return render(<View params={{ runId: 'run_1' }} />)
+  return render(<View {...route} params={{ runId: 'run_1' }} />)
 }
 
-function attached(size = { cols: 80, rows: 24 }) {
+function attached(size = { cols: 80, rows: 24 }, resume_id = 'pty-incarnation-run') {
   act(() => {
     StubSocket.last().onopen?.()
     StubSocket.last().onmessage?.({
-      data: JSON.stringify({ ok: true, ...size }),
+      data: JSON.stringify({ ok: true, ...size, resume_id }),
     })
   })
 }
@@ -50,6 +55,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -107,7 +113,14 @@ describe('terminal view', () => {
     act(() => {
       StubSocket.last().onopen?.()
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: true, cols: 80, rows: 24, has_control: true, control_generation: 7 }),
+        data: JSON.stringify({
+          ok: true,
+          cols: 80,
+          rows: 24,
+          has_control: true,
+          control_generation: 7,
+          resume_id: 'pty-incarnation-run',
+        }),
       })
     })
     expect(screen.getByText('Steering')).toBeDefined()
@@ -198,6 +211,66 @@ describe('terminal view', () => {
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
+  it('retries control when cached run authority changes', async () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+
+    fireEvent.click(screen.getByText('Take control'))
+    const denied = StubSocket.last()
+    act(() => {
+      denied.onopen?.()
+      denied.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: codeDenied,
+          error: 'run.attach: permission denied',
+        }),
+      })
+    })
+    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
+
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    act(() => useStore.getState().upsertRun(run()))
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    const authorized = StubSocket.last()
+    act(() => authorized.onopen?.())
+    expect(authorized.frames()[0]).toMatchObject({ write: true, resume: true })
+    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    view.unmount()
+  })
+  it('reattaches when changed authority revives an unchanged automatic write', async () => {
+    const view = mount()
+    const denied = StubSocket.last()
+    act(() => {
+      denied.onopen?.()
+      denied.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: codeDenied,
+          error: 'run.attach: permission denied',
+        }),
+      })
+    })
+
+    act(() =>
+      useStore.setState({
+        info: {
+          ...serverInfo,
+          member: { ...serverInfo.member, role: 'collaborator' },
+        },
+      }),
+    )
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const authorized = StubSocket.last()
+    act(() => authorized.onopen?.())
+    expect(authorized.frames()[0]).toMatchObject({ write: true })
+    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    view.unmount()
+  })
 
   it('starts every attach from the server, not from the last one', () => {
     // What a previous visit to this tab left behind: a steer denial, refusal,
@@ -233,6 +306,318 @@ describe('terminal view', () => {
     write.mockRestore()
     view.unmount()
   })
+  it('does not initialize a cached run until its first active visit', () => {
+    const view = mount({}, {}, { active: false })
+    expect(StubSocket.opened).toHaveLength(0)
+
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    expect(StubSocket.opened).toHaveLength(1)
+    view.unmount()
+  })
+  it('unmounts parked Run Dock, Run Room, and run header while retaining the primary pane', async () => {
+    const view = mount()
+    attached()
+    await waitFor(() => expect(document.querySelector('.xterm')).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Open Run Room' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByRole('tablist', { name: 'Run tabs' })).toBeDefined()
+    expect(screen.getByRole('tabpanel')).toBeDefined()
+    const pane = document.querySelector('.xterm')
+
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+
+    expect(screen.queryByRole('button', { name: 'Open Run Room' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()
+    expect(screen.queryByRole('tablist', { name: 'Run tabs' })).toBeNull()
+    expect(screen.queryByRole('tabpanel')).toBeNull()
+    expect(pane?.isConnected).toBe(true)
+
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    expect(screen.getByRole('button', { name: 'Open Run Room' })).toBeDefined()
+    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
+    expect(screen.getByRole('tablist', { name: 'Run tabs' })).toBeDefined()
+    expect(screen.getByRole('tabpanel')).toBeDefined()
+    view.unmount()
+  })
+
+  it('parks a live run without a hidden socket and resumes its parsed output', async () => {
+    const view = mount()
+    attached({ cols: 20, rows: 4 })
+    const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: new TextEncoder().encode('retained output').buffer,
+      }),
+    )
+    await vi.waitFor(() => expect(pane()).toContain('retained output'))
+
+    const socket = StubSocket.last()
+    const weight = vi.fn()
+    const View = terminalRoute()
+    view.rerender(
+      <View
+        params={{ runId: 'run_1' }}
+        active={false}
+        onTerminalWeight={weight}
+      />,
+    )
+
+    expect(socket.closed).toBe(true)
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(weight).toHaveBeenCalledWith(expect.any(Number))
+    expect(weight.mock.calls[0][0]).toBeGreaterThan(0)
+
+    view.rerender(
+      <View
+        params={{ runId: 'run_1' }}
+        active
+        onTerminalWeight={weight}
+      />,
+    )
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const resumed = StubSocket.last()
+    act(() => {
+      resumed.onopen?.()
+      resumed.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          cols: 20,
+          rows: 4,
+          resumed: true,
+          resume_id: 'pty-incarnation-run',
+        }),
+      })
+    })
+    expect(resumed.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-incarnation-run',
+    })
+    expect(pane()).toContain('retained output')
+    view.unmount()
+  })
+  it('reports retained normal and alternate buffer weight', async () => {
+    const open = vi.spyOn(Terminal.prototype, 'open')
+    const view = mount()
+    const terminal = open.mock.contexts[0] as Terminal
+    attached({ cols: 20, rows: 4 })
+    await new Promise<void>((done) => terminal.write('normal output', done))
+    await new Promise<void>((done) => terminal.write('\x1b[?1049halt output', done))
+
+    const weight = vi.fn()
+    const View = terminalRoute()
+    view.rerender(
+      <View
+        params={{ runId: 'run_1' }}
+        active={false}
+        onTerminalWeight={weight}
+      />,
+    )
+
+    const expected = (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
+    expect(terminal.buffer.normal.length).toBeGreaterThan(0)
+    expect(terminal.buffer.alternate.length).toBeGreaterThan(0)
+    expect(weight).toHaveBeenCalledWith(expected)
+    open.mockRestore()
+    view.unmount()
+  })
+  it('reports the larger weight when a deferred live multiline write settles while parked', async () => {
+    const originalWrite = Terminal.prototype.write
+    const write = vi.spyOn(Terminal.prototype, 'write')
+    write.mockImplementation(function (this: Terminal, chunk, done) {
+      if (chunk instanceof Uint8Array && done) {
+        // Let xterm parse the bytes, but defer the completion observed by the
+        // attach until the next turn so parking can happen first.
+        return originalWrite.call(this, chunk, () => setTimeout(done, 0))
+      }
+      return originalWrite.call(this, chunk, done)
+    })
+
+    const view = mount()
+    attached({ cols: 20, rows: 4 })
+    const weight = vi.fn()
+    const View = terminalRoute()
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onmessage?.({
+        data: new TextEncoder().encode('line one\nline two\nline three').buffer,
+      })
+      view.rerender(
+        <View
+          params={{ runId: 'run_1' }}
+          active={false}
+          onTerminalWeight={weight}
+        />,
+      )
+    })
+
+    const terminal = write.mock.instances.find(
+      (instance): instance is Terminal => instance instanceof Terminal,
+    )
+    if (!terminal) throw new Error('xterm terminal did not receive the live write')
+    const parkedCalls = weight.mock.calls.length
+    await waitFor(() => expect(weight.mock.calls.length).toBeGreaterThan(parkedCalls))
+    const expected = (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
+    expect(weight.mock.calls.at(-1)?.[0]).toBe(expected)
+    write.mockRestore()
+    view.unmount()
+  })
+  it('does not reopen an ended completed run when its cached view is revisited', () => {
+    const view = mount({}, { status: 'completed' })
+    attached()
+    const socket = StubSocket.last()
+    act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
+
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+
+    expect(StubSocket.opened).toHaveLength(1)
+    view.unmount()
+  })
+  it('does not reopen an ended completed run when follow mode changes', () => {
+    const resize = atViewport(1024, { height: 844, pointer: 'coarse' })
+    const view = mount({}, { status: 'completed' })
+    attached()
+    act(() => StubSocket.last().onclose?.({ code: 1000, reason: 'session ended' }))
+
+    resize(390)
+
+    expect(StubSocket.opened).toHaveLength(1)
+    view.unmount()
+  })
+  it('full-attaches an active nonowner mirror after a same-run relaunch', async () => {
+    const view = mount({}, { status: 'completed', member_id: bob.id })
+    attached(undefined, 'pty-incarnation-ended')
+    const endedSocket = StubSocket.last()
+    act(() => endedSocket.onclose?.({ code: 1000, reason: 'session ended' }))
+
+    act(() => useStore.getState().upsertRun(run({ status: 'running', member_id: bob.id })))
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    expect(replacement.frames()[0]).not.toHaveProperty('cursor')
+    view.unmount()
+  })
+
+  it('records a parked same-run relaunch and full-attaches only on activation', async () => {
+    const view = mount({}, { status: 'completed', member_id: bob.id })
+    attached(undefined, 'pty-incarnation-ended')
+    const endedSocket = StubSocket.last()
+    act(() => endedSocket.onclose?.({ code: 1000, reason: 'session ended' }))
+
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    act(() => useStore.getState().upsertRun(run({ status: 'running', member_id: bob.id })))
+    expect(StubSocket.opened).toHaveLength(1)
+
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    expect(replacement.frames()[0]).not.toHaveProperty('cursor')
+    view.unmount()
+  })
+
+  it('coalesces a relaunch with a simultaneous phone follow change', async () => {
+    const resize = atViewport(1024, { height: 844, pointer: 'coarse' })
+    const view = mount({}, { status: 'completed' })
+    attached(undefined, 'pty-incarnation-ended')
+    const endedSocket = StubSocket.last()
+    act(() => {
+      endedSocket.onclose?.({ code: 1000, reason: 'session ended' })
+      resize(390)
+      useStore.getState().upsertRun(run({ status: 'running' }))
+    })
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    expect(replacement.frames()[0]).toMatchObject({ follow: true })
+    view.unmount()
+  })
+
+  it('keeps an in-flight replay hidden and requests a full replay after parking', async () => {
+    const write = vi.spyOn(Terminal.prototype, 'write')
+    const callbacks: Array<() => void> = []
+    write.mockImplementation((chunk, done) => {
+      if (chunk instanceof Uint8Array && done) callbacks.push(done)
+    })
+    const view = mount({}, { status: 'completed' })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 3,
+          cols: 80,
+          rows: 24,
+          resume_id: 'pty-incarnation-run',
+        }),
+      })
+      socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
+    })
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(callbacks).toHaveLength(1)
+    expect(host.style.visibility).toBe('hidden')
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    expect(host.style.visibility).toBe('hidden')
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    write.mockRestore()
+    view.unmount()
+  })
+
+  it('disposes the attachment and xterm when the route is evicted', () => {
+    const dispose = vi.spyOn(Terminal.prototype, 'dispose')
+    const view = mount()
+    attached()
+    const socket = StubSocket.last()
+    view.unmount()
+
+    expect(socket.closed).toBe(true)
+    expect(dispose).toHaveBeenCalled()
+    dispose.mockRestore()
+  })
+
+  it('resets cached output and invalidates it on a final refusal', async () => {
+    const reset = vi.spyOn(Terminal.prototype, 'reset')
+    const invalidate = vi.fn()
+    const view = mount({}, {}, { onTerminalInvalidate: invalidate })
+    attached()
+    const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
+    act(() =>
+      StubSocket.last().onmessage?.({
+        data: new TextEncoder().encode('stale output').buffer,
+      }),
+    )
+    await vi.waitFor(() => expect(pane()).toContain('stale output'))
+
+    act(() => {
+      StubSocket.last().onopen?.()
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({ ok: false, code: -32000, error: 'final refusal' }),
+      })
+    })
+
+    expect(reset).toHaveBeenCalled()
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    expect(pane()).not.toContain('stale output')
+    reset.mockRestore()
+    view.unmount()
+  })
+
 
   it('draws a desktop replay and live redraw at the shared PTY geometry', async () => {
     const open = vi.spyOn(Terminal.prototype, 'open')
@@ -259,10 +644,15 @@ describe('terminal view', () => {
   })
 
   it('keeps a completed session hidden until the final replay callback after going offline', async () => {
+    const originalWrite = Terminal.prototype.write
     const write = vi.spyOn(Terminal.prototype, 'write')
     const callbacks: Array<() => void> = []
-    write.mockImplementation((chunk, done) => {
-      if (chunk instanceof Uint8Array && done) callbacks.push(done)
+    write.mockImplementation(function (this: Terminal, chunk, done) {
+      if (chunk instanceof Uint8Array && done) {
+        callbacks.push(done)
+        return
+      }
+      return originalWrite.call(this, chunk, done)
     })
     const view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
@@ -276,6 +666,7 @@ describe('terminal view', () => {
           rows: 24,
           has_control: true,
           control_generation: 1,
+          resume_id: 'pty-incarnation-run',
         }),
       })
     })
@@ -302,6 +693,51 @@ describe('terminal view', () => {
     write.mockRestore()
     view.unmount()
   })
+  it('finishes an ended replay after the route is parked and reveals it on revisit', async () => {
+    const originalWrite = Terminal.prototype.write
+    const write = vi.spyOn(Terminal.prototype, 'write')
+    const callbacks: Array<() => void> = []
+    write.mockImplementation(function (this: Terminal, chunk, done) {
+      if (chunk instanceof Uint8Array && done) {
+        callbacks.push(done)
+        return
+      }
+      return originalWrite.call(this, chunk, done)
+    })
+    const view = mount({}, { status: 'completed' })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 3,
+          cols: 80,
+          rows: 24,
+          resume_id: 'pty-incarnation-run',
+        }),
+      })
+    })
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
+    act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
+
+    expect(callbacks).toHaveLength(1)
+    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    expect(host.style.visibility).toBe('hidden')
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    expect(host.style.visibility).toBe('hidden')
+
+    act(() => callbacks[0]?.())
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    expect(host.style.visibility).toBe('')
+    write.mockRestore()
+    view.unmount()
+  })
   it('reveals a completed session when an offline close aborts before replay ends', () => {
     const view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
@@ -315,6 +751,7 @@ describe('terminal view', () => {
           rows: 24,
           has_control: true,
           control_generation: 1,
+          resume_id: 'pty-incarnation-run',
         }),
       })
     })
@@ -347,6 +784,7 @@ describe('terminal view', () => {
           rows: 24,
           has_control: true,
           control_generation: 1,
+          resume_id: 'pty-incarnation-run',
         }),
       })
       socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
@@ -393,7 +831,7 @@ describe('terminal view', () => {
     act(() => {
       release.onopen?.()
       release.onmessage?.({
-        data: JSON.stringify({ ok: true, cols: 20, rows: 4, resumed: true }),
+        data: JSON.stringify({ ok: true, cols: 20, rows: 4, resumed: true, resume_id: 'pty-incarnation-run' }),
       })
     })
 
@@ -704,6 +1142,7 @@ describe('the terminal on a phone', () => {
       write: true,
       follow: true,
       resume: true,
+      resume_id: 'pty-incarnation-run',
       cursor: 0,
       cols: 80,
       rows: 24,
@@ -732,6 +1171,65 @@ describe('the terminal on a phone', () => {
     await vi.waitFor(() => expect(input()?.readOnly).toBe(false))
     // The keys a soft keyboard has not got arrive with the ability to type.
     expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
+    view.unmount()
+  })
+  it('reattaches once when a desktop owner crosses the phone breakpoint', async () => {
+    const resize = atViewport(1024, { height: 844, pointer: 'coarse' })
+    const view = mount()
+    attached()
+    expect(StubSocket.opened).toHaveLength(1)
+
+    resize(390)
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const reopened = StubSocket.last()
+    act(() => {
+      reopened.onopen?.()
+      reopened.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          cols: 80,
+          rows: 24,
+          resumed: true,
+          resume_id: 'pty-incarnation-run',
+        }),
+      })
+    })
+
+    expect(reopened.frames()).toHaveLength(1)
+    expect(reopened.frames()[0]).toMatchObject({ follow: true, resume: true })
+    view.unmount()
+  })
+
+  it('reattaches on a phone follow change even after an explicit mirror choice', async () => {
+    const resize = atViewport(1024, { height: 844, pointer: 'coarse' })
+    const view = mount()
+    attached()
+
+    fireEvent.click(screen.getByText('Steering'))
+    const released = StubSocket.last()
+    act(() => {
+      released.onopen?.()
+      released.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          cols: 80,
+          rows: 24,
+          resumed: true,
+          resume_id: 'pty-incarnation-run',
+        }),
+      })
+    })
+    expect(StubSocket.opened).toHaveLength(2)
+
+    resize(390)
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    const reopened = StubSocket.last()
+    act(() => reopened.onopen?.())
+    expect(reopened.frames()).toHaveLength(1)
+    expect(reopened.frames()[0]).toMatchObject({ follow: true, resume: true })
+    expect(reopened.frames()[0]).not.toHaveProperty('write')
     view.unmount()
   })
 })

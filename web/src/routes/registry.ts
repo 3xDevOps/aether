@@ -6,6 +6,12 @@ import type { ComponentType } from 'react'
 
 export interface RouteProps {
   params: Record<string, string>
+  /** Terminal routes are inactive while retained by CenterView's cache. */
+  active?: boolean
+  /** Reports the number of parsed terminal cells held by an inactive view. */
+  onTerminalWeight?: (cells: number) => void
+  /** Reports that the cached terminal can no longer be resumed. */
+  onTerminalInvalidate?: () => void
 }
 
 const registry: Record<string, ComponentType<RouteProps>> = {}

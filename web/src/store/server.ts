@@ -79,6 +79,8 @@ export interface ServerSlice {
   connection: ConnectionState
   /** Changes whenever a caller needs to restart the connection lifecycle. */
   connectionEpoch: number
+  /** Event-log generation used to scope caches whose keys include run IDs. */
+  terminalCacheEpoch: number
   /** Highest event sequence applied; the cursor a reconnect replays from. */
   lastSeq: number
   hydrated: boolean
@@ -129,56 +131,61 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       unreachable: null,
     })
   return {
-  info: null,
-  identityKey: null,
-  capabilities: null,
-  connection: 'connecting',
-  connectionEpoch: 0,
-  lastSeq: 0,
-  hydrated: false,
-  hydrationError: null,
-  streamDead: false,
-  unreachable: null,
-  serverUpdate: null,
-  serverUpdateError: null,
-  serverUpdateProgress: null,
-  setInfo: (info) => set({ info }),
-  setIdentityKey: (identityKey) => set({ identityKey }),
-  setCapabilities: (capabilities) => set({ capabilities }),
-  setConnection: (connection) => set({ connection }),
-  noteSeq: (seq) =>
-    set((s) => (seq > s.lastSeq ? { lastSeq: seq } : {})),
-  resetSeq: () => set({ lastSeq: 0 }),
-  setHydrated: (hydrated, error = null) =>
-    set({ hydrated, hydrationError: error }),
-  setStreamDead: () => set({ streamDead: true }),
-  setUnreachable: (unreachable) => set({ unreachable }),
-  setServerUpdate: (serverUpdate) =>
-    set((s) => ({
-      serverUpdate,
-      serverUpdateError: null,
-      // The status is re-read on every reconnect, which is how an update
-      // ends: a server already running the version the phases were about
-      // has finished, so the progress is history and must stop saying a
-      // restart is coming.
-      serverUpdateProgress:
-        s.serverUpdateProgress &&
-        bareVersion(s.serverUpdateProgress.version ?? '') ===
-          bareVersion(serverUpdate.server_version)
-          ? null
-          : s.serverUpdateProgress,
-    })),
-  setServerUpdateFailed: (serverUpdateError) => set({ serverUpdateError }),
-  applyServerUpdate: (payload) =>
-    set((s) =>
-      stalePhase(s.serverUpdateProgress, payload)
-        ? {}
-        : { serverUpdateProgress: payload },
-    ),
-  resetConnection,
-  reconnect: () => {
-    resetConnection()
-    set((s) => ({ connectionEpoch: s.connectionEpoch + 1 }))
-  },
-}
+    info: null,
+    identityKey: null,
+    capabilities: null,
+    connection: 'connecting',
+    connectionEpoch: 0,
+    terminalCacheEpoch: 0,
+    lastSeq: 0,
+    hydrated: false,
+    hydrationError: null,
+    streamDead: false,
+    unreachable: null,
+    serverUpdate: null,
+    serverUpdateError: null,
+    serverUpdateProgress: null,
+    setInfo: (info) => set({ info }),
+    setIdentityKey: (identityKey) => set({ identityKey }),
+    setCapabilities: (capabilities) => set({ capabilities }),
+    setConnection: (connection) => set({ connection }),
+    noteSeq: (seq) =>
+      set((s) => (seq > s.lastSeq ? { lastSeq: seq } : {})),
+    resetSeq: () =>
+      set((s) => ({
+        lastSeq: 0,
+        terminalCacheEpoch: s.terminalCacheEpoch + 1,
+      })),
+    setHydrated: (hydrated, error = null) =>
+      set({ hydrated, hydrationError: error }),
+    setStreamDead: () => set({ streamDead: true }),
+    setUnreachable: (unreachable) => set({ unreachable }),
+    setServerUpdate: (serverUpdate) =>
+      set((s) => ({
+        serverUpdate,
+        serverUpdateError: null,
+        // The status is re-read on every reconnect, which is how an update
+        // ends: a server already running the version the phases were about
+        // has finished, so the progress is history and must stop saying a
+        // restart is coming.
+        serverUpdateProgress:
+          s.serverUpdateProgress &&
+          bareVersion(s.serverUpdateProgress.version ?? '') ===
+            bareVersion(serverUpdate.server_version)
+            ? null
+            : s.serverUpdateProgress,
+      })),
+    setServerUpdateFailed: (serverUpdateError) => set({ serverUpdateError }),
+    applyServerUpdate: (payload) =>
+      set((s) =>
+        stalePhase(s.serverUpdateProgress, payload)
+          ? {}
+          : { serverUpdateProgress: payload },
+      ),
+    resetConnection,
+    reconnect: () => {
+      resetConnection()
+      set((s) => ({ connectionEpoch: s.connectionEpoch + 1 }))
+    },
+  }
 }

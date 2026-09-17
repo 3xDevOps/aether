@@ -11,6 +11,8 @@ package ptyhost
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
+
+const resumeIDBytes = 32
+
+func newResumeID() (string, error) {
+	var raw [resumeIDBytes]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw[:]), nil
+}
 
 // WriteGate is the Wave 3 capability-check hook for write-mode attach.
 // nil = allow everyone (Wave 1 default). The hook is the whole contract;
@@ -169,15 +181,17 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	if err := h.reserve(key); err != nil {
 		return err
 	}
-	// Replace a session that ended (its process exited) so a fresh process
-	// can reuse the key: a run-shell tab whose shell exited must be
-	// reopenable. stop() is idempotent and closes the old attachment.
+	var err error
+	resumeID, err := newResumeID()
+	if err != nil {
+		h.unreserve(key)
+		return fmt.Errorf("ptyhost: generate resume id: %w", err)
+	}
 	if prev := h.lookup(key); prev != nil {
 		prev.stop()
 	}
 	path := h.transcriptPath(key)
 	_, isRun := key.Run()
-	var err error
 	var seed []byte
 	var modes modeScanner
 	var screen *terminalScreen
@@ -231,6 +245,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	_ = att.Resize(ctx, initialCols, initialRows)
 	s := &session{
 		run:          key,
+		resumeID:     resumeID,
 		att:          att,
 		tr:           tr,
 		history:      history,
@@ -464,9 +479,9 @@ type AttachClient struct {
 	// makes the reattach lossless: the session hands back exactly what it
 	// missed, rather than everything or nothing.
 	Cursor uint64
-	// ControlSessionID and ControlGeneration identify the fenced writable
-	// lease. They are carried to the input guard so bytes read before a
-	// takeover cannot be delivered after it.
+	// ResumeID identifies the PTY process incarnation that produced Cursor.
+	// Resume is honored only when this matches the current session.
+	ResumeID          string
 	ControlSessionID  string
 	ControlGeneration uint64
 	// Authorize completes the write authorization synchronously before the
@@ -501,12 +516,12 @@ type ShellTabReservation interface {
 }
 
 // ResumeWriter is an attach conn that reports how a resume was answered:
-// the cursor this client now holds, and whether the session could still
-// serve the one it asked from. A client told it was not resumed has to
-// clear its screen before the replay that follows, because that replay is
-// the whole scrollback rather than the gap.
+// the cursor this client now holds, whether the session could still serve
+// the one it asked from, and the current PTY process incarnation. A client
+// told it was not resumed has to clear its screen before the replay that
+// follows, because that replay is the whole scrollback rather than the gap.
 type ResumeWriter interface {
-	SetResume(cursor uint64, resumed bool)
+	SetResume(cursor uint64, resumed bool, resumeID string)
 }
 
 // GeometryWriter is an attach conn that wants the session's PTY size: once
@@ -619,7 +634,10 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	// reports it, so a follower draws what the writers see from its first
 	// frame rather than from the first change after it joined.
 	c.tellGeometry(c.replayCols, c.replayRows)
-	c.tellResume()
+	s.mu.Lock()
+	resumeID := s.resumeID
+	s.mu.Unlock()
+	c.tellResume(resumeID)
 
 	readErr := make(chan error, 1)
 	readDone := make(chan struct{})

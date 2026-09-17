@@ -296,11 +296,25 @@ instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
 
-Taking control and handing it back normally keep the screen and scrollback you
-are looking at: they are reattaches with different permissions, not a history
-redraw. If resume cannot be honored, the server may send the complete retained
-history again; the dashboard applies that history through the same hidden,
-incremental, ordered transaction, so no historical redraw appears as playback.
+Changing away from a run terminal no longer destroys its primary terminal
+immediately. A recently visited terminal remains in browser memory, so returning
+shows its parsed screen and scrollback at once. While it is inactive, its socket
+closes intentionally: you are no longer **Watching**, and it has no active
+control transport or geometry participation. The retained surface is only the
+TerminalPane/xterm; the RunHeader, run tabs, actions, Run Dock, and Run Room
+unmount while inactive, so their fixed IDs and auxiliary resources are unique to
+the active route. This cache is not persistent across a reload or browser tab.
+
+On return, the dashboard reconnects with `resume` only when it retained the
+server's nonempty `resume_id` for that PTY incarnation, and sends that ID with
+the settled cursor. Without the ID it performs a full attach. A successful
+resume supplies only the gap. If resume cannot be honored, the dashboard
+replays the complete retained transcript through the same hidden, ordered
+transaction, so there is no visible historical timelapse. Writes that settle
+while parked immediately refresh the cache's total normal-plus-alternate buffer
+weight. A completed entry whose session ended does not reconnect unless the
+same run is relaunched; that transition records a refresh while parked and
+full-attaches once active.
 
 ### Earlier output and full TUI history
 
