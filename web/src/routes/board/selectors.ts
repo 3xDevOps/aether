@@ -48,8 +48,9 @@ export const bucketLabel: Record<Bucket, string> = {
 }
 
 /**
- * Lifecycle to bucket. `needs-attention` covers both stalls and clean exits
- * waiting on run.close - the reason string on the card tells them apart.
+ * Lifecycle to bucket. `needs-attention` covers both stalls and pending
+ * approvals - the reason string on the card tells them apart. A clean exit
+ * presents as `completed`, which lands in Done, not here.
  */
 export function bucketOf(state: PresentationState): Bucket {
   switch (state) {

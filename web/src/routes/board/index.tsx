@@ -1,26 +1,37 @@
 import { Archive, CheckCheck, Rocket } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
-import { canLaunch } from '@/lib/commands'
+import { api } from '@/lib/api'
+import {
+  canLaunch,
+  clearDonePlan,
+  runClearDone,
+  type ClearDoneCandidate,
+  type ClearDonePlan,
+} from '@/lib/commands'
 import { useDelayed } from '@/lib/hooks'
 import { registerRoute } from '@/routes/registry'
+import { ClearDoneConfirm } from '@/routes/board/clear-done-dialog'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
 import { useBoard, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { useCapability, useSelfRole } from '@/store/hooks'
+import { useCapability, useSelf, useSelfRole } from '@/store/hooks'
+import type { RunRecord } from '@/store/runs'
 import '@/components/palette'
 
 /** The default centre view: the active workspace's run cards in three buckets. */
 export function Board() {
   const { columns, archivedCards } = useBoard()
   const ackAll = useStore((s) => s.ackAll)
+  const removeRun = useStore((s) => s.removeRun)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const caps = useCapability()
+  const self = useSelf()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
@@ -33,6 +44,13 @@ export function Board() {
   // Nothing to sort into buckets, and nothing still on its way.
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
+
+  const doneCandidates: ClearDoneCandidate[] =
+    columns
+      .find((c) => c.key === 'done')
+      ?.cards.map((card) => ({ run: card.run, workspace: card.workspace })) ?? []
+  const donePlan = clearDonePlan(doneCandidates, caps, self)
+  const runClear = (eligible: RunRecord[]) => runClearDone(eligible, { api, removeRun })
 
   const [showArchived, setShowArchived] = useState(false)
   // The toggle only exists while there is something behind it; once the
@@ -111,6 +129,9 @@ export function Board() {
                       showing: showArchived,
                       onToggle: setShowArchived,
                     }}
+                    clearDone={
+                      showArchived ? undefined : { plan: donePlan, onRun: runClear }
+                    }
                   />
                 ) : (
                   <Column key={column.key} column={column} placeholder={placeholder} />
@@ -191,21 +212,34 @@ interface ArchivedToggle {
   onToggle: (showing: boolean) => void
 }
 
+/** The Done header's bulk-archive action, hidden while archived.showing. */
+interface ClearDoneAction {
+  plan: ClearDonePlan
+  onRun: (eligible: RunRecord[]) => Promise<void>
+}
+
 function Column({
   column,
   placeholder,
   archived,
+  clearDone,
 }: {
   column: BoardColumn
   placeholder: 'skeleton' | 'empty' | 'none'
   archived?: ArchivedToggle
+  clearDone?: ClearDoneAction
 }) {
   return (
     <section
       className="flex min-w-0 flex-col border-b border-border bg-sidebar/35 last:border-b-0 lg:min-h-0 lg:border-b-0 lg:border-r lg:last:border-r-0"
       aria-label={column.label}
     >
-      <ColumnHeader label={column.label} count={column.cards.length} archived={archived} />
+      <ColumnHeader
+        label={column.label}
+        count={column.cards.length}
+        archived={archived}
+        clearDone={clearDone}
+      />
       <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
           <RunCard key={card.run.id} card={card} />
@@ -230,15 +264,38 @@ function ColumnHeader({
   label,
   count,
   archived,
+  clearDone,
 }: {
   label: string
   count: number
   archived?: ArchivedToggle
+  clearDone?: ClearDoneAction
 }) {
+  const heading = useRef<HTMLHeadingElement>(null)
+  const actions = useRef<HTMLDivElement>(null)
+  // Radix returns focus to Clear done's own trigger on close, but that
+  // button stops rendering once nothing eligible is left - exactly what a
+  // fully successful clear leaves behind. Fall back to the Archived toggle
+  // if this header has one, otherwise the heading itself, the way
+  // `takesFocus` in run-dock.tsx claims a placeholder when a terminal's
+  // element disappears out from under the keyboard.
+  const takeFocus = () => {
+    if (document.activeElement !== document.body) return
+    const toggle = actions.current?.querySelector<HTMLElement>('[aria-pressed]')
+    ;(toggle ?? heading.current)?.focus()
+  }
+
   return (
     <header className="flex min-h-[35px] shrink-0 items-center justify-between gap-2 border-b border-border px-3">
-      <h2 className="min-w-0 truncate text-[13px] font-semibold leading-5">{label}</h2>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <h2
+        ref={heading}
+        tabIndex={-1}
+        className="min-w-0 truncate text-[13px] font-semibold leading-5"
+      >
+        {label}
+      </h2>
+      <div ref={actions} className="flex shrink-0 items-center gap-1.5">
+        {clearDone && <ClearDoneButton {...clearDone} onClosed={takeFocus} />}
         {archived && archived.count > 0 && (
           <Tooltip>
             <Tooltip.Trigger<'button'>
@@ -266,6 +323,78 @@ function ColumnHeader({
         </Chip>
       </div>
     </header>
+  )
+}
+
+/**
+ * Archives every eligible Done card at once, behind a confirm dialog that
+ * states what it will archive and what stays - see "Clear done archives
+ * every eligible Done card at once" in docs/dashboard-frontend.md. `plan`
+ * tracks Done live while this button is idle; once the dialog opens, it
+ * freezes to a snapshot, so an archive landing mid-confirm cannot change
+ * the question being asked or unmount the dialog out from under itself.
+ */
+function ClearDoneButton({
+  plan,
+  onRun,
+  onClosed,
+}: ClearDoneAction & { onClosed: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [snapshot, setSnapshot] = useState<ClearDonePlan | null>(null)
+  const wasOpen = useRef(false)
+
+  // Fires once the render that closes the dialog has committed, so
+  // `onClosed` finds the DOM - the Archived toggle included - already
+  // reflecting whatever this run archived.
+  useEffect(() => {
+    if (wasOpen.current && !open) onClosed()
+    wasOpen.current = open
+  }, [open, onClosed])
+
+  const openConfirm = () => {
+    setSnapshot(plan)
+    setOpen(true)
+  }
+
+  const confirm = async () => {
+    if (!snapshot) return
+    setRunning(true)
+    await onRun(snapshot.eligible)
+    setRunning(false)
+    setOpen(false)
+  }
+
+  return (
+    <>
+      {plan.eligible.length > 0 && (
+        <Tooltip>
+          <Tooltip.Trigger<'button'>
+            render={(triggerProps) => (
+              <Button
+                {...triggerProps}
+                variant="ghost"
+                size="sm"
+                className="h-[22px] min-h-[22px] px-1.5 text-xs"
+                onClick={openConfirm}
+              >
+                <Archive className="size-3" aria-hidden />
+                Clear done
+              </Button>
+            )}
+          />
+          <Tooltip.Content>Archive every finished run you may act on</Tooltip.Content>
+        </Tooltip>
+      )}
+      {open && snapshot && (
+        <ClearDoneConfirm
+          plan={snapshot}
+          running={running}
+          onConfirm={() => void confirm()}
+          onCancel={() => setOpen(false)}
+        />
+      )}
+    </>
   )
 }
 

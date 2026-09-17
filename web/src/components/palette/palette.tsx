@@ -18,6 +18,7 @@ import {
 } from '@/lib/commands'
 import { runLabel, stateLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
+import { useBoard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { useAttentionRuns, useCapability, useSelf } from '@/store/hooks'
 
@@ -55,6 +56,11 @@ export function PaletteBody({
   const pausedRuns = useStore((s) => s.pausedRuns)
   const cap = useCapability()
   const self = useSelf()
+  const { columns } = useBoard()
+  const doneCandidates =
+    columns
+      .find((c) => c.key === 'done')
+      ?.cards.map((card) => ({ run: card.run, workspace: card.workspace })) ?? []
   const selected = useRef<Command | null>(null)
   const complete = () => {
     const command = selected.current
@@ -122,7 +128,7 @@ export function PaletteBody({
         )}
 
         <CommandGroup heading="Board actions">
-          {boardCommands({ cap, role: self.role }).map(item)}
+          {boardCommands({ cap, self, doneCandidates }).map(item)}
         </CommandGroup>
 
         {goTo.length > 0 && (

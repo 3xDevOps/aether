@@ -777,6 +777,20 @@ run header for one, show `deletesInLabel(deletes_at)` (`src/lib/format.ts`):
 "deleted today" under 24h (past due included), "deleted in 1 day" under
 48h, then "deleted in N days".
 
+**Clear done archives every eligible Done card at once.** The Done
+`ColumnHeader` grows a "Clear done" button, and the palette carries the same
+action as "Clear done runs"; both open the one confirm dialog
+(`ClearDoneConfirm`, `src/routes/board/clear-done-dialog.tsx`) over a plan
+`clearDonePlan()` (`src/lib/commands.ts`) snapshots when it opens. Eligible:
+`isArchivable`, not already archived, and killable by the caller. The
+dialog states what it will archive and, by count, what stays and why -
+still `completed` and awaiting Close, or not this caller's to kill. On
+confirm, `runClearDone()` archives the eligible runs one at a time, never
+`Promise.all` - the server has a single SQLite writer - and treats a
+`CodeNotFound` refusal as success (the run is already gone) by removing it
+locally instead of retrying. It reports one toast: "Archived N runs", or
+"Archived N, M failed: " plus the first real failure's message verbatim.
+
 ### Reason and paused on the wire
 
 **The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
@@ -804,8 +818,9 @@ verb rather than offering the one the server would refuse.
 verbs (pause/resume, send a message to the agent, close as merged or abandoned
 at any stage that holds a record, kill, delete, archive/restore,
 protect/unprotect, relaunch, pull branch, hand off) and the board verbs (open
-the board or the list, launch, launch from a template, mark all seen) - as
-data: an id, a label, an icon, the capability gate, and the call itself.
+the board or the list, launch, launch from a template, mark all seen, clear
+every eligible run out of Done) - as data: an id, a label, an icon, the
+capability gate, and the call itself.
 `useCommandRunner()` performs one and reports the outcome the same way
 everywhere: gateway verbs toast their past-tense name or the server's refusal
 verbatim. Deleting a run also removes it from the local run map after the

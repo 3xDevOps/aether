@@ -1,6 +1,8 @@
-import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { toast } from 'sonner'
 import { registerSlot } from '@/components/slots'
-import type { Run } from '@/lib/types'
+import { api, ApiError } from '@/lib/api'
+import type { GatewayCapabilities, Run } from '@/lib/types'
 import { Board } from '@/routes/board'
 import { useBoard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
@@ -13,9 +15,20 @@ import {
   fakeApi,
   otherWorkspace,
   run,
+  serverInfo,
   workspace,
 } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
+
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>()
+  const { fakeApi } = await import('@/test/fixtures')
+  return { ...actual, api: fakeApi() }
+})
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}))
 
 function seed(runs: Run[], active = workspace.id) {
   useStore.setState({
@@ -31,6 +44,14 @@ function seed(runs: Run[], active = workspace.id) {
     lastSeq: 0,
     route: { name: 'board', params: {} },
   })
+}
+
+const everyMethod: GatewayCapabilities = { gateway: 'remote', methods: ['*'], ws: [] }
+
+/** `seed`, plus the capability and caller identity Clear done reads. */
+function seedAs(self: typeof alice, runs: Run[]) {
+  seed(runs)
+  useStore.setState({ capabilities: everyMethod, info: { ...serverInfo, member: self } })
 }
 
 const stalled = run({
@@ -92,9 +113,36 @@ function timeline(kind: 'pause' | 'resume', seq: number) {
   )
 }
 
+/**
+ * One real run.archived event, through the same path the server publishes
+ * it on - Clear done relies on this, not on the RPC response, to move a run
+ * in the store.
+ */
+function archived(
+  runID: string,
+  seq: number,
+  payload: { archived_at: string | null; deletes_at: string | null },
+) {
+  return applyEvent(
+    useStore,
+    {
+      id: `evt_archived_${seq}`,
+      seq,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: runID,
+      actor_id: '',
+      type: 'run.archived',
+      payload,
+    },
+    fakeApi(),
+  )
+}
+
 // A stub left standing by a failing assertion would gut navigator for every
 // test after it, turning one real failure into a file full of them.
 afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => vi.clearAllMocks())
 
 describe('board', () => {
   it('deals runs into the three buckets, newest first, the working one bouncing', () => {
@@ -605,5 +653,306 @@ describe('board', () => {
 
     expect(column('Working').getByText('live despite archived_at')).toBeDefined()
     expect(screen.queryByRole('button', { name: /^Archived/ })).toBeNull()
+  })
+})
+
+describe('Clear done', () => {
+  it('archives what a collaborator may act on, skipping a completed run and a protected run owned by someone else', async () => {
+    const eligible = run({
+      id: 'run_clear_eligible',
+      status: 'merged',
+      member_id: alice.id,
+      finished_at: '2026-08-14T10:10:00Z',
+    })
+    const stillOpen = run({
+      id: 'run_clear_completed',
+      status: 'completed',
+      member_id: alice.id,
+      finished_at: '2026-08-14T10:05:00Z',
+    })
+    const someoneElsesProtected = run({
+      id: 'run_clear_protected',
+      status: 'merged',
+      member_id: alice.id,
+      protected: true,
+      finished_at: '2026-08-14T10:15:00Z',
+    })
+    seedAs(bob, [eligible, stillOpen, someoneElsesProtected])
+    render(<Board />)
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    const dialog = within(await screen.findByRole('dialog'))
+
+    expect(dialog.getByText('Archive 1 finished run?')).toBeDefined()
+    expect(
+      dialog.getByText(
+        '1 run stays: completed but not yet closed - close them as merged or abandoned first.',
+      ),
+    ).toBeDefined()
+    expect(dialog.getByText('1 run stays: you may not act on it.')).toBeDefined()
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Archive 1' }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    expect(api.runArchive).toHaveBeenCalledTimes(1)
+    expect(api.runArchive).toHaveBeenCalledWith(eligible.id, true)
+    expect(api.runArchive).not.toHaveBeenCalledWith(stillOpen.id, true)
+    expect(api.runArchive).not.toHaveBeenCalledWith(someoneElsesProtected.id, true)
+  })
+
+  it('lets an admin archive every eligible run regardless of ownership or protection', async () => {
+    const eligible = run({
+      id: 'run_clear_eligible2',
+      status: 'merged',
+      member_id: bob.id,
+      finished_at: '2026-08-14T10:10:00Z',
+    })
+    const stillOpen = run({
+      id: 'run_clear_completed2',
+      status: 'completed',
+      member_id: bob.id,
+      finished_at: '2026-08-14T10:05:00Z',
+    })
+    const someoneElsesProtected = run({
+      id: 'run_clear_protected2',
+      status: 'merged',
+      member_id: bob.id,
+      protected: true,
+      finished_at: '2026-08-14T10:15:00Z',
+    })
+    seedAs(alice, [eligible, stillOpen, someoneElsesProtected])
+    render(<Board />)
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    const dialog = within(await screen.findByRole('dialog'))
+
+    expect(dialog.getByText('Archive 2 finished runs?')).toBeDefined()
+    expect(
+      dialog.getByText(
+        '1 run stays: completed but not yet closed - close them as merged or abandoned first.',
+      ),
+    ).toBeDefined()
+    expect(dialog.queryByText(/you may not act on/)).toBeNull()
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Archive 2' }))
+
+    // someoneElsesProtected finished later, so it archives first: eligible
+    // runs go newest first, same as the Done column itself.
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 2 runs'))
+    expect(api.runArchive).toHaveBeenCalledTimes(2)
+    expect(api.runArchive).toHaveBeenNthCalledWith(1, someoneElsesProtected.id, true)
+    expect(api.runArchive).toHaveBeenNthCalledWith(2, eligible.id, true)
+    expect(api.runArchive).not.toHaveBeenCalledWith(stillOpen.id, true)
+  })
+
+  it('archives eligible runs one at a time, newest first, never in parallel', async () => {
+    const first = run({
+      id: 'run_seq_first',
+      status: 'failed',
+      finished_at: '2026-08-14T10:20:00Z',
+    })
+    const second = run({
+      id: 'run_seq_second',
+      status: 'merged',
+      finished_at: '2026-08-14T10:10:00Z',
+    })
+    seedAs(alice, [first, second])
+    render(<Board />)
+
+    const calls: string[] = []
+    let resolveFirst: (() => void) | undefined
+    vi.mocked(api.runArchive).mockImplementation((id: string) => {
+      calls.push(id)
+      if (calls.length === 1) {
+        return new Promise((resolve) => {
+          resolveFirst = () =>
+            resolve(run({ id, status: 'failed', archived_at: '2026-08-14T11:00:00Z' }))
+        })
+      }
+      return Promise.resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
+    })
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
+    )
+
+    await waitFor(() => expect(calls).toEqual([first.id]))
+    expect(calls).not.toContain(second.id)
+
+    resolveFirst?.()
+    await waitFor(() => expect(calls).toEqual([first.id, second.id]))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 2 runs'))
+  })
+
+  it('keeps going past a failure and reports the real server error once', async () => {
+    const ok = run({ id: 'run_fail_ok', status: 'merged', finished_at: '2026-08-14T10:20:00Z' })
+    const bad = run({ id: 'run_fail_bad', status: 'failed', finished_at: '2026-08-14T10:10:00Z' })
+    seedAs(alice, [ok, bad])
+    render(<Board />)
+
+    // A different code than the not-found one below, so a pass here proves
+    // the match is on the code and not just on being an ApiError.
+    vi.mocked(api.runArchive).mockImplementation(async (id: string) => {
+      if (id === bad.id) throw new ApiError(500, 'workspace is locked', -32001)
+      return run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' })
+    })
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
+    )
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Archived 1, 1 failed: workspace is locked'),
+    )
+    expect(api.runArchive).toHaveBeenCalledTimes(2)
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('treats a not-found failure as success and removes the run locally', async () => {
+    const gone = run({ id: 'run_gone', status: 'merged', finished_at: '2026-08-14T10:10:00Z' })
+    seedAs(alice, [gone])
+    render(<Board />)
+
+    vi.mocked(api.runArchive).mockRejectedValue(
+      new ApiError(404, 'run.archive: not found', -32000),
+    )
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
+    )
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    expect(useStore.getState().runs[gone.id]).toBeUndefined()
+  })
+
+  it('moves focus to the Done heading once a not-found removal leaves nothing archived to fall back on', async () => {
+    const gone = run({ id: 'run_gone_focus', status: 'merged', finished_at: '2026-08-14T10:10:00Z' })
+    // A run left in Working, so removing `gone` leaves Done empty rather
+    // than emptying the whole board - the Done heading has to stay mounted
+    // for this to be a meaningful fallback target.
+    const other = run({ id: 'run_other_focus', status: 'running' })
+    seedAs(alice, [gone, other])
+    render(<Board />)
+
+    vi.mocked(api.runArchive).mockRejectedValue(
+      new ApiError(404, 'run.archive: not found', -32000),
+    )
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
+    )
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByRole('button', { name: /^Archived/ })).toBeNull()
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Done' })),
+    )
+  })
+
+  it('moves focus to the Archived toggle once a successful clear archives the last live card', async () => {
+    const solo = run({ id: 'run_solo_focus', status: 'merged', finished_at: '2026-08-14T10:10:00Z' })
+    seedAs(alice, [solo])
+    render(<Board />)
+
+    // The RPC succeeds but carries no store update of its own; the run only
+    // moves once its run.archived event lands, same as a live gateway.
+    vi.mocked(api.runArchive).mockImplementation(async (id: string) => {
+      await archived(id, 1, { archived_at: '2026-08-14T11:00:00Z', deletes_at: '2026-08-28T10:00:00Z' })
+      return run({ id, status: 'merged' })
+    })
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
+    )
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const toggle = await screen.findByRole('button', { name: 'Archived 1' })
+    await waitFor(() => expect(document.activeElement).toBe(toggle))
+  })
+
+  it('keeps the dialog open on the plan it started with while an archive it already ran shrinks Done underneath it', async () => {
+    const first = run({
+      id: 'run_snap_first',
+      status: 'failed',
+      finished_at: '2026-08-14T10:20:00Z',
+    })
+    const second = run({
+      id: 'run_snap_second',
+      status: 'merged',
+      finished_at: '2026-08-14T10:10:00Z',
+    })
+    seedAs(alice, [first, second])
+    render(<Board />)
+
+    let resolveFirst: (() => void) | undefined
+    vi.mocked(api.runArchive).mockImplementation((id: string) => {
+      if (id === first.id) {
+        return new Promise((resolve) => {
+          resolveFirst = () => {
+            // The RPC settling is not what shrinks Done - its run.archived
+            // event, fired here the way the server would, is.
+            void archived(id, 1, { archived_at: '2026-08-14T11:00:00Z', deletes_at: null })
+            resolve(run({ id, status: 'failed' }))
+          }
+        })
+      }
+      // The second call is never meant to settle within this test: only
+      // that the dialog survives the first one landing matters here.
+      return new Promise(() => {})
+    })
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
+    )
+
+    resolveFirst?.()
+    await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(second.id, true))
+    // Done has shrunk underneath the dialog: `first` carries archived_at now.
+    await waitFor(() =>
+      expect(useStore.getState().runs[first.id]?.archived_at).toBe('2026-08-14T11:00:00Z'),
+    )
+
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText('Archive 2 finished runs?')).toBeDefined()
+    expect(dialog.getByRole('button', { name: 'Archive 2' })).toBeDefined()
+  })
+
+  it('renders no Clear done button when nothing in Done is eligible', () => {
+    const stillOpen = run({ id: 'run_none_eligible', status: 'completed' })
+    seedAs(alice, [stillOpen])
+    render(<Board />)
+
+    expect(screen.queryByRole('button', { name: 'Clear done' })).toBeNull()
+  })
+
+  it('hides Clear done while the Done column is showing its archived runs', () => {
+    const eligible = run({
+      id: 'run_arch_view_eligible',
+      status: 'merged',
+      finished_at: '2026-08-14T10:10:00Z',
+    })
+    const archived = run({
+      id: 'run_arch_view_archived',
+      status: 'merged',
+      finished_at: '2026-08-10T10:00:00Z',
+      archived_at: '2026-08-14T10:00:00Z',
+      deletes_at: '2026-08-28T10:00:00Z',
+    })
+    seedAs(alice, [eligible, archived])
+    render(<Board />)
+
+    expect(column('Done').getByRole('button', { name: 'Clear done' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived 1' }))
+
+    expect(column('Done').queryByRole('button', { name: 'Clear done' })).toBeNull()
   })
 })
