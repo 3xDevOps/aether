@@ -52,8 +52,21 @@ const endedStatuses: readonly RunStatus[] = [
 /** Statuses whose container is still being built, so no PTY session exists
  * to attach to yet. */
 const startingStatuses: readonly RunStatus[] = ['queued', 'provisioning']
+function terminalBufferWeight(terminal: XtermController['terminal']): number {
+  if (!terminal) return 0
+  return (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
+}
 
-function TerminalView({ params }: RouteProps) {
+function TerminalView(props: RouteProps) {
+  return <TerminalRoute key={props.params.runId} {...props} />
+}
+
+function TerminalRoute({
+  params,
+  active = true,
+  onTerminalWeight,
+  onTerminalInvalidate,
+}: RouteProps) {
   const runID = params.runId
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.terminals[runID] ?? initialTerminal)
@@ -65,6 +78,14 @@ function TerminalView({ params }: RouteProps) {
 
   const known = run !== undefined
   const starting = run !== undefined && startingStatuses.includes(run.status)
+  // An inactive cache entry does not create a terminal or socket on its
+  // first render. Once it has been active, the xterm stays enabled while
+  // parked so its parsed screen and measured host remain available.
+  const [initialized, setInitialized] = useState(() => active && known)
+  useEffect(() => {
+    if (active && known) setInitialized(true)
+  }, [active, known])
+
   // A stalled run still has a live agent session, so it steers like a
   // running one. The disabled control and the reason beside it read this
   // one answer rather than each testing the status themselves.
@@ -76,15 +97,54 @@ function TerminalView({ params }: RouteProps) {
   const [replaying, setReplaying] = useState(false)
   const runStatusRef = useRef(run?.status)
   runStatusRef.current = run?.status
+  // A final run can be relaunched in place. Keep this separate from the
+  // attachment's ended bit so a parked view records the transition without
+  // opening transport in the background.
+  const previousStatusRef = useRef(run?.status)
+  const relaunchPendingRef = useRef(false)
+  const lifecycleActive = useRef(active)
   const attachRef = useRef<Attachment | null>(null)
-  const gate = useRef(
-    replayGate((chunk, done) => terminalRef.current?.write(chunk, done), setReplaying),
-  )
+  const attachmentAtRenderRef = useRef<Attachment | null>(null)
+  attachmentAtRenderRef.current = attachRef.current
+  const phone = useMediaQuery(phoneScreen)
+  const phoneRef = useRef(phone)
+  phoneRef.current = phone
+  const weightRef = useRef(onTerminalWeight)
+  weightRef.current = onTerminalWeight
+  const invalidateRef = useRef(onTerminalInvalidate)
+  invalidateRef.current = onTerminalInvalidate
+  const automaticWrite =
+    !phone &&
+    steerable &&
+    run?.member_id === self.id
+  // A null choice means that the member has not made a control decision for
+  // this attachment, so ownership and device changes may update the answer.
+  // Once they take or release control, that decision wins over automation.
+  const explicitWriteRef = useRef<boolean | null>(null)
+  const writeSyncRef = useRef({ automaticWrite, phone })
   const terminalRef = useRef<XtermController['terminal']>(null)
+  const gate = useRef(
+    replayGate((chunk, done) => {
+      const current = terminalRef.current
+      if (!current) {
+        done?.()
+        return
+      }
+      current.write(chunk, () => {
+        done?.()
+        // Parking intentionally closes the socket but retains xterm. A write
+        // that was already queued can settle after that transition, so report
+        // the post-parse weight rather than leaving CenterView's budget stale.
+        if (!lifecycleActive.current) {
+          weightRef.current?.(terminalBufferWeight(current))
+        }
+      })
+    }, setReplaying),
+  )
   // Read at connect time by the attachment, so a toggle takes effect on the
   // reattach without re-running the terminal's own effect.
-  const writeRef = useRef(state.write)
-  writeRef.current = state.write
+  const writeRef = useRef(automaticWrite)
+  writeRef.current = explicitWriteRef.current ?? automaticWrite
   // An owner's run attaches with write already asked for, which the server
   // grants without the member touching anything. Only a request they made
   // counts as taking control.
@@ -93,9 +153,8 @@ function TerminalView({ params }: RouteProps) {
   // geometry the ack reports and imposes none of its own, so an agent's
   // screen is neither garbled here nor reflowed to 45 columns for everyone
   // else the moment this phone takes control.
-  const phone = useMediaQuery(phoneScreen)
   const controller = useXterm({
-    enabled: known,
+    enabled: known && initialized,
     follow: phone,
     onData: (data) => {
       // A mirror's input frames are ignored by the server; not sending them
@@ -125,19 +184,31 @@ function TerminalView({ params }: RouteProps) {
   const terminal = controller.terminal
   terminalRef.current = terminal
   const { geometry, setGeometry } = controller
+  // Close is irreversible and belongs to this run/xterm lifetime. This
+  // effect deliberately does not depend on active: parking suspends the
+  // logical attachment rather than disposing it.
   useEffect(() => {
-    if (!terminal || !known) return
+    return () => {
+      const attachment = attachRef.current
+      if (!attachment) return
+      attachment.close()
+      attachRef.current = null
+    }
+  }, [known, initialized, terminal])
+
+  // Setup has no cleanup of its own. That lets active transitions call
+  // suspend/resume without tearing down the attachment; the lifetime effect
+  // above handles actual unmount, run replacement, and xterm replacement.
+  useEffect(() => {
+    if (!active || !terminal || !known || !initialized || attachRef.current) return
 
     // A stalled run still has a live, recoverable agent session. Completed
     // and final-run attaches replay history read-only. A phone never steers
     // on its own: typing into an agent from a phone is a choice, and the
     // mirror is what a member opening their own run there wants.
-    const ownerSteering =
-      !phone &&
-      steerable &&
-      run?.member_id === self.id
-    setTerminal(runID, { ...initialTerminal, write: ownerSteering })
-    writeRef.current = ownerSteering
+    explicitWriteRef.current = null
+    setTerminal(runID, { ...initialTerminal, write: automaticWrite })
+    writeRef.current = automaticWrite
     askedForControl.current = false
     setControlMetadata(undefined)
     setSessionMissing(false)
@@ -174,14 +245,25 @@ function TerminalView({ params }: RouteProps) {
         setTerminal(runID, { connection })
       },
       onRefused: (message, code) => {
+        // A final refusal makes the cached transcript untrustworthy. Reset it
+        // before notifying CenterView so an invalidated entry cannot flash
+        // stale output while it is removed.
+        terminalRef.current?.reset()
+        invalidateRef.current?.()
         setSessionMissing(code === codeUnavailable)
         setTerminal(runID, { message, refused: true })
       },
-      onWriteDenied: () => setTerminal(runID, { steerDenied: true, write: false }),
+      onWriteDenied: () => {
+        explicitWriteRef.current = false
+        writeRef.current = false
+        askedForControl.current = false
+        setTerminal(runID, { steerDenied: true, write: false })
+      },
       onControlLost: () => {
         // Control is an ephemeral lease, not a permission decision. Drop the
         // writable preference and any pending request so the reconnect is a
         // mirror, while leaving the Take control action available.
+        explicitWriteRef.current = false
         writeRef.current = false
         askedForControl.current = false
         setTerminal(runID, { steerDenied: false, write: false })
@@ -191,30 +273,101 @@ function TerminalView({ params }: RouteProps) {
       sessionPending: () => runStatusRef.current !== undefined && !endedStatuses.includes(runStatusRef.current),
       geometry,
       wantsWrite: () => writeRef.current,
-      follows: () => phone,
+      follows: () => phoneRef.current,
     })
     attachRef.current = attachment
-
-    return () => {
-      attachment.close()
-      attachRef.current = null
-    }
+    // A never-before-mounted active route starts with a fresh full attach
+    // already, so consume a relaunch marker without opening a second socket.
+    relaunchPendingRef.current = false
   }, [
-    known,
+    active,
+    automaticWrite,
     geometry,
-    setGeometry,
+    initialized,
+    known,
     markControlTaken,
-    setControlMetadata,
-    phone,
     run?.member_id,
-    steerable,
-    runID,
     self.id,
+    setGeometry,
     setTerminal,
     starting,
+    steerable,
     terminal,
   ])
+  useEffect(() => {
+    const previous = previousStatusRef.current
+    const current = run?.status
+    previousStatusRef.current = current
+    if (
+      previous !== undefined &&
+      current !== undefined &&
+      endedStatuses.includes(previous) &&
+      steerable
+    ) {
+      // `run.relaunch` keeps the same run ID and cached xterm. The old
+      // attachment is ended, so its next connection must be a full replay.
+      relaunchPendingRef.current = true
+    }
+  }, [run?.status, steerable])
+  useEffect(() => {
+    const previous = writeSyncRef.current
+    const automaticChanged = previous.automaticWrite !== automaticWrite
+    const followChanged = previous.phone !== phone
+    writeSyncRef.current = { automaticWrite, phone }
 
+    if (automaticChanged && explicitWriteRef.current === null) {
+      writeRef.current = automaticWrite
+      if (state.write !== automaticWrite) {
+        setTerminal(runID, { write: automaticWrite })
+      }
+    }
+
+    // Follow is a wire-level attach option, not just a renderer preference.
+    // Replace an active socket even when the write answer did not change (or
+    // was explicitly chosen by the member). Combining both transitions here
+    // makes a breakpoint crossing one cutover rather than two. A relaunch is
+    // stronger than either and consumes the marker so the same render cannot
+    // request a second socket.
+    if (
+      attachmentAtRenderRef.current &&
+      active &&
+      lifecycleActive.current &&
+      (followChanged || (automaticChanged && explicitWriteRef.current === null))
+    ) {
+      const relaunch = relaunchPendingRef.current
+      relaunchPendingRef.current = false
+      attachRef.current?.reopen(relaunch ? undefined : { resume: true })
+    }
+  }, [active, automaticWrite, phone, runID, setTerminal, state.write])
+  // A cached view keeps only this primary terminal mounted. Its attachment
+  // is suspended while parked, and the parsed terminal reports both buffers
+  // to CenterView's bounded cache.
+  useEffect(() => {
+    const wasActive = lifecycleActive.current
+    if (!active && (wasActive || terminal)) {
+      if (wasActive) attachRef.current?.suspend()
+    } else if (active && !wasActive) {
+      const attachment = attachRef.current
+      if (relaunchPendingRef.current && attachment) {
+        relaunchPendingRef.current = false
+        attachment.reopen()
+      } else {
+        attachment?.resume()
+      }
+    }
+    lifecycleActive.current = active
+  }, [active, terminal])
+  useEffect(() => {
+    if (!active || !lifecycleActive.current || !relaunchPendingRef.current) return
+    const attachment = attachRef.current
+    if (!attachment) return
+    relaunchPendingRef.current = false
+    attachment.reopen()
+  }, [active, run?.status, terminal])
+  useEffect(() => {
+    if (active || !terminal) return
+    weightRef.current?.(terminalBufferWeight(terminal))
+  }, [active, replaying, terminal])
   // A read-only mirror must not raise a soft keyboard that types into
   // nothing, and xterm focuses its textarea on any tap. `disableStdin` makes
   // that textarea read-only, which is what keeps the keyboard down.
@@ -228,6 +381,7 @@ function TerminalView({ params }: RouteProps) {
     return <MissingRun />
   }
   const takeControl = (takeover = false) => {
+    explicitWriteRef.current = true
     writeRef.current = true
     askedForControl.current = true
     setTerminal(runID, { write: true, steerDenied: false })
@@ -237,6 +391,7 @@ function TerminalView({ params }: RouteProps) {
   }
 
   const releaseControl = () => {
+    explicitWriteRef.current = false
     writeRef.current = false
     askedForControl.current = false
     setTerminal(runID, { write: false })
@@ -320,11 +475,17 @@ function TerminalView({ params }: RouteProps) {
       )}
     </div>
   )
+  // Cached inactive views retain only the xterm surface. RunHeader owns the
+  // fixed run-tab/panel IDs and its action toolbar, so mounting it in every
+  // cached entry would create duplicate accessibility targets.
+  const panelProps = active
+    ? runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')
+    : { className: 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' }
 
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden pr-8">
-      <RunHeader run={run} subtitle={run.branch} active="terminal" />
-      <div {...runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')}>
+      {active && <RunHeader run={run} subtitle={run.branch} active="terminal" />}
+      <div {...panelProps}>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
             <TerminalPane
@@ -334,26 +495,27 @@ function TerminalView({ params }: RouteProps) {
               writable={state.write && !starting}
               imageTarget={runID}
               toolbarEnd={attachmentControls}
-              imageTargetKey={runID}
               imageUploadEnabled={
-                !starting && state.connection === 'live' && state.write && !state.steerDenied
+                active && !starting && state.connection === 'live' && state.write && !state.steerDenied
               }
               replaying={replaying}
             >
               {starting && <TerminalSpinner label="Starting the run's container" />}
             </TerminalPane>
           </div>
-          <RunDock runID={runID} />
+          {active && <RunDock runID={runID} />}
         </div>
       </div>
-      <RunRoom
-        key={runID}
-        run={run}
-        selfID={self.id}
-        control={controlMetadata}
-        onTakeControl={takeControl}
-        onReleaseControl={releaseControl}
-      />
+      {active && (
+        <RunRoom
+          key={runID}
+          run={run}
+          selfID={self.id}
+          control={controlMetadata}
+          onTakeControl={takeControl}
+          onReleaseControl={releaseControl}
+        />
+      )}
     </div>
   )
 }

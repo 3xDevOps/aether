@@ -130,6 +130,7 @@ type client struct {
 	// replay and the client has to clear its screen after all.
 	resume      bool
 	cursor      uint64
+	resumeID    string
 	resumed     bool
 	replayCols  uint
 	replayRows  uint
@@ -154,6 +155,7 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		snapshot: a.Snapshot,
 		resume:   a.Resume,
 		cursor:   a.Cursor,
+		resumeID: a.ResumeID,
 		cols:     a.Cols,
 		rows:     a.Rows,
 		replay:   io.NopCloser(bytes.NewReader(nil)),
@@ -208,9 +210,9 @@ func (s *session) imposesNow(c *client) bool {
 	return true
 }
 
-func (c *client) tellResume() {
+func (c *client) tellResume(resumeID string) {
 	if w, ok := c.conn.(ResumeWriter); ok {
-		w.SetResume(c.cursor, c.resumed)
+		w.SetResume(c.cursor, c.resumed, resumeID)
 	}
 }
 

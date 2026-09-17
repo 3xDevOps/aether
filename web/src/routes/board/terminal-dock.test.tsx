@@ -214,7 +214,7 @@ describe('environment terminal dock', () => {
     act(() => {
       socket.onopen?.()
       socket.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1 }),
+        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
     xterm.input?.('allowed before replay')
@@ -227,7 +227,7 @@ describe('environment terminal dock', () => {
     })
     act(() => {
       socket.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1 }),
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
     xterm.input?.('blocked')
@@ -278,7 +278,7 @@ describe('environment terminal dock', () => {
 
     act(() => {
       socket.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1 }),
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
       socket.onmessage?.({ data: new Uint8Array([1]).buffer })
     })
@@ -286,7 +286,7 @@ describe('environment terminal dock', () => {
 
     act(() => {
       socket.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1 }),
+        data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()

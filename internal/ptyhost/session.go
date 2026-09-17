@@ -55,6 +55,7 @@ type pendingOutputEvent struct {
 // clients.
 type session struct {
 	run        SessionKey
+	resumeID   string
 	generation uint64
 	att        runtime.Attachment
 	tr         *castWriter
@@ -443,10 +444,11 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		if c.replayCols == 0 || c.replayRows == 0 {
 			c.replayCols, c.replayRows = s.cols, s.rows
 		}
-		// A resumed terminal can consume a raw gap only when no accepted
-		// resize occurred before that gap. Resize events are not in the raw
-		// ring, so a non-empty gap crossing one must rebuild the screen.
-		if c.resume {
+		// A resumed terminal can consume a raw gap only when its cursor
+		// belongs to this exact PTY process and no accepted resize occurred
+		// before that gap. Resize events are not in the raw ring, so a
+		// non-empty gap crossing one must rebuild the screen.
+		if c.resume && c.resumeID != "" && c.resumeID == s.resumeID {
 			if missed, ok := s.ring.since(c.cursor); ok &&
 				(!c.snapshot || len(missed) == 0 || c.cursor >= s.lastResizeCursor) {
 				c.setReplay(missed)

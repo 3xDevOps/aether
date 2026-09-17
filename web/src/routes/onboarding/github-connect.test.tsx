@@ -86,6 +86,8 @@ function attachMainTab(): EnvTerminalSocket {
     resize: vi.fn(),
     reopen: vi.fn(),
     rebind: vi.fn(),
+    suspend: vi.fn(),
+    resume: vi.fn(),
     close: vi.fn(),
   }
   useStore.getState().resetEnvTerminal()

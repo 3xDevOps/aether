@@ -47,6 +47,8 @@ interface AttachHeader {
   write?: boolean
   follow?: boolean
   resume?: boolean
+  /** The PTY process incarnation whose parsed cursor is being resumed. */
+  resume_id?: string
   cursor?: number
   cols: number
   rows: number
@@ -70,10 +72,13 @@ interface AttachFrame {
   rows?: number
   cursor?: number
   resumed?: boolean
+  /** The PTY process incarnation that produced this screen/cursor. */
+  resume_id?: string
   replay?: number
   control_generation?: number
   has_control?: boolean
 }
+
 
 export interface ControlMetadata {
   control_session_id: string
@@ -86,7 +91,11 @@ export type AttachDataKind = 'replay' | 'replay-end' | 'live'
 export type AttachDataResult = void | Promise<void>
 
 export interface AttachHandlers {
-  /** Terminal output, tagged as a frame-sized replay or live operation. */
+  /**
+   * Terminal output, tagged as a frame-sized replay or live operation. For
+   * live output, call `settled` only after the current xterm generation has
+   * parsed the bytes; the callback is what advances the resumable cursor.
+   */
   onData?: (
     chunk: Uint8Array,
     kind: AttachDataKind,
@@ -176,6 +185,12 @@ export interface Attachment {
     takeover?: boolean
     releaseControl?: boolean
   }) => void
+  /**
+   * Park the transport without disposing the parsed terminal. A later
+   * `resume` reuses the parsed cursor and control-session identity.
+   */
+  suspend: () => void
+  resume: () => void
   /** Current tab identity and server-fenced control lease metadata. */
   controlMetadata?: () => ControlMetadata
   /** Update callbacks when a persistent socket gets a new terminal host. */
@@ -290,14 +305,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let socket: WebSocket | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
+  let unavailableTries = 0
+  let waitingForSession = false
   // The missing-session budget is its own count: an ordinary reconnect must
   // neither spend it nor be slowed by it.
-  let unavailableTries = 0
-  // A tolerated missing-session refusal reconnects like any dropped socket,
-  // so without this the deliberate wait would report itself offline once
-  // `attempt` had climbed past the threshold on earlier drops. Each socket
-  // earns it again, so a plain drop mid-wait is still reported as one.
-  let waitingForSession = false
   let disposed = false
   let refused = false
   // The run's terminal session is over and this attachment is parked. A
@@ -305,17 +316,24 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // a dropped socket or a foreground return - may reopen it; only an
   // explicit reopen() does.
   let ended = false
+  let suspended = false
+  let resumePending = false
+  // Once an in-flight replay is abandoned, the xterm screen may contain only
+  // a prefix of the session. Keep it invalid until a fresh replay has parsed
+  // completely; no later resume may trust that partial screen.
+  let replayInvalid = false
   let attached = false
   // Sticky for the life of the attachment: once the server has said this
   // member cannot steer, every reconnect is a mirror.
   let writeDenied = false
   type ReplayOperation =
-    | { type: 'data'; chunk: Uint8Array; kind: AttachDataKind }
+    | { type: 'data'; chunk: Uint8Array; kind: AttachDataKind; cursor?: number }
     | { type: 'geometry'; cols: number; rows: number }
   // Keep each replay operation backed by the WebSocket frame that carried it.
   // In particular, never allocate a transcript-sized buffer from ack.replay.
   let replayRemaining = 0
   let replayReady = true
+  let replayIsFull = false
   let replayQueue: ReplayOperation[] = []
   let replayQueueOffset = 0
   let replayDraining = false
@@ -327,10 +345,20 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         releaseControl?: boolean
       }
     | null = null
-  // How much of the session's output this client holds. The ack sets it to
-  // where the replay leaves off and every live byte advances it, so a
-  // reattach can ask for exactly what it missed.
-  let cursor = 0
+  // A resume cursor is meaningful only for the PTY incarnation that produced
+  // the retained screen. The server's nonempty ack value becomes the fence
+  // for every subsequent resume request; it intentionally survives a full
+  // replay fallback so the next request can target the new incarnation.
+  let resumeID: string | null = null
+  // The ack cursor is the boundary at which the declared replay ends. Bytes
+  // received after it are accounted for independently until xterm confirms
+  // that it parsed them.
+  let receivedCursor = 0
+  let parsedCursor = 0
+  let replayCursorTarget: number | null = null
+  const pendingLiveWrites = new Set<Promise<void>>()
+  let reopenGeneration = 0
+  let deliveryGeneration = 0
   // Stable for this logical browser tab and intentionally distinct from
   // another tab by the same member. Reconnects reuse it to resume control.
   const controlSessionID = crypto.randomUUID()
@@ -352,6 +380,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     drainGeneration++
     replayRemaining = 0
     replayReady = true
+    replayIsFull = false
+    replayCursorTarget = null
     replayQueue = []
     replayQueueOffset = 0
   }
@@ -404,6 +434,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     attached = false
     waitingForSession = false
     retryAfterReplay = false
+
     pendingReopen = null
     clearReplay()
     drop()
@@ -412,23 +443,84 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     handlers.onRefused(`terminal live output failed: ${detail}`)
     handlers.onState('offline')
   }
+  const advanceParsed = (target: number, generation: number) => {
+    if (generation !== deliveryGeneration || disposed || refused) return
+    parsedCursor = Math.max(parsedCursor, target)
+  }
+
+  const trackPendingLive = (
+    chunk: Uint8Array,
+    target: number,
+    generation: number,
+  ) => {
+    const onData = handlers.onData
+    if (!onData) {
+      advanceParsed(target, generation)
+      return
+    }
+
+    let complete!: () => void
+    let callbackSettled = false
+    const settledCompletion = new Promise<void>((resolve) => {
+      complete = () => {
+        if (callbackSettled) return
+        callbackSettled = true
+        resolve()
+      }
+    })
+    let completion: AttachDataResult
+    try {
+      completion = onData(chunk, 'live', complete)
+    } catch (error) {
+      if (generation === deliveryGeneration && !disposed && !refused) failLive(error)
+      return
+    }
+    let promise = false
+    try {
+      promise = !!completion && typeof completion.then === 'function'
+    } catch (error) {
+      if (generation === deliveryGeneration && !disposed && !refused) failLive(error)
+      return
+    }
+    if (!promise && callbackSettled) {
+      advanceParsed(target, generation)
+      return
+    }
+    const pending = promise
+      ? Promise.resolve(completion).then(
+          () => advanceParsed(target, generation),
+          (error) => {
+            if (generation === deliveryGeneration && !disposed && !refused) failLive(error)
+          },
+        )
+      : settledCompletion.then(() => advanceParsed(target, generation))
+    const tracked = pending.then(
+      () => undefined,
+      () => undefined,
+    )
+    pendingLiveWrites.add(tracked)
+    void tracked.then(() => pendingLiveWrites.delete(tracked))
+  }
 
   // Feed each replay frame to xterm as soon as it arrives. The queue retains
   // frame-backed slices only; wire order and xterm's own completion provide
   // the backpressure instead of waiting for the declared transcript boundary.
   const drainReplay = () => {
-    if (replayDraining || disposed || refused) return
+    if (replayDraining || disposed || refused || suspended) return
     replayDraining = true
     const generation = drainGeneration
+    const dataGeneration = deliveryGeneration
     const controller = new AbortController()
     drainAbort = controller
     const { signal } = controller
     const valid = () =>
       generation === drainGeneration &&
+      dataGeneration === deliveryGeneration &&
       drainAbort === controller &&
       !signal.aborted &&
       !disposed &&
-      !refused
+      !refused &&
+      !suspended
     void (async () => {
       try {
         while (valid() && replayQueueOffset < replayQueue.length) {
@@ -447,10 +539,18 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
 
           if (operation.kind === 'live') {
             const onData = handlers.onData
-            if (!onData) continue
+            if (!onData) {
+              advanceParsed(operation.cursor ?? receivedCursor, dataGeneration)
+              continue
+            }
             let settled!: () => void
+            let callbackSettled = false
             const settledCompletion = new Promise<void>((resolve) => {
-              settled = resolve
+              settled = () => {
+                if (callbackSettled) return
+                callbackSettled = true
+                resolve()
+              }
             })
             let completion: AttachDataResult
             try {
@@ -472,6 +572,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
                 ? await waitForDrain(Promise.resolve(completion), signal)
                 : await waitForDrain(settledCompletion, signal)
               if (!settledResult || !valid()) return
+              // Promise and callback-only handlers both settle the xterm
+              // write. In the callback-only case the callback may be
+              // asynchronous, so inspect callbackSettled after the await.
+              if (promise || callbackSettled) {
+                advanceParsed(operation.cursor ?? receivedCursor, dataGeneration)
+              }
             } catch (error) {
               if (valid()) failReplay(error)
               return
@@ -497,6 +603,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
             }
             if (!valid()) return
           }
+          if (operation.kind === 'replay-end' && operation.cursor !== undefined) {
+            parsedCursor = operation.cursor
+            // A fresh replay is the only operation that can make a screen
+            // abandoned by an earlier replay safe to resume again.
+            if (replayIsFull) replayInvalid = false
+          }
         }
       } finally {
         if (drainAbort !== controller) return
@@ -515,11 +627,15 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     takeover?: boolean
     releaseControl?: boolean
   } = {}) => {
-    if (disposed) return
-    clearReplay()
-    const resume = options.resume ?? false
+    if (disposed || suspended) return
+    // A replacement is not attached until its ack arrives. Controls sent
+    // during CONNECTING must not leak onto the old or half-open transport.
     attached = false
-    waitingForSession = false
+    deliveryGeneration++
+    clearReplay()
+    // Never send a cursor without the server-issued PTY incarnation fence.
+    // An unknown fence deliberately becomes an ordinary full attach.
+    const resume = (options.resume ?? false) && resumeID !== null
     handlers.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
@@ -555,7 +671,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (follows) header.follow = true
       if (resume) {
         header.resume = true
-        header.cursor = cursor
+        header.resume_id = resumeID!
+        header.cursor = parsedCursor
       }
       ws.send(JSON.stringify(header))
     }
@@ -575,16 +692,22 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
               type: 'data',
               chunk: chunk.subarray(0, replayLength),
               kind: reachesBoundary ? 'replay-end' : 'replay',
+              cursor: reachesBoundary ? replayCursorTarget ?? receivedCursor : undefined,
             })
           }
 
           // A frame can straddle the replay/live boundary. Queue its suffix
           // after the final replay slice, preserving byte order and cursor
-          // accounting without copying either part.
+          // accounting.
           if (replayLength < chunk.length) {
             const live = chunk.subarray(replayLength)
-            cursor += live.length
-            replayQueue.push({ type: 'data', chunk: live, kind: 'live' })
+            receivedCursor += live.length
+            replayQueue.push({
+              type: 'data',
+              chunk: live,
+              kind: 'live',
+              cursor: receivedCursor,
+            })
           }
           // Parsing starts with this frame, even when more replay bytes are
           // still expected.
@@ -592,16 +715,13 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           return
         }
 
-        cursor += chunk.length
+        receivedCursor += chunk.length
+        const target = receivedCursor
         if (replayPending()) {
-          replayQueue.push({ type: 'data', chunk, kind: 'live' })
+          replayQueue.push({ type: 'data', chunk, kind: 'live', cursor: target })
           drainReplay()
         } else {
-          try {
-            handlers.onData?.(chunk, 'live')
-          } catch (error) {
-            failLive(error)
-          }
+          trackPendingLive(chunk, target, deliveryGeneration)
         }
         return
       }
@@ -649,12 +769,20 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           drop()
           return
         }
-        // Retain only frame-backed slices and start draining each frame as it
-        // arrives; the declared boundary tags the final replay slice.
+        // Keep only a nonempty server-issued incarnation ID. A legacy or
+        // malformed ack leaves the last known fence untouched; when no fence
+        // is known, a later resume request is downgraded to a full attach.
+        if (typeof ack.resume_id === 'string' && ack.resume_id.length > 0) {
+          resumeID = ack.resume_id
+        }
         replayRemaining = replayBytes
         replayReady = replayBytes === 0
+        replayIsFull = !resume || ack.resumed !== true
         replayQueueOffset = 0
         replayQueue = []
+        receivedCursor = ack.cursor ?? 0
+        replayCursorTarget = replayBytes > 0 ? receivedCursor : null
+        if (replayBytes === 0) parsedCursor = receivedCursor
         hasControl = ack.has_control === true
         if (ack.control_generation !== undefined) {
           controlGeneration = ack.control_generation
@@ -668,7 +796,6 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
-        cursor = ack.cursor ?? 0
         handlers.onState('live')
         handlers.onAttached(
           askedWrite,
@@ -683,7 +810,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         // serialized, so replayGate is muted before the first binary frame.
         handlers.onReplayStart?.(replayBytes)
         if (disposed || refused || socket !== ws) return
-        if (replayReady) maybeCutover()
+        if (replayReady) {
+          if (replayIsFull) replayInvalid = false
+          maybeCutover()
+        }
         return
       }
       answered = true
@@ -738,10 +868,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     ws.onclose = (ev) => {
       if (disposed || socket !== ws) return
       socket = null
-      // A close before the exact boundary aborts the hidden transaction; the
-      // replacement attach will announce its own replay or final refusal.
+      // A close before the replay boundary abandons the hidden transaction.
+      // Once every replay byte has arrived, let its parser completion finish
+      // before cutting over; that completed replay is still safe to retain.
       const replayAborted = !replayReady
       if (replayAborted) {
+        replayInvalid = true
         handlers.onReplayAbort?.()
         clearReplay()
       }
@@ -829,7 +961,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   }
 
   const retry = () => {
-    if (disposed || refused) return
+    if (disposed || refused || suspended || resumePending) return
     handlers.onState(!waitingForSession && attempt > 3 ? 'offline' : 'reconnecting')
     timer = setTimeout(open, backoff(attempt))
     attempt++
@@ -845,18 +977,26 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     ws.close()
   }
 
-  const reopenNow = (options: {
-    resume?: boolean
-    takeover?: boolean
-    releaseControl?: boolean
-  } = {}) => {
+  const reopenNow = (
+    options: {
+      resume?: boolean
+      takeover?: boolean
+      releaseControl?: boolean
+    } = {},
+    resumeAttached = attached,
+  ) => {
+    reopenGeneration++
     // Only a live attach can be resumed: after a drop the screen has moved
-    // on without this client, and only a replay can say how.
+    // on without this client, and only a replay can say how. An aborted
+    // replay also makes the existing screen unusable until a fresh one lands.
+    suspended = false
+    resumePending = false
+    startWake()
     const request = {
       ...options,
-      resume: (options.resume ?? false) && attached,
+      resume: (options.resume ?? false) && resumeAttached && !replayInvalid,
     }
-    if (timer) clearTimeout(timer)
+    clearTimeout(timer!)
     timer = null
     retryAfterReplay = false
     refused = false
@@ -864,12 +1004,56 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     attempt = 0
     unavailableTries = 0
     waitingForSession = false
+    attached = false
     drop()
     open(request)
   }
 
+  const reopenAfterLiveWrites = (options: {
+    resume?: boolean
+    takeover?: boolean
+    releaseControl?: boolean
+  }) => {
+    const resumeAttached = attached
+    // Freeze the old transport before waiting. Its handlers are detached by
+    // drop(), so bytes arriving from it cannot race the parsed cursor.
+    attached = false
+    drop()
+    const pending = [...pendingLiveWrites]
+    if (pending.length === 0) {
+      reopenNow(options, resumeAttached)
+      return
+    }
+
+    suspended = false
+    resumePending = true
+    startWake()
+    clearTimeout(timer!)
+    timer = null
+    retryAfterReplay = false
+    refused = false
+    ended = false
+    attempt = 0
+    unavailableTries = 0
+    waitingForSession = false
+    const generation = ++reopenGeneration
+    Promise.all(pending).then(() => {
+      if (
+        disposed ||
+        suspended ||
+        ended ||
+        refused ||
+        !resumePending ||
+        generation !== reopenGeneration
+      ) {
+        return
+      }
+      reopenNow(options, resumeAttached)
+    })
+  }
+
   const maybeCutover = () => {
-    if (replayPending()) return
+    if (suspended || resumePending || replayPending()) return
     if (pendingReopen) {
       const request = pendingReopen
       pendingReopen = null
@@ -891,8 +1075,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // A phone that was in a pocket comes back to a dead socket and a frozen
   // retry timer. An attach the gateway refused, and one parked on a finished
   // session, are answers rather than failures: neither event re-asks them.
-  const stopWake = onWake((kind) => {
-    if (disposed || refused || ended) return
+  const wake = (kind: 'visible' | 'online') => {
+    if (disposed || refused || ended || suspended || resumePending) return
     // A tolerated missing-session refusal is a deliberate wait, and its
     // budget is four `backoff()` waits because that is what outlives
     // recovery starting the PTY. A wake reopens for free, so without this a
@@ -900,7 +1084,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     // wait as a failure inside a second. The freeze only delays that reconnect;
     // a run with no session has nothing to show sooner anyway.
     if (waitingForSession) return
-    if (timer) clearTimeout(timer)
+    clearTimeout(timer!)
     timer = null
     attempt = 0
     if (socket && kind === 'visible') return
@@ -908,6 +1092,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // Never reveal a partial or boundary-complete replay while replacing a
       // socket. Cancel its drain, keep the current host hidden, and let the
       // new ack announce one fresh full replay.
+      replayInvalid = true
       handlers.onReplayAbort?.()
       clearReplay()
       drop()
@@ -922,7 +1107,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     // rare enough that one re-attach and its replay is the cheaper mistake.
     drop()
     open()
-  })
+  }
+  let stopWake = onWake(wake)
+  const startWake = () => {
+    stopWake()
+    stopWake = onWake(wake)
+  }
   open()
   return {
     rebind: (next) => {
@@ -930,17 +1120,19 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // A dock remount replaces the xterm host. Keep the replacement hidden
       // while canceling any old drain, then begin one fresh full replay.
       handlers = next
+      replayInvalid = true
       handlers.onReplayAbort?.()
       clearReplay()
       pendingReopen = null
       retryAfterReplay = false
       refused = false
       ended = false
+      resumePending = false
+      reopenGeneration++
       attached = false
-      unavailableTries = 0
       waitingForSession = false
       attempt = 0
-      if (timer) clearTimeout(timer)
+      clearTimeout(timer!)
       timer = null
       drop()
       open()
@@ -972,13 +1164,68 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         pendingReopen = request
         return
       }
+      if (request.resume && pendingLiveWrites.size > 0) {
+        reopenAfterLiveWrites(request)
+        return
+      }
       reopenNow(request)
+    },
+    suspend: () => {
+      if (disposed || suspended || ended) return
+      const incompleteReplay = replayPending()
+      reopenGeneration++
+      suspended = true
+      resumePending = false
+      pendingReopen = null
+      retryAfterReplay = false
+      clearTimeout(timer!)
+      timer = null
+      stopWake()
+      stopWake = () => {}
+      if (incompleteReplay) {
+        replayInvalid = true
+        handlers.onReplayAbort?.()
+        clearReplay()
+      }
+      attached = false
+      drop()
+    },
+    resume: () => {
+      if (disposed || !suspended || ended) return
+      suspended = false
+      resumePending = true
+      const generation = ++reopenGeneration
+      // A screen invalidated by an abandoned replay must get a fresh full
+      // replay. Keep the latch set until that replay's parser completion.
+      const fullReplay = replayInvalid
+      const pending = [...pendingLiveWrites]
+      Promise.all(pending).then(() => {
+        if (
+          disposed ||
+          suspended ||
+          ended ||
+          refused ||
+          !resumePending ||
+          generation !== reopenGeneration
+        ) {
+          return
+        }
+        resumePending = false
+        startWake()
+        attempt = 0
+        unavailableTries = 0
+        waitingForSession = false
+        open({ resume: !fullReplay })
+      })
     },
     close: () => {
       disposed = true
+      reopenGeneration++
       clearReplay()
       stopWake()
-      if (timer) clearTimeout(timer)
+      stopWake = () => {}
+      clearTimeout(timer!)
+      timer = null
       drop()
     },
   }

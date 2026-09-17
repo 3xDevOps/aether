@@ -201,12 +201,12 @@ func TestResumeReplaysOnlyTheGap(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s := &session{resumeID: "pty-old", ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	s.deliver([]byte("\x1b[?2004h agent output\r\n"))
 	caughtUp := s.ring.written
 
 	// Nothing happened while this client was away.
-	idle := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, Cursor: caughtUp})
+	idle := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-old", Cursor: caughtUp})
 	if aerr := s.addClient(idle); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
@@ -220,13 +220,55 @@ func TestResumeReplaysOnlyTheGap(t *testing.T) {
 
 	// The agent kept talking during the reattach; that much and no more.
 	s.deliver([]byte("during the gap"))
-	behind := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, Cursor: caughtUp})
+	behind := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-old", Cursor: caughtUp})
 	if aerr := s.addClient(behind); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
 	behindReplay := readClientReplay(t, behind)
 	if !behind.resumed || string(behindReplay) != "during the gap" {
 		t.Fatalf("resume replayed %q, want the gap alone", behindReplay)
+	}
+}
+
+// A replacement PTY can restart its numeric cursor at the old value. The
+// old incarnation ID must force a full replay, while the replacement ID may
+// still serve only the gap.
+func TestResumeRequiresCurrentPTYIncarnation(t *testing.T) {
+	newSession := func(id string) *session {
+		tr, err := newCastWriter(filepath.Join(t.TempDir(), "cast"), 80, 24)
+		if err != nil {
+			t.Fatalf("newCastWriter: %v", err)
+		}
+		t.Cleanup(func() { _ = tr.close() })
+		s := &session{run: TerminalSession("m1", "tab"), resumeID: id, ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+		s.deliver([]byte("old output"))
+		s.deliver([]byte("replacement gap"))
+		return s
+	}
+	old := newSession("pty-old")
+	cursor := uint64(len("old output"))
+	replacement := newSession("pty-new")
+
+	stale := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: old.resumeID, Cursor: cursor})
+	if err := replacement.addClient(stale); err != nil {
+		t.Fatalf("stale addClient: %v", err)
+	}
+	if stale.resumed {
+		t.Fatal("old PTY incarnation resumed replacement")
+	}
+	if got := string(readClientReplay(t, stale)); got != "old outputreplacement gap" {
+		t.Fatalf("stale replay = %q, want full replacement replay", got)
+	}
+
+	matching := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: replacement.resumeID, Cursor: cursor})
+	if err := replacement.addClient(matching); err != nil {
+		t.Fatalf("matching addClient: %v", err)
+	}
+	if !matching.resumed {
+		t.Fatal("matching PTY incarnation did not resume")
+	}
+	if got := string(readClientReplay(t, matching)); got != "replacement gap" {
+		t.Fatalf("matching replay = %q, want the gap only", got)
 	}
 }
 
@@ -238,12 +280,12 @@ func TestResumeFallsBackWhenTheGapIsGone(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{ring: newRing(64), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s := &session{resumeID: "pty-fallback", ring: newRing(64), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	s.deliver([]byte("\x1b[?2004h"))
 	stale := s.ring.written
 	s.deliver(bytes.Repeat([]byte("x"), 512))
 
-	c := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, Cursor: stale})
+	c := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-fallback", Cursor: stale})
 	if aerr := s.addClient(c); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}

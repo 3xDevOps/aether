@@ -984,17 +984,27 @@ needs.
    ```json
    {"write":true,"cols":120,"rows":40}
    {"write":true,"follow":true,"cols":80,"rows":24}
+   {"resume":true,"cursor":4120,"resume_id":"pty-incarnation-7","cols":120,"rows":40}
    ```
 
-   `resume` asks to reattach while preserving the screen the client already
-   holds, avoiding a full scrollback replay when continuity can be proved. It
-   carries `cursor`, the output count the last ack reported plus every live byte
-   received since. When resume is honored, the replay is exactly the bytes
-   after that cursor - usually none - and the ack says `"resumed":true`.
-   When it cannot be honored, the ack says `"resumed":false`: a run attach may
-   receive the complete retained transcript again, while a reusable shell may
-   receive its current-screen replay. Step 2 describes how either replay is
-   applied without exposing redraw frames.
+   `resume` asks to reattach while preserving parsed xterm state already held by
+   a dashboard client. For a cached client, it is sent after inactivity has
+   intentionally closed the old socket.
+   For that client, `cursor` is the raw-output boundary whose xterm writes have
+   settled, not merely bytes received, and `resume_id` is the nonempty
+   server-issued PTY incarnation ID from the ack that produced that screen.
+   The dashboard sends both with the same logical `control_session_id`; without
+   a known `resume_id`, it sends a full attach rather than an ambiguous cursor.
+   The ID changes on every PTY/server incarnation, so it fences a cursor across
+   restarts.
+   When resume is honored, the ack says `"resumed":true` and the replay is
+   exactly the bytes after that cursor - the gap - while the cached screen is
+   retained. When the ID or cursor cannot be honored, the ack says
+   `"resumed":false`, returns the current cursor and `resume_id`, and a run
+   attach receives the complete retained transcript again; the dashboard
+   applies it through the hidden, ordered replay transaction, so no historical
+   timelapse is visible. A reusable shell may instead receive its current-screen
+   replay.
 
    `release_control` combines lease release with this attach. At the PTY-host
    commit boundary, the server holds the run-scoped authority lock, validates
@@ -1015,10 +1025,13 @@ needs.
    steers an agent without
    reflowing that agent's screen for everyone else watching it.
 
-2. Server answers one **text** frame: `{"ok":true,"framed":true,"cols":120,"rows":40,"replay":4096}`,
+2. Server answers one **text** frame:
+   `{"ok":true,"framed":true,"cols":120,"rows":40,"replay":4096,"cursor":4120,"resume_id":"pty-incarnation-7"}`,
    or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
-   The ack's geometry is the captured screen's size, not an echo of the
-   header. A later accepted resize arrives after that screen's replay bytes.
+   Every successful live run or shell attach ack includes the current nonempty
+   `resume_id`; finished transcript-only replays have no live PTY incarnation.
+   The ack's geometry is the captured screen's size, not an echo of the header.
+   A later accepted resize arrives after that screen's replay bytes.
    The optional `replay` value is the exact number of binary output bytes
    preceding live output. Clients split at that byte boundary even when one
    binary frame contains the end of replay and the beginning of live output.
@@ -1043,10 +1056,12 @@ needs.
    muted from the ack through the final replay-write callback.
    For a fresh run attach these bytes are the complete retained raw transcript,
    including segments from earlier server incarnations. A successful resume
-   supplies only the missing raw output. A failed resume may repeat the
-   complete run transcript, but that fallback uses the same hidden, ordered
-   replay transaction. `cursor` counts original session output and is what a
-   later `resume` sends back.
+   supplies only the missing raw output after the settled cursor. A failed
+   resume may repeat the complete run transcript, but that fallback uses the
+   same hidden, ordered replay transaction and returns the server's current
+   cursor and incarnation fence; it is never exposed as historical playback.
+   The dashboard's next `cursor` is therefore the output boundary settled by
+   xterm, paired with the ack's `resume_id`.
 
    The server keeps full-transcript replay resource-bounded: it streams retained
    segments lazily, opening and reading at most one segment at a time rather
@@ -1116,16 +1131,25 @@ needs.
 
 Closing the socket detaches; the run is unaffected.
 
+For a cached dashboard primary, inactivity intentionally closes the socket.
+That ordinary detach removes Watching presence, active control transport, and
+geometry participation; the browser keeps the parsed xterm state and logical
+control-session identity only while its memory cache retains the entry. This
+client cache is not server persistence. A completed entry whose session ended
+does not reconnect unless that same run is relaunched; a relaunch records a
+fresh full attach while parked and opens it when the entry becomes active.
+
 Dashboard attachments request `framed:true` and require the server to confirm it
 in the ack. An older server that ignores the request is refused with an update
 error rather than having raw bytes decoded as terminal records. After the ack,
 an `o` byte and four-byte big-endian payload length precede each output record;
 a `g` byte and two four-byte big-endian dimensions form a geometry record. The
 gateway decodes these sequentially into WebSocket frames. Replay counts exclude
-frame headers. Resume cursors count original session output. The dashboard
-starts each frame-sized replay operation as it arrives, but one serial xterm
-write chain preserves geometry/output wire order and backpressure; it never
-allocates a transcript-sized replay buffer or runs an independent geometry pump.
+frame headers. Dashboard resume cursors count original session output only
+through the xterm-settled boundary described above. The dashboard starts each
+frame-sized replay operation as it arrives, but one serial xterm write chain
+preserves geometry/output wire order and backpressure; it never allocates a
+transcript-sized replay buffer or runs an independent geometry pump.
 For a persistent dashboard dock, `rebind(next)` means that a new terminal host
 has taken over: the client cancels any old replay parser or drain with an
 explicit cancellation signal, drops the old socket, installs the new handlers,

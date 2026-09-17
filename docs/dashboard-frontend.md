@@ -1045,14 +1045,15 @@ the Add terminal tab when the dock becomes empty.
 Each run route names the body under the strip as its `tabpanel`, through
 `runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
 one carrying `aria-controls`: on the run strip only one of the four routes is
-mounted at a time, so the other three would be naming a panel that is not in
-the tree. An open dock's
-body is the panel its selected tab names; a shut dock has no body, and a dock
+active at a time, so the other three would be naming a panel that is not active
+in the tree. An open dock's body is the panel its selected tab names; a shut
+dock has no body, and a dock
 holding no tabs is no tab list at all, so neither names anything.
 
-Opening a run tab swaps the whole center view, which unmounts the strip that
-was activated, so the strip the next route draws takes the focus back -
-otherwise every tab press would drop a keyboard reader on `body`. It is armed
+Opening a run tab swaps the active center view. The previously active strip
+unmounts; a cached primary terminal retains only its terminal surface, hidden
+and inert, so the strip the next route draws takes the focus back. Otherwise
+every tab press would drop a keyboard reader on `body`. It is armed
 from the activation rather than the key press, and only from one the keyboard
 produced, which carries no click count: a press that is cancelled arms
 nothing, and a pointer click leaves focus where the pointer put it. The dock's
@@ -1090,8 +1091,10 @@ renders as one list: the reason, owner, agent account where the run borrowed
 one, the created and changed times, and the last commit. The shared
 `RunHeader` puts run state, harness, mode and branch below the title in its
 first section, leaving the second section to the tab strip and actions.
-All four routes render one `RunHeader` (`src/components/run-header.tsx`), so the run's own state
-travels with the reader, and `isRunRoute` in `tabs.tsx` is what keeps a sidebar
+Each active run-detail route renders one `RunHeader`; a parked terminal keeps
+only its primary pane and therefore no header/tab IDs or action portals. This
+lets the run's own state travel with the reader, and `isRunRoute` in `tabs.tsx`
+is what keeps a sidebar
 row lit while they move between the tabs. `RunHeader` keeps long task text
 behind a **View full task** disclosure, so its compact summary never discards
 the task.
@@ -1141,19 +1144,52 @@ offer **Back to board**. The launch paths seed the run they just started -
 both template launches and the onboarding first-run form, the way
 `launch-dialog.tsx` does - so a launch never lands on the deleted claim.
 
-The center view renders the run-detail route without a key, so one
-`TerminalView` is reused across a run switch. The Terminal tab therefore
-clears the pane when the run id changes rather than waiting for the attach
-ack: a run that ended with no recorded terminal is refused and never acks,
-which would leave the previous run's output on screen under the new run's
-name.
+`CenterView` retains visited `TerminalView` subtrees in its bounded cache while
+the run route changes. A first visit creates the terminal only for a known run;
+if that run has ended with no recorded terminal, the attach is refused and the
+cached pane is never allowed to show the previous run's output under the new
+run's name.
 
-The Terminal view is a vertical split. The agent terminal keeps flexible space
-above a `RunDock` below it. The first header section contains the title and
-metadata on two lines; the next contains tabs and actions on one line. The
-terminal strip left-aligns connection and steering immediately after the
-search, font, clipboard and image tools, without a spacer between the groups.
-Real gateway errors wrap there rather than being truncated.
+**Primary run terminals are cached, not destroyed by navigation.** `CenterView`
+keeps up to four recently visited primary run terminals mounted in browser
+memory. Cache keys include the authenticated identity and the terminal data
+generation epoch, so a key is never reused across either boundary. The cache
+contains only runs the member has visited: it does not prefetch runs and is not
+persisted across reloads or browser tabs.
+
+When a cached primary becomes inactive because the route changes, its
+WebSocket is intentionally closed. That detach removes its Watching presence,
+active control transport, and geometry participation, while retaining the
+parsed xterm screen/scrollback and the logical control-session identity.
+Reactivation renders that parsed state immediately and reconnects with
+`resume` only after pending xterm writes settle. The attach ack's server-issued
+`resume_id` fences the settled cursor to one PTY incarnation; a missing ID means
+a full attach, and a mismatched ID is acknowledged with `resumed:false`,
+the current cursor, and the current ID before the complete retained transcript
+is applied through the hidden serial replay transaction. A write completion while
+parked immediately reports the latest combined normal-plus-alternate buffer
+weight. A completed entry whose session ended stays parked and does not
+reconnect unless that same run is relaunched; then it full-attaches once active.
+
+Inactive entries are trimmed least-recently-used to an approximate 4,000,000
+xterm-cell budget, with at most four entries total and one most-recent
+overweight entry allowed. The active entry is protected while selected.
+Run deletion, an attach's final refusal, and an identity or data-generation
+change invalidate entries; LRU eviction disposes inactive entries. An
+invalidated active entry remains only long enough to show its refusal, then is
+disposed when it becomes inactive. Generation changes dispose the old
+generation immediately.
+
+The Terminal view is a vertical split. Only the active terminal renders its
+RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`; inactive cached
+entries retain only the primary TerminalPane/xterm. This keeps auxiliary fixed
+IDs and portals unique and restores focus handoff when the entry becomes active.
+The agent terminal keeps flexible space above a `RunDock` below it. The first
+header section contains the title and metadata on two lines; the next contains
+tabs and actions on one line. The terminal strip left-aligns connection and
+steering immediately after the search, font, clipboard and image tools, without
+a spacer between the groups. Real gateway errors wrap there rather than being
+truncated.
 
 The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
@@ -1276,9 +1312,10 @@ call `reopen()` after `rebind()`. Run shell callbacks guard the current
 subscriptions are removed on cleanup, while closing a tab or an exited shell
 unregisters its socket. Thus route changes and tab remounts cannot deliver late
 output, resizes, or image actions to a disposed host; only the selected shell
-tab mounts an xterm host and transcript replay restores its content. The
-primary agent attach is owned by `TerminalView` and closes with that route,
-unlike the run-shell attachments.
+tab mounts an xterm host and transcript replay restores its content.
+The primary agent attach follows the cache lifecycle above: route changes
+suspend it rather than dispose its parsed terminal; eviction, invalidation, or
+unmount closes it permanently.
 
 The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running. Stopping the container and discarding the saved image
@@ -1357,14 +1394,17 @@ the terminal with the gateway's own error instead.
   old lease before any replay, output, or geometry. If admission fails, the
   request is refused while the old writer and lease remain intact. A successful
   commit cancels the displaced writer; the replacement continues as the
-  read-only PTY attach on the same request, honors `resume`/`cursor`, returns
-  one normal attach ack, and then streams output. Invalid, stale, or
+  read-only PTY attach on the same request, honors `resume`/`resume_id`/`cursor`,
+  returns one normal attach ack, and then streams output. A successful live ack's
+  nonempty `resume_id` fences the cursor to that PTY incarnation; without a
+  stored ID the client sends a full attach, and a mismatch is acknowledged with
+  `resumed:false`, the current cursor, and current ID. Invalid, stale, or
   cross-member release is refused. A successful resume supplies only bytes
-  after `cursor`; if resume cannot be honored, the server may replay the
-  complete retained run transcript again and the dashboard applies that
-  fallback through the same hidden, serial ordered transaction. Taking control
-  and releasing it preserve the existing terminal when resume succeeds; when
-  fallback is needed, they still produce no visible historical playback. The
+  after the xterm-settled `cursor`; if resume cannot be honored, the server may
+  replay the complete retained run transcript again and the dashboard applies
+  that fallback through the same hidden, serial ordered transaction. Taking
+  control and releasing it preserve the existing terminal when resume succeeds;
+  when fallback is needed, they still produce no visible historical playback. The
   server streams retained segments lazily, opening and reading at most one
   segment at a time, so complete history does not require every segment to be
   loaded or left open.
@@ -1518,7 +1558,7 @@ both what it renders and the overlap set the conflict chips read.
   **Wrap lines** in the stats row is a toggle, starting on for a coarse
   pointer and off for a mouse. The choice itself is a view preference on the
   UI slice (`diffWrap`), stored like the sidebar width, because only one
-  run-detail route is mounted at a time and component state would forget it
+  run-detail route is active at a time and component state would forget it
   on every trip to the Terminal tab. The Files tab's diff pane reads the same
   preference: it has no toolbar to put a toggle in, so it never sets one, but
   a member who turned wrapping off on the Diff tab meant it for diffs and not

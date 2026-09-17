@@ -440,6 +440,9 @@ type AttachRequest struct {
 	// taken from the ack it is resuming from. The session replays exactly
 	// what followed it, so nothing produced during the reattach is lost.
 	Cursor uint64 `json:"cursor,omitempty"`
+	// ResumeID identifies the PTY process incarnation whose cursor the client
+	// retains. A resume is honored only when it matches the current session.
+	ResumeID string `json:"resume_id,omitempty"`
 	// ControlSessionID identifies one logical client tab across reconnects.
 	ControlSessionID string `json:"control_session_id,omitempty"`
 	// ControlGeneration is the fenced generation the client expects.
@@ -464,6 +467,9 @@ type AttachResponse struct {
 	// the replay is parsed. A client that reattaches sends it back to
 	// resume from exactly there.
 	Cursor uint64 `json:"cursor,omitempty"`
+	// ResumeID identifies the PTY process incarnation that produced Cursor.
+	// It is returned on every successful live attach, including fallback.
+	ResumeID string `json:"resume_id,omitempty"`
 	// Resumed answers a request to resume: true when the replay is only
 	// what this client missed, false when the session could not serve
 	// from its cursor and the replay is the whole scrollback instead -

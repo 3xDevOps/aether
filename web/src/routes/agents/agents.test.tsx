@@ -110,6 +110,8 @@ describe('agents view', () => {
       resize: vi.fn(),
       reopen: vi.fn(),
       rebind: vi.fn(),
+      suspend: vi.fn(),
+      resume: vi.fn(),
       close: vi.fn(),
     }
     registerEnvTerminalSocket('main', connection)

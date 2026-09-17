@@ -42,7 +42,8 @@ type rawAttachConn struct {
 // to exercise its live read/write lifecycle.
 type resumeReleasePTY struct {
 	*fakePTY
-	cursor uint64
+	cursor   uint64
+	resumeID string
 }
 
 // admissionFailurePTY lets release tests fail the PTY-host commit after the
@@ -61,18 +62,18 @@ func (p *admissionFailurePTY) Attach(ctx context.Context, key ptyhost.SessionKey
 
 type resumeReplayConn struct {
 	io.ReadWriter
-	replay ptyhost.ReplayWriter
-	resume ptyhost.ResumeWriter
-	cursor uint64
+	replay   ptyhost.ReplayWriter
+	resume   ptyhost.ResumeWriter
+	cursor   uint64
+	resumeID string
 }
 
 func (c *resumeReplayConn) WriteReplay(io.Reader, int) error {
-	c.resume.SetResume(c.cursor, true)
+	c.resume.SetResume(c.cursor, true, c.resumeID)
 	return c.replay.WriteReplay(bytes.NewReader(nil), 0)
 }
-
 func (p *resumeReleasePTY) Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
-	if client.Resume && client.Cursor == p.cursor {
+	if client.Resume && client.Cursor == p.cursor && client.ResumeID == p.resumeID {
 		replay, ok := conn.(ptyhost.ReplayWriter)
 		resume, resumed := conn.(ptyhost.ResumeWriter)
 		if ok && resumed {
@@ -81,6 +82,7 @@ func (p *resumeReleasePTY) Attach(ctx context.Context, key ptyhost.SessionKey, c
 				replay:     replay,
 				resume:     resume,
 				cursor:     p.cursor,
+				resumeID:   p.resumeID,
 			}
 			// Keep the replacement's input path observable. A read-only
 			// client must not admit the bytes, while the connection must
@@ -479,13 +481,14 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 		// suppresses only the caught-up replay while preserving live attach
 		// behavior, so this test proves the release request is a replacement
 		// attach rather than a release-only response.
-		e.srv.cfg.PTY = &resumeReleasePTY{fakePTY: e.pty, cursor: firstAck.Cursor}
+		e.srv.cfg.PTY = &resumeReleasePTY{fakePTY: e.pty, cursor: firstAck.Cursor, resumeID: firstAck.ResumeID}
 		release, releaseAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{
 			ControlSessionID:  "release-tab",
 			ControlGeneration: firstAck.ControlGeneration,
 			ReleaseControl:    true,
 			Resume:            true,
 			Cursor:            firstAck.Cursor,
+			ResumeID:          firstAck.ResumeID,
 		}, true)
 		defer func() { _ = release.ch.Close() }()
 		if !releaseAck.OK || releaseAck.HasControl || !releaseAck.Resumed || releaseAck.Replay != 0 {

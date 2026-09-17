@@ -447,23 +447,23 @@ func TestAttachReleaseStaysConnectedAsMirror(t *testing.T) {
 	b := &wsStubBackend{
 		attachTerm: term,
 		attachAck: protocol.AttachResponse{
-			OK: true, Framed: true, Resumed: true, Cursor: 42,
+			OK: true, Framed: true, Resumed: true, Cursor: 42, ResumeID: "pty-incarnation",
 		},
 	}
 	g, base := newWSGateway(t, b)
 	conn := wsDial(t, base, "/ws/attach/run-1", g.Token())
 
 	writeWSJSON(t, conn, protocol.DashAttachRequest{
-		Write: true, Resume: true, Cursor: 42,
+		Write: true, Resume: true, Cursor: 42, ResumeID: "pty-incarnation",
 		ControlSessionID: "release-tab", ControlGeneration: 7,
 		ReleaseControl: true,
 	})
 	ack := readWSJSON[protocol.AttachResponse](t, conn)
-	if !ack.OK || !ack.Resumed || ack.Replay != 0 || ack.Cursor != 42 {
+	if !ack.OK || !ack.Resumed || ack.Replay != 0 || ack.Cursor != 42 || ack.ResumeID != "pty-incarnation" {
 		t.Fatalf("release ack = %+v, want resumed zero-replay ack", ack)
 	}
 	req := b.recordedAttach()
-	if !req.ReadOnly || !req.Resume || req.Cursor != 42 || !req.ReleaseControl ||
+	if !req.ReadOnly || !req.Resume || req.Cursor != 42 || req.ResumeID != "pty-incarnation" || !req.ReleaseControl ||
 		req.ControlSessionID != "release-tab" || req.ControlGeneration != 7 || !req.Framed {
 		t.Fatalf("release attach request = %+v, want read-only resumed framed attach", req)
 	}

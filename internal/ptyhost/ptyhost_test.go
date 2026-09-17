@@ -276,8 +276,8 @@ func (c *hookConn) WriteReplay(replay io.Reader, _ int) error {
 	return nil
 }
 
-func (c *hookConn) SetGeometry(uint, uint) { c.record("geometry") }
-func (c *hookConn) SetResume(uint64, bool) { c.record("resume") }
+func (c *hookConn) SetGeometry(uint, uint)         { c.record("geometry") }
+func (c *hookConn) SetResume(uint64, bool, string) { c.record("resume") }
 
 func (c *hookConn) eventNames() []string {
 	c.mu.Lock()
