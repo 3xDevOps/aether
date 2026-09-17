@@ -484,6 +484,25 @@ func (f *fakeRuns) Kill(_ context.Context, run domain.RunID, actor domain.Member
 func (f *fakeRuns) DeleteRun(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("delete:%s:%s", run, actor))
 }
+
+// SetArchived returns a canned run reflecting the requested archived
+// state; the real Final-check, idempotency, and event shape are tested
+// against the scheduler directly in internal/scheduler/archive_test.go.
+func (f *fakeRuns) SetArchived(_ context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error) {
+	if err := f.record(fmt.Sprintf("archive:%s:%s:%v", run, actor, archived)); err != nil {
+		return nil, err
+	}
+	out := &domain.Run{
+		ID: run, WorkspaceID: "ws", MemberID: actor,
+		Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
+		Status: domain.RunMerged, CreatedAt: time.Now().UTC(),
+	}
+	if archived {
+		now := time.Now().UTC()
+		out.ArchivedAt = &now
+	}
+	return out, nil
+}
 func (f *fakeRuns) Pause(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("pause:%s:%s", run, actor))
 }

@@ -15,6 +15,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunDeletedPayload{},
 		RunTitlePayload{Title: "Fixing the login bug"},
 		RunProtectedPayload{Protected: true},
+		RunArchivedPayload{ArchivedAt: strPtr("2024-01-02T03:04:05Z"), DeletesAt: strPtr("2024-01-16T03:04:05Z")},
+		RunArchivedPayload{},
 		RunCostPayload{InputTokens: 1200, OutputTokens: 340, CostUSD: 0.42, Metered: true},
 		RunDiffPayload{Files: []FileDiffStat{{Path: "main.go", Additions: 10, Deletions: 2}}},
 		PresencePayload{State: PresenceWatching},
@@ -53,6 +55,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		t.Errorf("roundtrip covered %d types, codec registry has %d", len(seen), len(payloadCodecs))
 	}
 }
+
+func strPtr(s string) *string { return &s }
 
 func TestDecodePayloadUnknownType(t *testing.T) {
 	_, err := DecodePayload("nope", []byte("{}"))

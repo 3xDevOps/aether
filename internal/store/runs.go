@@ -82,12 +82,13 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		startedAt, finishedAt *int64
 		lastCommitAt          *int64
 		baseCheckedAt         *int64
+		archivedAt            *int64
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &r.UnansweredQuestions); err != nil {
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.UnansweredQuestions); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -99,13 +100,14 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	if baseCheckedAt != nil {
 		r.BaseCheckedAt = decodeTime(*baseCheckedAt)
 	}
+	r.ArchivedAt = decodeTimePtr(archivedAt)
 	return &r, nil
 }
 
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at`
+	runs.base_checked_at, runs.archived_at`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -323,6 +325,46 @@ func (d *DB) SetRunProtected(ctx context.Context, id domain.RunID, protected boo
 		err = fmt.Errorf("store: set run protected: %w", err)
 	}
 	return err
+}
+
+// SetRunArchived is the narrow, conditional archive/restore mutator.
+// Archiving (at != nil) takes effect only on a Final, unarchived run;
+// restoring (at == nil) takes effect only on an archived run. The
+// reported bool is whether this call changed the column; false with a
+// nil error also covers a run that does not exist.
+func (d *DB) SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time) (bool, error) {
+	var (
+		result sql.Result
+		err    error
+	)
+	if at != nil {
+		ts, encErr := encodeTime(*at)
+		if encErr != nil {
+			return false, fmt.Errorf("store: set run archived: %w", encErr)
+		}
+		var placeholders []string
+		args := []any{ts, id}
+		for _, s := range domain.AllRunStatuses {
+			if s.Final() {
+				placeholders = append(placeholders, "?")
+				args = append(args, s)
+			}
+		}
+		query := `UPDATE runs SET archived_at = ? WHERE id = ? AND archived_at IS NULL AND status IN (` +
+			strings.Join(placeholders, ", ") + `)`
+		result, err = d.db.ExecContext(ctx, query, args...)
+	} else {
+		result, err = d.db.ExecContext(ctx,
+			`UPDATE runs SET archived_at = NULL WHERE id = ? AND archived_at IS NOT NULL`, id)
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: set run archived: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: set run archived: %w", err)
+	}
+	return affected > 0, nil
 }
 
 func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {

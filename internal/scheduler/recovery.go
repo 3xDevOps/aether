@@ -131,13 +131,18 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if !sameEntry {
 		return nil, retainedTransitionError()
 	}
+	// archiveMu serializes this re-read-then-promote against SetArchived
+	// so the two can never interleave.
+	s.archiveMu.Lock()
 	latest, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
+		s.archiveMu.Unlock()
 		return nil, err
 	}
 	if latest.Mode != domain.LaunchTUI ||
 		(latest.Status != domain.RunMerged && latest.Status != domain.RunAbandoned) ||
 		latest.Reason != retainedCloseReason {
+		s.archiveMu.Unlock()
 		return nil, retainedTransitionError()
 	}
 	fresh = latest
@@ -153,9 +158,22 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	runningRow.Reason = ""
 	runningRow.StartedAt = &now
 	runningRow.FinishedAt = nil
+	wasArchived := fresh.ArchivedAt != nil
+	if wasArchived {
+		if _, clearErr := s.cfg.Store.SetRunArchived(ctx, run, nil); clearErr != nil {
+			s.archiveMu.Unlock()
+			return nil, fmt.Errorf("scheduler: clear archived run before relaunch: %w", clearErr)
+		}
+		runningRow.ArchivedAt = nil
+	}
 	if updateErr := s.cfg.Store.UpdateRun(ctx, &runningRow); updateErr != nil {
+		s.archiveMu.Unlock()
 		return nil, updateErr
 	}
+	if wasArchived {
+		s.publishArchived(ctx, &runningRow, actor)
+	}
+	s.archiveMu.Unlock()
 	resumed := false
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)

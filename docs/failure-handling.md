@@ -287,6 +287,15 @@ live run it first stops the container, waits for supervision to publish the
 final branch, then removes the checkout and durable run records; its timeline
 stays as audit history.
 
+`run.archive` hides a run in a final disposition (`merged`, `abandoned`,
+`failed`, or `interrupted`) from the board. Archiving itself removes
+nothing - the run's checkout, transcripts, cost history, and timeline are
+untouched - but the checkout TTL GC above still reclaims an archived run's
+worktree once `--checkout-ttl` passes. The run can be restored at any time
+with `run.archive` `{"archived":false}`. Archiving stamps `archived_at`;
+the wire also carries `deletes_at`, the date the server will delete the
+run. Re-archiving an already-archived run does not move either date.
+
 Below `--min-free-disk`, `run.launch` is refused with `-32004` (unavailable)
 and a message naming the numbers. Relaunching an eligible retained TUI run
 does not perform a new launch or disk-floor admission, so it can reopen its

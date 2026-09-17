@@ -180,6 +180,10 @@ type Scheduler struct {
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
+	// archiveMu serializes SetArchived against Relaunch's own restore of
+	// an archived run, so the two can never leave a run stuck between
+	// archived and running.
+	archiveMu sync.Mutex
 	// pending marks runs whose row exists but whose checkout/provisioning
 	// handoff has not reached runs yet. Delete waits for this short window so
 	// it cannot remove a row while its checkout is still being created; Kill

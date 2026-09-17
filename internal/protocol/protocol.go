@@ -103,6 +103,9 @@ const (
 	MethodWorkspaceOrigin = "workspace.origin"
 	// MethodRunProtect toggles a run's protected flag (owner or admin).
 	MethodRunProtect = "run.protect"
+	// MethodRunArchive hides a finished run from the board, or restores
+	// it; the run's data is untouched (same gate as run.delete: Kill).
+	MethodRunArchive = "run.archive"
 	// MethodSyncConflict reports a live-overlay sync conflict so both
 	// affected members are notified via the event feed (Steer-gated,
 	// like the sync bridge itself).

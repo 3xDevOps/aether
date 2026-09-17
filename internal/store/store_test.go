@@ -1099,6 +1099,9 @@ func assertRunEqual(t *testing.T, want, got *domain.Run) {
 	if !timePtrEqual(got.FinishedAt, want.FinishedAt) {
 		t.Fatalf("FinishedAt = %v, want %v", got.FinishedAt, want.FinishedAt)
 	}
+	if !timePtrEqual(got.ArchivedAt, want.ArchivedAt) {
+		t.Fatalf("ArchivedAt = %v, want %v", got.ArchivedAt, want.ArchivedAt)
+	}
 }
 
 func timePtrEqual(a, b *time.Time) bool {

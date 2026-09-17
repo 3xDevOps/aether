@@ -116,6 +116,9 @@ type Store interface {
 	// SetRunProtected sets only the run's protected flag, leaving every
 	// other field untouched.
 	SetRunProtected(ctx context.Context, id domain.RunID, protected bool) error
+	// SetRunArchived is the narrow, conditional archive/restore mutator;
+	// see its doc comment on the DB implementation for the exact rules.
+	SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time) (bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering
 	// it, and reports whether this call was the one that added them.

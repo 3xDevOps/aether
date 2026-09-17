@@ -226,6 +226,24 @@ func (s *Server) runDelete(ctx context.Context, member domain.MemberID, params j
 	return s.runAct(ctx, member, params, s.cfg.Runs.DeleteRun)
 }
 
+// runArchive hides a finished run from the board, or restores it. The
+// guard above has already checked Kill against the run, matching
+// run.delete's gate.
+func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.RunArchiveParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.RunID == "" {
+		return nil, invalidParams("run_id is required")
+	}
+	run, err := s.cfg.Runs.SetArchived(ctx, domain.RunID(p.RunID), member, p.Archived)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+}
+
 func (s *Server) runPause(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	return s.runAct(ctx, member, params, s.cfg.Runs.Pause)
 }

@@ -63,6 +63,10 @@ type RunController interface {
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
+	// SetArchived hides a Final run from the board (archived true) or
+	// restores it (false); see the scheduler implementation's doc comment
+	// for the exact refusal and idempotency rules.
+	SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error)
 	// RecordHandoff credits the outgoing owner of a run as a steerer and
 	// refreshes the co-author list its container reads. Called after the
 	// run row already names the new owner.
