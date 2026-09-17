@@ -52,6 +52,16 @@ func (r *Rollup) Add(c *store.RunCost) {
 // measurement.
 func (r Rollup) Advisory() bool { return r.Unmetered > 0 }
 
+// AddSummary folds totals the store already aggregated into the rollup.
+func (r *Rollup) AddSummary(s store.RunCostSummary) {
+	r.Runs += s.Runs
+	r.Metered += s.Metered
+	r.Unmetered += s.Unmetered
+	r.InputTokens += s.InputTokens
+	r.OutputTokens += s.OutputTokens
+	r.CostUSD += s.CostUSD
+}
+
 // MemberRollup is one member's share of a workspace's usage.
 type MemberRollup struct {
 	Member domain.MemberID `json:"member"`
@@ -89,4 +99,29 @@ func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
 		return cmp.Compare(a.Member, b.Member)
 	})
 	return rep
+}
+
+// foldDeleted adds the totals of deleted runs. A member whose runs are all
+// deleted still gets an entry.
+func (rep *Report) foldDeleted(deleted []*store.MemberCostSummary) {
+	if len(deleted) == 0 {
+		return
+	}
+	index := make(map[domain.MemberID]int, len(rep.Members))
+	for i, m := range rep.Members {
+		index[m.Member] = i
+	}
+	for _, d := range deleted {
+		rep.Total.AddSummary(d.RunCostSummary)
+		i, ok := index[d.MemberID]
+		if !ok {
+			rep.Members = append(rep.Members, MemberRollup{Member: d.MemberID})
+			i = len(rep.Members) - 1
+			index[d.MemberID] = i
+		}
+		rep.Members[i].Rollup.AddSummary(d.RunCostSummary)
+	}
+	slices.SortFunc(rep.Members, func(a, b MemberRollup) int {
+		return cmp.Compare(a.Member, b.Member)
+	})
 }

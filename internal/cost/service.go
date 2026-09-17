@@ -247,12 +247,16 @@ func (s *Service) markUnmetered(ctx context.Context, run domain.RunID) {
 }
 
 // Report rolls a workspace's recorded usage up per member and per run.
+// Totals include runs deleted from the workspace (see store.DeleteRun);
+// the per-run listing does not, since that run no longer exists to list.
 func (s *Service) Report(ctx context.Context, workspace domain.WorkspaceID) (Report, error) {
-	records, err := s.store.ListRunCosts(ctx, workspace)
+	records, deleted, err := s.store.ListWorkspaceCosts(ctx, workspace)
 	if err != nil {
 		return Report{}, fmt.Errorf("cost: report %s: %w", workspace, err)
 	}
-	return Roll(workspace, records), nil
+	rep := Roll(workspace, records)
+	rep.foldDeleted(deleted)
+	return rep, nil
 }
 
 // Budget reports a workspace's budget and where its spend sits against it.

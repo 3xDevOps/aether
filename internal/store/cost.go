@@ -52,6 +52,15 @@ type RunCostSummary struct {
 	CostUSD      float64
 }
 
+// MemberCostSummary is one member's folded totals from runs deleted out of
+// a workspace (see DeleteRun): a per-(workspace, member) row of
+// run_cost_deletions, in the same shape SummarizeRunCosts returns so a
+// caller can add it straight into a live rollup.
+type MemberCostSummary struct {
+	MemberID domain.MemberID
+	RunCostSummary
+}
+
 // CostStore is the cost-attribution and budget persistence surface.
 type CostStore interface {
 	// PutRunCost records a run's usage, keyed by run. A metered record
@@ -60,12 +69,17 @@ type CostStore interface {
 	// unmetered marker cannot erase real numbers.
 	PutRunCost(ctx context.Context, c *RunCost) error
 	GetRunCost(ctx context.Context, run domain.RunID) (*RunCost, error)
-	// ListRunCosts returns a workspace's records, oldest first.
-	ListRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, error)
 	// SummarizeRunCosts returns the same workspace history as a scalar
 	// aggregate using standard SQL SUM semantics, while avoiding allocation
-	// of every record.
+	// of every record. It includes runs deleted from the workspace (see
+	// DeleteRun), so a deletion cannot lower counted spend or reopen a
+	// budget cap.
 	SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID) (RunCostSummary, error)
+	// ListWorkspaceCosts returns a workspace's live records, oldest first,
+	// and each member's folded totals from deleted runs, ordered by member
+	// ID. Both come from one snapshot: DeleteRun moves a run from the first
+	// to the second, and separate reads could count it in both.
+	ListWorkspaceCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, []*MemberCostSummary, error)
 	// SetWorkspaceBudget creates or replaces a workspace's budget.
 	SetWorkspaceBudget(ctx context.Context, b *WorkspaceBudget) error
 	// GetWorkspaceBudget returns ErrNotFound when the workspace has no budget.
@@ -121,29 +135,28 @@ func (d *DB) GetRunCost(ctx context.Context, run domain.RunID) (*RunCost, error)
 	return c, nil
 }
 
-func (d *DB) ListRunCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, error) {
-	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+runCostCols+` FROM run_costs WHERE workspace_id = ? ORDER BY recorded_at, run_id`, workspace)
-	if err != nil {
-		return nil, fmt.Errorf("store: list run costs: %w", err)
-	}
-	return collect(rows, scanRunCost)
-}
-
 // SummarizeRunCosts returns the aggregate used by budget status and
 // admission. Standard SQL SUM semantics determine the numeric totals while
-// the query avoids allocating one object per historical row.
+// the query avoids allocating one object per historical row. The union
+// with run_cost_deletions folds back in what deleted runs (see DeleteRun)
+// contributed before their row was removed.
 func (d *DB) SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID) (RunCostSummary, error) {
 	var summary RunCostSummary
 	err := d.db.QueryRowContext(ctx, `
-		SELECT COUNT(*),
-		       COALESCE(SUM(CASE WHEN metered <> 0 THEN 1 ELSE 0 END), 0),
-		       COALESCE(SUM(CASE WHEN metered = 0 THEN 1 ELSE 0 END), 0),
-		       COALESCE(SUM(CASE WHEN metered <> 0 THEN input_tokens END), 0),
-		       COALESCE(SUM(CASE WHEN metered <> 0 THEN output_tokens END), 0),
-		       COALESCE(SUM(CASE WHEN metered <> 0 THEN cost_usd END), 0)
-		FROM run_costs
-		WHERE workspace_id = ?`, workspace,
+		SELECT COALESCE(SUM(runs), 0), COALESCE(SUM(metered), 0), COALESCE(SUM(unmetered), 0),
+		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cost_usd), 0)
+		FROM (
+			SELECT COUNT(*) AS runs,
+			       COALESCE(SUM(CASE WHEN metered <> 0 THEN 1 ELSE 0 END), 0) AS metered,
+			       COALESCE(SUM(CASE WHEN metered = 0 THEN 1 ELSE 0 END), 0) AS unmetered,
+			       COALESCE(SUM(CASE WHEN metered <> 0 THEN input_tokens END), 0) AS input_tokens,
+			       COALESCE(SUM(CASE WHEN metered <> 0 THEN output_tokens END), 0) AS output_tokens,
+			       COALESCE(SUM(CASE WHEN metered <> 0 THEN cost_usd END), 0) AS cost_usd
+			FROM run_costs WHERE workspace_id = ?
+			UNION ALL
+			SELECT runs, metered, unmetered, input_tokens, output_tokens, cost_usd
+			FROM run_cost_deletions WHERE workspace_id = ?
+		)`, workspace, workspace,
 	).Scan(&summary.Runs, &summary.Metered, &summary.Unmetered,
 		&summary.InputTokens, &summary.OutputTokens, &summary.CostUSD)
 	if err != nil {
@@ -151,6 +164,59 @@ func (d *DB) SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID
 	}
 	return summary, nil
 }
+
+func (d *DB) ListWorkspaceCosts(ctx context.Context, workspace domain.WorkspaceID) ([]*RunCost, []*MemberCostSummary, error) {
+	tx, err := d.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: list workspace costs: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+runCostCols+` FROM run_costs WHERE workspace_id = ? ORDER BY recorded_at, run_id`, workspace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: list workspace costs: %w", err)
+	}
+	records, err := collect(rows, scanRunCost)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err = tx.QueryContext(ctx, `
+		SELECT member_id, runs, metered, unmetered, input_tokens, output_tokens, cost_usd
+		FROM run_cost_deletions WHERE workspace_id = ? ORDER BY member_id`, workspace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: list workspace costs: deleted: %w", err)
+	}
+	deleted, err := collect(rows, scanMemberCostSummary)
+	if err != nil {
+		return nil, nil, err
+	}
+	return records, deleted, nil
+}
+
+// foldDeletedRunCostSQL rolls a run's row into its workspace and member's
+// accumulator before DeleteRun removes it, so a workspace's and a member's
+// counted spend cannot drop, and a budget cap cannot reopen, just because
+// the run itself is gone. A no-op when the run never had a cost row. The
+// CASE guards mirror SummarizeRunCosts: an unmetered row's numeric columns
+// are ignored, only its run and unmetered counts carry over.
+const foldDeletedRunCostSQL = `
+INSERT INTO run_cost_deletions (workspace_id, member_id, runs, metered, unmetered, input_tokens, output_tokens, cost_usd)
+SELECT workspace_id, member_id, 1,
+       CASE WHEN metered <> 0 THEN 1 ELSE 0 END,
+       CASE WHEN metered = 0 THEN 1 ELSE 0 END,
+       CASE WHEN metered <> 0 THEN input_tokens ELSE 0 END,
+       CASE WHEN metered <> 0 THEN output_tokens ELSE 0 END,
+       CASE WHEN metered <> 0 THEN cost_usd ELSE 0 END
+FROM run_costs WHERE run_id = ?
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET
+	runs          = run_cost_deletions.runs + excluded.runs,
+	metered       = run_cost_deletions.metered + excluded.metered,
+	unmetered     = run_cost_deletions.unmetered + excluded.unmetered,
+	input_tokens  = run_cost_deletions.input_tokens + excluded.input_tokens,
+	output_tokens = run_cost_deletions.output_tokens + excluded.output_tokens,
+	cost_usd      = run_cost_deletions.cost_usd + excluded.cost_usd
+`
 
 func (d *DB) SetWorkspaceBudget(ctx context.Context, b *WorkspaceBudget) error {
 	if b.WorkspaceID == "" {
@@ -212,6 +278,15 @@ func (d *DB) DeleteWorkspaceBudget(ctx context.Context, workspace domain.Workspa
 		return fmt.Errorf("store: delete workspace budget %s: %w", workspace, err)
 	}
 	return nil
+}
+
+func scanMemberCostSummary(row interface{ Scan(...any) error }) (*MemberCostSummary, error) {
+	var m MemberCostSummary
+	if err := row.Scan(&m.MemberID, &m.Runs, &m.Metered, &m.Unmetered,
+		&m.InputTokens, &m.OutputTokens, &m.CostUSD); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 func scanRunCost(row interface{ Scan(...any) error }) (*RunCost, error) {

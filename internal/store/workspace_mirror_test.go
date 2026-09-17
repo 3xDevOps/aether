@@ -281,8 +281,8 @@ func TestWorkspaceMirrorMigrationFromV24(t *testing.T) {
 	if err := db.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 29 {
-		t.Fatalf("schema version = %d, want 29", version)
+	if version != 30 {
+		t.Fatalf("schema version = %d, want 30", version)
 	}
 	var columns string
 	if err := db.db.QueryRow(`SELECT group_concat(name, ',') FROM pragma_table_info('workspace_mirrors')`).Scan(&columns); err != nil {
