@@ -211,6 +211,66 @@ describe('terminal view', () => {
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
+  it('retries control when cached run authority changes', async () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+
+    fireEvent.click(screen.getByText('Take control'))
+    const denied = StubSocket.last()
+    act(() => {
+      denied.onopen?.()
+      denied.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: codeDenied,
+          error: 'run.attach: permission denied',
+        }),
+      })
+    })
+    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
+
+    const View = terminalRoute()
+    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    act(() => useStore.getState().upsertRun(run()))
+    view.rerender(<View params={{ runId: 'run_1' }} active />)
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    const authorized = StubSocket.last()
+    act(() => authorized.onopen?.())
+    expect(authorized.frames()[0]).toMatchObject({ write: true, resume: true })
+    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    view.unmount()
+  })
+  it('reattaches when changed authority revives an unchanged automatic write', async () => {
+    const view = mount()
+    const denied = StubSocket.last()
+    act(() => {
+      denied.onopen?.()
+      denied.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: codeDenied,
+          error: 'run.attach: permission denied',
+        }),
+      })
+    })
+
+    act(() =>
+      useStore.setState({
+        info: {
+          ...serverInfo,
+          member: { ...serverInfo.member, role: 'collaborator' },
+        },
+      }),
+    )
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const authorized = StubSocket.last()
+    act(() => authorized.onopen?.())
+    expect(authorized.frames()[0]).toMatchObject({ write: true })
+    expect(screen.queryByText('You cannot steer this run.')).toBeNull()
+    view.unmount()
+  })
 
   it('starts every attach from the server, not from the last one', () => {
     // What a previous visit to this tab left behind: a steer denial, refusal,
@@ -413,6 +473,17 @@ describe('terminal view', () => {
     const View = terminalRoute()
     view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
     view.rerender(<View params={{ runId: 'run_1' }} active />)
+
+    expect(StubSocket.opened).toHaveLength(1)
+    view.unmount()
+  })
+  it('does not reopen an ended completed run when follow mode changes', () => {
+    const resize = atViewport(1024, { height: 844, pointer: 'coarse' })
+    const view = mount({}, { status: 'completed' })
+    attached()
+    act(() => StubSocket.last().onclose?.({ code: 1000, reason: 'session ended' }))
+
+    resize(390)
 
     expect(StubSocket.opened).toHaveLength(1)
     view.unmount()

@@ -43,7 +43,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   await wizard.expectStep('First run')
   await wizard.firstRun.launch('claude', 'write the result file')
 
-  const pane = page.locator('.xterm-rows')
+  const pane = page.locator('.xterm-rows:visible')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(

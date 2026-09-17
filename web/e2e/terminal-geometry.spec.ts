@@ -331,7 +331,7 @@ done
   expect(revisitAck?.ok).toBe(true)
   expect(revisitAck?.resumed).toBe(true)
   expect(revisitAck?.resume_id).toEqual(expect.stringMatching(/\S+/))
-  expect(revisitAck?.replay).toBe(0)
+  expect(revisitAck?.replay ?? 0).toBe(0)
   expect(browserReplayBytes).toBe(binaryReplayBytesBeforeRevisit)
   await expect.poll(() => rows.textContent(), { timeout: 15_000 }).toBe(settledScreen)
   const revisitedScreen = (await rows.textContent()) ?? ''

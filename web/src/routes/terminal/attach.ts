@@ -191,6 +191,10 @@ export interface Attachment {
    */
   suspend: () => void
   resume: () => void
+  /** Forget a permission denial after the caller observes changed authority. */
+  resetWriteDenial: () => void
+  /** Whether the server has said this terminal session is permanently over. */
+  isEnded: () => boolean
   /** Current tab identity and server-fenced control lease metadata. */
   controlMetadata?: () => ControlMetadata
   /** Update callbacks when a persistent socket gets a new terminal host. */
@@ -1154,6 +1158,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       control_generation: controlGeneration,
       has_control: hasControl,
     }),
+    resetWriteDenial: () => {
+      writeDenied = false
+    },
+    isEnded: () => ended,
     reopen: (options) => {
       if (disposed) return
       const request = { ...(options ?? {}) }

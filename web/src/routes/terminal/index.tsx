@@ -71,6 +71,10 @@ function TerminalRoute({
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.terminals[runID] ?? initialTerminal)
   const setTerminal = useStore((s) => s.setTerminal)
+  const workspaceID = run?.workspace_id
+  const steerOthers = useStore((s) =>
+    workspaceID ? s.workspaces[workspaceID]?.steer_others : undefined,
+  )
   const capability = useCapability()
   const self = useSelf()
   const controlTaken = useStore((s) => s.terminalControlTaken)
@@ -122,6 +126,14 @@ function TerminalRoute({
   // Once they take or release control, that decision wins over automation.
   const explicitWriteRef = useRef<boolean | null>(null)
   const writeSyncRef = useRef({ automaticWrite, phone })
+  const authorityRef = useRef({
+    selfID: self.id,
+    selfRole: self.role,
+    ownerID: run?.member_id,
+    protected: run?.protected,
+    steerOthers,
+  })
+  const controlRetryRef = useRef(false)
   const terminalRef = useRef<XtermController['terminal']>(null)
   const gate = useRef(
     replayGate((chunk, done) => {
@@ -310,9 +322,49 @@ function TerminalRoute({
     }
   }, [run?.status, steerable])
   useEffect(() => {
+    const previous = authorityRef.current
+    const current = {
+      selfID: self.id,
+      selfRole: self.role,
+      ownerID: run?.member_id,
+      protected: run?.protected,
+      steerOthers,
+    }
+    authorityRef.current = current
+    const changed =
+      previous.selfID !== current.selfID ||
+      previous.selfRole !== current.selfRole ||
+      previous.ownerID !== current.ownerID ||
+      previous.protected !== current.protected ||
+      previous.steerOthers !== current.steerOthers
+    if (!changed || !state.steerDenied) return
+
+    // A denial describes the authority snapshot that produced it. Ownership,
+    // role, protection, or workspace-policy changes make that answer stale;
+    // let the server decide again instead of pinning the cached route read-only.
+    attachRef.current?.resetWriteDenial()
+    controlRetryRef.current = true
+    explicitWriteRef.current = null
+    writeRef.current = automaticWrite
+    askedForControl.current = false
+    setTerminal(runID, { steerDenied: false, write: automaticWrite })
+  }, [
+    automaticWrite,
+    run?.member_id,
+    run?.protected,
+    runID,
+    self.id,
+    self.role,
+    setTerminal,
+    state.steerDenied,
+    steerOthers,
+  ])
+  useEffect(() => {
     const previous = writeSyncRef.current
     const automaticChanged = previous.automaticWrite !== automaticWrite
     const followChanged = previous.phone !== phone
+    const retryControl = controlRetryRef.current
+    controlRetryRef.current = false
     writeSyncRef.current = { automaticWrite, phone }
 
     if (automaticChanged && explicitWriteRef.current === null) {
@@ -328,15 +380,19 @@ function TerminalRoute({
     // makes a breakpoint crossing one cutover rather than two. A relaunch is
     // stronger than either and consumes the marker so the same render cannot
     // request a second socket.
+    const attachment = attachmentAtRenderRef.current
     if (
-      attachmentAtRenderRef.current &&
+      attachment &&
       active &&
       lifecycleActive.current &&
-      (followChanged || (automaticChanged && explicitWriteRef.current === null))
+      (!attachment.isEnded() || relaunchPendingRef.current) &&
+      (followChanged ||
+        (explicitWriteRef.current === null &&
+          (automaticChanged || (retryControl && automaticWrite))))
     ) {
       const relaunch = relaunchPendingRef.current
       relaunchPendingRef.current = false
-      attachRef.current?.reopen(relaunch ? undefined : { resume: true })
+      attachment.reopen(relaunch ? undefined : { resume: true })
     }
   }, [active, automaticWrite, phone, runID, setTerminal, state.write])
   // A cached view keeps only this primary terminal mounted. Its attachment
