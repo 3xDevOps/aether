@@ -303,8 +303,8 @@ evidence, and run-owned database records a manual Delete removes,
 publishing the run's branch first if the checkout still held commits the
 branch did not have. The published branch and the run's timeline survive,
 the timeline carrying a system note that records the purge. The run's
-cost row is removed with everything else, so its share drops out of the
-workspace's spend total the same as a manual delete. A run whose retained
+cost stays in the workspace's and the member's spend totals, the same as
+after a manual delete. A run whose retained
 container is still held within `--run-container-ttl`, or whose branch
 cannot be published, is skipped and retried on the next hourly sweep,
 logging a warning on the server naming the run and the reason. Restore

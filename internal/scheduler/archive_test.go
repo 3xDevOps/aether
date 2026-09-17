@@ -414,7 +414,9 @@ func TestSweepArchivedKeepsRestoredRun(t *testing.T) {
 		t.Fatalf("restore: %v", err)
 	}
 
-	e.sched.sweepArchivedRun(ctx, r.ID, cutoff)
+	if err := e.sched.sweepArchivedRun(ctx, r.ID, cutoff); err != nil {
+		t.Fatalf("sweepArchivedRun: %v", err)
+	}
 
 	fresh, err := e.db.GetRun(ctx, r.ID)
 	if err != nil {
@@ -436,7 +438,9 @@ func TestSweepArchivedRunKeepsRunArchivedAfterCutoff(t *testing.T) {
 	backdateArchived(t, e, r, domain.ArchiveRetention-24*time.Hour)
 	cutoff := time.Now().UTC().Add(-domain.ArchiveRetention)
 
-	e.sched.sweepArchivedRun(ctx, r.ID, cutoff)
+	if err := e.sched.sweepArchivedRun(ctx, r.ID, cutoff); err != nil {
+		t.Fatalf("sweepArchivedRun: %v", err)
+	}
 
 	if _, err := e.db.GetRun(ctx, r.ID); err != nil {
 		t.Fatalf("GetRun after sweep: %v", err)

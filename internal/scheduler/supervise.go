@@ -699,7 +699,9 @@ func (s *Scheduler) sweepArchived(ctx context.Context) {
 		return
 	}
 	for _, candidate := range candidates {
-		s.sweepArchivedRun(ctx, candidate.ID, cutoff)
+		if err := s.sweepArchivedRun(ctx, candidate.ID, cutoff); err != nil {
+			slog.Warn("scheduler: archive sweep", "run", candidate.ID, "error", err)
+		}
 	}
 }
 
@@ -707,22 +709,20 @@ func (s *Scheduler) sweepArchived(ctx context.Context) {
 // restore cannot race it. A run whose reason is retainedCloseReason is
 // skipped: DeleteRun would take its lifecycleMu, which Relaunch takes
 // before archiveMu.
-func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutoff time.Time) {
+func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutoff time.Time) error {
 	s.archiveMu.Lock()
 	defer s.archiveMu.Unlock()
 
 	fresh, err := s.cfg.Store.GetRun(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
 	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			slog.Warn("scheduler: archive sweep: reread run", "run", id, "error", err)
-		}
-		return
+		return fmt.Errorf("reread run: %w", err)
 	}
-	if fresh.ArchivedAt == nil || fresh.ArchivedAt.After(cutoff) || !fresh.Status.Final() {
-		return
-	}
-	if fresh.Reason == retainedCloseReason {
-		return
+	if fresh.ArchivedAt == nil || fresh.ArchivedAt.After(cutoff) || !fresh.Status.Final() ||
+		fresh.Reason == retainedCloseReason {
+		return nil
 	}
 
 	// Never destroy the only copy of unpublished work unattended: a
@@ -730,15 +730,14 @@ func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutof
 	// carry commits the branch does not have.
 	if fresh.Worktree != "" {
 		if _, err := s.cfg.Git.PublishRunBranch(ctx, id); err != nil {
-			slog.Warn("scheduler: archive sweep: publish run branch", "run", id, "error", err)
-			return
+			return fmt.Errorf("publish run branch: %w", err)
 		}
 	}
 
 	if err := s.DeleteRun(ctx, id, ""); err != nil {
-		slog.Warn("scheduler: archive sweep: delete run", "run", id, "error", err)
-		return
+		return fmt.Errorf("delete run: %w", err)
 	}
 	s.publishTimeline(ctx, fresh.WorkspaceID, id, "", events.TimelineNote,
 		"archived run deleted after the retention period")
+	return nil
 }
