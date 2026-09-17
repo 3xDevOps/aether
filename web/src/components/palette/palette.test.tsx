@@ -501,6 +501,35 @@ describe('command palette', () => {
     await waitFor(() => expect(api.runHandoff).toHaveBeenCalledWith('run_1', bob.id))
   })
 
+  it('offers restore on an archived run, reached from its own page', async () => {
+    // useAttentionRuns excludes an archived, final run entirely, so the
+    // palette must resolve the focused run from the run map instead - the
+    // only way to reach Restore is from the run's own page.
+    useStore.setState({
+      runs: {
+        [active.id]: toRecord(
+          run({
+            status: 'merged',
+            archived_at: '2026-08-14T10:00:00Z',
+            deletes_at: '2026-08-28T10:00:00Z',
+          }),
+        ),
+      },
+      route: { name: 'terminal', params: { runId: 'run_1' } },
+      capabilities: {
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach', 'terminal'],
+        local: [],
+      },
+    })
+    open()
+
+    fireEvent.click(await screen.findByText('Restore run'))
+
+    await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith('run_1', false))
+  })
+
   it('offers relaunch only on a retained TUI Done run', async () => {
     useStore.setState({
       runs: {

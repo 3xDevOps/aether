@@ -7,7 +7,7 @@ import type { Member, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { isUnseen, type Ack } from '@/store/board'
 import { usePendingApprovalRuns } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
+import { isArchivable, type RunRecord } from '@/store/runs'
 
 export type Bucket = 'needs-you' | 'working' | 'done'
 
@@ -65,6 +65,8 @@ export function bucketOf(state: PresentationState): Bucket {
 
 export interface BoardData {
   columns: BoardColumn[]
+  /** Finished, archived runs in scope - hidden from Done, shown behind its toggle. */
+  archivedCards: BoardCard[]
 }
 
 const at = (iso: string) => Date.parse(iso)
@@ -75,6 +77,7 @@ export function board(s: BoardInput): BoardData {
     working: [],
     done: [],
   }
+  const archivedCards: BoardCard[] = []
 
   for (const run of Object.values(s.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
@@ -82,18 +85,27 @@ export function board(s: BoardInput): BoardData {
       run.status,
       s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
     )
-    columns[bucketOf(state)].push({
+    const card: BoardCard = {
       run,
       state,
       owner: s.members[run.member_id],
       workspace: s.workspaces[run.workspace_id],
       unseen: isUnseen(s.acked, run),
       paused: state === 'working' && s.pausedRuns[run.id] === true,
-    })
+    }
+    // A live run can never be hidden: archiving is a server-side no-op
+    // outside a final status, but this guard holds even so.
+    if (run.archived_at && isArchivable(run.status)) {
+      archivedCards.push(card)
+      continue
+    }
+    columns[bucketOf(state)].push(card)
   }
 
   const newestFirst = (a: BoardCard, b: BoardCard) =>
     at(b.run.stateChangedAt) - at(a.run.stateChangedAt)
+  const archivedFirst = (a: BoardCard, b: BoardCard) =>
+    at(b.run.archived_at ?? '') - at(a.run.archived_at ?? '')
 
   return {
     columns: (Object.keys(columns) as Bucket[]).map((key) => ({
@@ -101,6 +113,7 @@ export function board(s: BoardInput): BoardData {
       label: bucketLabel[key],
       cards: columns[key].sort(newestFirst),
     })),
+    archivedCards: archivedCards.sort(archivedFirst),
   }
 }
 

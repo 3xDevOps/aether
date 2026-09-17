@@ -34,6 +34,25 @@ export function timeAgo(iso: string, now = Date.now()): string {
 }
 
 /**
+ * "deleted today" / "deleted in 1 day" / "deleted in N days" for an archived
+ * run's `deletes_at`, computed fresh each render rather than off a stored
+ * window. Whole hours floor into days, so this undercounts rather than
+ * overstates the time left on a destructive countdown: under 24h - a date
+ * already past included, a sweep due any moment - reads "today", 24h up to
+ * 48h reads "in 1 day". An unparseable value returns "" so the caller can
+ * render no badge at all.
+ */
+export function deletesInLabel(iso: string, now = Date.now()): string {
+  const deletesAt = new Date(iso).getTime()
+  if (!Number.isFinite(deletesAt)) return ''
+  const hours = Math.floor((deletesAt - now) / 3_600_000)
+  if (hours < 24) return 'deleted today'
+  const days = Math.floor(hours / 24)
+  if (days === 1) return 'deleted in 1 day'
+  return `deleted in ${days} days`
+}
+
+/**
  * A version with its release-tag prefix off. Release tags are "v1.2.3", the
  * desktop shell records "1.2.3", and the two have to compare equal.
  */

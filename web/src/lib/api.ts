@@ -511,6 +511,8 @@ export const api = {
     call<unknown>('agent.register', { definition }),
   runProtect: (runID: string, protect: boolean) =>
     call<unknown>('run.protect', { run_id: runID, protected: protect }),
+  runArchive: (runID: string, archived: boolean) =>
+    call<{ run: Run }>('run.archive', { run_id: runID, archived }).then((r) => r.run),
   runRelaunch: (runID: string) =>
     call<{ run: Run }>('run.relaunch', { run_id: runID }).then((r) => r.run),
   // The two endpoints that are not RPC methods: patch text is a read of a

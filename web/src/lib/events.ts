@@ -8,6 +8,7 @@ export const eventLabel = {
   'run.title': 'Run title',
   'run.deleted': 'Run deleted',
   'run.protected': 'Run protection',
+  'run.archived': 'Run archive',
   'run.agent': 'Agent',
   'run.diff': 'Diff',
   'run.cost': 'Cost',

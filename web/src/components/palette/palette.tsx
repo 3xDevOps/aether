@@ -47,6 +47,7 @@ export function PaletteBody({
   onTemplates: () => void
 }) {
   const runs = useAttentionRuns()
+  const runMap = useStore((s) => s.runs)
   const workspaces = useStore((s) => s.workspaces)
   const members = useStore((s) => s.members)
   const route = useStore((s) => s.route)
@@ -65,9 +66,10 @@ export function PaletteBody({
   // Steering acts on the run the centre view is showing, whichever of the run
   // detail routes is showing it - the terminal tab is exactly where a human
   // decides to steer. From the board no run is in view: reveal one first.
-  const focused = route.params.runId
-    ? runs.find((r) => r.run.id === route.params.runId)
-    : undefined
+  // Resolved from the run map rather than the attention list: an archived
+  // run's own page still needs its commands (Restore among them), and
+  // attention excludes archived runs once they are also final.
+  const focused = route.params.runId ? runMap[route.params.runId] : undefined
 
   const goTo = surfaces(cap)
 
@@ -95,12 +97,12 @@ export function PaletteBody({
   )
 
   const focusedContext = focused && {
-    run: focused.run,
-    paused: pausedRuns[focused.run.id],
+    run: focused,
+    paused: pausedRuns[focused.id],
     cap,
     members,
     self,
-    steerOthers: workspaces[focused.run.workspace_id]?.steer_others,
+    steerOthers: workspaces[focused.workspace_id]?.steer_others,
   }
 
   return (

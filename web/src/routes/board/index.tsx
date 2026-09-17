@@ -1,4 +1,5 @@
-import { CheckCheck, Rocket } from 'lucide-react'
+import { Archive, CheckCheck, Rocket } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,19 +16,35 @@ import '@/components/palette'
 
 /** The default centre view: the active workspace's run cards in three buckets. */
 export function Board() {
-  const { columns } = useBoard()
+  const { columns, archivedCards } = useBoard()
   const ackAll = useStore((s) => s.ackAll)
+  const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
   const caps = useCapability()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
   const unreachable = error !== null
-  const total = columns.reduce((n, c) => n + c.cards.length, 0)
+  // Archived runs count too: an all-archived scope must still render the
+  // grid (so the Done header's toggle - the only way back to them - can
+  // mount) rather than falling into the empty-workspace notice.
+  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
   // Nothing to sort into buckets, and nothing still on its way.
   const empty = hydrated && total === 0
   const placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
+
+  const [showArchived, setShowArchived] = useState(false)
+  // The toggle only exists while there is something behind it; once the
+  // last archived run leaves (restored, or later swept), fall back to Done.
+  useEffect(() => {
+    if (archivedCards.length === 0) setShowArchived(false)
+  }, [archivedCards.length])
+  // A workspace switch starts the new board on Done, not on whatever the
+  // previous workspace's toggle was left showing.
+  useEffect(() => {
+    setShowArchived(false)
+  }, [activeWorkspace])
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -83,9 +100,22 @@ export function Board() {
             <EmptyNotice />
           ) : (
             <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:overflow-hidden">
-              {columns.map((column) => (
-                <Column key={column.key} column={column} placeholder={placeholder} />
-              ))}
+              {columns.map((column) =>
+                column.key === 'done' ? (
+                  <Column
+                    key={column.key}
+                    column={showArchived ? { ...column, cards: archivedCards } : column}
+                    placeholder={placeholder}
+                    archived={{
+                      count: archivedCards.length,
+                      showing: showArchived,
+                      onToggle: setShowArchived,
+                    }}
+                  />
+                ) : (
+                  <Column key={column.key} column={column} placeholder={placeholder} />
+                ),
+              )}
             </div>
           )}
         </div>
@@ -154,19 +184,28 @@ function EmptyNotice() {
   )
 }
 
+/** The Done header's toggle between finished runs and its archived ones. */
+interface ArchivedToggle {
+  count: number
+  showing: boolean
+  onToggle: (showing: boolean) => void
+}
+
 function Column({
   column,
   placeholder,
+  archived,
 }: {
   column: BoardColumn
   placeholder: 'skeleton' | 'empty' | 'none'
+  archived?: ArchivedToggle
 }) {
   return (
     <section
       className="flex min-w-0 flex-col border-b border-border bg-sidebar/35 last:border-b-0 lg:min-h-0 lg:border-b-0 lg:border-r lg:last:border-r-0"
       aria-label={column.label}
     >
-      <ColumnHeader label={column.label} count={column.cards.length} />
+      <ColumnHeader label={column.label} count={column.cards.length} archived={archived} />
       <div className="min-h-0 flex-1 lg:overflow-y-auto">
         {column.cards.map((card) => (
           <RunCard key={card.run.id} card={card} />
@@ -187,13 +226,45 @@ function Column({
   )
 }
 
-function ColumnHeader({ label, count }: { label: string; count: number }) {
+function ColumnHeader({
+  label,
+  count,
+  archived,
+}: {
+  label: string
+  count: number
+  archived?: ArchivedToggle
+}) {
   return (
-    <header className="flex min-h-[35px] shrink-0 items-center justify-between gap-3 border-b border-border px-3">
-      <h2 className="text-[13px] font-semibold leading-5">{label}</h2>
-      <Chip color="default" variant="tertiary" size="sm" aria-label={`${count} runs`}>
-        <Chip.Label>{count}</Chip.Label>
-      </Chip>
+    <header className="flex min-h-[35px] shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+      <h2 className="min-w-0 truncate text-[13px] font-semibold leading-5">{label}</h2>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {archived && archived.count > 0 && (
+          <Tooltip>
+            <Tooltip.Trigger<'button'>
+              render={(triggerProps) => (
+                <Button
+                  {...triggerProps}
+                  variant={archived.showing ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-[22px] min-h-[22px] px-1.5 text-xs"
+                  aria-pressed={archived.showing}
+                  onClick={() => archived.onToggle(!archived.showing)}
+                >
+                  <Archive className="size-3" aria-hidden />
+                  Archived {archived.count}
+                </Button>
+              )}
+            />
+            <Tooltip.Content>
+              {archived.showing ? 'Back to Done' : 'Show archived runs'}
+            </Tooltip.Content>
+          </Tooltip>
+        )}
+        <Chip color="default" variant="tertiary" size="sm" aria-label={`${count} runs`}>
+          <Chip.Label>{count}</Chip.Label>
+        </Chip>
+      </div>
     </header>
   )
 }

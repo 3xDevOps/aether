@@ -28,6 +28,10 @@ export interface Run {
   last_commit?: string
   last_commit_at?: string | null
   protected?: boolean
+  /** Set while the run is hidden from the board; absent means not archived. */
+  archived_at?: string
+  /** When the deletion sweep will remove this run; absent means not archived. */
+  deletes_at?: string
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -298,6 +302,11 @@ export interface RunTitlePayload {
 }
 export interface RunProtectedPayload {
   protected: boolean
+}
+/** Both null means the run was restored. */
+export interface RunArchivedPayload {
+  archived_at: string | null
+  deletes_at: string | null
 }
 
 // Team surfaces: the approval inbox, the presence roster, cost and budgets,

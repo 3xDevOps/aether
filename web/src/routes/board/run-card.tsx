@@ -1,11 +1,11 @@
-import { Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
+import { Archive, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
 import { useRef, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateIndicator } from '@/components/state-dot'
 import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
 import { copyText } from '@/lib/clipboard'
-import { timeAgo } from '@/lib/format'
+import { deletesInLabel, timeAgo } from '@/lib/format'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { HarnessGlyph } from '@/routes/board/harness-glyph'
@@ -56,6 +56,8 @@ export function RunCard({ card }: { card: BoardCard }) {
       run.status === 'abandoned' ||
       run.status === 'failed' ||
       run.status === 'interrupted')
+  const deletesLabel =
+    run.archived_at && run.deletes_at ? deletesInLabel(run.deletes_at) : ''
   // An unanswered question is the action the member needs to take. A failed
   // run can also carry a lifecycle reason, but that reason belongs below the
   // action rather than replacing it.
@@ -149,6 +151,14 @@ export function RunCard({ card }: { card: BoardCard }) {
               className="flex size-[22px] items-center justify-center rounded-[2px] text-muted-foreground"
             >
               <Shield className="size-3.5" aria-hidden />
+            </span>
+          )}
+          {deletesLabel && (
+            <span title="Archived">
+              <Chip color="default" variant="soft" size="sm">
+                <Archive className="size-3" aria-hidden />
+                <Chip.Label>{deletesLabel}</Chip.Label>
+              </Chip>
             </span>
           )}
           <CardSlot name="card:badges" run={run} />
