@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -17,7 +18,7 @@ import (
 func init() {
 	register(command{
 		name:  "runs",
-		short: "list runs (--attention: only the ones waiting on a human)",
+		short: "list runs (--attention: waiting on a human; --archived: only archived)",
 		run:   runRuns,
 	})
 }
@@ -38,11 +39,54 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss are", n, noun)
 }
 
+// renderRuns writes the table. The caller rejects attention together with
+// archived, so archived alone decides the fifth column.
+func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string, overlapOf map[string]string, attention, archived bool) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fifthColumn := "OVERLAP"
+	if archived {
+		fifthColumn = "DELETES"
+	}
+	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tHARNESS\tMEMBER\t"+fifthColumn+"\tTITLE\tTASK"); err != nil {
+		return err
+	}
+	for _, r := range runs {
+		if (r.ArchivedAt != nil) != archived {
+			continue
+		}
+		if attention && !needsAttention(r) {
+			continue
+		}
+		title := r.Title
+		if title == "" {
+			title = r.Task
+		}
+		title = strings.ReplaceAll(title, "\n", " ")
+		task := strings.ReplaceAll(r.Task, "\n", " ")
+		fifth := overlapOf[r.ID]
+		if archived {
+			fifth = ""
+			if r.DeletesAt != nil {
+				fifth = *r.DeletesAt
+			}
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.ID, r.Status, r.Harness, memberName(r.MemberID), fifth, title, task); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
 	attention := fs.Bool("attention", false, "list only runs waiting on a human")
+	archived := fs.Bool("archived", false, "list only archived runs, with their deletion date")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *attention && *archived {
+		return fmt.Errorf("aether runs: --attention and --archived cannot be used together")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var rl protocol.RunListResult
@@ -82,31 +126,18 @@ func runRuns(args []string) error {
 			}
 			overlapOf[o.RunID] = strings.Join(flags, "; ")
 		}
-		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tHARNESS\tMEMBER\tOVERLAP\tTITLE\tTASK")
 		waiting := 0
 		for _, r := range rl.Runs {
 			if needsAttention(r) {
 				waiting++
 			}
-			if *attention && !needsAttention(r) {
-				continue
-			}
-			title := r.Title
-			if title == "" {
-				title = r.Task
-			}
-			title = strings.ReplaceAll(title, "\n", " ")
-			task := strings.ReplaceAll(r.Task, "\n", " ")
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				r.ID, r.Status, r.Harness, memberName(r.MemberID), overlapOf[r.ID], title, task)
 		}
-		if err := tw.Flush(); err != nil {
+		if err := renderRuns(os.Stdout, rl.Runs, memberName, overlapOf, *attention, *archived); err != nil {
 			return err
 		}
 		// The notice goes to stderr so it never lands in a pipeline reading
 		// the table, and it is skipped when the table already is the answer.
-		if waiting > 0 && !*attention {
+		if waiting > 0 && !*attention && !*archived {
 			_, _ = fmt.Fprintf(os.Stderr, "\n%s waiting on you: aether runs --attention\n",
 				plural(waiting, "run"))
 		}
