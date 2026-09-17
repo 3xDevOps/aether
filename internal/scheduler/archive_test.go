@@ -246,7 +246,7 @@ func TestRelaunchKeepsArchiveTimerWhenPromotionFails(t *testing.T) {
 	}
 
 	e.sched.cfg.Store = &failingUpdateRunStore{Store: e.db}
-	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); err == nil {
+	if _, relaunchErr := e.sched.Relaunch(ctx, run.ID, e.member.ID); relaunchErr == nil {
 		t.Fatal("Relaunch succeeded despite promotion failure")
 	}
 
