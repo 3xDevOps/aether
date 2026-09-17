@@ -19,8 +19,6 @@ func init() {
 	})
 }
 
-// setArchived implements `aether archive|unarchive <run-id>` over
-// run.archive.
 func setArchived(args []string, archive bool) error {
 	verb := "archive"
 	if !archive {
