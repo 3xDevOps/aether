@@ -129,6 +129,13 @@ Body and footer:
 - Reference issues with `Fixes #n` or `Closes #n`. A revert uses
   `revert: <original header>` and `This reverts commit <sha>.` in the body.
 
+AI assistance, per [AI_POLICY.md](AI_POLICY.md):
+
+- If an AI tool helped, add `This PR was made with the help of <name of
+  tool>.` to the pull request description.
+- Never list an AI tool as an author: no `Co-Authored-By:` trailer naming one
+  and no "Generated with" line, in any commit or pull request description.
+
 One commit, one type. A summary that needs "and" is two commits. Never
 `wip`, `update`, `fix stuff`, `misc`, or emoji.
 
