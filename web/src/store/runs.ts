@@ -36,6 +36,11 @@ export interface RunsSlice {
   applyLastCommit: (runID: string, commit: string, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
+  applyRunArchived: (
+    runID: string,
+    archivedAt: string | null,
+    deletesAt: string | null,
+  ) => void
 }
 
 export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
@@ -89,14 +94,45 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       if (!current || current.protected === isProtected) return {}
       return { runs: { ...s.runs, [runID]: { ...current, protected: isProtected } } }
     }),
+  applyRunArchived: (runID, archivedAt, deletesAt) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current) return {}
+      const next = {
+        ...current,
+        archived_at: archivedAt ?? undefined,
+        deletes_at: deletesAt ?? undefined,
+      }
+      if (current.archived_at === next.archived_at && current.deletes_at === next.deletes_at) {
+        return {}
+      }
+      return { runs: { ...s.runs, [runID]: next } }
+    }),
 })
 
-function isTerminal(status: RunStatus): boolean {
+/**
+ * Whether a run's disposition is final enough to archive: merged, abandoned,
+ * failed or interrupted. A completed run still awaits a human disposition
+ * (Close), so it stays off this list even though it has stopped. The archive
+ * command gate and every hide guard (board selectors, sidebar selectors,
+ * the attention count) share this one predicate - see "Archiving hides a
+ * finished run" in docs/dashboard-frontend.md.
+ */
+export function isArchivable(status: RunStatus): boolean {
   return (
-    status === 'completed' ||
     status === 'merged' ||
     status === 'abandoned' ||
     status === 'failed' ||
     status === 'interrupted'
   )
+}
+
+/**
+ * Whether a run has stopped for good: every archivable status (above) plus
+ * `completed`, which has also stopped but still awaits a human disposition
+ * and so is not itself archivable. Used to freeze `finished_at` once a run's
+ * outcome is settled - never for a hide guard, which wants `isArchivable`.
+ */
+export function isTerminal(status: RunStatus): boolean {
+  return status === 'completed' || isArchivable(status)
 }

@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { pendingApprovalKey } from '@/lib/status'
 import type { GatewayCapabilities, Member } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
+import { isArchivable } from '@/store/runs'
 import { useStore } from '@/store'
 import {
   sidebarGroups,
@@ -53,6 +54,9 @@ export function useAttentionCount(): number {
     )
     for (const run of Object.values(input.runs)) {
       if (input.workspace && run.workspace_id !== input.workspace) continue
+      // Same hide guard as sidebarRuns and board(): an archived, final run
+      // is off both lists, so it must not keep the attention badge stuck.
+      if (run.archived_at && isArchivable(run.status)) continue
       if (run.unanswered_questions !== undefined) {
         // A modern snapshot is authoritative, including zero: do not let a
         // stale room cache keep attention alive after a reply.

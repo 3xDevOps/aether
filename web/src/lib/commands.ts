@@ -6,6 +6,8 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
+  Archive,
+  ArchiveRestore,
   Cable,
   CheckCheck,
   CircleCheck,
@@ -34,7 +36,7 @@ import type { Member, PullResult, RunStatus } from '@/lib/types'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
-import type { RunRecord } from '@/store/runs'
+import { isArchivable, type RunRecord } from '@/store/runs'
 
 /** What a command needs to do its work, supplied by the surface running it. */
 export interface CommandDeps {
@@ -247,6 +249,28 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
+  if (cap.hasMethod('run.archive') && mayKill && isArchivable(run.status)) {
+    if (run.archived_at) {
+      list.push({
+        id: 'restore',
+        label: 'Restore run',
+        short: 'Restore',
+        Icon: ArchiveRestore,
+        done: 'Restored',
+        perform: (d) => d.api.runArchive(id, false),
+      })
+    } else {
+      list.push({
+        id: 'archive',
+        label: 'Archive run',
+        short: 'Archive',
+        Icon: Archive,
+        done: 'Archived',
+        perform: (d) => d.api.runArchive(id, true),
+      })
+    }
+  }
+
   if (cap.hasMethod('run.protect') && mayProtect) {
     list.push({
       id: 'protect',
@@ -392,6 +416,15 @@ export function useCommandRunner(
         toast.error(`${done} failed: ${message(err)}`)
       }
     },
-    [ackAll, navigate, onDone, onTemplates, openDialog, openForwardDialog, recordPull, removeRun],
+    [
+      ackAll,
+      navigate,
+      onDone,
+      onTemplates,
+      openDialog,
+      openForwardDialog,
+      recordPull,
+      removeRun,
+    ],
   )
 }

@@ -133,6 +133,71 @@ test('delete asks first, calls run.delete, and removes a live run', async () => 
   expect(useStore.getState().runs[record.id]).toBeUndefined()
 })
 
+// Archive is reversible, so it fires straight from the row - no confirm.
+test('archive has no confirm and calls run.archive', async () => {
+  const record = seed({ run: { status: 'merged' } })
+  render(<RunActions run={record} />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+
+  await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, true))
+  // The store is untouched: the run.archived event, not this call, moves it.
+  expect(useStore.getState().runs[record.id]?.archived_at).toBeUndefined()
+})
+
+test('restore stands in for archive once a run is archived, and calls run.archive with false', async () => {
+  const record = seed({
+    run: {
+      status: 'merged',
+      archived_at: '2026-08-14T10:00:00Z',
+      deletes_at: '2026-08-28T10:00:00Z',
+    },
+  })
+  render(<RunActions run={record} />)
+
+  expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Restore' }))
+
+  await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, false))
+})
+
+// completed still awaits a human disposition (Close), so it is not final.
+test('archive is offered only for a final status', () => {
+  const { unmount } = render(<RunActions run={seed({ run: { status: 'completed' } })} />)
+  expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
+  unmount()
+
+  for (const status of ['merged', 'abandoned', 'failed', 'interrupted'] as const) {
+    const rendered = render(<RunActions run={seed({ run: { status } })} />)
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeTruthy()
+    rendered.unmount()
+  }
+})
+
+// Same gate as Delete: the Kill policy, not ownership alone.
+test('archive follows the kill permission, not a rule of its own', () => {
+  render(
+    <RunActions
+      run={seed({
+        run: { status: 'merged', protected: true },
+        members: [alice, bob],
+        self: bob,
+      })}
+    />,
+  )
+  expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
+})
+
+test('a gateway without run.archive offers neither verb', () => {
+  const record = seed({ run: { status: 'merged' } })
+  useStore.setState({ capabilities: { gateway: 'remote', methods: [], ws: [] } })
+  render(<RunActions run={record} />)
+
+  expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull()
+})
+
 test('hand off offers the members who may own a run, and nobody else', async () => {
   const record = seed({ paused: false, members: [alice, bob, vera] })
   render(<RunActions run={record} />)

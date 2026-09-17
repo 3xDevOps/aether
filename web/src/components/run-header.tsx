@@ -1,6 +1,7 @@
-import { Shield } from 'lucide-react'
+import { Archive, Shield } from 'lucide-react'
 import { RunActions } from '@/components/run-actions'
 import { StateIndicator } from '@/components/state-dot'
+import { deletesInLabel } from '@/lib/format'
 import { runLabel, runState, stateLabel, type PresentationState } from '@/lib/status'
 import { focusRing } from '@/lib/utils'
 import { RunTabs } from '@/routes/terminal/tabs'
@@ -55,6 +56,8 @@ export function RunHeader({
   const task = run.task.trim()
   const detail = subtitle?.trim()
   const showDetail = Boolean(detail && detail !== task)
+  const deletesLabel =
+    run.archived_at && run.deletes_at ? deletesInLabel(run.deletes_at) : ''
 
   return (
     <div className="@container/run-header min-w-0 shrink-0">
@@ -75,6 +78,15 @@ export function RunHeader({
                 className="flex shrink-0 items-center pt-0.5 text-muted-foreground"
               >
                 <Shield className="size-3.5" aria-hidden />
+              </span>
+            )}
+            {deletesLabel && (
+              <span
+                title="Archived"
+                className="flex shrink-0 items-center gap-1 pt-0.5 text-xs text-muted-foreground"
+              >
+                <Archive className="size-3.5" aria-hidden />
+                {deletesLabel}
               </span>
             )}
           </div>

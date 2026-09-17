@@ -9,6 +9,7 @@ import type {
   GitBranchPayload,
   LinkStatus,
   OverlapPayload,
+  RunArchivedPayload,
   RunDiffPayload,
   RunProtectedPayload,
   RunStatusPayload,
@@ -318,6 +319,19 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunProtected(ev.run_id, p.protected)
+      break
+    }
+    case 'run.archived': {
+      const p = ev.payload as RunArchivedPayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          return false
+        }
+      }
+      store.getState().applyRunArchived(ev.run_id, p.archived_at, p.deletes_at)
       break
     }
     case 'run.diff': {

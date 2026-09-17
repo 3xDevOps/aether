@@ -660,6 +660,8 @@ run's wire `paused` field, skipping runs that do not carry it.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
+  `run.title`, `run.protected` and `run.archived` follow the same fetch-first
+  rule on a run the client has never seen.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
 
@@ -763,6 +765,18 @@ Two things the buckets do not come from the run status alone:
   tab - nothing is acknowledged when the page loads, so a fresh tab shows what
   is waiting rather than remembering that yesterday's you looked at it.
 
+**Archiving hides a finished run from Done without deleting it.** A run
+carries `archived_at`/`deletes_at` once archived. Every hide guard -
+`board()`, `sidebarRuns()`, and the attention count - drops it once its
+status is also final (`isArchivable`: `merged`, `abandoned`, `failed`,
+`interrupted`); a route that opens a run by id is untouched, since it reads
+the run map directly. The Done `ColumnHeader` grows an "Archived N" toggle
+once N is over zero, swapping the column's content to those runs, and
+resets to Done the moment the last one leaves. Each archived card, and the
+run header for one, show `deletesInLabel(deletes_at)` (`src/lib/format.ts`):
+"deleted today" under 24h (past due included), "deleted in 1 day" under
+48h, then "deleted in N days".
+
 ### Reason and paused on the wire
 
 **The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
@@ -788,13 +802,26 @@ verb rather than offering the one the server would refuse.
 
 `src/lib/commands.ts` holds every verb the dashboard can perform - the run
 verbs (pause/resume, send a message to the agent, close as merged or abandoned
-at any stage that holds a record, kill, delete, protect/unprotect, relaunch,
-pull branch, hand off) and the board verbs (open the board or the list, launch,
-launch from a template, mark all seen) - as data: an id, a label, an icon, the
-capability gate, and the call itself. `useCommandRunner()` performs one and
-reports the outcome the same way everywhere: gateway verbs toast their
-past-tense name or the server's refusal verbatim. Deleting a run also removes
-it from the local run map after the server confirms deletion.
+at any stage that holds a record, kill, delete, archive/restore,
+protect/unprotect, relaunch, pull branch, hand off) and the board verbs (open
+the board or the list, launch, launch from a template, mark all seen) - as
+data: an id, a label, an icon, the capability gate, and the call itself.
+`useCommandRunner()` performs one and reports the outcome the same way
+everywhere: gateway verbs toast their past-tense name or the server's refusal
+verbatim. Deleting a run also removes it from the local run map after the
+server confirms deletion; archiving, restoring and protecting call the
+gateway and nothing else, leaving the store for the run's own `run.archived`
+or `run.protected` event to update - two clients racing the same run cannot
+have an older RPC response overwrite a newer event.
+
+Archive/Restore are gated on `isArchivable(status)` (`src/store/runs.ts`;
+`merged`, `abandoned`, `failed`, `interrupted`, never `completed`) plus the
+kill permission and the `run.archive` capability; neither confirms, since
+archiving is reversible. Both join `primaryCommands` in
+`src/components/run-actions.tsx`, so Archive sits on the header next to
+Delete. The palette resolves its focused run from the run map by
+`route.params.runId` rather than the attention list, so an archived run's
+own page still offers Restore even though attention has stopped listing it.
 - **The command palette** (`src/components/palette/`) is the cmdk palette:
   `⌘K` on macOS and `Ctrl+K` elsewhere, anywhere in the app (see [Keyboard and
   focus](#keyboard-and-focus)), or the command center in the titlebar. Both

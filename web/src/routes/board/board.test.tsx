@@ -59,6 +59,14 @@ const elsewhere = run({
   status: 'running',
   workspace_id: otherWorkspace.id,
 })
+const archivedMerged = run({
+  id: 'run_archived',
+  task: 'already archived',
+  status: 'merged',
+  finished_at: '2026-08-10T10:30:00Z',
+  archived_at: '2026-08-14T10:00:00Z',
+  deletes_at: '2026-08-28T10:00:00Z',
+})
 
 // The columns are landmarks; a plain label lookup would also hit the state
 // dots, which carry the same words.
@@ -503,5 +511,99 @@ describe('board', () => {
     seed([working])
     render(<Board />)
     expect(screen.getByText(`chip:${working.id}`)).toBeDefined()
+  })
+
+  it('hides an archived run from Done, and reveals it with its deletion badge behind the toggle', () => {
+    vi.useFakeTimers()
+    try {
+      // 8 whole days before archivedMerged.deletes_at.
+      vi.setSystemTime(new Date('2026-08-20T10:00:00Z'))
+      seed([merged, archivedMerged])
+      render(<Board />)
+
+      expect(column('Done').getByText('landed already')).toBeDefined()
+      expect(column('Done').queryByText('already archived')).toBeNull()
+
+      const toggle = screen.getByRole('button', { name: 'Archived 1' })
+      expect(toggle.getAttribute('aria-pressed')).toBe('false')
+
+      fireEvent.click(toggle)
+
+      expect(column('Done').getByText('already archived')).toBeDefined()
+      expect(column('Done').queryByText('landed already')).toBeNull()
+      expect(column('Done').getByText('deleted in 8 days')).toBeDefined()
+      expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resets the toggle once the last archived run is restored', () => {
+    seed([merged, archivedMerged])
+    render(<Board />)
+    fireEvent.click(screen.getByRole('button', { name: 'Archived 1' }))
+    expect(column('Done').getByText('already archived')).toBeDefined()
+
+    act(() => useStore.getState().applyRunArchived(archivedMerged.id, null, null))
+
+    expect(screen.queryByRole('button', { name: /^Archived/ })).toBeNull()
+    expect(column('Done').getByText('landed already')).toBeDefined()
+  })
+
+  it('renders the grid and its toggle when every run in scope is archived', () => {
+    // Nothing lands in a bucket, so `total` must still count the archived
+    // runs behind the toggle - otherwise the board falls into the
+    // empty-workspace notice and the toggle (the only way back to them)
+    // never mounts.
+    seed([archivedMerged])
+    render(<Board />)
+
+    expect(screen.queryByText(/No runs yet/)).toBeNull()
+    expect(screen.getByRole('region', { name: 'Done' })).toBeDefined()
+    const toggle = screen.getByRole('button', { name: 'Archived 1' })
+
+    fireEvent.click(toggle)
+    expect(column('Done').getByText('already archived')).toBeDefined()
+  })
+
+  it('resets the archived toggle when the active workspace changes', () => {
+    const archivedElsewhere = run({
+      id: 'run_archived_elsewhere',
+      task: 'archived over there',
+      status: 'merged',
+      workspace_id: otherWorkspace.id,
+      finished_at: '2026-08-10T10:30:00Z',
+      archived_at: '2026-08-14T10:00:00Z',
+      deletes_at: '2026-08-28T10:00:00Z',
+    })
+    seed([merged, archivedMerged, archivedElsewhere])
+    render(<Board />)
+
+    const toggle = screen.getByRole('button', { name: 'Archived 1' })
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+
+    act(() => useStore.getState().setActiveWorkspace(otherWorkspace.id))
+
+    const otherToggle = screen.getByRole('button', { name: 'Archived 1' })
+    expect(otherToggle.getAttribute('aria-pressed')).toBe('false')
+    expect(column('Done').queryByText('archived over there')).toBeNull()
+  })
+
+  it('never hides a run carrying archived_at unless its status is final', () => {
+    // A defensive guard: the server only sets archived_at on a final run, but
+    // the board must not hide a live one even so.
+    const stillLive = run({
+      id: 'run_still_live',
+      task: 'live despite archived_at',
+      status: 'running',
+      archived_at: '2026-08-14T10:00:00Z',
+      deletes_at: '2026-08-28T10:00:00Z',
+    })
+    seed([stillLive])
+    render(<Board />)
+
+    expect(column('Working').getByText('live despite archived_at')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /^Archived/ })).toBeNull()
   })
 })

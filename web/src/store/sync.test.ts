@@ -61,6 +61,20 @@ function protectedEvent(over: Partial<Event> = {}): Event {
   }
 }
 
+function archivedEvent(over: Partial<Event> = {}): Event {
+  return {
+    id: 'evt_archived',
+    seq: 9,
+    time: '2026-08-14T11:03:00Z',
+    workspace_id: workspace.id,
+    run_id: 'run_1',
+    actor_id: '',
+    type: 'run.archived',
+    payload: { archived_at: '2026-08-14T11:03:00Z', deletes_at: '2026-08-28T11:03:00Z' },
+    ...over,
+  }
+}
+
 describe('hydrate', () => {
   it('fills the store from one round of fetches', async () => {
     const store = createRootStore()
@@ -471,6 +485,34 @@ describe('applyEvent', () => {
     )
     expect(store.getState().runs.run_1.protected).toBe(false)
     expect(store.getState().lastSeq).toBe(8)
+  })
+
+  it('updates a run archive state from run.archived events, fetching an unseen run first', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => []) }))
+    const client = fakeApi({ runGet: vi.fn(async () => run({ id: 'run_1' })) })
+
+    expect(store.getState().runs.run_1).toBeUndefined()
+    await applyEvent(store, archivedEvent(), client)
+
+    expect(client.runGet).toHaveBeenCalledWith('run_1')
+    expect(store.getState().runs.run_1.archived_at).toBe('2026-08-14T11:03:00Z')
+    expect(store.getState().runs.run_1.deletes_at).toBe('2026-08-28T11:03:00Z')
+
+    // Both null means restored.
+    await applyEvent(
+      store,
+      archivedEvent({
+        id: 'evt_restored',
+        seq: 10,
+        payload: { archived_at: null, deletes_at: null },
+      }),
+      client,
+    )
+
+    expect(store.getState().runs.run_1.archived_at).toBeUndefined()
+    expect(store.getState().runs.run_1.deletes_at).toBeUndefined()
+    expect(store.getState().lastSeq).toBe(10)
   })
 
   it('updates a run title from a run.title event', async () => {
