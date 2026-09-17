@@ -478,7 +478,7 @@ CREATE UNIQUE INDEX idx_approvals_source ON approvals(run_id, source_id) WHERE s
 
 CREATE TABLE run_costs (
 	run_id        TEXT PRIMARY KEY REFERENCES runs(id),
-	workspace_id  TEXT NOT NULL REFERENCES workspaces(id),
+	workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
 	member_id     TEXT NOT NULL REFERENCES members(id),
 	input_tokens  INTEGER NOT NULL DEFAULT 0,
 	output_tokens INTEGER NOT NULL DEFAULT 0,
@@ -924,6 +924,27 @@ INSERT OR IGNORE INTO coord_report_publications (report_id, event_id, publicatio
 	SELECT id, 'coord-report:' || id, 'pending', COALESCE(finalized_at, created_at), NULL
 	FROM coord_reports
 	WHERE state = 'finalized';
+`,
+	// v30: fold a deleted run's cost into its workspace and member instead
+	// of losing it. run_costs.run_id is PRIMARY KEY REFERENCES runs(id), so
+	// its row cannot outlive the run; one run_cost_deletions row per
+	// (workspace, member) accumulates what DeleteRun folds in, and the cost
+	// summaries add it back so counted spend and budget admission cannot
+	// change just because a run was deleted. member_id carries no foreign
+	// key: this is history keyed by id, and it must survive the member
+	// being removed (see store.DeleteMember).
+	`
+CREATE TABLE run_cost_deletions (
+	workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	member_id     TEXT NOT NULL,
+	runs          INTEGER NOT NULL DEFAULT 0,
+	metered       INTEGER NOT NULL DEFAULT 0,
+	unmetered     INTEGER NOT NULL DEFAULT 0,
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	cost_usd      REAL NOT NULL DEFAULT 0,
+	PRIMARY KEY (workspace_id, member_id)
+);
 `,
 }
 

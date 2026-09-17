@@ -160,8 +160,8 @@ func TestRunBaseProvenanceMigrationFromV25(t *testing.T) {
 	if queryErr := db.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); queryErr != nil {
 		t.Fatalf("read schema version: %v", queryErr)
 	}
-	if version != 29 {
-		t.Fatalf("schema version = %d, want 29", version)
+	if version != 30 {
+		t.Fatalf("schema version = %d, want 30", version)
 	}
 
 	got, err := db.GetRun(context.Background(), "r1")

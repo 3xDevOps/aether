@@ -337,6 +337,9 @@ func (d *DB) DeleteRun(ctx context.Context, id domain.RunID) error {
 		args  []any
 	}{
 		{`DELETE FROM approvals WHERE run_id = ?`, []any{id}},
+		// Fold the run's cost into its workspace/member accumulator before
+		// the row it came from is gone; see foldDeletedRunCostSQL.
+		{foldDeletedRunCostSQL, []any{id}},
 		{`DELETE FROM run_costs WHERE run_id = ?`, []any{id}},
 		// Published audit rows are reconciliation cache and may be removed
 		// with retired mailbox rows. Pending and quarantined rows retain their

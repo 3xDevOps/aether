@@ -2,6 +2,7 @@ package cost
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -56,7 +57,8 @@ func TestRollUpAttributesPerMemberAndKeepsUnmeteredOut(t *testing.T) {
 
 // TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces covers the
 // consumer-facing budget result after a metered replacement/replay, an
-// unmetered run, budget deletion, and a second workspace's independent spend.
+// unmetered run, deleting a run, clearing the budget, and a second
+// workspace's independent spend.
 func TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces(t *testing.T) {
 	ctx := context.Background()
 	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
@@ -148,6 +150,9 @@ func TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces(t *testing.T) {
 		t.Fatalf("other workspace budget = %+v, want only its own spend", other)
 	}
 
+	// Deleting the unmetered run must not lower the workspace's counted
+	// spend or run counts: the deletion folds them into an accumulator the
+	// summary still adds in (see store.DeleteRun).
 	if err = db.DeleteRun(ctx, r2.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
 	}
@@ -155,16 +160,15 @@ func TestBudgetReflectsCostHistoryAcrossUpdatesAndWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Budget after run deletion: %v", err)
 	}
-	wantAfterDelete := Rollup{Runs: 1, Metered: 1, InputTokens: 1200, OutputTokens: 340, CostUSD: 8}
-	if afterDelete.State != events.BudgetWarn || afterDelete.Spend != wantAfterDelete {
-		t.Fatalf("budget after run deletion = %+v, want metered spend only", afterDelete)
+	if afterDelete.State != events.BudgetWarn || afterDelete.Spend != wantSpend {
+		t.Fatalf("budget after run deletion = %+v, want unchanged from before the delete", afterDelete)
 	}
 
 	cleared, err := svc.SetBudget(ctx, w1.ID, Change{}, member.ID)
 	if err != nil {
 		t.Fatalf("clear budget: %v", err)
 	}
-	if cleared.Budget != nil || cleared.State != events.BudgetOK || cleared.Spend != wantAfterDelete {
+	if cleared.Budget != nil || cleared.State != events.BudgetOK || cleared.Spend != wantSpend {
 		t.Fatalf("cleared budget = %+v, want no cap with spend preserved", cleared)
 	}
 }
@@ -228,5 +232,174 @@ func TestUnmeteredSpendNeverCountsTowardTheCap(t *testing.T) {
 	}
 	if !spend.Advisory() {
 		t.Fatal("spend with unmetered runs must report itself advisory")
+	}
+}
+
+// TestDeletedRunSpendStillCountsAgainstTheBudget pins the budget-reopening
+// bug: deleting the run whose metered cost pushed a workspace to its cap
+// must not reopen that cap, because the workspace's counted spend must
+// not drop just because the run that earned it is gone.
+func TestDeletedRunSpendStillCountsAgainstTheBudget(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("NewInProc: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+	svc, err := New(Config{Store: db, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	w := &domain.Workspace{Name: "capped"}
+	if err = db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	member := &domain.Member{
+		DisplayName: "Ada", TailnetLogin: "ada@example", Role: domain.RoleCollaborator,
+	}
+	if err = db.CreateMember(ctx, member); err != nil {
+		t.Fatalf("CreateMember: %v", err)
+	}
+	r := &domain.Run{
+		WorkspaceID: w.ID, MemberID: member.ID, Task: "task", Harness: "claude",
+		Mode: domain.LaunchTUI, Status: domain.RunRunning,
+	}
+	if err = db.CreateRun(ctx, r); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err = db.PutRunCost(ctx, &store.RunCost{
+		RunID: r.ID, WorkspaceID: w.ID, MemberID: member.ID, CostUSD: 10, Metered: true,
+	}); err != nil {
+		t.Fatalf("PutRunCost: %v", err)
+	}
+	if _, err = svc.SetBudget(ctx, w.ID, Change{LimitUSD: 10}, member.ID); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+
+	if err = svc.Admit(ctx, w.ID, member.ID); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("Admit before delete = %v, want ErrBudgetExceeded", err)
+	}
+
+	if err = db.DeleteRun(ctx, r.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+
+	if err = svc.Admit(ctx, w.ID, member.ID); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("Admit after delete = %v, want the cap to remain in force", err)
+	}
+	status, err := svc.Budget(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("Budget after delete: %v", err)
+	}
+	if status.Spend.CostUSD != 10 {
+		t.Fatalf("spend after delete = %v, want the deleted run's cost still counted", status.Spend.CostUSD)
+	}
+}
+
+// TestReportKeepsDeletedRunSpendInTotalsButNotInTheRunList proves the
+// per-workspace and per-member breakdown a report shows keeps a deleted
+// run's numbers, while the run itself drops out of the per-run listing
+// (there is no run left to show).
+func TestReportKeepsDeletedRunSpendInTotalsButNotInTheRunList(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "cost.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("NewInProc: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+	svc, err := New(Config{Store: db, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	w := &domain.Workspace{Name: "team"}
+	if err = db.CreateWorkspace(ctx, w); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	ada := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@example", Role: domain.RoleCollaborator}
+	bob := &domain.Member{DisplayName: "Bob", TailnetLogin: "bob@example", Role: domain.RoleCollaborator}
+	if err = db.CreateMember(ctx, ada); err != nil {
+		t.Fatalf("CreateMember ada: %v", err)
+	}
+	if err = db.CreateMember(ctx, bob); err != nil {
+		t.Fatalf("CreateMember bob: %v", err)
+	}
+	newRun := func(member domain.MemberID) *domain.Run {
+		t.Helper()
+		r := &domain.Run{
+			WorkspaceID: w.ID, MemberID: member, Task: "task", Harness: "claude",
+			Mode: domain.LaunchTUI, Status: domain.RunRunning,
+		}
+		if createErr := db.CreateRun(ctx, r); createErr != nil {
+			t.Fatalf("CreateRun: %v", createErr)
+		}
+		return r
+	}
+	adaRun1, adaRun2 := newRun(ada.ID), newRun(bob.ID)
+	if err = db.PutRunCost(ctx, &store.RunCost{
+		RunID: adaRun1.ID, WorkspaceID: w.ID, MemberID: ada.ID, InputTokens: 10, OutputTokens: 1, CostUSD: 1, Metered: true,
+	}); err != nil {
+		t.Fatalf("PutRunCost adaRun1: %v", err)
+	}
+	if err = db.PutRunCost(ctx, &store.RunCost{
+		RunID: adaRun2.ID, WorkspaceID: w.ID, MemberID: bob.ID, InputTokens: 20, OutputTokens: 2, CostUSD: 2, Metered: true,
+	}); err != nil {
+		t.Fatalf("PutRunCost adaRun2: %v", err)
+	}
+
+	before, err := svc.Report(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+	wantTotal := Rollup{Runs: 2, Metered: 2, InputTokens: 30, OutputTokens: 3, CostUSD: 3}
+	if before.Total != wantTotal || len(before.Runs) != 2 {
+		t.Fatalf("report before delete = %+v, want total %+v and 2 runs", before, wantTotal)
+	}
+
+	// Ada's own run - the only record of her spend - is deleted.
+	if err = db.DeleteRun(ctx, adaRun1.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+
+	after, err := svc.Report(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("Report after delete: %v", err)
+	}
+	if after.Total != wantTotal {
+		t.Fatalf("report total after delete = %+v, want unchanged %+v", after.Total, wantTotal)
+	}
+	if len(after.Runs) != 1 || after.Runs[0].RunID != adaRun2.ID {
+		t.Fatalf("report runs after delete = %+v, want only bob's surviving run", after.Runs)
+	}
+	if len(after.Members) != 2 {
+		t.Fatalf("report members after delete = %+v, want ada still listed", after.Members)
+	}
+	var adaRollup, bobRollup Rollup
+	for _, m := range after.Members {
+		switch m.Member {
+		case ada.ID:
+			adaRollup = m.Rollup
+		case bob.ID:
+			bobRollup = m.Rollup
+		}
+	}
+	wantAda := Rollup{Runs: 1, Metered: 1, InputTokens: 10, OutputTokens: 1, CostUSD: 1}
+	wantBob := Rollup{Runs: 1, Metered: 1, InputTokens: 20, OutputTokens: 2, CostUSD: 2}
+	if adaRollup != wantAda {
+		t.Fatalf("ada rollup after delete = %+v, want %+v (her deleted run's spend still counted)", adaRollup, wantAda)
+	}
+	if bobRollup != wantBob {
+		t.Fatalf("bob rollup after delete = %+v, want unaffected %+v", bobRollup, wantBob)
 	}
 }

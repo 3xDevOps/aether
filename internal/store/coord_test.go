@@ -305,8 +305,8 @@ func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 	if versionErr := db.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); versionErr != nil {
 		t.Fatalf("read schema version: %v", versionErr)
 	}
-	if version != coordSchemaVersion {
-		t.Fatalf("schema version = %d, want %d", version, coordSchemaVersion)
+	if version != len(migrations) {
+		t.Fatalf("schema version = %d, want %d", version, len(migrations))
 	}
 	var kind, correlationID, idempotencyKey string
 	if metadataErr := db.db.QueryRow(`SELECT kind, correlation_id, idempotency_key FROM run_messages WHERE id = 'legacy-msg'`).

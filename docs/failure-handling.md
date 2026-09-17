@@ -245,7 +245,10 @@ checkout, run row, member account, and coordination surfaces for
 `--run-container-ttl`. Zero uses the default `1h`; a negative TTL disables
 retention and cleans up immediately. Kill stops and destroys a run immediately.
 Delete stops any live container and removes the checkout, transcript, and
-durable run records; its timeline remains audit history.
+durable run records; its timeline remains audit history. Its recorded cost
+survives inside its workspace's and its member's spend totals - the numbers
+[`aether cost` and `aether budget`](teams.md#budgets) report, and a workspace
+budget checks - so deleting a run over budget cannot reopen the cap.
 
 Relaunch is available only for an explicitly closed, retained TUI run whose
 retention deadline has not passed:
