@@ -302,6 +302,7 @@ commit captured at launch.
 | `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
 | `aether inject <run> "..."` | Push an instruction into a running agent. Renders as a banner in your member color. |
 | `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
+| `aether delete <run>` | Stop the run if it is live, then remove its checkout, transcript, evidence, and run records. Needs the same permission as `kill`. A published run branch stays in the workspace repo and the timeline keeps the history. |
 | `aether protect` / `unprotect <run>` | Limit steering and killing one run to its owner and admins, whatever the workspace policy says. |
 | `aether handoff <run> <member>` | Transfer ownership and notification routing immediately. The recipient needs no acceptance handshake; Aether records the actor and both owners and captures handoff context. The agent account and its cost attribution do not change. |
 | `aether close <run> --outcome merged\|abandoned` | Record the finish outcome and clear a finished run off the attention board after its automatic evidence capture. |
