@@ -165,6 +165,18 @@ getters, or the same contract at several layers.
 - Prefer standard-library and existing dependency functionality.
 - Do not add speculative abstractions, configuration, or compatibility paths.
 
+## Commits and pull requests
+
+Commit messages and pull request titles follow Conventional Commits; the
+rules are in the Commits section of [AGENTS.md](AGENTS.md).
+
+### AI assistance
+
+AI tools are welcome under the [AI contributions policy](AI_POLICY.md). In
+short: you own what you submit, you add `This PR was made with the help of
+<name of tool>.` to the pull request description, and you never list an AI
+tool as a commit or pull request co-author.
+
 ## Documentation
 
 Public documentation lives in `docs/`. Root-level `README.md` and this file
