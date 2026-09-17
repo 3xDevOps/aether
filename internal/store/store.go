@@ -97,6 +97,7 @@ type Store interface {
 	ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error)
 	ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error)
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
+	ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*domain.Run, error)
 	UpdateRun(ctx context.Context, r *domain.Run) error
 
 	// UpdateRunCommit updates only the last published commit metadata.

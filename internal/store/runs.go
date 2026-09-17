@@ -184,6 +184,24 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 	return collect(rows, scanRun)
 }
 
+// ListRunsArchivedBefore returns runs whose archived_at is set and at or
+// before cutoff, for the retention sweep. It does not filter by status: a
+// run restored or otherwise no longer eligible is caught by the sweep's
+// own re-read. One query, no index: the sweep runs hourly and the table
+// is small.
+func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*domain.Run, error) {
+	ts, err := encodeTime(cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("store: list runs archived before: %w", err)
+	}
+	rows, err := d.db.QueryContext(ctx,
+		runSnapshotQuery(`runs.archived_at IS NOT NULL AND runs.archived_at <= ?`)+` ORDER BY runs.id`, ts)
+	if err != nil {
+		return nil, fmt.Errorf("store: list runs archived before: %w", err)
+	}
+	return collect(rows, scanRun)
+}
+
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err

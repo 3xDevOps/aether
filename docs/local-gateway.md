@@ -231,8 +231,10 @@ archiving any other status returns `-32002` naming the run's real status.
 Archiving an already-archived run is a no-op that leaves its timestamp
 unchanged; calling it with `"archived":false` restores the run. The response
 is a `RunResult` whose `run.archived_at` and `run.deletes_at` are set while
-archived and absent otherwise; `deletes_at` is the date the server will
-delete the run (see [failure-handling.md](failure-handling.md#disk-pressure)).
+archived and absent otherwise; `deletes_at` is the date the server's
+archive sweep deletes the run, on its first boot or hourly sweep at or
+after that date (see
+[failure-handling.md](failure-handling.md#disk-pressure)).
 Both calls publish a `run.archived` event carrying the same two fields -
 null on both means the run was restored - and a matching timeline note.
 

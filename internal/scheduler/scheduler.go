@@ -518,13 +518,14 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
-	var gcC <-chan time.Time
+	// sweepArchived runs regardless of CheckoutTTL: archive retention is
+	// unconditional, unlike checkout GC.
 	if s.cfg.CheckoutTTL > 0 {
 		s.sweepCheckouts(ctx)
-		gc := time.NewTicker(time.Hour)
-		defer gc.Stop()
-		gcC = gc.C
 	}
+	s.sweepArchived(ctx)
+	gc := time.NewTicker(time.Hour)
+	defer gc.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -537,8 +538,11 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.sweepRetained(ctx)
 			s.drainEvidencePublications(ctx)
 			s.tickUpdates(ctx)
-		case <-gcC:
-			s.sweepCheckouts(ctx)
+		case <-gc.C:
+			if s.cfg.CheckoutTTL > 0 {
+				s.sweepCheckouts(ctx)
+			}
+			s.sweepArchived(ctx)
 		}
 	}
 }
