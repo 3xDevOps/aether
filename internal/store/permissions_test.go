@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -141,6 +142,132 @@ func TestSetRunProtected(t *testing.T) {
 		t.Fatalf("SetRunProtected on missing row: %v, want ErrNotFound", err)
 	}
 }
+
+// TestSetRunArchived covers the narrow archive/restore mutator: it only
+// archives a Final, unarchived run; re-archiving is a no-op that keeps the
+// original timestamp; restore only takes effect on an archived run.
+func TestSetRunArchived(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+
+	live := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	if changed, archErr := db.SetRunArchived(ctx, live.ID, ptrTime(time.Now().UTC())); archErr != nil {
+		t.Fatalf("SetRunArchived on running run: %v", archErr)
+	} else if changed {
+		t.Fatal("SetRunArchived archived a non-Final run")
+	}
+	got, err := db.GetRun(ctx, live.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ArchivedAt != nil {
+		t.Fatalf("ArchivedAt = %v, want nil for a refused archive", got.ArchivedAt)
+	}
+
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunAbandoned)
+	first := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if changed, archErr := db.SetRunArchived(ctx, r.ID, &first); archErr != nil {
+		t.Fatalf("SetRunArchived: %v", archErr)
+	} else if !changed {
+		t.Fatal("SetRunArchived on a Final unarchived run reported no change")
+	}
+	got, err = db.GetRun(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ArchivedAt == nil || !got.ArchivedAt.Equal(first) {
+		t.Fatalf("ArchivedAt = %v, want %v", got.ArchivedAt, first)
+	}
+	// Nothing else moved.
+	r.ArchivedAt = &first
+	assertRunEqual(t, r, got)
+
+	// Re-archiving is idempotent: it must not reset or extend the timer.
+	second := time.Now().UTC()
+	if changed, archErr := db.SetRunArchived(ctx, r.ID, &second); archErr != nil {
+		t.Fatalf("SetRunArchived (re-archive): %v", archErr)
+	} else if changed {
+		t.Fatal("re-archiving an already-archived run reported a change")
+	}
+	got, err = db.GetRun(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ArchivedAt == nil || !got.ArchivedAt.Equal(first) {
+		t.Fatalf("ArchivedAt after re-archive = %v, want unchanged %v", got.ArchivedAt, first)
+	}
+
+	// Restoring an unarchived run is a no-op.
+	unarchived := mustCreateRun(t, db, w.ID, m.ID, domain.RunFailed)
+	if changed, archErr := db.SetRunArchived(ctx, unarchived.ID, nil); archErr != nil {
+		t.Fatalf("SetRunArchived restore of unarchived run: %v", archErr)
+	} else if changed {
+		t.Fatal("restoring an already-unarchived run reported a change")
+	}
+
+	// Restore clears the column.
+	if changed, archErr := db.SetRunArchived(ctx, r.ID, nil); archErr != nil {
+		t.Fatalf("SetRunArchived restore: %v", archErr)
+	} else if !changed {
+		t.Fatal("restoring an archived run reported no change")
+	}
+	got, err = db.GetRun(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ArchivedAt != nil {
+		t.Fatalf("ArchivedAt after restore = %v, want nil", got.ArchivedAt)
+	}
+}
+
+// TestUpdateRunIgnoresStaleArchivedAt pins the invariant that UpdateRun's
+// SET list excludes archived_at: a caller holding a stale in-memory Run
+// with a bogus ArchivedAt (or one that has since changed underneath it)
+// can never clobber or resurrect the archive timer through UpdateRun.
+func TestUpdateRunIgnoresStaleArchivedAt(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunAbandoned)
+
+	at := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.SetRunArchived(ctx, r.ID, &at); err != nil {
+		t.Fatalf("SetRunArchived: %v", err)
+	}
+
+	stale := *r
+	stale.ArchivedAt = nil
+	if err := db.UpdateRun(ctx, &stale); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+	got, err := db.GetRun(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ArchivedAt == nil || !got.ArchivedAt.Equal(at) {
+		t.Fatalf("UpdateRun with a stale nil ArchivedAt changed the column: got %v, want %v", got.ArchivedAt, at)
+	}
+
+	bogus := time.Now().UTC().Add(24 * time.Hour)
+	stale.ArchivedAt = &bogus
+	if updateErr := db.UpdateRun(ctx, &stale); updateErr != nil {
+		t.Fatalf("UpdateRun: %v", updateErr)
+	}
+	got, err = db.GetRun(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ArchivedAt == nil || !got.ArchivedAt.Equal(at) {
+		t.Fatalf("UpdateRun with a stale bogus ArchivedAt changed the column: got %v, want %v", got.ArchivedAt, at)
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 // TestPermissionsMigrationUpgradesV3 builds a genuine v3 database, seeds
 // rows, then opens it: v4 must add the columns with permissive defaults
