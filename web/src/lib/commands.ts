@@ -28,11 +28,11 @@ import {
 } from 'lucide-react'
 import { useCallback } from 'react'
 import { toast } from 'sonner'
-import { api, type Api } from '@/lib/api'
+import { api, ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import { runState } from '@/lib/status'
-import type { Member, PullResult, RunStatus } from '@/lib/types'
+import type { Member, PullResult, RunStatus, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 import type { PaletteDialog } from '@/store/palette'
@@ -44,6 +44,7 @@ export interface CommandDeps {
   navigate: (name: string, params?: Record<string, string>) => void
   openDialog: (dialog: PaletteDialog, runID?: string) => void
   openForwardDialog: (target: string) => void
+  openClearDoneDialog: (plan: ClearDonePlan) => void
   ackAll: () => void
   /** Keeps a pull's git output for the diff tab to show. */
   recordPull: (runID: string, result: PullResult) => void
@@ -110,8 +111,98 @@ export interface RunCommandContext {
 /** What the board-wide verbs are gated on. */
 export interface BoardCommandContext {
   cap: Capability
-  /** The caller's own role, null before hydration. */
-  role: Member['role'] | null
+  /** The caller's own id and role, null before hydration. */
+  self: { id: string | null; role: Member['role'] | null }
+  /**
+   * The Done column's live cards in the caller's scope, so Clear done can
+   * weigh what it would archive.
+   */
+  doneCandidates: ClearDoneCandidate[]
+}
+
+/** One Done-column card, as much as Clear done needs to weigh it. */
+export interface ClearDoneCandidate {
+  run: RunRecord
+  /** The run's workspace, for the steer_others policy the kill permission reads. */
+  workspace?: Workspace
+}
+
+export interface ClearDonePlan {
+  /** Runs Clear done would archive. */
+  eligible: RunRecord[]
+  /** Completed runs that have stopped but still await Close; archiving
+   * cannot act on them until then. */
+  notClosed: number
+  /** Runs whose status qualifies but this member may not kill. */
+  notAllowed: number
+}
+
+/**
+ * What "Clear done" would archive out of the Done column's live cards:
+ * every `isArchivable` run, not already archived, that this member may
+ * kill, gated the same way the single Archive command is - see
+ * "Archiving hides a finished run" in docs/dashboard-frontend.md. The rest
+ * stay for one of two reasons, counted separately for the confirm dialog.
+ */
+export function clearDonePlan(
+  candidates: ClearDoneCandidate[],
+  cap: Capability,
+  self: { id: string | null; role: Member['role'] | null },
+): ClearDonePlan {
+  const plan: ClearDonePlan = { eligible: [], notClosed: 0, notAllowed: 0 }
+  if (!cap.hasMethod('run.archive')) return plan
+  for (const { run, workspace } of candidates) {
+    if (run.archived_at) continue
+    if (!isArchivable(run.status)) {
+      if (run.status === 'completed') plan.notClosed++
+      continue
+    }
+    const target = { owner: run.member_id, protected: run.protected, steerOthers: workspace?.steer_others }
+    if (!allowed('kill', self, target)) {
+      plan.notAllowed++
+      continue
+    }
+    plan.eligible.push(run)
+  }
+  return plan
+}
+
+// internal/protocol.CodeNotFound: the run is already gone, which is the
+// outcome Clear done was trying to reach anyway.
+const codeRunNotFound = -32000
+
+/**
+ * Archives every eligible run one at a time: the server has a single SQLite
+ * writer. Each call's own `run.archived` event moves the run in every
+ * connected dashboard, this one included, so the count below comes from the
+ * resolved calls, not from re-applying what the RPC returned.
+ */
+export async function runClearDone(
+  eligible: RunRecord[],
+  deps: Pick<CommandDeps, 'api' | 'removeRun'>,
+): Promise<void> {
+  let archived = 0
+  let failed = 0
+  let firstError: string | undefined
+  for (const run of eligible) {
+    try {
+      await deps.api.runArchive(run.id, true)
+      archived++
+    } catch (err) {
+      if (err instanceof ApiError && err.code === codeRunNotFound) {
+        deps.removeRun(run.id)
+        archived++
+        continue
+      }
+      failed++
+      firstError ??= message(err)
+    }
+  }
+  if (failed > 0) {
+    toast.error(`Archived ${archived}, ${failed} failed: ${firstError}`)
+  } else {
+    toast.success(`Archived ${archived} ${archived === 1 ? 'run' : 'runs'}`)
+  }
 }
 
 /**
@@ -331,12 +422,19 @@ function isFinished(status: RunStatus): boolean {
  * what the transport carries; the role says what this member may do, and the
  * local gateway advertises every method regardless of who is behind it.
  */
-export function canLaunch({ cap, role }: BoardCommandContext): boolean {
+export function canLaunch({
+  cap,
+  role,
+}: {
+  cap: Capability
+  role: Member['role'] | null
+}): boolean {
   return cap.hasMethod('run.launch') && allowed('launch', { id: null, role })
 }
 
 /** The verbs that act on the board rather than on one run. */
 export function boardCommands(ctx: BoardCommandContext): Command[] {
+  const role = ctx.self.role
   const list: Command[] = [
     {
       id: 'board',
@@ -351,7 +449,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.navigate('overview'),
     },
   ]
-  if (canLaunch(ctx)) {
+  if (canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'launch',
       label: 'Launch a run...',
@@ -359,7 +457,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.openDialog('launch'),
     })
   }
-  if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role: ctx.role })) {
+  if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role })) {
     list.push({
       id: 'template',
       label: 'Launch from a template...',
@@ -373,6 +471,15 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
     Icon: CheckCheck,
     perform: (d) => d.ackAll(),
   })
+  const plan = clearDonePlan(ctx.doneCandidates, ctx.cap, ctx.self)
+  if (plan.eligible.length > 0) {
+    list.push({
+      id: 'clear-done',
+      label: 'Clear done runs',
+      Icon: Archive,
+      perform: (d) => d.openClearDoneDialog(plan),
+    })
+  }
   return list
 }
 
@@ -389,6 +496,7 @@ export function useCommandRunner(
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const openForwardDialog = useStore((s) => s.openForwardDialog)
+  const openClearDoneDialog = useStore((s) => s.openClearDoneDialog)
   const ackAll = useStore((s) => s.ackAll)
   const recordPull = useStore((s) => s.recordPull)
   const removeRun = useStore((s) => s.removeRun)
@@ -402,6 +510,7 @@ export function useCommandRunner(
         navigate,
         openDialog,
         openForwardDialog,
+        openClearDoneDialog,
         ackAll,
         recordPull,
         removeRun,
@@ -423,6 +532,7 @@ export function useCommandRunner(
       onTemplates,
       openDialog,
       openForwardDialog,
+      openClearDoneDialog,
       recordPull,
       removeRun,
     ],

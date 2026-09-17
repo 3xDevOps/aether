@@ -530,6 +530,28 @@ describe('command palette', () => {
     await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith('run_1', false))
   })
 
+  it('opens the same confirm dialog as the board button, and does not archive before it confirms', async () => {
+    const done = run({
+      id: 'run_done',
+      status: 'merged',
+      finished_at: '2026-08-14T10:10:00Z',
+    })
+    useStore.setState({
+      runs: { [active.id]: toRecord(active), [done.id]: toRecord(done) },
+      capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+    })
+    open()
+
+    fireEvent.click(await screen.findByText('Clear done runs'))
+
+    expect(await screen.findByText('Archive 1 finished run?')).toBeDefined()
+    expect(api.runArchive).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive 1' }))
+
+    await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(done.id, true))
+  })
+
   it('offers relaunch only on a retained TUI Done run', async () => {
     useStore.setState({
       runs: {
