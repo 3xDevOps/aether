@@ -159,7 +159,11 @@ func serviceContainerVerify(t *testing.T, f *candidateLifecycleFixture, candidat
 	if len(started.Verifications) == 0 || started.Verifications[len(started.Verifications)-1].Status != protocol.VerificationRunning {
 		t.Fatalf("Verify result = %+v, want persisted running verification", started)
 	}
-	return serviceContainerWaitTerminal(t, f, candidate.CandidateID, len(started.Verifications)-1)
+	terminalCandidate, terminal := serviceContainerWaitTerminal(t, f, candidate.CandidateID, len(started.Verifications)-1)
+	if terminal.CandidateRevision != candidate.CandidateRevision {
+		t.Fatalf("verification candidate revision = %q, want frozen revision %q", terminal.CandidateRevision, candidate.CandidateRevision)
+	}
+	return terminalCandidate, terminal
 }
 
 func serviceContainerAssertProvenance(t *testing.T, v protocol.Verification, timeout int) {
@@ -389,7 +393,7 @@ func TestServiceContainerMirroredProposalPreservesBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshed, err := mirrorGit.RefreshWorkspaceMirror(ctx, f.workspace.ID, mirrorRequest)
-	if err != nil || refreshed.Status != domain.MirrorStatusPending || refreshed.CandidateCommit == "" {
+	if err != nil || refreshed.Status != domain.MirrorStatusReady || !refreshed.Changed || refreshed.CandidateCommit == "" {
 		t.Fatalf("mirror refresh = %+v, %v", refreshed, err)
 	}
 	adopted, err := mirrorGit.AdoptWorkspaceMirror(ctx, f.workspace.ID, 1)
@@ -477,7 +481,8 @@ func TestServiceContainerVerificationFailureStatesRejectDelivery(t *testing.T) {
 		wantOutput []string
 	}{
 		{name: "exit", argv: []string{"sh", "-c", "printf fail-output; printf fail-error >&2; exit 7"}, timeout: 30, status: protocol.VerificationFailed, wantOutput: []string{"fail-output", "fail-error"}},
-		{name: "timeout", argv: []string{"sh", "-c", "echo before-timeout; sleep 5"}, timeout: 1, status: protocol.VerificationTimedOut, wantOutput: []string{"before-timeout"}},
+		// Leave enough time for Docker setup; the command itself runs past the deadline.
+		{name: "timeout", argv: []string{"sh", "-c", "echo before-timeout; sleep 30"}, timeout: 10, status: protocol.VerificationTimedOut, wantOutput: []string{"before-timeout"}},
 		{name: "tracked-source-mutation", argv: []string{"sh", "-c", "printf mutated > one.txt"}, timeout: 30, status: protocol.VerificationSourceChanged, wantOutput: nil},
 	}
 	for _, tc := range tests {

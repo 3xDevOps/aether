@@ -347,6 +347,68 @@ func TestCandidateLifecycleRetainsCombinedInputsAfterSourcePurge(t *testing.T) {
 	}
 }
 
+func TestCandidateLifecyclePrepareRetryAfterInputSaveFailure(t *testing.T) {
+	f := newCandidateLifecycleFixture(t, strings.NewReader("retry transcript\n"), false)
+	source := f.source(t, "candidate-prepare-fault", "source.txt", "source\n", "packet-prepare-fault", nil)
+	base := candidateLifecycleGit(t, filepath.Join(f.repos, string(f.workspace.ID)+".git"), "rev-parse", "refs/heads/main")
+	params := protocol.IntegrationPrepareParams{
+		WorkspaceID: string(f.workspace.ID),
+		Submissions: []protocol.SubmissionRef{{
+			WorkspaceID: string(f.workspace.ID), RunID: string(source.run.ID),
+			EvidenceRef: source.packet.ID, RetainedRevision: source.packet.RetainedRevision,
+		}},
+		TargetRef: "refs/heads/main", ExpectedTargetRevision: base, IdempotencyKey: "prepare-input-save-fault",
+	}
+	saveErr := errors.New("input append save failed")
+	f.service.store = &candidateLifecycleFailingStore{DB: f.db, failOn: 1, err: saveErr}
+	if _, err := f.service.Prepare(f.ctx, Actor{MemberID: f.owner.ID}, params); !errors.Is(err, saveErr) {
+		t.Fatalf("faulted Prepare error = %v, want append-save error", err)
+	}
+	row, err := f.db.GetIntegrationCandidateByKey(f.ctx, f.workspace.ID, "member:"+string(f.owner.ID), params.IdempotencyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil || row.State != string(protocol.CandidatePreparing) {
+		t.Fatalf("durable candidate after append-save failure = %+v", row)
+	}
+	var durable protocol.Candidate
+	if err := json.Unmarshal(row.Payload, &durable); err != nil {
+		t.Fatal(err)
+	}
+	if len(durable.Inputs) != 0 {
+		t.Fatalf("durable inputs after append-save failure = %+v, want empty before retry", durable.Inputs)
+	}
+	candidateID := row.ID
+	retried, err := f.service.Prepare(f.ctx, Actor{MemberID: f.owner.ID}, params)
+	if err != nil {
+		t.Fatalf("Prepare retry after append-save failure: %v", err)
+	}
+	if retried.CandidateID != candidateID || retried.State != protocol.CandidateFrozen ||
+		retried.AppliedInputs != 1 || len(retried.Inputs) != 1 || retried.CandidateRevision == "" {
+		t.Fatalf("retried candidate = %+v", retried)
+	}
+	if retried.Inputs[0].Submission != params.Submissions[0] {
+		t.Fatalf("retried input submission = %+v, want %+v", retried.Inputs[0].Submission, params.Submissions[0])
+	}
+	repo := filepath.Join(f.repos, string(f.workspace.ID)+".git")
+	if got := candidateLifecycleGit(t, repo, "rev-parse", "refs/aether/candidates/"+candidateID+"/inputs/0"); got != source.packet.RetainedRevision {
+		t.Fatalf("retained candidate input = %s, want %s", got, source.packet.RetainedRevision)
+	}
+	artifact := filepath.Join(f.root, "candidate-artifacts", "candidates", candidateID, "0.transcript")
+	if got, err := os.ReadFile(artifact); err != nil || string(got) != "retry transcript\n" {
+		t.Fatalf("retained transcript = %q, %v", got, err)
+	}
+	f.removeSource(t, source)
+	replay, err := f.service.Prepare(f.ctx, Actor{MemberID: f.owner.ID}, params)
+	if err != nil {
+		t.Fatalf("completed Prepare replay after source deletion: %v", err)
+	}
+	if replay.CandidateID != retried.CandidateID || replay.CandidateRevision != retried.CandidateRevision ||
+		replay.State != protocol.CandidateFrozen {
+		t.Fatalf("completed replay after source deletion = %+v, original = %+v", replay, retried)
+	}
+}
+
 func TestCandidateLifecycleResolveConflictToImmutableRevision(t *testing.T) {
 	f := newCandidateLifecycleFixture(t, nil, false)
 	first := f.source(t, "candidate-conflict-one", "conflict.txt", "first\n", "packet-conflict-one", nil)
@@ -464,6 +526,29 @@ func TestCandidateLifecycleUnavailableRequiredSourceLeavesTargetUnchanged(t *tes
 				t.Fatalf("target changed after refused assembly: before=%s after=%s", before, after)
 			}
 		})
+	}
+}
+
+func TestCandidateLifecyclePrepareFailureJoinsSaveError(t *testing.T) {
+	f := newCandidateLifecycleFixture(t, nil, false)
+	source := f.source(t, "candidate-prepare-source-fault", "source.txt", "source\n", "packet-prepare-source-fault",
+		[]store.EvidenceSourceFact{{Name: "required", Available: false, Reason: "fault injected"}})
+	base := candidateLifecycleGit(t, filepath.Join(f.repos, string(f.workspace.ID)+".git"), "rev-parse", "refs/heads/main")
+	saveErr := errors.New("prepare failure save failed")
+	f.service.store = &candidateLifecycleFailingStore{DB: f.db, failOn: 1, err: saveErr}
+	_, err := f.service.Prepare(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationPrepareParams{
+		WorkspaceID: string(f.workspace.ID),
+		Submissions: []protocol.SubmissionRef{{
+			WorkspaceID: string(f.workspace.ID), RunID: string(source.run.ID),
+			EvidenceRef: source.packet.ID, RetainedRevision: source.packet.RetainedRevision,
+		}},
+		TargetRef: "refs/heads/main", ExpectedTargetRevision: base,
+		RequiredSources: []string{"required"}, IdempotencyKey: "prepare-source-save-fault",
+	})
+	if err == nil || !errors.Is(err, ErrUnavailable) || !errors.Is(err, saveErr) ||
+		!strings.Contains(err.Error(), "source required unavailable") ||
+		!strings.Contains(err.Error(), "prepare failure save failed") {
+		t.Fatalf("joined Prepare failure = %v, want source and persistence errors", err)
 	}
 }
 
