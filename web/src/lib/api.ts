@@ -66,6 +66,27 @@ import type {
   UpdateStatus,
   Workspace,
 } from '@/lib/types'
+import type {
+  IntegrationDecideParams,
+  IntegrationDecideResult,
+  IntegrationDeliverParams,
+  IntegrationDeliverResult,
+  IntegrationDeleteParams,
+  IntegrationDeleteResult,
+  IntegrationListParams,
+  IntegrationListResult,
+  IntegrationPatchResult,
+  IntegrationPrepareParams,
+  IntegrationPrepareResult,
+  IntegrationRequestDeliveryParams,
+  IntegrationRequestDeliveryResult,
+  IntegrationResolveParams,
+  IntegrationResolveResult,
+  IntegrationShowParams,
+  IntegrationShowResult,
+  IntegrationVerifyParams,
+  IntegrationVerifyResult,
+} from '@/lib/integration-types'
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
@@ -431,6 +452,26 @@ export const api = {
     packet_id: string
     max_bytes?: number
   }) => call<EvidenceTranscriptResult>('run.evidence.transcript', params),
+  integrationPrepare: (params: IntegrationPrepareParams) =>
+    call<IntegrationPrepareResult>('integration.prepare', params),
+  integrationShow: (params: IntegrationShowParams) =>
+    call<IntegrationShowResult>('integration.show', params),
+  integrationList: (params: IntegrationListParams) =>
+    call<IntegrationListResult>('integration.list', params),
+  integrationResolve: (params: IntegrationResolveParams) =>
+    call<IntegrationResolveResult>('integration.resolve', params),
+  integrationVerify: (params: IntegrationVerifyParams) =>
+    call<IntegrationVerifyResult>('integration.verify', params),
+  integrationRequestDelivery: (params: IntegrationRequestDeliveryParams) =>
+    call<IntegrationRequestDeliveryResult>('integration.request_delivery', params),
+  integrationDecide: (params: IntegrationDecideParams) =>
+    call<IntegrationDecideResult>('integration.decide', params),
+  integrationDeliver: (params: IntegrationDeliverParams) =>
+    call<IntegrationDeliverResult>('integration.deliver', params),
+  integrationPatch: (params: IntegrationShowParams) =>
+    call<IntegrationPatchResult>('integration.patch', params),
+  integrationDelete: (params: IntegrationDeleteParams) =>
+    call<IntegrationDeleteResult>('integration.delete', params),
   approvalList: (workspaceID: string, all = false) =>
     call<{ approvals: Approval[] }>('approval.list', {
       workspace_id: workspaceID,

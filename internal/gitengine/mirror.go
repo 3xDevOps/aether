@@ -124,7 +124,9 @@ var mirrorSharedCGNAT = &net.IPNet{
 // high-water mark is never lowered, including when a prior configuration is
 // rolled back.
 func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, req MirrorRequest) (MirrorResult, error) {
+	e.fileWriteMu.Lock()
 	result := MirrorResult{WorkspaceID: ws, SourceURL: req.SourceURL, Branch: req.Branch, Generation: req.Generation, CheckedAt: time.Now().UTC()}
+	defer e.fileWriteMu.Unlock()
 	if err := validateMirrorRequest(req, e.cfg.MirrorFetch != nil); err != nil {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, req, "", "", err)
 	}
@@ -201,8 +203,9 @@ func (e *Engine) MirrorGeneration(ctx context.Context, ws domain.WorkspaceID) (i
 // DisableWorkspaceMirror removes the mirrored-base policy and its accepted /
 // candidate refs. The workspace branch itself is left intact and becomes a
 // normal client-writable branch again. The always-on refs/aether hiding policy
-// remains in place for server-owned bookkeeping refs.
 func (e *Engine) DisableWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID) error {
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
 		return err
@@ -247,9 +250,9 @@ func (e *Engine) DisableWorkspaceMirror(ctx context.Context, ws domain.Workspace
 
 // RefreshWorkspaceMirror fetches exactly req.Branch and advances the mirrored
 // base only when the accepted observation is unchanged locally and upstream is
-// equal to or ahead of it. Rewrites and local/server-ahead divergence retain
-// candidate while leaving accepted and base untouched.
 func (e *Engine) RefreshWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, req MirrorRequest) (MirrorResult, error) {
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	result := MirrorResult{WorkspaceID: ws, SourceURL: req.SourceURL, Branch: req.Branch, Generation: req.Generation, CheckedAt: time.Now().UTC()}
 	if err := validateMirrorRequest(req, e.cfg.MirrorFetch != nil); err != nil {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, req, "", "", err)
@@ -314,9 +317,9 @@ func (e *Engine) RefreshWorkspaceMirror(ctx context.Context, ws domain.Workspace
 	return result, mirrorErr(MirrorErrorCASConflict, ws, req, result.BaseCommit, result.ObservedCommit, nil)
 }
 
-// AdoptWorkspaceMirror explicitly accepts a retained candidate and moves it to
-// accepted and the mirrored base. This is the sole non-fast-forward operation.
 func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, generation int64) (MirrorResult, error) {
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	result := MirrorResult{WorkspaceID: ws, Generation: generation, CheckedAt: time.Now().UTC()}
 	if generation < 0 {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, MirrorRequest{Generation: generation}, "", "", errors.New("invalid mirror generation"))

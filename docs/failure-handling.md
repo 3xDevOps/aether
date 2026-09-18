@@ -325,7 +325,62 @@ working, which is what you need to actually clear space.
 If the filesystem cannot be read at all, the floor allows the run: the guard
 exists to stop a disk from filling, not to stop the server.
 
-### Launch freshness and mirror failures
+### Candidate assembly, verification, and delivery
+
+Candidate work has its own durable lifecycle and is independent of the source
+run's checkout and evidence row. Preparation creates the candidate aggregate
+before allocating resources, then records each completed input copy as it
+retains the exact evidence Git revision and, when available, a bounded
+transcript artifact. Packet snapshots are bounded to 1 MiB total per
+candidate. A source packet may expire or be deleted after that ownership
+transfer; the candidate validates its own refs, transcript checksums, and
+metadata instead of trusting the original packet or run row.
+
+Candidate inputs are applied in order in a server-owned isolated checkout.
+When a cherry-pick conflicts, the journal and checkout remain in the
+`conflicted` state for explicit file resolutions. The candidate does not
+freeze until every retained input has applied; after freezing, the candidate
+revision and inputs are immutable. A required source that is unavailable or
+truncated refuses preparation. If an owned ref, transcript, or checksum is
+missing later, the candidate becomes `unavailable` and verification and
+delivery are blocked; Aether does not silently rebuild it from an expired
+source.
+
+Verification is asynchronous and finite. The server persists the runtime
+creation key before creating a container, runs the exact requested argv
+against a disposable copy of the frozen revision, bounds retained output to
+64 KiB per verification (at most 2 MiB across 32 verification records) while
+continuing to drain it, and checks the tree after all child processes stop. A
+timeout, cancellation, runtime failure, or source change is never a pass.
+A restart reconciles persisted creation keys, destroys any
+discovered verification container, removes its disposable checkout, and marks
+an interrupted attempt as an error; it never reruns the command or invents an
+exit code. Cleanup failures leave the verification record and recoverable
+resources for a later retry.
+
+Delivery claims its request durably before touching Git. A local workspace
+target uses an atomic expected-old compare-and-swap. A mirrored target cannot
+be updated directly: a proposal transaction creates the public
+`refs/heads/aether/proposal-<request-id>` ref and a private receipt while
+leaving the upstream-owned mirror base unchanged. A database failure after a
+successful Git transaction is reconciled from that exact private receipt, not
+by guessing from the target's current value; retrying therefore does not
+duplicate a delivery. The public proposal remains available for the human's
+normal fetch/push review route.
+
+Candidate lifetime is 30 days. Verification validity is 24 hours, and a
+delivery request cannot outlive its candidate or its selected verifications.
+Expiry and deletion first fence new actions and persist the transition, then
+destroy runtime/checkouts and remove candidate-private refs and transcript
+copies. Public proposal refs are transport artifacts and are not removed by
+candidate-private cleanup. Tombstone metadata is retained for at most 30 days
+so retries and cleanup can be reconciled without keeping source artifacts.
+If the transition or preservation step fails, Aether keeps recoverable
+resources and retries cleanup rather than deleting evidence silently. See
+[teams.md](teams.md#candidate-integration) for the operator-facing flow and
+[integration.md](integration.md) for the method-level contract.
+
+## Launch freshness and mirror failures
 
 Launch freshness is server-owned. Before a run row, checkout or container
 exists, the scheduler captures the workspace base. A configured workspace
