@@ -13,8 +13,8 @@ import type {
   ConfigImportResult,
   ConfigRoot,
   DaemonInstallResult,
-  DiskUsage,
   DaemonStatusResult,
+  DiskUsage,
   EnvHarnessesResult,
   EnvSaveResult,
   EvidenceGetResult,
@@ -46,6 +46,7 @@ import type {
   RoomStatusResult,
   RoomMessageAnchor,
   RoomMessageKind,
+  UsageResult,
   WorkspaceMirrorAuth,
   WorkspaceMirrorResult,
   FileDiff,
@@ -316,6 +317,8 @@ export const api = {
   memberList: () =>
     call<{ members: Member[] }>('member.list').then((r) => r.members),
   accountList: () => call<AccountAccess>('account.list'),
+  accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
+    call<UsageResult>('account.usage', params),
   accountShare: (memberID: string) =>
     call<unknown>('account.share', { member_id: memberID }),
   accountRevoke: (memberID: string) =>

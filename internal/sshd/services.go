@@ -35,6 +35,8 @@ type Services struct {
 	MissionControl MissionControl
 	// Missions is authenticated human mission creation and inspection.
 	Missions MissionService
+	// Usage reads read-only Claude Code and Codex subscription quota.
+	Usage QuotaReader
 	// Integration exposes authenticated candidate preparation, review,
 	// verification, and delivery through the generic control gateway.
 	Integration IntegrationService

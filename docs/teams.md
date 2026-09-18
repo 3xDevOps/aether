@@ -575,6 +575,22 @@ root process in the recipient's run read or change every file and credential in
 the shared home. Revocation blocks new launches and relaunches but does not
 stop existing runs; stop them first if access must end immediately.
 
+The dashboard's bottom-left status bar reads the selected account's
+subscription quota through the read-only `account.usage` RPC. An empty
+`account_member_id` means the caller's account; selecting another account
+requires the same explicit share as a launch, and an admin has no implicit
+access. The server rechecks that grant after each provider read, so a revoke
+during a request cannot return the owner's data. This read never copies a
+credential to the client or to a run. Native OAuth credentials are read only
+for Claude Code and Codex; API-key logins and other harnesses are reported as
+unsupported, and native reauthentication remains the owner's terminal action.
+
+Normal successful usage is cached for 60 seconds. `refresh:true` bypasses that
+success cache only within a 10-second request floor; failures wait at least
+60 seconds and honor a provider retry deadline. A stale row keeps only a
+same-credential successful window, reports its error and stale status, and is
+not presented as current after a reset has passed without a fresh measurement.
+
 ### Mission identity and current authority
 
 Mission work does not introduce a second identity or credential boundary.

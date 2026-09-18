@@ -11,10 +11,38 @@ Two rules shape everything below:
 1. **Aether does not install agents for you.** A member runs the displayed
    vendor install command in their environment terminal. The command should
    install the executable into `~/.local/bin`.
-2. **Aether does not extract or sync vendor credentials.** Logins happen
-   through the vendor's own flow in an Aether terminal. Credentials remain in
-   the member home; an explicit account share mounts that whole home into a
-   recipient's run.
+2. **Aether does not copy vendor credentials to clients or synchronize them.**
+   Logins happen through the vendor's own flow in an Aether terminal.
+   Credentials remain in the member home; an explicit account share mounts that
+   whole home into a recipient's run. For the read-only subscription quota
+   indicator, the server may read supported native Claude Code and Codex
+   subscription credentials in that home and call the vendor's fixed HTTPS
+   usage endpoint. Credential bytes and provider responses are never sent to
+   the browser or a run.
+
+The quota reader supports native OAuth subscription logins for Claude Code and
+Codex only. API-key logins, `pi`, `omp`, `opencode`, `fake`, and deployment
+custom harnesses are not quota sources. The dashboard explains an unsupported
+source rather than treating missing usage as zero. Native vendor
+reauthentication remains a member action in the environment terminal; Aether
+does not refresh or rewrite OAuth files.
+
+### Subscription quota
+
+The dashboard requests `account.usage` with
+`{"account_member_id":"<member-id>","refresh":false}`; an omitted or empty
+account selects the authenticated member. The result always has Claude and
+Codex rows. Each row reports only percentages and reset times returned by that
+provider. The internal provider endpoints are vendor APIs and may change
+without notice; a row can therefore be `unauthenticated`, `unsupported`,
+`unavailable`, `stale`, or `error` instead of inventing a number.
+
+Successful results normally remain cached for 60 seconds. `refresh:true`
+bypasses that success TTL but still observes a 10-second request floor; errors
+are retried no faster than 60 seconds and provider retry deadlines are honored.
+Stale data is retained only for the same credential identity, always carries
+its error and `stale` status, and is not shown as current after its reset
+window has passed without a new measurement.
 
 ## Shipped harnesses
 

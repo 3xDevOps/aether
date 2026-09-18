@@ -293,6 +293,40 @@ export interface AccountAccess {
   /** Members the caller has allowed to use their account. */
   shared_with: Member[]
 }
+export type UsageProviderName = 'claude' | 'codex'
+
+export type UsageProviderStatus =
+  | 'ok'
+  | 'stale'
+  | 'unauthenticated'
+  | 'unsupported'
+  | 'unavailable'
+  | 'error'
+
+export interface UsageWindow {
+  id: string
+  label: string
+  used_percent: number
+  resets_at?: string
+}
+
+export interface UsageProvider {
+  provider: UsageProviderName
+  status: UsageProviderStatus
+  windows: UsageWindow[]
+  plan?: string
+  updated_at?: string
+  checked_at: string
+  retry_at?: string
+  error?: string
+}
+
+/** account.usage: read-only subscription quota measurements. */
+export interface UsageResult {
+  account_member_id: string
+  providers: UsageProvider[]
+}
+
 
 export interface ServerInfo {
   server_version: string
