@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -312,13 +311,7 @@ func openFullCastReplay(path string) (io.ReadCloser, int, error) {
 	return openCastReplay(segments, nil), total, nil
 }
 func legacyCastIncarnation(info os.FileInfo, header castHeader) int64 {
-	var id uint64
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		id = stat.Ino
-	}
-	if id == 0 {
-		id = uint64(info.ModTime().UnixNano())
-	}
+	id := legacyCastFileID(info)
 	id ^= uint64(header.Timestamp) * 0x9e3779b97f4a7c15
 	id ^= uint64(header.Width)<<32 | uint64(header.Height)
 	id &^= uint64(1) << 63

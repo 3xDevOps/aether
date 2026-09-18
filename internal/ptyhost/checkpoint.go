@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -117,6 +118,10 @@ func writeCheckpointFile(path string, checkpoint screenCheckpoint) error {
 	}
 	if err = os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("ptyhost: install screen checkpoint: %w", err)
+	}
+	// Windows cannot flush the read-only directory handle opened below.
+	if runtime.GOOS == "windows" {
+		return nil
 	}
 	dirFile, err := os.Open(dir)
 	if err != nil {
