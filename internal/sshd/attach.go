@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,6 +39,7 @@ type controlAttach struct {
 	cancel     context.CancelCauseFunc
 	id         uint64
 	generation uint64
+	onFence    func()
 }
 
 func (s *Server) attachControlAck(ack *protocol.AttachResponse, snap control.Snapshot, held bool) {
@@ -83,7 +85,11 @@ func attachExitForError(err error) int {
 	}
 }
 
-func (s *Server) registerControlAttach(run, session string, generation uint64, cancel context.CancelCauseFunc) (uint64, error) {
+func (s *Server) registerControlAttach(run, session string, generation uint64, cancel context.CancelCauseFunc, onFence ...func()) (uint64, error) {
+	var fence func()
+	if len(onFence) > 0 {
+		fence = onFence[0]
+	}
 	s.controlMu.Lock()
 	if s.controlAttaches == nil {
 		s.controlAttaches = make(map[string]map[string]controlAttach)
@@ -94,14 +100,18 @@ func (s *Server) registerControlAttach(run, session string, generation uint64, c
 		s.controlAttaches[run] = bySession
 	}
 	id := s.controlAttachID.Add(1)
-	bySession[session] = controlAttach{cancel: cancel, id: id, generation: generation}
+	bySession[session] = controlAttach{cancel: cancel, id: id, generation: generation, onFence: fence}
 	s.controlMu.Unlock()
 
 	// Registration happens after lease acquisition. Revalidate after making
 	// the callback visible so a concurrent fence either finds this transport
 	// or is observed here.
 	if err := s.cfg.Control.Validate(run, session, generation); err != nil {
-		cancel(errAttachControlRevoked)
+		if fence != nil {
+			fence()
+		} else {
+			cancel(errAttachControlRevoked)
+		}
 		return id, err
 	}
 	return id, nil
@@ -123,13 +133,19 @@ func (s *Server) unregisterControlAttach(run, session string, id uint64) {
 func (s *Server) cancelControlAttach(run, session string, generation uint64, cause error) {
 	s.controlMu.Lock()
 	var cancel context.CancelCauseFunc
+	var onFence func()
 	if bySession := s.controlAttaches[run]; bySession != nil {
 		current := bySession[session]
 		if current.generation == generation {
 			cancel = current.cancel
+			onFence = current.onFence
 		}
 	}
 	s.controlMu.Unlock()
+	if onFence != nil {
+		onFence()
+		return
+	}
 	if cancel != nil {
 		cancel(cause)
 	}
@@ -166,6 +182,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	if err != nil {
 		e := rpcError(err)
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
+		return
+	}
+	if req.Interactive && (!req.Framed || req.Shell != "") {
+		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: protocol.CodeInvalidParams, Error: "interactive attach requires framed run stream"})
 		return
 	}
 	var controlLease *attachControlLease
@@ -249,8 +269,38 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	var controlCommitErr error
 	attachCtx, revoke := context.WithCancelCause(ctx)
 	defer revoke(nil)
+	var conn *attachConn
+	var controlReady func(bool) error
+	var controlReadyMu sync.Mutex
+	var controlReadyPending bool
+	var leaseMu sync.Mutex
+	var revokedGeneration uint64
+	var revokedInputErr error
+	setControlReady := func(fn func(bool) error) {
+		controlReadyMu.Lock()
+		defer controlReadyMu.Unlock()
+		controlReady = fn
+		if controlReadyPending && fn != nil {
+			controlReadyPending = false
+			_ = fn(true)
+		}
+	}
+	applyControlReady := func(readOnly bool) error {
+		controlReadyMu.Lock()
+		defer controlReadyMu.Unlock()
+		if controlReady == nil {
+			controlReadyPending = readOnly
+			return errors.New("attach control is not ready")
+		}
+		if !readOnly {
+			controlReadyPending = false
+		}
+		return controlReady(readOnly)
+	}
 	// The geometry here is only what this client brings; the PTY host
-	// overwrites it with the session's own before the ack goes out, and
+	// overwrites it with the session's own before the ack goes out.
+	var makeInteractiveFence func(*attachControlLease) func()
+	var controlFence func()
 	authorize := func() error {
 		if readOnly {
 			return nil
@@ -265,18 +315,42 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				controlAcquireErr = acquireErr
 				return acquireErr
 			}
+			controlSnap, controlHeld = acquired, true
+			lease := &attachControlLease{sessionID: req.ControlSessionID, generation: acquired.Generation}
+			leaseMu.Lock()
+			controlLease = lease
+			leaseMu.Unlock()
+			var fence func()
+			if req.Interactive {
+				fence = makeInteractiveFence(lease)
+				leaseMu.Lock()
+				controlFence = fence
+				leaseMu.Unlock()
+			}
+			s.attachControlAck(ack, controlSnap, true)
+			attachID, registerErr := s.registerControlAttach(req.RunID, lease.sessionID, acquired.Generation, revoke, fence)
+			leaseMu.Lock()
+			current := controlLease
+			registered := registerErr == nil && current == lease
+			if registered {
+				lease.attachID = attachID
+			} else if current == lease {
+				controlLease = nil
+				controlFence = nil
+			}
+			leaseMu.Unlock()
+			if !registered {
+				s.unregisterControlAttach(req.RunID, lease.sessionID, attachID)
+				if registerErr == nil {
+					registerErr = control.ErrStale
+					_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+				}
+				controlAcquireErr = registerErr
+				return registerErr
+			}
 			if displaced != nil {
 				s.cancelControlAttach(req.RunID, displaced.SessionID, displaced.Generation, errAttachControlRevoked)
 			}
-			controlSnap, controlHeld = acquired, true
-			controlLease = &attachControlLease{sessionID: req.ControlSessionID, generation: acquired.Generation}
-			s.attachControlAck(ack, controlSnap, true)
-			controlLease.attachID, acquireErr = s.registerControlAttach(req.RunID, controlLease.sessionID, acquired.Generation, revoke)
-			if acquireErr != nil {
-				controlAcquireErr = acquireErr
-				return acquireErr
-			}
-			return nil
 		}
 		if err := checkSteer(ctx, s.cfg.Store, member, run.ID); err != nil {
 			return err
@@ -314,54 +388,351 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			return nil
 		}
 	}
-	conn := newAttachConn(ch, r, ack, req.Framed, beforeAck)
+	conn = newAttachConn(ch, r, ack, req.Framed, beforeAck)
+	conn.interactive = req.Interactive && req.Shell == ""
+	recordRevoked := func(lease *attachControlLease, err error) {
+		if lease == nil {
+			return
+		}
+		revokedGeneration = lease.generation
+		revokedInputErr = err
+	}
+	makeInteractiveFence = func(lease *attachControlLease) func() {
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				leaseMu.Lock()
+				current := controlLease
+				if current == nil || current.sessionID != lease.sessionID || current.generation != lease.generation {
+					leaseMu.Unlock()
+					return
+				}
+				controlLease = nil
+				controlFence = nil
+				if revokedGeneration != lease.generation {
+					recordRevoked(lease, control.ErrStale)
+				}
+				s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+				_ = applyControlReady(true)
+				leaseMu.Unlock()
+				record := protocol.DashAttachControl{
+					Type: protocol.DashAttachControlFrame, OK: false,
+					Error:             "run control was revoked",
+					ControlSessionID:  req.ControlSessionID,
+					ControlGeneration: lease.generation,
+				}
+				_ = conn.sendControl(record)
+			})
+		}
+	}
+	releaseInteractiveLease := func(reason error, notify bool) {
+		var fence func()
+		var lease *attachControlLease
+		leaseMu.Lock()
+		lease = controlLease
+		if lease != nil && s.cfg.Control != nil {
+			_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+			recordRevoked(lease, reason)
+			if notify {
+				fence = controlFence
+			} else {
+				controlLease = nil
+				controlFence = nil
+				s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+			}
+		}
+		leaseMu.Unlock()
+		if fence != nil {
+			fence()
+		}
+	}
+	interactivePolicySteer := func() {
+		releaseInteractiveLease(permissions.ErrDenied, true)
+	}
+	interactivePolicyMembership := func() {
+		releaseInteractiveLease(errAttachMembershipRevoked, false)
+	}
+	if conn.interactive {
+		conn.errorHandler = func(err error) {
+			_ = conn.sendControl(protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, OK: false,
+				Code: protocol.CodeParse, Error: "parse error: " + err.Error(),
+				ControlSessionID: req.ControlSessionID,
+			})
+		}
+		conn.inputErrorHandler = func(ctl protocol.DashAttachControl, err error) {
+			code, message := attachControlError(err)
+			_ = conn.sendControl(protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, OK: false, Code: code,
+				Error: message, ControlSessionID: req.ControlSessionID,
+				ControlGeneration: ctl.ControlGeneration,
+			})
+		}
+		conn.inputHandler = func(ctl protocol.DashAttachControl) ([]byte, error) {
+			if ctl.Data == "" || ctl.ControlGeneration == 0 || s.cfg.Control == nil {
+				return nil, control.ErrStale
+			}
+			leaseMu.Lock()
+			lease := controlLease
+			err := control.ErrStale
+			if lease != nil && lease.generation == ctl.ControlGeneration {
+				err = nil
+			} else if revokedGeneration == ctl.ControlGeneration && revokedInputErr != nil {
+				err = revokedInputErr
+			}
+			leaseMu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			return []byte(ctl.Data), nil
+		}
+		var lastRequestID uint64
+		conn.controlHandler = func(ctl protocol.DashAttachControl) {
+			record := protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: ctl.RequestID,
+				ControlSessionID: req.ControlSessionID,
+			}
+			if ctl.RequestID == 0 {
+				record.Code = protocol.CodeInvalidParams
+				record.Error = "request_id is required"
+				_ = conn.sendControl(record)
+				return
+			}
+			if ctl.RequestID <= lastRequestID {
+				record.Code = protocol.CodeInvalidParams
+				record.Error = "request_id must increase"
+				_ = conn.sendControl(record)
+				return
+			}
+			lastRequestID = ctl.RequestID
+			if s.cfg.Control == nil {
+				record.Code = protocol.CodeDenied
+				record.Error = "run control is not enabled"
+				_ = conn.sendControl(record)
+				return
+			}
+			if ctl.Write {
+				leaseMu.Lock()
+				acquired, displaced, err := s.cfg.Control.AcquireAuthorized(
+					req.RunID, string(member), req.ControlSessionID, ctl.Takeover,
+					ctl.ControlGeneration,
+					func() error {
+						if err := checkSteer(ctx, s.cfg.Store, member, run.ID); err != nil {
+							return err
+						}
+						return applyControlReady(false)
+					},
+				)
+				if err != nil {
+					leaseMu.Unlock()
+					record.Code, record.Error = attachControlError(err)
+					if current, present := s.cfg.Control.Status(req.RunID); present {
+						record.ControlGeneration = current.Generation
+					}
+					_ = conn.sendControl(record)
+					return
+				}
+				lease := &attachControlLease{sessionID: req.ControlSessionID, generation: acquired.Generation}
+				fence := makeInteractiveFence(lease)
+				controlLease = lease
+				controlFence = fence
+				leaseMu.Unlock()
+				attachID, registerErr := s.registerControlAttach(req.RunID, lease.sessionID, lease.generation, revoke, fence)
+				needFence := false
+				leaseMu.Lock()
+				current := controlLease
+				registered := registerErr == nil && current == lease
+				if registered {
+					if validateErr := s.cfg.Control.Validate(req.RunID, lease.sessionID, lease.generation); validateErr != nil {
+						registerErr = validateErr
+						registered = false
+						needFence = current == lease
+					}
+				}
+				if registered {
+					lease.attachID = attachID
+					record.OK = true
+					record.HasControl = true
+					record.ControlGeneration = acquired.Generation
+					_ = conn.sendControl(record)
+					leaseMu.Unlock()
+					if displaced != nil {
+						s.cancelControlAttach(req.RunID, displaced.SessionID, displaced.Generation, errAttachControlRevoked)
+					}
+					return
+				}
+				if current == lease && !needFence {
+					controlLease = nil
+					controlFence = nil
+					recordRevoked(lease, control.ErrStale)
+				}
+				leaseMu.Unlock()
+				if needFence {
+					fence()
+				}
+				s.unregisterControlAttach(req.RunID, lease.sessionID, attachID)
+				if registerErr == nil {
+					registerErr = control.ErrStale
+					_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+				}
+				record.Code, record.Error = attachControlError(registerErr)
+				_ = conn.sendControl(record)
+				return
+			}
+			if ctl.Takeover {
+				record.Code = protocol.CodeInvalidParams
+				record.Error = "takeover requires write"
+				_ = conn.sendControl(record)
+				return
+			}
+			if ctl.ControlGeneration == 0 {
+				record.Code = protocol.CodeInvalidParams
+				record.Error = "control_generation is required"
+				_ = conn.sendControl(record)
+				return
+			}
+			leaseMu.Lock()
+			err := s.cfg.Control.ReleaseAdmitted(req.RunID, member, req.ControlSessionID, ctl.ControlGeneration, func() error {
+				return applyControlReady(true)
+			})
+			if err != nil {
+				leaseMu.Unlock()
+				record.Code, record.Error = attachControlError(err)
+				record.ControlGeneration = ctl.ControlGeneration
+				_ = conn.sendControl(record)
+				return
+			}
+			lease := controlLease
+			controlLease = nil
+			controlFence = nil
+			recordRevoked(lease, control.ErrStale)
+			leaseMu.Unlock()
+			if lease != nil && lease.generation == ctl.ControlGeneration {
+				s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+			}
+			record.OK = true
+			record.ControlGeneration = ctl.ControlGeneration
+			_ = conn.sendControl(record)
+		}
+	}
+	if conn.interactive {
+		conn.startControlWriter(attachCtx, revoke)
+		s.spawn(func() { conn.controlWriter() })
+	}
 	defer func() {
-		if controlLease == nil {
+		leaseMu.Lock()
+		lease := controlLease
+		controlLease = nil
+		controlFence = nil
+		leaseMu.Unlock()
+		if lease == nil {
 			return
 		}
-		s.unregisterControlAttach(req.RunID, controlLease.sessionID, controlLease.attachID)
+		s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+		if errors.Is(context.Cause(attachCtx), errAttachMembershipRevoked) {
+			_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+			return
+		}
 		if conn.okWritten() {
-			s.cfg.Control.Disconnect(req.RunID, controlLease.sessionID, controlLease.generation)
+			s.cfg.Control.Disconnect(req.RunID, lease.sessionID, lease.generation)
 			return
 		}
-		if err := s.cfg.Control.Release(req.RunID, member, controlLease.sessionID, controlLease.generation); err != nil {
-			s.cfg.Control.Disconnect(req.RunID, controlLease.sessionID, controlLease.generation)
+		if err := s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation); err != nil {
+			s.cfg.Control.Disconnect(req.RunID, lease.sessionID, lease.generation)
 		}
 	}()
+	// Close before authority cleanup so a blocked control write is released
+	// before the lease status is inspected.
+	defer func() { _ = conn.Close() }()
 	var inputGuard func() error
 	var inputAdmission func(func() error) error
-	if wantsControl && s.cfg.Control != nil {
-		inputGuard = func() error {
-			if controlLease == nil {
-				return control.ErrStale
-			}
-			return s.cfg.Control.Validate(req.RunID, controlLease.sessionID, controlLease.generation)
-		}
-		inputAdmission = func(accept func() error) error {
-			if controlLease == nil {
-				return control.ErrStale
-			}
-			return s.cfg.Control.AdmitMember(req.RunID, member, controlLease.sessionID, controlLease.generation, func() error {
-				if err := checkSteer(ctx, s.cfg.Store, member, run.ID); err != nil {
-					return err
+	if s.cfg.Control != nil && (wantsControl || conn.interactive) {
+		if !conn.interactive {
+			inputGuard = func() error {
+				leaseMu.Lock()
+				lease := controlLease
+				leaseMu.Unlock()
+				if lease == nil {
+					return control.ErrStale
 				}
-				return accept()
-			})
+				return s.cfg.Control.Validate(req.RunID, lease.sessionID, lease.generation)
+			}
+			inputAdmission = func(accept func() error) error {
+				leaseMu.Lock()
+				lease := controlLease
+				leaseMu.Unlock()
+				if lease == nil {
+					return control.ErrStale
+				}
+				return s.cfg.Control.AdmitMember(req.RunID, member, lease.sessionID, lease.generation, func() error {
+					if err := checkSteer(ctx, s.cfg.Store, member, run.ID); err != nil {
+						return err
+					}
+					return accept()
+				})
+			}
+		} else {
+			inputAdmission = func(accept func() error) error {
+				ctl, ok := conn.pendingInput()
+				if !ok {
+					return control.ErrStale
+				}
+				leaseMu.Lock()
+				lease := controlLease
+				err := control.ErrStale
+				if lease != nil && lease.generation == ctl.ControlGeneration {
+					err = nil
+				} else if revokedGeneration == ctl.ControlGeneration && revokedInputErr != nil {
+					err = revokedInputErr
+				}
+				leaseMu.Unlock()
+				if err != nil {
+					conn.reportPendingInputError(err)
+					return nil
+				}
+				var policyErr error
+				err = s.cfg.Control.AdmitMember(req.RunID, member, req.ControlSessionID, ctl.ControlGeneration, func() error {
+					policyErr = checkSteer(ctx, s.cfg.Store, member, run.ID)
+					if policyErr != nil {
+						return policyErr
+					}
+					return accept()
+				})
+				if policyErr != nil {
+					releaseInteractiveLease(policyErr, true)
+					conn.reportPendingInputError(policyErr)
+					return nil
+				}
+				if err != nil {
+					conn.reportPendingInputError(err)
+					if errors.Is(err, control.ErrStale) ||
+						errors.Is(err, permissions.ErrDenied) ||
+						errors.Is(err, errMemberRemoved) ||
+						errors.Is(err, errMemberPending) ||
+						errors.Is(err, store.ErrNotFound) {
+						return nil
+					}
+				}
+				return err
+			}
 		}
 	}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- s.cfg.PTY.Attach(attachCtx, key, ptyhost.AttachClient{
-			Member: member,
+			Cols:     cols,
+			Rows:     rows,
+			ReadOnly: readOnly,
+			Member:   member,
 			SessionGeneration: func() uint64 {
 				if shellReservation == nil {
 					return 0
 				}
 				return shellReservation.Generation()
 			}(),
-			Cols:      cols,
-			Rows:      rows,
-			ReadOnly:  readOnly,
+			OnControlReady: func(setReadOnly func(bool) error) {
+				setControlReady(setReadOnly)
+			},
 			Authorize: authorize,
 			Commit:    commit,
 			OnAttached: func() {
@@ -372,6 +743,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			InputGuard:     inputGuard,
 			InputAdmission: inputAdmission,
 			Snapshot:       req.Framed,
+			Screen:         req.Screen,
 			Follow:         req.Follow,
 			Resume:         req.Resume,
 			Cursor:         req.Cursor,
@@ -436,7 +808,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			// provisioning, and running runs keep the refusal: there a
 			// missing session is a transient race (recovery mid-reattach)
 			// the client's retry resolves.
-			if _, isRunSession := key.Run(); isRunSession && replayableStatus(run.Status) && s.serveReplay(ch, run, cols, rows, req.Framed, controlSnap, controlHeld) {
+			if _, isRunSession := key.Run(); isRunSession && replayableStatus(run.Status) && s.serveReplay(ch, run, cols, rows, req.Framed, req.Screen, controlSnap, controlHeld) {
 				return
 			}
 			e := rpcError(attachErr)
@@ -446,14 +818,29 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 		return
 	}
-	conn.sendOK()
-
 	s.publishPresence(run, member, events.PresenceWatching)
 	if !returned {
-		s.spawn(func() { s.revokeOnPolicyChange(attachCtx, revoke, member, run.ID, readOnly) })
-		if controlLease != nil {
+		leaseMu.Lock()
+		lease := controlLease
+		leaseMu.Unlock()
+		if req.Interactive {
 			s.spawn(func() {
-				s.revokeOnControlChange(attachCtx, revoke, string(run.ID), controlLease.sessionID, controlLease.generation)
+				s.revokeOnPolicyChange(attachCtx, revoke, member, run.ID, false, interactivePolicySteer, interactivePolicyMembership)
+			})
+		} else {
+			s.spawn(func() { s.revokeOnPolicyChange(attachCtx, revoke, member, run.ID, readOnly) })
+		}
+		if req.Interactive {
+			s.spawn(func() {
+				s.revokeOnCurrentControlChange(attachCtx, revoke, string(run.ID), func() (*attachControlLease, func()) {
+					leaseMu.Lock()
+					defer leaseMu.Unlock()
+					return controlLease, controlFence
+				})
+			})
+		} else if lease != nil {
+			s.spawn(func() {
+				s.revokeOnControlChange(attachCtx, revoke, string(run.ID), lease.sessionID, lease.generation)
 			})
 		}
 		attachErr = <-errCh
@@ -487,21 +874,32 @@ func replayableStatus(st domain.RunStatus) bool {
 // the channel cleanly (exit-status 0), reporting whether it served. A framed
 // dashboard attach still uses the final snapshot's geometry, but its output is
 // the same complete history a raw client receives.
-func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed bool, controlSnap control.Snapshot, controlHeld bool) bool {
+func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed, screen bool, controlSnap control.Snapshot, controlHeld bool) bool {
+	var (
+		rc          io.ReadCloser
+		replayBytes int
+		err         error
+	)
 	if framed {
-		snap, err := s.cfg.PTY.Snapshot(run.ID)
-		if err != nil {
-			slog.Warn("sshd: snapshot finished run geometry", "run", run.ID, "error", err)
+		snap, snapErr := s.cfg.PTY.Snapshot(run.ID)
+		if snapErr != nil {
+			slog.Warn("sshd: snapshot finished run", "run", run.ID, "error", snapErr)
 			return false
 		}
 		cols, rows = snap.Cols, snap.Rows
-	}
-	rc, replayBytes, err := s.cfg.PTY.Replay(run.ID)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("sshd: open transcript for attach replay", "run", run.ID, "error", err)
+		if screen {
+			replayBytes = len(snap.Data)
+			rc = io.NopCloser(bytes.NewReader(snap.Data))
 		}
-		return false
+	}
+	if rc == nil {
+		rc, replayBytes, err = s.cfg.PTY.Replay(run.ID)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				slog.Warn("sshd: open transcript for attach replay", "run", run.ID, "error", err)
+			}
+			return false
+		}
 	}
 	defer func() { _ = rc.Close() }()
 	ack := protocol.AttachResponse{
@@ -528,10 +926,10 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 // member demoted, removed, or handed off mid-attach - or whose run was
 // protected or whose workspace went admins-only - keeps typing into the
 // agent's terminal until they choose to disconnect, the one surface with
-// the most direct access to a running agent. Steer loss ends a write
-// attach; a read-only attach ends only when the membership itself goes.
-// Store reads only, every few seconds per live attach.
-func (s *Server) revokeOnPolicyChange(ctx context.Context, revoke context.CancelCauseFunc, member domain.MemberID, run domain.RunID, readOnly bool) {
+// the most direct access to a running agent. An interactive attach downgrades
+// to a mirror on steer loss and keeps the same watcher for later membership
+// loss. The optional callbacks are steer-loss and membership-loss handlers.
+func (s *Server) revokeOnPolicyChange(ctx context.Context, revoke context.CancelCauseFunc, member domain.MemberID, run domain.RunID, readOnly bool, callbacks ...func()) {
 	ticker := time.NewTicker(s.cfg.revalidateInterval)
 	defer ticker.Stop()
 	for {
@@ -540,6 +938,17 @@ func (s *Server) revokeOnPolicyChange(ctx context.Context, revoke context.Cancel
 			return
 		case <-ticker.C:
 			if cause := s.attachRevocation(ctx, member, run, readOnly); cause != nil {
+				if errors.Is(cause, errAttachMembershipRevoked) {
+					revoke(cause)
+					if len(callbacks) > 1 && callbacks[1] != nil {
+						callbacks[1]()
+					}
+					return
+				}
+				if errors.Is(cause, errAttachSteerRevoked) && len(callbacks) > 0 && callbacks[0] != nil {
+					callbacks[0]()
+					continue
+				}
 				revoke(cause)
 				return
 			}
@@ -550,7 +959,7 @@ func (s *Server) revokeOnPolicyChange(ctx context.Context, revoke context.Cancel
 // revokeOnControlChange fences a live attach when another session takes over,
 // releases the lease, or the reconnect window expires. The PTY input guard
 // independently checks every buffered read.
-func (s *Server) revokeOnControlChange(ctx context.Context, revoke context.CancelCauseFunc, run, session string, generation uint64) {
+func (s *Server) revokeOnControlChange(ctx context.Context, revoke context.CancelCauseFunc, run, session string, generation uint64, onFence ...func()) {
 	if s.cfg.Control == nil {
 		return
 	}
@@ -562,7 +971,11 @@ func (s *Server) revokeOnControlChange(ctx context.Context, revoke context.Cance
 			return
 		case <-ticker.C:
 			if err := s.cfg.Control.Validate(run, session, generation); err != nil {
-				revoke(errAttachControlRevoked)
+				if len(onFence) > 0 && onFence[0] != nil {
+					onFence[0]()
+				} else {
+					revoke(errAttachControlRevoked)
+				}
 				return
 			}
 		}
@@ -595,168 +1008,4 @@ func (s *Server) publishPresence(run *domain.Run, member domain.MemberID, state 
 		ActorID:     member,
 		Payload:     events.PresencePayload{State: state},
 	})
-}
-
-// attachConn is the io.ReadWriter handed to PTYAttacher.Attach. It delays
-// the acknowledgment until the PTY host identifies the replay boundary.
-type attachConn struct {
-	ch        subsystemConn
-	r         *bufio.Reader
-	ack       any
-	framed    bool
-	beforeAck func() error
-	mu        sync.Mutex
-	sent      bool
-	first     chan struct{}
-	writeErr  error
-}
-
-func newAttachConn(ch subsystemConn, r *bufio.Reader, ack any, framed bool, beforeAck func() error) *attachConn {
-	switch response := ack.(type) {
-	case *protocol.AttachResponse:
-		response.Framed = framed
-	case *protocol.TerminalResponse:
-		response.Framed = framed
-	}
-	return &attachConn{ch: ch, r: r, ack: ack, framed: framed, beforeAck: beforeAck, first: make(chan struct{})}
-}
-
-// SetGeometry takes the session's PTY size from the host. Before the ack
-// goes out it is what the ack reports; afterwards framed clients receive a
-// geometry record in the same stream as output. Raw clients receive no
-// geometry bytes.
-func (c *attachConn) SetGeometry(cols, rows uint) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.sent {
-		switch ack := c.ack.(type) {
-		case *protocol.AttachResponse:
-			ack.Cols, ack.Rows = cols, rows
-		case *protocol.TerminalResponse:
-			ack.Cols, ack.Rows = cols, rows
-		}
-		return
-	}
-	if c.framed && c.writeErr == nil {
-		if err := protocol.WriteTerminalGeometry(c.ch, cols, rows); err != nil {
-			c.writeErr = err
-			slog.Warn("sshd: write terminal geometry", "error", err)
-			c.ch.exit(1)
-			_ = c.ch.Close()
-		}
-	}
-}
-
-// SetResume records how the session answered a resume. It lands in the
-// ack, so it must arrive before WriteReplay sends it - Host.Attach calls
-// it straight after the client joins, which is where both are decided.
-func (c *attachConn) SetResume(cursor uint64, resumed bool, resumeID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.sent {
-		return
-	}
-	if ack, ok := c.ack.(*protocol.AttachResponse); ok {
-		ack.Cursor, ack.Resumed, ack.ResumeID = cursor, resumed, resumeID
-	}
-}
-
-func (c *attachConn) sendOK() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.sendOKLocked()
-}
-
-func (c *attachConn) sendOKLocked() {
-	if c.sent {
-		return
-	}
-	if c.beforeAck != nil {
-		beforeAck := c.beforeAck
-		c.beforeAck = nil
-		if err := beforeAck(); err != nil {
-			c.writeErr = err
-			return
-		}
-	}
-	c.sent = true
-	c.writeErr = writeJSONLine(c.ch, c.ack)
-	close(c.first)
-}
-
-func (c *attachConn) setReplayLocked(n int) {
-	switch ack := c.ack.(type) {
-	case *protocol.AttachResponse:
-		ack.Replay = n
-	case *protocol.TerminalResponse:
-		ack.Replay = n
-	}
-}
-
-func (c *attachConn) WriteReplay(replay io.Reader, bytes int) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.setReplayLocked(bytes)
-	c.sendOKLocked()
-	if c.writeErr != nil {
-		return c.writeErr
-	}
-	if err := writeTerminalReplay(c.ch, replay, bytes, c.framed); err != nil {
-		c.writeErr = err
-		return err
-	}
-	return nil
-}
-
-func writeTerminalReplay(w io.Writer, replay io.Reader, bytes int, framed bool) error {
-	if !framed {
-		written, err := io.CopyN(w, replay, int64(bytes))
-		if err == nil && written != int64(bytes) {
-			return io.ErrUnexpectedEOF
-		}
-		return err
-	}
-	buf := make([]byte, 32<<10)
-	remaining := bytes
-	for remaining > 0 {
-		read := len(buf)
-		if read > remaining {
-			read = remaining
-		}
-		if _, err := io.ReadFull(replay, buf[:read]); err != nil {
-			return err
-		}
-		if _, err := protocol.WriteTerminalOutput(w, buf[:read]); err != nil {
-			return err
-		}
-		remaining -= read
-	}
-	return nil
-}
-
-func (c *attachConn) okSent() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.sent
-}
-func (c *attachConn) okWritten() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.sent && c.writeErr == nil
-}
-
-func (c *attachConn) Read(p []byte) (int, error) { return c.r.Read(p) }
-func (c *attachConn) Close() error               { return c.ch.Close() }
-
-func (c *attachConn) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.sendOKLocked()
-	if c.writeErr != nil {
-		return 0, c.writeErr
-	}
-	if c.framed {
-		return protocol.WriteTerminalOutput(c.ch, p)
-	}
-	return c.ch.Write(p)
 }

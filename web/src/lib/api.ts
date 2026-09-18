@@ -199,6 +199,75 @@ async function get<T>(path: string): Promise<T> {
 }
 
 
+type HistoryFileHandle = {
+  createWritable: () => Promise<WritableStream<Uint8Array>>
+}
+
+type SaveFilePicker = (options: { suggestedName: string }) => Promise<HistoryFileHandle>
+
+function historyFilename(runID: string): string {
+  const safe = runID.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 96)
+  return safe ? `terminal-history-${safe}.ansi` : 'terminal-history.ansi'
+}
+
+/**
+ * Streams the archive directly into the browser's save-file writer when the
+ * File System Access API is available. Older browsers use a same-origin POST
+ * form with the bearer in a bounded body, never a download URL query
+ * parameter, so the browser still owns the streaming file download.
+ */
+export async function downloadTerminalHistory(runID: string): Promise<void> {
+  const path = `/api/runs/${encodeURIComponent(runID)}/terminal-history`
+  const token = bearer()
+  const picker = (window as Window & { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker
+  if (!picker) {
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.enctype = 'application/x-www-form-urlencoded'
+    form.action = path
+    form.target = '_blank'
+    form.hidden = true
+    if (token) {
+      const input = document.createElement('input')
+      input.type = 'hidden'
+      input.name = 'token'
+      input.value = token
+      form.append(input)
+    }
+    document.body.append(form)
+    form.submit()
+    form.remove()
+    return
+  }
+  const controller = new AbortController()
+  let body: ReadableStream<Uint8Array> | null = null
+  let writer: WritableStream<Uint8Array> | undefined
+  try {
+    const handle = await picker({ suggestedName: historyFilename(runID) })
+    const writable = await handle.createWritable()
+    writer = writable
+    const res = await fetch(path, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const err = await failure(res)
+      throw new ApiError(res.status, `/runs/${runID}/terminal-history: ${err.message}`, err.code, err.data)
+    }
+    body = res.body
+    if (!body) {
+      throw new Error('The terminal history response did not provide a stream.')
+    }
+    await body.pipeTo(writable)
+  } catch (cause) {
+    controller.abort()
+    if (body) await body.cancel().catch(() => undefined)
+    if (writer) await writer.abort(cause).catch(() => undefined)
+    throw cause
+  }
+}
+
+
 /**
  * A client-machine verb: POST /local/v1/<verb>. Only the local gateway
  * serves these (useCapability's hasLocal says which); failures carry the
@@ -599,6 +668,7 @@ export const api = {
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  downloadTerminalHistory,
   uploadTerminalImage: (file: File, runID?: string) => uploadTerminalImage(file, runID),
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),

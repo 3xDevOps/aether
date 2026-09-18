@@ -552,72 +552,106 @@ type recordedScreen struct {
 	modes  modeScanner
 }
 
-// readCastScreen reconstructs the terminal and tracked modes in one pass over
-// a cast. It deliberately consumes resize events before later output, unlike
-// replayReader which is for raw output only. A truncated final JSON event is
-// ignored so a crash during the last write does not erase a usable screen;
-// malformed complete events still fail recovery.
+// readCastScreen restores a durable compact checkpoint when it is valid and
+// falls back to a complete cast reconstruction for legacy or corrupt state.
 func readCastScreen(path string) (recordedScreen, error) {
-	f, err := os.Open(path)
+	if recovered, _, ok, err := recoverCheckpoint(path); ok && err == nil {
+		return recovered, nil
+	}
+	return readCastScreenFull(path)
+}
+
+// readCastScreenFull reconstructs the terminal and tracked modes over all
+// retained cast incarnations. A truncated final JSON event is ignored so a
+// crash during the last write does not erase a usable screen; malformed
+// complete events fail.
+func readCastScreenFull(path string) (recordedScreen, error) {
+	paths, err := priorCastPaths(path)
 	if err != nil {
 		return recordedScreen{}, err
 	}
-	defer func() { _ = f.Close() }()
-
-	r := bufio.NewReader(f)
-	line, readErr := r.ReadBytes('\n')
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
-		return recordedScreen{}, fmt.Errorf("ptyhost: read transcript header: %w", readErr)
-	}
-	line = bytes.TrimSpace(line)
-	if len(line) == 0 {
-		return recordedScreen{}, errors.New("ptyhost: transcript has no header")
-	}
-	var header castHeader
-	if err = json.Unmarshal(line, &header); err != nil {
-		return recordedScreen{}, fmt.Errorf("ptyhost: decode transcript header: %w", err)
-	}
-	if header.Version != 2 {
-		return recordedScreen{}, fmt.Errorf("ptyhost: unsupported transcript version %d", header.Version)
-	}
-	screen, err := newTerminalScreen(header.Width, header.Height)
-	if err != nil {
-		return recordedScreen{}, fmt.Errorf("ptyhost: restore transcript screen: %w", err)
-	}
+	paths = append(paths, path)
+	var screen *terminalScreen
 	var modes modeScanner
-	for {
-		line, readErr = r.ReadBytes('\n')
-		atEnd := errors.Is(readErr, io.EOF)
-		if readErr != nil && !atEnd {
-			screen.dispose()
-			return recordedScreen{}, fmt.Errorf("ptyhost: read transcript: %w", readErr)
+	for _, segmentPath := range paths {
+		f, err := os.Open(segmentPath)
+		if err != nil {
+			if screen != nil {
+				screen.dispose()
+			}
+			return recordedScreen{}, err
+		}
+		r := bufio.NewReader(f)
+		line, readErr := r.ReadBytes('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			_ = f.Close()
+			if screen != nil {
+				screen.dispose()
+			}
+			return recordedScreen{}, fmt.Errorf("ptyhost: read transcript header: %w", readErr)
 		}
 		line = bytes.TrimSpace(line)
-		if len(line) != 0 {
-			var event []json.RawMessage
-			if uerr := json.Unmarshal(line, &event); uerr != nil || len(event) < 3 {
-				if atEnd && isIncompleteJSON(uerr) {
-					break
-				}
+		var header castHeader
+		headerErr := json.Unmarshal(line, &header)
+		if headerErr != nil || header.Version != 2 {
+			_ = f.Close()
+			if screen != nil {
 				screen.dispose()
-				if uerr == nil {
-					uerr = errBadCastString
-				}
-				return recordedScreen{}, fmt.Errorf("ptyhost: decode transcript event: %w", uerr)
 			}
-			var code string
-			if uerr := json.Unmarshal(event[1], &code); uerr != nil {
-				screen.dispose()
-				return recordedScreen{}, fmt.Errorf("ptyhost: decode transcript event code: %w", uerr)
+			if headerErr == nil {
+				headerErr = fmt.Errorf("unsupported transcript version %d", header.Version)
 			}
-			if err := applyRecordedEvent(screen, &modes, code, event[2]); err != nil {
-				screen.dispose()
-				return recordedScreen{}, err
+			return recordedScreen{}, fmt.Errorf("ptyhost: decode transcript header: %w", headerErr)
+		}
+		if screen == nil {
+			screen, err = newTerminalScreen(header.Width, header.Height)
+			if err != nil {
+				_ = f.Close()
+				return recordedScreen{}, fmt.Errorf("ptyhost: restore transcript screen: %w", err)
 			}
 		}
-		if atEnd {
-			break
+		for {
+			line, readErr = r.ReadBytes('\n')
+			atEnd := errors.Is(readErr, io.EOF)
+			if readErr != nil && !atEnd {
+				_ = f.Close()
+				screen.dispose()
+				return recordedScreen{}, fmt.Errorf("ptyhost: read transcript: %w", readErr)
+			}
+			line = bytes.TrimSpace(line)
+			if len(line) != 0 {
+				var event []json.RawMessage
+				if uerr := json.Unmarshal(line, &event); uerr != nil || len(event) < 3 {
+					if atEnd && isIncompleteJSON(uerr) {
+						break
+					}
+					_ = f.Close()
+					screen.dispose()
+					if uerr == nil {
+						uerr = errBadCastString
+					}
+					return recordedScreen{}, fmt.Errorf("ptyhost: decode transcript event: %w", uerr)
+				}
+				var code string
+				if uerr := json.Unmarshal(event[1], &code); uerr != nil {
+					_ = f.Close()
+					screen.dispose()
+					return recordedScreen{}, fmt.Errorf("ptyhost: decode transcript event code: %w", uerr)
+				}
+				if err := applyRecordedEvent(screen, &modes, code, event[2]); err != nil {
+					_ = f.Close()
+					screen.dispose()
+					return recordedScreen{}, err
+				}
+			}
+			if atEnd {
+				break
+			}
 		}
+		_ = f.Close()
+	}
+	if screen == nil {
+		return recordedScreen{}, errors.New("ptyhost: transcript has no header")
 	}
 	return recordedScreen{screen: screen, modes: modes}, nil
 }

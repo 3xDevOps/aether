@@ -442,8 +442,14 @@ type SubscribeResponse struct {
 type AttachRequest struct {
 	RunID    string `json:"run_id"`
 	ReadOnly bool   `json:"read_only,omitempty"`
-	Cols     uint   `json:"cols,omitempty"`
-	Rows     uint   `json:"rows,omitempty"`
+	// Screen asks for a compact current terminal state on a fresh or fallback
+	// run attach. False retains the complete recorded history.
+	Screen bool `json:"screen,omitempty"`
+	// Interactive enables NDJSON input/control frames on a framed dashboard
+	// attach. Raw CLI and shell attachments continue to send PTY bytes.
+	Interactive bool `json:"interactive,omitempty"`
+	Cols        uint `json:"cols,omitempty"`
+	Rows        uint `json:"rows,omitempty"`
 	// Framed carries output and geometry in one ordered terminal record stream.
 	Framed bool `json:"framed,omitempty"`
 	// Shell names a shell tab inside the run container; write is required.

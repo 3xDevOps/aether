@@ -3,9 +3,9 @@ import type { AttachDataKind, AttachDataResult, Attachment } from '@/routes/term
 import type { SliceCreator } from '@/store/slice'
 
 /**
- * What the terminal view knows about one run's attach. `write` is what the
- * user asked for; `steerDenied` is the server's answer, which is the only
- * thing that gates steering - the client never decides it.
+ * What the terminal view knows about one run's attach. `write` is the
+ * server-granted control state; it never becomes true until an attach ack or
+ * an acknowledged control request grants the lease.
  */
 export interface TerminalState {
   connection: ConnectionState

@@ -164,10 +164,11 @@ func (h *Host) Close() error {
 		all = append(all, s)
 	}
 	h.mu.Unlock()
+	var stopErr error
 	for _, s := range all {
-		s.stop()
+		stopErr = errors.Join(stopErr, s.stop())
 	}
-	return nil
+	return stopErr
 }
 
 // StartSession takes ownership of att and starts the persistent session for
@@ -188,13 +189,17 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		return fmt.Errorf("ptyhost: generate resume id: %w", err)
 	}
 	if prev := h.lookup(key); prev != nil {
-		prev.stop()
+		if stopErr := prev.stop(); stopErr != nil {
+			h.unreserve(key)
+			return fmt.Errorf("ptyhost: stop previous session: %w", stopErr)
+		}
 	}
 	path := h.transcriptPath(key)
 	_, isRun := key.Run()
 	var seed []byte
 	var modes modeScanner
 	var screen *terminalScreen
+	var recoveredHistory []castSegment
 	recoveredTranscript := false
 	initialCols, initialRows := h.cfg.DefaultCols, h.cfg.DefaultRows
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
@@ -203,14 +208,20 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 			slog.Warn("ptyhost: seed replay from transcript", "path", path, "error", err)
 			seed = nil
 		}
-		recovered, scanErr := readCastScreen(path)
-		if scanErr != nil {
-			h.unreserve(key)
-			return fmt.Errorf("ptyhost: restore terminal screen: %w", scanErr)
+		recovered, segments, checkpointOK, _ := recoverCheckpoint(path)
+		if checkpointOK {
+			screen, modes, recoveredHistory = recovered.screen, recovered.modes, segments
+			recoveredTranscript = true
+		} else {
+			recovered, scanErr := readCastScreen(path)
+			if scanErr != nil {
+				h.unreserve(key)
+				return fmt.Errorf("ptyhost: restore terminal screen: %w", scanErr)
+			}
+			screen, modes = recovered.screen, recovered.modes
+			recoveredTranscript = true
 		}
-		screen, modes = recovered.screen, recovered.modes
 		initialCols, initialRows = screen.cols, screen.rows
-		recoveredTranscript = true
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		slog.Warn("ptyhost: inspect transcript for replay", "path", path, "error", statErr)
 	}
@@ -229,12 +240,17 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	}
 	var history []castSegment
 	if isRun {
-		history, err = priorCastSegments(path)
-		if err != nil {
-			_ = tr.close()
-			screen.dispose()
-			h.unreserve(key)
-			return err
+		if len(recoveredHistory) > 0 {
+			history = recoveredHistory
+			relocateCheckpointSegments(history, path)
+		} else {
+			history, err = priorCastSegments(path)
+			if err != nil {
+				_ = tr.close()
+				screen.dispose()
+				h.unreserve(key)
+				return err
+			}
 		}
 	}
 	if recoveredTranscript {
@@ -249,6 +265,7 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		att:          att,
 		tr:           tr,
 		history:      history,
+		checkpoint:   checkpointPath(path),
 		stdin:        att.Stdin(),
 		clients:      make(map[*client]struct{}),
 		ring:         newRing(h.cfg.ReplayBytes),
@@ -262,20 +279,36 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		screen:       screen,
 	}
 	if len(seed) > 0 {
-		s.ring.write(seed)
+		if isRun {
+			var written uint64
+			for _, segment := range history {
+				written += uint64(segment.outputBytes)
+			}
+			s.ring.seed(seed, written)
+		} else {
+			s.ring.write(seed)
+		}
 	}
 	if h.cfg.OnTitle != nil {
 		s.onTitle = func(title string) {
 			h.cfg.OnTitle(key, title)
 		}
 	}
-
+	if isRun {
+		if err := s.checkpointNow(); err != nil {
+			_ = tr.close()
+			screen.dispose()
+			h.unreserve(key)
+			return err
+		}
+	}
 	h.mu.Lock()
 	delete(h.starting, key)
 	if h.closed {
 		h.mu.Unlock()
 		_ = tr.close()
 		screen.dispose()
+		_ = os.Remove(checkpointPath(path))
 		_ = att.Close()
 		return errHostClosed
 	}
@@ -289,6 +322,9 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	h.mu.Unlock()
 
 	go s.pump()
+	if isRun {
+		go s.checkpointLoop()
+	}
 	return nil
 }
 
@@ -301,8 +337,7 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	if s == nil {
 		return ErrNoSession
 	}
-	s.stop()
-	return nil
+	return s.stop()
 }
 
 // RemoveRunTranscripts removes the agent transcript and every run-shell
@@ -318,7 +353,9 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 	patterns := []string{
 		filepath.Join(h.cfg.TranscriptDir, name+".cast"),
 		filepath.Join(h.cfg.TranscriptDir, name+".*.cast"),
+		filepath.Join(h.cfg.TranscriptDir, name+".screen"),
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
+		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),
 	}
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
@@ -399,13 +436,23 @@ func (h *Host) Snapshot(run domain.RunID) (ScreenSnapshot, error) {
 	result := &snapshotResult{done: make(chan struct{})}
 	h.snapshots[key] = result
 	h.mu.Unlock()
+	path := h.transcriptPath(key)
 
-	recovered, err := readCastScreen(h.transcriptPath(key))
+	recovered, _, checkpointOK, _ := recoverCheckpoint(path)
+	var err error
+	if !checkpointOK {
+		recovered, err = readCastScreen(path)
+	}
 	if err != nil {
 		result.err = fmt.Errorf("ptyhost: reconstruct snapshot: %w", err)
 	} else {
 		result.snapshot = makeScreenSnapshot(recovered.screen, recovered.modes)
 		recovered.screen.dispose()
+		if !checkpointOK {
+			if checkpointErr := persistColdCheckpoint(path, result.snapshot); checkpointErr != nil {
+				result.err = checkpointErr
+			}
+		}
 	}
 	h.mu.Lock()
 	if result.err != nil && h.snapshots[key] == result {
@@ -461,9 +508,10 @@ type AttachClient struct {
 	// it admitted. Zero accepts the current process for non-reserved attaches.
 	SessionGeneration uint64
 	ReadOnly          bool
-	// Snapshot asks for a compact current-screen replay rather than the raw
-	// retained output ring. The dashboard sets this; CLI and screenless taps
-	// leave it false.
+	// Screen asks for a compact current-screen replay for a run rather than
+	// the complete recorded transcript. Snapshot is the compatibility name
+	// retained for older in-process callers.
+	Screen   bool
 	Snapshot bool
 	// Follow renders at the session's geometry and imposes none, so a
 	// screen too small to hold the agent's can still steer it without
@@ -491,10 +539,14 @@ type AttachClient struct {
 	// client. Commit must be bounded, must not otherwise re-enter this session,
 	// and must not return an error after admit succeeds.
 	Commit func(admit func() error) error
-	// OnAttached runs after the client has joined successfully, but before
+	// OnAttached runs after the client has joined successfully, but before the
 	// replay, output, or geometry is written. It commits resources reserved
 	// while authorization was in flight.
 	OnAttached func()
+	// OnControlReady runs after admission and before OnAttached or any stream
+	// bytes. setReadOnly updates this client's live input eligibility and
+	// geometry contribution without detaching its output stream.
+	OnControlReady func(setReadOnly func(bool) error)
 	// InputGuard is checked immediately before and after every client read.
 	// It fences stale buffered input after a lease is taken over.
 	InputGuard func() error
@@ -537,11 +589,6 @@ type GeometryWriter interface {
 // or the host closes. Reads from conn are keystrokes (discarded when
 // read-only); writes to conn are raw PTY output, starting with the complete
 // run transcript or the recent scrollback for other session types. resize
-// carries [cols, rows] updates (nil = fixed geometry). Write authorization
-// runs synchronously before the client is registered, so a refused writer
-// can never contribute geometry or trigger a resize. A Commit hook receives
-// an admit callback and must invoke it exactly once before returning success;
-// the callback runs before attachment callbacks or stream data.
 func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
 	s := h.lookup(key)
 	if s == nil {
@@ -626,6 +673,27 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	if _, succeeded, _, _ := admissionState(); !succeeded {
 		return errAttachNoAdmission
 	}
+	if a.OnControlReady != nil {
+		a.OnControlReady(func(readOnly bool) error {
+			if !readOnly {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if !s.clientAttached(c) {
+					return ErrNoSession
+				}
+				if h.cfg.Gate != nil {
+					if err := h.cfg.Gate(ctx, a.Member, key); err != nil {
+						return fmt.Errorf("%w: %v", ErrWriteDenied, err)
+					}
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+			}
+			return s.setClientReadOnly(c, readOnly)
+		})
+	}
 	if a.OnAttached != nil {
 		a.OnAttached()
 	}
@@ -668,9 +736,9 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 			if c.isClosed() {
 				return
 			}
-			if n > 0 && !a.ReadOnly {
+			if n > 0 && s.clientWritable(c) {
 				accept := func() error {
-					return s.writeStdinContext(ctx, buf[:n])
+					return s.writeClientStdinContext(ctx, c, buf[:n])
 				}
 				if a.InputAdmission != nil {
 					if admissionErr := a.InputAdmission(accept); admissionErr != nil {
@@ -742,6 +810,11 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	}
 }
 
+func (s *session) clientWritable(c *client) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.stopped && !s.ended && !c.readOnly
+}
 func (h *Host) lookup(key SessionKey) *session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -834,6 +907,6 @@ func (h *Host) StopSessionsWithPrefix(ctx context.Context, prefix string) {
 	}
 	h.mu.Unlock()
 	for _, s := range sessions {
-		s.stop()
+		_ = s.stop()
 	}
 }

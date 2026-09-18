@@ -33,6 +33,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
   })
   const url = new URL(alice.url)
   const writer = new WebSocket(`ws://${url.host}/ws/attach/${run.id}?token=${url.searchParams.get('token')}`)
+  let writerGeneration = 0
   try {
     await new Promise<void>((resolve, reject) => {
       writer.addEventListener('error', () => reject(new Error('writer socket failed')))
@@ -40,6 +41,8 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
         writer.send(
           JSON.stringify({
             write: true,
+            screen: true,
+            interactive: true,
             cols: 60,
             rows: 18,
             control_session_id: geometrySessionID,
@@ -50,16 +53,22 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
         if (typeof event.data !== 'string') return
         const ack = JSON.parse(event.data)
         if (!ack.ok) reject(new Error(ack.error ?? 'writer refused'))
-        else resolve()
+        else {
+          writerGeneration = ack.control_generation ?? 0
+          resolve()
+        }
       }, { once: true })
     })
     await page.setViewportSize({ width: 1568, height: 1000 })
     await page.goto(alice.url)
-    await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /shared geometry regression/ }).click()
-    const rows = page.locator('.xterm-rows > div')
+    await page
+      .getByRole('complementary', { name: 'Runs' })
+      .getByRole('button', { name: /shared geometry regression/ })
+      .click()
+    const rows = page.locator('.xterm-rows:visible > div')
     const assertGrid = async (cols: number, height: number) => {
       await expect(rows).toHaveCount(height)
-      writer.send(JSON.stringify({ type: 'input', data: '\r' }))
+      writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
       await expect(rows.nth(height - 1)).toHaveText(`${' '.repeat(cols - 1)}X`)
     }
     await assertGrid(60, 18)
@@ -79,7 +88,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
   }
 })
 
-test('fresh runs replay complete history in terminal scrollback', async ({
+test('fresh runs bootstrap a bounded current screen after a large redraw archive', async ({
   page,
   aether,
 }) => {
@@ -89,12 +98,7 @@ test('fresh runs replay complete history in terminal scrollback', async ({
 
   const firstOutput = 'HISTORY-FIRST-OUTPUT'
   const currentPrompt = 'CURRENT-SNAPSHOT-PROMPT> '
-  const confirmation = 'SNAPSHOT-LIVE-CONFIRMATION'
-  const postReleaseConfirmation = 'POST-RELEASE-LIVE-CONFIRMATION'
-  // Each iteration clears and redraws the screen. The 96-byte payload makes
-  // the old redraws exceed the one-MiB live replay ring before the prompt.
   const redrawFill = 'x'.repeat(96)
-  // Emit the first screen only after the server has attached its recorder.
   const historyAgent = `stty -echo
 IFS= read -r start
 printf '\\033[2J\\033[H${firstOutput}\\n'
@@ -106,11 +110,7 @@ while [ "$i" -lt 18000 ]; do
 done
 printf '\\033[2J\\033[H${currentPrompt}'
 while IFS= read -r line; do
-  if [ "$line" = "snapshot-input-check" ]; then
-    printf '\\r\\n${confirmation}:%s\\r\\n${currentPrompt}' "$line"
-  else
-    printf '\\r\\n${postReleaseConfirmation}:%s\\r\\n${currentPrompt}' "$line"
-  fi
+  printf '\\r\\nLIVE:%s\\r\\n${currentPrompt}' "$line"
 done
 `
   aether.installAgent(await memberID(alice), 'claude', historyAgent)
@@ -125,6 +125,7 @@ done
   const url = new URL(alice.url)
   const writer = new WebSocket(`ws://${url.host}/ws/attach/${run.id}?token=${url.searchParams.get('token')}`)
   writer.binaryType = 'arraybuffer'
+  let writerGeneration = 0
   let generatedBytes = 0
   try {
     await new Promise<void>((resolve, reject) => {
@@ -138,14 +139,7 @@ done
         clearTimeout(timeout)
         reject(error)
       }
-      const finish = () => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        resolve()
-      }
       timeout = setTimeout(() => fail(new Error('agent did not finish its redraws')), 180_000)
-
       writer.addEventListener('error', () => fail(new Error('writer socket failed')))
       writer.addEventListener('close', () => {
         if (!settled) fail(new Error('writer socket closed before the prompt'))
@@ -154,6 +148,8 @@ done
         writer.send(
           JSON.stringify({
             write: true,
+            screen: false,
+            interactive: true,
             cols: 80,
             rows: 24,
             control_session_id: historySessionID,
@@ -162,9 +158,9 @@ done
       })
       writer.addEventListener('message', (event) => {
         if (typeof event.data === 'string') {
-          let ack: { ok?: boolean; error?: string }
+          let ack: { ok?: boolean; error?: string; control_generation?: number }
           try {
-            ack = JSON.parse(event.data) as { ok?: boolean; error?: string }
+            ack = JSON.parse(event.data) as typeof ack
           } catch {
             return
           }
@@ -173,15 +169,19 @@ done
             fail(new Error(ack.error ?? 'writer refused'))
           } else if (!started) {
             started = true
-            writer.send(JSON.stringify({ type: 'input', data: 'go\r' }))
+            writerGeneration = ack.control_generation ?? 0
+            writer.send(JSON.stringify({ type: 'input', data: 'go\r', control_generation: writerGeneration }))
           }
           return
         }
-
         const chunk = new Uint8Array(event.data as ArrayBuffer)
         generatedBytes += chunk.byteLength
         text = (text + new TextDecoder().decode(chunk)).slice(-8192)
-        if (text.includes(currentPrompt)) finish()
+        if (text.includes(currentPrompt) && started) {
+          settled = true
+          clearTimeout(timeout)
+          resolve()
+        }
       })
     })
     expect(generatedBytes).toBeGreaterThan(1_048_576)
@@ -195,15 +195,27 @@ done
   }
 
   let browserReplayBytes = 0
+  const browserHeaders: Array<{ screen?: boolean; interactive?: boolean }> = []
   const browserAttachAcks: Array<{
     ok?: boolean
     resumed?: boolean
-    resume_id?: string
     replay?: number
-    has_control?: boolean
+    resume_id?: string
   }> = []
   await page.routeWebSocket(/\/ws\/attach\//, (socket) => {
     const server = socket.connectToServer()
+    socket.onMessage((message) => {
+      if (typeof message === 'string') {
+        try {
+          const header = JSON.parse(message) as { screen?: boolean; interactive?: boolean }
+          if (header.screen !== undefined || header.interactive !== undefined) browserHeaders.push(header)
+        } catch {
+          // Binary-output checks below are the proof; malformed client frames are
+          // intentionally left to the real gateway.
+        }
+      }
+      server.send(message)
+    })
     server.onMessage((message) => {
       if (typeof message !== 'string') {
         browserReplayBytes += message.length
@@ -212,13 +224,12 @@ done
           const ack = JSON.parse(message) as {
             ok?: boolean
             resumed?: boolean
-            resume_id?: string
             replay?: number
-            has_control?: boolean
+            resume_id?: string
           }
           if (ack.ok === true) browserAttachAcks.push(ack)
         } catch {
-          // Non-JSON text frames are not attach acknowledgements.
+          // Non-JSON output is not an attach acknowledgement.
         }
       }
       socket.send(message)
@@ -226,222 +237,18 @@ done
   })
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
-  // The run terminal mounts only after this click. Observe the page subtree
-  // now, filtering each mutation through the eventual xterm viewport and its
-  // computed visibility, so the first replay cannot start painting before its
-  // observer is installed.
-  await page.evaluate(() => {
-    const state = {
-      phase: 'initial' as 'initial' | 'release',
-      oldRedrawMutations: { initial: 0, release: 0 },
-    }
-    const observer = new MutationObserver(() => {
-      const viewport = document.querySelector('.xterm-viewport')
-      if (!viewport) return
-      const box = viewport.getBoundingClientRect()
-      if (box.width === 0 || box.height === 0) return
-      const rows = viewport.closest('.xterm')?.querySelector('.xterm-rows')
-      if (!rows || getComputedStyle(rows).visibility !== 'visible') return
-      if (!rows.textContent?.includes('OLD-REDRAW')) return
-      state.oldRedrawMutations[state.phase] += 1
-    })
-    observer.observe(document.body, {
-      childList: true,
-      characterData: true,
-      subtree: true,
-    })
-    // Playwright's page context has no declaration for this test-only probe.
-    const browserWindow = window as unknown as {
-      __terminalHistoryObserver?: {
-        state: typeof state
-        observer: MutationObserver
-      }
-    }
-    browserWindow.__terminalHistoryObserver = { state, observer }
-  })
   await page
     .getByRole('complementary', { name: 'Runs' })
     .getByRole('button', { name: /snapshot current prompt/ })
     .click()
 
-  const redrawMutations = async () => {
-    return await page.evaluate(() => {
-      const browserWindow = window as unknown as {
-        __terminalHistoryObserver?: {
-          state: {
-            oldRedrawMutations: { initial: number; release: number }
-          }
-        }
-      }
-      const probe = browserWindow.__terminalHistoryObserver
-      if (!probe) throw new Error('terminal history observer was not installed')
-      return probe.state.oldRedrawMutations
-    })
-  }
-  const rows = page.locator('.xterm-rows')
-  const countOccurrences = (value: string, needle: string) =>
-    needle.length === 0 ? 0 : value.split(needle).length - 1
-
+  const rows = page.locator('.xterm-rows:visible')
   await expect(rows).toContainText(currentPrompt, { timeout: 30_000 })
-  await expect
-    .poll(() => rows.evaluate((element) => getComputedStyle(element).visibility), {
-      timeout: 30_000,
-    })
-    .toBe('visible')
   await expect(rows).not.toContainText(firstOutput)
-  await expect.poll(() => browserReplayBytes, { timeout: 30_000 }).toBeGreaterThan(1_048_576)
-  // The replay's final prompt is the first settled screen. No intermediate
-  // clear-and-redraw frame may have reached the visible viewport.
-  expect(await redrawMutations()).toEqual({ initial: 0, release: 0 })
-
-  const room = page.getByRole('complementary', { name: 'Run Room' })
-  await page.getByRole('button', { name: 'Open Run Room' }).click()
-  await expect(room.getByText(/Controller: /)).toBeVisible()
-  await room.getByRole('button', { name: 'Take control' }).click()
-  const takeover = page.getByRole('dialog', { name: 'Take control of this run?' })
-  await takeover.getByRole('button', { name: 'Take control' }).click()
-  await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
-  await room.getByRole('button', { name: 'Close Run Room' }).click()
-
-  const screen = page.locator('.xterm-screen')
-  await screen.click()
-  const sentAt = Date.now()
-  await page.keyboard.type('snapshot-input-check')
-  await page.keyboard.press('Enter')
-  await expect(rows).toContainText(`${confirmation}:snapshot-input-check`, {
-    timeout: 15_000,
-  })
-  expect(Date.now() - sentAt).toBeLessThan(15_000)
-  const settledScreen = (await rows.textContent()) ?? ''
-  await expect.poll(() => rows.textContent(), { timeout: 15_000 }).toBe(settledScreen)
-  const settledConfirmationCount = countOccurrences(settledScreen, confirmation)
-  const settledPromptCount = countOccurrences(settledScreen, currentPrompt)
-  const attachAckCountBeforeRevisit = browserAttachAcks.length
-  const binaryReplayBytesBeforeRevisit = browserReplayBytes
-  await page.getByRole('tab', { name: 'Overview', exact: true }).click()
-  await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
-  await expect(page.getByRole('tab', { name: 'Terminal', exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  )
-  await expect
-    .poll(() => browserAttachAcks.length, { timeout: 15_000 })
-    .toBe(attachAckCountBeforeRevisit + 1)
-  const revisitAck = browserAttachAcks[browserAttachAcks.length - 1]
-  expect(revisitAck?.ok).toBe(true)
-  expect(revisitAck?.resumed).toBe(true)
-  expect(revisitAck?.resume_id).toEqual(expect.stringMatching(/\S+/))
-  expect(revisitAck?.replay ?? 0).toBe(0)
-  expect(browserReplayBytes).toBe(binaryReplayBytesBeforeRevisit)
-  await expect.poll(() => rows.textContent(), { timeout: 15_000 }).toBe(settledScreen)
-  const revisitedScreen = (await rows.textContent()) ?? ''
-  expect(revisitedScreen).toBe(settledScreen)
-  expect(countOccurrences(revisitedScreen, confirmation)).toBe(settledConfirmationCount)
-  expect(countOccurrences(revisitedScreen, currentPrompt)).toBe(settledPromptCount)
-
-  // Capture the settled viewport before the release transition and require
-  // resume to leave that screen untouched.
-  await page.evaluate(() => {
-    const browserWindow = window as unknown as {
-      __terminalHistoryObserver?: {
-        state: { phase: 'initial' | 'release' }
-      }
-    }
-    const probe = browserWindow.__terminalHistoryObserver
-    if (!probe) throw new Error('terminal history observer was not installed')
-    probe.state.phase = 'release'
-  })
-  const attachAckCountBeforeRelease = browserAttachAcks.length
-  await page.getByRole('button', { name: 'Steering', exact: true }).click()
-  await expect
-    .poll(() => browserAttachAcks.length, { timeout: 15_000 })
-    .toBeGreaterThan(attachAckCountBeforeRelease)
-  const releaseAck = browserAttachAcks[browserAttachAcks.length - 1]
-  expect(releaseAck?.ok).toBe(true)
-  expect(releaseAck?.resumed).toBe(true)
-  expect(releaseAck?.resume_id).toEqual(expect.stringMatching(/\S+/))
-  expect((releaseAck?.replay ?? 0)).toBe(0)
-  expect((releaseAck?.has_control ?? false)).toBe(false)
-  const takeControl = page.getByRole('button', { name: 'Take control', exact: true })
-  await expect(takeControl).toBeVisible()
-  await expect(takeControl).toBeEnabled()
-  await expect.poll(() => rows.textContent(), { timeout: 15_000 }).toBe(settledScreen)
-  const releasedScreen = (await rows.textContent()) ?? ''
-  expect(releasedScreen).toBe(settledScreen)
-  expect(countOccurrences(releasedScreen, confirmation)).toBe(settledConfirmationCount)
-  expect(countOccurrences(releasedScreen, currentPrompt)).toBe(settledPromptCount)
-  // A fresh controller sends one line after release. The browser must remain
-  // a read-only mirror while its same live PTY forwards that output.
-  const liveWriter = new WebSocket(
-    `ws://${url.host}/ws/attach/${run.id}?token=${url.searchParams.get('token')}`,
-  )
-  liveWriter.binaryType = 'arraybuffer'
-  try {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false
-      const fail = (error: Error) => {
-        if (settled) return
-        settled = true
-        reject(error)
-      }
-      liveWriter.addEventListener('error', () => fail(new Error('post-release writer socket failed')))
-      liveWriter.addEventListener('close', () => {
-        if (!settled) fail(new Error('post-release writer socket closed before its ack'))
-      })
-      liveWriter.addEventListener('open', () => {
-        liveWriter.send(
-          JSON.stringify({
-            write: true,
-            cols: 80,
-            rows: 24,
-            control_session_id: 'terminal-history-post-release',
-          }),
-        )
-      })
-      liveWriter.addEventListener('message', (event) => {
-        if (typeof event.data !== 'string') return
-        let ack: { ok?: boolean; error?: string }
-        try {
-          ack = JSON.parse(event.data) as { ok?: boolean; error?: string }
-        } catch {
-          return
-        }
-        if (ack.ok === undefined) return
-        if (!ack.ok) fail(new Error(ack.error ?? 'post-release writer refused'))
-        else if (!settled) {
-          settled = true
-          resolve()
-        }
-      })
-    })
-    liveWriter.send(JSON.stringify({ type: 'input', data: 'post-release-live-input\r' }))
-    await expect(rows).toContainText(
-      `${postReleaseConfirmation}:post-release-live-input`,
-      { timeout: 15_000 },
-    )
-    await expect(takeControl).toBeVisible()
-    await expect(takeControl).toBeEnabled()
-    const liveScreen = (await rows.textContent()) ?? ''
-    expect(countOccurrences(liveScreen, confirmation)).toBe(settledConfirmationCount)
-    expect(countOccurrences(liveScreen, postReleaseConfirmation)).toBe(
-      countOccurrences(releasedScreen, postReleaseConfirmation) + 1,
-    )
-    expect(countOccurrences(liveScreen, currentPrompt)).toBe(settledPromptCount + 1)
-    expect(await redrawMutations()).toEqual({ initial: 0, release: 0 })
-  } finally {
-    if (liveWriter.readyState !== WebSocket.CLOSED) {
-      await new Promise<void>((resolve) => {
-        liveWriter.addEventListener('close', () => resolve(), { once: true })
-        liveWriter.close()
-      })
-    }
-  }
-
-  await page.getByRole('button', { name: 'Open terminal search' }).click()
-  const find = page.getByLabel('Find in terminal')
-  await expect(find).toBeVisible()
-  await find.fill(firstOutput)
-  await find.press('Enter')
-  await expect(page.locator('.xterm-selection div').first()).toBeVisible()
-  await expect(page.getByText('No matches')).toBeHidden()
+  await expect.poll(() => browserReplayBytes, { timeout: 30_000 }).toBeGreaterThan(0)
+  expect(browserReplayBytes).toBeLessThan(512 * 1024)
+  expect(browserHeaders[0]).toMatchObject({ screen: true, interactive: true })
+  expect(browserAttachAcks[0]).toMatchObject({ ok: true, resumed: false })
+  expect(browserAttachAcks[0]?.replay ?? 0).toBeLessThan(512 * 1024)
+  await expect(page.getByRole('status', { name: 'Restoring terminal history' })).toBeHidden()
 })

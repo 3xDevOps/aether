@@ -43,6 +43,8 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 	term, ack, err := s.Backend.Attach(s.Ctx, protocol.AttachRequest{
 		RunID:             r.PathValue("run"),
 		ReadOnly:          !allowWrite,
+		Screen:            req.Screen,
+		Interactive:       req.Interactive,
 		Cols:              cols,
 		Rows:              rows,
 		Shell:             shell,
@@ -78,8 +80,9 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 
 	// A read-only attach's input is dropped rather than refused. Its
 	// resizes still travel: the session decides whether a mirror's size
-	// counts, and a lone one's does.
-	if err := s.pumpTerminal(term, allowWrite, true); err != nil {
+	// counts, and a lone one's does. Interactive input/control is sent as
+	// NDJSON so the SSH and in-process gateways share one parser.
+	if err := s.pumpTerminal(term, allowWrite, true, req.Interactive); err != nil {
 		_ = s.Conn.Close(attachEndClose(err))
 		return
 	}
@@ -111,10 +114,10 @@ func attachEndClose(err error) (websocket.StatusCode, string) {
 }
 
 // pumpTerminal bridges the socket and a terminal: terminal output records are
-// decoded in order, binary records go out as binary frames, and geometry
-// records become JSON controls before the next record is read. Client input
-// and resize controls are handled concurrently.
-func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error {
+// decoded in order, binary records go out as binary frames, and geometry and
+// control records become JSON controls before the next record is read. Client
+// input and resize controls are handled concurrently.
+func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize, interactive bool) error {
 	go func() {
 		defer s.cancel()
 		defer func() { _ = term.Close() }()
@@ -132,10 +135,30 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 			}
 			switch ctl.Type {
 			case protocol.DashAttachInput:
-				if !allowInput || ctl.Data == "" {
+				if ctl.Data == "" || (!interactive && !allowInput) {
 					continue
 				}
-				if _, err := term.Write([]byte(ctl.Data)); err != nil {
+				payload := []byte(ctl.Data)
+				if interactive {
+					var marshalErr error
+					payload, marshalErr = json.Marshal(ctl)
+					if marshalErr != nil {
+						continue
+					}
+					payload = append(payload, '\n')
+				}
+				if _, err := term.Write(payload); err != nil {
+					return
+				}
+			case protocol.DashAttachControlFrame:
+				if !interactive {
+					continue
+				}
+				payload, err := json.Marshal(ctl)
+				if err != nil {
+					continue
+				}
+				if _, err := term.Write(append(payload, '\n')); err != nil {
 					return
 				}
 			case protocol.DashAttachResize:
@@ -157,6 +180,11 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 				Cols: size[0],
 				Rows: size[1],
 			}) != nil {
+				return nil
+			}
+		}
+		if reader.Control != nil {
+			if s.WriteJSON(*reader.Control) != nil {
 				return nil
 			}
 		}

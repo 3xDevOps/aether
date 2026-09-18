@@ -1,4 +1,12 @@
-import { type Attachment, type ControlMetadata, codeConflict, codeDenied, connectAttach, replayGate } from '@/routes/terminal/attach'
+import {
+  type Attachment,
+  type ControlMetadata,
+  type ControlResult,
+  codeConflict,
+  codeDenied,
+  connectAttach,
+  replayGate,
+} from '@/routes/terminal/attach'
 import type { ConnectionState } from '@/lib/stream'
 import { StubSocket } from '@/test/stub-socket'
 import { fire } from '@/test/wake'
@@ -629,6 +637,35 @@ describe('connectAttach', () => {
     })
     a.close()
   })
+  it('drains geometry queued before the first replay frame', () => {
+    const geometries: Array<[number, number]> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      onGeometry: (cols, rows) => geometries.push([cols, rows]),
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({
+      data: JSON.stringify({ ok: true, replay: 1, resume_id: 'pty-incarnation-a' }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'geometry',
+        cols: 100,
+        rows: 30,
+      }),
+    })
+
+    expect(geometries).toEqual([[100, 30]])
+    a.close()
+  })
+
   it('stops old replay operations when closed during the first callback', async () => {
     const events: string[] = []
     let finish!: () => void
@@ -1976,6 +2013,305 @@ describe('connectAttach', () => {
     expect(refusal).toBeNull()
     a.close()
   })
+  it('bounds a screen live backlog at 4 MiB and recovers with a full compact replay', async () => {
+    const settled: Array<() => void> = []
+    const replayStarts: Array<[number, boolean]> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, kind, done) => {
+        if (kind === 'live' && done) settled.push(done)
+      },
+      onAttached: () => {},
+      onReplayStart: (bytes, full) => replayStarts.push([bytes, full]),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, resume_id: 'pty-incarnation-a' }) })
+    const oldMessage = oldSocket.onmessage!
+    const frame = new Uint8Array(1024 * 1024).buffer
+    for (let n = 0; n < 4; n++) oldMessage({ data: frame })
+
+    expect(settled).toHaveLength(4)
+    expect(oldSocket.closed).toBe(true)
+    // The detached old transport cannot add a fifth write after overflow.
+    oldMessage({ data: new Uint8Array([1]).buffer })
+    expect(settled).toHaveLength(4)
+
+    settled.forEach((done) => done())
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({ screen: true })
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    replacement.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, resume_id: 'pty-incarnation-b' }) })
+    expect(replayStarts.at(-1)).toEqual([0, true])
+    a.close()
+  })
+
+  it('parks overflow recovery across suspend and resumes the invalid screen intentionally', async () => {
+    const finish: Array<() => void> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: () => new Promise<void>((resolve) => finish.push(resolve)),
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+    const frame = new Uint8Array(1024 * 1024).buffer
+    for (let n = 0; n < 4; n++) oldSocket.onmessage?.({ data: frame })
+    expect(finish).toHaveLength(4)
+
+    a.suspend()
+    finish.forEach((done) => done())
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(StubSocket.opened).toHaveLength(1)
+
+    a.resume()
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('resume')
+    a.close()
+  })
+
+  it('does not reopen an overflowed transport after close', async () => {
+    const finish: Array<() => void> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, _kind, done) => {
+        if (done) finish.push(done)
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+    const frame = new Uint8Array(1024 * 1024).buffer
+    for (let n = 0; n < 4; n++) oldSocket.onmessage?.({ data: frame })
+    expect(oldSocket.closed).toBe(true)
+
+    a.close()
+    finish.forEach((done) => done())
+    await Promise.resolve()
+    await Promise.resolve()
+    vi.advanceTimersByTime(60_000)
+    expect(StubSocket.opened).toHaveLength(1)
+  })
+
+  it('sends screen and interactive options and updates control in place', () => {
+    const metadata: ControlMetadata[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    expect(socket.frames()[0]).toMatchObject({ screen: true, interactive: true })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        replay: 0,
+        control_session_id: a.controlMetadata!().control_session_id,
+        control_generation: 3,
+        has_control: false,
+      }),
+    })
+
+    a.setControl(true)
+    expect(socket.frames()[1]).toMatchObject({
+      type: 'control',
+      request_id: 1,
+      write: true,
+    })
+    expect(socket.frames()[1]).not.toHaveProperty('control_generation')
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        request_id: 1,
+        ok: true,
+        has_control: true,
+        control_session_id: a.controlMetadata!().control_session_id,
+        control_generation: 4,
+      }),
+    })
+    expect(metadata[metadata.length - 1]).toMatchObject({ has_control: true, control_generation: 4 })
+    a.send('x')
+    expect(socket.frames()[2]).toMatchObject({ type: 'input', control_generation: 4 })
+    a.close()
+  })
+  it('clears authority on an unsolicited negative current-fence record', () => {
+    const metadata: ControlMetadata[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    const sessionID = a.controlMetadata!().control_session_id
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        replay: 0,
+        control_session_id: sessionID,
+        control_generation: 5,
+        has_control: true,
+      }),
+    })
+
+    // A Go omitempty response can omit both false-valued fields. A stale
+    // fence must still be ignored before deriving the current revocation.
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        control_session_id: sessionID,
+        control_generation: 4,
+      }),
+    })
+    expect(a.controlMetadata!().has_control).toBe(true)
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        control_session_id: sessionID,
+        control_generation: 5,
+      }),
+    })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 5, has_control: false })
+    expect(a.controlMetadata!().has_control).toBe(false)
+    a.close()
+  })
+
+
+  it('keeps a mirror owner fence for an explicit takeover', () => {
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 7, has_control: false }) })
+    a.setControl(true, true)
+    expect(socket.frames()[1]).toMatchObject({
+      type: 'control',
+      write: true,
+      takeover: true,
+      control_generation: 7,
+    })
+    a.close()
+  })
+
+  it('accepts a fresh zero-generation denial and permits the next mirror acquisition', () => {
+    const metadata: ControlMetadata[] = []
+    const results: ControlResult[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onControlResult: (value) => results.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 3, has_control: false }) })
+
+    a.setControl(true)
+    expect(socket.frames()[1]).not.toHaveProperty('control_generation')
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        request_id: 1,
+        ok: false,
+        code: codeConflict,
+        control_generation: 0,
+        has_control: false,
+      }),
+    })
+    expect(results[0]).toMatchObject({ ok: false, control_generation: 0, has_control: false })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 0, has_control: false })
+
+    a.setControl(true)
+    expect(socket.frames()[2]).not.toHaveProperty('control_generation')
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        request_id: 2,
+        ok: true,
+        control_generation: 4,
+        has_control: true,
+      }),
+    })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 4, has_control: true })
+    a.close()
+  })
+
+  it('ignores stale control acknowledgements and revocations', () => {
+    const results: ControlResult[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControlResult: (value) => results.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 5, has_control: true }) })
+    a.setControl(false)
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'control', request_id: 99, ok: false, has_control: false, control_generation: 4 }),
+    })
+    expect(a.controlMetadata!().has_control).toBe(true)
+    expect(results).toHaveLength(0)
+    a.close()
+  })
 })
 
 describe('replayGate', () => {
@@ -2038,6 +2374,23 @@ describe('replayGate', () => {
     expect(visibility).toEqual([true, true, false])
   })
 
+  it('mutes resumed deltas without hiding the warm screen', () => {
+    const visibility: boolean[] = []
+    const done: Array<() => void> = []
+    const gate = replayGate(
+      (_chunk, callback) => {
+        if (callback) done.push(callback)
+      },
+      (visible) => visibility.push(visible),
+    )
+    gate.start('delta')
+    expect(gate.muted()).toBe(true)
+    expect(visibility).toEqual([true])
+    gate.write(new Uint8Array([1]), 'replay-end')
+    done[0]()
+    expect(gate.muted()).toBe(false)
+    expect(visibility).toEqual([true, false])
+  })
   it('unmutes on demand so a dropped socket mid-replay never leaves input dead', () => {
     const gate = replayGate(() => {})
     gate.write(new Uint8Array([1]), 'replay')

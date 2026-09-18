@@ -46,6 +46,24 @@ func TestTerminalRecordsPreserveOutputGeometryOrder(t *testing.T) {
 		t.Fatalf("output around geometry = %q", events)
 	}
 }
+func TestTerminalControlRecordRoundTrip(t *testing.T) {
+	var wire bytes.Buffer
+	want := DashAttachControl{
+		Type: DashAttachControlFrame, RequestID: 9, OK: true,
+		HasControl: true, ControlSessionID: "tab-1", ControlGeneration: 4,
+	}
+	if err := WriteTerminalControl(&wire, want); err != nil {
+		t.Fatal(err)
+	}
+	reader := TerminalReader{Reader: &wire}
+	n, geometry, err := reader.Read(make([]byte, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || geometry != [2]uint{} || reader.Control == nil || *reader.Control != want {
+		t.Fatalf("control record = n=%d geometry=%v control=%+v, want %+v", n, geometry, reader.Control, want)
+	}
+}
 
 func TestTerminalRecordsRejectTruncatedFrames(t *testing.T) {
 	for name, data := range map[string][]byte{

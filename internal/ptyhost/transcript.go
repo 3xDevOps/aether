@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -20,11 +21,12 @@ import (
 const transcriptFlushInterval = 2 * time.Second
 
 type castHeader struct {
-	Version   int               `json:"version"`
-	Width     uint              `json:"width"`
-	Height    uint              `json:"height"`
-	Timestamp int64             `json:"timestamp"`
-	Env       map[string]string `json:"env"`
+	Version     int               `json:"version"`
+	Width       uint              `json:"width"`
+	Height      uint              `json:"height"`
+	Timestamp   int64             `json:"timestamp"`
+	Incarnation int64             `json:"incarnation,omitempty"`
+	Env         map[string]string `json:"env"`
 }
 
 // castWriter appends asciinema cast v2 events (output, resize, marker) to
@@ -38,6 +40,7 @@ type castWriter struct {
 	f           *os.File
 	bw          *bufio.Writer
 	start       time.Time
+	incarnation int64
 	pending     []byte
 	outputBytes int
 	closed      bool
@@ -55,19 +58,22 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ptyhost: create transcript: %w", err)
 	}
+	start := time.Now()
 	w := &castWriter{
-		f:     f,
-		bw:    bufio.NewWriterSize(f, 32*1024),
-		start: time.Now(),
-		stop:  make(chan struct{}),
-		path:  path,
+		f:           f,
+		bw:          bufio.NewWriterSize(f, 32*1024),
+		start:       start,
+		incarnation: start.UnixNano(),
+		stop:        make(chan struct{}),
+		path:        path,
 	}
 	hdr, err := json.Marshal(castHeader{
-		Version:   2,
-		Width:     cols,
-		Height:    rows,
-		Timestamp: w.start.Unix(),
-		Env:       map[string]string{"TERM": "xterm-256color"},
+		Version:     2,
+		Width:       cols,
+		Height:      rows,
+		Timestamp:   w.start.Unix(),
+		Incarnation: w.incarnation,
+		Env:         map[string]string{"TERM": "xterm-256color"},
 	})
 	if err != nil {
 		_ = f.Close()
@@ -216,6 +222,7 @@ func (w *castWriter) resize(cols, rows uint) {
 	// and grid transition as the live emulator.
 	if len(w.pending) > 0 {
 		w.eventLocked("o", w.pending)
+		w.outputBytes += len(w.pending)
 		w.pending = nil
 	}
 	w.eventLocked("r", fmt.Appendf(nil, "%dx%d", cols, rows))
@@ -258,6 +265,7 @@ type castSegment struct {
 	path        string
 	fileBytes   int64
 	outputBytes int
+	incarnation int64
 }
 
 // priorCastSegments returns every immutable incarnation renamed aside before
@@ -303,6 +311,22 @@ func openFullCastReplay(path string) (io.ReadCloser, int, error) {
 	}
 	return openCastReplay(segments, nil), total, nil
 }
+func legacyCastIncarnation(info os.FileInfo, header castHeader) int64 {
+	var id uint64
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		id = stat.Ino
+	}
+	if id == 0 {
+		id = uint64(info.ModTime().UnixNano())
+	}
+	id ^= uint64(header.Timestamp) * 0x9e3779b97f4a7c15
+	id ^= uint64(header.Width)<<32 | uint64(header.Height)
+	id &^= uint64(1) << 63
+	if id == 0 {
+		id = 1
+	}
+	return int64(id)
+}
 
 func inspectCastSegment(path string) (castSegment, error) {
 	f, err := os.Open(path)
@@ -313,6 +337,15 @@ func inspectCastSegment(path string) (castSegment, error) {
 	if err != nil {
 		_ = f.Close()
 		return castSegment{}, fmt.Errorf("ptyhost: inspect transcript: %w", err)
+	}
+	header, err := readCastHeader(f)
+	if err != nil {
+		_ = f.Close()
+		return castSegment{}, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = f.Close()
+		return castSegment{}, fmt.Errorf("ptyhost: seek transcript: %w", err)
 	}
 	r := newReplayReader(f, info.Size())
 	n, readErr := io.Copy(io.Discard, r)
@@ -326,7 +359,49 @@ func inspectCastSegment(path string) (castSegment, error) {
 	if n > int64(^uint(0)>>1) {
 		return castSegment{}, errors.New("ptyhost: transcript output exceeds platform limits")
 	}
-	return castSegment{path: path, fileBytes: info.Size(), outputBytes: int(n)}, nil
+	if header.Incarnation == 0 {
+		header.Incarnation = legacyCastIncarnation(info, header)
+	}
+	return castSegment{path: path, fileBytes: info.Size(), outputBytes: int(n), incarnation: header.Incarnation}, nil
+}
+
+func inspectCastHeader(path string) (castSegment, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return castSegment{}, fmt.Errorf("ptyhost: open transcript: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return castSegment{}, fmt.Errorf("ptyhost: inspect transcript: %w", err)
+	}
+	header, err := readCastHeader(f)
+	if err != nil {
+		return castSegment{}, err
+	}
+	if header.Incarnation == 0 {
+		header.Incarnation = legacyCastIncarnation(info, header)
+	}
+	return castSegment{path: path, fileBytes: info.Size(), incarnation: header.Incarnation}, nil
+}
+
+func readCastHeader(f *os.File) (castHeader, error) {
+	line, err := bufio.NewReader(io.LimitReader(f, 1<<20)).ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return castHeader{}, fmt.Errorf("ptyhost: read transcript header: %w", err)
+	}
+	var header castHeader
+	decodeErr := json.Unmarshal(bytes.TrimSpace(line), &header)
+	if decodeErr != nil {
+		return castHeader{}, fmt.Errorf("ptyhost: decode transcript header: %w", decodeErr)
+	}
+	if header.Version != 2 {
+		return castHeader{}, fmt.Errorf("ptyhost: unsupported transcript version %d", header.Version)
+	}
+	if err == io.EOF && len(bytes.TrimSpace(line)) == 0 {
+		return castHeader{}, errors.New("ptyhost: transcript has no header")
+	}
+	return header, nil
 }
 
 // snapshot flushes the complete output events already accepted by the session

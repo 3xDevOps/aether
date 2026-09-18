@@ -36,6 +36,12 @@ func (r *ring) write(p []byte) {
 	}
 }
 
+func (r *ring) seed(p []byte, written uint64) {
+	r.buf = append(r.buf[:0], p...)
+	r.written = written
+	r.dropped = written > uint64(len(r.buf))
+}
+
 // since returns the bytes written after cursor, and whether the ring
 // still holds all of them. A cursor from further back than the ring
 // retains - or one ahead of what has been written, which no honest
@@ -123,6 +129,7 @@ type client struct {
 	// never reflow the agent's screen for anyone else.
 	follow   bool
 	snapshot bool
+	screen   bool
 	// resume means this client kept the screen from a previous attach, so
 	// it is sent only what it missed and provokes no redraw. cursor is how
 	// far it got, and resumed records whether the ring could still answer
@@ -152,7 +159,8 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		conn:     conn,
 		readOnly: a.ReadOnly,
 		follow:   a.Follow,
-		snapshot: a.Snapshot,
+		snapshot: a.Screen || a.Snapshot,
+		screen:   a.Screen,
 		resume:   a.Resume,
 		cursor:   a.Cursor,
 		resumeID: a.ResumeID,

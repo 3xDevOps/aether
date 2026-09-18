@@ -60,6 +60,7 @@ type session struct {
 	att        runtime.Attachment
 	tr         *castWriter
 	history    []castSegment
+	checkpoint string
 
 	stdinMu sync.Mutex
 	stdin   io.WriteCloser
@@ -86,6 +87,7 @@ type session struct {
 	pendingScreen    []byte
 	pendingEvents    []pendingOutputEvent
 	finalSnapshot    ScreenSnapshot
+	checkpointErr    error
 	onTitle          func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
@@ -278,6 +280,40 @@ func (s *session) commitPendingOutputLocked(p []byte) {
 		}
 	}
 }
+func (s *session) checkpointLocked() error {
+	if s.tr == nil || s.screen == nil {
+		return nil
+	}
+	if _, isRun := s.run.Run(); !isRun || s.checkpoint == "" {
+		return nil
+	}
+	snapshot := makeScreenSnapshot(s.screen, s.modes)
+	if err := s.tr.checkpoint(s.checkpoint, snapshot, s.history); err != nil {
+		s.checkpointErr = err
+		return err
+	}
+	s.checkpointErr = nil
+	return nil
+}
+
+func (s *session) checkpointNow() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checkpointLocked()
+}
+
+func (s *session) checkpointLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.checkpointNow()
+		case <-s.done:
+			return
+		}
+	}
+}
 
 // end marks the session ended after the agent exited: the transcript closes
 // and every attachment drains to EOF, but the session stays queryable until
@@ -310,6 +346,7 @@ func (s *session) finishLocked() {
 		s.pendingScreen = nil
 	}
 	if s.screen != nil {
+		_ = s.checkpointLocked()
 		s.finalSnapshot = makeScreenSnapshot(s.screen, s.modes)
 		s.screen.dispose()
 		s.screen = nil
@@ -331,13 +368,14 @@ func (s *session) finishLocked() {
 	}
 }
 
-func (s *session) stop() {
+func (s *session) stop() error {
 	s.resizeMu.Lock()
 	s.mu.Lock()
 	if s.stopped {
+		err := s.checkpointErr
 		s.mu.Unlock()
 		s.resizeMu.Unlock()
-		return
+		return err
 	}
 	s.stopped = true
 	s.finishLocked()
@@ -356,12 +394,13 @@ func (s *session) stop() {
 	if !s.ended && s.done != nil {
 		close(s.done)
 	}
+	err := s.checkpointErr
 	s.mu.Unlock()
 	s.resizeMu.Unlock()
 	if att != nil {
 		_ = att.Close()
 	}
-
+	return err
 }
 
 func (s *session) isActive() bool {
@@ -387,10 +426,17 @@ func (s *session) snapshot() (ScreenSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.finalSnapshot.Data) > 0 {
-		return cloneScreenSnapshot(s.finalSnapshot), nil
+		snapshot := cloneScreenSnapshot(s.finalSnapshot)
+		if s.checkpointErr != nil {
+			return snapshot, fmt.Errorf("ptyhost: screen checkpoint: %w", s.checkpointErr)
+		}
+		return snapshot, nil
 	}
 	if s.screen == nil {
 		return ScreenSnapshot{}, errors.New("ptyhost: terminal snapshot unavailable")
+	}
+	if s.checkpointErr != nil {
+		return makeScreenSnapshot(s.screen, s.modes), fmt.Errorf("ptyhost: screen checkpoint: %w", s.checkpointErr)
 	}
 	return makeScreenSnapshot(s.screen, s.modes), nil
 }
@@ -450,13 +496,15 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		// non-empty gap crossing one must rebuild the screen.
 		if c.resume && c.resumeID != "" && c.resumeID == s.resumeID {
 			if missed, ok := s.ring.since(c.cursor); ok &&
-				(!c.snapshot || len(missed) == 0 || c.cursor >= s.lastResizeCursor) {
+				(!c.snapshot || c.cursor >= s.lastResizeCursor) {
 				c.setReplay(missed)
 				c.resumed = true
 			}
 		}
 		if !c.resumed {
-			if _, isRun := s.run.Run(); isRun {
+			if c.screen {
+				c.setReplay(makeScreenSnapshot(s.screen, s.modes).Data)
+			} else if _, isRun := s.run.Run(); isRun {
 				replay, replayBytes, err := s.tr.snapshot(s.history)
 				if err != nil {
 					s.mu.Unlock()
@@ -488,6 +536,56 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		s.mu.Unlock()
 		return nil
 	}
+}
+
+func (s *session) setClientReadOnly(c *client, readOnly bool) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrNoSession
+	}
+	if _, ok := s.clients[c]; !ok {
+		return ErrNoSession
+	}
+	if s.ended {
+		return ErrSessionEnded
+	}
+	if c.readOnly == readOnly {
+		return nil
+	}
+	c.readOnly = readOnly
+	s.reconcileLocked(false)
+	return nil
+}
+func (s *session) clientAttached(c *client) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.ended {
+		return false
+	}
+	_, ok := s.clients[c]
+	return ok
+}
+func (s *session) writeClientStdinContext(ctx context.Context, c *client, p []byte) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return ErrNoSession
+	}
+	if s.ended {
+		s.mu.Unlock()
+		return ErrSessionEnded
+	}
+	if _, ok := s.clients[c]; !ok || c.readOnly {
+		s.mu.Unlock()
+		return ErrWriteDenied
+	}
+	s.mu.Unlock()
+	return s.writeStdinContextLocked(ctx, p)
 }
 
 func (s *session) removeClient(c *client) {

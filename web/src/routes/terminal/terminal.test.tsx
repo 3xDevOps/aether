@@ -40,11 +40,49 @@ function mount(
   return render(<View {...route} params={{ runId: 'run_1' }} />)
 }
 
-function attached(size = { cols: 80, rows: 24 }, resume_id = 'pty-incarnation-run') {
+function attached(
+  size = { cols: 80, rows: 24 },
+  resume_id = 'pty-incarnation-run',
+  over: Record<string, unknown> = {},
+) {
   act(() => {
-    StubSocket.last().onopen?.()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    const header = socket.frames()[0]
+    const hasControl =
+      typeof header === 'object' &&
+      header !== null &&
+      'write' in header &&
+      header.write === true
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        ...size,
+        resume_id,
+        has_control: hasControl,
+        control_generation: hasControl ? 1 : 0,
+        ...over,
+      }),
+    })
+  })
+}
+
+function controlAck(
+  has_control: boolean,
+  request_id: number,
+  control_generation: number,
+  over: Record<string, unknown> = {},
+) {
+  act(() => {
     StubSocket.last().onmessage?.({
-      data: JSON.stringify({ ok: true, ...size, resume_id }),
+      data: JSON.stringify({
+        type: 'control',
+        request_id,
+        ok: true,
+        has_control,
+        control_generation,
+        ...over,
+      }),
     })
   })
 }
@@ -69,16 +107,44 @@ describe('terminal view', () => {
     expect(screen.getByText('Steering')).toBeDefined()
 
     fireEvent.click(screen.getByText('Steering'))
-    attached()
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(useStore.getState().terminals.run_1.write).toBe(true)
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 2)
 
-    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(useStore.getState().terminals.run_1.write).toBe(false)
     expect(screen.getByText('Take control')).toBeDefined()
     view.unmount()
   })
 
+  it('waits for a control acknowledgement without replacing the output socket', () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    const socket = StubSocket.last()
+    const opened = StubSocket.opened.length
+
+    fireEvent.click(screen.getByText('Take control'))
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(useStore.getState().terminals.run_1.write).toBe(false)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
+
+    expect(useStore.getState().terminals.run_1.write).toBe(true)
+    expect(screen.getByText('Steering')).toBeDefined()
+
+    fireEvent.click(screen.getByText('Steering'))
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 2, write: false })
+    controlAck(false, 2, 1)
+    fireEvent.click(screen.getByText('Take control'))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 3, write: true })
+    expect(socket.frames().at(-1)).not.toHaveProperty('control_generation')
+    view.unmount()
+  })
+
+
   it('opens another member run as a mirror until they take control', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    const view = mount({}, { member_id: bob.id })
     attached()
 
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
@@ -88,18 +154,18 @@ describe('terminal view', () => {
   })
 
   it('says what a mirror is until the member has taken control once', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    const view = mount({}, { member_id: bob.id })
     attached()
 
     const hint = 'Read-only mirror. Take control to type into the agent.'
     expect(screen.getByText(hint)).toBeDefined()
 
-    // Asking is not being granted: the flag waits for the reattach's ack, so
-    // a member the server refuses keeps the hint.
+    // Asking is not being granted optimistically: the flag changes only after
+    // the ordered control response acknowledges the lease.
     fireEvent.click(screen.getByText('Take control'))
     expect(useStore.getState().terminalControlTaken).toBe(false)
-    attached()
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
 
     expect(useStore.getState().terminalControlTaken).toBe(true)
     expect(screen.queryByText(hint)).toBeNull()
@@ -110,30 +176,15 @@ describe('terminal view', () => {
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
-    act(() => {
-      StubSocket.last().onopen?.()
-      StubSocket.last().onmessage?.({
-        data: JSON.stringify({
-          ok: true,
-          cols: 80,
-          rows: 24,
-          has_control: true,
-          control_generation: 7,
-          resume_id: 'pty-incarnation-run',
-        }),
-      })
-    })
+    controlAck(true, 1, 1)
     expect(screen.getByText('Steering')).toBeDefined()
 
     act(() => StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' }))
     expect(screen.getByText('Take control')).toBeDefined()
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
 
-    // The mirror can explicitly ask for control again; reopen clears the
-    // bounded reconnect timer and starts this request immediately.
-    fireEvent.click(screen.getByText('Take control'))
-    act(() => StubSocket.last().onopen?.())
-    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
+    // The mirror remains eligible for a later explicit request; no
+    // permission-denial latch is set by lease displacement.
     view.unmount()
   })
 
@@ -150,19 +201,27 @@ describe('terminal view', () => {
   })
 
   it('keeps the mirror hint when the server refuses the request', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    const view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
-    act(() => {
-      StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: codeDenied, error: 'permission denied' }),
-      })
-    })
+        data: JSON.stringify({
+          type: 'control',
+          request_id: 1,
+          ok: false,
+          code: codeDenied,
+          error: 'permission denied',
+          has_control: false,
+          control_generation: 1,
+        }),
+      }),
+    )
 
     expect(useStore.getState().terminalControlTaken).toBe(false)
+    expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
 
@@ -175,7 +234,6 @@ describe('terminal view', () => {
     expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
     view.unmount()
   })
-
   it('keeps one control session across live status transitions', () => {
     const view = mount()
     attached()
@@ -195,7 +253,6 @@ describe('terminal view', () => {
   it('disables the toggle and says why when the server denies steering', () => {
     const view = mount()
     act(() => StubSocket.last().onopen?.())
-
     act(() =>
       StubSocket.last().onmessage?.({
         data: JSON.stringify({
@@ -211,22 +268,27 @@ describe('terminal view', () => {
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
+
   it('retries control when cached run authority changes', async () => {
     const view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
     const denied = StubSocket.last()
-    act(() => {
-      denied.onopen?.()
+    expect(denied.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    act(() =>
       denied.onmessage?.({
         data: JSON.stringify({
+          type: 'control',
+          request_id: 1,
           ok: false,
           code: codeDenied,
           error: 'run.attach: permission denied',
+          has_control: false,
+          control_generation: 1,
         }),
-      })
-    })
+      }),
+    )
     expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
 
     const View = terminalRoute()
@@ -234,26 +296,38 @@ describe('terminal view', () => {
     act(() => useStore.getState().upsertRun(run()))
     view.rerender(<View params={{ runId: 'run_1' }} active />)
 
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const authorized = StubSocket.last()
     act(() => authorized.onopen?.())
     expect(authorized.frames()[0]).toMatchObject({ write: true, resume: true })
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
     view.unmount()
   })
-  it('reattaches when changed authority revives an unchanged automatic write', async () => {
+  it('retries control on an authority change without replacing the stream', () => {
     const view = mount()
-    const denied = StubSocket.last()
-    act(() => {
-      denied.onopen?.()
-      denied.onmessage?.({
+    const socket = StubSocket.last()
+    attached()
+
+    fireEvent.click(screen.getByText('Steering'))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 1)
+
+    fireEvent.click(screen.getByText('Take control'))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 2, write: true })
+    act(() =>
+      socket.onmessage?.({
         data: JSON.stringify({
+          type: 'control',
+          request_id: 2,
           ok: false,
           code: codeDenied,
           error: 'run.attach: permission denied',
+          has_control: false,
+          control_generation: 0,
         }),
-      })
-    })
+      }),
+    )
+    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
 
     act(() =>
       useStore.setState({
@@ -264,10 +338,9 @@ describe('terminal view', () => {
       }),
     )
 
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
-    const authorized = StubSocket.last()
-    act(() => authorized.onopen?.())
-    expect(authorized.frames()[0]).toMatchObject({ write: true })
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 3, write: true })
+    controlAck(true, 3, 2)
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
     view.unmount()
   })
@@ -809,7 +882,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('preserves existing terminal output when Steering is released with resume', async () => {
+  it('preserves existing terminal output when Steering is released', async () => {
     const reset = vi.spyOn(Terminal.prototype, 'reset')
     const write = vi.spyOn(Terminal.prototype, 'write')
     const view = mount()
@@ -826,14 +899,10 @@ describe('terminal view', () => {
     const writeCount = write.mock.calls.length
 
     fireEvent.click(screen.getByText('Steering'))
-    expect(StubSocket.opened).toHaveLength(2)
+    expect(StubSocket.opened).toHaveLength(1)
     const release = StubSocket.last()
-    act(() => {
-      release.onopen?.()
-      release.onmessage?.({
-        data: JSON.stringify({ ok: true, cols: 20, rows: 4, resumed: true, resume_id: 'pty-incarnation-run' }),
-      })
-    })
+    expect(release.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 2)
 
     expect(reset.mock.calls).toHaveLength(resetCount)
     const writesAfterAck = write.mock.calls.slice(writeCount)
@@ -1109,6 +1178,8 @@ describe('the terminal on a phone', () => {
     // of its own - a finished run's replay - is laid out at.
     expect(StubSocket.last().frames()[0]).toEqual({
       follow: true,
+      screen: true,
+      interactive: true,
       cols: 80,
       rows: 24,
       control_session_id: expect.any(String),
@@ -1135,19 +1206,13 @@ describe('the terminal on a phone', () => {
     const view = mount()
     attached({ cols: 132, rows: 43 })
 
+    const socket = StubSocket.last()
     fireEvent.click(screen.getByText('Take control'))
-    attached({ cols: 132, rows: 43 })
-
-    expect(StubSocket.last().frames()[0]).toEqual({
-      write: true,
-      follow: true,
-      resume: true,
-      resume_id: 'pty-incarnation-run',
-      cursor: 0,
-      cols: 80,
-      rows: 24,
-      control_session_id: expect.any(String),
-    })
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(socket.frames()[0]).toMatchObject({ follow: true, cols: 80, rows: 24 })
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
+    expect(screen.getByText('Steering')).toBeDefined()
     view.unmount()
   })
 
@@ -1166,8 +1231,8 @@ describe('the terminal on a phone', () => {
     expect(screen.queryByRole('toolbar', { name: 'Terminal keys' })).toBeNull()
 
     fireEvent.click(screen.getByText('Take control'))
-    attached()
-
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
     await vi.waitFor(() => expect(input()?.readOnly).toBe(false))
     // The keys a soft keyboard has not got arrive with the ability to type.
     expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
@@ -1207,24 +1272,13 @@ describe('the terminal on a phone', () => {
     attached()
 
     fireEvent.click(screen.getByText('Steering'))
+    expect(StubSocket.opened).toHaveLength(1)
     const released = StubSocket.last()
-    act(() => {
-      released.onopen?.()
-      released.onmessage?.({
-        data: JSON.stringify({
-          ok: true,
-          replay: 0,
-          cols: 80,
-          rows: 24,
-          resumed: true,
-          resume_id: 'pty-incarnation-run',
-        }),
-      })
-    })
-    expect(StubSocket.opened).toHaveLength(2)
+    expect(released.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 2)
 
     resize(390)
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const reopened = StubSocket.last()
     act(() => reopened.onopen?.())
     expect(reopened.frames()).toHaveLength(1)
