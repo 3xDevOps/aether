@@ -736,8 +736,8 @@ describe('Clear done', () => {
 
     fireEvent.click(dialog.getByRole('button', { name: 'Archive 2' }))
 
-    // someoneElsesProtected finished later, so it archives first: eligible
-    // runs go newest first, same as the Done column itself.
+    // someoneElsesProtected finished later, so its call is issued first:
+    // eligible runs go newest first, same as the Done column itself.
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 2 runs'))
     expect(api.runArchive).toHaveBeenCalledTimes(2)
     expect(api.runArchive).toHaveBeenNthCalledWith(1, someoneElsesProtected.id, true)
@@ -745,7 +745,7 @@ describe('Clear done', () => {
     expect(api.runArchive).not.toHaveBeenCalledWith(stillOpen.id, true)
   })
 
-  it('archives eligible runs one at a time, newest first, never in parallel', async () => {
+  it('issues every archive at once, newest first', async () => {
     const first = run({
       id: 'run_seq_first',
       status: 'failed',
@@ -777,11 +777,11 @@ describe('Clear done', () => {
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
 
-    await waitFor(() => expect(calls).toEqual([first.id]))
-    expect(calls).not.toContain(second.id)
+    // The second call goes out while the first is still pending.
+    await waitFor(() => expect(calls).toEqual([first.id, second.id]))
+    expect(toast.success).not.toHaveBeenCalled()
 
     resolveFirst?.()
-    await waitFor(() => expect(calls).toEqual([first.id, second.id]))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 2 runs'))
   })
 
@@ -810,22 +810,59 @@ describe('Clear done', () => {
     expect(toast.success).not.toHaveBeenCalled()
   })
 
-  it('treats a not-found failure as success and removes the run locally', async () => {
-    const gone = run({ id: 'run_gone', status: 'merged', finished_at: '2026-08-14T10:10:00Z' })
-    seedAs(alice, [gone])
+  it('names the first failure in Done order even when a later one fails sooner', async () => {
+    const newest = run({ id: 'run_ord_newest', status: 'failed', finished_at: '2026-08-14T10:30:00Z' })
+    const middle = run({ id: 'run_ord_middle', status: 'merged', finished_at: '2026-08-14T10:20:00Z' })
+    const oldest = run({ id: 'run_ord_oldest', status: 'failed', finished_at: '2026-08-14T10:10:00Z' })
+    seedAs(alice, [newest, middle, oldest])
     render(<Board />)
 
-    vi.mocked(api.runArchive).mockRejectedValue(
-      new ApiError(404, 'run.archive: not found', -32000),
-    )
+    let failNewest: (() => void) | undefined
+    vi.mocked(api.runArchive).mockImplementation((id: string) => {
+      if (id === newest.id) {
+        return new Promise((_, reject) => {
+          failNewest = () => reject(new ApiError(500, 'newest failed', -32001))
+        })
+      }
+      if (id === oldest.id) return Promise.reject(new ApiError(500, 'oldest failed', -32001))
+      return Promise.resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
+    })
 
     fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
     fireEvent.click(
-      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 1' }),
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 3' }),
     )
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 1 run'))
+    await waitFor(() => expect(api.runArchive).toHaveBeenCalledTimes(3))
+    expect(toast.error).not.toHaveBeenCalled()
+
+    failNewest?.()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Archived 1, 2 failed: newest failed'),
+    )
+  })
+
+  it('treats a not-found failure as success and removes that run locally', async () => {
+    const kept = run({ id: 'run_kept', status: 'merged', finished_at: '2026-08-14T10:20:00Z' })
+    const gone = run({ id: 'run_gone', status: 'merged', finished_at: '2026-08-14T10:10:00Z' })
+    seedAs(alice, [kept, gone])
+    render(<Board />)
+
+    // Only the older run is gone, so a removal keyed to the wrong settled
+    // result would drop `kept` instead.
+    vi.mocked(api.runArchive).mockImplementation(async (id: string) => {
+      if (id === gone.id) throw new ApiError(404, 'run.archive: not found', -32000)
+      return run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' })
+    })
+
+    fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
+    )
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 2 runs'))
     expect(useStore.getState().runs[gone.id]).toBeUndefined()
+    expect(useStore.getState().runs[kept.id]).toBeDefined()
   })
 
   it('moves focus to the Done heading once a not-found removal leaves nothing archived to fall back on', async () => {
