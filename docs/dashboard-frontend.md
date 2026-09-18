@@ -1200,6 +1200,43 @@ sharing the same server state. Questions and queued steers therefore appear in
 the existing run-level count and **Needs you** grouping instead of creating a
 second dashboard inbox.
 
+### Candidate review in Run evidence
+
+The existing `EvidenceDrawer` is also the candidate review surface; candidate
+state is not a second run board. Its retained packet view keeps the heading
+**Recorded observations, not verification**, and the candidate panel labels raw
+packet snapshots as **Raw packet — observation, not verification**. **Review
+candidates** opens the candidate list for the current workspace, and
+**Prepare candidate** starts a review from ordered retained packets. **Add
+selected packet** adds another exact source; the preparation action remains
+**Prepare candidate**. **Refresh candidates** re-reads the list and
+**Show candidate** loads the selected aggregate.
+
+The review shows the exact ordered inputs, their observation snapshots, target
+and expected revision, candidate revision/state, conflicts and file
+resolutions. **Apply resolutions** submits explicit path edits or deletes and
+continues isolated assembly. Once frozen, the panel shows the exact argv,
+observed image, runtime identity and working directory, bounded resource and
+timeout details, setup/environment provenance, result, bounded output and
+provenance for each verification. **Run verification** starts the server-side
+check;
+**Request delivery** binds the selected verification IDs, target, expected
+revision, and action; **Approve delivery** or **Deny delivery** records the
+human decision; and **Deliver approved** executes the already-approved exact
+request.
+
+Candidate mutations are disabled while the connection is **Offline**,
+**Reconnecting**, or **Connecting**. A return to **Live** refetches candidates
+and the selected review before enabling controls, so stale revisions and
+requests are not reused. The panel preserves the gateway's real error rather
+than manufacturing a client-side result. Candidate review has no separate
+attention board, mission-progress surface, or agent decision path; it remains
+an evidence-linked human review flow.
+
+The wire methods and bounded records are documented in
+[integration.md](integration.md); this guide records only the dashboard
+surface and its reconnect behavior.
+
 A run id none of the four tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
 four copies of a sentence with nothing to press. What it says is what the

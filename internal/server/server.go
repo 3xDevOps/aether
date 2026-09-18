@@ -24,6 +24,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -78,6 +79,10 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// IntegrationAdmission is the server-controlled policy seam for
+	// consequential candidate mutations. It is never populated from a
+	// request field.
+	IntegrationAdmission integration.AdmissionFunc
 	// StandardImage is the server-owned image used for all runs until member
 	// image selection is available. Empty uses DefaultStandardImage.
 	StandardImage string
@@ -368,6 +373,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Bus:      s.bus,
 		Events:   s.log,
 		Runs:     s.sched,
+		Runtime:  s.rt,
 		Git:      s.git,
 		PTY:      s.pty,
 		SSH:      &sshCfg,

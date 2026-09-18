@@ -197,6 +197,45 @@ adoption can move it. Run branches remain publishable to the workspace, and
 `aether pull` remains the safe review path before a human merges locally and
 pushes the reviewed branch to checkout Origin.
 
+## Candidate verification and delivery
+
+Candidate operations use the existing workspace capabilities, not a new
+integration role. Reading a candidate requires the caller's normal view
+authority; preparing, resolving, verifying, requesting delivery, and executing
+delivery use the existing **Push** capability. The service resolves the
+current member, workspace, run ownership, and candidate state itself. It
+rechecks the caller and the approved human approver at the actual delivery,
+so an old page, role change, or stale request cannot turn into authority.
+`integration.decide` is human-only: an agent/run actor cannot approve its own
+delivery, and an optional mission identifier is context rather than a
+permission grant.
+
+Verification runs against a server-owned isolated candidate revision and a
+disposable verification tree; candidate inputs and retained evidence are not
+re-read from a mutable live checkout. The isolation protects the source tree
+and post-execution integrity check, not the selected account's credentials.
+The trusted shared-home rule still applies: `aether account share` gives the
+recipient's runs the owner's home, saved login, signing key, and other files.
+Do not use account sharing to imply a per-candidate credential boundary.
+
+Delivery to a local workspace target is an expected-old atomic ref update.
+Delivery to a mirrored target must use the `proposal` action: it creates a
+public `refs/heads/aether/proposal-<request-id>` ref and a private receipt,
+without pushing the upstream or moving its protected mirror base. The proposal
+is labelled proposed, not landed; a human fetches and pushes it through the
+normal upstream review route. The mirror's read-only deploy key is only for
+server fetches and is never reused as a delivery credential.
+
+Nothing here blocks native credential use outside Aether. An agent with a
+member home can still run its own `git push`, `gh` operation, or pull-request
+flow under that member's credentials, subject to the upstream's permissions.
+Candidate delivery's Push checks govern only the Aether-managed operation.
+
+See [teams.md](teams.md#candidate-integration) for the operator flow,
+[integration.md](integration.md) for the exact wire contract, and
+[failure-handling.md](failure-handling.md#candidate-assembly-verification-and-delivery)
+for restart and cleanup behavior.
+
 ### Hostile agents
 
 If you run agents you do not trust, put the `--data-dir` on a filesystem

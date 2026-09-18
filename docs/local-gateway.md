@@ -299,6 +299,45 @@ the file reads and the member and workspace writes below. `aether gui`
 proxies these methods over SSH; the server gateway dispatches them in-process.
 Both transports therefore expose the same API shape and authorization checks.
 
+### Candidate integration methods
+
+The authenticated gateway exposes the candidate integration service through
+the same generic control-channel route. `aether gui` sends these calls over
+its authenticated SSH backend; `aether-server --web-port` dispatches them
+in-process for the member identified by Tailscale WhoIs. The method names,
+parameter fields, aggregate states, and result objects are documented in
+[integration.md](integration.md).
+
+| Method | Request body | Success result |
+| --- | --- | --- |
+| `integration.prepare` | `IntegrationPrepareParams` | `{ "candidate": Candidate }` |
+| `integration.show` | `IntegrationShowParams` | `{ "candidate": Candidate }` |
+| `integration.patch` | `IntegrationShowParams` | `{ "patch": string, "truncated": boolean }` |
+| `integration.list` | `IntegrationListParams` | `{ "candidates": CandidateSummary[] }` |
+| `integration.resolve` | `IntegrationResolveParams` | `{ "candidate": Candidate }` |
+| `integration.verify` | `IntegrationVerifyParams` | `{ "candidate": Candidate }` |
+| `integration.request_delivery` | `IntegrationRequestDeliveryParams` | `{ "candidate": Candidate }` |
+| `integration.decide` | `IntegrationDecideParams` | `{ "candidate": Candidate }` |
+| `integration.deliver` | `IntegrationDeliverParams` | `{ "candidate": Candidate }` |
+| `integration.delete` | `IntegrationDeleteParams` | `{}` |
+
+For example, the dashboard sends the params object directly (not a JSON-RPC
+envelope):
+
+```http
+POST /api/v1/integration.show
+Content-Type: application/json
+Authorization: Bearer <local-gateway-token>
+
+{"workspace_id":"ws_123","candidate_id":"cand_456"}
+```
+
+The response is `200` with the result object as the whole body. Every
+integration mutation is authenticated and re-authorized at the service
+boundary; a client cannot supply an actor, run identity, mission authority,
+or push grant. A transport failure is handled by the existing local-gateway
+redial/retry policy, while a service denial, conflict, stale revision, or
+unavailable owned source remains the server's protocol error.
 
 | Method | Params | Result |
 | --- | --- | --- |
