@@ -172,32 +172,35 @@ export function clearDonePlan(
 const codeRunNotFound = -32000
 
 /**
- * Archives every eligible run one at a time: the server has a single SQLite
- * writer. Each call's own `run.archived` event moves the run in every
+ * Archives every eligible run at once; the server serializes the writes
+ * itself. Each call's own `run.archived` event moves the run in every
  * connected dashboard, this one included, so the count below comes from the
- * resolved calls, not from re-applying what the RPC returned.
+ * settled calls, not from re-applying what the RPC returned.
  */
 export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
 ): Promise<void> {
+  const results = await Promise.allSettled(
+    eligible.map((run) => deps.api.runArchive(run.id, true)),
+  )
   let archived = 0
   let failed = 0
   let firstError: string | undefined
-  for (const run of eligible) {
-    try {
-      await deps.api.runArchive(run.id, true)
+  results.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
       archived++
-    } catch (err) {
-      if (err instanceof ApiError && err.code === codeRunNotFound) {
-        deps.removeRun(run.id)
-        archived++
-        continue
-      }
-      failed++
-      firstError ??= message(err)
+      return
     }
-  }
+    const err: unknown = result.reason
+    if (err instanceof ApiError && err.code === codeRunNotFound) {
+      deps.removeRun(eligible[i].id)
+      archived++
+      return
+    }
+    failed++
+    firstError ??= message(err)
+  })
   if (failed > 0) {
     toast.error(`Archived ${archived}, ${failed} failed: ${firstError}`)
   } else {
