@@ -31,4 +31,7 @@ type Services struct {
 	Rooms RoomService
 	// Evidence is the durable evidence packet service.
 	Evidence EvidenceService
+	// Integration exposes authenticated candidate preparation, review,
+	// verification, and delivery through the generic control gateway.
+	Integration IntegrationService
 }

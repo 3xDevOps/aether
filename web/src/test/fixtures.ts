@@ -15,6 +15,7 @@ import type {
   UpdateStatus,
   Workspace,
 } from '@/lib/types'
+import type { Candidate } from '@/lib/integration-types'
 export const alice: Member = {
   id: 'mem_alice',
   display_name: 'Alice',
@@ -41,6 +42,22 @@ export const workspace: Workspace = {
   name: 'main-repo',
   base_branch: 'main',
   created_at: '2026-08-14T08:00:00Z',
+}
+
+export const integrationCandidate: Candidate = {
+  candidate_id: 'candidate_fixture',
+  workspace_id: workspace.id,
+  submissions: [],
+  inputs: [],
+  target_ref: 'refs/heads/main',
+  expected_target_revision: 'fixture-target-revision',
+  state: 'preparing',
+  applied_inputs: 0,
+  verifications: [],
+  mutations: [],
+  created_at: '2026-08-14T10:05:00Z',
+  expires_at: '2026-09-14T10:05:00Z',
+  version: 1,
 }
 
 export const otherWorkspace: Workspace = {
@@ -253,6 +270,16 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runEvidenceGet: vi.fn(async () => ({ packet: evidencePacket() })),
     runEvidencePatch: vi.fn(async () => ({ packet: evidencePacket(), patch: '', truncated: false })),
     runEvidenceTranscript: vi.fn(async () => ({ packet: evidencePacket(), data_base64: '', truncated: false })),
+    integrationPrepare: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationShow: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationList: vi.fn(async () => ({ candidates: [] })),
+    integrationResolve: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationVerify: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationRequestDelivery: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationDecide: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationDeliver: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationPatch: vi.fn(async () => ({ patch: '', truncated: false })),
+    integrationDelete: vi.fn(async () => ({})),
     approvalList: vi.fn(async () => []),
     approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),
