@@ -172,6 +172,11 @@ func integratorCapabilities() []string {
 		protocol.MethodWorkerInspect,
 		protocol.MethodWorkerCancel,
 		protocol.MethodWorkerRetry,
+		protocol.MethodIntegrationPrepare,
+		protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify,
+		protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver,
 	}
 }
 

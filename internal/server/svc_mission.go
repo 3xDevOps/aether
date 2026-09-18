@@ -34,6 +34,24 @@ func init() {
 			AuthorizationMu: d.SSH.AuthorizationMu, Cost: d.SSH.Services.Costs,
 			Evidence: d.Evidence, ScopeSnapshot: lazyMissionScope{ssh: d.SSH}.Snapshot,
 			Bus: d.Bus,
+			Integration: func() (sshd.IntegrationService, error) {
+				if d.SSH == nil {
+					return nil, errors.New("mission: SSH config is unavailable")
+				}
+				base := d.SSH.Services.Integration
+				if base == nil {
+					return nil, errors.New("mission: integration service is unavailable")
+				}
+				// A mission adapter is installed before the integration
+				// service when registration order is reversed. Its owner
+				// stores the real base once the integration builder runs.
+				if _, isAdapter := base.(interface {
+					SetIntegrationService(sshd.IntegrationService)
+				}); isAdapter {
+					return nil, errors.New("mission: integration service is not bound")
+				}
+				return base, nil
+			},
 			MissionControl: func() (sshd.MissionControl, error) {
 				if d.SSH == nil || d.SSH.Services.MissionControl == nil {
 					return nil, errors.New("mission: mission control is unavailable")
@@ -59,11 +77,20 @@ func init() {
 				}, nil
 			}
 		}
+		baseIntegration := d.SSH.Services.Integration
 		svc, err := mission.New(cfg)
 		if err != nil {
 			return nil, err
 		}
+		if baseIntegration != nil {
+			if _, isAdapter := baseIntegration.(interface {
+				SetIntegrationService(sshd.IntegrationService)
+			}); !isAdapter {
+				svc.SetIntegrationService(baseIntegration)
+			}
+		}
 		d.SSH.Services.Missions = svc
+		d.SSH.Services.Integration = svc.IntegrationAdapter()
 		return svc, nil
 	})
 }

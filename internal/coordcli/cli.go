@@ -120,6 +120,11 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = report(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "task", "worker":
 		result, err = missionCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In, cfg.ErrOut)
+	case "integration":
+		if len(args) < 2 {
+			return fail(cfg.Out, protocol.CodeInvalidParams, "integration requires a subcommand")
+		}
+		result, err = integrationCommand(ctx, cfg.Socket, args[1], args[2:], cfg.In)
 	default:
 		return fail(cfg.Out, protocol.CodeMethodNotFound, "unknown command: "+args[0])
 	}
@@ -143,6 +148,7 @@ Commands:
   reply     answer a durable question
   task      inspect and mutate mission task revisions
   worker    inspect and manage mission worker attempts
+  integration run the five integrator candidate operations
   report    submit a durable outcome with evidence references
 
 Run "aether-internal <command> --help" for command options.
@@ -188,18 +194,28 @@ are explicit identities for retry-safe starts and retries.
 
 Submit one durable outcome. A summary file of "-" reads standard input.
 `,
-	"task show":              "usage: aether-internal task show --task-id <id>\n",
-	"task list":              "usage: aether-internal task list --mission-id <id>\n",
-	"task propose":           "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
-	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
-	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
-	"task abandon":           "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
-	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
-	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",
-	"worker cancel":          "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"worker retry":           "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
+	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
+
+Agent integration is limited to these five assignment-scoped operations.
+The mounted socket supplies caller identity; parameters are bounded JSON.
+`,
+	"integration prepare":          "usage: aether-internal integration prepare --params-file FILE|- [--json]\n",
+	"integration show":             "usage: aether-internal integration show --params-file FILE|- [--json]\n",
+	"integration verify":           "usage: aether-internal integration verify --params-file FILE|- [--json]\n",
+	"integration request-delivery": "usage: aether-internal integration request-delivery --params-file FILE|- [--json]\n",
+	"integration deliver":          "usage: aether-internal integration deliver --params-file FILE|- [--json]\n",
+	"task show":                    "usage: aether-internal task show --task-id <id>\n",
+	"task list":                    "usage: aether-internal task list --mission-id <id>\n",
+	"task propose":                 "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task revise":                  "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task accept":                  "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"task accept-submission":       "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
+	"task abandon":                 "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker start":                 "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
+	"worker list":                  "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
+	"worker inspect":               "usage: aether-internal worker inspect --attempt-id <id>\n",
+	"worker cancel":                "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker retry":                 "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
 }
 
 func writeHelp(out io.Writer, command string) (int, error) {
@@ -266,6 +282,18 @@ const skillWorkflow = `Workflow:
 4. Keep evidence for the work you perform and report success, failure, or blocked.
 5. Read the inbox once more before reporting, then take no new work after submission.
 `
+const integratorWorkflow = `Integrator candidate flow:
+  Prepare: aether-internal integration prepare --params-file /run/aether/prepare.json --json
+  Review:  aether-internal integration show --params-file /run/aether/show.json --json
+  Verify:  aether-internal integration verify --params-file /run/aether/verify.json --json
+  Request: aether-internal integration request-delivery --params-file /run/aether/request-delivery.json --json
+The request-delivery result is a human-decision boundary. Do not approve a
+delivery from the agent socket; a human reviews and decides through the
+authenticated review surface. Only after approval:
+  Deliver: aether-internal integration deliver --params-file /run/aether/deliver.json --json
+Recovery: if a call reports unavailable after it may have committed, retry the
+same params file with the same idempotency_key; never invent a replacement key.
+`
 
 func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
 	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\n", SchemaVersion); err != nil {
@@ -286,6 +314,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 		if _, err := fmt.Fprintf(out, "Run: %s\nAssignment: %s\n", boundedSkillField(status.RunID), assignment); err != nil {
 			return ExitFailure, fmt.Errorf("write skill assignment: %w", err)
 		}
+		integratorRole := false
 		if assignment := status.Assignment; assignment != nil {
 			if _, err := fmt.Fprintf(out, "Mission: %s\nRole: %s\nTask ID: %s\nTask revision: %d\nAttempt ID: %s\nIntegrator run: %s\nIntegrator generation: %d\n",
 				boundedSkillField(assignment.MissionID),
@@ -299,6 +328,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 			}
 			switch assignment.Role {
 			case "integrator":
+				integratorRole = true
 				if len(assignment.ExecutionChoices) > 0 {
 					if _, err := fmt.Fprintf(out, "Approved execution choices: %s\n", boundedSkillExecutionChoices(assignment.ExecutionChoices)); err != nil {
 						return ExitFailure, fmt.Errorf("write skill execution choices: %w", err)
@@ -313,21 +343,26 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 					assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
 					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
 				}
+				if _, err := io.WriteString(out, integratorWorkflow); err != nil {
+					return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
+				}
 			case "worker":
 				if _, err := io.WriteString(out, "Worker scope: read and propose changes only for the assigned task; do not spawn workers.\n"); err != nil {
 					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
 				}
 			}
-			if len(assignment.Capabilities) > 0 {
-				capabilities := boundedSkillCapabilities(assignment.Capabilities)
-				if _, err := fmt.Fprintf(out, "Assignment capabilities: %s\n", capabilities); err != nil {
+			capabilities := skillCapabilitiesForRole(assignment.Capabilities, integratorRole)
+			if len(capabilities) > 0 {
+				bounded := boundedSkillCapabilities(capabilities)
+				if _, err := fmt.Fprintf(out, "Assignment capabilities: %s\n", bounded); err != nil {
 					return ExitFailure, fmt.Errorf("write skill assignment capabilities: %w", err)
 				}
 			}
 		}
-		if len(status.Capabilities) > 0 {
-			capabilities := boundedSkillCapabilities(status.Capabilities)
-			if _, err := fmt.Fprintf(out, "Capabilities: %s\n", capabilities); err != nil {
+		capabilities := skillCapabilitiesForRole(status.Capabilities, integratorRole)
+		if len(capabilities) > 0 {
+			bounded := boundedSkillCapabilities(capabilities)
+			if _, err := fmt.Fprintf(out, "Capabilities: %s\n", bounded); err != nil {
 				return ExitFailure, fmt.Errorf("write skill capabilities: %w", err)
 			}
 		}
@@ -343,6 +378,31 @@ func boundedSkillField(value string) string {
 		return value
 	}
 	return value[:256] + "…"
+}
+func skillCapabilitiesForRole(values []string, integrator bool) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.HasPrefix(value, "integration.") {
+			if !integrator || !skillIntegrationCapability(value) {
+				continue
+			}
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func skillIntegrationCapability(value string) bool {
+	switch value {
+	case protocol.MethodIntegrationPrepare,
+		protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify,
+		protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver:
+		return true
+	default:
+		return false
+	}
 }
 
 func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) string {

@@ -5,13 +5,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
-import type { EvidencePacket, Run } from '@/lib/types'
+import type { EvidencePacket, MissionSubmission, Run } from '@/lib/types'
 import type {
   Candidate,
   CandidateResolution,
   CandidateSummary,
   DeliveryAction,
   IntegrationPrepareParams,
+  SubmissionRef,
   Verification,
 } from '@/lib/integration-types'
 import { useStore } from '@/store'
@@ -71,20 +72,55 @@ function packetSelectable(packet: EvidencePacket): boolean {
   return Boolean(git?.available && !git.truncated)
 }
 
+function acceptedMissionSubmissions(submissions: MissionSubmission[]): MissionSubmission[] {
+  return submissions
+    .filter((submission) => submission.state === 'accepted')
+    .sort((left, right) => {
+      const leftVersion = left.acceptance?.accepted_set_version ?? Number.MAX_SAFE_INTEGER
+      const rightVersion = right.acceptance?.accepted_set_version ?? Number.MAX_SAFE_INTEGER
+      return leftVersion - rightVersion || left.id.localeCompare(right.id)
+    })
+}
+
+function submissionRef(submission: MissionSubmission): SubmissionRef {
+  return {
+    workspace_id: submission.ref.workspace_id,
+    run_id: submission.ref.run_id,
+    evidence_ref: submission.ref.evidence_ref,
+    retained_revision: submission.ref.retained_revision,
+  }
+}
+
+function missionAcceptedSetLabel(submissions: MissionSubmission[]): string {
+  const latest = submissions.reduce((value, submission) => Math.max(value, submission.acceptance?.accepted_set_version ?? 0), 0)
+  return latest > 0 ? `Accepted set ${latest}` : 'Accepted set unavailable'
+}
 function targetRevision(runs: Run[], currentRunID: string): string {
   return runs.find((run) => run.id === currentRunID && run.base_commit)?.base_commit
     || runs.find((run) => run.base_commit)?.base_commit
     || ''
 }
-
 export interface CandidateReviewProps {
   workspaceID: string
   currentRunID: string
   client?: Api
+  /** Mission context reuses this review surface with the current accepted set. */
+  missionID?: string
+  missionSubmissions?: MissionSubmission[]
+  initialExpanded?: boolean
 }
 
-export function CandidateReview({ workspaceID, currentRunID, client = api }: CandidateReviewProps) {
-  const [expanded, setExpanded] = useState(false)
+export function CandidateReview({
+  workspaceID,
+  currentRunID,
+  client = api,
+  missionID,
+  missionSubmissions = [],
+  initialExpanded = false,
+}: CandidateReviewProps) {
+  const missionMode = Boolean(missionID)
+  const [expanded, setExpanded] = useState(initialExpanded)
+
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine)
   const gatewayConnection = useStore((state) => state.connection)
   const [authorityReady, setAuthorityReady] = useState(false)
@@ -119,6 +155,21 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
   const selectedPackets = useMemo(
     () => selectedIDs.map((id) => packets.find((packet) => packet.id === id)).filter((packet): packet is EvidencePacket => Boolean(packet)),
     [packets, selectedIDs],
+  )
+  const orderedMissionSubmissions = useMemo(
+    () => acceptedMissionSubmissions(missionSubmissions),
+    [missionSubmissions],
+  )
+  const selectedSubmissionRefs = useMemo(
+    () => missionMode
+      ? orderedMissionSubmissions.map(submissionRef)
+      : selectedPackets.map((packet) => ({
+        workspace_id: workspaceID,
+        run_id: packet.run_id,
+        evidence_ref: packet.id,
+        retained_revision: packet.retained_revision || '',
+      })),
+    [missionMode, orderedMissionSubmissions, selectedPackets, workspaceID],
   )
   const request = candidate?.delivery_request
   const frozen = candidate?.state === 'frozen'
@@ -273,15 +324,12 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
   }
 
   const prepare = async () => {
-    if (!canMutate || selectedPackets.length < 2 || !targetRef || !expectedRevision) return
+    const minimumInputs = missionMode ? 1 : 2
+    if (!canMutate || selectedSubmissionRefs.length < minimumInputs || !targetRef || !expectedRevision) return
     const params: IntegrationPrepareParams = {
       workspace_id: workspaceID,
-      submissions: selectedPackets.map((packet) => ({
-        workspace_id: workspaceID,
-        run_id: packet.run_id,
-        evidence_ref: packet.id,
-        retained_revision: packet.retained_revision || '',
-      })),
+      ...(missionID ? { mission_id: missionID } : {}),
+      submissions: selectedSubmissionRefs,
       target_ref: targetRef,
       expected_target_revision: expectedRevision,
       idempotency_key: '',
@@ -512,42 +560,65 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
         <div id="candidate-review-region" className="mt-2 space-y-3" role="region" aria-label="Candidate review">
           {(!gatewayAvailable || !authorityReady) && <p role="status" className="border border-state-attention/40 bg-state-attention/10 p-2 text-[11px] text-state-attention">{!gatewayAvailable ? 'Offline or reconnecting.' : 'Loading fresh workspace authority.'} Mutation controls remain disabled until the gateway reconnects and fresh authority is loaded.</p>}
           {error && <div role="alert" className="flex items-start justify-between gap-2 border border-state-failed/30 bg-state-failed/10 p-2 text-[11px] text-state-failed"><span>{error}</span>{candidate && <Button type="button" size="sm" variant="ghost" disabled={loading || !gatewayAvailable} onClick={() => void showCandidate(candidate.candidate_id)}>Reload candidate</Button>}</div>}
-          <div className="space-y-2">
-            <h3 className="text-[12px] font-semibold">Select retained packets</h3>
-            <p className="text-[11px] text-muted-foreground">Select at least two precise packets. Retained revisions are immutable; unavailable sources cannot be prepared.</p>
-            {loading && !packets.length && <p className="text-[11px] text-muted-foreground">Loading workspace evidence…</p>}
-            <div className="divide-y divide-border border border-border">
-              {packets.map((packet) => {
-                const selectable = packetSelectable(packet)
-                return (
-                  <label key={packet.id} className={`block p-2 text-[11px] ${selectable ? 'cursor-pointer' : 'opacity-60'}`}>
-                    <span className="flex items-start gap-2">
-                      <input type="checkbox" aria-label={`Select packet ${packet.id}`} checked={selectedIDs.includes(packet.id)} disabled={!selectable} onChange={() => selectPacket(packet)} />
+          {missionMode ? (
+            <div className="space-y-2" data-testid="mission-candidate-inputs">
+              <h3 className="text-[12px] font-semibold">Mission accepted inputs</h3>
+              <p className="text-[11px] text-muted-foreground">The current accepted set is sent exactly as recorded by the mission. Order follows acceptance version; refresh and retry if the set changed.</p>
+              <p className="text-[11px] text-muted-foreground">{missionAcceptedSetLabel(orderedMissionSubmissions)} · {orderedMissionSubmissions.length} input{orderedMissionSubmissions.length === 1 ? '' : 's'}</p>
+              {orderedMissionSubmissions.length === 0 ? (
+                <p className="border border-state-attention/40 bg-state-attention/10 p-2 text-[11px] text-state-attention">No current accepted submissions are available for preparation.</p>
+              ) : (
+                <ol className="space-y-1 border border-border p-2 text-[11px]" aria-label="Ordered mission candidate inputs">
+                  {orderedMissionSubmissions.map((submission, index) => (
+                    <li key={submission.id} className="flex items-center gap-1">
+                      <span className="w-4 text-muted-foreground">{index + 1}.</span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex justify-between gap-2"><strong className="truncate">{packet.trigger} · {packet.id}</strong><time className="shrink-0 text-muted-foreground">{dateLabel(packet.captured_at)}</time></span>
-                        <span className="block truncate text-muted-foreground">{packet.objective || 'Objective not recorded'}</span>
-                        <span className="mt-1 block text-muted-foreground">Retained revision: <code>{packet.retained_revision || 'Unavailable'}</code></span>
-                        <span className="block text-muted-foreground">Source status: {sourceLabel(packet)}</span>
-                        <span className="block text-muted-foreground">Packet availability: {(packet as EvidencePacket & { availability?: string }).availability || 'legacy packet (source status above)'}</span>
-                        <span className="block text-muted-foreground">Claimed: {packet.provenance || 'Not recorded'} · Observed: {packet.retained_revision ? `Git revision ${packet.retained_revision}` : 'Unavailable'}</span>
+                        <code className="block truncate">{submission.ref.evidence_ref}</code>
+                        <span className="block truncate text-muted-foreground">run {submission.ref.run_id} · retained <code>{submission.ref.retained_revision}</code></span>
                       </span>
-                    </span>
-                  </label>
-                )
-              })}
+                      {submission.acceptance?.accepted_set_version != null && <span className="shrink-0 text-muted-foreground">#{submission.acceptance.accepted_set_version}</span>}
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
-            {selectedPackets.length > 0 && <ol className="space-y-1 border border-border p-2 text-[11px]" aria-label="Ordered candidate inputs">
-              {selectedPackets.map((packet, index) => <li key={packet.id} className="flex items-center gap-1"><span className="w-4 text-muted-foreground">{index + 1}.</span><code className="min-w-0 flex-1 truncate">{packet.id}</code><Button type="button" size="sm" variant="ghost" aria-label={`Move packet ${packet.id} up`} disabled={index === 0} onClick={() => reorder(index, -1)}>↑</Button><Button type="button" size="sm" variant="ghost" aria-label={`Move packet ${packet.id} down`} disabled={index === selectedPackets.length - 1} onClick={() => reorder(index, 1)}>↓</Button><Button type="button" size="sm" variant="ghost" aria-label={`Remove packet ${packet.id}`} onClick={() => selectPacket(packet)}>Remove</Button></li>)}
-            </ol>}
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <h3 className="text-[12px] font-semibold">Select retained packets</h3>
+              <p className="text-[11px] text-muted-foreground">Select at least two precise packets. Retained revisions are immutable; unavailable sources cannot be prepared.</p>
+              {loading && !packets.length && <p className="text-[11px] text-muted-foreground">Loading workspace evidence…</p>}
+              <div className="divide-y divide-border border border-border">
+                {packets.map((packet) => {
+                  const selectable = packetSelectable(packet)
+                  return (
+                    <label key={packet.id} className={`block p-2 text-[11px] ${selectable ? 'cursor-pointer' : 'opacity-60'}`}>
+                      <span className="flex items-start gap-2">
+                        <input type="checkbox" aria-label={`Select packet ${packet.id}`} checked={selectedIDs.includes(packet.id)} disabled={!selectable} onChange={() => selectPacket(packet)} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex justify-between gap-2"><strong className="truncate">{packet.trigger} · {packet.id}</strong><time className="shrink-0 text-muted-foreground">{dateLabel(packet.captured_at)}</time></span>
+                          <span className="block truncate text-muted-foreground">{packet.objective || 'Objective not recorded'}</span>
+                          <span className="mt-1 block text-muted-foreground">Retained revision: <code>{packet.retained_revision || 'Unavailable'}</code></span>
+                          <span className="block text-muted-foreground">Source status: {sourceLabel(packet)}</span>
+                          <span className="block text-muted-foreground">Packet availability: {(packet as EvidencePacket & { availability?: string }).availability || 'legacy packet (source status above)'}</span>
+                          <span className="block text-muted-foreground">Claimed: {packet.provenance || 'Not recorded'} · Observed: {packet.retained_revision ? `Git revision ${packet.retained_revision}` : 'Unavailable'}</span>
+                        </span>
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+              {selectedPackets.length > 0 && <ol className="space-y-1 border border-border p-2 text-[11px]" aria-label="Ordered candidate inputs">
+                {selectedPackets.map((packet, index) => <li key={packet.id} className="flex items-center gap-1"><span className="w-4 text-muted-foreground">{index + 1}.</span><code className="min-w-0 flex-1 truncate">{packet.id}</code><Button type="button" size="sm" variant="ghost" aria-label={`Move packet ${packet.id} up`} disabled={index === 0} onClick={() => reorder(index, -1)}>↑</Button><Button type="button" size="sm" variant="ghost" aria-label={`Move packet ${packet.id} down`} disabled={index === selectedPackets.length - 1} onClick={() => reorder(index, 1)}>↓</Button><Button type="button" size="sm" variant="ghost" aria-label={`Remove packet ${packet.id}`} onClick={() => selectPacket(packet)}>Remove</Button></li>)}
+              </ol>}
+            </div>
+          )}
 
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1"><Label htmlFor="candidate-target-ref">Target ref</Label><Input id="candidate-target-ref" value={targetRef} onChange={(event) => setTargetRef(event.target.value)} placeholder="refs/heads/main" disabled={Boolean(candidate)} /></div>
             <div className="space-y-1"><Label htmlFor="candidate-target-revision">Expected target revision</Label><Input id="candidate-target-revision" value={expectedRevision} onChange={(event) => setExpectedRevision(event.target.value)} placeholder="Authoritative workspace commit" disabled={Boolean(candidate)} /><p className="text-[10px] text-muted-foreground">Read from the workspace run's captured base commit; never guessed.</p></div>
           </div>
           {summaries.length > 0 && <div className="space-y-1"><h3 className="text-[12px] font-semibold">Existing candidates</h3><div className="divide-y divide-border border border-border">{summaries.map((item) => <div key={item.candidate_id} className="flex items-center gap-2 p-2 text-[11px]"><span className="min-w-0 flex-1"><code className="block truncate">{item.candidate_id}</code><span className="text-muted-foreground">{item.state} · {item.candidate_revision || 'No combined revision'}</span></span><Button type="button" size="sm" variant="outline" disabled={loading || Boolean(busy) || !gatewayAvailable} onClick={() => void showCandidate(item.candidate_id)}>Show full</Button></div>)}</div></div>}
-          <Button type="button" size="sm" disabled={!canMutate || selectedPackets.length < 2 || !targetRef || !expectedRevision || Boolean(candidate)} onClick={() => void prepare()}>Prepare candidate</Button>
-
+          <Button type="button" size="sm" disabled={!canMutate || selectedSubmissionRefs.length < (missionMode ? 1 : 2) || !targetRef || !expectedRevision || Boolean(candidate)} onClick={() => void prepare()}>Prepare candidate</Button>
           {candidate && <CandidateDetails
             candidate={candidate}
             patch={patch}
@@ -610,6 +681,7 @@ function CandidateDetails(props: CandidateDetailsProps) {
   return (
     <div className="space-y-3 border-t border-border pt-3">
       <div className="flex items-start justify-between gap-2"><div><h3 className="text-[12px] font-semibold">Candidate details</h3><p className="text-[11px] text-muted-foreground">State: <strong>{candidate.state}</strong> · Applied inputs: {candidate.applied_inputs}/{candidate.inputs.length}</p></div><code className="max-w-[55%] truncate text-[11px]">{candidate.candidate_revision || 'No combined revision'}</code></div>
+      {candidate.mission_id && <p className="text-[11px] text-muted-foreground">Mission <code>{candidate.mission_id}</code>{candidate.mission_accepted_set_version != null && <> · frozen accepted set <strong>{candidate.mission_accepted_set_version}</strong></>}</p>}
       {candidate.error && <p role="alert" className="text-[11px] text-state-failed">Blocked: {candidate.error}</p>}
       <dl className="grid gap-1 text-[11px] text-muted-foreground sm:grid-cols-2"><div><dt className="inline font-medium">Target ref: </dt><dd className="inline break-all">{candidate.target_ref}</dd></div><div><dt className="inline font-medium">Expected target revision: </dt><dd className="inline break-all">{candidate.expected_target_revision}</dd></div></dl>
       <div><h4 className="text-[11px] font-semibold">Ordered inputs</h4><ol className="mt-1 space-y-1 text-[11px] text-muted-foreground">{candidate.inputs.map((input, index) => <li key={`${input.submission.evidence_ref}-${index}`}>{index + 1}. <code>{input.submission.evidence_ref}</code> · retained <code>{input.submission.retained_revision}</code> · base <code>{input.base_revision}</code></li>)}</ol></div>

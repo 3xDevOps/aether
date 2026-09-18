@@ -204,6 +204,8 @@ export interface MissionSubmissionRef {
 
 export interface MissionSubmissionAcceptance {
   scope_disposition?: string
+  /** Monotonic position in the mission's accepted set. */
+  accepted_set_version?: number
 }
 
 export interface MissionSubmission {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -99,6 +100,212 @@ func (s *Scheduler) coordinationSeam() *coordination {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.coordination
+}
+
+const verificationBridgeRefDirName = "verification-bridges"
+
+type verificationBridgeRef struct {
+	CreationKey  string `json:"creation_key"`
+	BridgeDigest string `json:"bridge_digest"`
+	BridgePath   string `json:"bridge_path"`
+}
+
+func (s *Scheduler) verificationBridgeRefDir() string {
+	return filepath.Join(s.cfg.StateDir, verificationBridgeRefDirName)
+}
+
+func verificationBridgeRefName(creationKey string) string {
+	sum := sha256.Sum256([]byte(creationKey))
+	return "aether-verification-" + hex.EncodeToString(sum[:]) + ".json"
+}
+
+func (s *Scheduler) verificationBridgeRefPath(creationKey string) string {
+	return filepath.Join(s.verificationBridgeRefDir(), verificationBridgeRefName(creationKey))
+}
+
+func validateVerificationBridgeRef(ref verificationBridgeRef) error {
+	if ref.CreationKey == "" || ref.BridgeDigest == "" || ref.BridgePath == "" {
+		return errors.New("scheduler: incomplete verification bridge reference")
+	}
+	if len(ref.BridgeDigest) != sha256.Size*2 {
+		return errors.New("scheduler: invalid verification bridge digest")
+	}
+	if _, err := hex.DecodeString(ref.BridgeDigest); err != nil {
+		return fmt.Errorf("scheduler: invalid verification bridge digest: %w", err)
+	}
+	return nil
+}
+
+// writeVerificationBridgeRef durably records the staged CLI before a caller
+// is allowed to create the runtime. The creation key is hashed into the file
+// name so authenticated-but-opaque keys can never escape StateDir.
+func (s *Scheduler) writeVerificationBridgeRef(ref verificationBridgeRef) error {
+	if err := validateVerificationBridgeRef(ref); err != nil {
+		return err
+	}
+	dir := s.verificationBridgeRefDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("scheduler: create verification bridge ref dir: %w", err)
+	}
+	data, err := json.Marshal(ref)
+	if err != nil {
+		return fmt.Errorf("scheduler: encode verification bridge ref: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".aether-verification-*")
+	if err != nil {
+		return fmt.Errorf("scheduler: write verification bridge ref: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("scheduler: write verification bridge ref: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("scheduler: sync verification bridge ref: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("scheduler: close verification bridge ref: %w", err)
+	}
+	if err := os.Rename(tmpName, s.verificationBridgeRefPath(ref.CreationKey)); err != nil {
+		return fmt.Errorf("scheduler: install verification bridge ref: %w", err)
+	}
+	cleanup = false
+	if err := fsyncDir(dir); err != nil {
+		return err
+	}
+	if err := fsyncDir(s.cfg.StateDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Scheduler) readVerificationBridgeRef(creationKey string) (verificationBridgeRef, error) {
+	data, err := os.ReadFile(s.verificationBridgeRefPath(creationKey))
+	if err != nil {
+		return verificationBridgeRef{}, err
+	}
+	var ref verificationBridgeRef
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return verificationBridgeRef{}, fmt.Errorf("scheduler: decode verification bridge ref: %w", err)
+	}
+	if ref.CreationKey != creationKey {
+		return verificationBridgeRef{}, errors.New("scheduler: verification bridge ref creation key mismatch")
+	}
+	if err := validateVerificationBridgeRef(ref); err != nil {
+		return verificationBridgeRef{}, err
+	}
+	return ref, nil
+}
+
+// PrepareVerificationRuntime adds only the version-matched, read-only CLI
+// mount. It deliberately does not provision a run socket or lifecycle files.
+// The durable reference is installed while staging is serialized with the
+// collector, before the caller can invoke Runtime.Create.
+func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtime.Spec) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if spec == nil {
+		return errors.New("scheduler: verification runtime spec is nil")
+	}
+	if spec.CreationKey == "" {
+		return errors.New("scheduler: verification runtime creation key is required")
+	}
+	c := s.coordinationSeam()
+	if c == nil {
+		return errors.New("scheduler: verification coordination is unavailable")
+	}
+	c.stageMu.Lock()
+	defer c.stageMu.Unlock()
+	digest, bin, err := c.stageLocked()
+	if err != nil {
+		return fmt.Errorf("stage verification coordination CLI: %w", err)
+	}
+	for _, mount := range spec.Mounts {
+		switch mount.ContainerPath {
+		case coordtransport.CLIPath, coordtransport.BinaryPath, coordtransport.MountDir:
+			return fmt.Errorf("scheduler: verification spec already uses reserved coordination mount %q", mount.ContainerPath)
+		}
+	}
+	mounts := append([]runtime.Mount(nil), spec.Mounts...)
+	mounts = append(mounts, runtime.Mount{
+		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
+	})
+	if err := checkCoordinationMounts(mounts[len(mounts)-1:]); err != nil {
+		return err
+	}
+	env := maps.Clone(spec.Env)
+	if env == nil {
+		env = make(map[string]string)
+	}
+	ensureCoordinationCLIPath(env)
+	if err := s.writeVerificationBridgeRef(verificationBridgeRef{
+		CreationKey: spec.CreationKey, BridgeDigest: digest,
+		BridgePath: mounts[len(mounts)-1].HostPath,
+	}); err != nil {
+		return err
+	}
+	spec.Mounts = mounts
+	spec.Env = env
+	return nil
+}
+
+// ReleaseVerificationRuntime clears the durable staged-CLI reference. The
+// integration engine calls this only after it has proved the runtime absent;
+// this method intentionally performs no runtime lookup or destruction.
+func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if creationKey == "" {
+		return errors.New("scheduler: verification runtime creation key is required")
+	}
+	c := s.coordinationSeam()
+	locked := c != nil
+	if locked {
+		c.stageMu.Lock()
+		defer func() {
+			if locked {
+				c.stageMu.Unlock()
+			}
+		}()
+	}
+	if _, err := s.readVerificationBridgeRef(creationKey); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := os.Remove(s.verificationBridgeRefPath(creationKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("scheduler: remove verification bridge ref: %w", err)
+	}
+	if err := fsyncDir(s.verificationBridgeRefDir()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := fsyncDir(s.cfg.StateDir); err != nil {
+		return err
+	}
+	if c != nil {
+		// Release is durable before collecting, and staging remains serialized
+		// until the reference unlink and both directory fsyncs complete.
+		c.stageMu.Unlock()
+		locked = false
+		s.collectStagedBridges()
+	}
+	return nil
 }
 
 // coordinationMounts stages the CLI for every configured container. A run
@@ -289,13 +496,15 @@ func checkCoordinationMounts(mounts []runtime.Mount) error {
 	return nil
 }
 
-// stage installs this server's binary under its own content hash and
-// returns the digest and path. A staged copy that already hashes to the
-// digest is reused; anything else - missing, truncated, or a file whose
-// content no longer matches its name - is replaced atomically.
+// stage serializes content-addressed staging against collection. A staged
+// copy is reused only after its content and read-only mode are verified.
 func (c *coordination) stage() (digest, path string, err error) {
 	c.stageMu.Lock()
 	defer c.stageMu.Unlock()
+	return c.stageLocked()
+}
+
+func (c *coordination) stageLocked() (digest, path string, err error) {
 	digest, err = hashFile(c.selfExe)
 	if err != nil {
 		return "", "", fmt.Errorf("hash server binary: %w", err)
@@ -421,11 +630,9 @@ func (s *Scheduler) releaseCoordination(run domain.RunID) {
 	}
 }
 
-// collectStagedBridges deletes staged binaries no run references any more.
-// The references are the sidecars themselves, so this doubles as recovery:
-// a server that just restarted rebuilds the live set from the sidecars that
-// survived, and a build referenced by a container it will re-attach to is
-// retained exactly because that container's sidecar is still there.
+// collectStagedBridges deletes staged binaries no durable reference names.
+// Run and terminal sidecars, plus verification creation-key references, are
+// retained until their owners explicitly release them after cleanup.
 func (s *Scheduler) collectStagedBridges() {
 	c := s.coordinationSeam()
 	if c == nil {
@@ -517,27 +724,54 @@ func (s *Scheduler) referencedBridges() (map[string]bool, error) {
 	}
 	terminalDir := s.terminalSidecarDir()
 	terminalEntries, err := os.ReadDir(terminalDir)
+	if !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range terminalEntries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			member := domain.MemberID(strings.TrimSuffix(e.Name(), ".json"))
+			sc, err := s.readTerminalSidecar(member)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				return nil, err
+			}
+			if sc.BridgeDigest != "" {
+				referenced[sc.BridgeDigest] = true
+			}
+		}
+	}
+	verificationDir := s.verificationBridgeRefDir()
+	verificationEntries, err := os.ReadDir(verificationDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return referenced, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range terminalEntries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+	for _, e := range verificationEntries {
+		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".json") &&
+			!strings.HasPrefix(e.Name(), ".aether-verification-")) {
 			continue
 		}
-		member := domain.MemberID(strings.TrimSuffix(e.Name(), ".json"))
-		sc, err := s.readTerminalSidecar(member)
+		data, err := os.ReadFile(filepath.Join(verificationDir, e.Name()))
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
 			return nil, err
 		}
-		if sc.BridgeDigest != "" {
-			referenced[sc.BridgeDigest] = true
+		var ref verificationBridgeRef
+		if err := json.Unmarshal(data, &ref); err != nil {
+			// A partially written reference is an unknown cleanup outcome:
+			// retain every staged byte rather than guessing what is live.
+			return nil, fmt.Errorf("scheduler: decode verification bridge ref %s: %w", e.Name(), err)
 		}
+		if err := validateVerificationBridgeRef(ref); err != nil {
+			return nil, err
+		}
+		referenced[ref.BridgeDigest] = true
 	}
 	return referenced, nil
 }

@@ -155,13 +155,6 @@ type SubmissionEvidence struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
-type SubmissionRef struct {
-	WorkspaceID      string `json:"workspace_id"`
-	RunID            string `json:"run_id"`
-	EvidenceRef      string `json:"evidence_ref"`
-	RetainedRevision string `json:"retained_revision"`
-}
-
 type Submission struct {
 	ID                   string               `json:"id"`
 	MissionID            string               `json:"mission_id"`

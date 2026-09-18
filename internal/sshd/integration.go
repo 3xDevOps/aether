@@ -81,8 +81,8 @@ func (s *Server) integrationPrepare(ctx context.Context, member domain.MemberID,
 	if perr != nil {
 		return nil, perr
 	}
-	if p.WorkspaceID == "" || p.TargetRef == "" || p.ExpectedTargetRevision == "" || p.IdempotencyKey == "" {
-		return nil, invalidParams("workspace_id, target_ref, expected_target_revision, and idempotency_key are required")
+	if p.TargetRef == "" || p.ExpectedTargetRevision == "" || p.IdempotencyKey == "" {
+		return nil, invalidParams("target_ref, expected_target_revision, and idempotency_key are required")
 	}
 	candidate, err := svc.Prepare(ctx, integrationActor(member), p)
 	if err != nil {

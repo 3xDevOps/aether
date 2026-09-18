@@ -9,18 +9,11 @@ it does not lock files, pause work, or decide which change wins.
 Candidate verification and delivery is a separate authenticated service
 described in [integration.md](integration.md). Coordination records remain
 observations/evidence; they do not constitute an accepted submission, a
-frozen candidate revision, or a landed upstream change. Agent integration
-verbs are provided by the mission-policy adapter, not by this standalone
-human coordination surface; this guide does not claim those verbs or a new
-agent CLI are shipped here.
-
-Candidate verification and delivery is a separate authenticated service
-described in [integration.md](integration.md). Coordination records remain
-observations/evidence; they do not constitute an accepted submission, a
-frozen candidate revision, or a landed upstream change. Agent integration
-verbs are provided by the mission-policy adapter, not by this standalone
-human coordination surface; this guide does not claim those verbs or a new
-agent CLI are shipped here.
+frozen candidate revision, or a landed upstream change. The mission-policy
+adapter exposes a narrow agent integration CLI only to the current integrator:
+`prepare`, `show`, `verify`, `request-delivery`, and `deliver`. Human review
+remains the approval boundary; ordinary and worker runs do not receive these
+commands.
 
 ## Run-mounted surfaces
 
@@ -83,13 +76,15 @@ line. The base coordination method set is:
 | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
 
 The `coord.*` wire and its six base methods are unchanged. Mission-assigned
-runs additionally receive the assignment-scoped `task.*` and `worker.*`
-methods published by `coord.status`; those methods use the same
-run-authenticated socket but are not part of the base `coord.*` set. Their
-allow-list is derived from the current assignment, not from caller-supplied
-roles or identities. A mission may authorize its integrator and active worker
-runs as peers before any file overlap exists; ordinary runs retain the radar
-active/grace authorization described below.
+runs additionally receive assignment-scoped `task.*` and `worker.*` methods
+published by `coord.status`; the current integrator also receives exactly
+`integration.prepare`, `integration.show`, `integration.verify`,
+`integration.request_delivery`, and `integration.deliver`. These methods use
+the same run-authenticated socket but are not part of the base `coord.*` set.
+Every allow-list is derived from the current assignment, not from
+caller-supplied roles or identities. A mission may authorize its integrator
+and active worker runs as peers before any file overlap exists; ordinary runs
+retain the radar active/grace authorization described below.
 
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
 IDs, the recorded task, each currently authorized peer, and the six base
@@ -304,6 +299,69 @@ The first command returns the durable `question_id`. Use that value with
 and `reply` accept the same `--body-file` and standard-input forms as `send`.
 The example IDs are ordinary non-secret values. Replace them with the peer
 run ID and question ID returned by the run's own status and inbox results.
+
+### Integrator candidate integration
+
+Only the current mission integrator may use the agent integration surface. It
+is exactly five commands:
+
+```text
+integration prepare
+integration show
+integration verify
+integration request-delivery
+integration deliver
+```
+
+Each command accepts `--params-file FILE|-` and `--json`. The file is a
+bounded JSON object up to 16 MiB using the corresponding `internal/protocol`
+parameter type; `-` reads bounded JSON from standard input. The mounted run
+the caller identity, so parameter JSON must not carry an actor, run owner, or
+approval identity. Every command returns the normal `schema_version`, `ok`,
+`result`, and structured `error` envelope with the normal CLI exit codes.
+There is no agent `decide`, `approve`, generic RPC, list, resolve, patch, or
+delete command.
+
+An integrator prepares, inspects, verifies, and requests delivery using
+explicit parameter files:
+
+```sh
+/usr/local/bin/aether-internal integration prepare \
+  --params-file /run/aether/integration-prepare.json --json
+/usr/local/bin/aether-internal integration show \
+  --params-file /run/aether/integration-show.json --json
+/usr/local/bin/aether-internal integration verify \
+  --params-file /run/aether/integration-verify.json --json
+/usr/local/bin/aether-internal integration request-delivery \
+  --params-file /run/aether/integration-request.json --json
+```
+
+`request-delivery` is the human-decision boundary. The integrator must stop
+there while an authenticated human reviews and decides; the agent socket
+cannot approve its own delivery. After the human decision authorizes the
+request, delivery is the exact command below:
+
+```sh
+/usr/local/bin/aether-internal integration deliver \
+  --params-file /run/aether/integration-deliver.json --json
+```
+
+If a command reports the coordination socket as unavailable after it may have
+committed, recovery replays the same bounded params file and preserves every
+explicit mutation identity:
+
+```sh
+/usr/local/bin/aether-internal integration prepare \
+  --params-file /run/aether/integration-prepare.json --json
+/usr/local/bin/aether-internal integration request-delivery \
+  --params-file /run/aether/integration-request.json --json
+/usr/local/bin/aether-internal integration deliver \
+  --params-file /run/aether/integration-deliver.json --json
+```
+
+Do not replace an `idempotency_key` with a new value during recovery. A
+successful retry returns the original durable result; a denial, conflict, or
+invalid state remains a structured server error.
 
 ### Report an outcome
 

@@ -131,6 +131,30 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 		t.Fatalf("unacked after release = %d (err %v), want 0", n, err)
 	}
 }
+func TestMissionMethodWhitelistIntegrationSurface(t *testing.T) {
+	for _, method := range []string{
+		protocol.MethodIntegrationPrepare,
+		protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify,
+		protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver,
+	} {
+		if !isMissionMethod(method) {
+			t.Errorf("integration method %q is not admitted to mission dispatch", method)
+		}
+	}
+	for _, method := range []string{
+		protocol.MethodIntegrationList,
+		protocol.MethodIntegrationResolve,
+		protocol.MethodIntegrationPatch,
+		protocol.MethodIntegrationDecide,
+		protocol.MethodIntegrationDelete,
+	} {
+		if isMissionMethod(method) {
+			t.Errorf("forbidden integration method %q is admitted to mission dispatch", method)
+		}
+	}
+}
 
 // TestLostResponseRedelivers is the at-least-once guarantee over the real
 // socket: the bridge dies between the read and the agent seeing it, so

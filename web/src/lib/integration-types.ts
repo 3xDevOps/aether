@@ -111,6 +111,8 @@ export interface Candidate {
   candidate_id: string
   workspace_id: string
   mission_id?: string
+  /** Frozen mission accepted-set binding, when this candidate was prepared for a mission. */
+  mission_accepted_set_version?: number
   submissions: SubmissionRef[]
   required_sources?: string[]
   inputs: CandidateInput[]

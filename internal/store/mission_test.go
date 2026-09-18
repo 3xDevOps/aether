@@ -292,3 +292,185 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 		t.Fatalf("pending after latest ack = %d, want 0", pending)
 	}
 }
+
+func mustSubmitMissionAttempt(t *testing.T, db *DB, mission *domain.Mission, task *domain.Task, dispatchKey string) *domain.Submission {
+	t.Helper()
+	attempt, _, err := reserveMissionAttempt(t, db, mission, task, dispatchKey)
+	if err != nil {
+		t.Fatalf("ReserveAttempt: %v", err)
+	}
+	run := &domain.Run{ID: attempt.RunID, WorkspaceID: mission.WorkspaceID, MemberID: domain.MemberID(mission.AccountableHumanID), Task: task.Revision.Title, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunQueued}
+	if err := db.CreateRunWithID(context.Background(), run); err != nil {
+		t.Fatalf("CreateRunWithID: %v", err)
+	}
+	submission, err := db.SubmitAttempt(context.Background(), attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.SubmissionRef{
+		WorkspaceID: mission.WorkspaceID, RunID: attempt.RunID, EvidenceRef: "packet-" + dispatchKey, RetainedRevision: "tree-" + dispatchKey,
+	}, []domain.SubmissionEvidence{{Kind: "retained_packet", Ref: "packet-" + dispatchKey, Available: true}}, nil)
+	if err != nil {
+		t.Fatalf("SubmitAttempt: %v", err)
+	}
+	return submission
+}
+
+func mustAcceptMissionSubmission(t *testing.T, db *DB, mission *domain.Mission, submission *domain.Submission, key string) *domain.Acceptance {
+	t.Helper()
+	accepted, err := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", key)
+	if err != nil {
+		t.Fatalf("AcceptSubmission: %v", err)
+	}
+	mission.AcceptedSetVersion = accepted.AcceptedSetVersion
+	return accepted
+}
+
+func TestMissionAcceptedSetVersionAdvancesWhenCurrentOutputLeavesSet(t *testing.T) {
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	task := mustCreateMissionTask(t, db, mission.ID, "accepted output")
+	submission := mustSubmitMissionAttempt(t, db, mission, task, "accepted-output")
+	mustAcceptMissionSubmission(t, db, mission, submission, "accept-output")
+	if mission.AcceptedSetVersion != 1 {
+		t.Fatalf("initial accepted set version = %d, want 1", mission.AcceptedSetVersion)
+	}
+
+	revision, err := db.ProposeTaskRevision(context.Background(), task.ID, &domain.TaskRevision{Title: "replacement", Objective: "replacement"}, "replacement-proposal")
+	if err != nil {
+		t.Fatalf("ProposeTaskRevision: %v", err)
+	}
+	if err := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "replacement-accept"); err != nil {
+		t.Fatalf("AcceptTaskRevision: %v", err)
+	}
+	afterReplacement, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after replacement: %v", err)
+	}
+	if afterReplacement.AcceptedSetVersion != 2 {
+		t.Fatalf("accepted set version after replacement = %d, want 2", afterReplacement.AcceptedSetVersion)
+	}
+	var historical int
+	if err := db.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM mission_acceptances WHERE mission_id=? AND task_id=? AND task_revision=?`, mission.ID, task.ID, 1).Scan(&historical); err != nil {
+		t.Fatalf("count historical acceptance: %v", err)
+	}
+	if historical != 1 {
+		t.Fatalf("historical acceptance count = %d, want 1", historical)
+	}
+
+	if err := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "replacement-accept"); err != nil {
+		t.Fatalf("replay AcceptTaskRevision: %v", err)
+	}
+	afterReplay, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after replacement replay: %v", err)
+	}
+	if afterReplay.AcceptedSetVersion != 2 {
+		t.Fatalf("accepted set version after replacement replay = %d, want 2", afterReplay.AcceptedSetVersion)
+	}
+}
+
+func TestMissionAcceptedSetVersionDoesNotAdvanceForProposedWorkOrAbandonment(t *testing.T) {
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	task := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "proposed", Objective: "proposed", Status: domain.TaskRevisionProposed}}
+	if err := db.CreateTask(context.Background(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	revision, err := db.ProposeTaskRevision(context.Background(), task.ID, &domain.TaskRevision{Title: "proposed replacement", Objective: "proposed replacement"}, "proposed-revision")
+	if err != nil {
+		t.Fatalf("ProposeTaskRevision: %v", err)
+	}
+	if err := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "accept-proposed"); err != nil {
+		t.Fatalf("AcceptTaskRevision: %v", err)
+	}
+	afterAccept, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after proposed acceptance: %v", err)
+	}
+	if afterAccept.AcceptedSetVersion != 0 {
+		t.Fatalf("accepted set version after proposed work = %d, want 0", afterAccept.AcceptedSetVersion)
+	}
+	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-proposed"); err != nil {
+		t.Fatalf("AbandonTask: %v", err)
+	}
+	afterAbandon, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after proposed abandonment: %v", err)
+	}
+	if afterAbandon.AcceptedSetVersion != 0 {
+		t.Fatalf("accepted set version after proposed abandonment = %d, want 0", afterAbandon.AcceptedSetVersion)
+	}
+	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-proposed"); err != nil {
+		t.Fatalf("replay AbandonTask: %v", err)
+	}
+	replayed, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after proposed abandonment replay: %v", err)
+	}
+	if replayed.AcceptedSetVersion != 0 {
+		t.Fatalf("accepted set version after proposed abandonment replay = %d, want 0", replayed.AcceptedSetVersion)
+	}
+}
+
+func TestMissionAcceptedSetVersionRejectsStaleAcceptanceAfterCurrentOutputRemoval(t *testing.T) {
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	firstTask := mustCreateMissionTask(t, db, mission.ID, "first output")
+	firstSubmission := mustSubmitMissionAttempt(t, db, mission, firstTask, "first-output")
+	mustAcceptMissionSubmission(t, db, mission, firstSubmission, "accept-first-output")
+	oldSetVersion := mission.AcceptedSetVersion
+
+	revision, err := db.ProposeTaskRevision(context.Background(), firstTask.ID, &domain.TaskRevision{Title: "first replacement", Objective: "first replacement"}, "first-replacement-proposal")
+	if err != nil {
+		t.Fatalf("ProposeTaskRevision: %v", err)
+	}
+	if err := db.AcceptTaskRevision(context.Background(), firstTask.ID, revision.Revision, mission.IntegratorGeneration, "first-replacement-accept"); err != nil {
+		t.Fatalf("AcceptTaskRevision: %v", err)
+	}
+	current, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission: %v", err)
+	}
+	if current.AcceptedSetVersion != oldSetVersion+1 {
+		t.Fatalf("accepted set version = %d, want %d", current.AcceptedSetVersion, oldSetVersion+1)
+	}
+
+	secondTask := mustCreateMissionTask(t, db, mission.ID, "second output")
+	secondSubmission := mustSubmitMissionAttempt(t, db, current, secondTask, "second-output")
+	if _, err := db.AcceptSubmission(context.Background(), secondSubmission.ID, current.CurrentIntegratorRunID, current.IntegratorGeneration, oldSetVersion, "", "accept-stale-output"); !errors.Is(err, ErrMissionStale) {
+		t.Fatalf("stale accepted set = %v, want ErrMissionStale", err)
+	}
+}
+
+func TestMissionAcceptedSetVersionAdvancesOnAbandonmentOfCurrentOutput(t *testing.T) {
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
+	task := mustCreateMissionTask(t, db, mission.ID, "abandoned output")
+	submission := mustSubmitMissionAttempt(t, db, mission, task, "abandoned-output")
+	mustAcceptMissionSubmission(t, db, mission, submission, "accept-abandoned-output")
+	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-output"); err != nil {
+		t.Fatalf("AbandonTask: %v", err)
+	}
+	afterAbandon, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after abandonment: %v", err)
+	}
+	if afterAbandon.AcceptedSetVersion != 2 {
+		t.Fatalf("accepted set version after abandonment = %d, want 2", afterAbandon.AcceptedSetVersion)
+	}
+	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-output"); err != nil {
+		t.Fatalf("replay AbandonTask: %v", err)
+	}
+	afterReplay, err := db.GetMission(context.Background(), mission.ID)
+	if err != nil {
+		t.Fatalf("GetMission after abandonment replay: %v", err)
+	}
+	if afterReplay.AcceptedSetVersion != 2 {
+		t.Fatalf("accepted set version after abandonment replay = %d, want 2", afterReplay.AcceptedSetVersion)
+	}
+}

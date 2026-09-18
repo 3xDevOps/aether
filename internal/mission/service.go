@@ -96,10 +96,15 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
+	// Integration resolves the underlying candidate engine lazily. Mission
+	// policy owns the adapter while the engine remains the implementation.
+	Integration func() (sshd.IntegrationService, error)
 }
 type Service struct {
 	cfg             Config
 	mu              sync.Mutex
+	integrationMu   sync.RWMutex
+	integrationBase sshd.IntegrationService
 	dispatchMu      sync.Mutex
 	reconcileCursor map[domain.WorkspaceID]string
 	cancel          context.CancelFunc
@@ -795,6 +800,10 @@ func (s *Service) Show(ctx context.Context, p protocol.MissionShowParams) (proto
 // run identity; no method accepts a human/member selector or generic RPC.
 func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method string, raw json.RawMessage) (any, error) {
 	switch method {
+	case protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver:
+		return s.handleIntegrationAgent(ctx, run, method, raw)
 	case protocol.MethodTaskShow, protocol.MethodTaskList:
 		return s.handleTaskRead(ctx, run, method, raw)
 	case protocol.MethodTaskPropose, protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission, protocol.MethodTaskAbandon:

@@ -864,6 +864,16 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&previous); err != nil {
 		return err
 	}
+	// A revision change removes the prior output from the current accepted set
+	// only when that revision has an accepted output. Proposed work alone is
+	// not part of the set and must not advance its version.
+	var previousOutput int
+	if previous != revision {
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances WHERE mission_id = ? AND task_id = ? AND task_revision = ?`, missionID, id, previous).Scan(&previousOutput)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	if revision < previous {
 		return ErrMissionStale
 	}
@@ -895,8 +905,10 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 	if err := recordMutationReceipt(tx, ctx, missionID, "task.accept", key, payload, string(id), revision, n); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); err != nil {
-		return err
+	if previousOutput == 1 {
+		if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -1618,6 +1630,9 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	if err := recordMutationReceipt(tx, ctx, missionID, "submission.accept", key, payload, string(id), taskRevision, n); err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -1662,6 +1677,17 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, expectedGenerati
 	}
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
+	var currentRevision int
+	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id=?`, id).Scan(&currentRevision); err != nil {
+		return err
+	}
+	// Abandonment removes an output from the current accepted set only when
+	// the task's current revision has an acceptance. Proposed work is ignored.
+	var currentOutput int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances WHERE mission_id=? AND task_id=? AND task_revision=?`, missionID, id, currentRevision).Scan(&currentOutput)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET abandoned_at=?, updated_at=? WHERE id=? AND abandoned_at IS NULL`, n, n, id)
 	if err != nil {
 		return err
@@ -1676,8 +1702,10 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, expectedGenerati
 	if err := recordMutationReceipt(tx, ctx, missionID, "task.abandon", key, payload, string(id), 0, n); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version=accepted_set_version+1, updated_at=? WHERE id=?`, n, missionID); err != nil {
-		return err
+	if currentOutput == 1 {
+		if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version=accepted_set_version+1, updated_at=? WHERE id=?`, n, missionID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

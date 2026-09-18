@@ -30,6 +30,7 @@ import { useCapability, useSelf } from '@/store/hooks'
 import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
+import { CandidateReview } from '@/routes/terminal/candidate-review'
 
 function newIdempotencyKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -250,6 +251,10 @@ function MissionDetailView({
     return counts
   }, [detail?.tasks])
   const integratorRunID = mission?.current_integrator_run_id
+  const acceptedSubmissions = useMemo(
+    () => (detail?.submissions ?? []).filter((submission) => submission.state === 'accepted'),
+    [detail?.submissions],
+  )
   const canReplace =
     Boolean(mission) &&
     cap.hasMethod('mission.replace-integrator') &&
@@ -353,6 +358,22 @@ function MissionDetailView({
                   onRun={(runID) => navigate('terminal', { runId: runID })}
                 />
               ))}
+            </section>
+            <section className="mt-3 border bg-card p-3" aria-label="Mission candidate review">
+              <h2 className="text-sm font-semibold">Candidate progress</h2>
+              <p className="mt-1 text-xs text-muted-foreground">Prepare and review the current accepted mission set through the existing verification and delivery workflow. Task status alone never implies delivery.</p>
+              {integratorRunID ? (
+                <CandidateReview
+                  workspaceID={mission.workspace_id}
+                  currentRunID={integratorRunID}
+                  missionID={mission.id}
+                  missionSubmissions={acceptedSubmissions}
+                  initialExpanded
+                  client={client}
+                />
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">Waiting for the integrator run before candidate preparation can begin.</p>
+              )}
             </section>
           </>
         )}

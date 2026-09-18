@@ -496,8 +496,8 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 
 // handle decodes one request and dispatches it. The method set is closed:
 // anything outside the coordination methods, run.report, and the explicit
-// task/worker mission methods is method-not-found, so no control verb is
-// reachable from inside a container.
+// task/worker/integrator mission methods is method-not-found, so no control
+// verb is reachable from inside a container.
 func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
 	req, resp, valid := protocol.ParseRequest(line)
 	if !valid {
@@ -595,7 +595,10 @@ func isMissionMethod(method string) bool {
 	case protocol.MethodTaskShow, protocol.MethodTaskList, protocol.MethodTaskPropose,
 		protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission,
 		protocol.MethodTaskAbandon, protocol.MethodWorkerStart, protocol.MethodWorkerList,
-		protocol.MethodWorkerInspect, protocol.MethodWorkerCancel, protocol.MethodWorkerRetry:
+		protocol.MethodWorkerInspect, protocol.MethodWorkerCancel, protocol.MethodWorkerRetry,
+		protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver:
 		return true
 	default:
 		return false

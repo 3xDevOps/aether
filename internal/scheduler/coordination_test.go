@@ -365,3 +365,160 @@ func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
 		t.Fatalf("a run that was never provisioned was released: %v", released)
 	}
 }
+
+func TestPrepareVerificationRuntimeReferenceLifetime(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "verification cli")))
+	coord, binDir := withCoordination(t, e)
+	key := "verification-lifetime-key"
+	spec := runtime.Spec{
+		Image: "busybox:1.36", Command: []string{"true"},
+		User: "1000:1000", CreationKey: key,
+	}
+	if err := e.sched.PrepareVerificationRuntime(t.Context(), &spec); err != nil {
+		t.Fatalf("PrepareVerificationRuntime: %v", err)
+	}
+	cli, ok := mountFor(spec, coordtransport.CLIPath)
+	if !ok || !cli.ReadOnly {
+		t.Fatalf("verification CLI mount = %+v, want read-only mount", cli)
+	}
+	if _, ok := mountFor(spec, coordtransport.BinaryPath); ok {
+		t.Fatal("verification runtime received the coordination bridge mount")
+	}
+	if _, ok := mountFor(spec, coordtransport.MountDir); ok {
+		t.Fatal("verification runtime received the coordination socket mount")
+	}
+	if spec.User != "1000:1000" {
+		t.Fatalf("verification runtime user = %q, want non-root user preserved", spec.User)
+	}
+	if !strings.Contains(":"+spec.Env["PATH"]+":", ":"+filepath.Dir(coordtransport.CLIPath)+":") {
+		t.Fatalf("verification PATH = %q, missing staged CLI directory", spec.Env["PATH"])
+	}
+	if _, ok := spec.Env["AETHER_RUN_ID"]; ok {
+		t.Fatalf("verification runtime gained a run identity: %#v", spec.Env)
+	}
+	ref, err := e.sched.readVerificationBridgeRef(key)
+	if err != nil {
+		t.Fatalf("read durable verification reference: %v", err)
+	}
+	if ref.BridgePath != cli.HostPath {
+		t.Fatalf("reference bridge path = %q, want %q", ref.BridgePath, cli.HostPath)
+	}
+	var sawReferenceAtCreate bool
+	e.rt.createHook = func() {
+		_, sawErr := e.sched.readVerificationBridgeRef(key)
+		sawReferenceAtCreate = sawErr == nil
+	}
+	containerID, err := e.rt.Create(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("fake runtime Create: %v", err)
+	}
+	if !sawReferenceAtCreate {
+		t.Fatal("verification bridge reference was not durable before Runtime.Create")
+	}
+	if err := e.rt.Destroy(t.Context(), containerID); err != nil {
+		t.Fatalf("destroy fake verification runtime: %v", err)
+	}
+	// The durable reference remains live until explicit cleanup release, even
+	// after a scheduler restart with no in-memory current digest.
+	reboot := e.newScheduler(t, e.rt, newFakePTY())
+	reboot.UseCoordination(coord, binDir)
+	reboot.collectStagedBridges()
+	if _, err := os.Stat(cli.HostPath); err != nil {
+		t.Fatalf("reference-protected collection removed staged CLI: %v", err)
+	}
+	if _, err := reboot.readVerificationBridgeRef(key); err != nil {
+		t.Fatalf("verification reference did not survive restart: %v", err)
+	}
+	if err := reboot.ReleaseVerificationRuntime(t.Context(), key); err != nil {
+		t.Fatalf("ReleaseVerificationRuntime: %v", err)
+	}
+	if _, err := os.Stat(reboot.verificationBridgeRefPath(key)); !os.IsNotExist(err) {
+		t.Fatalf("verification reference survived release: %v", err)
+	}
+	if _, err := os.Stat(cli.HostPath); !os.IsNotExist(err) {
+		t.Fatalf("released staged CLI survived collection: %v", err)
+	}
+}
+
+func TestPrepareVerificationRuntimeDisabledCoordinationKeepsNonRootCLI(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "verification cli")))
+	coord, binDir := withCoordination(t, e)
+	e.sched.UseCoordination(coord, binDir, false)
+	key := "verification-disabled-key"
+	spec := runtime.Spec{
+		Image: "busybox:1.36", Command: []string{"true"},
+		Env:  map[string]string{"PATH": "/usr/bin"},
+		User: "1000:1000", CreationKey: key,
+	}
+	if err := e.sched.PrepareVerificationRuntime(t.Context(), &spec); err != nil {
+		t.Fatalf("PrepareVerificationRuntime with coordination disabled: %v", err)
+	}
+	if spec.User != "1000:1000" {
+		t.Fatalf("verification runtime user = %q, want non-root user", spec.User)
+	}
+	cli, ok := mountFor(spec, coordtransport.CLIPath)
+	if !ok || !cli.ReadOnly {
+		t.Fatalf("disabled coordination CLI mount = %+v, want read-only mount", cli)
+	}
+	if _, ok := mountFor(spec, coordtransport.BinaryPath); ok {
+		t.Fatal("disabled coordination mounted the bridge binary")
+	}
+	if _, ok := mountFor(spec, coordtransport.MountDir); ok {
+		t.Fatal("disabled coordination mounted a run socket directory")
+	}
+	if !strings.Contains(":"+spec.Env["PATH"]+":", ":"+filepath.Dir(coordtransport.CLIPath)+":") {
+		t.Fatalf("disabled coordination PATH = %q, missing staged CLI directory", spec.Env["PATH"])
+	}
+	if err := e.sched.ReleaseVerificationRuntime(t.Context(), key); err != nil {
+		t.Fatalf("ReleaseVerificationRuntime: %v", err)
+	}
+}
+
+func TestPrepareVerificationRuntimeFailsClosedWhenStagingFails(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(filepath.Join(t.TempDir(), "missing-server")))
+	withCoordination(t, e)
+	key := "verification-staging-failure-key"
+
+	spec := runtime.Spec{
+		Image: "busybox:1.36", Command: []string{"true"},
+		CreationKey: key,
+	}
+	err := e.sched.PrepareVerificationRuntime(t.Context(), &spec)
+	if err == nil || !strings.Contains(err.Error(), "stage verification coordination CLI") {
+		t.Fatalf("PrepareVerificationRuntime error = %v, want staging refusal", err)
+	}
+	if len(spec.Mounts) != 0 {
+		t.Fatalf("failed preparation mutated mounts: %+v", spec.Mounts)
+	}
+	if _, err := os.Stat(e.sched.verificationBridgeRefPath(key)); !os.IsNotExist(err) {
+		t.Fatalf("failed preparation left a durable reference: %v", err)
+	}
+}
+
+func TestVerificationBridgeCollectionRetainsUnknownReference(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "verification cli")))
+	withCoordination(t, e)
+	seam := e.sched.coordinationSeam()
+	_, stagedPath, err := seam.stage()
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	seam.mu.Lock()
+	seam.staged = ""
+	seam.mu.Unlock()
+	if err := os.MkdirAll(e.sched.verificationBridgeRefDir(), 0o755); err != nil {
+		t.Fatalf("create verification reference dir: %v", err)
+	}
+	tempRef := filepath.Join(e.sched.verificationBridgeRefDir(), ".aether-verification-crash")
+	if err := os.WriteFile(tempRef, []byte(`{"creation_key":"unknown"`), 0o600); err != nil {
+		t.Fatalf("write partial verification reference: %v", err)
+	}
+	e.sched.collectStagedBridges()
+	if _, err := os.Stat(stagedPath); err != nil {
+		t.Fatalf("unknown verification cleanup outcome reclaimed %s: %v", stagedPath, err)
+	}
+}
