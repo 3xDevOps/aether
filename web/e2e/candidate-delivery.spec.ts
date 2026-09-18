@@ -312,11 +312,11 @@ test('reviews two retained runs, verifies them in a real container, and lands th
   const requestVersion = request.request_version
   // An offline page cannot mutate the durable request. Reconnect and reload
   // before the human gate, so no stale page state can approve anything.
+  await expect(review.getByRole('button', { name: 'Approve delivery', exact: true })).toBeEnabled()
   await page.context().setOffline(true)
-  await expect(review.getByText('Offline. Mutation controls are disabled until the gateway reconnects.')).toBeVisible()
   await expect(review.getByRole('button', { name: 'Approve delivery', exact: true })).toBeDisabled()
   await page.context().setOffline(false)
-  await expect(review.getByText('Offline. Mutation controls are disabled until the gateway reconnects.')).toBeHidden()
+  await expect(review.getByRole('button', { name: 'Approve delivery', exact: true })).toBeEnabled()
   await expect
     .poll(
       async () => (await showCandidate(alice.api, workspaceID, candidateID)).delivery_request?.state,
@@ -428,13 +428,13 @@ test('applies selected conflict resolutions without overwriting untouched files'
   let candidate = await showCandidate(alice.api, workspaceID, candidateID)
   expect(candidate.state).toBe('conflicted')
   expect(candidate.conflicts).toEqual([conflictLeftPath, conflictRightPath])
-  await expect(review.getByLabel(`Resolution for ${conflictLeftPath}`)).toBeVisible()
-  await expect(review.getByLabel(`Resolution for ${conflictRightPath}`)).toBeVisible()
+  await expect(review.getByRole('textbox', { name: `Resolution for ${conflictLeftPath}`, exact: true })).toBeVisible()
+  await expect(review.getByRole('textbox', { name: `Resolution for ${conflictRightPath}`, exact: true })).toBeVisible()
 
   const resolvedLeft = 'resolved left content'
   const resolvedRight = 'resolved right content'
-  const leftDraft = review.getByLabel(`Resolution for ${conflictLeftPath}`)
-  const rightDraft = review.getByLabel(`Resolution for ${conflictRightPath}`)
+  const leftDraft = review.getByRole('textbox', { name: `Resolution for ${conflictLeftPath}`, exact: true })
+  const rightDraft = review.getByRole('textbox', { name: `Resolution for ${conflictRightPath}`, exact: true })
   await leftDraft.fill(resolvedLeft)
   await expect(review.getByRole('checkbox', { name: `Apply resolution for ${conflictLeftPath}`, exact: true })).toBeChecked()
   await expect(review.getByRole('checkbox', { name: `Apply resolution for ${conflictRightPath}`, exact: true })).not.toBeChecked()
@@ -454,7 +454,7 @@ test('applies selected conflict resolutions without overwriting untouched files'
     )
     .toEqual([conflictRightPath])
   await expect(review).toContainText(conflictRightPath)
-  await expect(review.getByLabel(`Resolution for ${conflictRightPath}`)).toHaveValue('')
+  await expect(rightDraft).toHaveValue('')
   expect(candidate.conflicts).toEqual([conflictRightPath])
 
   await rightDraft.fill(resolvedRight)
