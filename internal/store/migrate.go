@@ -952,7 +952,31 @@ CREATE TABLE run_cost_deletions (
 	`
 ALTER TABLE runs ADD COLUMN archived_at INTEGER;
 `,
-	// v32: durable missions, immutable task specifications, fenced attempts,
+	// v32: durable integration candidate aggregates. Candidate rows are
+	// deliberately independent of runs (and therefore source-run deletion);
+	// payload carries the aggregate's protocol JSON while the immutable
+	// envelope columns support idempotency and CAS updates.
+	`
+CREATE TABLE integration_candidates (
+	id              TEXT PRIMARY KEY,
+	workspace_id    TEXT NOT NULL,
+	actor_key       TEXT NOT NULL,
+	idempotency_key TEXT NOT NULL,
+	digest          TEXT NOT NULL,
+	state           TEXT NOT NULL,
+	version         INTEGER NOT NULL CHECK (version > 0),
+	payload         TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	expires_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_integration_candidates_key
+	ON integration_candidates(workspace_id, actor_key, idempotency_key);
+CREATE INDEX idx_integration_candidates_workspace
+	ON integration_candidates(workspace_id, created_at DESC, id DESC);
+CREATE INDEX idx_integration_candidates_cleanup
+	ON integration_candidates(state, expires_at, created_at, id);
+`,
+	// v33: durable missions, immutable task specifications, fenced attempts,
 	// exact-version submissions, and acceptance records. Mission state is
 	// deliberately separate from Store so compatibility stores can opt in.
 	`

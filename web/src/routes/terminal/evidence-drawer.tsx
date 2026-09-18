@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { api, type Api } from '@/lib/api'
 import type { EvidencePacket, EvidencePatchResult, EvidenceTranscriptResult } from '@/lib/types'
+import { CandidateReview } from '@/routes/terminal/candidate-review'
 import { useStore } from '@/store'
 const emptyPackets: EvidencePacket[] = []
 
@@ -183,6 +184,9 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
             <Button type="button" size="icon" variant="ghost" aria-label="Close evidence" onClick={() => setOpen(false)}>×</Button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="px-3">
+              <CandidateReview workspaceID={workspaceID} currentRunID={runID} client={client} />
+            </div>
             {error && <div role="alert" className="flex items-start justify-between gap-2 border-b border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-state-failed"><span>{error}</span>{!selectedID && <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void loadList()}>Retry evidence</Button>}</div>}
             {!selectedID ? (
               <div className="p-3">
