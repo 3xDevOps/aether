@@ -131,11 +131,15 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
   const gatewayAvailable = browserOnline && gatewayConnection === 'live'
   const canMutate = gatewayAvailable && authorityReady && !busy
 
-  const clearAuthority = useCallback(() => {
+  const invalidateAuthority = useCallback(() => {
     loadGeneration.current += 1
     setAuthorityReady(false)
     setLoading(false)
     setBusy(null)
+  }, [])
+
+  const clearAuthority = useCallback(() => {
+    invalidateAuthority()
     setPackets([])
     setSelectedIDs([])
     setSummaries([])
@@ -148,7 +152,7 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
     setExpectedRevision('')
     setError(undefined)
     setArgvError(undefined)
-  }, [])
+  }, [invalidateAuthority])
 
   const loadWorkspacePackets = useCallback(async () => {
     if (!expanded) return
@@ -177,8 +181,13 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
       setTargetRef((value) => value || `refs/heads/${nextWorkspace.base_branch}`)
       setExpectedRevision((value) => value || targetRevision(allRuns, currentRunID))
       const listedCandidates = await client.integrationList({ workspace_id: workspaceID, limit: 50 })
+      const selectedCandidateID = candidateVersion.current?.id
+      const refreshedCandidate = selectedCandidateID
+        ? await client.integrationShow({ workspace_id: workspaceID, candidate_id: selectedCandidateID })
+        : null
       if (generation === loadGeneration.current) {
         setSummaries(listedCandidates.candidates)
+        if (refreshedCandidate && !applyCandidate(refreshedCandidate.candidate)) return
         setAuthorityReady(true)
       }
     } catch (cause) {
@@ -189,7 +198,7 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
     } finally {
       if (generation === loadGeneration.current) setLoading(false)
     }
-  }, [client, currentRunID, expanded, workspaceID])
+  }, [applyCandidate, client, currentRunID, expanded, workspaceID])
 
   useEffect(() => {
     if (!expanded) return
@@ -201,26 +210,26 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
     if (previousConnection.current === gatewayConnection) return
     previousConnection.current = gatewayConnection
     if (gatewayConnection !== 'live') {
-      clearAuthority()
+      invalidateAuthority()
       return
     }
     if (expanded) {
-      clearAuthority()
+      invalidateAuthority()
       void loadWorkspacePackets()
     }
-  }, [clearAuthority, expanded, gatewayConnection, loadWorkspacePackets])
+  }, [expanded, gatewayConnection, invalidateAuthority, loadWorkspacePackets])
 
   useEffect(() => {
     const becameOnline = () => {
       setBrowserOnline(true)
       if (gatewayConnection === 'live' && expanded) {
-        clearAuthority()
+        invalidateAuthority()
         void loadWorkspacePackets()
       }
     }
     const becameOffline = () => {
       setBrowserOnline(false)
-      clearAuthority()
+      invalidateAuthority()
     }
     window.addEventListener('online', becameOnline)
     window.addEventListener('offline', becameOffline)
@@ -228,7 +237,7 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
       window.removeEventListener('online', becameOnline)
       window.removeEventListener('offline', becameOffline)
     }
-  }, [clearAuthority, expanded, gatewayConnection, loadWorkspacePackets])
+  }, [expanded, gatewayConnection, invalidateAuthority, loadWorkspacePackets])
 
   useEffect(() => {
     if (!candidate || !hasRunningVerification || !expanded || !gatewayAvailable) return
