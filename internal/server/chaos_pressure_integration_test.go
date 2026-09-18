@@ -76,14 +76,13 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		}, &launched); err != nil {
 			t.Fatalf("run.launch %d: %v", i, err)
 		}
-		// The fake agent parks on stdin; steering it is what ends the run.
+		// Setup owns terminal control; avoid the queued steering grace period.
 		att := openAttach(t, env.client, launched.Run.ID)
 		waitOutput(t, att, "agent-ready")
-		if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-			RunID: launched.Run.ID, Message: "finish", IdempotencyKey: fmt.Sprintf("pressure-finish-%d", i),
-		}, nil); err != nil {
-			t.Fatalf("run.inject %d: %v", i, err)
+		if _, writeErr := att.stdin.Write([]byte("finish\n")); writeErr != nil {
+			t.Fatalf("finish load run %d: %v", i, writeErr)
 		}
+		waitOutput(t, att, "got:finish")
 		att.close()
 		env.waitStatus(t, launched.Run.ID, domain.RunCompleted)
 		if err := env.ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
@@ -228,10 +227,8 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		t.Fatalf("relaunch replaced retained fixture checkout %s", retainedCheckout)
 	}
 	retainedAtt = waitAttach(t, env.client, retained.Run.ID)
-	if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-		RunID: retained.Run.ID, Message: "finish", IdempotencyKey: "pressure-retained-finish",
-	}, nil); err != nil {
-		t.Fatalf("run.inject retained fixture: %v", err)
+	if _, writeErr := retainedAtt.stdin.Write([]byte("finish\n")); writeErr != nil {
+		t.Fatalf("finish retained fixture: %v", writeErr)
 	}
 	waitOutput(t, retainedAtt, "got:finish")
 	// A clean harness exit enters the supervisor's reusable login-shell loop;
