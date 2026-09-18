@@ -36,7 +36,7 @@ return the protocol records used by the transport:
 
 ```go
 func New(cfg Config) (*Service, error)
-func (s *Service) Close()
+func (s *Service) Close() error
 func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.IntegrationPrepareParams) (protocol.Candidate, error)
 func (s *Service) Show(ctx context.Context, actor Actor, p protocol.IntegrationShowParams) (protocol.Candidate, error)
 func (s *Service) Patch(ctx context.Context, actor Actor, p protocol.IntegrationShowParams) (protocol.IntegrationPatchResult, error)
@@ -150,6 +150,11 @@ ID, so an original packet may expire or be purged after transfer without
 silently changing the candidate. Missing owned evidence is visible in `show`
 as `unavailable`; delivery never trusts metadata alone.
 
+Retry an interrupted `integration.prepare` with the same idempotency key and
+parameters. A `preparing` candidate resumes from its durable ordered inputs;
+completed candidates return their existing result without consulting deleted
+source packets. A retry never extends candidate expiry.
+
 The `Candidate` aggregate carries `candidate_id`, `workspace_id`, optional
 `mission_id`, ordered `submissions`, `required_sources`, immutable `inputs`,
 `target_ref`, `expected_target_revision`, optional `candidate_revision`,
@@ -215,6 +220,13 @@ output per verification; excess output is drained and discarded and sets
 mutation never becomes `passed`. A changed tracked source, including ignored
 tracked paths or mode/deletion changes, is `source_changed`; it does not create
 a new candidate revision.
+
+The server writes each terminal result to a bounded, atomic recovery artifact
+before updating the aggregate. If the aggregate save fails, startup or periodic
+cleanup reconciles that exact result without rerunning the command. A corrupt
+or mismatched artifact blocks recovery rather than manufacturing a passing
+check. These artifacts share the candidate's retention and deletion boundary.
+`Service.Close` returns the first asynchronous persistence failure.
 
 An observed exit code of `0` is the command's recorded result, not semantic
 proof that the candidate is correct. The verification status and retained

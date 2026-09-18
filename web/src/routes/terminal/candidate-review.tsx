@@ -497,7 +497,7 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
   }
 
   return (
-    <section className="mt-3 border-t border-border pt-3" aria-label="Candidate review">
+    <div className="mt-3 border-t border-border pt-3">
       <Button
         type="button"
         variant="outline"
@@ -574,7 +574,7 @@ export function CandidateReview({ workspaceID, currentRunID, client = api }: Can
           />}
         </div>
       )}
-    </section>
+    </div>
   )
 }
 
