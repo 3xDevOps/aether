@@ -204,7 +204,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   await wizard.expectStep('First run')
   await wizard.firstRun.launch('claude', 'write the result file')
 
-  const pane = page.locator('.xterm-rows:visible')
+  const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(
@@ -327,7 +327,7 @@ done
   const open = (task: string) => sidebar.getByRole('button', { name: task }).click()
   const board = () => surfaces.getByRole('button', { name: 'Board', exact: true }).click()
   await open(launched[0].task)
-  const rows = page.locator('.xterm-rows:visible')
+  const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
   await expect(rows).toContainText(launched[0].screen, { timeout: 30_000 })
   await board()
   // Start A's two-lines-per-second stream only after its browser surface is

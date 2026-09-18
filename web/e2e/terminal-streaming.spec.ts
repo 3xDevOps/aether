@@ -172,7 +172,7 @@ done
     .getByRole('complementary', { name: 'Runs' })
     .getByRole('button', { name: /same socket control/ })
     .click()
-  const rows = page.locator('.xterm-rows:visible')
+  const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
   await expect(rows).toContainText('CONTROL-BASE', { timeout: 30_000 })
   const settled = await rows.textContent()
   const socketsBeforeControl = outputSockets
@@ -187,7 +187,7 @@ done
   expect(binaryBytes).toBe(bytesBeforeControl)
   await expect.poll(() => rows.textContent()).toBe(settled)
   await expect(page.getByRole('status', { name: 'Restoring terminal history' })).toBeHidden()
-  await page.locator('.xterm-screen').click()
+  await page.locator('.xterm-screen:not([data-aether-frozen-view] *)').click()
   await page.keyboard.type('read-only-check')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(500)
@@ -202,7 +202,7 @@ done
   expect(binaryBytes).toBe(bytesBeforeControl)
   await expect.poll(() => rows.textContent()).toBe(settled)
 
-  await page.locator('.xterm-screen').click()
+  await page.locator('.xterm-screen:not([data-aether-frozen-view] *)').click()
   await page.keyboard.type('authority-check')
   await page.keyboard.press('Enter')
   await expect(rows).toContainText('CONTROL-ECHO:authority-check', { timeout: 15_000 })
@@ -215,7 +215,10 @@ test('full history download streams early ANSI output omitted from the live view
 }) => {
   await page.addInitScript(() => {
     const captured: number[] = []
-    const win = window as Window & { __terminalHistoryBytes?: number[] }
+    const win = window as Window & {
+      __terminalHistoryBytes?: number[]
+      __terminalHistoryComplete?: boolean
+    }
     win.__terminalHistoryBytes = captured
     Object.defineProperty(window, 'showSaveFilePicker', {
       configurable: true,
@@ -224,6 +227,9 @@ test('full history download streams early ANSI output omitted from the live view
           new WritableStream<Uint8Array>({
             write(chunk) {
               for (const byte of chunk) captured.push(byte)
+            },
+            close() {
+              win.__terminalHistoryComplete = true
             },
           }),
       }),
@@ -265,14 +271,16 @@ sleep 600
   await page.goto(alice.url)
   await page
     .getByRole('complementary', { name: 'Runs' })
-    .getByRole('button', { name: 'download complete terminal history', exact: true })
+    .getByRole('button', { name: /download complete terminal history/ })
     .click()
   await page.getByRole('button', { name: 'Download full terminal history', exact: true }).click()
   await expect
-    .poll(() => page.evaluate(() => (window as Window & { __terminalHistoryBytes?: number[] }).__terminalHistoryBytes?.length ?? 0), {
-      timeout: 30_000,
-    })
-    .toBeGreaterThan(0)
+    .poll(
+      () => page.evaluate(() =>
+        (window as Window & { __terminalHistoryComplete?: boolean }).__terminalHistoryComplete === true),
+      { timeout: 30_000 },
+    )
+    .toBe(true)
   const downloaded = await page.evaluate(() =>
     new TextDecoder().decode(
       new Uint8Array(
@@ -283,7 +291,7 @@ sleep 600
   expect(downloaded).toContain(firstOutput)
   expect(downloaded).toContain(currentOutput)
   expect(downloaded.indexOf(firstOutput)).toBeLessThan(downloaded.indexOf(currentOutput))
-  const rows = page.locator('.xterm-rows:visible')
+  const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
   await expect(rows).toContainText(currentOutput, { timeout: 30_000 })
   await expect(rows).not.toContainText(firstOutput)
 })

@@ -89,7 +89,7 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
     await page.goto(`${alice.url}&run=${run.id}`)
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
     await expect(page.getByText('Attached', { exact: true })).toBeVisible()
-    const rows = page.locator('.xterm-rows > div')
+    const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *) > div')
     await expect(rows).toHaveCount(desktopRows)
 
     const viewport = page.viewportSize()
@@ -108,7 +108,7 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
     expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(viewport?.height)
     // The terminal remains underneath the sheet, and opening the room did not
     // make this phone's width a new PTY geometry proposal.
-    await expect(page.locator('.xterm')).toBeVisible()
+    await expect(page.locator('.xterm:not([data-aether-frozen-view] *)')).toBeVisible()
     await expect(rows).toHaveCount(desktopRows)
     expect(await sessionGeometry()).toEqual(beforeOpen)
 

@@ -103,10 +103,10 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
 
   // The phone draws the desktop viewer's grid: every row of it, at its
   // width, on a screen a third as wide, which is what it pans over.
-  const rows = page.locator('.xterm-rows > div')
+  const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *) > div')
   await expect(rows).toHaveCount(desktopRows)
   const grid = () =>
-    page.locator('.xterm').evaluate((el) => {
+    page.locator('.xterm:not([data-aether-frozen-view] *)').evaluate((el) => {
       const screen = el.querySelector('.xterm-screen') as HTMLElement | null
       const measure = el.querySelector('.xterm-char-measure-element') as HTMLElement | null
       const host = el.parentElement as HTMLElement
