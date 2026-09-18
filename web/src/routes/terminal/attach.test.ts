@@ -2289,6 +2289,101 @@ describe('connectAttach', () => {
     a.close()
   })
 
+  it('retains authority across back-to-back duplicate acquisition refusals', () => {
+    const metadata: ControlMetadata[] = []
+    const results: ControlResult[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onControlResult: (value) => results.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 3, has_control: false }) })
+
+    // Both requests are sent before either result is delivered. The second
+    // refusal is for the lease granted by the first request.
+    a.setControl(true)
+    a.setControl(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 1, ok: true,
+        control_generation: 4, has_control: true,
+      }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 2, ok: false, code: codeConflict,
+        control_generation: 4,
+      }),
+    })
+
+    expect(results).toHaveLength(2)
+    expect(results[1]).toMatchObject({ ok: false, control_generation: 4, has_control: true })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 4, has_control: true })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 4, has_control: true })
+    a.send('still-owner')
+    expect(socket.frames().at(-1)).toMatchObject({
+      type: 'input', data: 'still-owner', control_generation: 4,
+    })
+    a.close()
+  })
+
+  it('uses explicit retained authority before an earlier grant arrives', () => {
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 3, has_control: false }) })
+    a.setControl(true)
+    a.setControl(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 2, ok: false, code: codeConflict,
+        control_generation: 4, has_control: true,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 4, has_control: true })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', ok: false, control_generation: 4, has_control: true,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 4, has_control: true })
+
+    a.setControl(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 3, ok: false, code: codeConflict,
+        control_generation: 5,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 5, has_control: false })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 1, ok: true,
+        control_generation: 4, has_control: true,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 5, has_control: false })
+    a.close()
+  })
+
   it('ignores stale control acknowledgements and revocations', () => {
     const results: ControlResult[] = []
     const a = connectAttach(() => '/ws/attach/run_1', {

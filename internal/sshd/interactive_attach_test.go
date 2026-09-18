@@ -283,6 +283,48 @@ func TestInteractiveAttachAcquireInputReleaseReacquire(t *testing.T) {
 	}
 }
 
+func TestInteractiveAttachDuplicateAcquireRetainsAuthority(t *testing.T) {
+	e := controlAttachEnv(t)
+	interactive := &interactiveTestPTY{fakePTY: e.pty}
+	e.srv.cfg.PTY = interactive
+
+	wire, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{
+		ControlSessionID: "duplicate-acquire-tab",
+		ReadOnly:         true,
+	})
+	defer func() { _ = wire.pipe.Close() }()
+	if !ack.OK || ack.HasControl {
+		t.Fatalf("interactive ack = %+v, want a read-only mirror", ack)
+	}
+
+	// Queue two acquisitions before reading either result. The second sees the
+	// lease granted by the first and must report that this attach still owns it.
+	wire.send(t, protocol.DashAttachControl{
+		Type: protocol.DashAttachControlFrame, RequestID: 1, Write: true,
+	})
+	wire.send(t, protocol.DashAttachControl{
+		Type: protocol.DashAttachControlFrame, RequestID: 2, Write: true,
+	})
+	_, first := wire.next(t)
+	_, second := wire.next(t)
+	if first == nil || !first.OK || !first.HasControl || first.ControlGeneration == 0 {
+		t.Fatalf("first acquisition = %+v, want writable control", first)
+	}
+	if second == nil || second.OK || second.Code != protocol.CodeConflict ||
+		!second.HasControl || second.ControlGeneration != first.ControlGeneration {
+		t.Fatalf("duplicate result = %+v, want conflict retaining generation %d",
+			second, first.ControlGeneration)
+	}
+
+	wire.send(t, protocol.DashAttachControl{
+		Type: protocol.DashAttachInput, Data: "still-owner",
+		ControlGeneration: first.ControlGeneration,
+	})
+	if data, ctl := wire.next(t); string(data) != "echo:still-owner" || ctl != nil {
+		t.Fatalf("post-refusal input record = %q/%+v, want echo", data, ctl)
+	}
+}
+
 func TestInteractiveAttachLaterGrantRevocationContinuesWatching(t *testing.T) {
 	e := controlAttachEnv(t)
 	interactive := &interactiveTestPTY{fakePTY: e.pty}

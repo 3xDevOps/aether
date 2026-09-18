@@ -184,7 +184,11 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize, interactiv
 			}
 		}
 		if reader.Control != nil {
-			if s.WriteJSON(*reader.Control) != nil {
+			payload, marshalErr := protocol.MarshalTerminalControl(*reader.Control)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if s.write(websocket.MessageText, payload) != nil {
 				return nil
 			}
 		}

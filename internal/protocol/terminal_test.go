@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"slices"
@@ -62,6 +63,25 @@ func TestTerminalControlRecordRoundTrip(t *testing.T) {
 	}
 	if n != 0 || geometry != [2]uint{} || reader.Control == nil || *reader.Control != want {
 		t.Fatalf("control record = n=%d geometry=%v control=%+v, want %+v", n, geometry, reader.Control, want)
+	}
+}
+
+func TestMarshalTerminalControlExplicitAuthority(t *testing.T) {
+	payload, err := MarshalTerminalControl(DashAttachControl{
+		Type: DashAttachControlFrame, RequestID: 3, ControlGeneration: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"has_control":false`)) {
+		t.Fatalf("outbound control = %s, want explicit false authority", payload)
+	}
+	var decoded DashAttachControl
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.HasControl {
+		t.Fatalf("decoded authority = true, want false")
 	}
 }
 

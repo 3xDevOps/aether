@@ -145,9 +145,23 @@ func (r *TerminalReader) Read(p []byte) (n int, geometry [2]uint, err error) {
 	return n, geometry, err
 }
 
+// MarshalTerminalControl encodes a server-to-client terminal control record.
+// Outbound results carry has_control explicitly, including false; inbound
+// commands continue to use DashAttachControl's compact omitempty encoding.
+func MarshalTerminalControl(control DashAttachControl) ([]byte, error) {
+	type terminalControlFrame struct {
+		DashAttachControl
+		HasControl bool `json:"has_control"`
+	}
+	return json.Marshal(terminalControlFrame{
+		DashAttachControl: control,
+		HasControl:        control.HasControl,
+	})
+}
+
 // WriteTerminalControl writes an ordered JSON control record.
 func WriteTerminalControl(w io.Writer, control DashAttachControl) error {
-	payload, err := json.Marshal(control)
+	payload, err := MarshalTerminalControl(control)
 	if err != nil {
 		return err
 	}

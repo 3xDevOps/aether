@@ -78,8 +78,10 @@ dashboard terminal sends a text frame such as
 `"takeover":true` for an explicit Run Room takeover and the current
 `"control_generation"` fence. The server answers on that same stream with
 `{"type":"control","request_id":17,"ok":true,"has_control":true,
-"control_session_id":"...","control_generation":8}`; refusals carry the
-`code` and `error`. An unsolicited lease revocation is also a
+"control_session_id":"...","control_generation":8}`. Every result includes
+`has_control`, even when false; refusals also carry `code` and `error`.
+A refused duplicate acquisition does not revoke a lease the session still owns.
+An unsolicited lease revocation is also a
 `type:"control"` frame, but has no `request_id`; it reports the exact revoked
 generation, and the displaced interactive session remains a read-only mirror.
 The same-socket notification is used when an interactive attach loses **Steer**:

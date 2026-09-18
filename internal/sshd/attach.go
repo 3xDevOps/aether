@@ -275,6 +275,29 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	var controlReadyPending bool
 	var leaseMu sync.Mutex
 	var revokedGeneration uint64
+	// Hold leaseMu through capture and enqueueing so a stale positive result
+	// cannot follow its revocation.
+	fillControlResult := func(record *protocol.DashAttachControl, local *attachControlLease) {
+		record.HasControl = false
+		record.ControlGeneration = 0
+		if s.cfg.Control == nil {
+			return
+		}
+		current, present := s.cfg.Control.Status(req.RunID)
+		if !present {
+			return
+		}
+		record.ControlGeneration = current.Generation
+		record.HasControl = local != nil &&
+			local.sessionID == current.SessionID &&
+			local.generation == current.Generation
+	}
+	sendControlResult := func(record protocol.DashAttachControl) {
+		leaseMu.Lock()
+		fillControlResult(&record, controlLease)
+		_ = conn.sendControl(record)
+		leaseMu.Unlock()
+	}
 	var revokedInputErr error
 	setControlReady := func(fn func(bool) error) {
 		controlReadyMu.Lock()
@@ -454,19 +477,21 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}
 	if conn.interactive {
 		conn.errorHandler = func(err error) {
-			_ = conn.sendControl(protocol.DashAttachControl{
+			record := protocol.DashAttachControl{
 				Type: protocol.DashAttachControlFrame, OK: false,
 				Code: protocol.CodeParse, Error: "parse error: " + err.Error(),
 				ControlSessionID: req.ControlSessionID,
-			})
+			}
+			sendControlResult(record)
 		}
 		conn.inputErrorHandler = func(ctl protocol.DashAttachControl, err error) {
 			code, message := attachControlError(err)
-			_ = conn.sendControl(protocol.DashAttachControl{
+			record := protocol.DashAttachControl{
 				Type: protocol.DashAttachControlFrame, OK: false, Code: code,
 				Error: message, ControlSessionID: req.ControlSessionID,
-				ControlGeneration: ctl.ControlGeneration,
-			})
+				ControlGeneration: ctl.ControlGeneration, HasControl: false,
+			}
+			_ = conn.sendControl(record)
 		}
 		conn.inputHandler = func(ctl protocol.DashAttachControl) ([]byte, error) {
 			if ctl.Data == "" || ctl.ControlGeneration == 0 || s.cfg.Control == nil {
@@ -495,20 +520,20 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			if ctl.RequestID == 0 {
 				record.Code = protocol.CodeInvalidParams
 				record.Error = "request_id is required"
-				_ = conn.sendControl(record)
+				sendControlResult(record)
 				return
 			}
 			if ctl.RequestID <= lastRequestID {
 				record.Code = protocol.CodeInvalidParams
 				record.Error = "request_id must increase"
-				_ = conn.sendControl(record)
+				sendControlResult(record)
 				return
 			}
 			lastRequestID = ctl.RequestID
 			if s.cfg.Control == nil {
 				record.Code = protocol.CodeDenied
 				record.Error = "run control is not enabled"
-				_ = conn.sendControl(record)
+				sendControlResult(record)
 				return
 			}
 			if ctl.Write {
@@ -524,12 +549,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 					},
 				)
 				if err != nil {
-					leaseMu.Unlock()
 					record.Code, record.Error = attachControlError(err)
-					if current, present := s.cfg.Control.Status(req.RunID); present {
-						record.ControlGeneration = current.Generation
-					}
+					fillControlResult(&record, controlLease)
 					_ = conn.sendControl(record)
+					leaseMu.Unlock()
 					return
 				}
 				lease := &attachControlLease{sessionID: req.ControlSessionID, generation: acquired.Generation}
@@ -576,19 +599,19 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 					_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
 				}
 				record.Code, record.Error = attachControlError(registerErr)
-				_ = conn.sendControl(record)
+				sendControlResult(record)
 				return
 			}
 			if ctl.Takeover {
 				record.Code = protocol.CodeInvalidParams
 				record.Error = "takeover requires write"
-				_ = conn.sendControl(record)
+				sendControlResult(record)
 				return
 			}
 			if ctl.ControlGeneration == 0 {
 				record.Code = protocol.CodeInvalidParams
 				record.Error = "control_generation is required"
-				_ = conn.sendControl(record)
+				sendControlResult(record)
 				return
 			}
 			leaseMu.Lock()
@@ -596,10 +619,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				return applyControlReady(true)
 			})
 			if err != nil {
-				leaseMu.Unlock()
 				record.Code, record.Error = attachControlError(err)
-				record.ControlGeneration = ctl.ControlGeneration
+				fillControlResult(&record, controlLease)
 				_ = conn.sendControl(record)
+				leaseMu.Unlock()
 				return
 			}
 			lease := controlLease

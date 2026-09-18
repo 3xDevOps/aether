@@ -422,13 +422,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       frame.ok !== true &&
       frame.control_generation !== undefined &&
       frame.control_generation === controlGeneration
+    const foreignGenerationNegative =
+      frame.ok !== true &&
+      frame.control_generation !== undefined &&
+      frame.control_generation > controlGeneration
     const granted =
       frame.has_control ??
-      (currentFenceNegative ||
-        pending?.write === true ||
-        (pending?.write === false && frame.ok === true)
-        ? false
-        : hasControl)
+      (currentFenceNegative || foreignGenerationNegative ||
+      (pending?.write === false && frame.ok === true) ? false : hasControl)
     const result: ControlResult = {
       request_id: requestID,
       ok: frame.ok === true,
