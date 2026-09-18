@@ -54,6 +54,9 @@ var coordinationCapabilities = []string{
 }
 
 // Status answers coord.status for run: who it is, exactly the peers it
+// may message, and how many messages are waiting. A current mission
+// assignment uses its server-authorized peer set; ordinary runs retain the
+// radar's active/grace behavior.
 func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
 	const method = protocol.MethodCoordStatus
 	if s.cfg.Disabled {
@@ -67,12 +70,62 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	if rpcErr != nil {
 		return protocol.CoordStatusResult{}, rpcErr
 	}
-	set, total, truncated, err := s.radar.authorizedSetBounded(ctx, run, protocol.CoordMaxStatusPeers)
-	if err != nil {
-		return protocol.CoordStatusResult{}, internalError(method, err)
+
+	var assignment *protocol.CoordMissionAssignment
+	var missionPeers []protocol.CoordPeer
+	if s.cfg.Mission != nil {
+		a, err := s.cfg.Mission.Assignment(ctx, run)
+		if err != nil {
+			return protocol.CoordStatusResult{}, missionRPCError(method, err)
+		}
+		if a.MissionID != "" {
+			assignment = &a
+			missionPeers, err = s.cfg.Mission.Peers(ctx, run)
+			if err != nil {
+				return protocol.CoordStatusResult{}, missionRPCError(method, err)
+			}
+		}
 	}
-	peers := make([]protocol.CoordPeer, 0, len(set))
-	for _, p := range set {
+	var radarPeers []authorizedPeer
+	var radarTotal int
+	var radarTruncated bool
+	if assignment == nil {
+		var radarErr error
+		radarPeers, radarTotal, radarTruncated, radarErr = s.radar.authorizedSetBounded(ctx, run, protocol.CoordMaxStatusPeers)
+		if radarErr != nil {
+			return protocol.CoordStatusResult{}, internalError(method, radarErr)
+		}
+	}
+
+	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
+	seen := make(map[domain.RunID]int, len(missionPeers)+len(radarPeers))
+	appendPeer := func(peer protocol.CoordPeer) {
+		id := domain.RunID(peer.RunID)
+		if id == "" || id == run {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			// MissionService and the radar each return a bounded unique set;
+			// a duplicate keeps the first current-authority entry.
+			return
+		}
+		if len(peers) >= protocol.CoordMaxStatusPeers {
+			return
+		}
+		seen[id] = len(peers)
+		peers = append(peers, peer)
+	}
+	missionTotal := 0
+	for _, peer := range missionPeers {
+		if target, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err != nil ||
+			target == nil || target.Status.Terminal() {
+			continue
+		}
+		missionTotal++
+		peer.State = protocol.CoordPeerMission
+		appendPeer(s.decoratePeer(ctx, peer))
+	}
+	for _, p := range radarPeers {
 		task, taskBytes, taskTruncated := "", 0, false
 		memberID := ""
 		if r, gerr := s.cfg.Store.GetRun(ctx, p.run); gerr == nil && r != nil {
@@ -95,20 +148,67 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		if !p.expiry.IsZero() {
 			peer.ExpiresAt = p.expiry.UTC().Format(time.RFC3339)
 		}
-		peers = append(peers, peer)
+		appendPeer(peer)
 	}
 	unread, err := s.cfg.Mail.CountUnackedRunMessages(ctx, run)
 	if err != nil {
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
 	task, taskBytes, taskTruncated := boundStatusText(self.Task, protocol.CoordMaxStatusTaskBytes)
+	capabilities := coordinationCapabilities
+	total, truncated := radarTotal, radarTruncated
+	if assignment != nil {
+		capabilities = assignment.Capabilities
+		total = missionTotal
+		truncated = missionTotal > protocol.CoordMaxStatusPeers
+	}
 	return protocol.CoordStatusResult{
 		WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
 		WorkspaceID: string(self.WorkspaceID), MemberID: string(self.MemberID),
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
-		Peers: peers, PeerTotal: total, PeersTruncated: truncated, Unread: unread,
-		Capabilities: append([]string(nil), coordinationCapabilities...),
+		Assignment: assignment, Peers: peers, PeerTotal: total,
+		PeersTruncated: truncated, Unread: unread,
+		Capabilities: append([]string(nil), capabilities...),
 	}, nil
+}
+
+func (s *Service) decoratePeer(ctx context.Context, peer protocol.CoordPeer) protocol.CoordPeer {
+	if peer.TaskBytes == 0 && peer.Task != "" {
+		peer.Task, peer.TaskBytes, peer.TaskTruncated =
+			boundStatusText(peer.Task, protocol.CoordMaxStatusTaskBytes)
+	}
+	if peer.MemberID == "" {
+		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err == nil && r != nil {
+			peer.MemberID = string(r.MemberID)
+			if peer.Task == "" {
+				peer.Task, peer.TaskBytes, peer.TaskTruncated =
+					boundStatusText(r.Task, protocol.CoordMaxStatusTaskBytes)
+			}
+		}
+	}
+	return peer
+}
+
+func missionRPCError(method string, err error) *protocol.Error {
+	if err == nil {
+		return nil
+	}
+	var rpcErr *protocol.Error
+	if errors.As(err, &rpcErr) && rpcErr != nil {
+		copyErr := *rpcErr
+		if copyErr.Message == "" {
+			copyErr.Message = method + ": mission request failed"
+		}
+		return &copyErr
+	}
+	code := protocol.CodeInternal
+	switch {
+	case errors.Is(err, store.ErrMissionStale), errors.Is(err, store.ErrMissionTakeover):
+		code = protocol.CodeDenied
+	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady):
+		code = protocol.CodeConflict
+	}
+	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
 func (s *Service) transportAllowed(run domain.RunID) bool {
 	return s.spend(s.requestBuckets, run, requestBurst, requestRefill)
@@ -393,12 +493,37 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		}
 		refs[i] = ref
 	}
-	if s.cfg.Evidence == nil {
-		return protocol.CoordReportResult{}, internalError(method, ErrNoEvidenceCapture)
-	}
 	self, rpcErr := s.resolveRun(ctx, method, run)
 	if rpcErr != nil {
 		return protocol.CoordReportResult{}, rpcErr
+	}
+	existingFinalized := false
+	if prior, err := s.cfg.Mail.GetCoordReportByIdempotency(ctx, run, p.IdempotencyKey); err == nil {
+		existingFinalized = prior != nil && prior.State == store.CoordReportFinalized
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
+	missionActive := false
+	missionLookupFailed := false
+	if s.cfg.Mission != nil {
+		assignment, err := s.cfg.Mission.Assignment(ctx, run)
+		if err != nil {
+			if !existingFinalized {
+				return protocol.CoordReportResult{}, missionRPCError(method, err)
+			}
+			missionLookupFailed = true
+		} else {
+			missionActive = assignment.MissionID != ""
+		}
+		if !existingFinalized {
+			if err := s.cfg.Mission.ValidateReport(ctx, run); err != nil {
+				return protocol.CoordReportResult{}, missionRPCError(method, err)
+			}
+		}
+	}
+	missionReconcile := s.cfg.Mission != nil && (missionActive || missionLookupFailed)
+	if s.cfg.Evidence == nil {
+		return protocol.CoordReportResult{}, internalError(method, ErrNoEvidenceCapture)
 	}
 	lock := s.reportLock(run)
 	lock.Lock()
@@ -426,7 +551,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	if report.State == store.CoordReportFinalized && report.PublishedAt != nil {
+	if report.State == store.CoordReportFinalized && report.PublishedAt != nil && !missionReconcile {
 		return coordReportResult(report), nil
 	}
 
@@ -466,6 +591,11 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}
 	if report.State != store.CoordReportFinalized {
 		return protocol.CoordReportResult{}, internalError(method, errors.New("coord report did not finalize"))
+	}
+	if missionReconcile {
+		if err := s.cfg.Mission.ReconcileReport(ctx, run, report, packet); err != nil {
+			return protocol.CoordReportResult{}, missionRPCError(method, err)
+		}
 	}
 	if report.PublishedAt == nil {
 		if rpcErr := s.publishReportEvidence(ctx, report, packet); rpcErr != nil {
@@ -673,6 +803,13 @@ func (s *Service) drainOutboxPage(ctx context.Context) (pending, progressed bool
 			pending = true
 			continue
 		}
+		if s.cfg.Mission != nil {
+			if rerr := s.cfg.Mission.ReconcileReport(ctx, report.RunID, report, packet); rerr != nil {
+				s.recordReportFailure(ctx, pub, rerr, false)
+				pending = true
+				continue
+			}
+		}
 		if perr := s.publishReportEvidence(ctx, report, packet); perr != nil {
 			permanent := errors.Is(perr, store.ErrCoordReportPublicationConflict) ||
 				errors.Is(perr, events.ErrEventIDConflict)
@@ -868,14 +1005,43 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 		}
 	}
 	if !correlated {
-		peer, err := s.radar.authorized(ctx, from, to)
-		if err != nil {
-			return nil, internalError(method, err)
+		missionAuthorized := false
+		missionActive := false
+		if s.cfg.Mission != nil {
+			assignment, err := s.cfg.Mission.Assignment(ctx, from)
+			if err != nil {
+				return nil, missionRPCError(method, err)
+			}
+			missionActive = assignment.MissionID != ""
+			if missionActive {
+				peers, err := s.cfg.Mission.Peers(ctx, from)
+				if err != nil {
+					return nil, missionRPCError(method, err)
+				}
+				for _, peer := range peers {
+					if target.WorkspaceID == sender.WorkspaceID && domain.RunID(peer.RunID) == to {
+						missionAuthorized = true
+						break
+					}
+				}
+			}
 		}
-		if peer.state == "" {
+		if missionActive && !missionAuthorized {
 			return nil, &protocol.Error{
 				Code:    protocol.CodeDenied,
-				Message: fmt.Sprintf("%s: run %s is not an authorized peer of run %s", method, to, from),
+				Message: fmt.Sprintf("%s: run %s is not an authorized mission peer of run %s", method, to, from),
+			}
+		}
+		if !missionActive && !missionAuthorized {
+			peer, err := s.radar.authorized(ctx, from, to)
+			if err != nil {
+				return nil, internalError(method, err)
+			}
+			if peer.state == "" {
+				return nil, &protocol.Error{
+					Code:    protocol.CodeDenied,
+					Message: fmt.Sprintf("%s: run %s is not an authorized peer of run %s", method, to, from),
+				}
 			}
 		}
 	}

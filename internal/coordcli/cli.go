@@ -18,16 +18,11 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 const (
-	// BinaryPath is the argv0-selected path for the coordination CLI. The
-	// scheduler mounts the same digest-staged server binary here alongside
-	// mcpbridge.BinaryPath, whose historical path remains the MCP/status hook
-	// surface.
-	BinaryPath = "/usr/local/bin/aether-internal"
 	// SchemaVersion is the machine-readable CLI envelope version.
 	SchemaVersion = protocol.CoordWireVersion
 
@@ -37,6 +32,8 @@ const (
 	ExitDenied  = 3
 	ExitMissing = 4
 )
+
+var defaultSocketPath = coordtransport.SocketPath
 
 // Config makes Run testable without changing the command's wire contract.
 // Socket is intentionally not a command-line option: production always uses
@@ -83,7 +80,7 @@ func Execute(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 // calling process's cwd or environment and never writes a user repository.
 func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	if cfg.Socket == "" {
-		cfg.Socket = mcpbridge.SocketPath
+		cfg.Socket = defaultSocketPath
 	}
 	if cfg.In == nil {
 		cfg.In = os.Stdin
@@ -95,7 +92,13 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		cfg.ErrOut = os.Stderr
 	}
 	if len(args) == 0 {
-		return fail(cfg.Out, protocol.CodeInvalidRequest, "a command is required")
+		return fail(cfg.Out, protocol.CodeInvalidRequest, "a command is required; use --help for command usage")
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		return writeHelp(cfg.Out, "")
+	}
+	if len(args) >= 2 && (args[len(args)-1] == "-h" || args[len(args)-1] == "--help") {
+		return writeHelp(cfg.Out, strings.Join(args[:len(args)-1], " "))
 	}
 
 	var result any
@@ -115,6 +118,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = reply(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "report":
 		result, err = report(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
+	case "task", "worker":
+		result, err = missionCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In, cfg.ErrOut)
 	default:
 		return fail(cfg.Out, protocol.CodeMethodNotFound, "unknown command: "+args[0])
 	}
@@ -123,6 +128,90 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	}
 	if err := writeEnvelope(cfg.Out, Envelope{SchemaVersion: SchemaVersion, OK: true, Result: result}); err != nil {
 		return ExitFailure, fmt.Errorf("write success response: %w", err)
+	}
+	return ExitOK, nil
+}
+
+const topUsage = `usage: aether-internal <command> [options]
+
+Commands:
+  status    inspect this run and its authorized peers
+  skill     print the coordination workflow and live assignment
+  send      send a durable message to an authorized peer
+  inbox     read the at-least-once inbox
+  ask       ask an authorized peer a durable question
+  reply     answer a durable question
+  task      inspect and mutate mission task revisions
+  worker    inspect and manage mission worker attempts
+  report    submit a durable outcome with evidence references
+
+Run "aether-internal <command> --help" for command options.
+`
+
+var commandUsages = map[string]string{
+	"status": `usage: aether-internal status --json
+
+Print this run's identity, assignment, authorized peers, unread count, and capabilities.
+`,
+	"skill": `usage: aether-internal skill
+
+Print the bounded coordination workflow. Outside a coordinated run this still
+prints the general workflow, without claiming an identity or assignment.
+`,
+	"send": `usage: aether-internal send --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
+
+Send one durable message. A body file of "-" reads standard input.
+`,
+	"inbox": `usage: aether-internal inbox [--wait <seconds>] [--ack <token>]
+
+Read one bounded inbox batch. Supplying --ack acknowledges the previous batch.
+`,
+	"ask": `usage: aether-internal ask --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
+
+Ask one durable, correlated question. A body file of "-" reads standard input.
+`,
+	"reply": `usage: aether-internal reply --question-id <id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
+
+Reply to the sender of one durable question. A body file of "-" reads standard input.
+`,
+	"task": `usage: aether-internal task <show|list|propose|revise|accept|accept-submission|abandon> [options]
+
+Task mutations use the assignment and integrator authority on the run socket and require explicit idempotency keys.
+Use --revision-file path or --revision-file - for bounded JSON revisions.
+`,
+	"worker": `usage: aether-internal worker <start|list|inspect|cancel|retry> [options]
+
+Worker mutations use the mission authority on the run socket. Dispatch keys
+are explicit identities for retry-safe starts and retries.
+`,
+	"report": `usage: aether-internal report --outcome <success|failure|blocked> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+
+Submit one durable outcome. A summary file of "-" reads standard input.
+`,
+	"task show":              "usage: aether-internal task show --task-id <id>\n",
+	"task list":              "usage: aether-internal task list --mission-id <id>\n",
+	"task propose":           "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
+	"task abandon":           "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
+	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
+	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",
+	"worker cancel":          "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker retry":           "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
+}
+
+func writeHelp(out io.Writer, command string) (int, error) {
+	text, ok := commandUsages[command]
+	if command == "" {
+		text, ok = topUsage, true
+	}
+	if !ok {
+		return fail(out, protocol.CodeMethodNotFound, "unknown command: "+command)
+	}
+	if _, err := io.WriteString(out, text); err != nil {
+		return ExitFailure, fmt.Errorf("write help: %w", err)
 	}
 	return ExitOK, nil
 }
@@ -137,7 +226,7 @@ func status(ctx context.Context, socket string, args []string) (protocol.CoordSt
 		return protocol.CoordStatusResult{}, usageError("status requires --json")
 	}
 	var out protocol.CoordStatusResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
 		return out, err
 	}
 	if out.Peers == nil {
@@ -157,25 +246,147 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 	if fs.NArg() != 0 {
 		return fail(out, protocol.CodeInvalidParams, "skill takes no arguments")
 	}
+	if socket == "" {
+		return writeSkill(out, nil)
+	}
 	var status protocol.CoordStatusResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
+		if errorCode(err) == protocol.CodeUnavailable {
+			return writeSkill(out, nil)
+		}
 		return fail(out, errorCode(err), err.Error())
 	}
-	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\nRun: %s\n", SchemaVersion, status.RunID); err != nil {
+	return writeSkill(out, &status)
+}
+
+const skillWorkflow = `Workflow:
+1. Inspect the assignment and acceptance requirements before acting.
+2. Stay within the assigned scope; do not invent identity or authority.
+3. Use aether-internal to read the inbox at natural checkpoints and ask authorized peers when blocked.
+4. Keep evidence for the work you perform and report success, failure, or blocked.
+5. Read the inbox once more before reporting, then take no new work after submission.
+`
+
+func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
+	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\n", SchemaVersion); err != nil {
 		return ExitFailure, fmt.Errorf("write skill header: %w", err)
 	}
-	assignment := strings.TrimSpace(status.Task)
-	if assignment == "" {
-		assignment = "(assignment not supplied)"
+	if status == nil {
+		if _, err := io.WriteString(out, "No coordination socket is mounted; this is the general workflow and carries no run identity or assignment.\n"); err != nil {
+			return ExitFailure, fmt.Errorf("write skill availability: %w", err)
+		}
+	} else {
+		assignment := strings.TrimSpace(status.Task)
+		if assignment == "" {
+			assignment = "(assignment not supplied)"
+		}
+		if len(assignment) > protocol.CoordMaxStatusTaskBytes {
+			assignment = assignment[:protocol.CoordMaxStatusTaskBytes] + "…"
+		}
+		if _, err := fmt.Fprintf(out, "Run: %s\nAssignment: %s\n", boundedSkillField(status.RunID), assignment); err != nil {
+			return ExitFailure, fmt.Errorf("write skill assignment: %w", err)
+		}
+		if assignment := status.Assignment; assignment != nil {
+			if _, err := fmt.Fprintf(out, "Mission: %s\nRole: %s\nTask ID: %s\nTask revision: %d\nAttempt ID: %s\nIntegrator run: %s\nIntegrator generation: %d\n",
+				boundedSkillField(assignment.MissionID),
+				boundedSkillField(assignment.Role),
+				boundedSkillField(assignment.TaskID),
+				assignment.TaskRevision,
+				boundedSkillField(assignment.AttemptID),
+				boundedSkillField(assignment.IntegratorRunID),
+				assignment.IntegratorGeneration); err != nil {
+				return ExitFailure, fmt.Errorf("write skill mission assignment: %w", err)
+			}
+			switch assignment.Role {
+			case "integrator":
+				if len(assignment.ExecutionChoices) > 0 {
+					if _, err := fmt.Fprintf(out, "Approved execution choices: %s\n", boundedSkillExecutionChoices(assignment.ExecutionChoices)); err != nil {
+						return ExitFailure, fmt.Errorf("write skill execution choices: %w", err)
+					}
+				}
+				if _, err := fmt.Fprintf(out, "Attempt allowance: active=%d/%d total=%d/%d remaining_concurrent=%d remaining_total=%d\n",
+					assignment.ActiveAttempts,
+					assignment.MaxConcurrentAttempts,
+					assignment.TotalAttempts,
+					assignment.MaxTotalAttempts,
+					assignment.MaxConcurrentAttempts-assignment.ActiveAttempts,
+					assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
+					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
+				}
+			case "worker":
+				if _, err := io.WriteString(out, "Worker scope: read and propose changes only for the assigned task; do not spawn workers.\n"); err != nil {
+					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
+				}
+			}
+			if len(assignment.Capabilities) > 0 {
+				capabilities := boundedSkillCapabilities(assignment.Capabilities)
+				if _, err := fmt.Fprintf(out, "Assignment capabilities: %s\n", capabilities); err != nil {
+					return ExitFailure, fmt.Errorf("write skill assignment capabilities: %w", err)
+				}
+			}
+		}
+		if len(status.Capabilities) > 0 {
+			capabilities := boundedSkillCapabilities(status.Capabilities)
+			if _, err := fmt.Fprintf(out, "Capabilities: %s\n", capabilities); err != nil {
+				return ExitFailure, fmt.Errorf("write skill capabilities: %w", err)
+			}
+		}
 	}
-	if _, err := fmt.Fprintf(out, "Assignment: %s\n", assignment); err != nil {
-		return ExitFailure, fmt.Errorf("write skill assignment: %w", err)
-	}
-	_, err := io.WriteString(out, "Inspect this assignment before acting. Stay within scope, use aether-internal to communicate with authorized peers, read inbox at natural checkpoints, ask questions when blocked, and report success, failure, or blocked with real evidence. Do not take new work after reporting.\n")
-	if err != nil {
+	if _, err := io.WriteString(out, skillWorkflow); err != nil {
 		return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
 	}
 	return ExitOK, nil
+}
+
+func boundedSkillField(value string) string {
+	if len(value) <= 256 {
+		return value
+	}
+	return value[:256] + "…"
+}
+
+func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) string {
+	var b strings.Builder
+	for _, choice := range values {
+		value := "account=" + boundedSkillField(choice.AccountMemberID) +
+			" harness=" + boundedSkillField(choice.Harness) +
+			" mode=" + boundedSkillField(choice.Mode)
+		separator := 0
+		if b.Len() > 0 {
+			separator = 2
+		}
+		if b.Len()+separator+len(value) > 2048 {
+			break
+		}
+		if separator > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(value)
+	}
+	if b.Len() == 2048 {
+		return b.String() + "…"
+	}
+	return b.String()
+}
+
+func boundedSkillCapabilities(values []string) string {
+	var b strings.Builder
+	for _, value := range values {
+		value = boundedSkillField(value)
+		if b.Len() > 0 {
+			if b.Len()+2+len(value) > 2048 {
+				break
+			}
+			b.WriteString(", ")
+		} else if len(value) > 2048 {
+			value = value[:2048]
+		}
+		b.WriteString(value)
+	}
+	if b.Len() == 2048 {
+		return b.String() + "…"
+	}
+	return b.String()
 }
 
 func send(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordSendResult, error) {
@@ -203,7 +414,7 @@ func send(ctx context.Context, socket string, args []string, in io.Reader, errOu
 	}
 	p := protocol.CoordSendParams{ToRunID: *to, Body: text, IdempotencyKey: idempotencyKey}
 	var out protocol.CoordSendResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordSend, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordSend, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -220,7 +431,7 @@ func inbox(ctx context.Context, socket string, args []string) (protocol.CoordInb
 		return protocol.CoordInboxResult{}, usageError("inbox takes --wait and --ack flags")
 	}
 	var out protocol.CoordInboxResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: *ack, WaitSeconds: *wait}, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: *ack, WaitSeconds: *wait}, &out); err != nil {
 		return out, err
 	}
 	if out.Messages == nil {
@@ -254,7 +465,7 @@ func ask(ctx context.Context, socket string, args []string, in io.Reader, errOut
 	}
 	p := protocol.CoordAskParams{ToRunID: *to, Body: text, IdempotencyKey: idempotencyKey}
 	var out protocol.CoordAskResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordAsk, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordAsk, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -285,7 +496,7 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 	}
 	p := protocol.CoordReplyParams{QuestionID: *question, Body: text, IdempotencyKey: idempotencyKey}
 	var out protocol.CoordReplyResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordReply, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReply, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -315,7 +526,7 @@ func report(ctx context.Context, socket string, args []string, in io.Reader, err
 	}
 	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey}
 	var out protocol.CoordReportResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -360,6 +571,9 @@ func resolveBody(body, file string, in io.Reader) (result string, retErr error) 
 		return "", usageError("choose one of --body and --body-file")
 	}
 	if file == "" && body != "-" {
+		if len(body) > protocol.CoordMaxBodyBytes {
+			return "", usageError(fmt.Sprintf("body exceeds %d bytes", protocol.CoordMaxBodyBytes))
+		}
 		return body, nil
 	}
 	r := in
@@ -377,9 +591,12 @@ func resolveBody(body, file string, in io.Reader) (result string, retErr error) 
 		}()
 		r = f
 	}
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(io.LimitReader(r, protocol.CoordMaxBodyBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read body: %w", err)
+	}
+	if len(data) > protocol.CoordMaxBodyBytes {
+		return "", usageError(fmt.Sprintf("body exceeds %d bytes", protocol.CoordMaxBodyBytes))
 	}
 	return string(data), nil
 }
@@ -416,7 +633,7 @@ func errorCode(err error) int {
 	if _, ok := err.(*CLIUsageError); ok {
 		return protocol.CodeInvalidParams
 	}
-	if code := mcpbridge.ErrorCode(err); code != 0 {
+	if code := coordtransport.ErrorCode(err); code != 0 {
 		return code
 	}
 	return protocol.CodeInternal

@@ -306,10 +306,10 @@ describe('command palette', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
-      expect(api.runLaunch).toHaveBeenCalledWith({
+      expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
         workspace_id: workspace.id,
         harness: 'claude',
-      }),
+      })),
     )
     // A launch drops the user straight into the agent terminal.
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))

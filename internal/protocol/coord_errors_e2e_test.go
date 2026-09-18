@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/overlap"
@@ -58,7 +59,7 @@ func TestCoordWireV3ErrorsGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	conn, err := net.Dial("unix", filepath.Join(dir, coord.SocketName))
+	conn, err := net.Dial("unix", filepath.Join(dir, coordtransport.SocketName))
 	if err != nil {
 		t.Fatalf("dial coordination socket: %v", err)
 	}

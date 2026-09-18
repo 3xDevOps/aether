@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
 )
 
@@ -16,7 +17,7 @@ import (
 // against the coordination socket mounted with it.
 func mcp(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	socket := fs.String("socket", mcpbridge.SocketPath, "coordination socket to bridge")
+	socket := fs.String("socket", coordtransport.SocketPath, "coordination socket to bridge")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

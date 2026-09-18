@@ -31,6 +31,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		EvidencePacketPayload{PacketID: "packet_1", WorkspaceID: "ws_1", RunID: "r1", CreatorID: "mem_1", Trigger: "manual",
 			EventBoundary: 42, ChangedFileCount: 2, SourceCount: 3, UnavailableSourceCount: 1,
 			TruncatedSourceCount: 1, UnresolvedFactCount: 4},
+		MissionChangedPayload{MissionID: "mission_1", IntegratorGeneration: 2, AcceptedSetVersion: 7},
 		OverlapPayload{With: []OverlapPeer{{RunID: "r2", Files: []string{"main.go"}}}},
 		BudgetPayload{State: BudgetExceeded, SpendUSD: 12.5, LimitUSD: 10, WarnUSD: 8,
 			UnmeteredRuns: 2, Reason: "new run refused"},

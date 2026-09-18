@@ -31,4 +31,8 @@ type Services struct {
 	Rooms RoomService
 	// Evidence is the durable evidence packet service.
 	Evidence EvidenceService
+	// MissionControl arbitrates mission worker takeover and integrator input.
+	MissionControl MissionControl
+	// Missions is authenticated human mission creation and inspection.
+	Missions MissionService
 }

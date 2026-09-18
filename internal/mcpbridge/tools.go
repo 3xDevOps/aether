@@ -2,8 +2,8 @@ package mcpbridge
 
 import (
 	"context"
-	"errors"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -51,13 +51,13 @@ type inboxOutput struct {
 	AckToken string                  `json:"ack_token,omitempty"`
 }
 
-func registerTools(srv *mcp.Server, c *client, g *gate) {
+func registerTools(srv *mcp.Server, socket string, g *gate) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolStatus,
 		Description: "Report this run's v3 identity, assignment, authorized peers, and capabilities.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, protocol.CoordStatusResult, error) {
 		out := protocol.CoordStatusResult{Peers: []protocol.CoordPeer{}, Capabilities: []string{}}
-		if err := c.call(ctx, protocol.MethodCoordStatus, nil, &out); err != nil {
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
 			return failed(err), out, nil
 		}
 		if out.Peers == nil {
@@ -75,7 +75,7 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 			"An explicit stable idempotency_key is required; retries with the same key return the original receipt.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordSendParams) (*mcp.CallToolResult, protocol.CoordSendResult, error) {
 		var out protocol.CoordSendResult
-		if err := c.call(ctx, protocol.MethodCoordSend, in, &out); err != nil {
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordSend, in, &out); err != nil {
 			return failed(err), out, nil
 		}
 		return nil, out, nil
@@ -89,7 +89,7 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 		empty := protocol.CoordInboxResult{Messages: []protocol.CoordMessage{}}
 		id := callID(req)
 		if err := g.claim(ctx, id); err != nil {
-			return failed(internalError(protocol.MethodCoordInbox, err)), empty, nil
+			return failed(err), empty, nil
 		}
 		defer g.release(id)
 		// If the caller does not provide an explicit token, carry forward the
@@ -99,7 +99,7 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 			in.AckToken = g.token()
 		}
 		var out protocol.CoordInboxResult
-		if err := c.call(ctx, protocol.MethodCoordInbox, in, &out); err != nil {
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordInbox, in, &out); err != nil {
 			return failed(err), empty, nil
 		}
 		g.stage(id, out.AckToken)
@@ -115,7 +115,7 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 			"An explicit stable idempotency_key is required; retries with the same key return the original question_id.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordAskParams) (*mcp.CallToolResult, protocol.CoordAskResult, error) {
 		var out protocol.CoordAskResult
-		if err := c.call(ctx, protocol.MethodCoordAsk, in, &out); err != nil {
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordAsk, in, &out); err != nil {
 			return failed(err), out, nil
 		}
 		return nil, out, nil
@@ -127,7 +127,7 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 			"An explicit stable idempotency_key is required.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReplyParams) (*mcp.CallToolResult, protocol.CoordReplyResult, error) {
 		var out protocol.CoordReplyResult
-		if err := c.call(ctx, protocol.MethodCoordReply, in, &out); err != nil {
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReply, in, &out); err != nil {
 			return failed(err), out, nil
 		}
 		return nil, out, nil
@@ -139,7 +139,7 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 			"An explicit stable idempotency_key is required; the server captures evidence before accepting it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReportParams) (*mcp.CallToolResult, protocol.CoordReportResult, error) {
 		var out protocol.CoordReportResult
-		if err := c.call(ctx, protocol.MethodCoordReport, in, &out); err != nil {
+		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReport, in, &out); err != nil {
 			return failed(err), out, nil
 		}
 		return nil, out, nil
@@ -152,9 +152,10 @@ func registerTools(srv *mcp.Server, c *client, g *gate) {
 func failed(err error) *mcp.CallToolResult {
 	res := &mcp.CallToolResult{}
 	res.SetError(err)
-	var ce *coordError
-	if errors.As(err, &ce) {
-		res.Meta = mcp.Meta{MetaErrorCode: ce.Code}
+	code := coordtransport.ErrorCode(err)
+	if code == 0 {
+		code = protocol.CodeInternal
 	}
+	res.Meta = mcp.Meta{MetaErrorCode: code}
 	return res
 }

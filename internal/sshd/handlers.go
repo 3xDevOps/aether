@@ -122,17 +122,14 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
-	actor, err := resolveActor(ctx, s.cfg.Store, member)
+	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID)
 	if err != nil {
+		if errors.Is(err, permissions.ErrDenied) {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunLaunch + ": " + err.Error()}
+		}
 		return nil, rpcError(err)
 	}
-	if cerr := permissions.Check(permissions.Launch, actor, permissions.Target{}); cerr != nil {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: protocol.MethodRunLaunch + ": " + cerr.Error()}
-	}
-	account, perr := s.launchAccount(ctx, member, p.AccountMemberID)
-	if perr != nil {
-		return nil, perr
-	}
+	account := admission.Account.ID
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{CachedBase: p.CachedBase})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {

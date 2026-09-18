@@ -7,6 +7,7 @@ import {
   FolderGit2,
   FolderTree,
   History,
+  ListTodo,
   Settings,
   ShieldQuestion,
   Users,
@@ -27,6 +28,8 @@ export interface Surface {
  */
 export function surfaces(cap: Capability): Surface[] {
   const list: Surface[] = []
+  if (cap.hasMethod('mission.list'))
+    list.push({ name: 'missions', label: 'Missions', Icon: ListTodo })
   if (cap.hasMethod('approval.list'))
     list.push({ name: 'approvals', label: 'Approvals', Icon: ShieldQuestion })
   if (cap.hasMethod('workspace.timeline'))

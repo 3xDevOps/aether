@@ -250,6 +250,42 @@ func TestStatusReporters(t *testing.T) {
 	}
 }
 
+// Supported interactive profiles load discovery through a vendor-native
+// per-launch mechanism. The assets and pointers are runtime-scoped and never
+// require a member-home or repository instruction file.
+func TestDiscoveryMechanisms(t *testing.T) {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode"} {
+		p, ok := Lookup(name)
+		if !ok {
+			t.Fatalf("Lookup(%q) missing", name)
+		}
+		args := p.DiscoveryLaunchArgs("/run/aether")
+		env := p.DiscoveryLaunchEnv("/run/aether")
+		if len(args) == 0 && len(env) == 0 {
+			t.Errorf("%s has no taskless discovery mechanism", name)
+		}
+		for _, arg := range args {
+			if strings.Contains(arg, CoordPlaceholder) {
+				t.Errorf("%s discovery args kept placeholder: %v", name, args)
+			}
+		}
+		for key, value := range env {
+			if strings.Contains(value, CoordPlaceholder) {
+				t.Errorf("%s discovery env %s kept placeholder: %q", name, key, value)
+			}
+		}
+		for file, body := range p.DiscoveryFiles {
+			if len(body) == 0 {
+				t.Errorf("%s ships empty discovery file %q", name, file)
+			}
+		}
+	}
+	custom, _ := Lookup("custom")
+	if len(custom.DiscoveryArgs) != 0 || len(custom.DiscoveryEnv) != 0 || len(custom.DiscoveryFiles) != 0 {
+		t.Fatalf("custom profile must not carry discovery wiring: %+v", custom)
+	}
+}
+
 func TestArgv(t *testing.T) {
 	template := []string{"claude", "-p", TaskPlaceholder, "prefix-{task}-suffix"}
 	got := Argv(template, "fix the bug")

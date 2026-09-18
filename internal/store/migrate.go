@@ -952,6 +952,226 @@ CREATE TABLE run_cost_deletions (
 	`
 ALTER TABLE runs ADD COLUMN archived_at INTEGER;
 `,
+	// v32: durable missions, immutable task specifications, fenced attempts,
+	// exact-version submissions, and acceptance records. Mission state is
+	// deliberately separate from Store so compatibility stores can opt in.
+	`
+CREATE TABLE missions (
+	id                        TEXT PRIMARY KEY,
+	workspace_id              TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	objective                 TEXT NOT NULL,
+	accountable_human_id      TEXT NOT NULL REFERENCES members(id),
+	integrator_account_member_id TEXT NOT NULL DEFAULT '',
+	integrator_harness        TEXT NOT NULL DEFAULT '',
+	integrator_mode           TEXT NOT NULL DEFAULT 'headless',
+	execution_choices         TEXT NOT NULL DEFAULT '[]',
+	max_concurrent_attempts   INTEGER NOT NULL CHECK (max_concurrent_attempts > 0),
+	max_total_attempts        INTEGER NOT NULL CHECK (max_total_attempts > 0),
+	current_integrator_run_id TEXT,
+	integrator_generation     INTEGER NOT NULL DEFAULT 1,
+	accepted_set_version      INTEGER NOT NULL DEFAULT 0,
+	idempotency_key           TEXT NOT NULL,
+	created_at                INTEGER NOT NULL,
+	updated_at                INTEGER NOT NULL,
+	CHECK (json_valid(execution_choices)),
+	UNIQUE (workspace_id, idempotency_key)
+);
+CREATE INDEX idx_missions_workspace ON missions(workspace_id, created_at, id);
+
+CREATE TABLE mission_tasks (
+	id               TEXT PRIMARY KEY,
+	mission_id       TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	current_revision INTEGER NOT NULL DEFAULT 1 CHECK (current_revision > 0),
+	abandoned_at     INTEGER,
+	created_at       INTEGER NOT NULL,
+	updated_at       INTEGER NOT NULL
+);
+CREATE INDEX idx_mission_tasks_mission ON mission_tasks(mission_id, created_at, id);
+
+CREATE TABLE mission_task_revisions (
+	task_id               TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	revision              INTEGER NOT NULL CHECK (revision > 0),
+	title                 TEXT NOT NULL,
+	objective             TEXT NOT NULL,
+	scope                 TEXT NOT NULL DEFAULT '{}',
+	evidence_requirements TEXT NOT NULL DEFAULT '[]',
+	status                TEXT NOT NULL CHECK (status IN ('proposed', 'accepted', 'superseded', 'abandoned')),
+	proposed_by_run_id    TEXT NOT NULL DEFAULT '',
+	supersedes_revision   INTEGER NOT NULL DEFAULT 0,
+	created_at            INTEGER NOT NULL,
+	accepted_at           INTEGER,
+	PRIMARY KEY (task_id, revision),
+	CHECK (json_valid(scope)),
+	CHECK (json_valid(evidence_requirements))
+);
+CREATE INDEX idx_mission_task_revisions_status
+	ON mission_task_revisions(task_id, status, revision DESC);
+
+CREATE TABLE mission_task_dependencies (
+	task_id             TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision       INTEGER NOT NULL,
+	depends_on_task_id  TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	depends_on_revision INTEGER NOT NULL CHECK (depends_on_revision > 0),
+	output_ref          TEXT NOT NULL DEFAULT '',
+	created_at          INTEGER NOT NULL,
+	PRIMARY KEY (task_id, task_revision, depends_on_task_id, depends_on_revision),
+	CHECK (task_id <> depends_on_task_id),
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision) ON DELETE CASCADE
+);
+CREATE INDEX idx_mission_task_dependencies_source
+	ON mission_task_dependencies(depends_on_task_id, depends_on_revision);
+
+CREATE TABLE mission_attempts (
+	id                    TEXT PRIMARY KEY,
+	mission_id            TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id               TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision         INTEGER NOT NULL,
+	number                INTEGER NOT NULL CHECK (number > 0),
+	dispatch_key          TEXT NOT NULL,
+	harness               TEXT NOT NULL DEFAULT '',
+	mode                  TEXT NOT NULL DEFAULT 'headless',
+	state                 TEXT NOT NULL CHECK (state IN ('reserved', 'launching', 'running', 'unknown', 'submitted', 'completed', 'failed', 'cancelled', 'superseded', 'abandoned')),
+	run_id                TEXT,
+	actor_run_id          TEXT NOT NULL DEFAULT '',
+	authorizing_human_id  TEXT NOT NULL DEFAULT '',
+	run_owner_id          TEXT NOT NULL DEFAULT '',
+	account_owner_id      TEXT NOT NULL DEFAULT '',
+	authority_generation  INTEGER NOT NULL DEFAULT 0,
+	integrator_generation INTEGER NOT NULL DEFAULT 0,
+	created_at            INTEGER NOT NULL,
+	reserved_at           INTEGER NOT NULL,
+	started_at            INTEGER,
+	finished_at           INTEGER,
+	UNIQUE (mission_id, dispatch_key),
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision)
+);
+CREATE INDEX idx_mission_attempts_active
+	ON mission_attempts(mission_id, state, created_at, id);
+CREATE INDEX idx_mission_attempts_task
+	ON mission_attempts(task_id, number DESC, created_at DESC);
+
+CREATE TABLE mission_submissions (
+	id                    TEXT PRIMARY KEY,
+	mission_id            TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id               TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision         INTEGER NOT NULL,
+	attempt_id            TEXT NOT NULL REFERENCES mission_attempts(id) ON DELETE CASCADE,
+	workspace_id          TEXT NOT NULL REFERENCES workspaces(id),
+	run_id                TEXT NOT NULL REFERENCES runs(id),
+	evidence_ref          TEXT NOT NULL,
+	retained_revision     TEXT NOT NULL,
+	evidence               TEXT NOT NULL DEFAULT '[]',
+	state                 TEXT NOT NULL CHECK (state IN ('proposed', 'accepted', 'rejected', 'superseded', 'abandoned')),
+	proposed_by_run_id    TEXT NOT NULL,
+	integrator_generation INTEGER NOT NULL,
+	created_at            INTEGER NOT NULL,
+	decided_at            INTEGER,
+	decision_by_run_id    TEXT NOT NULL DEFAULT '',
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision),
+	UNIQUE (attempt_id)
+);
+CREATE INDEX idx_mission_submissions_task
+	ON mission_submissions(task_id, task_revision, state, created_at DESC);
+
+CREATE TABLE mission_acceptances (
+	submission_id          TEXT PRIMARY KEY REFERENCES mission_submissions(id),
+	mission_id             TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id                TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision          INTEGER NOT NULL,
+	accepted_set_version   INTEGER NOT NULL,
+	integrator_generation  INTEGER NOT NULL,
+	accepted_by_run_id     TEXT NOT NULL,
+	accepted_at            INTEGER NOT NULL,
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision),
+	UNIQUE (mission_id, accepted_set_version),
+	UNIQUE (task_id, task_revision)
+);
+CREATE INDEX idx_mission_acceptances_mission
+	ON mission_acceptances(mission_id, accepted_set_version);
+
+CREATE TABLE mission_worker_takeovers (
+	worker_run_id TEXT PRIMARY KEY,
+	mission_id    TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id       TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	attempt_id    TEXT NOT NULL REFERENCES mission_attempts(id) ON DELETE CASCADE,
+	member_id     TEXT NOT NULL,
+	active        INTEGER NOT NULL CHECK (active IN (0, 1)),
+	generation    INTEGER NOT NULL DEFAULT 1,
+	updated_at    INTEGER NOT NULL
+);
+CREATE INDEX idx_mission_worker_takeovers_mission
+	ON mission_worker_takeovers(mission_id, active, updated_at);
+CREATE TABLE mission_control_changes (
+	mission_id          TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+	generation          INTEGER NOT NULL DEFAULT 0,
+	published_generation INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE mission_integrator_replacements (
+	mission_id       TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	idempotency_key  TEXT NOT NULL,
+	account_member_id TEXT NOT NULL,
+	harness           TEXT NOT NULL,
+	mode              TEXT NOT NULL,
+	generation       INTEGER NOT NULL,
+	run_id           TEXT NOT NULL DEFAULT '',
+	created_at       INTEGER NOT NULL,
+	PRIMARY KEY (mission_id, idempotency_key)
+);
+CREATE TABLE mission_create_receipts (
+	workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	idempotency_key     TEXT NOT NULL,
+	mission_id          TEXT NOT NULL UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
+	objective           TEXT NOT NULL,
+	accountable_human_id TEXT NOT NULL,
+	integrator_account_member_id TEXT NOT NULL,
+	integrator_harness  TEXT NOT NULL,
+	integrator_mode     TEXT NOT NULL,
+	execution_choices   TEXT NOT NULL,
+	max_concurrent_attempts INTEGER NOT NULL,
+	max_total_attempts  INTEGER NOT NULL,
+	created_at          INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, idempotency_key)
+);
+CREATE INDEX idx_mission_integrator_replacements_mission
+	ON mission_integrator_replacements(mission_id, generation);
+`,
+	`
+CREATE TABLE mission_mutation_receipts (
+	mission_id       TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	operation        TEXT NOT NULL,
+	idempotency_key  TEXT NOT NULL,
+	payload          TEXT NOT NULL,
+	result_id        TEXT NOT NULL DEFAULT '',
+	result_revision  INTEGER NOT NULL DEFAULT 0,
+	created_at       INTEGER NOT NULL,
+	PRIMARY KEY (mission_id, operation, idempotency_key)
+);
+CREATE INDEX idx_mission_mutation_receipts_result
+	ON mission_mutation_receipts(result_id);
+`,
+	`
+ALTER TABLE mission_submissions ADD COLUMN scope_violations TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE mission_acceptances ADD COLUMN scope_disposition TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE missions ADD COLUMN integrator_authorizing_human_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_run_owner_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN authorizing_human_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN run_owner_id TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE mission_attempts ADD COLUMN cancel_requested_at INTEGER;
+ALTER TABLE mission_attempts ADD COLUMN cancellation_actor_run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_attempts ADD COLUMN cancellation_generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mission_attempts ADD COLUMN last_error TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE mission_create_receipts ADD COLUMN initial_run_id TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

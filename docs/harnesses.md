@@ -18,37 +18,46 @@ Two rules shape everything below:
 
 ## Shipped harnesses
 
-| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | MCP | Status | Steering | Env setup |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | yes (`--mcp-config`) | hooks (`--settings`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | no | notify (`-c notify=[...]`) | PTY | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | PTY | yes |
-| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | extension (`-e`) | PTY | no |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | no | plugin (`OPENCODE_CONFIG_CONTENT`) | HTTP TUI API | no |
-| `fake` | a script you name | - | - | - | - | no | - | PTY | no |
-| `custom` | deployment-supplied | - | - | - | - | no | - | PTY | no |
+| `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes |
+| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes |
+| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (`OPENCODE_CONFIG_CONTENT`) | HTTP TUI API | no |
+| `fake` | a script you name | - | - | - | - | - | PTY | no |
+| `custom` | deployment-supplied | - | - | - | - | - | PTY | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
 or `/home/aether` for a non-root image user).
 
-The `config.roots` response used by the dashboard carries a
-`runtime_ignores` list for each configuration root. These are root-relative
-paths, and the browser applies them before reading selected file bytes with
-case-sensitive exact or component-prefix matching; trailing slashes are
-presentation-only. This policy is destination-specific: a directory whose
-basename is renamed or ambiguous must be assigned to a destination before
-the import preview can be read. Credential names remain globally excluded,
-independent of this runtime list.
+The `config.roots` response used by the dashboard carries a `runtime_ignores`
+list for each configuration root. These are root-relative paths, and the
+browser applies them before reading selected file bytes with case-sensitive
+exact or component-prefix matching; trailing slashes are presentation-only.
+This policy is destination-specific: a directory whose basename is renamed or
+ambiguous must be assigned to a destination before the import preview can be
+read. Credential names remain globally excluded, independent of this runtime
+list.
 
 The **Env setup** column marks harnesses that can participate in agent setup:
 the dashboard can open the member's environment terminal for installation and
 login. Exactly `claude`, `codex`, and `pi` qualify; everything else stays
 launchable for runs but is not offered in that setup flow.
 
-Only harnesses with an **MCP** column of `yes` can be pointed at the in-container
-coordination bridge, so conflict coordination between overlapping runs works for
-Claude Code and degrades to the advisory overlap notice for the rest. See
-[coordination.md](coordination.md).
+Every coordinated shipped harness receives the staged
+`/usr/local/bin/aether-internal` CLI and the run's private socket. No harness
+receives a default MCP registration flag or config file. The short discovery
+hint is delivered through each vendor's native per-launch startup mechanism
+where supported; the `skill` command loads the assignment-specific guidance.
+Runs without the CLI still have the advisory overlap notice.
+The startup switches follow the vendor references: [Claude CLI
+reference](https://code.claude.com/docs/en/cli-reference),
+[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
+[pi CLI reference](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md),
+[omp CLI reference](https://omp.sh/docs/cli), and
+[OpenCode configuration](https://opencode.ai/docs/config/). Aether passes these
+only for the one launch that owns the coordination socket.
 
 The **Status** column is how the agent itself tells Aether it is waiting for
 you, rather than leaving the server to guess from silence. See "Status
@@ -109,12 +118,10 @@ events. Aether points each one at the staged server binary inside the
 container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
 and where that mechanism needs a file, the file is written into the run's
-coordination directory beside the MCP config. The interactive launch of each,
-with the MCP registration it already carried:
+coordination directory. The interactive launch of each is:
 
 ```
 claude --dangerously-skip-permissions "<task>" \
-  --mcp-config /run/aether/mcp.json \
   --settings /run/aether/claude-settings.json
 
 codex --dangerously-bypass-approvals-and-sandbox "<task>" \
@@ -142,9 +149,8 @@ Every one of them ends up running the same command inside the container:
 ```
 
 The report travels back over the run's own coordination socket, so no token
-enters the container and nothing new is mounted - this is the same bridge
-conflict coordination uses ([mcp-bridge.md](mcp-bridge.md)). The server
-turns it into a run status straight away:
+enters the container and nothing new is mounted. The server turns it into a
+run status straight away:
 
 | The agent says | The run becomes | Reason shown |
 | --- | --- | --- |
@@ -196,9 +202,9 @@ Four things turn the reporter off:
 - **`--conflict-coordination=false`.** There are no mounts, so there is no
   socket to report on and no directory to write the assets into.
 - **An argv override.** A `--harness-definitions` entry that redefines a
-  shipped harness drops the status arguments and the status environment
-  exactly as it drops the MCP flag - nothing checks the overridden command
-  is still that CLI.
+  shipped harness drops the status arguments, status environment, and
+  taskless discovery mechanism - nothing checks the overridden command is
+  still that CLI.
 - **`OPENCODE_PURE` in the workspace environment.** opencode loads no
   external plugin at all when that variable is set, Aether's included, and
   Aether does not take it away from you. The run launches and works
@@ -257,26 +263,37 @@ Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 
 The task prompt is optional in tui mode: launch without one and you land in
-the agent's bare interactive TUI, exactly as if you had started the CLI
-yourself, and type the first prompt there. Every argv token that carries the
-prompt is then dropped, so `opencode --prompt={task}` leaves whole rather than
-dangling an empty flag. Headless mode has no interactive surface, so it still
-requires a task.
+the agent's interactive TUI with an empty composer, exactly as if you had
+started the CLI yourself, and type the first prompt there. Every argv token
+that carries the prompt is then dropped, so `opencode --prompt={task}` leaves
+whole rather than dangling an empty flag. Headless mode has no interactive
+surface, so it still requires a task.
 
-Where conflict coordination is on and the launch has a task, Aether adds an
-automatic discovery instruction before substituting `{task}`:
+Where conflict coordination is on and the launch has a task, Aether adds this
+short discovery instruction before substituting `{task}`:
 
 ```
 Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
 ```
 
-The server stages the version-matched `/usr/local/bin/aether-internal` CLI and
-the run's `/run/aether/coord3.sock` automatically. No manual skill install,
-identity flag, or credential setup is needed. The agent should run
-`aether-internal skill` before acting, then use the CLI or the registered MCP
-bridge for coordination and outcome reporting. A taskless TUI launch stays
-taskless and receives no appended instruction. The co-author rule still asks
-the agent to read `/run/aether/co-authors` before each commit. Only the prompt
+For a taskless launch, the same instruction is delivered through the
+vendor-native startup mechanism, without inventing an initial user prompt:
+
+| CLI | Taskless discovery mechanism |
+| --- | --- |
+| `claude` | `--append-system-prompt` |
+| `codex` | one-launch `-c developer_instructions="..."` |
+| `pi`, `omp` | `--append-system-prompt` |
+| `opencode` | ephemeral `instructions` file in `OPENCODE_CONFIG_CONTENT` |
+
+The instruction is short and runtime-scoped. The `skill` command loads the
+version-matched assignment, role guidance, and workflow from the staged CLI.
+The server stages that `/usr/local/bin/aether-internal` CLI and the run's
+`/run/aether/coord3.sock` automatically. No manual skill install, identity
+flag, repository instruction, or persistent member-home write is needed.
+The agent should run `aether-internal skill` before acting, then use the CLI
+for coordination and outcome reporting. The co-author rule still asks the
+agent to read `/run/aether/co-authors` before each commit. Only the prompt
 the harness receives changes: the stored task, branch slug, and every CLI and
 dashboard surface keep what the member typed. See [coordination.md](coordination.md).
 
@@ -582,9 +599,9 @@ visible immediately to the shared home.
 ## Adding a harness
 
 The registry is one map entry: argv templates for both modes, credential
-paths, profile root, denylist, API key passthrough, the optional MCP flag,
-and the status reporter - what the harness can report, which is what declares
-a reporter at all, plus the arguments or environment variables that point the
-harness at it and any asset files those name. An adapter is a separate,
-optional file. Both are covered in
+paths, profile root, denylist, API key passthrough, the taskless discovery
+mechanism, and the status reporter - what the harness can report, which is
+what declares a reporter at all, plus the arguments or environment variables
+that point the harness at it and any asset files those name. An adapter is a
+separate, optional file. Both are covered in
 [adapters.md](adapters.md).

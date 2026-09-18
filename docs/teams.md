@@ -512,17 +512,62 @@ aether run "triage the failures" --agent codex --account <owner-member-id>
 aether account revoke <member-id>
 ```
 
-The dashboard exposes the same grant controls on **Members** and an **Account**
-picker in the launch dialog. The run is owned by the authenticated launcher,
-whose identity is used for the timeline and Git author. The selected account
-supplies its saved environment, complete home and credentials, configuration
-roots, custom harness definitions, vendor quota, and cost attribution.
+The dashboard exposes the same existing account-sharing controls on **Members**
+and an **Account** picker in the launch dialog. The run is owned by the
+authenticated launcher, whose identity is used for the timeline and Git author.
+The selected account supplies its saved environment, complete home and
+credentials, configuration roots, custom harness definitions, vendor quota, and
+cost attribution.
 
 Sharing is directional. It does not let the recipient open the owner's
 environment terminal, and admins get no implicit account access. It does let a
 root process in the recipient's run read or change every file and credential in
 the shared home. Revocation blocks new launches and relaunches but does not
 stop existing runs; stop them first if access must end immediately.
+
+### Mission identity and current authority
+
+Mission work does not introduce a second identity or credential boundary.
+Record these roles separately:
+
+- **Actor:** the authenticated human, originating run, or server action that
+  performed an operation. An integrator run is the actor for dispatches it
+  makes.
+- **Authorizing human:** the human who authorized the mission or consequential
+  action.
+- **Run owner:** the member responsible for the run's workflow and
+  notifications.
+- **Account owner:** the member whose selected account supplies the run's
+  image, home, configuration, and native credentials.
+
+The actor is not rewritten as the authorizing human, run owner, or account
+owner merely because the operation was performed on somebody's behalf. A
+mission's finite concurrency and total-attempt limits bound Aether admission;
+they do not narrow what the selected whole-home credentials can do inside the
+container.
+
+Release B rechecks the current member role, account-sharing authority,
+mission assignment, and control/assignment generation at each consequential
+operation. Presence, a skill, an integrator label, or a run ID does not grant
+authority. There is no separate eligible-controller administration, grant
+expiry, or per-worker approval product, and taking control does not grant
+access to another member's account.
+
+The durable worker takeover hold has its own generation and is independent of
+the ephemeral control lease. `mission.worker.release` is a human-only
+compare-and-swap action: the caller supplies the worker run ID and observed
+`expected_takeover_generation`, and Aether rechecks current steering authority
+and control admission before clearing the hold. A stale generation, revoked
+authority, or foreign holder is refused without clearing it; an integrator or
+worker cannot release the hold through its assignment socket. Releasing a
+hold changes control state, not account sharing.
+
+Mission progress has the same evidence boundary as the dashboard: a worker
+report or process success does not make a task **Done**. The current task
+revision must have an accepted submission with required evidence available,
+and any scope deviation must carry an explicit disposition. The resulting
+evidence remains provenance of what Aether captured or a participant reported,
+not independent verification.
 
 Agent configuration is not watched or inventoried automatically. In the local
 dashboard's Agents step, choose one local directory with the browser directory

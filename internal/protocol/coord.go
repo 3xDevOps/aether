@@ -63,7 +63,29 @@ const (
 	// CoordPeerGrace is a peer whose overlap cleared but whose grace window
 	// has not expired yet, so in-flight replies still land.
 	CoordPeerGrace = "grace"
+	// CoordPeerMission is a peer authorized by the current mission
+	// membership/assignment even when no file overlap exists.
+	CoordPeerMission = "mission"
 )
+
+// CoordMissionAssignment is the live mission authority for the run behind a
+// coordination socket. Role is descriptive authority, never a client-provided
+// role flag; an omitted assignment means this is an ordinary run.
+type CoordMissionAssignment struct {
+	MissionID             string                   `json:"mission_id,omitempty"`
+	Role                  string                   `json:"role,omitempty"`
+	TaskID                string                   `json:"task_id,omitempty"`
+	TaskRevision          int                      `json:"task_revision,omitempty"`
+	AttemptID             string                   `json:"attempt_id,omitempty"`
+	IntegratorRunID       string                   `json:"integrator_run_id,omitempty"`
+	IntegratorGeneration  uint64                   `json:"integrator_generation,omitempty"`
+	ExecutionChoices      []MissionExecutionChoice `json:"execution_choices,omitempty"`
+	MaxConcurrentAttempts int                      `json:"max_concurrent_attempts,omitempty"`
+	MaxTotalAttempts      int                      `json:"max_total_attempts,omitempty"`
+	ActiveAttempts        int                      `json:"active_attempts,omitempty"`
+	TotalAttempts         int                      `json:"total_attempts,omitempty"`
+	Capabilities          []string                 `json:"capabilities,omitempty"`
+}
 
 // Status output limits are intentionally smaller than the request budget:
 // status is safe to call at natural checkpoints and must not turn a large
@@ -94,18 +116,19 @@ type CoordPeer struct {
 // CoordStatusResult is the result of coord.status: who the caller is,
 // exactly the peers it may message, and how many messages are waiting.
 type CoordStatusResult struct {
-	WireVersion    string      `json:"wire_version"`
-	RunID          string      `json:"run_id"`
-	WorkspaceID    string      `json:"workspace_id"`
-	MemberID       string      `json:"member_id"`
-	Task           string      `json:"task,omitempty"`
-	TaskBytes      int         `json:"task_bytes,omitempty"`
-	TaskTruncated  bool        `json:"task_truncated,omitempty"`
-	Peers          []CoordPeer `json:"peers"`
-	PeerTotal      int         `json:"peer_total,omitempty"`
-	PeersTruncated bool        `json:"peers_truncated,omitempty"`
-	Unread         int         `json:"unread"`
-	Capabilities   []string    `json:"capabilities"`
+	WireVersion    string                  `json:"wire_version"`
+	RunID          string                  `json:"run_id"`
+	WorkspaceID    string                  `json:"workspace_id"`
+	MemberID       string                  `json:"member_id"`
+	Task           string                  `json:"task,omitempty"`
+	TaskBytes      int                     `json:"task_bytes,omitempty"`
+	TaskTruncated  bool                    `json:"task_truncated,omitempty"`
+	Assignment     *CoordMissionAssignment `json:"assignment,omitempty"`
+	Peers          []CoordPeer             `json:"peers"`
+	PeerTotal      int                     `json:"peer_total,omitempty"`
+	PeersTruncated bool                    `json:"peers_truncated,omitempty"`
+	Unread         int                     `json:"unread"`
+	Capabilities   []string                `json:"capabilities"`
 }
 
 // CoordSendParams are the params of coord.send. The sender is the socket,

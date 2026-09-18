@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -17,7 +18,7 @@ import (
 
 func (h *coordHarness) dial(t *testing.T, run domain.RunID) *protocol.Client {
 	t.Helper()
-	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), SocketName))
+	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName))
 	if err != nil {
 		t.Fatalf("dial %s: %v", run, err)
 	}
@@ -55,7 +56,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	}
 	defer timeline.Close() //nolint:errcheck // test cleanup
 
-	dirA, err := h.svc.Provision(ctx, a, map[string][]byte{ConfigName: []byte(`{"mcpServers":{}}`)})
+	dirA, err := h.svc.Provision(ctx, a, map[string][]byte{"fixture.json": []byte(`{"mcpServers":{}}`)})
 	if err != nil {
 		t.Fatalf("Provision(a): %v", err)
 	}
@@ -68,10 +69,10 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	if got := mode(t, dirA); got != runDirMode {
 		t.Errorf("run directory mode = %o, want %o", got, runDirMode)
 	}
-	if got := mode(t, filepath.Join(dirA, ConfigName)); got != configMode {
+	if got := mode(t, filepath.Join(dirA, "fixture.json")); got != configMode {
 		t.Errorf("config mode = %o, want %o", got, configMode)
 	}
-	if got := mode(t, filepath.Join(dirA, SocketName)); got != socketMode {
+	if got := mode(t, filepath.Join(dirA, coordtransport.SocketName)); got != socketMode {
 		t.Errorf("socket mode = %o, want %o", got, socketMode)
 	}
 
@@ -217,7 +218,7 @@ func TestRestartRecovery(t *testing.T) {
 		if err := h.db.UpdateRunStatus(ctx, finished, domain.RunAbandoned, "", nil, nil); err != nil {
 			t.Fatalf("finish run: %v", err)
 		}
-		socket := filepath.Join(h.dir, "coord", string(alive), SocketName)
+		socket := filepath.Join(h.dir, "coord", string(alive), coordtransport.SocketName)
 		if cerr := h.svc.Close(); cerr != nil {
 			t.Fatalf("Close: %v", cerr)
 		}
@@ -270,7 +271,7 @@ func TestRestartRecovery(t *testing.T) {
 				t.Fatalf("finish run %s: %v", r, err)
 			}
 		}
-		socket := filepath.Join(h.dir, "coord", string(retained), SocketName)
+		socket := filepath.Join(h.dir, "coord", string(retained), coordtransport.SocketName)
 		if err := h.svc.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -311,7 +312,7 @@ func TestRestartRecovery(t *testing.T) {
 		h := newHarness(t, 1)
 		h.start()
 		run := h.run(0)
-		if _, err := h.svc.Provision(ctx, run, map[string][]byte{ConfigName: []byte(`{}`)}); err != nil {
+		if _, err := h.svc.Provision(ctx, run, map[string][]byte{"fixture.json": []byte(`{}`)}); err != nil {
 			t.Fatalf("Provision: %v", err)
 		}
 		if err := h.svc.Close(); err != nil {
@@ -319,13 +320,13 @@ func TestRestartRecovery(t *testing.T) {
 		}
 
 		h.restart(t, true)
-		socket := filepath.Join(h.dir, "coord", string(run), SocketName)
+		socket := filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName)
 		if _, err := os.Lstat(socket); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("socket after an off recovery = %v, want it unlinked", err)
 		}
 		// The mount itself stays: the container holds it open, and its
 		// read-only assets are simply inert.
-		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), ConfigName)); err != nil {
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), "fixture.json")); err != nil {
 			t.Fatalf("the mounted config must stay in place: %v", err)
 		}
 	})
@@ -356,7 +357,7 @@ func TestRestartRecovery(t *testing.T) {
 		}
 		// The current version is still bound, so a re-provisioned bridge
 		// keeps working.
-		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), SocketName)); err != nil {
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName)); err != nil {
 			t.Errorf("the current socket must stay bound: %v", err)
 		}
 	})
@@ -479,7 +480,7 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 
-	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), SocketName))
+	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

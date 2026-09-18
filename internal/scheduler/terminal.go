@@ -145,11 +145,21 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: build terminal environment: %w", err)
 	}
+	coordMounts, coordErr := s.terminalCoordinationMount(member)
+	if coordErr != nil {
+		return nil, coordErr
+	}
+	plan.Mounts = append(plan.Mounts, coordMounts...)
+	if len(coordMounts) > 0 {
+		ensureCoordinationCLIPath(plan.Env)
+	}
 	terminalReservation := &terminalSupervision{member: member}
 	if reserveErr := s.reserveTerminalUser(terminalReservation, plan.User); reserveErr != nil {
+		s.releaseTerminalCoordination(member)
 		return nil, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
 	}
 	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, plan.Mounts, plan.User); ownershipErr != nil {
+		s.releaseTerminalCoordination(member)
 		s.releaseTerminalReservation(terminalReservation)
 		return nil, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)
 	}
@@ -168,8 +178,31 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	}
 	cid, err = s.createAndStartTerminal(ctx, spec)
 	if err != nil {
+		if cid == "" {
+			s.releaseTerminalCoordination(member)
+		} else {
+			if updateErr := s.updateTerminalCoordination(member, cid); updateErr != nil {
+				slog.Warn("scheduler: retain terminal coordination container reference", "member", member, "container", cid, "error", updateErr)
+			}
+			s.retainTerminalAfterRuntimeError(m, nil, cid)
+		}
 		s.releaseTerminalReservation(terminalReservation)
 		return nil, err
+	}
+	if len(coordMounts) > 0 {
+		if updateErr := s.updateTerminalCoordination(member, cid); updateErr != nil {
+			destroyErr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid)
+			if destroyErr == nil || errors.Is(destroyErr, runtime.ErrNotFound) {
+				s.releaseTerminalCoordination(member)
+			} else {
+				s.retainTerminalAfterRuntimeError(m, nil, cid)
+			}
+			s.releaseTerminalReservation(terminalReservation)
+			if destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
+				return nil, errors.Join(updateErr, fmt.Errorf("scheduler: destroy terminal after sidecar failure: %w", destroyErr))
+			}
+			return nil, updateErr
+		}
 	}
 	terminalReservation.containerID = cid
 	terminal := &domain.Terminal{Member: member, ContainerID: string(cid), Image: plan.Image, StartedAt: startedAt}
@@ -186,12 +219,18 @@ func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spe
 	if err != nil {
 		return "", fmt.Errorf("scheduler: create terminal: %w", err)
 	}
-	startErr := s.cfg.Runtime.Start(ctx, cid)
-	if startErr == nil {
+	if startErr := s.cfg.Runtime.Start(ctx, cid); startErr == nil {
 		return cid, nil
+	} else {
+		destroyErr := s.cfg.Runtime.Destroy(context.Background(), cid)
+		if destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
+			return cid, errors.Join(
+				fmt.Errorf("scheduler: start terminal: %w", startErr),
+				fmt.Errorf("scheduler: destroy terminal after start failure: %w", destroyErr),
+			)
+		}
+		return "", fmt.Errorf("scheduler: start terminal: %w", startErr)
 	}
-	_ = s.cfg.Runtime.Destroy(context.Background(), cid)
-	return "", fmt.Errorf("scheduler: start terminal: %w", startErr)
 }
 
 func (s *Scheduler) lookupTerminal(member domain.MemberID) *terminalSupervision {
@@ -581,6 +620,9 @@ func (s *Scheduler) cleanupExitedTerminalLocked(ctx context.Context, sup *termin
 		delete(s.terminals, sup.member)
 	}
 	s.mu.Unlock()
+	// The staged CLI is released only after runtime destruction is confirmed
+	// and the matching durable terminal row is handled.
+	s.releaseTerminalCoordination(sup.member)
 	// The reservation belongs to this supervision, not to whichever
 	// replacement may now occupy the member slot. Release it even when the
 	// slot changed so a failed cleanup cannot strand an ownership claim.
@@ -721,6 +763,11 @@ func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.Member
 	} else if row != nil {
 		cid = row.ContainerID
 	}
+	if cid == "" {
+		if sc, sidecarErr := s.readTerminalSidecar(member); sidecarErr == nil {
+			cid = sc.ContainerID
+		}
+	}
 	s.cfg.PTY.StopSessionsWithPrefix(ctx, terminalPrefix(member))
 	if cid != "" {
 		if stopErr := s.cfg.Runtime.Stop(ctx, runtime.ID(cid), s.cfg.StopGrace); stopErr != nil && !errors.Is(stopErr, runtime.ErrNotFound) {
@@ -733,6 +780,7 @@ func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.Member
 	if err := s.cfg.Store.DeleteTerminal(ctx, member); err != nil {
 		return fmt.Errorf("scheduler: delete terminal record: %w", err)
 	}
+	s.releaseTerminalCoordination(member)
 	s.mu.Lock()
 	if current := s.terminals[member]; current == sup {
 		delete(s.terminals, member)

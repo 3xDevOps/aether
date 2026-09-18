@@ -1,13 +1,12 @@
 // Command coordagent is the coordination E2E's in-container agent. It is
-// built and installed as the image's "claude" executable, so the shipped
-// claude profile launches it verbatim - flags, task, and the appended
-// --mcp-config - and everything it reports it learned from inside a real
-// run container as the image's non-root user.
+// built and installed as the image's "claude" executable. The harness does
+// not receive automatic MCP configuration; when this fixture wants MCP it
+// invokes the staged bridge itself, exactly as an optional user configuration
+// would.
 //
 // It knows nothing about Aether's own paths: the coordination directory is
-// the directory of the config it was pointed at, the bridge command is what
-// that config names, and the socket is whatever socket the directory holds.
-// A real harness has exactly that much.
+// the directory of the config it was pointed at, or the standard mounted
+// directory for a manually invoked bridge.
 //
 // It never exits. Its whole conversation with the test is its terminal, and
 // a run whose agent exits is a run the test can no longer attach to.
@@ -29,6 +28,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -74,16 +74,29 @@ func main() {
 		time.Sleep(time.Hour)
 	}
 }
-
 func coordinate(ctx context.Context) error {
 	configPath := flagValue("--mcp-config")
-	if configPath == "" {
-		say("assets:notice-only")
-		return nil
+	dir := coordtransport.MountDir
+	command := coordtransport.BinaryPath
+	args := []string{"mcp"}
+	if configPath != "" {
+		// A user may still opt into MCP manually through a harness-owned
+		// config. The server never synthesizes this argument.
+		dir = filepath.Dir(configPath)
+		raw, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", configPath, err)
+		}
+		command, args, err = bridgeCommand(raw)
+		if err != nil {
+			return err
+		}
+	} else {
+		say("assets:manual-mcp")
 	}
-	dir := filepath.Dir(configPath)
-	// Traversing the coordination directory, reading the config out of it,
-	// and being refused a write to it are all the non-root user's own.
+	// Traversing the coordination directory, reading the config out of it
+	// when manually supplied, and being refused a write to it are all the
+	// non-root user's own.
 	if err := reportDir(dir); err != nil {
 		return err
 	}
@@ -91,14 +104,6 @@ func coordinate(ctx context.Context) error {
 		return err
 	}
 	if err := reportReadOnly(dir); err != nil {
-		return err
-	}
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", configPath, err)
-	}
-	command, args, err := bridgeCommand(raw)
-	if err != nil {
 		return err
 	}
 	if err := reportMode(command); err != nil {
@@ -139,6 +144,20 @@ func coordinate(ctx context.Context) error {
 		return err
 	}
 	say("inbox:%s", msg.Body)
+
+	// Keep the optional MCP round trip and the durable CLI outcome in the
+	// same real container scenario. The report is intentionally sent via
+	// the mounted CLI, not through a test helper or a synthesized harness
+	// argument.
+	report := exec.CommandContext(ctx, coordtransport.CLIPath,
+		"report", "--outcome", "success",
+		"--summary", "manual MCP coordination completed",
+		"--idempotency-key", "container-report-"+status.RunID)
+	raw, err := report.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("run.report: %w (%s)", err, raw)
+	}
+	say("report:%s", strings.TrimSpace(string(raw)))
 	return nil
 }
 

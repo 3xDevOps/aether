@@ -268,6 +268,42 @@ func (i *Index) Overlaps(ctx context.Context) ([]Entry, error) {
 	return out, nil
 }
 
+// Snapshot returns the latest complete diff file set for one active run.
+// The boolean is false when the index has no usable snapshot; callers must
+// represent that as unavailable rather than treating it as an empty change
+// set. This is a read-only view of the existing run.diff index.
+func (i *Index) Snapshot(ctx context.Context, run domain.RunID) ([]string, bool, error) {
+	if run == "" {
+		return nil, false, nil
+	}
+	active, err := i.runs.ListActiveRuns(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("overlap: list active runs: %w", err)
+	}
+	found := false
+	for _, r := range active {
+		if r != nil && r.ID == run {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, false, nil
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	st := i.state[run]
+	if st == nil || !st.live || st.workspace == "" {
+		return nil, false, nil
+	}
+	paths := make([]string, 0, len(st.files))
+	for path := range st.files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths, true, nil
+}
+
 // refresh recomputes the overlap view and returns it. When announce is
 // set it publishes a run.overlap event for every run whose set changed
 // (an empty set means the overlap cleared); otherwise it only records the

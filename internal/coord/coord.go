@@ -18,6 +18,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -73,8 +74,24 @@ type Runs interface {
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
 }
 
-// Peers is the conflict radar's read side and the sole authorization
-// source for sends; satisfied by *overlap.Index.
+// MissionService is the optional mission authority behind the coordination
+// socket. It is deliberately expressed only in protocol/domain/store types:
+// the mission package can implement it without importing coord, while this
+// package remains the one run-authenticated transport boundary.
+//
+// A nil service means an ordinary run. Mission errors are authoritative:
+// callers must not silently fall back to radar authorization or ordinary
+// reporting when a current mission assignment is stale.
+type MissionService interface {
+	Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error)
+	Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error)
+	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
+	ValidateReport(context.Context, domain.RunID) error
+	ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
+}
+
+// Peers is the conflict radar's read side. Mission authorization, when
+// configured, is evaluated by MissionService before radar fallback.
 type Peers interface {
 	Overlaps(ctx context.Context) ([]overlap.Entry, error)
 }
@@ -104,6 +121,10 @@ type Config struct {
 	Bus events.Bus
 	// Peers is the radar index sends are authorized against.
 	Peers Peers
+	// Mission is the optional current mission authority. It extends peer
+	// authorization and owns mission task/worker methods and report
+	// validation/reconciliation; nil preserves ordinary coordination.
+	Mission MissionService
 	// PTY injects the overlap notice into a run's terminal.
 	PTY Injector
 	// Reports is where run.report lands: the scheduler. Leaving it unset

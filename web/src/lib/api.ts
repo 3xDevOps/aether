@@ -29,6 +29,11 @@ import type {
   LinkRepoResult,
   LinkStatus,
   Member,
+  MissionCreateResult,
+  MissionListResult,
+  MissionReplaceIntegratorResult,
+  MissionShowResult,
+  MissionWorkerReleaseResult,
   Overlap,
   PresenceEntry,
   PullResult,
@@ -306,6 +311,40 @@ export const api = {
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
+  missionCreate: (params: {
+    workspace_id: string
+    objective: string
+    accountable_human_id: string
+    integrator: {
+      account_member_id: string
+      harness: string
+      mode: string
+    }
+    execution_choices: Array<{
+      account_member_id: string
+      harness: string
+      mode: string
+    }>
+    max_concurrent_attempts: number
+    max_total_attempts: number
+    idempotency_key: string
+  }) => call<MissionCreateResult>('mission.create', params),
+  missionShow: (missionID: string) =>
+    call<MissionShowResult>('mission.show', { mission_id: missionID }),
+  missionList: (params: { workspace_id: string; limit?: number; before?: string }) =>
+    call<MissionListResult>('mission.list', params),
+  missionReplaceIntegrator: (params: {
+    mission_id: string
+    expected_generation: number
+    integrator: {
+      account_member_id: string
+      harness: string
+      mode: string
+    }
+    idempotency_key: string
+  }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
+  missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
+    call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
