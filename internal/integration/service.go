@@ -114,6 +114,25 @@ type Service struct {
 	closed         bool
 	active         map[string]context.CancelFunc
 	locks          sync.Map
+	asyncMu        sync.Mutex
+	asyncErr       error
+}
+
+func (s *Service) recordAsyncError(err error) {
+	if err == nil {
+		return
+	}
+	s.asyncMu.Lock()
+	if s.asyncErr == nil {
+		s.asyncErr = err
+	}
+	s.asyncMu.Unlock()
+}
+
+func (s *Service) asynchronousError() error {
+	s.asyncMu.Lock()
+	defer s.asyncMu.Unlock()
+	return s.asyncErr
 }
 
 func New(cfg Config) (*Service, error) {
@@ -149,7 +168,7 @@ func (s *Service) Close() error {
 	}
 	s.life.Unlock()
 	s.wg.Wait()
-	return nil
+	return s.asynchronousError()
 }
 
 func (s *Service) registerVerification(id string, cancel context.CancelFunc) bool {

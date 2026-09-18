@@ -50,14 +50,10 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 		if existing == nil {
 			return zero, store.ErrNotFound
 		}
-		_, c, err := s.load(ctx, p.WorkspaceID, existing.ID)
-		if err != nil {
-			return zero, err
-		}
-		l := s.lock(c.CandidateID)
+		l := s.lock(existing.ID)
 		l.Lock()
 		defer l.Unlock()
-		_, c, err = s.load(ctx, p.WorkspaceID, existing.ID)
+		rec, c, err := s.load(ctx, p.WorkspaceID, existing.ID)
 		if err != nil {
 			return zero, err
 		}
@@ -69,7 +65,7 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 		if existing.Digest != dig {
 			return zero, ErrConflict
 		}
-		return *c, nil
+		return s.resumePrepare(ctx, p, rec, c)
 	}
 
 	if existing, err := s.store.GetIntegrationCandidateByKey(ctx, wsID, key, p.IdempotencyKey); err == nil && existing != nil {
@@ -135,42 +131,75 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 		return zero, err
 	}
 	candidate.Version = rec.Version
-	for i, sub := range p.Submissions {
+	return s.resumePrepare(ctx, p, rec, &candidate)
+}
+
+// resumePrepare reconciles a durable preparing aggregate. Input retention and
+// transcript paths are deterministic, so retrying an input whose append save
+// was lost safely verifies/reuses the already-acquired artifacts.
+func (s *Service) resumePrepare(ctx context.Context, p protocol.IntegrationPrepareParams, rec *store.IntegrationCandidate, candidate *protocol.Candidate) (protocol.Candidate, error) {
+	var zero protocol.Candidate
+	if rec == nil || candidate == nil {
+		return zero, ErrInvalidRequest
+	}
+	if !candidate.ExpiresAt.IsZero() && !s.nowTime().Before(candidate.ExpiresAt) {
+		return zero, ErrExpired
+	}
+	if candidate.State == protocol.CandidateDeleting || candidate.State == protocol.CandidateExpired {
+		return zero, ErrExpired
+	}
+	if candidate.State != protocol.CandidatePreparing {
+		return *candidate, nil
+	}
+	if len(candidate.Submissions) != len(p.Submissions) {
+		return zero, ErrConflict
+	}
+	for i := range candidate.Submissions {
+		if candidate.Submissions[i] != p.Submissions[i] {
+			return zero, ErrConflict
+		}
+	}
+	if len(candidate.Inputs) > len(candidate.Submissions) {
+		return zero, ErrConflict
+	}
+	for i := range candidate.Inputs {
+		if candidate.Inputs[i].Submission != candidate.Submissions[i] {
+			return zero, ErrConflict
+		}
+	}
+	candidate.Error = ""
+	for i := len(candidate.Inputs); i < len(p.Submissions); i++ {
+		sub := p.Submissions[i]
 		if sub.WorkspaceID != p.WorkspaceID || sub.RunID == "" || sub.EvidenceRef == "" || sub.RetainedRevision == "" {
 			candidate.Error = "invalid submission"
-			_ = s.save(ctx, rec, &candidate)
-			return zero, fmt.Errorf("%w: submission %d", ErrInvalidRequest, i)
+			return zero, s.prepareFailure(ctx, rec, candidate, fmt.Errorf("%w: submission %d", ErrInvalidRequest, i))
 		}
 		if !validObjectIDLoose(sub.RetainedRevision) {
 			candidate.Error = "invalid retained revision"
-			_ = s.save(ctx, rec, &candidate)
-			return zero, fmt.Errorf("%w: retained revision", ErrInvalidRequest)
+			return zero, s.prepareFailure(ctx, rec, candidate, fmt.Errorf("%w: retained revision", ErrInvalidRequest))
 		}
-		input, e := s.prepareInput(ctx, wsID, &candidate, i, sub, p.RequiredSources)
+		input, e := s.prepareInput(ctx, domain.WorkspaceID(p.WorkspaceID), candidate, i, sub, p.RequiredSources)
 		if e != nil {
 			candidate.Error = e.Error()
-			_ = s.save(ctx, rec, &candidate)
-			return zero, e
+			return zero, s.prepareFailure(ctx, rec, candidate, e)
 		}
 		candidate.Inputs = append(candidate.Inputs, input)
-		if e := s.save(ctx, rec, &candidate); e != nil {
+		if e := s.save(ctx, rec, candidate); e != nil {
 			return zero, e
 		}
 	}
-	if _, e := s.git.CandidateCheckout(ctx, wsID, candidate.CandidateID, candidate.ExpectedTargetRevision); e != nil {
+	if _, e := s.git.CandidateCheckout(ctx, domain.WorkspaceID(p.WorkspaceID), candidate.CandidateID, candidate.ExpectedTargetRevision); e != nil {
 		candidate.Error = e.Error()
-		_ = s.save(ctx, rec, &candidate)
-		return zero, e
+		return zero, s.prepareFailure(ctx, rec, candidate, e)
 	}
 	revInputs := make([]gitengine.CandidateRevisionInput, len(candidate.Inputs))
 	for i, in := range candidate.Inputs {
 		revInputs[i] = gitengine.CandidateRevisionInput{Revision: in.Submission.RetainedRevision, Base: in.BaseRevision}
 	}
-	assembled, err := s.git.AssembleCandidate(ctx, wsID, candidate.CandidateID, revInputs)
+	assembled, err := s.git.AssembleCandidate(ctx, domain.WorkspaceID(p.WorkspaceID), candidate.CandidateID, revInputs)
 	if err != nil && !errors.Is(err, gitengine.ErrCandidateConflict) {
 		candidate.Error = err.Error()
-		_ = s.save(ctx, rec, &candidate)
-		return zero, err
+		return zero, s.prepareFailure(ctx, rec, candidate, err)
 	}
 	candidate.CandidateRevision = assembled.Revision
 	candidate.Conflicts = append([]string(nil), assembled.Conflicts...)
@@ -183,10 +212,20 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 		candidate.State = protocol.CandidatePreparing
 	}
 	candidate.Error = ""
-	if err := s.save(ctx, rec, &candidate); err != nil {
+	if err := s.save(ctx, rec, candidate); err != nil {
 		return zero, err
 	}
-	return candidate, nil
+	return *candidate, nil
+}
+
+func (s *Service) prepareFailure(ctx context.Context, rec *store.IntegrationCandidate, candidate *protocol.Candidate, original error) error {
+	if original == nil {
+		return nil
+	}
+	if saveErr := s.save(ctx, rec, candidate); saveErr != nil {
+		return errors.Join(original, fmt.Errorf("integration: persist prepare failure: %w", saveErr))
+	}
+	return original
 }
 
 func validObjectIDLoose(v string) bool {

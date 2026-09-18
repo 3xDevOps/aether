@@ -458,7 +458,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		acceptedOrder = append(acceptedOrder, sub)
 	}
 
-	base := runGit(t, filepath.Join(e.dataDir, "repos", string(e.ws.ID)+".git"), "rev-parse", "refs/heads/main")
+	base := runGit(t, filepath.Join(e.dataDir, "repos", string(e.ws.ID)+".git"), nil, "rev-parse", "refs/heads/main")
 	prepareParams := map[string]any{
 		// Workspace, mission, and submissions are intentionally omitted. The
 		// server derives all three from this integrator's authenticated run.
@@ -520,7 +520,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		t.Fatalf("passed verification IDs = %v, want one", verificationIDs)
 	}
 
-	if _, err := coordtransport.Call(ctx, integratorSocket, protocol.MethodIntegrationDecide, protocol.IntegrationDecideParams{
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodIntegrationDecide, protocol.IntegrationDecideParams{
 		WorkspaceID: string(e.ws.ID), CandidateID: candidate.CandidateID,
 	}, nil); err == nil {
 		t.Fatal("integrator agent socket could decide delivery; approval is human-only")
@@ -575,7 +575,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		delivered.DeliveryReceipt.CandidateRevision != candidate.CandidateRevision {
 		t.Fatalf("delivery receipt = %+v, want exact landed candidate", delivered.DeliveryReceipt)
 	}
-	if got := runGit(t, filepath.Join(e.dataDir, "repos", string(e.ws.ID)+".git"), "rev-parse", "refs/heads/main"); got != candidate.CandidateRevision {
+	if got := runGit(t, filepath.Join(e.dataDir, "repos", string(e.ws.ID)+".git"), nil, "rev-parse", "refs/heads/main"); got != candidate.CandidateRevision {
 		t.Fatalf("main after exact delivery = %s, want candidate %s", got, candidate.CandidateRevision)
 	}
 

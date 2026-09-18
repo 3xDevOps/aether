@@ -153,13 +153,14 @@ func (s *Service) Verify(ctx context.Context, actor Actor, p protocol.Integratio
 		expires = candidate.ExpiresAt
 	}
 	verification := protocol.Verification{
-		VerificationID: verificationID,
-		Argv:           append([]string(nil), argv...),
-		Status:         protocol.VerificationRunning,
-		CreatedAt:      created,
-		ExpiresAt:      expires,
-		TimeoutSeconds: timeoutSeconds,
-		CreationKey:    creationKey,
+		VerificationID:    verificationID,
+		CandidateRevision: candidate.CandidateRevision,
+		Argv:              append([]string(nil), argv...),
+		Status:            protocol.VerificationRunning,
+		CreatedAt:         created,
+		ExpiresAt:         expires,
+		TimeoutSeconds:    timeoutSeconds,
+		CreationKey:       creationKey,
 	}
 	candidate.Verifications = append(candidate.Verifications, verification)
 	candidate.Mutations = append(candidate.Mutations, protocol.CandidateMutation{
@@ -789,88 +790,191 @@ func (s *Service) markVerificationCleanupFailure(ctx context.Context, workspaceI
 			continue
 		}
 		candidate.Verifications[i].Error = cleanupErr.Error()
-		_ = s.save(ctx, record, candidate)
+		if saveErr := s.save(ctx, record, candidate); saveErr != nil {
+			s.recordAsyncError(fmt.Errorf("integration: save verification %s cleanup failure: %w", verificationID, saveErr))
+		}
 		return
 	}
 }
 
+// finishVerification records a durable result artifact before updating the
+// aggregate. An asynchronous worker reports any failure through Close.
 func (s *Service) finishVerification(ctx context.Context, workspaceID domain.WorkspaceID, candidateID, verificationID string, status protocol.VerificationStatus, exit *int, output []byte, truncated bool, runErr error) {
+	err := s.finishVerificationResult(ctx, workspaceID, candidateID, verificationID, status, exit, output, truncated, runErr)
+	if err != nil {
+		s.recordAsyncError(err)
+	}
+}
+
+func (s *Service) finishVerificationResult(ctx context.Context, workspaceID domain.WorkspaceID, candidateID, verificationID string, status protocol.VerificationStatus, exit *int, output []byte, truncated bool, runErr error) error {
 	lock := s.lock(candidateID)
 	lock.Lock()
 	defer lock.Unlock()
 	record, candidate, err := s.load(ctx, string(workspaceID), candidateID)
-	if err != nil || candidate.State != protocol.CandidateFrozen || !s.nowTime().Before(candidate.ExpiresAt) {
-		return
+	if err != nil {
+		return fmt.Errorf("integration: load verification %s for finalization: %w", verificationID, err)
 	}
+	if candidate.State != protocol.CandidateFrozen || !s.nowTime().Before(candidate.ExpiresAt) {
+		return nil
+	}
+	var v *protocol.Verification
 	for i := range candidate.Verifications {
-		if candidate.Verifications[i].VerificationID != verificationID || candidate.Verifications[i].Status != protocol.VerificationRunning {
-			continue
+		if candidate.Verifications[i].VerificationID == verificationID {
+			if candidate.Verifications[i].Status != protocol.VerificationRunning {
+				return nil
+			}
+			v = &candidate.Verifications[i]
+			break
 		}
-		v := &candidate.Verifications[i]
-		v.Status = status
-		v.ExitCode = exit
-		v.Output = string(output)
-		v.OutputTruncated = truncated
-		v.ContainerID = ""
-		finished := s.nowTime()
-		v.FinishedAt = &finished
-		if runErr != nil {
-			v.Error = runErr.Error()
-		}
-		_ = s.save(ctx, record, candidate)
-		return
 	}
+	if v == nil {
+		return nil
+	}
+	switch status {
+	case protocol.VerificationPassed, protocol.VerificationFailed, protocol.VerificationTimedOut,
+		protocol.VerificationCancelled, protocol.VerificationError, protocol.VerificationSourceChanged:
+	default:
+		return fmt.Errorf("%w: invalid terminal verification status %q", ErrInvalidRequest, status)
+	}
+	if status == protocol.VerificationPassed && (exit == nil || *exit != 0) {
+		return fmt.Errorf("%w: passed verification has invalid exit", ErrInvalidRequest)
+	}
+	outputText, outputTruncated := normalizeVerificationOutput(output, truncated)
+	errorText := normalizeVerificationError(runErr)
+	finished := s.nowTime()
+	if !finished.Before(candidate.ExpiresAt) {
+		return nil
+	}
+	result := verificationResultArtifact{
+		Version:           1,
+		WorkspaceID:       candidate.WorkspaceID,
+		CandidateID:       candidate.CandidateID,
+		VerificationID:    verificationID,
+		CandidateRevision: v.CandidateRevision,
+		CreationKey:       v.CreationKey,
+		CreatedAt:         v.CreatedAt,
+		FinishedAt:        &finished,
+		ExpiresAt:         v.ExpiresAt,
+		Status:            status,
+		ExitCode:          cloneVerificationExitCode(exit),
+		Output:            outputText,
+		OutputTruncated:   outputTruncated,
+		Error:             errorText,
+	}
+	path, err := verificationResultPath(s.root, candidateID, verificationID)
+	if err != nil {
+		return fmt.Errorf("integration: prepare verification %s result artifact: %w", verificationID, err)
+	}
+	if err := writeVerificationResult(path, result); err != nil {
+		return fmt.Errorf("integration: persist verification %s result artifact: %w", verificationID, err)
+	}
+	v.Status = status
+	v.ExitCode = cloneVerificationExitCode(exit)
+	v.Output = outputText
+	v.OutputTruncated = outputTruncated
+	v.Error = errorText
+	v.ContainerID = ""
+	v.FinishedAt = &finished
+	if err := s.save(ctx, record, candidate); err != nil {
+		return fmt.Errorf("integration: save verification %s final result: %w", verificationID, err)
+	}
+	return nil
 }
 
-// recoverVerifications is used by retention/restart recovery. It only destroys
-// containers carrying a persisted creation key and marks records interrupted;
-// it never re-runs a command or fabricates an exit code.
+// recoverVerifications is used by retention/restart recovery. It destroys
+// containers carrying a persisted creation key, then reconciles a durable
+// terminal result when one exists. It never re-runs a command or fabricates
+// an exit code.
 func (s *Service) recoverVerifications(ctx context.Context, c *protocol.Candidate) error {
 	if c == nil || s.runtime == nil {
 		return nil
 	}
-	recovered := make(map[string]struct{})
+	type recoveredResult struct {
+		result *verificationResultArtifact
+	}
+	recovered := make(map[string]recoveredResult)
 	for _, v := range c.Verifications {
 		if v.Status != protocol.VerificationRunning || s.verificationActive(v.VerificationID) {
 			continue
 		}
 		if err := s.cleanupVerificationRuntime(ctx, v.CreationKey, ""); err != nil {
-			return err
+			return fmt.Errorf("integration: recover verification %s runtime: %w", v.VerificationID, err)
 		}
 		if s.git != nil {
 			if err := s.git.RemoveCandidateVerification(ctx, domain.WorkspaceID(c.WorkspaceID), c.CandidateID, v.VerificationID); err != nil {
-				return err
+				return fmt.Errorf("integration: remove verification %s checkout during recovery: %w", v.VerificationID, err)
 			}
 		}
-		recovered[v.VerificationID] = struct{}{}
+		path, err := verificationResultPath(s.root, c.CandidateID, v.VerificationID)
+		if err != nil {
+			return fmt.Errorf("integration: locate verification %s result artifact: %w", v.VerificationID, err)
+		}
+		result, found, err := readVerificationResult(path)
+		if err != nil {
+			return fmt.Errorf("integration: read verification %s result artifact: %w", v.VerificationID, err)
+		}
+		if found {
+			if err := validateVerificationResult(result, c, v); err != nil {
+				return fmt.Errorf("integration: verify verification %s result artifact: %w", v.VerificationID, err)
+			}
+			recovered[v.VerificationID] = recoveredResult{result: &result}
+		} else {
+			recovered[v.VerificationID] = recoveredResult{}
+		}
 	}
 	if len(recovered) == 0 {
 		return nil
 	}
 	record, fresh, err := s.load(ctx, c.WorkspaceID, c.CandidateID)
 	if err != nil {
-		return err
+		return fmt.Errorf("integration: load candidate during verification recovery: %w", err)
 	}
-	if fresh.State == protocol.CandidateExpired {
+	// Deleting and expired candidates have already crossed their durable
+	// lifecycle fence. Recovery may clean runtime artifacts, but must not
+	// resurrect a terminal result or mutate the tombstone.
+	if fresh.State != protocol.CandidateFrozen || !s.nowTime().Before(fresh.ExpiresAt) {
 		return nil
 	}
 	changed := false
 	finished := s.nowTime()
 	for i := range fresh.Verifications {
-		if fresh.Verifications[i].Status != protocol.VerificationRunning {
+		v := &fresh.Verifications[i]
+		if v.Status != protocol.VerificationRunning {
 			continue
 		}
-		if _, ok := recovered[fresh.Verifications[i].VerificationID]; !ok {
+		recoveredResult, ok := recovered[v.VerificationID]
+		if !ok {
 			continue
 		}
-		fresh.Verifications[i].Status = protocol.VerificationError
-		fresh.Verifications[i].Error = "verification interrupted during recovery"
-		fresh.Verifications[i].FinishedAt = &finished
-		fresh.Verifications[i].ContainerID = ""
+		if recoveredResult.result != nil {
+			if err := validateVerificationResult(*recoveredResult.result, fresh, *v); err != nil {
+				return fmt.Errorf("integration: verify fresh verification %s result artifact: %w", v.VerificationID, err)
+			}
+			result := recoveredResult.result
+			v.Status = result.Status
+			v.ExitCode = cloneVerificationExitCode(result.ExitCode)
+			v.Output = result.Output
+			v.OutputTruncated = result.OutputTruncated
+			v.Error = result.Error
+			if result.FinishedAt != nil {
+				finishedAt := *result.FinishedAt
+				v.FinishedAt = &finishedAt
+			}
+		} else {
+			v.Status = protocol.VerificationError
+			v.ExitCode = nil
+			v.Output = ""
+			v.OutputTruncated = false
+			v.Error = "verification interrupted during recovery"
+			v.FinishedAt = &finished
+		}
+		v.ContainerID = ""
 		changed = true
 	}
 	if changed {
-		return s.save(ctx, record, fresh)
+		if err := s.save(ctx, record, fresh); err != nil {
+			return fmt.Errorf("integration: save recovered verification results: %w", err)
+		}
 	}
 	return nil
 }
