@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -35,40 +36,196 @@ type screenCheckpoint struct {
 	Segments    []checkpointSegment `json:"segments,omitempty"`
 }
 
+func (s *session) captureCheckpointLocked() (*checkpointCapture, error) {
+	if s.tr == nil || s.screen == nil {
+		return nil, nil
+	}
+	if _, isRun := s.run.Run(); !isRun || s.checkpoint == "" {
+		return nil, nil
+	}
+	snapshot := makeScreenSnapshot(s.screen, s.modes)
+	capture, err := s.tr.captureCheckpoint(s.checkpoint, snapshot, s.history)
+	if err != nil {
+		s.checkpointErr = err
+		return nil, err
+	}
+	s.checkpointSeq++
+	capture.seq = s.checkpointSeq
+	return &capture, nil
+}
+
+func (s *session) persistCheckpoint(capture *checkpointCapture) error {
+	if capture == nil {
+		return nil
+	}
+	s.checkpointMu.Lock()
+	defer s.checkpointMu.Unlock()
+	s.mu.Lock()
+	stale := capture.seq < s.checkpointSeq
+	s.mu.Unlock()
+	if stale {
+		capture.boundary.release()
+		return nil
+	}
+	err := capture.persist()
+	s.mu.Lock()
+	if capture.seq == s.checkpointSeq {
+		s.checkpointErr = err
+	}
+	s.mu.Unlock()
+	return err
+}
+func (s *session) purgeSnapshot() {
+	s.mu.Lock()
+	s.finalSnapshot = ScreenSnapshot{}
+	s.mu.Unlock()
+}
+func (s *session) snapshot() (ScreenSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.finalSnapshot.Data) > 0 {
+		snapshot := cloneScreenSnapshot(s.finalSnapshot)
+		if s.checkpointErr != nil {
+			return snapshot, fmt.Errorf("ptyhost: screen checkpoint: %w", s.checkpointErr)
+		}
+		return snapshot, nil
+	}
+	if s.screen == nil {
+		return ScreenSnapshot{}, errors.New("ptyhost: terminal snapshot unavailable")
+	}
+	if s.checkpointErr != nil {
+		return makeScreenSnapshot(s.screen, s.modes), fmt.Errorf("ptyhost: screen checkpoint: %w", s.checkpointErr)
+	}
+	return makeScreenSnapshot(s.screen, s.modes), nil
+}
+
+func (s *session) checkpointNow() error {
+	s.mu.Lock()
+	capture, err := s.captureCheckpointLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.persistCheckpoint(capture)
+}
+
+func (s *session) checkpointLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.checkpointNow()
+		case <-s.done:
+			return
+		}
+	}
+}
+
 func checkpointPath(transcript string) string {
 	return strings.TrimSuffix(transcript, ".cast") + ".screen"
 }
 
-// checkpoint flushes all cast bytes represented by snap, then atomically
-// records the snapshot and its exact cast boundary. Callers hold session.mu.
-func (w *castWriter) checkpoint(path string, snap ScreenSnapshot, history []castSegment) error {
+type castBoundary struct {
+	writer  *castWriter
+	file    *os.File
+	segment castSegment
+}
+
+func (b *castBoundary) release() {
+	if b.writer == nil {
+		return
+	}
+	b.writer.lifetimeMu.RUnlock()
+	b.writer = nil
+	b.file = nil
+}
+
+func (b *castBoundary) flush() error {
+	if b.writer == nil {
+		return nil
+	}
+	b.writer.mu.Lock()
+	err := b.writer.flushStagedLocked()
+	if err == nil {
+		err = b.writer.bw.Flush()
+	}
+	b.writer.mu.Unlock()
+	return err
+}
+
+func (b *castBoundary) sync() error {
+	if b.writer == nil || b.file == nil {
+		return nil
+	}
+	err := b.file.Sync()
+	b.release()
+	return err
+}
+
+type checkpointCapture struct {
+	path     string
+	snapshot ScreenSnapshot
+	segments []checkpointSegment
+	boundary castBoundary
+	seq      uint64
+}
+
+func (c *checkpointCapture) persist() error {
+	if err := c.boundary.flush(); err != nil {
+		c.boundary.release()
+		return fmt.Errorf("ptyhost: flush checkpoint transcript: %w", err)
+	}
+	if err := c.boundary.sync(); err != nil {
+		return fmt.Errorf("ptyhost: sync checkpoint transcript: %w", err)
+	}
+	return writeCheckpointFile(c.path, screenCheckpoint{
+		Version:     screenCheckpointVersion,
+		Incarnation: c.boundary.segment.incarnation,
+		CastOffset:  c.boundary.segment.fileBytes,
+		Cols:        c.snapshot.Cols,
+		Rows:        c.snapshot.Rows,
+		Data:        c.snapshot.Data,
+		Segments:    c.segments,
+	})
+}
+
+// captureCheckpoint records the logical cast boundary represented by snap.
+// Pending UTF-8 is made an event under the short writer lock, while flushing
+// the buffered prefix and syncing the file are deferred until persistence.
+func (w *castWriter) captureCheckpoint(path string, snap ScreenSnapshot, history []castSegment) (checkpointCapture, error) {
+	w.lifetimeMu.RLock()
 	w.mu.Lock()
 	if w.closed {
 		w.mu.Unlock()
-		return errors.New("ptyhost: checkpoint transcript is closed")
+		w.lifetimeMu.RUnlock()
+		return checkpointCapture{}, errors.New("ptyhost: checkpoint transcript is closed")
+	}
+	// A sticky write error must not turn pending tails into an unbounded queue.
+	// An empty write checks it without flushing the buffer.
+	if _, err := w.bw.Write(nil); err != nil {
+		w.mu.Unlock()
+		w.lifetimeMu.RUnlock()
+		return checkpointCapture{}, fmt.Errorf("ptyhost: checkpoint transcript: %w", err)
 	}
 	if len(w.pending) > 0 {
-		w.eventLocked("o", w.pending)
-		w.outputBytes += len(w.pending)
+		pending := w.pending
 		w.pending = nil
+		line := castLine(w.start, "o", pending)
+		if len(w.staged) == 0 {
+			w.staged = line
+		} else {
+			w.staged = append(w.staged, line...)
+		}
+		w.logicalBytes += int64(len(line))
+		w.outputBytes += len(pending)
 	}
-	if err := w.bw.Flush(); err != nil {
-		w.mu.Unlock()
-		return fmt.Errorf("ptyhost: flush checkpoint transcript: %w", err)
+	boundary := castSegment{
+		path: w.path, fileBytes: w.logicalBytes,
+		outputBytes: w.outputBytes, incarnation: w.incarnation,
 	}
-	if err := w.f.Sync(); err != nil {
-		w.mu.Unlock()
-		return fmt.Errorf("ptyhost: sync checkpoint transcript: %w", err)
-	}
-	info, err := w.f.Stat()
-	current := castSegment{path: w.path, fileBytes: 0, outputBytes: w.outputBytes, incarnation: w.incarnation}
-	if err == nil {
-		current.fileBytes = info.Size()
-	}
+	writerFile := w.f
 	w.mu.Unlock()
-	if err != nil {
-		return fmt.Errorf("ptyhost: inspect checkpoint transcript: %w", err)
-	}
 
 	segments := make([]checkpointSegment, 0, len(history)+1)
 	for _, segment := range history {
@@ -78,15 +235,13 @@ func (w *castWriter) checkpoint(path string, snap ScreenSnapshot, history []cast
 		})
 	}
 	segments = append(segments, checkpointSegment{
-		Path: filepath.Base(current.path), Incarnation: current.incarnation,
-		FileBytes: current.fileBytes, OutputBytes: current.outputBytes,
+		Path: filepath.Base(boundary.path), Incarnation: boundary.incarnation,
+		FileBytes: boundary.fileBytes, OutputBytes: boundary.outputBytes,
 	})
-	checkpoint := screenCheckpoint{
-		Version: screenCheckpointVersion, Incarnation: current.incarnation,
-		CastOffset: current.fileBytes, Cols: snap.Cols, Rows: snap.Rows,
-		Data: append([]byte(nil), snap.Data...), Segments: segments,
-	}
-	return writeCheckpointFile(path, checkpoint)
+	return checkpointCapture{
+		path: path, snapshot: cloneScreenSnapshot(snap), segments: segments,
+		boundary: castBoundary{writer: w, file: writerFile, segment: boundary},
+	}, nil
 }
 
 func writeCheckpointFile(path string, checkpoint screenCheckpoint) error {
