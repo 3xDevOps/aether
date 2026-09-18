@@ -8,6 +8,7 @@ import {
 import { ThemeToggle } from '@/components/theme'
 import { Chip, Tooltip } from '@/components/ui/heroui'
 import { formatBytes } from '@/lib/format'
+import { UsageReader } from '@/components/shell/usage'
 import { inModal } from '@/lib/keys'
 import type { ConnectionState } from '@/lib/stream'
 import type { DiskUsage } from '@/lib/types'
@@ -422,6 +423,7 @@ export function StatusBar() {
             </div>
           </CollapsibleContent>
         </Collapsible>
+        <UsageReader />
       </div>
       <span className="flex min-w-0 shrink-0 items-center gap-2">
         {desktop && (
