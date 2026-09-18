@@ -528,6 +528,21 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   The popup also writes out the facts a pointer reads from a hover: the disk
   breakdown, the protocol version and what this machine is linked to. Tooltips
   and `title` stay hints for a pointer, never the only copy of a fact.
+  The bottom-left **Usage** entry is one mounted reader: it remains compact
+  and reachable at narrow widths and sits beside the version readout on wide
+  screens. It calls `account.usage` for the authenticated member, polls only
+  while the page is visible and live, and refreshes on reconnect, focus,
+  visibility and an explicit Refresh action. Opening the popover loads
+  `account.list` for the own/shared account selector; changing that selection
+  clears the previous values before reading the new account, and responses
+  from superseded selections are discarded. Claude and Codex are always
+  represented in the popover. The display uses only measured windows: an
+  expired reset window is omitted until a new measurement arrives, transport
+  failures mark saved values stale, and authorization failures clear them.
+  Older servers that report method-not-found are explained without a
+  retrying poll loop. Pi, OpenCode, OMP/custom harnesses, API-key usage and
+  billing history are explicitly outside this read-only surface; credentials
+  remain server-side.
 - **The run header** gives its first section two lines: the title and task
   disclosure, then state, harness/mode and branch metadata. The second section
   holds only the run-detail tabs and actions. Desktop actions all appear from
@@ -694,6 +709,7 @@ shapes, gateway authentication and error decoding. It carries exactly the
 methods the views call; the team-feature methods arrive with the tickets that
 use them. Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff
 tab's patch text, the status bar's disk number, and the capabilities probe -
+
 because those read a working tree, a filesystem, and the gateway descriptor
 rather than RPC methods. `aether gui` sends its per-process token as
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
@@ -709,6 +725,17 @@ answers is the whole filesystem holding the data directory, not the directory
 itself, and the gauge is labelled as that: it is the number that says whether
 the box is running out of room, and claiming it as Aether's own usage would
 be an invention.
+
+`account.usage` is the quota RPC used by the status-bar popover. Its params
+are `{account_member_id?: string, refresh?: boolean}` and its result is
+`{account_member_id, providers}` with independently decoded Claude/Codex
+provider rows (`status`, `windows`, optional `plan`, `updated_at`, `retry_at`,
+`error`, and `checked_at`). The provider endpoints are subscription services
+whose response shapes can change; the server owns credentials, fixed provider
+hosts, bounded fetches and cache policy. The dashboard does not refresh
+tokens, run provider CLIs, or infer billing/history, and an older server that
+does not know this method is shown as needing an update rather than polled
+forever.
 
 ## Board
 

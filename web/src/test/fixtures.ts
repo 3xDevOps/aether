@@ -13,6 +13,7 @@ import type {
   ServerUpdateStatus,
   Template,
   UpdateStatus,
+  UsageResult,
   Workspace,
 } from '@/lib/types'
 export const alice: Member = {
@@ -226,6 +227,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     serverInfo: vi.fn(async () => serverInfo),
     workspaceGet: vi.fn(async () => workspace),
     memberList: vi.fn(async () => [alice, bob]),
+    accountUsage: vi.fn(async (): Promise<UsageResult> => ({
+      account_member_id: alice.id,
+      providers: [],
+    })),
     accountList: vi.fn(async () => ({ accounts: [alice], shared_with: [] })),
     accountShare: vi.fn(async () => ({})),
     accountRevoke: vi.fn(async () => ({})),

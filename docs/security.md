@@ -205,7 +205,20 @@ without that a root agent can plant a setuid binary through a writable bind
 mount and have it survive on the host. See the security note on
 `ValidateMounts` in `internal/runtime/mounts.go`.
 
+### Subscription quota reads
+
+The read-only `account.usage` control method makes the server, not the
+browser, read native Claude Code and Codex OAuth files from the selected
+member home and call fixed vendor HTTPS usage endpoints. This is server-side
+token use for status reporting, not credential extraction: Aether never copies
+the credential bytes, refreshes or rewrites native OAuth files, or sends tokens
+or provider response bodies to clients. API-key logins and unsupported
+harnesses do not become quota collectors. Account selection uses the same
+explicit directional grant as launches; administrators do not gain implicit
+access, and membership/share authorization is checked before and after the
+provider read.
 ## The dashboard gateways
+
 
 The dashboard runs over one of two gateways, which share their handlers and
 differ only in who they trust (`internal/webgate` is the shared core;

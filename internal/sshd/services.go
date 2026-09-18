@@ -31,4 +31,6 @@ type Services struct {
 	Rooms RoomService
 	// Evidence is the durable evidence packet service.
 	Evidence EvidenceService
+	// Usage reads read-only Claude Code and Codex subscription quota.
+	Usage QuotaReader
 }
