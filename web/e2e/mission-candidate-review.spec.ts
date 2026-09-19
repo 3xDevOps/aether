@@ -112,15 +112,14 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   const workerURL = new URL(alice.url)
   workerURL.searchParams.set('run', started.attempt.run_id)
   await page.goto(workerURL.toString())
+  await expect(page.getByText('Attached', { exact: true })).toBeVisible({ timeout: terminalTimeout })
   await expect(page.getByRole('button', { name: 'Open Run Room' })).toBeVisible({ timeout: terminalTimeout })
   await page.getByRole('button', { name: 'Open Run Room' }).click()
   const room = page.getByRole('complementary', { name: 'Run Room' })
   await expect(room).toBeVisible()
+  // The owner's initial attach already holds control.
+  await room.getByRole('button', { name: 'Release control', exact: true }).click()
   await room.getByRole('button', { name: 'Take control', exact: true }).click()
-  const takeoverDialog = page.getByRole('dialog', { name: 'Take control of this run?' })
-  if (await takeoverDialog.isVisible()) {
-    await takeoverDialog.getByRole('button', { name: 'Take control', exact: true }).click()
-  }
   await expect(room.getByRole('button', { name: 'Release control', exact: true })).toBeVisible({ timeout: 30_000 })
 
   await page.goto(alice.url)
