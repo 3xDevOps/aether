@@ -182,6 +182,7 @@ func (s *Service) Verify(ctx context.Context, actor Actor, p protocol.Integratio
 	go func() {
 		defer s.unregisterVerification(verificationID)
 		defer cancel()
+
 		s.runVerification(workCtx, actor, domain.WorkspaceID(p.WorkspaceID), p.CandidateID, verificationID, argv, timeout)
 	}()
 	return out, nil

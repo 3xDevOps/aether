@@ -75,7 +75,6 @@ describe('candidate review authority and resolution drafts', () => {
     })
     expect((screen.getByLabelText('Expected target revision') as HTMLInputElement).value).toBe('')
   })
-
   it('keeps the fresher polled result and restores controls after an older refresh', async () => {
     vi.useFakeTimers()
     const first = candidate({

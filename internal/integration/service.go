@@ -80,6 +80,7 @@ type Git interface {
 	RenderCandidatePatch(context.Context, domain.WorkspaceID, string, string, int) (gitengine.Patch, error)
 	RemoveCandidate(context.Context, domain.WorkspaceID, string) error
 }
+
 type Config struct {
 	Store       Store
 	Git         Git
@@ -245,6 +246,7 @@ func defaultAdmission(_ context.Context, a Admission) (func(), error) {
 	}
 	return func() {}, nil
 }
+
 func (s *Service) admit(ctx context.Context, a Admission) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -264,6 +266,7 @@ func (s *Service) admit(ctx context.Context, a Admission) (func(), error) {
 	}
 	return release, nil
 }
+
 func (s *Service) authorize(ctx context.Context, actor Actor, c *protocol.Candidate, operation string) (func(), error) {
 	if c == nil || c.WorkspaceID == "" {
 		return nil, fmt.Errorf("%w: candidate", ErrInvalidRequest)

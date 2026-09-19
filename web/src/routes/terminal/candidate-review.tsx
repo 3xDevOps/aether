@@ -119,7 +119,6 @@ export function CandidateReview({
 }: CandidateReviewProps) {
   const missionMode = Boolean(missionID)
   const [expanded, setExpanded] = useState(initialExpanded)
-
   const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine)
   const gatewayConnection = useStore((state) => state.connection)
   const [authorityReady, setAuthorityReady] = useState(false)

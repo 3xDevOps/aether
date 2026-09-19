@@ -73,7 +73,6 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return zero, err
 	}
-
 	now := s.nowTime()
 	candidateID, err := newCandidateID()
 	if err != nil {
