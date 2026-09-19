@@ -49,50 +49,56 @@ func TestMissionAttemptReservationIsAtomicAndIdempotent(t *testing.T) {
 	task := mustCreateMissionTask(t, db, mission.ID, "bounded worker")
 
 	var wg sync.WaitGroup
-	results := make(chan error, 2)
+	type reservationResult struct {
+		key string
+		err error
+	}
+	results := make(chan reservationResult, 2)
 	for _, key := range []string{"dispatch-a", "dispatch-b"} {
 		wg.Add(1)
 		go func(key string) {
 			defer wg.Done()
 			_, _, err := reserveMissionAttempt(t, db, mission, task, key)
-			results <- err
+			results <- reservationResult{key: key, err: err}
 		}(key)
 	}
 	wg.Wait()
 	close(results)
 	var admitted, limited int
-	for err := range results {
-		if err == nil {
+	var admittedKey string
+	for result := range results {
+		if result.err == nil {
 			admitted++
-		} else if errors.Is(err, ErrMissionLimit) {
+			admittedKey = result.key
+		} else if errors.Is(result.err, ErrMissionLimit) {
 			limited++
 		} else {
-			t.Fatalf("reserve concurrent attempt: %v", err)
+			t.Fatalf("reserve concurrent attempt: %v", result.err)
 		}
 	}
 	if admitted != 1 || limited != 1 {
 		t.Fatalf("concurrent admission = admitted %d limited %d, want one each", admitted, limited)
 	}
 
-	attempt, replay, err := reserveMissionAttempt(t, db, mission, task, "dispatch-a")
+	attempt, replay, err := reserveMissionAttempt(t, db, mission, task, admittedKey)
 	if err != nil || !replay {
 		t.Fatalf("idempotent replay = %+v, replay %v, err %v", attempt, replay, err)
 	}
-	if _, _, err := db.ReserveAttempt(context.Background(), &domain.AttemptReservation{
+	if _, _, reserveErr := db.ReserveAttempt(context.Background(), &domain.AttemptReservation{
 		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
-		DispatchKey: "dispatch-a", Harness: "codex", Mode: domain.LaunchHeadless,
+		DispatchKey: admittedKey, Harness: "codex", Mode: domain.LaunchHeadless,
 		IntegratorGeneration: mission.IntegratorGeneration,
-	}); !errors.Is(err, ErrMissionIdempotencyConflict) {
-		t.Fatalf("semantic replay conflict = %v, want ErrMissionIdempotencyConflict", err)
+	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
+		t.Fatalf("semantic replay conflict = %v", reserveErr)
 	}
-	if err := db.UpdateAttemptState(context.Background(), attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, ""); err != nil {
-		t.Fatalf("settle first attempt: %v", err)
+	if updateErr := db.UpdateAttemptState(context.Background(), attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, ""); updateErr != nil {
+		t.Fatalf("settle first attempt: %v", updateErr)
 	}
-	if _, _, err := reserveMissionAttempt(t, db, mission, task, "dispatch-c"); err != nil {
-		t.Fatalf("retry within total allowance: %v", err)
+	if _, _, reserveErr := reserveMissionAttempt(t, db, mission, task, "dispatch-c"); reserveErr != nil {
+		t.Fatalf("retry within total allowance: %v", reserveErr)
 	}
-	if _, _, err := reserveMissionAttempt(t, db, mission, task, "dispatch-d"); !errors.Is(err, ErrMissionLimit) {
-		t.Fatalf("total allowance = %v, want ErrMissionLimit", err)
+	if _, _, reserveErr := reserveMissionAttempt(t, db, mission, task, "dispatch-d"); !errors.Is(reserveErr, ErrMissionLimit) {
+		t.Fatalf("total allowance = %v, want ErrMissionLimit", reserveErr)
 	}
 }
 
@@ -103,17 +109,17 @@ func TestMissionDependenciesRejectCyclesAndProjectBlocked(t *testing.T) {
 	mission := mustCreateMission(t, db, workspace.ID, member.ID, 2, 4)
 	first := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "first", Objective: "first", Status: domain.TaskRevisionProposed}}
 	second := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "second", Objective: "second", Status: domain.TaskRevisionProposed}}
-	if err := db.CreateTask(context.Background(), first); err != nil {
-		t.Fatalf("create first: %v", err)
+	if firstErr := db.CreateTask(context.Background(), first); firstErr != nil {
+		t.Fatalf("create first: %v", firstErr)
 	}
-	if err := db.CreateTask(context.Background(), second); err != nil {
-		t.Fatalf("create second: %v", err)
+	if secondErr := db.CreateTask(context.Background(), second); secondErr != nil {
+		t.Fatalf("create second: %v", secondErr)
 	}
-	if err := db.SetTaskDependencies(context.Background(), first.ID, 1, []domain.TaskDependency{{TaskID: first.ID, Revision: 1, DependsOnTaskID: second.ID, DependsOnRevision: 1}}, "dep-a"); err != nil {
-		t.Fatalf("set dependency: %v", err)
+	if dependencyErr := db.SetTaskDependencies(context.Background(), first.ID, 1, []domain.TaskDependency{{TaskID: first.ID, Revision: 1, DependsOnTaskID: second.ID, DependsOnRevision: 1}}, "dep-a"); dependencyErr != nil {
+		t.Fatalf("set dependency: %v", dependencyErr)
 	}
-	if err := db.AcceptTaskRevision(context.Background(), first.ID, 1, mission.IntegratorGeneration, "accept-first"); err != nil {
-		t.Fatalf("accept first: %v", err)
+	if acceptErr := db.AcceptTaskRevision(context.Background(), first.ID, 1, mission.IntegratorGeneration, "accept-first"); acceptErr != nil {
+		t.Fatalf("accept first: %v", acceptErr)
 	}
 	projected, err := db.ProjectTask(context.Background(), first.ID)
 	if err != nil {
@@ -124,17 +130,17 @@ func TestMissionDependenciesRejectCyclesAndProjectBlocked(t *testing.T) {
 	}
 	cycleA := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "cycle-a", Objective: "cycle-a", Status: domain.TaskRevisionProposed}}
 	cycleB := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "cycle-b", Objective: "cycle-b", Status: domain.TaskRevisionProposed}}
-	if err := db.CreateTask(context.Background(), cycleA); err != nil {
-		t.Fatalf("create cycle A: %v", err)
+	if cycleAErr := db.CreateTask(context.Background(), cycleA); cycleAErr != nil {
+		t.Fatalf("create cycle A: %v", cycleAErr)
 	}
-	if err := db.CreateTask(context.Background(), cycleB); err != nil {
-		t.Fatalf("create cycle B: %v", err)
+	if cycleBErr := db.CreateTask(context.Background(), cycleB); cycleBErr != nil {
+		t.Fatalf("create cycle B: %v", cycleBErr)
 	}
-	if err := db.SetTaskDependencies(context.Background(), cycleA.ID, 1, []domain.TaskDependency{{TaskID: cycleA.ID, Revision: 1, DependsOnTaskID: cycleB.ID, DependsOnRevision: 1}}, "dep-cycle-a"); err != nil {
-		t.Fatalf("set cycle A dependency: %v", err)
+	if dependencyErr := db.SetTaskDependencies(context.Background(), cycleA.ID, 1, []domain.TaskDependency{{TaskID: cycleA.ID, Revision: 1, DependsOnTaskID: cycleB.ID, DependsOnRevision: 1}}, "dep-cycle-a"); dependencyErr != nil {
+		t.Fatalf("set cycle A dependency: %v", dependencyErr)
 	}
-	if err := db.SetTaskDependencies(context.Background(), cycleB.ID, 1, []domain.TaskDependency{{TaskID: cycleB.ID, Revision: 1, DependsOnTaskID: cycleA.ID, DependsOnRevision: 1}}, "dep-cycle-b"); !errors.Is(err, ErrMissionCycle) {
-		t.Fatalf("cycle dependency = %v, want ErrMissionCycle", err)
+	if cycleErr := db.SetTaskDependencies(context.Background(), cycleB.ID, 1, []domain.TaskDependency{{TaskID: cycleB.ID, Revision: 1, DependsOnTaskID: cycleA.ID, DependsOnRevision: 1}}, "dep-cycle-b"); !errors.Is(cycleErr, ErrMissionCycle) {
+		t.Fatalf("cycle dependency = %v, want ErrMissionCycle", cycleErr)
 	}
 }
 
@@ -144,23 +150,23 @@ func TestMissionAcceptanceRequiresExactEvidenceAndRevision(t *testing.T) {
 	member := mustCreateMember(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
 	task := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "verify", Objective: "verify", Status: domain.TaskRevisionAccepted, EvidenceRequirements: []domain.EvidenceRequirement{{Kind: "test"}}}}
-	if err := db.CreateTask(context.Background(), task); err != nil {
-		t.Fatalf("CreateTask: %v", err)
+	if createErr := db.CreateTask(context.Background(), task); createErr != nil {
+		t.Fatalf("CreateTask: %v", createErr)
 	}
 	attempt, _, err := reserveMissionAttempt(t, db, mission, task, "evidence-dispatch")
 	if err != nil {
 		t.Fatalf("ReserveAttempt: %v", err)
 	}
 	reservedRun := &domain.Run{ID: attempt.RunID, WorkspaceID: workspace.ID, MemberID: member.ID, Task: task.Revision.Title, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunQueued}
-	if err := db.CreateRunWithID(context.Background(), reservedRun); err != nil {
-		t.Fatalf("CreateRunWithID: %v", err)
+	if runErr := db.CreateRunWithID(context.Background(), reservedRun); runErr != nil {
+		t.Fatalf("CreateRunWithID: %v", runErr)
 	}
 	submission, err := db.SubmitAttempt(context.Background(), attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.SubmissionRef{WorkspaceID: workspace.ID, RunID: attempt.RunID, EvidenceRef: "packet-1", RetainedRevision: "tree-1"}, []domain.SubmissionEvidence{{Kind: "test", Ref: "packet-1", Available: false}}, nil)
 	if err != nil {
 		t.Fatalf("SubmitAttempt: %v", err)
 	}
-	if _, err := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "accept-submission"); !errors.Is(err, ErrMissionNotReady) {
-		t.Fatalf("accept missing evidence = %v, want ErrMissionNotReady", err)
+	if _, acceptErr := db.AcceptSubmission(context.Background(), submission.ID, mission.CurrentIntegratorRunID, mission.IntegratorGeneration, mission.AcceptedSetVersion, "", "accept-submission"); !errors.Is(acceptErr, ErrMissionNotReady) {
+		t.Fatalf("accept missing evidence = %v, want ErrMissionNotReady", acceptErr)
 	}
 	projected, err := db.ProjectTask(context.Background(), task.ID)
 	if err != nil {
@@ -184,11 +190,11 @@ func TestMissionTaskRevisionAcceptanceFencesOlderProposal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("propose third: %v", err)
 	}
-	if err := db.AcceptTaskRevision(context.Background(), task.ID, third.Revision, mission.IntegratorGeneration, "accept-3"); err != nil {
-		t.Fatalf("accept third: %v", err)
+	if acceptErr := db.AcceptTaskRevision(context.Background(), task.ID, third.Revision, mission.IntegratorGeneration, "accept-3"); acceptErr != nil {
+		t.Fatalf("accept third: %v", acceptErr)
 	}
-	if err := db.AcceptTaskRevision(context.Background(), task.ID, second.Revision, mission.IntegratorGeneration, "accept-2"); !errors.Is(err, ErrMissionStale) {
-		t.Fatalf("accept older revision: %v, want ErrMissionStale", err)
+	if staleErr := db.AcceptTaskRevision(context.Background(), task.ID, second.Revision, mission.IntegratorGeneration, "accept-2"); !errors.Is(staleErr, ErrMissionStale) {
+		t.Fatalf("accept older revision: %v, want ErrMissionStale", staleErr)
 	}
 	projected, err := db.ProjectTask(context.Background(), task.ID)
 	if err != nil {
@@ -211,8 +217,8 @@ func TestMissionInitialIntegratorRunBecomesRetiredAfterReplacement(t *testing.T)
 	if replaced.CurrentIntegratorRunID == initialRun {
 		t.Fatalf("replacement retained initial run %q", initialRun)
 	}
-	if _, err := db.GetMissionByRun(context.Background(), initialRun); !errors.Is(err, ErrMissionStale) {
-		t.Fatalf("initial run lookup = %v, want ErrMissionStale", err)
+	if _, lookupErr := db.GetMissionByRun(context.Background(), initialRun); !errors.Is(lookupErr, ErrMissionStale) {
+		t.Fatalf("initial run lookup = %v, want ErrMissionStale", lookupErr)
 	}
 	current, err := db.GetMissionByRun(context.Background(), replaced.CurrentIntegratorRunID)
 	if err != nil {
@@ -228,7 +234,7 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID, 1, 2)
@@ -238,8 +244,8 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 		t.Fatalf("ReserveAttempt: %v", err)
 	}
 	ctx := context.Background()
-	if _, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, member.ID, true); err != nil {
-		t.Fatalf("set takeover: %v", err)
+	if _, takeoverErr := db.SetMissionWorkerTakeover(ctx, attempt.RunID, member.ID, true); takeoverErr != nil {
+		t.Fatalf("set takeover: %v", takeoverErr)
 	}
 	first, err := db.PendingMissionControlChange(ctx, mission.ID)
 	if err != nil {
@@ -248,8 +254,8 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 	if first == 0 {
 		t.Fatal("pending first change = 0, want nonzero generation")
 	}
-	if _, err := db.SetMissionWorkerTakeover(ctx, attempt.RunID, member.ID, false); err != nil {
-		t.Fatalf("clear takeover: %v", err)
+	if _, clearErr := db.SetMissionWorkerTakeover(ctx, attempt.RunID, member.ID, false); clearErr != nil {
+		t.Fatalf("clear takeover: %v", clearErr)
 	}
 	second, err := db.PendingMissionControlChange(ctx, mission.ID)
 	if err != nil {
@@ -258,8 +264,8 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 	if second <= first {
 		t.Fatalf("coalesced generation = %d, want > %d", second, first)
 	}
-	if err := db.AckMissionControlChange(ctx, mission.ID, first); err != nil {
-		t.Fatalf("ack first generation: %v", err)
+	if ackErr := db.AckMissionControlChange(ctx, mission.ID, first); ackErr != nil {
+		t.Fatalf("ack first generation: %v", ackErr)
 	}
 	pending, err := db.PendingMissionControlChange(ctx, mission.ID)
 	if err != nil {
@@ -268,14 +274,14 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 	if pending != second {
 		t.Fatalf("pending after old ack = %d, want newer %d", pending, second)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close before reopen: %v", err)
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("close before reopen: %v", closeErr)
 	}
 	reopened, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer reopened.Close()
+	defer func() { _ = reopened.Close() }()
 	pending, err = reopened.PendingMissionControlChange(ctx, mission.ID)
 	if err != nil {
 		t.Fatalf("pending after reopen: %v", err)
@@ -283,11 +289,11 @@ func TestMissionControlChangeOutboxCoalescesAcrossReopen(t *testing.T) {
 	if pending != second {
 		t.Fatalf("pending after reopen = %d, want newer %d", pending, second)
 	}
-	if err := reopened.AckMissionControlChange(ctx, mission.ID, second); err != nil {
-		t.Fatalf("ack latest generation: %v", err)
+	if ackErr := reopened.AckMissionControlChange(ctx, mission.ID, second); ackErr != nil {
+		t.Fatalf("ack latest generation: %v", ackErr)
 	}
-	if pending, err := reopened.PendingMissionControlChange(ctx, mission.ID); err != nil {
-		t.Fatalf("pending after latest ack: %v", err)
+	if pending, pendingErr := reopened.PendingMissionControlChange(ctx, mission.ID); pendingErr != nil {
+		t.Fatalf("pending after latest ack: %v", pendingErr)
 	} else if pending != 0 {
 		t.Fatalf("pending after latest ack = %d, want 0", pending)
 	}
@@ -299,9 +305,9 @@ func mustSubmitMissionAttempt(t *testing.T, db *DB, mission *domain.Mission, tas
 	if err != nil {
 		t.Fatalf("ReserveAttempt: %v", err)
 	}
-	run := &domain.Run{ID: attempt.RunID, WorkspaceID: mission.WorkspaceID, MemberID: domain.MemberID(mission.AccountableHumanID), Task: task.Revision.Title, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunQueued}
-	if err := db.CreateRunWithID(context.Background(), run); err != nil {
-		t.Fatalf("CreateRunWithID: %v", err)
+	run := &domain.Run{ID: attempt.RunID, WorkspaceID: mission.WorkspaceID, MemberID: mission.AccountableHumanID, Task: task.Revision.Title, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunQueued}
+	if createErr := db.CreateRunWithID(context.Background(), run); createErr != nil {
+		t.Fatalf("CreateRunWithID: %v", createErr)
 	}
 	submission, err := db.SubmitAttempt(context.Background(), attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.SubmissionRef{
 		WorkspaceID: mission.WorkspaceID, RunID: attempt.RunID, EvidenceRef: "packet-" + dispatchKey, RetainedRevision: "tree-" + dispatchKey,
@@ -338,8 +344,8 @@ func TestMissionAcceptedSetVersionAdvancesWhenCurrentOutputLeavesSet(t *testing.
 	if err != nil {
 		t.Fatalf("ProposeTaskRevision: %v", err)
 	}
-	if err := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "replacement-accept"); err != nil {
-		t.Fatalf("AcceptTaskRevision: %v", err)
+	if acceptErr := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "replacement-accept"); acceptErr != nil {
+		t.Fatalf("AcceptTaskRevision: %v", acceptErr)
 	}
 	afterReplacement, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -349,15 +355,15 @@ func TestMissionAcceptedSetVersionAdvancesWhenCurrentOutputLeavesSet(t *testing.
 		t.Fatalf("accepted set version after replacement = %d, want 2", afterReplacement.AcceptedSetVersion)
 	}
 	var historical int
-	if err := db.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM mission_acceptances WHERE mission_id=? AND task_id=? AND task_revision=?`, mission.ID, task.ID, 1).Scan(&historical); err != nil {
-		t.Fatalf("count historical acceptance: %v", err)
+	if countErr := db.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM mission_acceptances WHERE mission_id=? AND task_id=? AND task_revision=?`, mission.ID, task.ID, 1).Scan(&historical); countErr != nil {
+		t.Fatalf("count historical acceptance: %v", countErr)
 	}
 	if historical != 1 {
 		t.Fatalf("historical acceptance count = %d, want 1", historical)
 	}
 
-	if err := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "replacement-accept"); err != nil {
-		t.Fatalf("replay AcceptTaskRevision: %v", err)
+	if replayAcceptErr := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "replacement-accept"); replayAcceptErr != nil {
+		t.Fatalf("replay AcceptTaskRevision: %v", replayAcceptErr)
 	}
 	afterReplay, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -374,15 +380,15 @@ func TestMissionAcceptedSetVersionDoesNotAdvanceForProposedWorkOrAbandonment(t *
 	member := mustCreateMember(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 8)
 	task := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "proposed", Objective: "proposed", Status: domain.TaskRevisionProposed}}
-	if err := db.CreateTask(context.Background(), task); err != nil {
-		t.Fatalf("CreateTask: %v", err)
+	if createErr := db.CreateTask(context.Background(), task); createErr != nil {
+		t.Fatalf("CreateTask: %v", createErr)
 	}
 	revision, err := db.ProposeTaskRevision(context.Background(), task.ID, &domain.TaskRevision{Title: "proposed replacement", Objective: "proposed replacement"}, "proposed-revision")
 	if err != nil {
 		t.Fatalf("ProposeTaskRevision: %v", err)
 	}
-	if err := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "accept-proposed"); err != nil {
-		t.Fatalf("AcceptTaskRevision: %v", err)
+	if acceptErr := db.AcceptTaskRevision(context.Background(), task.ID, revision.Revision, mission.IntegratorGeneration, "accept-proposed"); acceptErr != nil {
+		t.Fatalf("AcceptTaskRevision: %v", acceptErr)
 	}
 	afterAccept, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -391,8 +397,8 @@ func TestMissionAcceptedSetVersionDoesNotAdvanceForProposedWorkOrAbandonment(t *
 	if afterAccept.AcceptedSetVersion != 0 {
 		t.Fatalf("accepted set version after proposed work = %d, want 0", afterAccept.AcceptedSetVersion)
 	}
-	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-proposed"); err != nil {
-		t.Fatalf("AbandonTask: %v", err)
+	if abandonErr := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-proposed"); abandonErr != nil {
+		t.Fatalf("AbandonTask: %v", abandonErr)
 	}
 	afterAbandon, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -401,8 +407,8 @@ func TestMissionAcceptedSetVersionDoesNotAdvanceForProposedWorkOrAbandonment(t *
 	if afterAbandon.AcceptedSetVersion != 0 {
 		t.Fatalf("accepted set version after proposed abandonment = %d, want 0", afterAbandon.AcceptedSetVersion)
 	}
-	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-proposed"); err != nil {
-		t.Fatalf("replay AbandonTask: %v", err)
+	if replayAbandonErr := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-proposed"); replayAbandonErr != nil {
+		t.Fatalf("replay AbandonTask: %v", replayAbandonErr)
 	}
 	replayed, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -427,8 +433,8 @@ func TestMissionAcceptedSetVersionRejectsStaleAcceptanceAfterCurrentOutputRemova
 	if err != nil {
 		t.Fatalf("ProposeTaskRevision: %v", err)
 	}
-	if err := db.AcceptTaskRevision(context.Background(), firstTask.ID, revision.Revision, mission.IntegratorGeneration, "first-replacement-accept"); err != nil {
-		t.Fatalf("AcceptTaskRevision: %v", err)
+	if acceptErr := db.AcceptTaskRevision(context.Background(), firstTask.ID, revision.Revision, mission.IntegratorGeneration, "first-replacement-accept"); acceptErr != nil {
+		t.Fatalf("AcceptTaskRevision: %v", acceptErr)
 	}
 	current, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -440,8 +446,8 @@ func TestMissionAcceptedSetVersionRejectsStaleAcceptanceAfterCurrentOutputRemova
 
 	secondTask := mustCreateMissionTask(t, db, mission.ID, "second output")
 	secondSubmission := mustSubmitMissionAttempt(t, db, current, secondTask, "second-output")
-	if _, err := db.AcceptSubmission(context.Background(), secondSubmission.ID, current.CurrentIntegratorRunID, current.IntegratorGeneration, oldSetVersion, "", "accept-stale-output"); !errors.Is(err, ErrMissionStale) {
-		t.Fatalf("stale accepted set = %v, want ErrMissionStale", err)
+	if _, staleErr := db.AcceptSubmission(context.Background(), secondSubmission.ID, current.CurrentIntegratorRunID, current.IntegratorGeneration, oldSetVersion, "", "accept-stale-output"); !errors.Is(staleErr, ErrMissionStale) {
+		t.Fatalf("stale accepted set = %v, want ErrMissionStale", staleErr)
 	}
 }
 
@@ -453,8 +459,8 @@ func TestMissionAcceptedSetVersionAdvancesOnAbandonmentOfCurrentOutput(t *testin
 	task := mustCreateMissionTask(t, db, mission.ID, "abandoned output")
 	submission := mustSubmitMissionAttempt(t, db, mission, task, "abandoned-output")
 	mustAcceptMissionSubmission(t, db, mission, submission, "accept-abandoned-output")
-	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-output"); err != nil {
-		t.Fatalf("AbandonTask: %v", err)
+	if abandonErr := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-output"); abandonErr != nil {
+		t.Fatalf("AbandonTask: %v", abandonErr)
 	}
 	afterAbandon, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
@@ -463,8 +469,8 @@ func TestMissionAcceptedSetVersionAdvancesOnAbandonmentOfCurrentOutput(t *testin
 	if afterAbandon.AcceptedSetVersion != 2 {
 		t.Fatalf("accepted set version after abandonment = %d, want 2", afterAbandon.AcceptedSetVersion)
 	}
-	if err := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-output"); err != nil {
-		t.Fatalf("replay AbandonTask: %v", err)
+	if replayAbandonErr := db.AbandonTask(context.Background(), task.ID, mission.IntegratorGeneration, "abandon-output"); replayAbandonErr != nil {
+		t.Fatalf("replay AbandonTask: %v", replayAbandonErr)
 	}
 	afterReplay, err := db.GetMission(context.Background(), mission.ID)
 	if err != nil {
