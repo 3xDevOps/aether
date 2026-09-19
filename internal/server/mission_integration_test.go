@@ -499,12 +499,15 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	}); err == nil {
 		t.Fatal("prepare with conflicting mission_id unexpectedly succeeded")
 	}
-	shownCandidate := runMissionIntegrationCLI(t, integratorRun, "show", map[string]any{"candidate_id": candidate.CandidateID})
+	shownCandidate := runMissionIntegrationCLI(t, integratorRun, "show", map[string]any{
+		"workspace_id": candidate.WorkspaceID, "candidate_id": candidate.CandidateID,
+	})
 	if shownCandidate.CandidateID != candidate.CandidateID || shownCandidate.MissionID != missionID {
 		t.Fatalf("integration.show did not preserve server-filled mission binding: %+v", shownCandidate)
 	}
 
 	failed := runMissionIntegrationCLI(t, integratorRun, "verify", map[string]any{
+		"workspace_id": candidate.WorkspaceID,
 		"candidate_id": candidate.CandidateID, "candidate_revision": candidate.CandidateRevision,
 		"argv":            []string{"sh", "-c", "printf 'fixture-failure\\n'; exit 17"},
 		"timeout_seconds": 30, "idempotency_key": "docker-verify-failed",
@@ -514,6 +517,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		t.Fatalf("failed verification was not durably recorded: %+v", failed.Verifications)
 	}
 	passed := runMissionIntegrationCLI(t, integratorRun, "verify", map[string]any{
+		"workspace_id": candidate.WorkspaceID,
 		"candidate_id": candidate.CandidateID, "candidate_revision": candidate.CandidateRevision,
 		// Verification also proves the canonical staged CLI exists in the
 		// verification image and has no run identity/socket.
@@ -540,6 +544,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		t.Fatal("integrator agent socket could decide delivery; approval is human-only")
 	}
 	requested := runMissionIntegrationCLI(t, integratorRun, "request-delivery", map[string]any{
+		"workspace_id": candidate.WorkspaceID,
 		"candidate_id": candidate.CandidateID, "candidate_revision": candidate.CandidateRevision,
 		"verification_ids": verificationIDs, "action": string(protocol.DeliveryActionUpdateRef),
 		"idempotency_key": "docker-request-delivery",
@@ -570,6 +575,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		t.Fatalf("advance stale target ref: %v", err)
 	}
 	if _, err := runMissionIntegrationCLIResult(t, integratorRun, "deliver", map[string]any{
+		"workspace_id": candidate.WorkspaceID,
 		"candidate_id": candidate.CandidateID, "request_id": requested.DeliveryRequest.RequestID,
 		"request_version": requested.DeliveryRequest.RequestVersion,
 	}); err == nil {
@@ -579,6 +585,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		t.Fatalf("restore reviewed target ref: %v", err)
 	}
 	delivered := runMissionIntegrationCLI(t, integratorRun, "deliver", map[string]any{
+		"workspace_id": candidate.WorkspaceID,
 		"candidate_id": candidate.CandidateID, "request_id": requested.DeliveryRequest.RequestID,
 		"request_version": requested.DeliveryRequest.RequestVersion,
 	})
@@ -675,7 +682,9 @@ func waitMissionVerification(ctx context.Context, t *testing.T, runID string, ca
 			t.Fatalf("verification did not settle: %+v: %v", candidate.Verifications, ctx.Err())
 		case <-ticker.C:
 		}
-		candidate = runMissionIntegrationCLI(t, runID, "show", map[string]any{"candidate_id": candidate.CandidateID})
+		candidate = runMissionIntegrationCLI(t, runID, "show", map[string]any{
+			"workspace_id": candidate.WorkspaceID, "candidate_id": candidate.CandidateID,
+		})
 	}
 	return candidate
 }
