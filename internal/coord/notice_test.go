@@ -86,9 +86,20 @@ func TestOverlapNoticeFiresOncePerPairAndReArms(t *testing.T) {
 		t.Fatalf("injections = %+v, want one per run", got)
 	}
 	notice := seen[a]
-	for _, want := range []string{"[aether] Overlap:", string(b), "src/auth.go", "aether_send", "Advisory only"} {
+	for _, want := range []string{
+		"[aether] Overlap:", string(b), "src/auth.go",
+		"/usr/local/bin/aether-internal status --json",
+		"/usr/local/bin/aether-internal send",
+		"/usr/local/bin/aether-internal inbox --wait 30",
+		"Advisory only",
+	} {
 		if !strings.Contains(notice, want) {
 			t.Fatalf("notice %q does not mention %q", notice, want)
+		}
+	}
+	for _, obsolete := range []string{"MCP", "aether_status", "aether_send", "aether_inbox"} {
+		if strings.Contains(notice, obsolete) {
+			t.Fatalf("notice retained obsolete MCP guidance %q: %s", obsolete, notice)
 		}
 	}
 
