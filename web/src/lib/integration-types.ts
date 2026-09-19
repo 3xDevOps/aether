@@ -164,6 +164,7 @@ export interface CandidateResolution { path: string; content?: string; delete?: 
 export interface IntegrationResolveParams {
   workspace_id: string
   candidate_id: string
+  expected_version: number
   files: CandidateResolution[]
   idempotency_key: string
 }
