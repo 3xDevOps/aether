@@ -3,7 +3,6 @@ package sshd
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -18,23 +17,9 @@ func init() {
 // launchAccount resolves the account a caller may use. Access is opt-in and
 // directional: an admin has no implicit right to another member's credentials.
 func (s *Server) launchAccount(ctx context.Context, actor domain.MemberID, requested string) (domain.MemberID, *protocol.Error) {
-	account := domain.MemberID(requested)
-	if account == "" || account == actor {
-		return actor, nil
-	}
-	owner, err := s.cfg.Store.GetMember(ctx, account)
+	account, err := ResolveLaunchAccount(ctx, s.cfg.Store, actor, requested)
 	if err != nil {
 		return "", rpcError(err)
-	}
-	if owner.Pending {
-		return "", &protocol.Error{Code: protocol.CodeDenied, Message: "account owner is pending admin approval"}
-	}
-	shared, err := s.cfg.Store.AccountSharedWith(ctx, account, actor)
-	if err != nil {
-		return "", rpcError(err)
-	}
-	if !shared {
-		return "", &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("member %s has not shared their account with you", account)}
 	}
 	return account, nil
 }

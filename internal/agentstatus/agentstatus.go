@@ -13,6 +13,8 @@ package agentstatus
 import (
 	_ "embed"
 	"encoding/json"
+
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 )
 
 // State is what the agent last said it was doing. The zero value means no
@@ -57,11 +59,8 @@ type Report struct {
 }
 
 // ReporterCommand is the staged server binary inside the run container
-// (internal/mcpbridge.BinaryPath). It is spelled out rather than imported
-// because the bridge package reaches back here through the coordination
-// service, and because the assets beside it are data files that carry the
-// same path as text anyway.
-const ReporterCommand = "/opt/aether/aether-server"
+// (internal/coordtransport.BinaryPath).
+const ReporterCommand = coordtransport.BinaryPath
 
 // ClaudeSettingsName is the file the server writes into the run's
 // coordination directory and points Claude Code at with --settings.
@@ -70,7 +69,7 @@ const ClaudeSettingsName = "claude-settings.json"
 // ClaudeSettings is that file: a Claude Code settings document whose only
 // key is hooks, registering the reporter on every event that tells Aether
 // whether the agent is working or waiting. The command path is the staged
-// server binary inside the run container (internal/mcpbridge.BinaryPath).
+// server binary inside the run container (internal/coordtransport.BinaryPath).
 //
 //go:embed claude-settings.json
 var ClaudeSettings []byte
@@ -81,7 +80,7 @@ const OpenCodePluginName = "opencode-status.js"
 
 // OpenCodePlugin is that file: an opencode plugin that runs the reporter
 // on the events below. It spawns the staged server binary inside the run
-// container (internal/mcpbridge.BinaryPath).
+// container (internal/coordtransport.BinaryPath).
 //
 //go:embed opencode-status.js
 var OpenCodePlugin []byte

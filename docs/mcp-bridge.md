@@ -1,78 +1,74 @@
 # The MCP bridge
 
-Aether's MCP bridge is the optional in-container interface to the same
-coordination service exposed by `/usr/local/bin/aether-internal`. It does not
-add a second protocol or authority layer. Both interfaces speak coordination
-wire v3 over the run's Unix socket.
+Aether's MCP bridge is an optional, manually configured in-container adapter
+for six existing coordination tools. The canonical agent interface is the
+`aether-internal` CLI, which is automatically available in every managed
+container and can load a version-matched skill on demand. The bridge is not the
+Release B orchestration interface and does not need to mirror its mission or
+worker-management surface.
 
-The server stages a version-matched copy of its own binary and mounts it
-read-only at both executable paths:
+When coordination assets are available, the server stages verified executable
+bytes read-only at the two in-container paths used by the existing surfaces:
 
 ```
-/opt/aether/aether-server         hidden MCP entry point and lifecycle hook
-/usr/local/bin/aether-internal    agent-facing coordination CLI
+/opt/aether/aether-server         optional MCP entry point and lifecycle hook
+/usr/local/bin/aether-internal    canonical agent-facing coordination CLI
 ```
 
-It also mounts the run's coordination directory read-only:
+The run coordination directory carries the run socket and related server
+assets:
 
 ```
 /run/aether/coord3.sock           this run's v3 socket
-/run/aether/mcp.json              optional harness MCP configuration
 /run/aether/co-authors            server-generated commit trailers
 ```
 
-The executable mounts use the same verified bytes. They are server-constructed
-assets, not caller-provided mounts. Caller mounts cannot target or nest under
-`/run/aether`, `/opt/aether`, or `/usr/local/bin/aether-internal`, so a profile,
-credential home, or worktree cannot shadow them. If staging or verification
-fails, Aether mounts neither coordination surface and records coordination as
-unavailable instead of handing a container an unverified binary.
+These are Aether-owned surfaces, not caller-provided mounts. Caller mounts
+cannot shadow the coordination directory or either executable. If verified
+staging fails, Aether refuses to create the managed container; it does not
+silently launch a container without the canonical CLI or bridge binary.
 
-The socket is the only identity and authentication boundary. The bridge has
-no token, login, run-ID, or credential option. A connection to
-`/run/aether/coord3.sock` is the run that owns that socket. No caller-supplied
-sender identity is sent in a tool parameter.
+The socket is the run identity and authentication boundary. The bridge and CLI
+have no token, login, run-ID, or credential option. A connection to a run's
+socket is that run; a binary can be present without a run identity, but then
+run-bound operations are unavailable.
 
-## Registration and discovery
+## Manual registration and discovery
 
-A harness profile that supports an externally supplied MCP configuration is
-registered automatically at launch. The server writes `mcp.json` into the run
-coordination directory and appends the profile's MCP flag. Claude Code is the
-shipped profile with this registration:
+Aether does not automatically register the MCP bridge, write a harness
+configuration, or append a harness-specific MCP flag. To use MCP voluntarily,
+create a user-managed configuration outside `/run/aether`, then point a
+harness that supports MCP configuration at it. For example:
 
 ```sh
-claude --dangerously-skip-permissions "Describe the assigned change" \
-  --mcp-config /run/aether/mcp.json
-```
-
-The generated configuration is:
-
-```json
+cat >/tmp/aether-mcp.json <<'EOF'
 {"mcpServers":{"aether":{"type":"stdio","command":"/opt/aether/aether-server","args":["mcp"]}}}
+EOF
+claude --mcp-config /tmp/aether-mcp.json
 ```
 
-The config and executable are read-only. Nothing is written into the
-worktree or the member's configuration home. A harness without MCP
-registration still receives the overlap notice, but it does not receive these
-tools. A run started without the registration cannot gain it without a
-relaunch.
+The example is manual, and the path is not written or managed by Aether. Other
+harnesses may use different configuration syntax. The staged MCP entry point
+still reaches only the run socket belonging to the container.
 
-A coordinated task-bearing run also receives this short discovery instruction
-in its launch prompt:
+The canonical CLI remains available without MCP. A shell-capable harness can
+invoke `aether-internal` directly and request its live, version-matched skill
+on demand. A container or terminal without a run identity can use general
+help or the non-run skill guidance, but status, messaging, reporting, and
+mission operations return unavailable. Lack of manual MCP registration is not
+an overlap-only or notice-only mode.
 
-```
-Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
-```
+See [coordination.md](coordination.md) for the established CLI commands and
+wire limits. The optional bridge does not install a skill package or carry an
+identity claim.
 
-The instruction is the automatic discovery path for harnesses with or without
-MCP. It does not install a skill package and does not carry an identity claim.
-See [coordination.md](coordination.md) for the CLI commands and wire limits.
+## The existing six-tool surface
 
-## MCP tools and exact parity
-
-The bridge exposes exactly six tools. Their parameters, receipts, authorization
-rules, size limits, idempotency behavior, and durable storage are the
-corresponding v3 coordination methods, not MCP-specific variants.
+The bridge exposes exactly six existing tools. Their parameters, receipts,
+authorization rules, limits, idempotency behavior, and durable storage map to
+the established v3 coordination methods. This is the bridge's complete
+surface; it does not expose Release B mission, task, worker, takeover, or
+integrator-management commands.
 
 | MCP tool | v3 method | Parameters | Result |
 | --- | --- | --- | --- |
@@ -83,9 +79,9 @@ corresponding v3 coordination methods, not MCP-specific variants.
 | `aether_reply` | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 
-MCP returns the structured v3 result directly. The CLI wraps the same result
-in its `schema_version` and `ok` JSON envelope; this presentation difference
-does not change the operation or receipt.
+The bridge returns the established structured result directly. This
+presentation differs from any CLI envelope, but it does not add operations or
+make MCP a Release B-parity interface.
 
 `aether_send`, `aether_ask`, `aether_reply`, and `aether_report` require an
 explicit `idempotency_key`; the bridge never invents one. For a retry after a
@@ -99,22 +95,21 @@ acknowledgement token that reached the MCP stream when the next call omits
 `ack_token`, while an explicit token remains supported. A cancelled call,
 failed response write, or bridge process exit does not promote a staged token,
 so the batch is delivered again. `wait_seconds` requests one bounded server
-wait from 0 through 30 seconds; it is not an unbounded poll.
+wait; it is not an unbounded poll.
 
 `aether_ask` returns a durable `question_id`. `aether_reply` takes that ID
 instead of a target run ID and routes only to the original question sender.
-The question establishes the reply relationship, so a reply can land after
-ordinary overlap grace expires; it cannot authorize an unrelated message or
-cross a workspace boundary.
+The question establishes the reply relationship; it cannot authorize an
+unrelated message or cross a workspace boundary.
 
-`aether_report` accepts only `success`, `failure`, or `blocked` and requires a
+`aether_report` accepts only the established outcome values and requires a
 non-empty summary. Before the server accepts it, Aether captures the run's
-evidence, including a private Git evidence commit and a PTY transcript capped
-at 16 MiB. The retained packet records factual context, provenance,
-unresolved facts, and a next action, with explicit unavailable or truncated
-sources. Evidence expires after 30 days. It is not an atomic environment
-snapshot and does not assert that the outcome was verified. A failed capture
-or persistence step leaves the outcome unaccepted and the runtime recoverable.
+evidence, including a private Git evidence commit and a bounded PTY
+transcript. The retained packet records factual context, provenance,
+unresolved facts, and a next action, with unavailable or truncated sources
+shown explicitly. Evidence is not an atomic environment snapshot and does not
+assert that the outcome was verified. A failed capture or persistence step
+leaves the outcome unaccepted and the runtime recoverable.
 
 ## MCP errors
 
@@ -166,7 +161,10 @@ sidecars.
 Active runs and retained terminal TUI runs keep their socket, unread mailbox,
 and MCP assets through a server restart. When the container is destroyed,
 Aether releases the coordination directory and mailbox after required evidence
-capture. With `--conflict-coordination=false`, new runs receive no bridge
-mount, CLI mount, socket, or MCP configuration. Existing mounted assets become
-inert and coordination calls return unavailable; the conflict radar itself
-continues to operate.
+capture.
+The coordination disable setting remains effective. When it is off, no run
+socket or usable MCP bridge is provided: bridge calls and run-bound CLI
+operations return unavailable. Every newly created managed container still
+receives the staged CLI, but without a run socket it can provide only general
+help or non-run skill guidance. Existing mounted assets become inert; the
+conflict radar itself continues to operate.

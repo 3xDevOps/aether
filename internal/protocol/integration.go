@@ -83,26 +83,27 @@ type CandidateMutation struct {
 
 // Candidate is the durable aggregate returned by integration methods.
 type Candidate struct {
-	CandidateID            string              `json:"candidate_id"`
-	WorkspaceID            string              `json:"workspace_id"`
-	MissionID              string              `json:"mission_id,omitempty"`
-	Submissions            []SubmissionRef     `json:"submissions"`
-	RequiredSources        []string            `json:"required_sources"`
-	Inputs                 []CandidateInput    `json:"inputs"`
-	TargetRef              string              `json:"target_ref"`
-	ExpectedTargetRevision string              `json:"expected_target_revision"`
-	CandidateRevision      string              `json:"candidate_revision,omitempty"`
-	State                  CandidateState      `json:"state"`
-	Conflicts              []string            `json:"conflicts,omitempty"`
-	AppliedInputs          int                 `json:"applied_inputs"`
-	Verifications          []Verification      `json:"verifications"`
-	DeliveryRequest        *DeliveryRequest    `json:"delivery_request,omitempty"`
-	DeliveryReceipt        *DeliveryReceipt    `json:"delivery_receipt,omitempty"`
-	Mutations              []CandidateMutation `json:"mutations"`
-	CreatedAt              time.Time           `json:"created_at"`
-	ExpiresAt              time.Time           `json:"expires_at"`
-	Error                  string              `json:"error,omitempty"`
-	Version                int64               `json:"version"`
+	CandidateID               string              `json:"candidate_id"`
+	WorkspaceID               string              `json:"workspace_id"`
+	MissionID                 string              `json:"mission_id,omitempty"`
+	MissionAcceptedSetVersion uint64              `json:"mission_accepted_set_version,omitempty"`
+	Submissions               []SubmissionRef     `json:"submissions"`
+	RequiredSources           []string            `json:"required_sources"`
+	Inputs                    []CandidateInput    `json:"inputs"`
+	TargetRef                 string              `json:"target_ref"`
+	ExpectedTargetRevision    string              `json:"expected_target_revision"`
+	CandidateRevision         string              `json:"candidate_revision,omitempty"`
+	State                     CandidateState      `json:"state"`
+	Conflicts                 []string            `json:"conflicts,omitempty"`
+	AppliedInputs             int                 `json:"applied_inputs"`
+	Verifications             []Verification      `json:"verifications"`
+	DeliveryRequest           *DeliveryRequest    `json:"delivery_request,omitempty"`
+	DeliveryReceipt           *DeliveryReceipt    `json:"delivery_receipt,omitempty"`
+	Mutations                 []CandidateMutation `json:"mutations"`
+	CreatedAt                 time.Time           `json:"created_at"`
+	ExpiresAt                 time.Time           `json:"expires_at"`
+	Error                     string              `json:"error,omitempty"`
+	Version                   int64               `json:"version"`
 }
 
 // CandidateSummary is the bounded list projection of a candidate aggregate.

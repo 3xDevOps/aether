@@ -5,6 +5,7 @@ import type {
   BudgetReport,
   EvidencePacket,
   Member,
+  Mission,
   RoomMessage,
   RoomStatusResult,
   Run,
@@ -66,6 +67,24 @@ export const otherWorkspace: Workspace = {
   name: 'docs-site',
   base_branch: 'main',
   created_at: '2026-08-14T07:00:00Z',
+}
+export function mission(over: Partial<Mission> = {}): Mission {
+  return {
+    id: 'mission_1',
+    workspace_id: workspace.id,
+    objective: 'coordinate checkout work',
+    accountable_human_id: alice.id,
+    integrator: { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+    execution_choices: [{ account_member_id: alice.id, harness: 'claude', mode: 'headless' }],
+    max_concurrent_attempts: 2,
+    max_total_attempts: 8,
+    current_integrator_run_id: 'run_integrator',
+    integrator_generation: 1,
+    accepted_set_version: 0,
+    created_at: '2026-08-14T10:00:00Z',
+    updated_at: '2026-08-14T10:00:00Z',
+    ...over,
+  }
 }
 
 export function run(over: Partial<Run> = {}): Run {
@@ -253,6 +272,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     accountRevoke: vi.fn(async () => ({})),
     runList: vi.fn(async () => [run()]),
     runGet: vi.fn(async () => run()),
+    missionCreate: vi.fn(async () => ({ mission: mission() })),
+    missionShow: vi.fn(async () => ({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [] })),
+    missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: undefined })),
+    missionWorkerRelease: vi.fn(async () => ({ run_id: 'run_worker', takeover_active: false, takeover_generation: 2 })),
+    missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
     runDelete: vi.fn(async () => ({})),

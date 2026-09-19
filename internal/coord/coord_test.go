@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -177,7 +178,16 @@ func sendParams(to domain.RunID, body string) protocol.CoordSendParams {
 func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 	t.Helper()
 	ctx := context.Background()
-	dir := t.TempDir()
+	// Unix socket paths must not grow with the test or subtest name.
+	dir, err := os.MkdirTemp("", "ac-")
+	if err != nil {
+		t.Fatalf("create coordination fixture directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+			t.Errorf("remove coordination fixture directory: %v", cleanupErr)
+		}
+	})
 	db, err := store.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)

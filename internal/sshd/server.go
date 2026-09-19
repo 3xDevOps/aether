@@ -106,6 +106,9 @@ type Config struct {
 	// Config provides authenticated access to the caller's persistent
 	// harness configuration roots. It never accepts a member selector.
 	Config ConfigBackend
+	// AuthorizationMu is shared with mission admission so account and role
+	// revocation cannot race a run launch. New allocates one when omitted.
+	AuthorizationMu *sync.Mutex
 	// Services carries the team-feature service seams; see services.go.
 	// Each nil field disables its methods with CodeUnavailable.
 	Services Services
@@ -149,7 +152,7 @@ type Server struct {
 	// makes either admission or revocation the linearization point. Handlers
 	// that also need registerMu acquire registerMu first; authorizationMu
 	// paths never acquire registerMu or mu, so the lock order cannot cycle.
-	authorizationMu sync.Mutex
+	authorizationMu *sync.Mutex
 	handoffSeq      atomic.Uint64
 
 	mu    sync.Mutex
@@ -182,6 +185,9 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Store == nil || cfg.Bus == nil || cfg.Git == nil || cfg.PTY == nil || cfg.Runs == nil {
 		return nil, errors.New("sshd: config requires Store, Bus, Git, PTY, and Runs")
 	}
+	if cfg.AuthorizationMu == nil {
+		cfg.AuthorizationMu = &sync.Mutex{}
+	}
 	if cfg.handshakeTimeout <= 0 {
 		cfg.handshakeTimeout = defaultHandshakeTimeout
 	}
@@ -200,6 +206,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{
 		cfg:             cfg,
+		authorizationMu: cfg.AuthorizationMu,
 		handshakes:      make(chan struct{}, cfg.maxHandshakes),
 		conns:           make(map[net.Conn]struct{}),
 		syncChannels:    make(map[domain.MemberID]int),

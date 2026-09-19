@@ -131,16 +131,180 @@ func TestCLIJSONEnvelopeAndStableExit(t *testing.T) {
 
 func TestCLISkillPrintsAssignmentAndWorkflow(t *testing.T) {
 	s := newCLISocket(t, func(protocol.Request) protocol.Response {
-		return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-1","workspace_id":"ws-1","member_id":"member-1","task":"ship the release","peers":[],"unread":0,"capabilities":["coord.report"]}`)}
+		return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-1","workspace_id":"ws-1","member_id":"member-1","task":"ship the release","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":3,"execution_choices":[{"account_member_id":"member-1","harness":"claude","mode":"headless"}],"max_concurrent_attempts":2,"max_total_attempts":5,"active_attempts":1,"total_attempts":2},"peers":[],"unread":0,"capabilities":["coord.report"]}`)}
 	})
 	code, raw := runCLI(t, s.path, []string{"skill"}, "")
 	if code != ExitOK {
 		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
 	}
-	for _, want := range []string{"Aether coordination skill v3", "Run: run-1", "Assignment: ship the release", "aether-internal", "report success, failure, or blocked"} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("skill output %q does not contain %q", raw, want)
+	if !strings.Contains(raw, "Approved execution choices: account=member-1 harness=claude mode=headless") ||
+		!strings.Contains(raw, "remaining_concurrent=1") ||
+		!strings.Contains(raw, "remaining_total=3") ||
+		!strings.Contains(raw, "integration request-delivery --params-file") ||
+		!strings.Contains(raw, "human-decision boundary") ||
+		!strings.Contains(raw, "same idempotency_key") {
+		t.Fatalf("skill output %q does not include live identity, assignment, integrator allowance, or integration recovery workflow", raw)
+	}
+	if strings.Contains(raw, "No coordination socket") {
+		t.Fatalf("skill treated a reachable socket as unavailable: %q", raw)
+	}
+}
+
+func TestCLISkillPrintsWorkerScope(t *testing.T) {
+	s := newCLISocket(t, func(protocol.Request) protocol.Response {
+		return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-worker","workspace_id":"ws-1","member_id":"member-2","task":"implement the assigned task","assignment":{"mission_id":"mission-1","role":"worker","task_id":"task-1","task_revision":2,"attempt_id":"attempt-1","capabilities":["task.show","task.propose","task.revise","integration.deliver"]},"peers":[],"unread":0,"capabilities":["coord.report","integration.deliver","integration.decide"]}`)}
+	})
+	code, raw := runCLI(t, s.path, []string{"skill"}, "")
+	if code != ExitOK {
+		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
+	}
+	if !strings.Contains(raw, "Worker scope: read and propose changes only for the assigned task; do not spawn workers.") {
+		t.Fatalf("worker skill output = %q", raw)
+	}
+	if strings.Contains(raw, "integration.") || strings.Contains(raw, "human-decision boundary") {
+		t.Fatalf("worker skill granted integrator integration guidance: %q", raw)
+	}
+}
+
+func TestCLIGeneralSkillWithoutSocket(t *testing.T) {
+	var out bytes.Buffer
+	oldSocketPath := defaultSocketPath
+	defaultSocketPath = filepath.Join(t.TempDir(), "missing.sock")
+	t.Cleanup(func() { defaultSocketPath = oldSocketPath })
+	code, err := Run(context.Background(), []string{"skill"}, Config{Out: &out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != ExitOK {
+		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
+	}
+	raw := out.String()
+	if raw == "" {
+		t.Fatal("skill output is empty without a socket")
+	}
+	if strings.Contains(raw, "Run:") || strings.Contains(raw, "Assignment:") {
+		t.Fatalf("general skill claimed live assignment: %q", raw)
+	}
+}
+
+func TestCLIHelpIsSocketIndependent(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"send", "--help"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var out bytes.Buffer
+			code, err := Run(context.Background(), args, Config{Socket: filepath.Join(t.TempDir(), "missing.sock"), Out: &out})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != ExitOK {
+				t.Fatalf("help exit = %d, want %d; output=%q", code, ExitOK, out.String())
+			}
+			if !strings.Contains(out.String(), "usage: aether-internal") {
+				t.Fatalf("help output = %q", out.String())
+			}
+		})
+	}
+}
+
+func TestCLIMissionTaskAndWorkerAdapters(t *testing.T) {
+	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+		switch req.Method {
+		case protocol.MethodTaskShow:
+			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","status":"ready"}}`)}
+		case protocol.MethodTaskAcceptSubmission:
+			var p protocol.TaskAcceptSubmissionParams
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				t.Fatalf("decode accept submission: %v", err)
+			}
+			if p.SubmissionID != "submission-1" || p.ExpectedIntegratorGeneration != 4 || p.ExpectedAcceptedSetVersion != 8 || p.IdempotencyKey != "accept-1" || p.ScopeDisposition != "approved with documented deviation" {
+				t.Fatalf("accept submission params = %+v", p)
+			}
+			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","status":"accepted"},"acceptance":{"accepted_set_version":9}}`)}
+		case protocol.MethodWorkerStart:
+			var p protocol.WorkerStartParams
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				t.Fatalf("decode worker start: %v", err)
+			}
+			if p.DispatchKey != "dispatch-1" || p.ExpectedIntegratorGeneration != 4 {
+				t.Fatalf("worker start params = %+v", p)
+			}
+			return protocol.Response{Result: json.RawMessage(`{"attempt":{"id":"attempt-1","state":"reserved"}}`)}
+		default:
+			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
 		}
+	})
+	if code, raw := runCLI(t, s.path, []string{"task", "show", "--task-id", "task-1"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
+		t.Fatalf("task show = code %d, envelope %s", code, raw)
+	}
+	if code, raw := runCLI(t, s.path, []string{"task", "accept-submission", "--submission-id", "submission-1", "--expected-integrator-generation", "4", "--expected-accepted-set-version", "8", "--idempotency-key", "accept-1", "--scope-disposition", "approved with documented deviation"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
+		t.Fatalf("task accept-submission = code %d, envelope %s", code, raw)
+	}
+	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--mission-id", "mission-1", "--task-id", "task-1", "--task-revision", "2", "--dispatch-key", "dispatch-1", "--harness", "claude", "--mode", "headless", "--account-owner-id", "member-1", "--run-owner-id", "member-1", "--expected-integrator-generation", "4"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
+		t.Fatalf("worker start = code %d, envelope %s", code, raw)
+	}
+}
+func TestCLIIntegrationFiveCommandSurface(t *testing.T) {
+	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+		switch req.Method {
+		case protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
+			protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
+			protocol.MethodIntegrationDeliver:
+			var raw map[string]any
+			if err := json.Unmarshal(req.Params, &raw); err != nil {
+				t.Fatalf("decode integration params: %v", err)
+			}
+			if raw["actor"] != nil || raw["run_id"] != nil {
+				t.Fatalf("integration params carried transport identity: %+v", raw)
+			}
+			return protocol.Response{Result: json.RawMessage(`{"candidate":{"candidate_id":"candidate-1"}}`)}
+		default:
+			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+		}
+	})
+	file := filepath.Join(t.TempDir(), "params.json")
+	if err := os.WriteFile(file, []byte(`{"workspace_id":"ws-1","candidate_id":"candidate-1","idempotency_key":"fixed-1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"prepare", "show", "verify", "request-delivery", "deliver"} {
+		args := []string{"integration", command, "--params-file", file, "--json"}
+		if command == "verify" {
+			args = []string{"integration", command, "--params-file", "-", "--json"}
+		}
+		input := ""
+		if command == "verify" {
+			input = `{"workspace_id":"ws-1","candidate_id":"candidate-1","candidate_revision":"rev-1","idempotency_key":"verify-1"}`
+		}
+		code, raw := runCLI(t, s.path, args, input)
+		if code != ExitOK || !decodeEnvelope(t, raw).OK {
+			t.Fatalf("integration %s = code %d, envelope %s", command, code, raw)
+		}
+	}
+}
+func TestCLIIntegrationErrorCodesMapToExitStatuses(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code int
+		exit int
+	}{
+		{name: "denied", code: protocol.CodeDenied, exit: ExitDenied},
+		{name: "conflict", code: protocol.CodeConflict, exit: ExitDenied},
+		{name: "invalid params", code: protocol.CodeInvalidParams, exit: ExitUsage},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+				if req.Method != protocol.MethodIntegrationShow {
+					return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+				}
+				return protocol.Response{Error: &protocol.Error{Code: test.code, Message: "integration.show: " + test.name}}
+			})
+			code, raw := runCLI(t, s.path, []string{"integration", "show", "--params-file", "-", "--json"}, `{}`)
+			if code != test.exit {
+				t.Fatalf("integration %s exit = %d, want %d; output=%s", test.name, code, test.exit, raw)
+			}
+			env := decodeEnvelope(t, raw)
+			if env.OK || env.Error == nil || env.Error.Code != test.code {
+				t.Fatalf("integration %s envelope = %+v", test.name, env)
+			}
+		})
 	}
 }
 
@@ -279,7 +443,6 @@ func TestCLIFlagParseErrorsAreInvalidParams(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "status help", args: []string{"status", "--help"}},
 		{name: "status unknown", args: []string{"status", "--unknown"}},
 		{name: "status malformed", args: []string{"status", "--json=not-bool"}},
 		{name: "skill unknown", args: []string{"skill", "--unknown"}},

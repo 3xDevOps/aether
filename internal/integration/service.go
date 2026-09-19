@@ -44,6 +44,8 @@ type Admission struct {
 	MissionID   string
 	Candidate   *protocol.Candidate
 	Submissions []protocol.SubmissionRef
+	// NewCandidate is true only for Prepare before the first durable row.
+	NewCandidate bool
 }
 type AdmissionFunc func(context.Context, Admission) (release func(), err error)
 
@@ -86,27 +88,35 @@ type Config struct {
 	Runtime     runtime.Runtime
 	Root        string
 	Environment func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
-	Admission   AdmissionFunc
-	Now         func() time.Time
+	// PrepareRuntime stages any auxiliary runtime resources before Create.
+	// The hook receives the persisted verification creation key in Spec.
+	PrepareRuntime func(context.Context, *runtime.Spec) error
+	// ReleaseRuntime removes resources staged by PrepareRuntime. It is called
+	// only after the runtime container is proven absent.
+	ReleaseRuntime func(context.Context, string) error
+	Admission      AdmissionFunc
+	Now            func() time.Time
 }
 type Service struct {
-	store       Store
-	git         Git
-	evidence    EvidenceSource
-	runtime     runtime.Runtime
-	root        string
-	environment func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
-	admission   AdmissionFunc
-	now         func() time.Time
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	life        sync.Mutex
-	closed      bool
-	active      map[string]context.CancelFunc
-	locks       sync.Map
-	asyncMu     sync.Mutex
-	asyncErr    error
+	store          Store
+	git            Git
+	evidence       EvidenceSource
+	runtime        runtime.Runtime
+	root           string
+	environment    func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
+	prepareRuntime func(context.Context, *runtime.Spec) error
+	releaseRuntime func(context.Context, string) error
+	admission      AdmissionFunc
+	now            func() time.Time
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	life           sync.Mutex
+	closed         bool
+	active         map[string]context.CancelFunc
+	locks          sync.Map
+	asyncMu        sync.Mutex
+	asyncErr       error
 }
 
 func (s *Service) recordAsyncError(err error) {
@@ -130,13 +140,17 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Store == nil || cfg.Git == nil || cfg.Evidence == nil || cfg.Runtime == nil || cfg.Environment == nil || strings.TrimSpace(cfg.Root) == "" {
 		return nil, fmt.Errorf("%w: store, git, evidence, runtime, environment, and root are required", ErrInvalidRequest)
 	}
+	if (cfg.PrepareRuntime == nil) != (cfg.ReleaseRuntime == nil) {
+		return nil, fmt.Errorf("%w: prepare and release runtime hooks must be configured together", ErrInvalidRequest)
+	}
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{store: cfg.Store, git: cfg.Git, evidence: cfg.Evidence, runtime: cfg.Runtime, root: cfg.Root,
-		environment: cfg.Environment, admission: cfg.Admission, now: now, ctx: ctx, cancel: cancel, active: make(map[string]context.CancelFunc)}, nil
+		environment: cfg.Environment, prepareRuntime: cfg.PrepareRuntime, releaseRuntime: cfg.ReleaseRuntime,
+		admission: cfg.Admission, now: now, ctx: ctx, cancel: cancel, active: make(map[string]context.CancelFunc)}, nil
 }
 
 func (s *Service) Close() error {
@@ -224,6 +238,9 @@ func (s *Service) cancelCandidate(c *protocol.Candidate) {
 }
 
 func defaultAdmission(_ context.Context, a Admission) (func(), error) {
+	if a.NewCandidate && a.Candidate == nil {
+		return nil, fmt.Errorf("%w: new candidate admission requires candidate", ErrInvalidRequest)
+	}
 	if a.Actor.RunID != "" || a.MissionID != "" {
 		return nil, ErrUnauthorized
 	}
@@ -233,6 +250,9 @@ func defaultAdmission(_ context.Context, a Admission) (func(), error) {
 func (s *Service) admit(ctx context.Context, a Admission) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if a.NewCandidate && a.Candidate == nil {
+		return nil, fmt.Errorf("%w: new candidate admission requires candidate", ErrInvalidRequest)
 	}
 	if s.admission == nil {
 		return defaultAdmission(ctx, a)
@@ -254,7 +274,7 @@ func (s *Service) authorize(ctx context.Context, actor Actor, c *protocol.Candid
 	return s.authorizeWorkspace(ctx, actor, domain.WorkspaceID(c.WorkspaceID), operation, c.MissionID, c, c.Submissions)
 }
 
-func (s *Service) authorizeWorkspace(ctx context.Context, actor Actor, wsID domain.WorkspaceID, operation, missionID string, c *protocol.Candidate, submissions []protocol.SubmissionRef) (func(), error) {
+func (s *Service) authorizeWorkspace(ctx context.Context, actor Actor, wsID domain.WorkspaceID, operation, missionID string, c *protocol.Candidate, submissions []protocol.SubmissionRef, newCandidate ...bool) (func(), error) {
 	if actor.MemberID == "" && actor.RunID == "" {
 		return nil, ErrUnauthorized
 	}
@@ -303,7 +323,8 @@ func (s *Service) authorizeWorkspace(ctx context.Context, actor Actor, wsID doma
 		return nil, fmt.Errorf("%w: %v", ErrUnauthorized, err)
 	}
 	subs := append([]protocol.SubmissionRef(nil), submissions...)
-	return s.admit(ctx, Admission{Operation: operation, Actor: effective, WorkspaceID: wsID, MissionID: missionID, Candidate: c, Submissions: subs})
+	isNew := len(newCandidate) > 0 && newCandidate[0]
+	return s.admit(ctx, Admission{Operation: operation, Actor: effective, WorkspaceID: wsID, MissionID: missionID, Candidate: c, Submissions: subs, NewCandidate: isNew})
 }
 
 func (s *Service) validateOwned(ctx context.Context, c *protocol.Candidate) error {

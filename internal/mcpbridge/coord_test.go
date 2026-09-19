@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/overlap"
@@ -125,7 +126,7 @@ func newCoordStack(t *testing.T) *coordStack {
 		if perr != nil {
 			t.Fatalf("provision %s: %v", run, perr)
 		}
-		sock := filepath.Join(provisioned, coord.SocketName)
+		sock := filepath.Join(provisioned, coordtransport.SocketName)
 		if i == 0 {
 			s.sockA = sock
 		} else {

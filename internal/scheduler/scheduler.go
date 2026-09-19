@@ -120,13 +120,9 @@ type Config struct {
 	// checked. Member definitions shape argv inside that member's own
 	// container and do not leak across members.
 	Harnesses map[string]HarnessSpec
-	// ServerBinary is the server binary staged into run containers to
-	// serve the MCP bridge (docs/mcp-bridge.md). Empty means
-	// DefaultServerBinary: the running binary, which survives a PATH
-	// change, a relative launch, and an upgrade that replaced the file
-	// underneath the process. The E2E suite points it at a binary it
-	// built, because under `go test` /proc/self/exe is the test binary and
-	// has no mcp subcommand.
+	// ServerBinary is the server binary staged into every new run and
+	// terminal container for the coordination CLI. Coordinated runs also use
+	// it for lifecycle callbacks; empty means DefaultServerBinary.
 	ServerBinary string
 }
 
@@ -672,14 +668,15 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 				DenyNames:       spec.DenyNames,
 			}).Profile()
 		}
-		// An explicit argv override is respected verbatim. The registry MCP
-		// flag belongs to the shipped CLI, not an override: nothing checks
-		// the override is still that CLI.
-		profile.MCPConfigFlag = ""
+		// An explicit argv override is respected verbatim. Registry discovery
+		// and status assets belong to the shipped CLI, not an override.
 		profile.Reporter = harness.ReporterNone
 		profile.StatusArgs = nil
 		profile.StatusEnv = nil
 		profile.StatusFiles = nil
+		profile.DiscoveryArgs = nil
+		profile.DiscoveryEnv = nil
+		profile.DiscoveryFiles = nil
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:

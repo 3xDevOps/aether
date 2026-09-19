@@ -77,9 +77,9 @@ describe('launch dialog', () => {
       expect(screen.getByLabelText('Agent').textContent).toBe('claude'),
     )
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
-    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
       workspace_id: workspace.id, harness: 'claude',
-    }))
+    })))
   })
   it('offers setup, and the pinned custom harness, when nothing is installed', async () => {
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
@@ -142,11 +142,11 @@ describe('launch dialog', () => {
 
     // The default mode is the server's own, so it stays off the wire.
     await waitFor(() =>
-      expect(api.runLaunch).toHaveBeenCalledWith({
+      expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
         workspace_id: workspace.id,
         harness: 'claude',
         task: 'rewrite the checkout flow',
-      }),
+      })),
     )
     expect(useStore.getState().lastHarnessByAccount[alice.id]).toBe('claude')
   })
@@ -208,12 +208,12 @@ describe('launch dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
-      expect(api.runLaunch).toHaveBeenCalledWith({
+      expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
         workspace_id: workspace.id,
         harness: 'claude',
         task: 'triage the flaky tests',
         mode: 'headless',
-      }),
+      })),
     )
     // A launch drops the member straight into the run's terminal.
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))

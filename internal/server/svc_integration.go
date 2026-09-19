@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/sshd"
 )
 
 const (
@@ -119,6 +120,39 @@ func init() {
 			return nil, fmt.Errorf("integration: runtime is required")
 		}
 
+		admission := func(ctx context.Context, a integration.Admission) (func(), error) {
+			releases := make([]func(), 0, 2)
+			if d.SSH != nil && d.SSH.Services.Missions != nil {
+				if policy, ok := d.SSH.Services.Missions.(interface {
+					AdmitIntegration(context.Context, integration.Admission) (func(), error)
+				}); ok {
+					release, policyErr := policy.AdmitIntegration(ctx, a)
+					if policyErr != nil {
+						return nil, policyErr
+					}
+					if release != nil {
+						releases = append(releases, release)
+					}
+				}
+			}
+			if d.Config.IntegrationAdmission != nil {
+				release, extraErr := d.Config.IntegrationAdmission(ctx, a)
+				if extraErr != nil {
+					for i := len(releases) - 1; i >= 0; i-- {
+						releases[i]()
+					}
+					return nil, extraErr
+				}
+				if release != nil {
+					releases = append(releases, release)
+				}
+			}
+			return func() {
+				for i := len(releases) - 1; i >= 0; i-- {
+					releases[i]()
+				}
+			}, nil
+		}
 		svc, err := integration.New(integration.Config{
 			Store:       d.Store,
 			Git:         d.Git,
@@ -126,14 +160,33 @@ func init() {
 			Runtime:     d.Runtime,
 			Root:        d.DataDir,
 			Environment: integrationEnvironment(d),
-			Admission:   d.Config.IntegrationAdmission,
+			Admission:   admission,
+			PrepareRuntime: func(ctx context.Context, spec *runtime.Spec) error {
+				if d.Runs == nil {
+					return fmt.Errorf("integration: scheduler is unavailable")
+				}
+				return d.Runs.PrepareVerificationRuntime(ctx, spec)
+			},
+			ReleaseRuntime: func(ctx context.Context, creationKey string) error {
+				if d.Runs == nil {
+					return fmt.Errorf("integration: scheduler is unavailable")
+				}
+				return d.Runs.ReleaseVerificationRuntime(ctx, creationKey)
+			},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("integration: create service: %w", err)
 		}
 		// SSH owns the transport adapter, while the service remains the one
-		// durable candidate engine shared by every transport.
-		d.SSH.Services.Integration = svc
+		// durable candidate engine shared by every transport. If mission
+		// registered first, complete its lazy base binding instead.
+		if setter, ok := d.SSH.Services.Integration.(interface {
+			SetIntegrationService(sshd.IntegrationService)
+		}); ok {
+			setter.SetIntegrationService(svc)
+		} else {
+			d.SSH.Services.Integration = svc
+		}
 
 		return &integrationService{
 			cleanup: integrationCleanup(svc),

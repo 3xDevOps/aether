@@ -9,6 +9,7 @@ import (
 	integration "github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // IntegrationService is the SSH/control-channel seam for the candidate
@@ -52,9 +53,17 @@ func integrationActor(member domain.MemberID) integration.Actor {
 	return integration.Actor{MemberID: member}
 }
 
-func integrationServiceError(err error) *protocol.Error {
+// IntegrationServiceError maps candidate-service failures to the protocol
+// error used by both authenticated human transport and mission agent
+// transport. Keep this classifier shared so callers expose identical codes.
+func IntegrationServiceError(err error) *protocol.Error {
 	if err == nil {
 		return nil
+	}
+	var existing *protocol.Error
+	if errors.As(err, &existing) && existing != nil {
+		copyErr := *existing
+		return &copyErr
 	}
 	switch {
 	case errors.Is(err, integration.ErrInvalidRequest):
@@ -67,6 +76,11 @@ func integrationServiceError(err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
 	case errors.Is(err, integration.ErrUnavailable):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+	case errors.Is(err, store.ErrMissionStale), errors.Is(err, store.ErrMissionTakeover):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: err.Error()}
+	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady),
+		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict):
+		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
 	default:
 		return rpcError(err)
 	}
@@ -81,12 +95,12 @@ func (s *Server) integrationPrepare(ctx context.Context, member domain.MemberID,
 	if perr != nil {
 		return nil, perr
 	}
-	if p.WorkspaceID == "" || p.TargetRef == "" || p.ExpectedTargetRevision == "" || p.IdempotencyKey == "" {
-		return nil, invalidParams("workspace_id, target_ref, expected_target_revision, and idempotency_key are required")
+	if p.TargetRef == "" || p.ExpectedTargetRevision == "" || p.IdempotencyKey == "" {
+		return nil, invalidParams("target_ref, expected_target_revision, and idempotency_key are required")
 	}
 	candidate, err := svc.Prepare(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationPrepareResult{Candidate: candidate}, nil
 }
@@ -105,7 +119,7 @@ func (s *Server) integrationShow(ctx context.Context, member domain.MemberID, ra
 	}
 	candidate, err := svc.Show(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationShowResult{Candidate: candidate}, nil
 }
@@ -124,7 +138,7 @@ func (s *Server) integrationList(ctx context.Context, member domain.MemberID, ra
 	}
 	result, err := svc.List(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return result, nil
 }
@@ -143,7 +157,7 @@ func (s *Server) integrationPatch(ctx context.Context, member domain.MemberID, r
 	}
 	patch, err := svc.Patch(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return patch, nil
 }
@@ -162,7 +176,7 @@ func (s *Server) integrationResolve(ctx context.Context, member domain.MemberID,
 	}
 	candidate, err := svc.Resolve(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationResolveResult{Candidate: candidate}, nil
 }
@@ -181,7 +195,7 @@ func (s *Server) integrationVerify(ctx context.Context, member domain.MemberID, 
 	}
 	candidate, err := svc.Verify(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationVerifyResult{Candidate: candidate}, nil
 }
@@ -200,7 +214,7 @@ func (s *Server) integrationRequestDelivery(ctx context.Context, member domain.M
 	}
 	candidate, err := svc.RequestDelivery(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationRequestDeliveryResult{Candidate: candidate}, nil
 }
@@ -219,7 +233,7 @@ func (s *Server) integrationDecide(ctx context.Context, member domain.MemberID, 
 	}
 	candidate, err := svc.Decide(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationDecideResult{Candidate: candidate}, nil
 }
@@ -238,7 +252,7 @@ func (s *Server) integrationDeliver(ctx context.Context, member domain.MemberID,
 	}
 	candidate, err := svc.Deliver(ctx, integrationActor(member), p)
 	if err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationDeliverResult{Candidate: candidate}, nil
 }
@@ -256,7 +270,7 @@ func (s *Server) integrationDelete(ctx context.Context, member domain.MemberID, 
 		return nil, invalidParams("workspace_id and candidate_id are required")
 	}
 	if err := svc.Delete(ctx, integrationActor(member), p); err != nil {
-		return nil, integrationServiceError(err)
+		return nil, IntegrationServiceError(err)
 	}
 	return protocol.IntegrationDeleteResult{}, nil
 }

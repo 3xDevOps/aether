@@ -19,9 +19,8 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/3xDevOps/Aether/internal/coord"
-	"github.com/3xDevOps/Aether/internal/coordcli"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -77,31 +76,32 @@ func TestIntegrationCoordinationInContainer(t *testing.T) {
 	}
 
 	// The agent's side, reported from inside the container: the argument it
-	// was launched with, the user it runs as, both binds read-only in the
-	// kernel's own mount table, the coordination directory it traverses
-	// with the config and socket modes it finds there, that directory
-	// refusing a write with EROFS, and the staged binary it executes as the
-	// bridge.
+	// The fixture invokes the staged MCP bridge itself. No harness receives an
+	// automatic config argument, but the optional manually invoked MCP path
+	// remains a real round trip over the mounted socket.
 	for _, att := range []*attachConn{attA, attB} {
-		att.waitOutput(t, "--mcp-config "+mcpConfigTarget)
+		if strings.Contains(att.output(), "--mcp-config") {
+			t.Errorf("run received obsolete automatic MCP config: %q", att.output())
+		}
+		att.waitOutput(t, "assets:manual-mcp")
 		att.waitOutput(t, "user:"+user)
-		att.waitOutput(t, "mode:"+mcpbridge.MountDir+"=0755")
-		att.waitOutput(t, coord.ConfigName+"=0444")
+		att.waitOutput(t, "mode:"+coordtransport.MountDir+"=0755")
 		att.waitOutput(t, coord.CoAuthorsName+"=0444")
-		att.waitOutput(t, coord.SocketName+"=0666")
-		att.waitOutput(t, "mount:"+mcpbridge.MountDir+"=ro")
-		att.waitOutput(t, "readonly:"+mcpbridge.MountDir)
-		att.waitOutput(t, "mode:"+mcpbridge.BinaryPath+"=0555")
-		att.waitOutput(t, "mount:"+mcpbridge.BinaryPath+"=ro")
-		att.waitOutput(t, "bridge:"+mcpbridge.BinaryPath+" mcp")
+		att.waitOutput(t, coordtransport.SocketName+"=0666")
+		att.waitOutput(t, "mount:"+coordtransport.MountDir+"=ro")
+		att.waitOutput(t, "readonly:"+coordtransport.MountDir)
+		att.waitOutput(t, "mode:"+coordtransport.BinaryPath+"=0555")
+		att.waitOutput(t, "mount:"+coordtransport.BinaryPath+"=ro")
+		att.waitOutput(t, "bridge:"+coordtransport.BinaryPath+" mcp")
+		att.waitOutput(t, "inbox:handled by ")
+		att.waitOutput(t, "report:")
+		if !strings.Contains(att.output(), `"ok":true`) {
+			t.Errorf("manual MCP fixture report was not acknowledged: %q", att.output())
+		}
 	}
 
-	// The round trip: each agent found its peer through aether_status,
-	// messaged it with aether_send, and read the peer's message out of
-	// aether_inbox - every call served by the staged binary inside its own
-	// container, over the socket its own mount carries.
-	attA.waitOutput(t, "inbox:handled by "+runB.ID)
-	attB.waitOutput(t, "inbox:handled by "+runA.ID)
+	// The round trip and final report are performed inside the real container,
+	// through the manually invoked MCP bridge and mounted CLI.
 	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, runB.ID))
 	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, runA.ID))
 	for _, att := range []*attachConn{attA, attB} {
@@ -136,10 +136,17 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 	boCtrl, boClient := srv.control(t, e.bo.key)
 
 	runA := e.launch(t, adaCtrl, "shell coordination A", "pi")
-	runB := e.launch(t, boCtrl, "shell coordination B", "omp")
 	attA := openAttach(t, adaClient, runA.ID)
-	cli := newDockerCLI(t)
+	if _, err := attA.stdin.Write([]byte("aether-cli-start\r")); err != nil {
+		t.Fatalf("start pi shell fixture: %v", err)
+	}
+	// A taskless terminal must still receive the CLI and skill workflow.
+	runB := e.launch(t, boCtrl, "", "omp")
 	attB := openAttach(t, boClient, runB.ID)
+	if _, err := attB.stdin.Write([]byte("aether-cli-start\r")); err != nil {
+		t.Fatalf("start omp shell fixture: %v", err)
+	}
+	cli := newDockerCLI(t)
 	mountsOK := true
 	for _, run := range []protocol.Run{runA, runB} {
 		if !e.assertRealizedMounts(ctx, t, cli, run.ID, user) {
@@ -151,16 +158,22 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 	if !mountsOK {
 		return
 	}
+	digest := fileDigest(t, e.serverBinary)
 	for _, att := range []*attachConn{attA, attB} {
+		att.waitOutput(t, "cli-no-auto-mcp:")
+		att.waitOutput(t, "cli-help:")
+		att.waitOutput(t, "cli-skill-available:")
+		att.waitOutput(t, "cli-digest:"+digest)
 		att.waitOutput(t, "cli-status:")
 		att.waitOutput(t, "cli-sent:")
 		att.waitOutput(t, "cli-inbox:")
 		att.waitOutput(t, "cli-acked:")
+		att.waitOutput(t, "cli-reported:")
 		assertNoAgentError(t, att)
 	}
 }
 
-// assertRealizedMounts reads the two coordination binds back off the live
+// assertRealizedMounts reads the three coordination binds back off the live
 // container. The bridge source must be the staged copy of the very binary
 // the server was told to stage, named by its own content hash.
 func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *client.Client, run, user string) bool {
@@ -171,9 +184,9 @@ func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *
 	}
 	staged := filepath.Join(e.dataDir, "runtime", "bin", "aether-server-"+fileDigest(t, e.serverBinary))
 	want := map[string]string{
-		mcpbridge.BinaryPath: resolved(t, staged),
-		coordcli.BinaryPath:  resolved(t, staged),
-		mcpbridge.MountDir:   resolved(t, e.coordDir(run)),
+		coordtransport.BinaryPath: resolved(t, staged),
+		coordtransport.CLIPath:    resolved(t, staged),
+		coordtransport.MountDir:   resolved(t, e.coordDir(run)),
 	}
 	realized := make(map[string]container.MountPoint, len(insp.Container.Mounts))
 	for _, m := range insp.Container.Mounts {
@@ -195,6 +208,41 @@ func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *
 		}
 	}
 	return valid
+}
+
+// assertDisabledCLIOnly inspects a live disabled run. The staged CLI remains
+// a read-only digest-pinned bind, while the bridge and socket directory are
+// absent from the actual container.
+func (e *coordEnv) assertDisabledCLIOnly(ctx context.Context, t *testing.T, cli *client.Client, run, user string) {
+	t.Helper()
+	insp, err := cli.ContainerInspect(ctx, containerName(run), client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatalf("inspect disabled run %s's container: %v", run, err)
+	}
+	if insp.Container.Config.User != user {
+		t.Fatalf("disabled run %s user = %q, want %q", run, insp.Container.Config.User, user)
+	}
+	staged := filepath.Join(e.dataDir, "runtime", "bin", "aether-server-"+fileDigest(t, e.serverBinary))
+	var cliMount *container.MountPoint
+	for i := range insp.Container.Mounts {
+		m := &insp.Container.Mounts[i]
+		switch m.Destination {
+		case coordtransport.CLIPath:
+			cliMount = m
+		case coordtransport.BinaryPath, coordtransport.MountDir:
+			t.Errorf("disabled run %s unexpectedly has coordination mount %s", run, m.Destination)
+		}
+	}
+	if cliMount == nil {
+		t.Fatalf("disabled run %s has no CLI mount: %+v", run, insp.Container.Mounts)
+	}
+	want := resolved(t, staged)
+	if cliMount.Source != want {
+		t.Errorf("disabled run %s CLI source = %q, want %q", run, cliMount.Source, want)
+	}
+	if cliMount.RW {
+		t.Errorf("disabled run %s CLI mount is writable", run)
+	}
 }
 
 // collectCoordinationTimeline drains a short, bounded window after a mount
@@ -223,6 +271,41 @@ func collectCoordinationTimeline(t *testing.T, sub events.Subscription, seen *[]
 	}
 }
 
+// TestIntegrationCoordinationCLIWhenDisabled proves that an ordinary
+// taskless member terminal still gets the staged CLI in a custom non-root
+// image, while the disabled switch gives it no socket or coordination bind.
+func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	requireBinary(t, "docker")
+	if !dockerReachable(t) {
+		t.Skip("the disabled CLI scenario needs a reachable Docker daemon")
+	}
+	image, user := buildCoordAgentImage(t)
+	docker, _, ok := dockerRuntime(t)
+	if !ok {
+		t.Fatal("the Docker daemon went away after the image was built")
+	}
+	e := &coordEnv{
+		rt: docker, image: image, serverBinary: buildServerBinary(t),
+		dataDir: filepath.Join(shortTempDir(t), "data"),
+	}
+	srv := e.seed(ctx, t, true)
+	ctrl, memberClient := srv.control(t, e.ada.key)
+	run := e.launch(t, ctrl, "", "pi")
+	att := openAttach(t, memberClient, run.ID)
+	if _, err := att.stdin.Write([]byte("aether-cli-start\r")); err != nil {
+		t.Fatalf("start disabled shell fixture: %v", err)
+	}
+	att.waitOutput(t, "cli-no-auto-mcp:")
+	att.waitOutput(t, "cli-help:")
+	att.waitOutput(t, "cli-skill-no-socket:")
+	att.waitOutput(t, "cli-digest:"+fileDigest(t, e.serverBinary))
+	att.waitOutput(t, "cli-disabled-no-socket:")
+	assertNoAgentError(t, att)
+	e.assertDisabledCLIOnly(ctx, t, newDockerCLI(t), run.ID, user)
+}
+
 // buildCoordAgentImage builds the run image this scenario launches:
 // busybox, the fixture agent installed as the "claude" executable the
 // shipped profile launches, two shell-capable harness shims, and a non-root
@@ -238,14 +321,63 @@ func buildCoordAgentImage(t *testing.T) (image, user string) {
 	build := exec.Command("go", "build", "-o", filepath.Join(dir, "claude"), "./internal/server/testdata/coordagent")
 	build.Dir = repoRoot(t)
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the in-container agent: %v (%s)", err, out)
+	if out, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build the in-container agent: %v (%s)", buildErr, out)
 	}
 	writeFile(t, filepath.Join(dir, "shell-coord-agent"), `#!/bin/sh
 set -eu
 task=${1:-shell coordination}
 
+fail() {
+	echo "cli-fail:$*" >&2
+	exit 1
+}
+
+# The test releases the fixture only after the attach subsystem acknowledges
+# its stream, so every marker below is observable rather than a startup race.
+if ! IFS= read -r start; then
+	fail "start handshake"
+fi
+[ "$start" = "aether-cli-start" ] || fail "start handshake"
 printf '%s:initial\n' "$AETHER_RUN_ID" > shared.txt
+for arg in "$@"; do
+	[ "$arg" = "--mcp-config" ] && fail "automatic MCP config"
+done
+echo "cli-no-auto-mcp:$AETHER_RUN_ID"
+
+help=$(/usr/local/bin/aether-internal --help) || fail help
+case "$help" in
+	*"aether-internal"*) echo "cli-help:$AETHER_RUN_ID" ;;
+	*) fail "help output missing command name" ;;
+esac
+skill=$(/usr/local/bin/aether-internal skill) || fail skill
+case "$skill" in
+	?*) echo "cli-skill-available:$AETHER_RUN_ID" ;;
+	*) fail "skill output was empty" ;;
+esac
+# The CLI and bridge are the same staged binary when coordination is live,
+# but the CLI remains intentionally present when the bridge is disabled.
+digest=$(sha256sum /usr/local/bin/aether-internal |
+	awk 'NR == 1 {print $1}')
+[ -n "$digest" ] || fail "digest unavailable"
+echo "cli-digest:$digest"
+
+# The disabled server still gives every image the version-matched CLI, but it
+# deliberately gives no run socket or coordination directory.
+if [ ! -e /run/aether/coord3.sock ]; then
+	case "$skill" in
+		*"No coordination socket is mounted"*) echo "cli-skill-no-socket:$AETHER_RUN_ID" ;;
+		*) fail "skill did not report no-socket availability" ;;
+	esac
+	echo "cli-disabled-no-socket:$AETHER_RUN_ID"
+	sleep 60
+	exit 0
+fi
+case "$skill" in
+	*"Run:"*) echo "cli-skill-live:$AETHER_RUN_ID" ;;
+	*) fail "skill did not report live run identity" ;;
+esac
+
 # The diff watcher may register after the first edit. Re-touch with changing
 # content every 10 seconds, with quiet polling between writes, for the same
 # two-minute window as the proven coordination fixture.
@@ -264,7 +396,7 @@ while [ "$attempt" -lt 120 ]; do
 		exit "$code"
 	}
 	last_status=$status
-	peer=$(printf '%s\n' "$status" | awk -F '"run_id":"' 'NF > 2 { split($3, p, "\""); print p[1]; exit }')
+	peer=$(printf '%s\n' "$status" | sed -nE 's/.*"peers":\[\{"run_id":"([^"]*)".*/\1/p')
 	if [ -n "$peer" ]; then
 		break
 	fi
@@ -272,14 +404,13 @@ while [ "$attempt" -lt 120 ]; do
 	sleep 1
 done
 if [ -z "$peer" ]; then
-	echo "cli-fail:no peer status:$last_status" >&2
-	exit 1
+	fail "no peer status:$last_status"
 fi
 
 /usr/local/bin/aether-internal send \
 	--to "$peer" \
 	--body "$task" \
-	--idempotency-key "shell-send-$AETHER_RUN_ID" >/dev/null
+	--idempotency-key "shell-send-$AETHER_RUN_ID" >/dev/null || fail send
 echo "cli-status:$AETHER_RUN_ID"
 echo "cli-sent:$AETHER_RUN_ID:$peer"
 
@@ -288,15 +419,22 @@ while [ "$attempt" -lt 20 ]; do
 	inbox=$(/usr/local/bin/aether-internal inbox --wait 2)
 	ack=$(printf '%s\n' "$inbox" | sed -n 's/.*"ack_token":"\([^"]*\)".*/\1/p')
 	if [ -n "$ack" ]; then
-		/usr/local/bin/aether-internal inbox --ack "$ack" >/dev/null
+		/usr/local/bin/aether-internal inbox --ack "$ack" >/dev/null || fail ack
 		echo "cli-inbox:$AETHER_RUN_ID"
 		echo "cli-acked:$AETHER_RUN_ID"
-		exit 0
+		break
 	fi
 	attempt=$((attempt + 1))
 done
-echo "cli-fail:no message" >&2
-exit 1
+[ -n "$ack" ] || fail "no message"
+report=$(/usr/local/bin/aether-internal report \
+	--outcome success \
+	--summary "shell coordination completed" \
+	--idempotency-key "shell-report-$AETHER_RUN_ID") || fail report
+case "$report" in
+	*'"ok":true'*) echo "cli-reported:$AETHER_RUN_ID" ;;
+	*) fail "report not acknowledged:$report" ;;
+esac
 `)
 	uid, gid := os.Getuid(), os.Getgid()
 	if uid == 0 {

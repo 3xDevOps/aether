@@ -156,9 +156,10 @@ func (s *Service) noticeText(ctx context.Context, peer events.OverlapPeer) (stri
 		who = fmt.Sprintf("%s (%q - %q)", r.ID, m.DisplayName, r.Task)
 	}
 	return fmt.Sprintf(
-		"[%s] Overlap: run %s is also editing %s. You have aether MCP tools to coordinate "+
-			"(aether_status, aether_send, aether_inbox). Advisory only - keep working; if the "+
-			"other agent doesn't reply, proceed and note the overlap in your commit.",
+		"[%s] Overlap: run %s is also editing %s. Use /usr/local/bin/aether-internal status --json to inspect the assignment and peers; "+
+			"use /usr/local/bin/aether-internal send --to <run-id> --body <message> --idempotency-key <key> to coordinate, and "+
+			"/usr/local/bin/aether-internal inbox --wait 30 to read messages. Advisory only - keep working; if the other agent "+
+			"doesn't reply, proceed and note the overlap in your commit.",
 		noticeActor, who, fileList(peer.Files)), nil
 }
 

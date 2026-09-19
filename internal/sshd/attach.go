@@ -332,7 +332,9 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			acquired, displaced, acquireErr := s.cfg.Control.AcquireAuthorized(
 				req.RunID, string(member), req.ControlSessionID, req.Takeover,
 				req.ControlGeneration,
-				func() error { return checkSteer(ctx, s.cfg.Store, member, run.ID) },
+				func() error {
+					return checkSteer(ctx, s.cfg.Store, member, run.ID)
+				},
 			)
 			if acquireErr != nil {
 				controlAcquireErr = acquireErr
@@ -389,7 +391,19 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				req.RunID, member, req.ControlSessionID, req.ControlGeneration,
 				func() error {
 					admissionErr = admit()
-					return admissionErr
+					if admissionErr != nil {
+						return admissionErr
+					}
+					// Release the durable mission hold only after the
+					// replacement has been admitted. A failed replacement
+					// therefore leaves both the old lease and hold intact.
+					if mission := s.cfg.Services.MissionControl; mission != nil {
+						if err := mission.Release(ctx, run.ID, member); err != nil {
+							admissionErr = err
+							return err
+						}
+					}
+					return nil
 				},
 			); err != nil {
 				if admissionErr == nil {
@@ -407,6 +421,51 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				s.attachControlAck(ack, current, false)
 			} else {
 				s.attachControlAck(ack, control.Snapshot{}, false)
+			}
+			return nil
+		}
+	} else if wantsControl && s.cfg.Control != nil {
+		// Install the durable mission hold only after the PTY host has
+		// admitted this writer. Both that admission and the hold mutation
+		// remain under the worker's control lock, so a failed attach cannot
+		// leave an orchestration fence behind.
+		commit = func(admit func() error) error {
+			leaseMu.Lock()
+			lease := controlLease
+			revokedWriter := conn.interactive &&
+				(errors.Is(revokedInputErr, control.ErrStale) || errors.Is(revokedInputErr, permissions.ErrDenied))
+			leaseMu.Unlock()
+			if lease == nil {
+				// An interactive revocation keeps the attach as a mirror.
+				// Its queued fence makes the PTY read-only when control is ready.
+				if revokedWriter {
+					return admit()
+				}
+				controlCommitErr = control.ErrStale
+				return controlCommitErr
+			}
+			var admissionErr error
+			err := s.cfg.Control.AdmitMember(
+				req.RunID, member, lease.sessionID, lease.generation,
+				func() error {
+					admissionErr = admit()
+					if admissionErr != nil {
+						return admissionErr
+					}
+					if mission := s.cfg.Services.MissionControl; mission != nil {
+						if err := mission.Takeover(ctx, run.ID, member); err != nil {
+							controlCommitErr = err
+							return err
+						}
+					}
+					return nil
+				},
+			)
+			if err != nil {
+				if admissionErr == nil && controlCommitErr == nil {
+					controlCommitErr = err
+				}
+				return err
 			}
 			return nil
 		}
@@ -657,6 +716,8 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			return
 		}
 		if conn.okWritten() {
+			// Disconnect/expiry cleanup must never clear a durable mission
+			// takeover; only the explicit Release control commit does that.
 			s.cfg.Control.Disconnect(req.RunID, lease.sessionID, lease.generation)
 			return
 		}

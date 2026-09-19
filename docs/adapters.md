@@ -26,7 +26,7 @@ one entry to the `profiles` map:
 | `LocalRoot` | Home-relative configuration root exposed to the browser's one-time import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
 | `DenyNames` | Basenames the browser import skips before upload and the manual profile path excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
-| `MCPConfigFlag` | The CLI's flag for a server-supplied MCP server config, if it has one. Set it and the run is wired to the coordination bridge; leave it empty and coordination degrades to the overlap notice. |
+| `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
 
 Rules that are easy to get wrong:
 
@@ -44,9 +44,13 @@ Rules that are easy to get wrong:
 - **Configuration has two explicit paths.** The browser directory picker imports
   once into the authenticated member's persistent home; the Files editor then
   reads and writes that home. A local daemon never watches `LocalRoot`.
-- **The MCP flag belongs to the CLI it ships with.** A deployment that
-  overrides a harness's argv gets no MCP flag appended, because nothing checks
-  that the override is still that CLI.
+- **Taskless discovery is runtime-scoped.** Use the vendor's documented startup
+  instruction mechanism and keep the hint short; `aether-internal skill`
+  fetches the assignment-specific details from the run socket.
+
+- **An argv override must stay verbatim.** The scheduler drops the shipped
+  taskless discovery and status wiring when a definition replaces a shipped
+  harness, because nothing checks that the override is still that CLI.
 
 Then add coverage in `internal/harness/harness_test.go` alongside the existing
 table-driven cases, and a row in the tables in
@@ -54,7 +58,8 @@ table-driven cases, and a row in the tables in
 until the doc is fixed.
 
 That is the whole harness change. The scheduler resolves argv, mounts, run user
-and MCP config from the profile; nothing else needs editing.
+and per-launch discovery/status assets from the profile; nothing else needs
+editing.
 
 ---
 

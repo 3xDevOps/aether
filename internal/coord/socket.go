@@ -17,23 +17,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 const (
-	// SocketName is the v3 coordination socket inside a run's directory.
-	// Every wire version has its own name so a stale bridge cannot parse a
-	// newer status or message shape.
-	SocketName = "coord3.sock"
 	// v1 and v2 sockets are retired at the v3 cutover. Recovery unlinks
 	// them instead of serving a shape their bridges cannot parse.
 	legacySocketName   = "coord.sock"
 	previousSocketName = "coord2.sock"
-	// ConfigName is the optional harness config a launch profile points
-	// the agent at. Its content belongs to the harness registry; this
-	// package owns only where it lives and that it is read-only.
-	ConfigName = "mcp.json"
 	// CoAuthorsName holds the Co-authored-by trailers the agent appends to
 	// its commits, one per member other than the owner who has steered the
 	// run. It is rewritten whenever that set grows, so an agent reads it
@@ -42,7 +35,7 @@ const (
 )
 
 // wireSocketNames is the current coordination wire only.
-var wireSocketNames = []string{SocketName}
+var wireSocketNames = []string{coordtransport.SocketName}
 
 // retiredSocketNames are wire versions this server no longer speaks.
 var retiredSocketNames = []string{legacySocketName, previousSocketName}
@@ -131,7 +124,7 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 			return "", fmt.Errorf("coord: set mode on %s: %w", path, err)
 		}
 	}
-	if err := s.listen(run, SocketName); err != nil {
+	if err := s.listen(run, coordtransport.SocketName); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -327,7 +320,7 @@ func survivingSockets(dir string) []string {
 		}
 	}
 	if len(names) == 0 {
-		names = append(names, SocketName)
+		names = append(names, coordtransport.SocketName)
 	}
 	return names
 }
@@ -502,8 +495,9 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 }
 
 // handle decodes one request and dispatches it. The method set is closed:
-// anything outside the coordination methods and run.report is method-not-found,
-// so no control verb is reachable from inside a container.
+// anything outside the coordination methods, run.report, and the explicit
+// task/worker/integrator mission methods is method-not-found, so no control
+// verb is reachable from inside a container.
 func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
 	req, resp, valid := protocol.ParseRequest(line)
 	if !valid {
@@ -561,11 +555,30 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 		}
 		result, rpcErr = s.Report(ctx, run, p)
 	default:
-		resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
-		return resp
+		if isMissionMethod(req.Method) {
+			if s.cfg.Disabled {
+				resp.Error = unavailable(req.Method)
+				return resp
+			}
+			if s.cfg.Mission == nil {
+				resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
+				return resp
+			}
+			var missionErr error
+			result, missionErr = s.cfg.Mission.HandleAgent(ctx, run, req.Method, req.Params)
+			if missionErr != nil {
+				rpcErr = missionRPCError(req.Method, missionErr)
+			}
+			if rpcErr == nil {
+				break
+			}
+		} else {
+			resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
+			return resp
+		}
 	}
 	if rpcErr != nil {
-		resp.Error = rpcErr
+		resp.Error = missionRPCError(req.Method, rpcErr)
 		return resp
 	}
 	raw, err := json.Marshal(result)
@@ -575,6 +588,21 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 	}
 	resp.Result = raw
 	return resp
+}
+
+func isMissionMethod(method string) bool {
+	switch method {
+	case protocol.MethodTaskShow, protocol.MethodTaskList, protocol.MethodTaskPropose,
+		protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission,
+		protocol.MethodTaskAbandon, protocol.MethodWorkerStart, protocol.MethodWorkerList,
+		protocol.MethodWorkerInspect, protocol.MethodWorkerCancel, protocol.MethodWorkerRetry,
+		protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver:
+		return true
+	default:
+		return false
+	}
 }
 func rateLimitedResponse(line []byte) (protocol.Response, bool) {
 	_, resp, _ := protocol.ParseRequest(line)

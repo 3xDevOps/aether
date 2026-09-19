@@ -40,66 +40,97 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 		return zero, fmt.Errorf("%w: too many required sources", ErrInvalidRequest)
 	}
 	wsID := domain.WorkspaceID(p.WorkspaceID)
-	release, err := s.authorizeWorkspace(ctx, actor, wsID, protocol.MethodIntegrationPrepare, p.MissionID, nil, p.Submissions)
-	if err != nil {
-		return zero, err
-	}
-	defer release()
 	key := actorKey(actor)
 	dig := digest(p)
-	if existing, e := s.store.GetIntegrationCandidateByKey(ctx, wsID, key, p.IdempotencyKey); e == nil && existing != nil {
-		if existing.Digest != dig {
-			return zero, ErrConflict
+
+	// A replay must authorize against the persisted candidate, not a nil
+	// placeholder. This also makes the uniqueness-race path indistinguishable
+	// from a normal replay to the policy adapter.
+	replay := func(existing *store.IntegrationCandidate) (protocol.Candidate, error) {
+		if existing == nil {
+			return zero, store.ErrNotFound
 		}
 		l := s.lock(existing.ID)
 		l.Lock()
 		defer l.Unlock()
-		rec, c, le := s.load(ctx, p.WorkspaceID, existing.ID)
-		if le != nil {
-			return zero, le
+		rec, c, err := s.load(ctx, p.WorkspaceID, existing.ID)
+		if err != nil {
+			return zero, err
+		}
+		release, err := s.authorizeWorkspace(ctx, actor, wsID, protocol.MethodIntegrationPrepare, c.MissionID, c, c.Submissions, false)
+		if err != nil {
+			return zero, err
+		}
+		defer release()
+		if existing.Digest != dig {
+			return zero, ErrConflict
 		}
 		return s.resumePrepare(ctx, p, rec, c)
-	} else if e != nil && !errors.Is(e, store.ErrNotFound) {
-		return zero, e
+	}
+
+	if existing, err := s.store.GetIntegrationCandidateByKey(ctx, wsID, key, p.IdempotencyKey); err == nil && existing != nil {
+		return replay(existing)
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return zero, err
 	}
 	now := s.nowTime()
 	candidateID, err := newCandidateID()
 	if err != nil {
 		return zero, err
 	}
-	candidate := protocol.Candidate{CandidateID: candidateID, WorkspaceID: p.WorkspaceID, MissionID: p.MissionID,
-		Submissions: append([]protocol.SubmissionRef(nil), p.Submissions...), Inputs: make([]protocol.CandidateInput, 0, len(p.Submissions)),
-		RequiredSources: append([]string(nil), p.RequiredSources...), TargetRef: p.TargetRef, ExpectedTargetRevision: p.ExpectedTargetRevision, State: protocol.CandidatePreparing,
-		Verifications: []protocol.Verification{}, Mutations: []protocol.CandidateMutation{}, CreatedAt: now, ExpiresAt: now.Add(protocol.IntegrationCandidateLifetime)}
-	payload, _ := json.Marshal(candidate)
-	rec := &store.IntegrationCandidate{ID: candidate.CandidateID, WorkspaceID: wsID, ActorKey: key, IdempotencyKey: p.IdempotencyKey, Digest: dig,
-		State: string(candidate.State), Version: 1, Payload: payload, CreatedAt: now, ExpiresAt: candidate.ExpiresAt}
-	if e := s.store.CreateIntegrationCandidate(ctx, rec); e != nil {
-		if errors.Is(e, store.ErrConflict) {
-			if old, ge := s.store.GetIntegrationCandidateByKey(ctx, wsID, key, p.IdempotencyKey); ge == nil && old != nil {
-				if old.Digest != dig {
-					return zero, ErrConflict
-				}
-				l := s.lock(old.ID)
-				l.Lock()
-				defer l.Unlock()
-				current, c, le := s.load(ctx, p.WorkspaceID, old.ID)
-				if le != nil {
-					return zero, le
-				}
-				return s.resumePrepare(ctx, p, current, c)
-			}
-		}
-		return zero, e
+	candidate := protocol.Candidate{
+		CandidateID: candidateID, WorkspaceID: p.WorkspaceID, MissionID: p.MissionID,
+		Submissions:     append([]protocol.SubmissionRef(nil), p.Submissions...),
+		Inputs:          make([]protocol.CandidateInput, 0, len(p.Submissions)),
+		RequiredSources: append([]string(nil), p.RequiredSources...),
+		TargetRef:       p.TargetRef, ExpectedTargetRevision: p.ExpectedTargetRevision,
+		State: protocol.CandidatePreparing, Verifications: []protocol.Verification{},
+		Mutations: []protocol.CandidateMutation{}, CreatedAt: now,
+		ExpiresAt: now.Add(protocol.IntegrationCandidateLifetime),
 	}
+
+	// Take the candidate lock before entering the shared authorization
+	// boundary. The candidate is passed by pointer before its first durable
+	// JSON snapshot so admission may freeze mission-owned binding fields.
 	l := s.lock(candidate.CandidateID)
 	l.Lock()
-	defer l.Unlock()
-	current, c, le := s.load(ctx, p.WorkspaceID, candidate.CandidateID)
-	if le != nil {
-		return zero, le
+	release, err := s.authorizeWorkspace(ctx, actor, wsID, protocol.MethodIntegrationPrepare, candidate.MissionID, &candidate, p.Submissions, true)
+	if err != nil {
+		l.Unlock()
+		return zero, err
 	}
-	return s.resumePrepare(ctx, p, current, c)
+	released := false
+	locked := true
+	defer func() {
+		if !released {
+			release()
+		}
+		if locked {
+			l.Unlock()
+		}
+	}()
+	payload, err := json.Marshal(candidate)
+	if err != nil {
+		return zero, err
+	}
+	rec := &store.IntegrationCandidate{ID: candidate.CandidateID, WorkspaceID: wsID, ActorKey: key, IdempotencyKey: p.IdempotencyKey, Digest: dig,
+		State: string(candidate.State), Version: 1, Payload: payload, CreatedAt: now, ExpiresAt: candidate.ExpiresAt}
+	if err := s.store.CreateIntegrationCandidate(ctx, rec); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			// No durable row was published for this candidate. Drop the
+			// speculative admission before taking the published row's lock.
+			release()
+			released = true
+			locked = false
+			l.Unlock()
+			if old, ge := s.store.GetIntegrationCandidateByKey(ctx, wsID, key, p.IdempotencyKey); ge == nil && old != nil {
+				return replay(old)
+			}
+		}
+		return zero, err
+	}
+	candidate.Version = rec.Version
+	return s.resumePrepare(ctx, p, rec, &candidate)
 }
 
 // resumePrepare reconciles a durable preparing aggregate. Input retention and

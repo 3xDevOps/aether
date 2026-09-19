@@ -5,24 +5,23 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/3xDevOps/Aether/internal/coord"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 // The coordination E2E's fake agent. It plays the part a real harness
 // plays: it edits a file the radar can see it shares with a peer, it reads
-// what lands in its terminal, and - when its launch profile registered the
-// MCP bridge - it settles the overlap through the three tools.
+// what lands in its terminal, and - when this fixture elects to exercise
+// MCP - manually invokes the bridge through its mounted socket.
 //
 // The bridge it drives is the real one, speaking the real coordination
 // wire on the socket its own mount carries; it runs in process rather than
@@ -48,8 +47,8 @@ const coordShared = "shared.txt"
 const coordPoll = 2 * time.Minute
 
 type coordAgent struct {
-	// peer is the task of the run this agent messages. Empty means it only
-	// reports the surfaces it was given: the notice-only degradation.
+	// peer is the task of the run this agent messages. Empty means this
+	// fixture only reports the mounted surfaces without invoking MCP.
 	peer string
 	// body is the message it sends.
 	body string
@@ -88,29 +87,20 @@ func (a coordAgent) run(ctx context.Context, c *e2eContainer) {
 }
 
 // coordinate reports which coordination surfaces the run actually got and,
-// when the harness was registered with the bridge, uses them: find the
-// peer through aether_status, message it, and wait for its reply.
+// when the fixture is configured to exercise MCP, invokes the bridge
+// manually. No launch profile supplies an MCP config or registration flag.
 func (a coordAgent) coordinate(ctx context.Context, c *e2eContainer) {
-	dir, mounted := c.mount(mcpbridge.MountDir)
+	dir, mounted := c.mount(coordtransport.MountDir)
 	if !mounted {
 		c.output("assets:none\r\n")
 		return
 	}
-	_, err := os.Stat(filepath.Join(dir.HostPath, coord.ConfigName))
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		c.output("assets:notice-only\r\n")
-		return
-	case err != nil:
-		c.output("agent-error: stat mcp config: " + err.Error() + "\r\n")
-		return
-	}
-	c.output("assets:mcp\r\n")
+	c.output("assets:manual-mcp\r\n")
 	if a.peer == "" {
 		return
 	}
 
-	cs, closeBridge, err := bridgeSession(ctx, filepath.Join(dir.HostPath, coord.SocketName))
+	cs, closeBridge, err := bridgeSession(ctx, filepath.Join(dir.HostPath, coordtransport.SocketName))
 	if err != nil {
 		c.output("agent-error: " + err.Error() + "\r\n")
 		return

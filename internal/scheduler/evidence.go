@@ -373,11 +373,10 @@ func (s *Scheduler) persistEvidenceIdentity(run domain.RunID, identity string) e
 
 // persistEvidencePending leaves a durable retry marker even when no in-memory
 // owner remains (for example, a missing container discovered during recovery).
-func (s *Scheduler) persistEvidencePending(run domain.RunID, identity string) {
+func (s *Scheduler) persistEvidencePendingErr(run domain.RunID, identity string) error {
 	sc, err := s.readSidecar(run)
 	if err != nil && !os.IsNotExist(err) {
-		slog.Warn("scheduler: read evidence-pending sidecar", "run", run, "error", err)
-		return
+		return fmt.Errorf("scheduler: read evidence-pending sidecar: %w", err)
 	}
 	if sc.RunID == "" {
 		sc.RunID = string(run)
@@ -385,6 +384,13 @@ func (s *Scheduler) persistEvidencePending(run domain.RunID, identity string) {
 	sc.EvidenceIdentity = identity
 	sc.EvidencePending = true
 	if err := s.writeSidecar(sc); err != nil {
+		return fmt.Errorf("scheduler: persist evidence-pending sidecar: %w", err)
+	}
+	return nil
+}
+
+func (s *Scheduler) persistEvidencePending(run domain.RunID, identity string) {
+	if err := s.persistEvidencePendingErr(run, identity); err != nil {
 		slog.Warn("scheduler: persist evidence-pending sidecar", "run", run, "error", err)
 	}
 }

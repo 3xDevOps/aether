@@ -1,4 +1,4 @@
-package mcpbridge
+package coordtransport
 
 import (
 	"bufio"
@@ -54,10 +54,9 @@ func callTimeout(method string, params any) time.Duration {
 }
 
 // Call makes one coordination request on socket and decodes its result
-// into result, which may be nil. It is the same framing the MCP tools use,
-// exposed for the in-container callers that are not tools at all - the
-// status reporter ("aether-server report") calls run.report with it. ctx
-// bounds the round trip.
+// into result, which may be nil. It preserves the coordination wire-v3
+// framing used by the CLI, MCP bridge, and lifecycle reporter. ctx bounds
+// the round trip.
 func Call(ctx context.Context, socket, method string, params, result any) error {
 	return (&client{socket: socket}).call(ctx, method, params, result)
 }
@@ -162,8 +161,8 @@ func internalError(method string, cause error) *coordError {
 }
 
 // ErrorCode classifies an error returned by Call. A zero result means the
-// failure was local to the bridge (for example JSON encoding), rather than a
-// coordination protocol error.
+// failure was local to the transport (for example JSON encoding), rather than
+// a coordination protocol error.
 func ErrorCode(err error) int {
 	var ce *coordError
 	if errors.As(err, &ce) {

@@ -2,16 +2,18 @@
 
 Aether's conflict radar identifies active runs that edit the same files. When
 coordination is enabled, each run also gets a small, durable channel for
-communicating with the other runs that the radar authorizes. The channel is
-advisory: it does not lock files, pause work, or decide which change wins.
+communicating with radar-authorized runs; a current mission assignment may add
+server-authorized peers before any file overlap exists. The channel is advisory:
+it does not lock files, pause work, or decide which change wins.
 
 Candidate verification and delivery is a separate authenticated service
 described in [integration.md](integration.md). Coordination records remain
 observations/evidence; they do not constitute an accepted submission, a
-frozen candidate revision, or a landed upstream change. Agent integration
-verbs are provided by the mission-policy adapter, not by this standalone
-human coordination surface; this guide does not claim those verbs or a new
-agent CLI are shipped here.
+frozen candidate revision, or a landed upstream change. The mission-policy
+adapter exposes a narrow agent integration CLI only to the current integrator:
+`prepare`, `show`, `verify`, `request-delivery`, and `deliver`. Human review
+remains the approval boundary; ordinary and worker runs do not receive these
+commands.
 
 ## Run-mounted surfaces
 
@@ -21,9 +23,12 @@ The server keeps coordination data below its private data directory:
 <data>/coord/                       0700  coordination root
 <data>/coord/<run-id>/              0755  one run's coordination directory
 <data>/coord/<run-id>/coord3.sock   0666  the v3 coordination socket
-<data>/coord/<run-id>/mcp.json      0444  optional MCP server configuration
 <data>/coord/<run-id>/co-authors    0444  server-generated commit trailers
 ```
+
+The coordination mount contains no MCP configuration file. For the optional
+manual bridge, use the `/tmp` configuration example in
+[the MCP bridge guide](mcp-bridge.md).
 
 Inside a container, the run directory appears at `/run/aether`. Only
 `coord3.sock` is served. A socket from an older wire version is not rebound;
@@ -47,18 +52,19 @@ is the identity: a connection accepted by a run's socket is treated as that
 run. `aether-internal` has no socket, run-identity, login, or credential
 option and always uses `/run/aether/coord3.sock`.
 
-Caller-supplied mounts are validated before these mounts are appended. A
-caller mount may not target or nest under `/run/aether`, `/opt/aether`, or
+Caller-supplied mounts are validated before these mounts are appended. A caller mount may not target or nest under `/run/aether`, `/opt/aether`, or
 `/usr/local/bin/aether-internal`, so a credential home, profile, or worktree
 cannot shadow the socket or either executable. The server fails closed if it
-cannot stage and verify its binary. In that case the run still launches, but
-coordination is unavailable and the terminal receives only the normal overlap
-notice.
+cannot stage and verify its binary: managed-container creation or launch is
+refused rather than proceeding without the canonical CLI or bridge.
+For enabled runs, the coordination directory and staged server binary are
+therefore either present as verified or absent from a container; the canonical
+read-only CLI mount is provisioned separately.
 
 ## Wire v3
 
 The socket carries JSON-RPC 2.0 requests and responses, one request per NDJSON
-line. The coordination method set is exactly:
+line. The base coordination method set is:
 
 | Method | Parameters | Result |
 | --- | --- | --- |
@@ -69,12 +75,26 @@ line. The coordination method set is exactly:
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
 
+The `coord.*` wire and its six base methods are unchanged. Mission-assigned
+runs additionally receive assignment-scoped `task.*` and `worker.*` methods
+published by `coord.status`; the current integrator also receives exactly
+`integration.prepare`, `integration.show`, `integration.verify`,
+`integration.request_delivery`, and `integration.deliver`. These methods use
+the same run-authenticated socket but are not part of the base `coord.*` set.
+Every allow-list is derived from the current assignment, not from
+caller-supplied roles or identities. A mission may authorize its integrator
+and active worker runs as peers before any file overlap exists; ordinary runs
+retain the radar active/grace authorization described below.
+
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
-IDs, the recorded task, each currently authorized peer, and all six
-capabilities. The sender is never a parameter. A run can message only a peer
-in the same workspace that the radar currently marks as overlapping, or a
-peer in its ten-minute overlap grace period. A question reply is the one
-correlation exception: `coord.reply` identifies its destination from the
+IDs, the recorded task, each currently authorized peer, and the six base
+coordination capabilities (or the assignment-scoped capability set for a
+mission run). The sender is never a parameter. An ordinary run can message
+only a peer in the same workspace that the radar currently marks as
+overlapping, or a peer in its ten-minute overlap grace period. A mission run
+can also message its current assignment peers, which are shown with
+`state: "mission"` even when no file overlap exists. A question reply is the
+one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
 grace expires. It cannot be used to send an unrelated message or cross a
 workspace boundary.
@@ -101,7 +121,9 @@ also enforces these bounds:
 
 The method set is closed. A connection cannot invoke a control verb, access
 Git, read another run's transcript, or address a run outside the authorized
-peer set.
+peer or current mission-assignment set. Assignment-scoped task and worker
+methods still enforce the role, mission, revision, generation, and current
+authority checks on the server; they are not a general control API.
 
 ## Delivery, acknowledgement, and retries
 
@@ -185,7 +207,23 @@ The stable error codes are:
 ```
 
 `status` requires `--json`; `skill` takes no arguments and prints the current
-v3 assignment plus the short coordination workflow.
+v3 assignment plus the short coordination workflow. Integrator assignments
+include the server-approved account/harness/mode choices and active/total
+attempt allowance. Worker assignments identify the assigned task and state
+that workers may read and propose only; workers must not spawn other workers.
+
+Top-level and per-command help are available without a coordination socket:
+
+```sh
+/usr/local/bin/aether-internal --help
+/usr/local/bin/aether-internal send --help
+```
+
+`skill` also works without the mounted socket. In that case it prints the
+general workflow without claiming a run identity or assignment. Commands that
+need run state return `-32004` and exit with status 4 when the socket is not
+available. Message, question, reply, and report bodies read from flags, files,
+or standard input are capped at 4 KiB before a request is sent.
 
 ### Send a message
 
@@ -213,6 +251,35 @@ when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
 
+### Inspect and manage mission tasks and workers
+
+Task and worker commands use the authority attached to the run's socket. They
+do not accept a caller-supplied role or identity:
+
+```sh
+/usr/local/bin/aether-internal task show --task-id task-1
+/usr/local/bin/aether-internal task list --mission-id mission-1
+/usr/local/bin/aether-internal worker list --mission-id mission-1
+/usr/local/bin/aether-internal worker inspect --attempt-id attempt-1
+```
+
+Task revisions are bounded JSON specifications. Pass them with
+`--revision-file path` or `--revision-file -` for standard input (or use
+`--revision '<json>'`). Every task mutation (`propose`, `revise`, `accept`,
+`accept-submission`, and `abandon`) requires a stable `--idempotency-key`;
+integrator mutations also require the observed
+`--expected-integrator-generation`. Accepting a submission additionally
+requires `--expected-accepted-set-version`. If the server's exact submission
+result reports non-empty `ScopeViolations`, the caller must explicitly assess
+those deviations by passing `--scope-disposition '<reason>'`; the client does
+not generate or infer a path list, and an empty reason is not an assessment.
+
+Worker starts and retries require explicit `--dispatch-key` values. The
+dispatch key is also the idempotency key for that operation, so replaying the
+same command cannot create a second attempt. Worker cancellation requires its
+own `--idempotency-key` and the observed
+`--expected-integrator-generation`.
+
 ### Ask a question and reply
 
 ```sh
@@ -232,6 +299,60 @@ The first command returns the durable `question_id`. Use that value with
 and `reply` accept the same `--body-file` and standard-input forms as `send`.
 The example IDs are ordinary non-secret values. Replace them with the peer
 run ID and question ID returned by the run's own status and inbox results.
+
+### Integrator candidate integration
+
+A candidate freezes selected accepted revisions for combined verification and
+human-approved delivery. Only the current mission integrator may use these
+agent commands:
+
+```text
+integration prepare
+integration show
+integration verify
+integration request-delivery
+integration deliver
+```
+
+Each accepts `--params-file FILE|-` and optional `--json`. JSON input is
+limited to 32 KiB; `-` reads standard input. The run socket supplies caller
+identity. Parameter JSON cannot grant a role or approval. Results use the
+normal `schema_version`, `ok`, `result`, and structured `error` envelope.
+There is no agent `decide`, `approve`, generic RPC, list, resolve, patch, or
+delete command.
+
+Use each command's `--help` for its required JSON fields. Prepare requires
+`target_ref`, `expected_target_revision`, and `idempotency_key`; the server
+resolves omitted workspace, mission, and accepted inputs. Explicit
+`submissions` select an ordered subset of current accepted revisions.
+
+Create parameter files in a writable location, not the read-only
+`/run/aether` mount:
+
+```sh
+aether-internal integration prepare --params-file /tmp/aether-prepare.json --json
+aether-internal integration show --params-file /tmp/aether-show.json --json
+aether-internal integration verify --params-file /tmp/aether-verify.json --json
+aether-internal integration request-delivery --params-file /tmp/aether-request.json --json
+```
+
+Verification is asynchronous; poll `show` for its durable result. Wait for a
+human delivery decision before executing the approved request:
+
+```sh
+aether-internal integration deliver --params-file /tmp/aether-deliver.json --json
+```
+
+Other mission work may continue, but changing the accepted submission set
+invalidates an older candidate's mission binding. A replacement integrator
+may continue a candidate when the accepted set is unchanged.
+
+After an uncertain outcome, retry the same parameters and mutation identity.
+Do not replace an `idempotency_key` merely because the connection failed;
+delivery retries use the same `request_id` and `request_version`. A denial,
+conflict, or invalid state remains a structured server error. See
+[Candidate integration](integration.md) for parameter records, retained
+verification evidence, human decisions, and exact delivery.
 
 ### Report an outcome
 
@@ -295,6 +416,10 @@ Active runs and explicitly retained terminal TUI runs keep their socket,
 unread mailbox, and timeline entries through a server restart. Recovery
 rebinds `coord3.sock` for those runs. When a run's container is destroyed,
 Aether releases the coordination directory and mailbox after any required
-evidence capture has completed. With `--conflict-coordination=false`, no new
-coordination socket or mounts are created and every coordination request is
-unavailable; the conflict radar itself remains active.
+evidence capture has completed. With `--conflict-coordination=false`, a newly
+created container still receives the read-only canonical CLI mount, but no
+coordination socket or borrowed run identity is provided. Run-bound
+coordination requests are unavailable; `--help` and the general, identity-free
+`skill` workflow still work, and the CLI cannot authorize run operations. The
+optional MCP bridge has no usable socket. The conflict radar itself remains
+active.

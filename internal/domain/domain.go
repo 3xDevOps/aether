@@ -135,9 +135,11 @@ func (m LaunchMode) Valid() bool {
 
 // LaunchOptions carries one-shot launch controls that are not part of the
 // strict Launch seam. CachedBase pins a retry to the exact accepted mirror
-// commit returned by a prior base-capture failure.
+// commit returned by a prior base-capture failure. AssignedRunID is reserved
+// by durable mission state and is never exposed through generic run.launch.
 type LaunchOptions struct {
-	CachedBase string
+	CachedBase    string
+	AssignedRunID RunID
 }
 
 // Role is a member's role within the deployment.

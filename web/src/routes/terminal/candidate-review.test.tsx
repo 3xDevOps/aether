@@ -3,7 +3,7 @@ import type { Api } from '@/lib/api'
 import type { Candidate, CandidateSummary } from '@/lib/integration-types'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import { useStore } from '@/store'
-import { fakeApi, integrationCandidate, workspace } from '@/test/fixtures'
+import { fakeApi, integrationCandidate, run, workspace } from '@/test/fixtures'
 
 type CandidateOverrides = Partial<Candidate>
 
@@ -62,6 +62,19 @@ afterEach(() => {
 })
 
 describe('candidate review authority and resolution drafts', () => {
+  it('leaves the target revision blank when only another run has a base', async () => {
+    const client = fakeApi({
+      runList: vi.fn(async () => [
+        run({ base_commit: '' }),
+        run({ id: 'unrelated', base_commit: 'unrelated-base' }),
+      ]),
+    })
+    render(<CandidateReview workspaceID={workspace.id} currentRunID="run_1" client={client} />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Candidate review' }))
+    })
+    expect((screen.getByLabelText('Expected target revision') as HTMLInputElement).value).toBe('')
+  })
   it('keeps the fresher polled result and restores controls after an older refresh', async () => {
     vi.useFakeTimers()
     const first = candidate({

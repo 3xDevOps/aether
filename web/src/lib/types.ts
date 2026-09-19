@@ -47,6 +47,224 @@ export interface Run {
   base_source?: string
   base_checked_at?: string | null
 }
+/** Release B mission orchestration wire objects. IDs and revisions are server authority. */
+export type MissionTaskStatus = 'ready' | 'working' | 'review' | 'done' | 'proposed' | 'abandoned' | 'blocked'
+export type MissionTaskRevisionStatus = 'proposed' | 'accepted' | 'superseded' | 'abandoned'
+export type MissionAttemptState =
+  | 'reserved'
+  | 'launching'
+  | 'running'
+  | 'unknown'
+  | 'submitted'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'superseded'
+  | 'abandoned'
+export type MissionSubmissionState =
+  | 'proposed'
+  | 'accepted'
+  | 'rejected'
+  | 'superseded'
+  | 'abandoned'
+
+export interface MissionExecutionChoice {
+  account_member_id: string
+  harness: string
+  mode: string
+}
+
+export type MissionIntegrator = MissionExecutionChoice
+
+export interface Mission {
+  id: string
+  workspace_id: string
+  objective: string
+  accountable_human_id: string
+  integrator: MissionIntegrator
+  execution_choices: MissionExecutionChoice[]
+  max_concurrent_attempts: number
+  max_total_attempts: number
+  current_integrator_run_id: string
+  integrator_generation: number
+  accepted_set_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface MissionTaskScope {
+  expected_paths?: string[]
+  semantic_responsibility?: string
+  interfaces?: MissionInterfaceRevision[]
+  migrations?: string[]
+  shared_tests?: string[]
+  base?: string
+  target?: string
+  exclusions?: string[]
+}
+
+export interface MissionInterfaceRevision {
+  name: string
+  revision: string
+}
+
+export interface MissionEvidenceRequirement {
+  kind: string
+  detail?: string
+}
+
+export interface MissionTaskRevision {
+  task_id: string
+  revision: number
+  title: string
+  objective: string
+  scope: MissionTaskScope
+  evidence_requirements: MissionEvidenceRequirement[]
+  status: MissionTaskRevisionStatus
+  proposed_by_run_id?: string
+  supersedes_revision?: number
+  created_at: string
+  accepted_at?: string | null
+}
+
+export interface MissionTaskDependency {
+  task_id: string
+  revision: number
+  depends_on_task_id: string
+  depends_on_revision: number
+  output_ref?: string
+}
+
+export interface MissionTaskBlocker {
+  kind: string
+  task_id?: string
+  owner_run_id?: string
+  action: string
+}
+
+export interface MissionTask {
+  id: string
+  mission_id: string
+  current_revision: number
+  revision?: MissionTaskRevision | null
+  dependencies?: MissionTaskDependency[]
+  status: MissionTaskStatus
+  blockers?: MissionTaskBlocker[]
+  abandoned_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MissionAttempt {
+  id: string
+  mission_id: string
+  task_id: string
+  task_revision: number
+  number: number
+  dispatch_key: string
+  harness: string
+  mode: string
+  state: MissionAttemptState
+  run_id: string
+  actor_run_id?: string
+  authorizing_human_id?: string
+  run_owner_id?: string
+  account_owner_id?: string
+  authority_generation: number
+  integrator_generation: number
+  created_at: string
+  reserved_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  /** Durable hold/takeover state, not inferred from a live lease. */
+  takeover_active?: boolean
+  takeover_member_id?: string
+  takeover_generation?: number
+  /** Optional future-compatible field when the backend includes its hold. */
+  orchestration_hold?: boolean
+  cancel_requested_at?: string | null
+  cancellation_actor_run_id?: string
+  cancellation_generation?: number
+  last_error?: string
+}
+
+export interface MissionSubmissionEvidence {
+  kind: string
+  ref: string
+  available: boolean
+  detail?: string
+}
+
+export interface MissionSubmissionRef {
+  workspace_id: string
+  run_id: string
+  evidence_ref: string
+  retained_revision: string
+}
+
+export interface MissionSubmissionAcceptance {
+  scope_disposition?: string
+  /** Monotonic position in the mission's accepted set. */
+  accepted_set_version?: number
+}
+
+export interface MissionSubmission {
+  id: string
+  mission_id: string
+  task_id: string
+  task_revision: number
+  attempt_id: string
+  ref: MissionSubmissionRef
+  evidence: MissionSubmissionEvidence[]
+  scope_violations?: string[]
+  acceptance?: MissionSubmissionAcceptance
+  state: MissionSubmissionState
+  proposed_by_run_id: string
+  integrator_generation: number
+  created_at: string
+  decided_at?: string | null
+  decision_by_run_id?: string
+}
+
+export interface MissionScopeDiagnostic {
+  task_id: string
+  task_revision: number
+  run_id: string
+  kind: 'intended_overlap' | 'observed_overlap' | 'out_of_scope'
+  paths: string[]
+  peer_task_id?: string
+  peer_run_id?: string
+  unavailable?: boolean
+  unavailable_why?: string
+  detail?: string
+}
+
+export interface MissionShowResult {
+  mission: Mission
+  tasks: MissionTask[]
+  attempts?: MissionAttempt[]
+  submissions?: MissionSubmission[]
+  diagnostics?: MissionScopeDiagnostic[]
+}
+
+export interface MissionListResult {
+  missions: Mission[]
+  next_cursor?: string
+}
+
+export interface MissionCreateResult {
+  mission: Mission
+}
+
+export interface MissionReplaceIntegratorResult {
+  mission: Mission
+  run_id?: string
+}
+export interface MissionWorkerReleaseResult {
+  run_id: string
+  takeover_active: boolean
+  takeover_generation: number
+}
 export interface Workspace {
   id: string
   name: string

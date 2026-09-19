@@ -501,43 +501,65 @@ where the link appeared. Other links keep the normal browser behavior.
 
 ## Conflict coordination
 
-When two runs edit the same file, each container gets a unix socket it can
-message the other run through. Detail is in `docs/coordination.md` (host side
-and wire) and `docs/mcp-bridge.md` (the in-container half); the operator-facing
-stances are these.
+When two runs edit the same file, each container may receive a run-scoped unix
+socket for coordination. Detail is in `docs/coordination.md` (host side and
+wire) and `docs/mcp-bridge.md` (the optional in-container bridge); the
+operator-facing stances are these.
 
+- **Binary availability is not run identity.** The canonical
+  `/usr/local/bin/aether-internal` CLI is an Aether-provided, version-matched
+  executable available in managed containers, and the staged server binary
+  may also be present for the optional bridge and lifecycle plumbing. Neither
+  path authenticates a caller. The socket at `/run/aether/coord3.sock` is the
+  run identity: a connection accepted there is treated as that run. An
+  identity-less environment terminal or container can use general help or
+  non-run skill guidance, but status, messaging, reporting, and mission
+  operations are unavailable.
 - **The mount is the authentication, so no token enters a container.** Each run
-  gets its own socket at `/run/aether/coord3.sock`; whoever connects on it *is*
-  that run. There is nothing inside the container to steal, and nothing to
-  rotate. The host-side modes (`0700` on the coordination root, `0755` on the
-  per-run directory, `0666` on the socket, `0444` on the config and the
-  co-author list, `0555` on the staged binary) are a contract with a
+  gets its own socket; there is nothing inside the container to steal, and
+  nothing to rotate. The host-side modes (`0700` on the coordination root,
+  `0755` on the per-run directory, `0666` on the socket, `0444` on the config
+  and the co-author list, `0555` on the staged binary) are a contract with a
   semi-trusted container that may not run as root - they are not the access
   control. Both container paths are reserved:
   `runtime.ValidateMounts` refuses any caller-supplied mount that targets or
   nests under them, so a credential home cannot shadow either.
-- **The socket exposes six methods and no control verbs.** `coord.status`,
-  `coord.send`, `coord.inbox`, `coord.ask`, `coord.reply`, and `coord.report`
-  are the complete set - no `run.kill`, no git, no other run's transcript.
-  Messages are capped at 4 KiB, rate-limited per run, bounded at 100 unread per
-  inbox, and every one is recorded on the workspace timeline.
-- **A run can widen its own peer set, and the cap is what bounds it.** The
-  overlap that authorizes a message is computed from the two runs' own diff
-  snapshots, so a run that touches every tracked file is reported as
-  overlapping with every other run in the workspace. The server cannot tell
-  that from a wide refactor, so it limits each run to 8 distinct
-  correspondents instead of trying to. Read this as defence in depth, not a
-  boundary: runs in one workspace already share a repository, so influencing
-  each other through file contents needs no authorization at all. Turn the
-  feature off with `--conflict-coordination=false` if that is not acceptable.
+- **Disabling coordination still disables coordination.** With
+  `--conflict-coordination=false`, the read-only canonical CLI mount remains
+  available, but no usable run socket, borrowed run identity, or MCP bridge is
+  available. Run-bound CLI calls and bridge calls return unavailable; the
+  identity-free CLI can still provide general help and non-run skill guidance.
+  The overlap radar remains active.
+- **The base socket exposes six coordination methods and no control verbs.**
+  `coord.status`, `coord.send`, `coord.inbox`, `coord.ask`, `coord.reply`, and
+  `coord.report` are the complete `coord.*` wire set. A mission-assigned run
+  additionally receives only the current assignment's `task.*` and `worker.*`
+  methods over that same run-authenticated socket; those methods are not a
+  general control API. There is no `run.kill`, no Git access, and no other
+  run's transcript. Messages are capped at 4 KiB, rate-limited per run,
+  bounded at 100 unread per inbox, and every one is recorded on the workspace
+  timeline. The optional bridge is manual and still exposes only its six
+  existing tools; it is not automatic registration or a Release B
+  mission/worker interface.
+- **A run can widen its own peer set, and the cap is what bounds it.** For
+  ordinary runs, the overlap that authorizes a message is computed from the two
+  runs' own diff snapshots, so a run that touches every tracked file is
+  reported as overlapping with every other run in the workspace. Mission
+  assignments instead provide a server-derived peer set that may authorize
+  active integrator and worker runs before file overlap; neither set is
+  caller-selected, and both remain bounded. The server limits each run to 8
+  distinct correspondents instead of trying to infer intent from a wide
+  refactor. Read this as defence in depth, not a boundary: runs in one
+  workspace already share a repository, so influencing each other through file
+  contents needs no authorization at all. Turn the feature off if that is not
+  acceptable.
 - **The staged bridge binary is the server's own binary.** It is mounted
-  read-only at `/opt/aether/aether-server` so any image can run the MCP bridge
-  without shipping an extra artifact. A container therefore holds a copy of the
-  server's code and can run any of its subcommands - `serve`, `mcp --socket
-  <path>`, the rest. This grants nothing new: the binary carries no
-  credentials, reaches no host state that the container was not already given,
-  and the isolation is still the container, exactly as in "The agent container"
-  above.
+  read-only at `/opt/aether/aether-server` so a container can run the optional
+  MCP bridge without shipping an extra artifact. A container therefore holds a
+  copy of the server's code and can run its available subcommands. This grants
+  nothing new: the binary carries no credentials, reaches no host state that
+  the container was not already given, and the isolation is still the
+  container, exactly as in "The agent container" above.
 
 ## Server self-update
 

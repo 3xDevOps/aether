@@ -94,6 +94,19 @@ successful takeover fences the old writer; its input is rejected and its
 session becomes a read-only mirror. Invalid, stale, or cross-member requests
 are refused without changing the current writer.
 
+When this run is a mission worker, taking writable agent or shell control also
+sets a durable orchestration hold for that worker. The hold survives reconnect
+expiry, disconnect cleanup, protection fencing, and a server restart; integrator
+messages remain visible and durable but cannot inject input while the hold is
+active. An explicitly authorized **Release control** action may clear the hold
+even after the lease, PTY, or worker attempt has disappeared; it must name the
+current durable takeover generation, and a stale generation is refused. The
+server rechecks current Steer authority for that human and never evicts a
+different member's live writer while releasing. A failed release admission
+leaves both the human lease and the hold in place. This hold changes
+orchestration eligibility only; taking control never grants account-use
+authority or affects unrelated workers.
+
 Only the run owner or an administrator can enable protection. Enabling
 protection immediately fences the current controller and cancels every queued
 Run Room steer request. While protected, non-owner steering is refused and the

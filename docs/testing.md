@@ -109,7 +109,7 @@ Scenarios:
 | `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Explicit profile operations and harness logins: a login in the environment terminal persists into two runs, a manual profile push updates the shared persistent member home for a later run and an already-running run, and denylisted credential names are refused (Docker only - it needs a real terminal). CLI profile `push`, `status`, and `rollback` remain separate manual operations |
 | `TestIntegrationMemberEnvironmentImage` (`environment_image_integration_test.go`) | The saved environment image: what the container layer keeps, and that a container started from it **without** the member home mounted has no signing key, no `.gitconfig` and no gh token - Docker's commit never captures a bind mount |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
-| `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: both binds realized and read-only, `mcp.json` and `co-authors` found at `0444` inside the container, the staged binary executed as `/opt/aether/aether-server mcp` by a non-root agent, and a status/send/inbox round trip between two overlapping runs |
+| `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: the run socket and both verified read-only executable binds are realized, no Aether-managed `mcp.json` is installed, `co-authors` is found at `0444`, the staged binary executes as `/opt/aether/aether-server mcp` by a non-root agent when manually configured, and a status/send/inbox round trip works between two overlapping runs |
 | `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --event ...` against the run's own socket, and each run parking at needs-attention with `waiting for your input` seconds after the agent's turn ends - not after the stall threshold - then returning to running with `agent resumed` on the agent's next turn |
 | `TestIntegrationOpenCodeStatusReporterInContainer` (`agentstatus_integration_test.go`) | The same path for a harness that has no flag to point at its reporter: the plugin written at `0444` into the run's coordination directory, `OPENCODE_CONFIG_CONTENT` naming it from inside the container with the launch command left exactly as it was, the staged binary running `aether-server report opencode --event session.idle` against the run's own socket, the run parking at needs-attention with `waiting for your input` seconds after the turn ends, and returning to running with `agent resumed` when the agent takes the steer |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootRetainedTUI`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to an active surviving container; an explicitly closed TUI run survives with the same row, paused container, and checkout and can relaunch that exact retained identity; a lost active container becomes `interrupted` after its `wip:` commit and published branch, with no replacement relaunch |
@@ -152,7 +152,7 @@ tailnet identity resolution so join and fallback scenarios need no real
 tailnet, `Harnesses` overrides registry argv templates so a registered
 harness (with its real profile root and credential mounts) can run a
 scripted agent - the first two double as deployment wiring - and
-`ServerBinary` names the binary staged as the in-container MCP bridge.
+`ServerBinary` names the executable staged for the CLI and optional MCP bridge.
 
 ### The container coordination scenario
 
@@ -166,17 +166,21 @@ under `go test` `/proc/self/exe` is not. So the scenario points
 `ServerBinary` at an `aether-server` it builds - the same one the chaos
 scenarios run as a child process.
 
-The agent has to be launched by the shipped `claude` profile, because a
-`Harnesses` argv override is respected verbatim and takes the MCP
-registration with it. So the scenario builds a run image whose `claude`
-executable is the fixture agent in `internal/server/testdata/coordagent`,
-running as a non-root user. The fixture knows no Aether paths: it takes the
-coordination directory from the `--mcp-config` it was handed and the bridge
-command from that config, the way a real harness would. What it found goes
-on its terminal, where the test reads it over a real attach: the modes,
-both binds read-only in the kernel's own mount table, a write the
-coordination directory refuses with EROFS, and every tool result. The
-daemon's own view of the two binds is checked beside it.
+The scenario uses the shipped `claude` profile with a non-root fixture agent
+from `internal/server/testdata/coordagent`. It explicitly invokes the optional
+bridge from the canonical executable mount; no automatic MCP registration is
+required. The fixture reports directory modes, read-only mounts from the
+kernel's mount table, EROFS on attempted writes, and tool results over a real
+attach. The daemon's mount view is checked alongside those observations.
+
+`TestIntegrationMissionCompositionInDocker` composes mission dispatch,
+proactive coordination, accepted retained submissions, combined verification,
+human approval, and exact delivery. It also checks failed verification,
+stale-target rejection, and integrator replacement. Its `claude`, `pi`, and
+`omp` executables are scripted fixtures, not genuine vendor-agent runs.
+`web/e2e/mission-candidate-review.spec.ts` drives launch, progress, worker
+control, and mission candidate preparation in a real browser and attaches a
+successful screenshot for visual inspection.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container

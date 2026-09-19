@@ -103,6 +103,15 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
       ),
     )
     s.setOverlaps(overlaps)
+    if (
+      active &&
+      (capabilities === null || capabilities.methods.includes('mission.list'))
+    ) {
+      await client
+        .missionList({ workspace_id: active, limit: 50 })
+        .then((result) => s.setMissions(result.missions, result.next_cursor))
+        .catch(ignore)
+    }
     s.setCapabilities(capabilities)
     // A deep link (`aether://run/<id>` from either shell) arrives as
     // `?run=<id>` and can only be acted on now that the runs are here. A
@@ -269,6 +278,47 @@ export async function applyEvent(
   // their name renders as a raw ID everywhere.
   if (ev.actor_id && !store.getState().members[ev.actor_id]) {
     await client.memberList().then(store.getState().setMembers).catch(ignore)
+  }
+
+  // Mission events are scoped projection hints. Never let an event from a
+  // background workspace refresh the mission currently visible in this tab.
+  if (ev.type.startsWith('mission.') && ev.workspace_id) {
+    const state = store.getState()
+    if (state.activeWorkspace === ev.workspace_id) {
+      const current = state.route
+      const missionID =
+        current.name === 'missions' ? current.params.missionId : undefined
+      let changedMissionID: string | undefined
+      if (typeof ev.payload === 'object' && ev.payload !== null && 'mission_id' in ev.payload) {
+        const candidate = ev.payload.mission_id
+        if (typeof candidate === 'string') changedMissionID = candidate
+      }
+      const currentMission = missionID ? state.missions[missionID] : undefined
+      if (
+        missionID &&
+        changedMissionID === missionID &&
+        (!currentMission || currentMission.workspace_id === ev.workspace_id)
+      ) {
+        await client
+          .missionShow(missionID)
+          .then((result) => {
+            if (result.mission.workspace_id !== ev.workspace_id) return
+            store.getState().setMissionDetail({
+              mission: result.mission,
+              tasks: result.tasks,
+              attempts: result.attempts ?? [],
+              submissions: result.submissions ?? [],
+              diagnostics: result.diagnostics ?? [],
+            })
+          })
+          .catch(ignore)
+      } else {
+        await client
+          .missionList({ workspace_id: ev.workspace_id, limit: 50 })
+          .then((result) => store.getState().setMissions(result.missions, result.next_cursor))
+          .catch(ignore)
+      }
+    }
   }
 
   switch (ev.type) {

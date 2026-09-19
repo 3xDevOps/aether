@@ -2488,3 +2488,50 @@ connection, which is how to read the page's console and its computed
 shell falls back to padding for the system bars itself on a WebView older
 than Chromium 140, so check `chrome://version` on the phone before
 concluding the page is wrong.
+
+## Missions and Launch Swarm
+
+The launch dialog keeps **Single agent** as its default. When the gateway
+advertises `mission.create`, it also offers **Swarm**: one concise objective,
+an integrator account/harness/mode, an explicit list of allowed worker
+account/harness/mode choices, and finite concurrent and total-attempt limits.
+The form sends the exact selected values to `mission.create`, including a
+client idempotency key, then navigates to `missions/<server-issued-id>`. A
+failed retry keeps that key; client-generated IDs are never used as mission
+authority. The server bounds these finite limits at eight concurrent attempts
+and 128 total attempts; the form rejects values outside those bounds before
+sending.
+
+`routes/missions` is registered through `routes/index.ts`, and the
+`MissionsSlice` is composed into the root store. Hydration reads
+`mission.list` for the active workspace; mission events refetch either the
+open `mission.show` projection or the current list, so reloads and event
+reconnects recover server state rather than retaining a demo snapshot. The
+progress view renders the authoritative task statuses Ready, Working, Review,
+Done, Proposed and Abandoned. It keeps blockers, exact task revision/scope,
+attempt IDs, evidence availability, and accepted submission
+revision/artifact references visible. A worker success or exit is not enough
+to render Done: the server must accept a submission for the current task
+revision, with the required evidence available and any scope disposition
+explicitly recorded.
+
+Run links use the existing terminal route. Take control and Release control
+continue to enforce the normal run controller and durable worker hold.
+`mission.worker.release` is the human-only release action for a worker hold:
+the dashboard sends the run ID and observed
+`expected_takeover_generation` as a compare-and-swap, while the server
+rechecks current steering authority under the same admission boundary. A
+stale generation, revoked authority, or foreign control holder leaves the
+hold in place and surfaces the conflict; an integrator or worker cannot
+release it through the assignment-scoped socket. Integrator replacement is
+gated by capabilities and role, pins `expected_generation`, and reuses one
+idempotency key across retries while reloading the resulting mission. The
+mission marker joins ordinary run cards through the `card:badges` slot; the
+shell and board remain unchanged.
+
+`mission.show` also carries bounded server-derived scope diagnostics. The
+mission task view labels intended overlap, observed overlap and out-of-scope
+paths and links each diagnostic to the task or peer run. The same diagnostics
+are registered into the existing run-card conflict-chip slot, so overlap
+warnings stay in the conflict experience rather than creating a second board
+or lock surface.

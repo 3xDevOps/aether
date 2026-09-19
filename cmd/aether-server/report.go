@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -54,7 +54,7 @@ func report(args []string) {
 	harness, args := args[0], args[1:]
 	fs := flag.NewFlagSet("report "+harness, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	socket := fs.String("socket", mcpbridge.SocketPath, "coordination socket to report on")
+	socket := fs.String("socket", coordtransport.SocketPath, "coordination socket to report on")
 	event := fs.String("event", "", "the event being reported (opencode, pi, omp)")
 	status := fs.String("status", "", "the session status type the event carries (opencode session.status)")
 	tool := fs.String("tool", "", "the tool the event names, where it names one (pi, omp)")
@@ -96,7 +96,7 @@ func report(args []string) {
 	if !mapped {
 		return
 	}
-	err := mcpbridge.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
+	err := coordtransport.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
 		State:  string(rep.State),
 		Reason: rep.Reason,
 	}, nil)

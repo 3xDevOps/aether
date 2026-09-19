@@ -174,12 +174,15 @@ func (s *Service) Verify(ctx context.Context, actor Actor, p protocol.Integratio
 		candidateLock.Unlock()
 		return protocol.Candidate{}, e
 	}
+	// Admission protects durable queueing only. The asynchronous worker
+	// rechecks the current actor at each runtime boundary below.
+	release()
 	out := *candidate
 	candidateLock.Unlock()
 	go func() {
 		defer s.unregisterVerification(verificationID)
 		defer cancel()
-		defer release()
+
 		s.runVerification(workCtx, actor, domain.WorkspaceID(p.WorkspaceID), p.CandidateID, verificationID, argv, timeout)
 	}()
 	return out, nil
@@ -276,7 +279,13 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	}
 	spec.WorktreeHostPath = checkout
 	spec.CreationKey = currentCreationKey(candidate, verificationID)
+	creationKey := spec.CreationKey
 	if e := spec.Validate(); e != nil {
+		if cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, ""); cleanupErr != nil {
+			releaseClaim()
+			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
+			return
+		}
 		if removeErr := s.git.RemoveCandidateVerification(context.Background(), workspaceID, candidateID, verificationID); removeErr != nil {
 			releaseClaim()
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, removeErr))
@@ -286,30 +295,79 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 		s.finishVerification(context.Background(), workspaceID, candidateID, verificationID, protocol.VerificationError, nil, nil, false, e)
 		return
 	}
+	if s.prepareRuntime != nil {
+		if e := s.prepareRuntime(ctx, &spec); e != nil {
+			if cleanupErr := s.cleanupVerificationRuntime(context.Background(), creationKey, ""); cleanupErr != nil {
+				releaseClaim()
+				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
+				return
+			}
+			if removeErr := s.git.RemoveCandidateVerification(context.Background(), workspaceID, candidateID, verificationID); removeErr != nil {
+				releaseClaim()
+				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, removeErr))
+				return
+			}
+			releaseClaim()
+			s.finishVerification(context.Background(), workspaceID, candidateID, verificationID, protocol.VerificationError, nil, nil, false, e)
+			return
+		}
+		if spec.CreationKey != creationKey {
+			e := fmt.Errorf("%w: runtime preparation changed creation key", ErrUnavailable)
+			if cleanupErr := s.cleanupVerificationRuntime(context.Background(), creationKey, ""); cleanupErr != nil {
+				releaseClaim()
+				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
+				return
+			}
+			if removeErr := s.git.RemoveCandidateVerification(context.Background(), workspaceID, candidateID, verificationID); removeErr != nil {
+				releaseClaim()
+				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, removeErr))
+				return
+			}
+			releaseClaim()
+			s.finishVerification(context.Background(), workspaceID, candidateID, verificationID, protocol.VerificationError, nil, nil, false, e)
+			return
+		}
+		if e := spec.Validate(); e != nil {
+			if cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, ""); cleanupErr != nil {
+				releaseClaim()
+				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
+				return
+			}
+			if removeErr := s.git.RemoveCandidateVerification(context.Background(), workspaceID, candidateID, verificationID); removeErr != nil {
+				releaseClaim()
+				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, removeErr))
+				return
+			}
+			releaseClaim()
+			s.finishVerification(context.Background(), workspaceID, candidateID, verificationID, protocol.VerificationError, nil, nil, false, e)
+			return
+		}
+	}
 	environmentSHA256 := digest(spec.Env)
 	setupScriptSHA256 := digest(spec.SetupScript)
 
-	// Keep the candidate claim fenced through Create and persistence of the
-	// private container identity. Delete/Cleanup then cannot race a late create.
+	// Recheck authorization immediately before materializing the runtime.
+	// Candidate lock is already held, preserving lock order with Show.
+	createRelease, err := s.authorize(ctx, actor, candidate, protocol.MethodIntegrationVerify)
+	if err != nil {
+		if cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, ""); cleanupErr != nil {
+			releaseClaim()
+			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(err, cleanupErr))
+			return
+		}
+		if removeErr := s.git.RemoveCandidateVerification(context.Background(), workspaceID, candidateID, verificationID); removeErr != nil {
+			releaseClaim()
+			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(err, removeErr))
+			return
+		}
+		releaseClaim()
+		s.finishVerification(context.Background(), workspaceID, candidateID, verificationID, protocol.VerificationError, nil, nil, false, err)
+		return
+	}
 	containerID, err := s.runtime.Create(ctx, spec)
 	if err != nil {
-		var cleanupErr error
-		if containerID != "" {
-			cleanupErr = destroyVerificationContainer(containerID, s.runtime)
-		} else {
-			lookupCtx, cancelLookup := context.WithTimeout(context.Background(), 15*time.Second)
-			foundID, findErr := s.runtime.FindByCreationKey(lookupCtx, spec.CreationKey)
-			cancelLookup()
-			if findErr == nil {
-				if foundID == "" {
-					cleanupErr = errors.New("runtime returned an empty container id for creation key")
-				} else {
-					cleanupErr = destroyVerificationContainer(foundID, s.runtime)
-				}
-			} else if !errors.Is(findErr, runtime.ErrNotFound) {
-				cleanupErr = fmt.Errorf("find verification container after create failure: %w", findErr)
-			}
-		}
+		createRelease()
+		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			releaseClaim()
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(err, cleanupErr))
@@ -331,8 +389,9 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 		}
 	}
 	if e := s.save(ctx, record, candidate); e != nil {
+		createRelease()
+		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		releaseClaim()
-		cleanupErr := destroyVerificationContainer(containerID, s.runtime)
 		if cleanupErr == nil {
 			if removeErr := s.git.RemoveCandidateVerification(context.Background(), workspaceID, candidateID, verificationID); removeErr != nil {
 				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, removeErr))
@@ -344,11 +403,12 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 		}
 		return
 	}
+	createRelease()
 	claimedLock = false
 	candidateLock.Unlock()
 	info, inspectErr := s.runtime.Inspect(ctx, containerID)
 	if inspectErr != nil {
-		cleanupErr := destroyVerificationContainer(containerID, s.runtime)
+		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(inspectErr, cleanupErr))
 			return
@@ -362,7 +422,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	}
 	observedImage := info.Image
 	if e := s.updateVerificationMetadata(context.Background(), workspaceID, candidateID, verificationID, spec.Image, observedImage, info.User, spec.WorkingDir, int(timeout/time.Second), spec.CPULimit, spec.MemoryLimitBytes, environmentSHA256, setupScriptSHA256); e != nil {
-		cleanupErr := destroyVerificationContainer(containerID, s.runtime)
+		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
 			return
@@ -377,7 +437,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 
 	attachment, err := s.runtime.Attach(ctx, containerID)
 	if err != nil {
-		cleanupErr := destroyVerificationContainer(containerID, s.runtime)
+		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(err, cleanupErr))
 			return
@@ -415,14 +475,21 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	if claimErr == nil {
 		claimErr = s.ensureRunningVerification(startCandidate, verificationID)
 	}
+	var startRelease func()
 	var startErr error
 	if claimErr == nil {
+		startRelease, claimErr = s.authorize(ctx, actor, startCandidate, protocol.MethodIntegrationVerify)
+	}
+	if claimErr == nil {
 		startErr = s.runtime.Start(ctx, containerID)
+	}
+	if startRelease != nil {
+		startRelease()
 	}
 	startLock.Unlock()
 	if claimErr != nil {
 		_ = attachment.Close()
-		cleanupErr := destroyVerificationContainer(containerID, s.runtime)
+		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(claimErr, cleanupErr))
 			return
@@ -470,7 +537,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	// On a normal exit, wait for both streams to reach EOF before detaching.
 	// On failure/timeout, detach first so cleanup can stop blocked readers.
 	_ = attachment.Close()
-	cleanupErr := destroyVerificationContainer(containerID, s.runtime)
+	cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 	if !drained {
 		drainTimer := time.NewTimer(15 * time.Second)
 		select {
@@ -594,6 +661,41 @@ func destroyVerificationContainer(id runtime.ID, rt runtime.Runtime) error {
 	}
 	if err := rt.Destroy(cleanupCtx, id); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		return err
+	}
+	return nil
+}
+
+// cleanupVerificationRuntime proves that the container is absent before
+// releasing any resources staged by PrepareRuntime. An unknown lookup or
+// failed destroy deliberately leaves the durable verification running so
+// recovery can retry without losing ownership of staged resources.
+func (s *Service) cleanupVerificationRuntime(ctx context.Context, creationKey string, containerID runtime.ID) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if containerID != "" {
+		if err := destroyVerificationContainer(containerID, s.runtime); err != nil {
+			return err
+		}
+	} else if creationKey != "" {
+		lookupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		foundID, err := s.runtime.FindByCreationKey(lookupCtx, creationKey)
+		cancel()
+		switch {
+		case err == nil && foundID == "":
+			return errors.New("runtime returned an empty container id for creation key")
+		case err == nil:
+			if err = destroyVerificationContainer(foundID, s.runtime); err != nil {
+				return err
+			}
+		case !errors.Is(err, runtime.ErrNotFound):
+			return fmt.Errorf("find verification container: %w", err)
+		}
+	}
+	if s.releaseRuntime != nil && creationKey != "" {
+		if err := s.releaseRuntime(ctx, creationKey); err != nil {
+			return fmt.Errorf("release verification runtime resources: %w", err)
+		}
 	}
 	return nil
 }
@@ -796,15 +898,8 @@ func (s *Service) recoverVerifications(ctx context.Context, c *protocol.Candidat
 		if v.Status != protocol.VerificationRunning || s.verificationActive(v.VerificationID) {
 			continue
 		}
-		if v.CreationKey != "" {
-			id, err := s.runtime.FindByCreationKey(ctx, v.CreationKey)
-			if err == nil {
-				if e := destroyVerificationContainer(id, s.runtime); e != nil {
-					return fmt.Errorf("integration: recover verification %s runtime: %w", v.VerificationID, e)
-				}
-			} else if !errors.Is(err, runtime.ErrNotFound) {
-				return fmt.Errorf("integration: find verification %s runtime: %w", v.VerificationID, err)
-			}
+		if err := s.cleanupVerificationRuntime(ctx, v.CreationKey, ""); err != nil {
+			return fmt.Errorf("integration: recover verification %s runtime: %w", v.VerificationID, err)
 		}
 		if s.git != nil {
 			if err := s.git.RemoveCandidateVerification(ctx, domain.WorkspaceID(c.WorkspaceID), c.CandidateID, v.VerificationID); err != nil {

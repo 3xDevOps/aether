@@ -41,18 +41,19 @@ func init() {
 			// only after finalization.
 			Evidence:        coordEvidenceCapture{service: d.Evidence},
 			EvidencePackets: d.Store,
+			Mission:         lazyMission{ssh: d.SSH},
 		})
 		if err != nil {
 			return nil, err
 		}
-		// The in-container half (): the scheduler stages the MCP
-		// bridge binary and mounts it beside this service's per-run
-		// directory. Leaving the seam unset with the kill switch off is
-		// what keeps new containers free of coordination assets, while the
-		// service above still runs to make the old ones inert.
-		if !d.Config.CoordinationDisabled {
-			d.Runs.UseCoordination(svc, filepath.Join(d.DataDir, "runtime", "bin"))
-		}
+		// Binary staging is independent from the conflict-coordination
+		// kill switch. Every new container receives the verified CLI; only
+		// enabled runs receive a socket and lifecycle assets.
+		d.Runs.UseCoordination(
+			svc,
+			filepath.Join(d.DataDir, "runtime", "bin"),
+			!d.Config.CoordinationDisabled,
+		)
 		return svc, nil
 	})
 }

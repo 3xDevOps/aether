@@ -156,7 +156,8 @@ completed candidates return their existing result without consulting deleted
 source packets. A retry never extends candidate expiry.
 
 The `Candidate` aggregate carries `candidate_id`, `workspace_id`, optional
-`mission_id`, ordered `submissions`, `required_sources`, immutable `inputs`,
+`mission_id` and `mission_accepted_set_version`, ordered `submissions`,
+`required_sources`, immutable `inputs`,
 `target_ref`, `expected_target_revision`, optional `candidate_revision`,
 `state`, optional `conflicts`, `applied_inputs`, `verifications`, optional
 `delivery_request`/`delivery_receipt`, `created_at`, `expires_at`, optional
@@ -331,6 +332,8 @@ type Config struct {
     Runtime     runtime.Runtime
     Root        string
     Environment func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
+    PrepareRuntime func(context.Context, *runtime.Spec) error
+    ReleaseRuntime func(context.Context, string) error
     Admission   AdmissionFunc
     Now         func() time.Time
 }
@@ -346,42 +349,55 @@ type Admission struct {
     WorkspaceID domain.WorkspaceID
     MissionID   string
     Candidate   *protocol.Candidate
+    NewCandidate bool
     Submissions []protocol.SubmissionRef
 }
 
 type AdmissionFunc func(context.Context, Admission) (release func(), err error)
 ```
 
-`AdmissionFunc` is server-controlled and is invoked for **every mutation**,
-including `integration.prepare` when `mission_id` is omitted. The default
-policy rejects run actors and any non-empty mission ID. The callback must hold
-its returned release fence until the consequential operation completes. The
-authenticated transport supplies `Actor`: human SSH/gateway calls get only
-`MemberID`; the server's run socket adapter is the sole source of `RunID`.
-Clients cannot set either field.
+`AdmissionFunc` is server-controlled and runs for every mutation, including
+prepare with an omitted `mission_id`. The standalone default rejects run
+actors and non-empty mission IDs. The embedding server installs mission
+policy without weakening the engine's workspace/member permission checks.
+Authenticated transports supply `Actor`: SSH/gateway calls supply `MemberID`;
+the run socket supplies `RunID`. Clients cannot set either identity.
 
-The mission-policy adapter is the authoritative integrator. It must resolve the
-current mission association, accepted-submission membership, and generation
-fence for the caller and every input, including when the request's
-`mission_id` is empty. It must reject mission-associated inputs/callers used
-through an empty mission ID, stale generations, and unaccepted submissions.
-It must not import mission state into this engine or trust client-supplied
-mission IDs, candidate IDs, generations, or acceptance claims. The engine's
-independent workspace/member/push/read checks remain mandatory.
+Prepare passes a candidate pointer before its first durable write with
+`NewCandidate=true`. Policy freezes the mission-owned accepted-set version
+there. Replays receive the existing binding with `NewCandidate=false`.
+Published-candidate locks precede the shared authorization fence. Successful
+admission returns a release function held through the consequential action.
+Verification separately admits queueing, container creation, and start; it
+does not hold the authority fence while waiting for the command.
+
+The mission adapter resolves current assignments and every source run's
+mission association, even when `mission_id` is omitted. It rejects mixed
+mission/ordinary inputs, stale integrators, unaccepted revisions, and changed
+accepted-set bindings. Explicit sources may select an ordered subset.
+Human operations retain existing member permissions; historical review and
+authorized cleanup remain available. The engine does not own mission state.
+
+`PrepareRuntime` and `ReleaseRuntime` must be supplied together or both omitted.
+The server wires them to verified CLI staging keyed by the persisted runtime
+creation key. Verification containers receive the CLI but no run socket or
+fabricated assignment. Staged references survive restart and remain retained
+while runtime liveness or destruction is uncertain.
 
 ## Retention and recovery
 
 Candidate, request, and verification lifetimes are bounded as above. Delete
 and expiry first persist the fence (`unavailable`/`deleting`) before destroying
 verification runtimes and removing owned checkouts, refs, transcripts, and
-other artifacts. Recovery scans durable records, marks interrupted
-verifications as `error`, destroys containers found by their persisted creation
-key, removes disposable checkouts, and never reruns a command or invents an
-exit code. A failed cleanup remains recoverable. Candidate tombstone metadata
+other artifacts. Recovery destroys containers found by their persisted creation
+key and removes disposable checkouts. It restores an exact durable terminal
+result when one exists; otherwise it marks the interrupted verification as
+`error`. It never reruns a command or invents an exit code. A failed cleanup
+remains recoverable. Candidate tombstone metadata
 is retained for at most 30 days; public proposal refs are never removed as
 candidate-private artifacts.
 
-Release B appends migration **32** after the v31 schema in
-`internal/store/migrate.go`; migrations are append-only and shipped entries
-must not be edited. Operators should inspect `schema_migrations` and expect
-version 32 rather than infer schema from a client build.
+The candidate schema is migration **32**; mission migrations **33–38** follow
+it in `internal/store/migrate.go`. Shipped migrations remain unchanged.
+Operators should inspect `schema_migrations` and expect version 38, not infer
+schema from a client build or reuse a database from an incompatible branch.

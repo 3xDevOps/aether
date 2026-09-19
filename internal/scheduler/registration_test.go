@@ -3,7 +3,6 @@ package scheduler
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"path"
 	"path/filepath"
 	"slices"
@@ -12,15 +11,13 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
-	coordpkg "github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
 )
 
 // recordingCoordinator is the fake coordinator plus the asset files each
-// run was provisioned with - where the harness MCP registration and the
-// status reporter land.
+// run was provisioned with - status and taskless discovery assets.
 type recordingCoordinator struct {
 	fakeCoordinator
 
@@ -41,11 +38,10 @@ func (r *recordingCoordinator) file(run domain.RunID, name string) []byte {
 	return r.files[run][name]
 }
 
-// TestHarnessMCPRegistration is the launch-time half of the registration
-// contract: a harness whose profile carries the flag is given a config
-// naming the staged bridge and the argument pointing at it, and one that
-// does not is launched untouched - notice-only, with no config written.
-func TestHarnessMCPRegistration(t *testing.T) {
+// TestHarnessProvisioningDoesNotRegisterMCP proves provisioning leaves
+// user-controlled MCP configuration alone. The staged CLI and lifecycle
+// assets are separate surfaces.
+func TestHarnessProvisioningDoesNotRegisterMCP(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	dir := t.TempDir()
@@ -55,38 +51,18 @@ func TestHarnessMCPRegistration(t *testing.T) {
 	}
 	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
 
-	registered, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
-	if err != nil {
-		t.Fatalf("launch claude run: %v", err)
-	}
-	argv := e.rt.byName(string(registered.ID)).spec.Command
-	if i := slices.Index(argv, "--mcp-config"); i < 0 || i+1 >= len(argv) || argv[i+1] != mcpConfigPath {
-		t.Fatalf("registered harness argv = %v, want --mcp-config %s in it", argv, mcpConfigPath)
-	}
-
-	var doc struct {
-		Servers map[string]struct {
-			Type    string   `json:"type"`
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		} `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(coord.file(registered.ID, coordpkg.ConfigName), &doc); err != nil {
-		t.Fatalf("decode written MCP config: %v", err)
-	}
-	srv, ok := doc.Servers[mcpbridge.ServerName]
-	if !ok || srv.Type != "stdio" || srv.Command != mcpbridge.BinaryPath || !slices.Equal(srv.Args, []string{bridgeSubcommand}) {
-		t.Fatalf("MCP config = %+v, want a stdio %s server running %s %s",
-			doc.Servers, mcpbridge.ServerName, mcpbridge.BinaryPath, bridgeSubcommand)
-	}
-
-	unsupported, _ := e.launchFake(t, "fix the auth bug")
-	argv = e.rt.byName(string(unsupported.ID)).spec.Command
-	if slices.Contains(argv, "--mcp-config") {
-		t.Fatalf("unsupported harness argv = %v, want no MCP registration", argv)
-	}
-	if cfg := coord.file(unsupported.ID, coordpkg.ConfigName); cfg != nil {
-		t.Fatalf("unsupported harness had an MCP config written: %s", cfg)
+	for _, name := range []string{"claude", "fake"} {
+		run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", name, domain.LaunchTUI)
+		if err != nil {
+			t.Fatalf("launch %s run: %v", name, err)
+		}
+		argv := e.rt.byName(string(run.ID)).spec.Command
+		if slices.Contains(argv, "--mcp-config") {
+			t.Fatalf("%s argv = %v, want no automatic MCP registration", name, argv)
+		}
+		if cfg := coord.file(run.ID, "mcp.json"); cfg != nil {
+			t.Fatalf("%s run had an MCP config written: %s", name, cfg)
+		}
 	}
 }
 
@@ -106,7 +82,7 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 		files:           make(map[domain.RunID]map[string][]byte),
 	}
 	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
-	settingsPath := path.Join(mcpbridge.MountDir, agentstatus.ClaudeSettingsName)
+	settingsPath := path.Join(coordtransport.MountDir, agentstatus.ClaudeSettingsName)
 
 	tui, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add OAuth login", "claude", domain.LaunchTUI)
 	if err != nil {
@@ -126,7 +102,7 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 	// scheduler's, so nothing but this pins the two together: a hook that
 	// names a path the run container does not carry reports nothing, and
 	// silently.
-	wantCommand := mcpbridge.BinaryPath + " report claude"
+	wantCommand := coordtransport.BinaryPath + " report claude"
 	if !bytes.Contains(agentstatus.ClaudeSettings, []byte(`"`+wantCommand+`"`)) {
 		t.Fatalf("%s runs something other than %q; the staged binary is what the container has",
 			agentstatus.ClaudeSettingsName, wantCommand)
@@ -215,7 +191,7 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 		t.Fatalf("plugin written for the run = %s, want the embedded asset", got)
 	}
 	spec := e.rt.byName(string(tui.ID)).spec
-	wantConfig := `{"plugin":["file://` + path.Join(mcpbridge.MountDir, agentstatus.OpenCodePluginName) + `"]}`
+	wantConfig := `{"plugin":["file://` + path.Join(coordtransport.MountDir, agentstatus.OpenCodePluginName) + `"]}`
 	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != wantConfig {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q, want %q", got, wantConfig)
 	}
@@ -233,7 +209,7 @@ func TestOpenCodeStatusReporterRegistration(t *testing.T) {
 	}
 	// The plugin is a leaf package's bytes and the binary path is the
 	// scheduler's; nothing but this pins the two together.
-	wantCommand := `"` + mcpbridge.BinaryPath + `"`
+	wantCommand := `"` + coordtransport.BinaryPath + `"`
 	if !bytes.Contains(agentstatus.OpenCodePlugin, []byte(wantCommand)) {
 		t.Fatalf("%s spawns something other than %s; the staged binary is what the container has",
 			agentstatus.OpenCodePluginName, wantCommand)
@@ -279,7 +255,7 @@ func TestReporterRegistrationPerHarness(t *testing.T) {
 	if i := slices.Index(argv, "-c"); i < 0 || i+1 >= len(argv) || argv[i+1] != agentstatus.CodexNotifySetting {
 		t.Fatalf("interactive codex argv = %v, want -c %s in it", argv, agentstatus.CodexNotifySetting)
 	}
-	if !strings.Contains(agentstatus.CodexNotifySetting, mcpbridge.BinaryPath) {
+	if !strings.Contains(agentstatus.CodexNotifySetting, coordtransport.BinaryPath) {
 		t.Fatalf("the codex notify setting %s names something other than the staged binary",
 			agentstatus.CodexNotifySetting)
 	}
@@ -287,7 +263,7 @@ func TestReporterRegistrationPerHarness(t *testing.T) {
 		t.Fatalf("interactive codex run recorded reporter %s, want %s", got, harness.ReporterTurnEnd)
 	}
 
-	extension := path.Join(mcpbridge.MountDir, agentstatus.PiExtensionName)
+	extension := path.Join(coordtransport.MountDir, agentstatus.PiExtensionName)
 	for _, name := range []string{"pi", "omp"} {
 		run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "add a test", name, domain.LaunchTUI)
 		if err != nil {

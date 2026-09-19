@@ -267,7 +267,13 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		BaseSource:      source,
 		BaseCheckedAt:   base.CheckedAt,
 	}
-	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
+	if err := createAssignedRun(ctx, s.cfg.Store, run, opts.AssignedRunID); err != nil {
+		if opts.AssignedRunID != "" {
+			existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
+			if getErr == nil && sameReservedRun(existing, run) {
+				return s.freshen(ctx, existing), nil
+			}
+		}
 		return nil, err
 	}
 	pending := s.beginPending(run.ID)
@@ -349,9 +355,16 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	entry.gitAuthorEmail = actor.GitIdentity().Email
 	s.mu.Unlock()
 	// Coordination assets are Aether-owned container surfaces and are appended
-	// after the environment plan's validated workspace mounts.
-	coordMounts, coordArgs, coordEnv := s.coordinationMounts(ctx, entry, run, profile)
+	// after the environment plan's validated workspace mounts. Staging errors
+	// are provisioning errors: never create a container that lacks the CLI.
+	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile)
+	if coordErr != nil {
+		return coordErr
+	}
 	plan.Mounts = append(plan.Mounts, coordMounts...)
+	if len(coordMounts) > 0 {
+		ensureCoordinationCLIPath(plan.Env)
+	}
 	argv = append(argv, coordArgs...)
 	// Last, so the server's value wins over the workspace's for the same
 	// reason Profile.Env's does: what the server needs the container to

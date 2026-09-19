@@ -11,7 +11,7 @@
 // load has to name neither.
 
 // REPORTER is the staged server binary inside the run container
-// (internal/mcpbridge.BinaryPath).
+// (internal/coordtransport.BinaryPath).
 const REPORTER = '/opt/aether/aether-server'
 
 // OWNER marks the process that reports: a child agent inherits its

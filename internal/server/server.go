@@ -348,6 +348,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		node, nodeErr = tailscaled.Self(discoverCtx)
 		cancel()
 	}
+	authMu := &sync.Mutex{}
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
 		HostKeyPath:       filepath.Join(cfg.DataDir, "ssh", "host_ed25519_key"),
@@ -365,6 +366,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
 		Profiles:          prof,
 		Config:            sshd.NewConfigBackend(homes, s.db),
+		AuthorizationMu:   authMu,
 	}
 	if err = s.buildServices(Deps{
 		Config:   cfg,

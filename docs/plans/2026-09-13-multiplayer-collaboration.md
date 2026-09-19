@@ -1,9 +1,11 @@
 # Multiplayer collaboration: implementation plan
 
-**Status:** Approved product direction after the 2026-09-14 UX review, not a
-list of shipped capabilities. Proposed commands below are not available today.
-This is the planning source of truth for subsequent implementation sessions;
-exact flags, schemas, timing, storage limits, and delivery dates are not frozen.
+**Status:** Approved product direction after the 2026-09-14 UX review. This is
+the planning source of truth for Release B scope, not a complete reference for
+shipped APIs. The canonical `aether-internal` CLI, its automatically available
+container surface, and its on-demand version-matched skill are established
+directions; exact mission command flags, schemas, timing, storage limits, and
+delivery dates are not frozen.
 
 **Context:** The initial ideation proposed Run Rooms, delegated execution,
 missions, work contracts, swarms, evidence packets, shared engineering memory,
@@ -43,15 +45,14 @@ The feature sections are implementation slices, not nine new screens or boards.
 ## 1. What changes from the original proposal
 
 | Original idea | Recommendation |
-|---|---|
 | Run Rooms | Keep. One shared conversation, visible presence, and Take control / Release control. Enforce control on the server across input paths, not just the dashboard composer. |
-| Delegated execution | Keep. Extend the existing account-sharing experience without a general-purpose policy builder. Distinguish Aether admission rules from actual access to native credentials. |
+| Delegated execution | Keep the existing role and whole-home account-sharing behavior. Recheck current authority for mission admission and control; a separate grants or restricted-execution product is excluded from Release B. |
 | Missions | Keep. One objective and one integrator. Separate work, execution attempts, evidence acceptance, and Git integration internally. |
 | Work contracts | Put expected scope and shared interfaces in the task specification. Keep negotiation and observed overlap; remove separate contract administration and scope leases. |
-| Swarms | Saved mission configurations using the same CLI, integrator, and template mechanisms. No second orchestrator or swarm lifecycle. |
+| Swarms | Keep one integrator mission shape. Saved mission configurations are deferred beyond Release B; there is no second orchestrator or swarm lifecycle. |
 | Evidence packets | Move earlier and capture automatically. They underpin handoff, review, retry, forks, and integration without becoming paperwork. |
 | Engineering memory | Defer durable workspace records until the coordination loop works. Initially retain decisions in mission discussions and evidence packets. |
-| Flow intelligence | Extend the existing attention board and approval inbox. Add analytics only after the underlying states are reliable. |
+| Flow intelligence | Retain the shipped question UI and current attention indicators. A new F9 blocker, action-inbox, or analytics product is deferred beyond Release B. |
 | Persistent agents and autonomous missions | Deferred directions, not a committed release. Persistent identity does not mean unlimited lifetime, spending, or authority. |
 
 **The core product should be: humans delegate bounded objectives; integrator
@@ -140,23 +141,36 @@ extra choices that users must configure on each run.
 
 ### Identity is not one field
 
-Record:
+Record the identities that explain a mission operation separately:
 
 - **Actor:** the authenticated human, originating run, or server action that
-  performed an operation.
-- **Authorizing human:** who granted an automated operation its authority.
-- **Run owner:** the human responsible for the workflow and notifications.
-- **Account owner:** whose native model account and environment back execution.
+  performed the operation. An integrator run is the actor for dispatch and
+  coordination calls it makes.
+- **Authorizing human:** the human who authorized the mission or other
+  consequential operation. This is not necessarily the actor or the owner of
+  the run that executes it.
+- **Run owner:** the human responsible for a run's workflow and notifications.
+- **Account owner:** the member whose selected agent account supplies the
+  environment and home mounted into the run. Existing account sharing remains
+  whole-home sharing; it is not a per-run credential boundary.
 - **Execution configuration:** the selected image, configuration snapshot, and
   credential references, never secret values.
 
-The actor must not be rewritten as the owner merely because an agent acted on
-that person's behalf. Show the controller and relevant ownership on the run;
-keep the complete record inspectable without requiring five identity choices
-at launch.
+The mission's accountable human is recorded alongside these identities. An
+agent acting within an authorization must not be rewritten as the authorizing
+human, and a run owner must not be inferred to be the account owner. Keep the
+actor, authorizer, run owner, account owner, and relevant controller
+inspectable without requiring five identity choices at launch.
 
-An execution configuration records what Aether supplied. It cannot prove that a
-mutable home never changed or that a process used no other reachable credential.
+The server rechecks current role, account-sharing, mission-assignment, and
+authority-generation state for every consequential operation. Replacing an
+integrator or taking human control fences stale commands; presence, a skill,
+or a role name does not grant authority. These checks govern Aether admission,
+not what a mounted credential can do inside the container.
+
+An execution configuration records what Aether supplied. It cannot prove that
+a mutable home never changed or that a process used no other reachable
+credential.
 
 ### Four statements must remain distinct
 
@@ -249,9 +263,14 @@ through the CLI in F4; that is not a reason to burden everyday conversation.
 Persist instruction identity and authorization before attempting input. Report
 **Sent**, **Not sent**, or **Delivery uncertain**, separately from agent replies.
 
-#### Steering Delivery Rework
+#### Steering delivery
 
-Rework the current approach and serialize injection and steering messages with hooks instead of standard input. Write a hook (or multiple hooks if the file is incompatible with multiple cli agents) that is compatible with most mainstream coding agents that will programmatically allow us to steer and inject messages into sessions in the most streamlined way possible. Document how users are able to install this hook. 
+Steering and injection use the existing serialized Aether-mediated PTY input
+path. The server admits one authorized writer, serializes the text and the
+harness-specific submit sequence, and records the delivery result separately
+from any agent reply. This is a transport and admission contract, not a
+universal inbound hook: do not rewrite harness hooks or ask users to install
+one.
 #### Human versus integrator control
 
 An authorized integrator may hold steering authority over its workers. A human
@@ -343,212 +362,135 @@ can inspect retained changes and evidence. Handoff succeeds without a recipient
 handshake and labels unavailable context. A later fork restores the declared
 repository contents. Unsupported or missing evidence is unavailable, not verified.
 
-### F3. Delegation grants and execution gates
+### F3. Delegation grants and execution gates — excluded from Release B
 
-**Purpose:** delegate deliberate authority without calling unrestricted
-credential sharing restricted execution.
+F3's separate grants and permissions product is not part of this release.
+Keep the existing team roles and explicit whole-home account-sharing surface.
+Account sharing remains trusted access to the selected member's complete
+writable home, credentials, image, and configuration; a mission, workspace,
+harness, or task scope does not turn it into restricted execution.
 
-#### Extend account sharing, not a policy builder
+Release B must recheck current authority at each consequential boundary,
+including mission creation or dispatch, launch and relaunch, worker control,
+integrator replacement, retry, scheduling, and delivery. A role change or
+account-share revocation therefore affects newly authorized operations under
+the existing rules. It does not add a new grant model or silently stop an
+already-running container, and it cannot recall credentials copied from the
+home.
 
-Start from the existing account-sharing surface. Show who receives access, what
-that access actually exposes, when it expires, and how to revoke it. Per-launch
-approval is an optional setting, not the normal path.
+Do not add an eligible-controller administration surface, grant expiry,
+per-worker approval, a permission matrix, no-push or repository-only switches,
+or a credential mode. Do not imply stronger credential isolation than the
+current role and whole-home account-sharing boundary provides. Mission
+authorization may still bind finite concurrency and total-attempt limits;
+those limits belong to mission state and are enforced on dispatch, not to a
+new grants product.
 
-Do not initially expose a general matrix of launch/steer/approve/push permissions,
-token limits, dollar limits, retry limits, and credential modes. Mission-wide
-execution limits belong in mission authorization, where orchestration needs them.
+Restricted execution, separately scoped credentials, and an action-enforcing
+credential service remain later security architecture decisions. An
+administrator may retain existing stop authority without receiving implicit
+permission to use another member's account.
 
-#### Separate two contracts internally
-
-**Aether-operation authority** determines what Aether admits: the grantee,
-authorized account and launch scope, expiry, revocation, and operations allowed
-within an approved mission.
-
-**Execution credential authority** determines what a container can actually do:
-the repositories its Git credential can access, reachable services and production
-environments, provider spending limits, and whether credentials can be copied or
-altered.
-
-An Aether-operation grant does not create a credential boundary.
-
-**Initial recommendation:** retain explicitly labeled trusted whole-home account
-sharing. Do not add no-push or repository-only switches that imply restrictions
-the mounted credentials bypass. Workspace and harness selectors constrain launch
-admission, not the credentials' subsequent reach.
-
-Restricted execution requires separately scoped credentials or a genuinely
-enforcing credential/action service. That is a later security architecture
-decision, not a mode added to the initial sharing dialog.
-
-#### Close the transitive-control gap
-
-If someone can steer a credential-bearing run, they can influence what those
-credentials do. A grant must therefore determine who may control delegated runs,
-not merely who may launch them. Default team-wide steering must not silently
-broaden a narrow grant.
-
-The same applies to handoff, relaunch, integrator replacement, templates, and
-scheduled launches. An admin may stop execution without receiving implicit
-permission to use somebody else's account.
-
-#### Mission authority before worker spawning
-
-A human authorizes the objective, workspace/repository, allowed accounts and
-harnesses, eligible controllers, orchestration operations, and mission-wide
-concurrency and total attempt allowance. Retries consume the same attempt
-allowance rather than creating an unbounded second pool.
-
-Present a concise launch summary with safe defaults and inspectable limits, not a
-new per-worker permissions form. Within that approved boundary, the integrator
-can dispatch and coordinate without asking a human at every step. It must ask
-before expanding scope or authority. New grants are not implied by templates,
-role names, or skill text.
-
-#### Revocation
-
-Expose two distinct outcomes:
-
-1. **Revoke future use:** deny subsequent launches and newly authorized operations.
-2. **Revoke and stop affected execution:** withdraw authority and terminate
-   affected runs, reporting any failures.
-
-Neither recalls a credential copied outside the container. Name any required
-provider-side revocation. Record grant creation, use, expiry, and revocation.
-Check expiry at use, not only in a periodic cleanup job.
-
-#### Approval gates
-
-A **gate** is a requirement checked before a specified action proceeds. A
-consequential approval binds to the exact request version: action, account,
-execution configuration, relevant repository or artifact revision, limits,
-authorized approver, and expiry where applicable.
-
-Changing the request invalidates the approval. Recording approved is insufficient
-unless the execution path checks it. Do not require human approval of routine
-task transitions that remain inside the authorized mission.
-
-#### Budget honesty
-
-Keep the distinction between admission budgets, concurrency/attempt limits,
-estimated spend, metered stop thresholds with possible overshoot, and
-provider-enforced hard limits. These are enforcement facts, not five budget modes
-users must choose from. Unmetered is unknown, not zero.
-
-Concurrent admission must not let multiple requests independently consume the
-same remaining allowance. Do not promise a hard dollar ceiling without enforcing
-it where spending occurs.
-
-**Acceptance:** expiry or revocation between approval and provisioning prevents
-launch. A third teammate cannot obtain account-use power by taking control of a
-delegated run. Relaunch, scheduling, retry, and worker spawning apply the same
-current authority checks. Mission limits hold under concurrent dispatches.
+**Acceptance:** current role and account-sharing authority is checked again
+when work is admitted or controlled; finite mission limits hold under
+concurrent dispatches; and no Release B path creates a new grant, expiry, or
+per-worker approval product or promises credential isolation.
 
 ### F4. Agent coordination CLI and skills
 
-**Purpose:** make Aether's coordination system usable by any shell-capable coding
-agent, with or without the Model Context Protocol (MCP).
+**Purpose:** make Aether's coordination system usable by any shell-capable
+coding agent without requiring MCP.
 
-This is a central feature, not optional polish for the conflict radar.
+The canonical interface is `aether-internal`. A version-matched copy is
+automatically available in every managed container. `skill` is an on-demand
+request for the live assignment's version-matched instructions; it does not
+install a package or rewrite a repository or shared configuration home.
 
-#### Architecture
-
-Use the existing run-authenticated socket as the foundation:
+Use the existing run-authenticated socket as the authority boundary:
 
 ```text
 worker or integrator agent
         |
-        +-- Aether coordination CLI
-        +-- optional MCP interface
+        +-- canonical aether-internal CLI
+        +-- optional, manually configured MCP bridge (six existing tools)
                     |
-           same coordination service
+           existing coordination service
                     |
        authority, tasks, messages, evidence
 ```
 
-- agents will invoke this tool as `aether-internal`
-- Automatically stage a version-matched CLI and coordination instructions into
-  participating containers.
-- Do not require manual skill installation, identity flags, or human login.
-- Derive the calling run from its socket, not command-line identity claims.
-- Bind task-attempt and integrator authority server-side.
-- Keep CLI and MCP as interfaces to the same behavior.
+- Do not require manual CLI skill installation, identity flags, or human login.
+- Derive a run caller from its socket, not a command-line identity claim.
+- Bind task, attempt, and integrator authority server-side.
+- The optional MCP bridge remains a manual integration for its six existing
+  coordination tools. It is not automatically registered and does not promise
+  parity with the Release B mission or worker-management CLI.
 - Scope discovery, messages, and orchestration to authorized relationships.
-- Do not expose a human SSH key, dashboard token, Docker socket, or unrestricted
-  control RPC to a worker.
+- Do not expose a human SSH key, dashboard token, Docker socket, or
+  unrestricted control RPC to a worker.
+
+Binary availability is not run identity. A managed container without a run
+socket can use general help or the non-run portion of `skill`, but run-bound
+status, messaging, reporting, and mission operations are unavailable. The
+coordination disable switch remains effective: it prevents the coordination
+surface and run operations even when a packaged binary is present. Ordinary
+standalone runs remain ordinary runs.
 
 Mission execution must not silently degrade into uncoordinated workers when a
-required orchestration capability is unavailable. Preserve ordinary standalone
-runs, but refuse mission operations whose required interface cannot be provided.
+required orchestration capability is unavailable. Refuse mission operations
+whose required interface cannot be provided.
 
-#### Proposed command surface
+#### Command surface
 
-Use a namespace such as **`aether-internal`**; These are proposed command families, not existing commands
-or frozen flags.
+The command families below describe the product contract; exact flags and
+wire details are implementation decisions, not additional scope:
 
-| Command family                                    | Purpose                                                                               |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `status --json`                                   | Own identity, current assignment, capabilities, and coordinator.                      |
-| `skill`                                           | Version-matched instructions for the caller's actual worker or integrator assignment. |
-| `task show` / `task propose`                      | Inspect the current task or propose additional work.                                  |
-| `send`                                            | Attributed messages to authorized peers.                                              |
-| `inbox --wait` / `inbox --ack`                    | Bounded waiting, replay, and explicit acknowledgement.                                |
-| `ask` / `reply`                                   | Durable, correlated questions and answers.                                            |
-| `report`                                          | Submit an attempt outcome with evidence references.                                   |
-| `worker start` / `worker list` / `worker inspect` | Integrator-controlled execution and inspection.                                       |
-| `worker cancel` / `worker retry`                  | Explicit cancellation and authorized replacement attempts.                            |
+| Command family | Purpose |
+| --- | --- |
+| `status` | Own run identity, current assignment, capabilities, and coordinator. |
+| `skill` | Version-matched instructions for the caller's actual assignment. |
+| `task` | Inspect or propose work within the assigned authority. |
+| `send` | Attributed messages to authorized peers. |
+| `inbox` | Bounded waiting, replay, and acknowledgement. |
+| `ask` / `reply` | Durable, correlated questions and answers. |
+| `report` | Submit an attempt outcome with evidence references. |
+| `worker` | Integrator-controlled execution and inspection within mission limits. |
 
-Keep the worker's normal loop small: inspect assignment, communicate, ask,
-report. Integrators receive additional worker-management commands. Routine
+Keep the worker's normal loop small: inspect assignment, communicate, ask, and
+report. Integrators receive the additional worker-management surface. Routine
 resource release is the server's job after preserving settled results; no
-release/retain command is required in the agent's normal completion workflow.
+release/retain command is required in the normal completion workflow.
 
 Command requirements:
 
-- machine-readable output with a schema version;
-- stable error codes and meaningful exit statuses;
-- bounded output, cursor-based reads, and bounded waits instead of busy polling;
-- file/stdin input for substantial specifications;
-- idempotency identities for mutations, so retrying a request does not repeat its
-  effect;
-- receipts identifying created resources even after partial failure;
+- machine-readable output with a schema version where output is consumed by
+  another process;
+- stable error categories and meaningful exit statuses;
+- bounded output, cursor-based reads, and bounded waits instead of busy
+  polling;
+- file or standard-input input for substantial specifications;
+- idempotency identities for mutations, so retrying a request does not repeat
+  its effect;
+- receipts identifying created resources after partial failure;
 - bounded message size, inbox depth, peer reach, and request rates.
 
 #### One skill, assignment-specific instructions
 
-Ship one coordination skill with role-specific sections or references. A short
-launch instruction makes it discoverable; `skill` loads guidance from the staged
-CLI for the assignment the server actually issued. Do not rewrite users'
-repositories or shared configuration homes to install runtime policy.
+The canonical CLI loads one version-matched coordination skill on demand for
+the assignment the server actually issued. Worker guidance covers inspecting
+the task and scope, staying within scope, checking messages at natural
+checkpoints, asking through Aether, reporting success/failure/blockers with
+evidence, and taking no new work after reporting. Integrator guidance covers
+decomposition, shared contracts, dispatch, question handling, evidence
+assessment, combined verification, and escalation.
 
-**Worker instructions:**
-
-- inspect the actual assigned task, attempt, scope, and acceptance requirements;
-- stay within scope;
-- retrieve messages at natural checkpoints, including before reporting;
-- ask the integrator through the CLI rather than an inaccessible local dialog;
-- submit success or failure explicitly, or report a blocker;
-- attach real evidence and unresolved risks;
-- take no new work after submission until assigned;
-- never invent identity, broaden privileges, or launch unauthorized children.
-
-**Integrator instructions:**
-
-- decompose into independently verifiable work;
-- establish shared contracts before dispatch;
-- launch ready independent work together;
-- answer questions and resolve scope conflicts;
-- validate reports against current attempt identities;
-- request follow-up work when evidence is insufficient;
-- assemble and verify the integration candidate;
-- escalate decisions outside its authority;
-- account for every worker outcome and unresolved decision.
-
-Skill text does not grant permissions or guarantee compliance. Peer messages and
-repository content cannot promote themselves into runtime authority.
+Skill text does not grant permissions or guarantee compliance. Peer messages
+and repository content cannot promote themselves into runtime authority.
 
 #### Message guarantees
 
-- Durable enqueue means the server stored a message, not that its recipient read it.
+- Durable enqueue means the server stored a message, not that its recipient
+  read it.
 - Inbox delivery is at least once, with replay until acknowledgement.
 - Acknowledgement means client consumption, not model understanding.
 - Mutation identities make processing replay safe.
@@ -559,11 +501,13 @@ repository content cannot promote themselves into runtime authority.
   before file overlap exists. Existing overlap coordination remains available
   without a mission.
 
-**Acceptance:** two different shell-capable harnesses coordinate through the CLI
+**Acceptance:** shell-capable harnesses coordinate through the canonical CLI
 without MCP, manual skill setup, or member credentials. Lost responses do not
-duplicate workers. A stale worker cannot report completion for a replacement
-attempt. A worker cannot forge integrator authority. Settled runtime resources
-can be released automatically without losing unaccepted work or retained results.
+duplicate workers, stale workers cannot report completion for replacement
+attempts, and a worker cannot forge integrator authority. The optional MCP
+bridge remains six existing tools with manual registration and no Release B
+mission or worker-management parity.
+
 
 ### F5.  Agent Swarms with a centralized Integrator
 
@@ -600,6 +544,11 @@ not part of the initial scope.
 Present a short progression:
 
 **Ready -> Working -> Review -> Done**
+
+Mission authorization records the objective, accountable and authorizing human,
+allowed account/harness choices, and finite maximum-concurrent and total-attempt
+limits. These are admission bounds enforced by mission state; they do not
+narrow the selected account's home or native credential authority.
 
 - Ready means the work is authorized and its required dependencies are satisfied.
 - Working means a current attempt is executing it.
@@ -661,6 +610,11 @@ It cannot:
 
 Workers do not spawn children initially. They propose subtasks to the integrator.
 Hierarchical delegation is outside this implementation scope.
+For each attempt, record the actor run that dispatched or reported it, the
+authorizing human, the run owner, and the account owner separately. A current
+integrator assignment and authority generation authorize orchestration only
+while the server's current role, account-sharing, mission, and assignment
+checks still pass.
 
 #### Integrator failure
 
@@ -746,7 +700,7 @@ integrator can revise their task scopes without a separate contract-management
 workflow. Out-of-scope edits remain visible and require disposition rather than
 being discarded or silently accepted.
 
-### F7. Swarm templates
+### F7. Swarm templates — deferred beyond Release B
 
 **Purpose:** repeat a proven collaboration pattern. A swarm template is a saved
 swarm mission configuration, not a separate lifecycle or scheduling system.
@@ -781,7 +735,7 @@ settlement and recovery and a concrete workflow needs them.
 template cannot mutate running work. Scheduled launches recheck current authority
 and do not accumulate missed executions into an unexpected launch storm.
 
-### F8. Shared decision records
+### F8. Shared decision records — deferred beyond Release B
 
 **Purpose:** preserve inspectable engineering decisions, not unlimited
 conversational memory or a competing source of project instructions.
@@ -819,42 +773,17 @@ database is not required to retrieve that record.
 Superseding a record does not rewrite a previous run's history. Initial missions
 remain useful without a workspace-memory feature.
 
-### F9. Actionable flow and attention
+### F9. Actionable flow and attention — excluded from Release B
 
-**Purpose:** tell the team what needs a decision next.
+Release B does not add a new attention board, action inbox, blocker ownership
+model, flow analytics, or eligible-decision-maker administration. Retain the
+shipped question UI: existing Run Room questions remain correlated, durable
+until answered or otherwise settled, and visible through the current run
+attention indicators. They do not become a second task or approval product.
 
-Extend the existing attention board and approval inbox rather than creating a
-separate action-inbox product. Show actionable work before analytics about it.
-
-Each blocker needs:
-
-- a structured reason;
-- an owner or eligible decision-maker;
-- when it began;
-- what it prevents;
-- the action that resolves it;
-- links to supporting evidence or the actual error.
-
-Useful initial reasons include human decision, dependency, credentials/environment,
-verification, integration, and unavailable integrator. Distinguish a reported
-concern from an enforced hold or a paused container.
-
-Prefer concrete actions: **Answer**, **Review**, **Retry**, **Take control**.
-Group related requests, deduplicate repeated notifications, and preserve
-unresolved requests when everyone is offline. A mission should not generate one
-human notification for every worker event.
-
-Later metrics can cover decision latency, age of integration-ready work, rework,
-failed attempts, time waiting for verification/integration, and measured cost
-per accepted/integrated outcome with metering coverage. They are not prerequisites
-for the attention experience.
-
-Do not call duplicate work prevented merely because an overlap warning appeared.
-Do not score developer productivity by agent count, tokens, or messages.
-
-**Acceptance:** someone arriving after an overnight run can identify the next
-actionable decision and its owner without reading every transcript or visiting
-a second board.
+Do not infer that an overlap notice, unanswered question, or agent report is a
+verified blocker. Any later F9 work needs a separate product decision and must
+reuse the current authority and account-sharing boundaries.
 
 ---
 
@@ -865,45 +794,52 @@ a second board.
 - F1: Run Room control, attributed send-or-refuse steering, and shared discussion.
 - F2: automatic evidence summaries, retained objects, and immediate handoff.
 - F1/F2: retained diff and transcript annotations, not browser capture or forks yet.
-- F4: agent coordination CLI for status, messaging, questions, and reports, plus
-  automatically discoverable worker instructions.
-- F9: actionable questions and ownership in the existing attention experience.
+- F4: the canonical `aether-internal` CLI, on-demand version-matched skill,
+  and existing coordination operations.
 
 This improves existing runs without requiring users to adopt missions. Preserve
-the current trusted account-sharing boundary; do not imply stronger grants.
+the current team roles and trusted whole-home account-sharing boundary; do not
+imply stronger grants.
 
 ### Release B — Supervised agent teams
 
-- F3: minimum mission-scoped authority, eligible controllers, and execution limits
-  **before enabling worker spawning**.
-- F5: minimal mission/task/attempt model.
+- F5: minimal mission/task/attempt model with finite concurrency and total
+  attempt limits.
 - F4/F5: integrator skill, worker lifecycle CLI, and durable recovery.
 - F6: task scope and proactive coordination in the existing conflict experience.
 - F2/F5: exact-revision evidence and combined-candidate verification.
 - F1/F5: human takeover and the final delivery gate.
 
-**This is the first major multiplayer demonstration:**
+F3's separate grants product is excluded. Release B rechecks current role,
+account-sharing, mission-assignment, and authority-generation state at each
+consequential operation; it does not add eligible-controller administration,
+grant expiry, per-worker approval, or restricted credential modes.
 
-> A human authorizes a mission. An integrator launches two workers using different
-> harnesses. They negotiate a shared interface through Aether, submit retained
-> evidence, and the integrator verifies the combined result before requesting the
-> human delivery decision.
+**Deferred genuine two-harness demonstration:**
+
+The genuine vendor-harness demonstration is a follow-up tracked in the release
+PR, not a Release B merge gate. Real Docker/browser coverage with scripted
+fixtures remains required.
+
+> A human authorizes a bounded mission within existing team authority. An
+> integrator launches two workers using different harnesses. They negotiate a
+> shared interface through Aether, submit retained evidence, and the
+> integrator verifies the combined result before requesting the human delivery
+> decision.
 
 That scenario must include a disconnected client and a restarted integrator.
-The integrator can act within approved scope without approval for every worker
-step; expanded authority and final delivery still require human decisions.
+The integrator can act within the finite approved mission limits without
+approval for every worker step; expanded authority and final delivery still
+require human decisions. The optional MCP bridge is not automatically
+registered and does not need to expose Release B mission or worker commands.
 
-### Release C — Reusable team operation
+### Release C — excluded
 
-- F7: saved mission/swarm templates.
-- F3: simpler sharing expiry/revocation controls and optional per-launch approval.
-- F8: durable decision records only when retrieval needs are demonstrated.
-- F9: flow analytics after the underlying states are reliable.
-- Later portions of F1/F2: preview capture and explicit repository-state forks.
-
-Do not use this release as an excuse to add a permission matrix, graph editor,
-scope leases, or a new board. Each addition must improve one of the two everyday
-workflows.
+No Release C scope is committed here. Saved mission/swarm templates, grant
+expiry or per-launch approval controls, durable decision records, F9 analytics,
+and later preview or repository-state forks require a separate product decision.
+Do not use a future release label to smuggle in a permission matrix, graph
+editor, scope leases, a new board, or stronger credential isolation.
 
 ### Deferred directions — Separate design approval
 
@@ -937,10 +873,12 @@ Keep the system structurally boring:
 
 - **Scheduler:** processes, containers, pause/stop, automatic release, and recovery.
 - **Coordination service:** run-authenticated messages and agent-facing operations.
-- **Mission state:** tasks, attempts, assignments, gates, and submissions.
-- **Permissions/grants:** current authority, including who can control delegated runs.
+- **Mission state:** tasks, attempts, assignments, finite limits, gates, and submissions.
+- **Current authority:** existing team roles and whole-home account-sharing checks,
+  revalidated at consequential operations; no separate grants product.
 - **Git/evidence storage:** retained revisions and verification artifacts.
-- **CLI, MCP, dashboard:** clients of the same contracts.
+- **CLI, optional MCP bridge, dashboard:** clients of the same established contracts;
+  MCP remains manual and limited to its six existing tools.
 
 Reuse the event stream for delivery and projections, but do not derive
 authoritative task state from free-form timeline messages. Critical state changes
@@ -982,5 +920,6 @@ guides when behavior ships; this plan alone is not documentation of shipped APIs
 
 **The organizing center is the agent coordination CLI, version-matched skill,
 and recoverable integrator loop.** Run Rooms give humans control, automatic
-evidence makes results inspectable, grants bound authority, and missions give
-that loop durable structure. Fewer visible concepts do not mean weaker guarantees.
+evidence makes results inspectable, current authority checks bound admission,
+and missions give that loop durable structure. Fewer visible concepts do not
+mean weaker guarantees.

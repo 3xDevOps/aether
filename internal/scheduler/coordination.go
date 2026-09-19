@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,76 +12,31 @@ import (
 	"log/slog"
 	"maps"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/coord"
-	"github.com/3xDevOps/Aether/internal/coordcli"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// Coordination assets are two read-only bind sources (mounted at three
-// targets) that let an agent talk to its overlapping peers: the server's own
-// binary, which serves the MCP bridge and aether-internal CLI at its new
-// path while remaining available to existing run.report hooks at the legacy
-// path, and the run's coordination directory, which carries the socket the
-// bridge dials.
-//
-// These mounts deliberately do not go through runtime.ValidateMounts, and
-// routing them through it would be a mistake, not a fix. That validator
-// rejects targets at or under /run/aether, /opt/aether, and the reserved
-// /usr/local/bin/aether-internal file outright, because those surfaces are
-// reserved for exactly these assets: the unconditional rejection is what
-// guarantees no credential home, synced profile, or any other caller-supplied
-// mount can ever shadow the bridge, CLI, or coordination socket. Relaxing it
-// into an opt-in would trade that guarantee for uniformity nothing here needs.
-//
-// So the reserved rule protects the targets, and the mounts are built below
-// from server-constructed paths - never from anything a client or an agent
-// names - and appended after the caller's mounts have been validated.
-//
-// The whole thing is fail-closed: a binary that cannot be staged and
-// verified is never mounted. The run still launches - coordination is
-// advisory, and an agent without the bridge still gets the overlap notice -
-// but the failure is recorded on the run's timeline rather than swallowed.
+// Coordination assets are server-constructed, read-only bind mounts. Every
+// container gets the verified CLI, while coordinated runs additionally get
+// the run socket and lifecycle hook assets.
+const (
+	bridgePrefix                   = "aether-server-"
+	legacyBridgePrefix             = "aether-bridge-"
+	bridgeMode         fs.FileMode = 0o555
+)
 
-// bridgePrefix names host-staged binaries. Keep this independent from the
-// executable's container identity: existing collectors and upgrades recognize
-// this server-oriented prefix.
-const bridgePrefix = "aether-server-"
-
-// legacyBridgePrefix is the prefix used by the short-lived release that named
-// host files after the container's aether-internal argv0. Existing sidecars
-// can still point at those files while their containers finish.
-const legacyBridgePrefix = "aether-internal-"
-
-var bridgePrefixes = [...]string{bridgePrefix, legacyBridgePrefix}
-
-// bridgeMode is read-execute for everyone and writable by no one. The
-// staged file is also mounted read-only, so this is defence in depth
-// against anything on the host reaching it through <data>.
-const bridgeMode fs.FileMode = 0o555
-
-// bridgeSubcommand is the hidden subcommand the staged binary serves the
-// stdio MCP bridge with (cmd/aether-server). The same binary is also invoked
-// directly as aether-internal for shell-capable harnesses via argv0.
-const bridgeSubcommand = "mcp"
-
-// mcpConfigPath is where the harness config written into a run's
-// coordination directory appears inside its container. Only a harness
-// whose profile registers MCP is ever pointed at it.
-var mcpConfigPath = path.Join(mcpbridge.MountDir, coord.ConfigName)
+var bridgePrefixes = []string{bridgePrefix, legacyBridgePrefix}
 
 // Coordinator is the scheduler's view of the conflict-coordination service
-// (*coord.Service): it owns each run's socket directory, which the
-// scheduler bind-mounts into the container and releases once the container
-// is gone.
+// (*coord.Service): it owns each run's socket directory, which the scheduler
+// bind-mounts into coordinated containers and releases once the container is
+// gone.
 type Coordinator interface {
 	Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error)
 	WriteCoAuthors(run domain.RunID, trailers []string) error
@@ -88,28 +44,17 @@ type Coordinator interface {
 }
 
 // coordination is the attached service plus where staged bridge binaries
-// live. A nil coordination is the kill switch: nothing is staged, nothing
-// is provisioned, nothing is mounted, and assets an earlier process left
-// behind are retained untouched so a container still holding them simply
-// finds them inert.
+// live. Staging remains available when the coordinator is disabled so every
+// container gets the version-matched CLI; enabled controls run identity.
 type coordination struct {
-	svc    Coordinator
-	binDir string
-	// selfExe is the binary staged into containers (Config.ServerBinary).
+	svc     Coordinator
+	binDir  string
 	selfExe string
+	enabled bool
 
-	// stageMu serializes stage() against collectStagedBridges(). Without
-	// it a collector whose snapshot predates a concurrent stage could
-	// delete the bytes that stage just verified and is about to mount. It
-	// also means any temp file a collection sees is a crash leftover, never
-	// a copy in flight, so the collector can reclaim those too.
+	// stageMu serializes stage() against collectStagedBridges().
 	stageMu sync.Mutex
-
-	// mu guards staged: the digest of this server's own binary once it has
-	// been staged. It is retained across collections so an idle server does
-	// not re-copy itself for every launch, and so a launch that has staged
-	// but not yet written its sidecar cannot have the bytes it is about to
-	// mount collected underneath it by a run finishing concurrently.
+	// mu guards staged: the digest of this server's own binary once staged.
 	mu     sync.Mutex
 	staged string
 }
@@ -126,14 +71,29 @@ func (c *coordination) currentDigest() string {
 	return c.staged
 }
 
-// UseCoordination attaches the conflict-coordination service and the
-// directory staged bridge binaries live in (<data>/runtime/bin). It is
-// called once during assembly, before any run is launched; leaving it
-// unset is how the kill switch keeps coordination out of new containers.
-func (s *Scheduler) UseCoordination(svc Coordinator, binDir string) {
+// UseCoordination attaches the coordinator and staged-binary directory. The
+// optional enabled argument is false for the conflict-coordination kill
+// switch; binary staging remains active either way.
+func (s *Scheduler) UseCoordination(svc Coordinator, binDir string, enabled ...bool) {
+	active := true
+	if len(enabled) > 0 {
+		active = enabled[0]
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.coordination = &coordination{svc: svc, binDir: binDir, selfExe: s.cfg.ServerBinary}
+	s.coordination = &coordination{
+		svc: svc, binDir: binDir, selfExe: s.cfg.ServerBinary, enabled: active,
+	}
+}
+
+// RequireCoordination is the admission seam for services that need a real
+// run identity. It never returns a disabled or unconfigured coordinator.
+func (s *Scheduler) RequireCoordination() (Coordinator, error) {
+	c := s.coordinationSeam()
+	if c == nil || !c.enabled || c.svc == nil {
+		return nil, errors.New("scheduler: coordination is unavailable")
+	}
+	return c.svc, nil
 }
 
 func (s *Scheduler) coordinationSeam() *coordination {
@@ -142,70 +102,273 @@ func (s *Scheduler) coordinationSeam() *coordination {
 	return s.coordination
 }
 
-// exists - and returns the three read-only mounts (one source is mounted at
-// both executable paths) plus the launch arguments and environment
-// registering the bridge and the status reporter with the harness. A failure
-// anywhere leaves the run with no coordination and says so on its timeline;
-// it never returns a mount it could not verify.
-func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string, map[string]string) {
-	c := s.coordinationSeam()
-	if c == nil {
-		return nil, nil, nil
-	}
-	mounts, launchArgs, launchEnv, err := s.provisionCoordination(ctx, c, entry, run, profile)
-	if err == nil {
-		return mounts, launchArgs, launchEnv
-	}
-	slog.Warn("scheduler: coordination assets unavailable", "run", run.ID, "error", err)
-	s.publishTimeline(ctx, run.WorkspaceID, run.ID, run.MemberID, events.TimelineNote,
-		"coordination unavailable for this run: "+err.Error())
-	return nil, nil, nil
+const verificationBridgeRefDirName = "verification-bridges"
+
+type verificationBridgeRef struct {
+	CreationKey  string `json:"creation_key"`
+	BridgeDigest string `json:"bridge_digest"`
+	BridgePath   string `json:"bridge_path"`
 }
 
-func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
+func (s *Scheduler) verificationBridgeRefDir() string {
+	return filepath.Join(s.cfg.StateDir, verificationBridgeRefDirName)
+}
+
+func verificationBridgeRefName(creationKey string) string {
+	sum := sha256.Sum256([]byte(creationKey))
+	return "aether-verification-" + hex.EncodeToString(sum[:]) + ".json"
+}
+
+func (s *Scheduler) verificationBridgeRefPath(creationKey string) string {
+	return filepath.Join(s.verificationBridgeRefDir(), verificationBridgeRefName(creationKey))
+}
+
+func validateVerificationBridgeRef(ref verificationBridgeRef) error {
+	if ref.CreationKey == "" || ref.BridgeDigest == "" || ref.BridgePath == "" {
+		return errors.New("scheduler: incomplete verification bridge reference")
+	}
+	if len(ref.BridgeDigest) != sha256.Size*2 {
+		return errors.New("scheduler: invalid verification bridge digest")
+	}
+	if _, err := hex.DecodeString(ref.BridgeDigest); err != nil {
+		return fmt.Errorf("scheduler: invalid verification bridge digest: %w", err)
+	}
+	return nil
+}
+
+// writeVerificationBridgeRef durably records the staged CLI before a caller
+// is allowed to create the runtime. The creation key is hashed into the file
+// name so authenticated-but-opaque keys can never escape StateDir.
+func (s *Scheduler) writeVerificationBridgeRef(ref verificationBridgeRef) error {
+	if err := validateVerificationBridgeRef(ref); err != nil {
+		return err
+	}
+	dir := s.verificationBridgeRefDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("scheduler: create verification bridge ref dir: %w", err)
+	}
+	data, err := json.Marshal(ref)
+	if err != nil {
+		return fmt.Errorf("scheduler: encode verification bridge ref: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".aether-verification-*")
+	if err != nil {
+		return fmt.Errorf("scheduler: write verification bridge ref: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("scheduler: write verification bridge ref: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("scheduler: sync verification bridge ref: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("scheduler: close verification bridge ref: %w", err)
+	}
+	if err := os.Rename(tmpName, s.verificationBridgeRefPath(ref.CreationKey)); err != nil {
+		return fmt.Errorf("scheduler: install verification bridge ref: %w", err)
+	}
+	cleanup = false
+	if err := fsyncDir(dir); err != nil {
+		return err
+	}
+	if err := fsyncDir(s.cfg.StateDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Scheduler) readVerificationBridgeRef(creationKey string) (verificationBridgeRef, error) {
+	data, err := os.ReadFile(s.verificationBridgeRefPath(creationKey))
+	if err != nil {
+		return verificationBridgeRef{}, err
+	}
+	var ref verificationBridgeRef
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return verificationBridgeRef{}, fmt.Errorf("scheduler: decode verification bridge ref: %w", err)
+	}
+	if ref.CreationKey != creationKey {
+		return verificationBridgeRef{}, errors.New("scheduler: verification bridge ref creation key mismatch")
+	}
+	if err := validateVerificationBridgeRef(ref); err != nil {
+		return verificationBridgeRef{}, err
+	}
+	return ref, nil
+}
+
+// PrepareVerificationRuntime adds only the version-matched, read-only CLI
+// mount. It deliberately does not provision a run socket or lifecycle files.
+// The durable reference is installed while staging is serialized with the
+// collector, before the caller can invoke Runtime.Create.
+func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtime.Spec) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if spec == nil {
+		return errors.New("scheduler: verification runtime spec is nil")
+	}
+	if spec.CreationKey == "" {
+		return errors.New("scheduler: verification runtime creation key is required")
+	}
+	c := s.coordinationSeam()
+	if c == nil {
+		return errors.New("scheduler: verification coordination is unavailable")
+	}
+	c.stageMu.Lock()
+	defer c.stageMu.Unlock()
+	digest, bin, err := c.stageLocked()
+	if err != nil {
+		return fmt.Errorf("stage verification coordination CLI: %w", err)
+	}
+	for _, mount := range spec.Mounts {
+		switch mount.ContainerPath {
+		case coordtransport.CLIPath, coordtransport.BinaryPath, coordtransport.MountDir:
+			return fmt.Errorf("scheduler: verification spec already uses reserved coordination mount %q", mount.ContainerPath)
+		}
+	}
+	mounts := append([]runtime.Mount(nil), spec.Mounts...)
+	mounts = append(mounts, runtime.Mount{
+		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
+	})
+	if err := checkCoordinationMounts(mounts[len(mounts)-1:]); err != nil {
+		return err
+	}
+	env := maps.Clone(spec.Env)
+	if env == nil {
+		env = make(map[string]string)
+	}
+	ensureCoordinationCLIPath(env)
+	if err := s.writeVerificationBridgeRef(verificationBridgeRef{
+		CreationKey: spec.CreationKey, BridgeDigest: digest,
+		BridgePath: mounts[len(mounts)-1].HostPath,
+	}); err != nil {
+		return err
+	}
+	spec.Mounts = mounts
+	spec.Env = env
+	return nil
+}
+
+// ReleaseVerificationRuntime clears the durable staged-CLI reference. The
+// integration engine calls this only after it has proved the runtime absent;
+// this method intentionally performs no runtime lookup or destruction.
+func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if creationKey == "" {
+		return errors.New("scheduler: verification runtime creation key is required")
+	}
+	c := s.coordinationSeam()
+	locked := c != nil
+	if locked {
+		c.stageMu.Lock()
+		defer func() {
+			if locked {
+				c.stageMu.Unlock()
+			}
+		}()
+	}
+	if _, err := s.readVerificationBridgeRef(creationKey); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := os.Remove(s.verificationBridgeRefPath(creationKey)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("scheduler: remove verification bridge ref: %w", err)
+	}
+	if err := fsyncDir(s.verificationBridgeRefDir()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := fsyncDir(s.cfg.StateDir); err != nil {
+		return err
+	}
+	if c != nil {
+		// Release is durable before collecting, and staging remains serialized
+		// until the reference unlink and both directory fsyncs complete.
+		c.stageMu.Unlock()
+		locked = false
+		s.collectStagedBridges()
+	}
+	return nil
+}
+
+// coordinationMounts stages the CLI for every configured container. A run
+// gets the socket and lifecycle assets only when coordination is enabled.
+func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string, map[string]string, error) {
+	c := s.coordinationSeam()
+	if c == nil {
+		return nil, nil, nil, nil
+	}
+	if c.enabled && c.svc == nil {
+		return nil, nil, nil, errors.New("coordination service is unavailable")
+	}
 	digest, bin, err := c.stage()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("stage coordination CLI: %w", err)
 	}
-	// The harness registration: a profile that can load an MCP config gets
-	// one written into its coordination directory, naming the staged bridge,
-	// and the flag pointing at it appended to its launch command. A harness
-	// without registration is provisioned all the same and degrades to the
-	// overlap notice, which is the information a human at that terminal
-	// would want anyway.
-	files := make(map[string][]byte)
-	if mcpArgs := profile.MCPArgs(mcpConfigPath); len(mcpArgs) > 0 {
-		var config []byte
-		if config, err = harness.MCPConfig(mcpbridge.ServerName, mcpbridge.BinaryPath, bridgeSubcommand); err != nil {
+	cliMount := runtime.Mount{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true}
+	if run == nil || !c.enabled {
+		mounts := []runtime.Mount{cliMount}
+		if err := checkCoordinationMounts(mounts); err != nil {
 			return nil, nil, nil, err
 		}
-		files[coord.ConfigName] = config
-		launchArgs = append(launchArgs, mcpArgs...)
+		if run != nil && entry != nil {
+			s.mu.Lock()
+			entry.bridgeDigest, entry.bridgePath = digest, bin
+			sc := entry.sidecar()
+			s.mu.Unlock()
+			if err := s.writeSidecar(sc); err != nil {
+				return nil, nil, nil, err
+			}
+			if err := fsyncDir(s.cfg.StateDir); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		return mounts, nil, nil, nil
 	}
-	// The status reporter goes into the same directory the same way, but
-	// only for an interactive run: a headless agent exits when it is done
-	// and never waits for anyone to answer it. The profile's Reporter field
-	// is what declares one - what the harness is pointed at may be a file,
-	// a launch flag, or an environment variable, so the assets alone do not
-	// say - and the kind is taken from this same branch: what the entry
-	// claims about this run is what the container was actually given.
+	return s.provisionCoordination(ctx, c, entry, run, profile, digest, bin, cliMount)
+}
+
+func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
+	files := make(map[string][]byte)
+	// Lifecycle status and taskless discovery assets are server-owned and
+	// remain available only to coordinated interactive runs. User-supplied
+	// MCP configuration is never rewritten by provisioning.
 	reporter := harness.ReporterNone
 	if run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone {
 		maps.Copy(files, profile.StatusFiles)
-		launchArgs = append(launchArgs, profile.StatusLaunchArgs(mcpbridge.MountDir)...)
-		launchEnv = profile.StatusLaunchEnv(mcpbridge.MountDir)
+		launchArgs = append(launchArgs, profile.StatusLaunchArgs(coordtransport.MountDir)...)
+		launchEnv = profile.StatusLaunchEnv(coordtransport.MountDir)
 		reporter = profile.Reporter
 	}
-	var dir string
-	dir, err = c.svc.Provision(ctx, run.ID, files)
+	if run.Mode == domain.LaunchTUI && run.Task == "" {
+		if launchEnv == nil && len(profile.DiscoveryEnv) > 0 {
+			launchEnv = make(map[string]string, len(profile.DiscoveryEnv))
+		}
+		maps.Copy(files, profile.DiscoveryFiles)
+		launchArgs = append(launchArgs, profile.DiscoveryLaunchArgs(coordtransport.MountDir)...)
+		maps.Copy(launchEnv, profile.DiscoveryLaunchEnv(coordtransport.MountDir))
+	}
+	dir, err := c.svc.Provision(ctx, run.ID, files)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("provision coordination directory: %w", err)
 	}
-	// Past this point the run owns a live socket, so anything that stops it
-	// from being mounted has to hand it straight back rather than leave a
-	// listener nothing can reach - and any claims already recorded on the
-	// entry have to go with it, or the next sidecar write would durably
-	// name assets the run does not hold.
 	defer func() {
 		if err != nil {
 			s.mu.Lock()
@@ -217,9 +380,6 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 			}
 		}
 	}()
-	// The co-author list has to be in the directory before the container
-	// exists: the agent is told to read it before its first commit, and a
-	// path that is missing on first look reads as "nobody to credit".
 	s.mu.Lock()
 	author := entry.gitAuthorEmail
 	s.mu.Unlock()
@@ -231,9 +391,9 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		return nil, nil, nil, fmt.Errorf("write run co-authors: %w", err)
 	}
 	mounts = []runtime.Mount{
-		{HostPath: bin, ContainerPath: mcpbridge.BinaryPath, ReadOnly: true},
-		{HostPath: bin, ContainerPath: coordcli.BinaryPath, ReadOnly: true},
-		{HostPath: dir, ContainerPath: mcpbridge.MountDir, ReadOnly: true},
+		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
+		cliMount,
+		{HostPath: dir, ContainerPath: coordtransport.MountDir, ReadOnly: true},
 	}
 	if err = checkCoordinationMounts(mounts); err != nil {
 		return nil, nil, nil, err
@@ -243,13 +403,6 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	entry.reporter = reporter
 	sc := entry.sidecar()
 	s.mu.Unlock()
-	// The reference has to be durable before the container exists, or a
-	// crash in between would leave a container holding assets nothing
-	// claims and the next collection would delete them underneath it.
-	// writeSidecar fsyncs the file and renames it into place; the directory
-	// needs its own fsync for the *name* to survive power loss, or recovery
-	// could find the contents on disk under no name at all - which is
-	// exactly the unreferenced-digest case the collector acts on.
 	if err = s.writeSidecar(sc); err != nil {
 		return nil, nil, nil, err
 	}
@@ -257,6 +410,57 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		return nil, nil, nil, err
 	}
 	return mounts, launchArgs, launchEnv, nil
+}
+func ensureCoordinationCLIPath(env map[string]string) {
+	if env == nil {
+		return
+	}
+	for _, entry := range strings.Split(env["PATH"], ":") {
+		if entry == filepath.Dir(coordtransport.CLIPath) {
+			return
+		}
+	}
+	env["PATH"] = filepath.Dir(coordtransport.CLIPath) + ":" + env["PATH"]
+}
+
+// terminalCoordinationMount stages the CLI for a member terminal without
+// provisioning a run socket. The reference is durable before container
+// creation, so a restart or collector cannot reclaim a mounted binary.
+func (s *Scheduler) terminalCoordinationMount(member domain.MemberID) ([]runtime.Mount, error) {
+	c := s.coordinationSeam()
+	if c == nil {
+		return nil, nil
+	}
+	digest, bin, err := c.stage()
+	if err != nil {
+		return nil, fmt.Errorf("stage terminal coordination CLI: %w", err)
+	}
+	mounts := []runtime.Mount{{
+		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
+	}}
+	if err := checkCoordinationMounts(mounts); err != nil {
+		return nil, err
+	}
+	if err := s.writeTerminalSidecar(sidecar{
+		TerminalMember: string(member), BridgeDigest: digest, BridgePath: bin,
+	}); err != nil {
+		return nil, err
+	}
+	return mounts, nil
+}
+
+func (s *Scheduler) updateTerminalCoordination(member domain.MemberID, container runtime.ID) error {
+	sc, err := s.readTerminalSidecar(member)
+	if err != nil {
+		return err
+	}
+	sc.ContainerID = string(container)
+	return s.writeTerminalSidecar(sc)
+}
+
+func (s *Scheduler) releaseTerminalCoordination(member domain.MemberID) {
+	s.removeTerminalSidecar(member)
+	s.collectStagedBridges()
 }
 
 // checkCoordinationMounts is the source-side half of mount validation for
@@ -279,8 +483,12 @@ func checkCoordinationMounts(mounts []runtime.Mount) error {
 		if err != nil {
 			return fmt.Errorf("coordination mount %q: %w", m.ContainerPath, err)
 		}
-		wantDir := m.ContainerPath == mcpbridge.MountDir
-		if info.IsDir() != wantDir {
+		wantDir := m.ContainerPath == coordtransport.MountDir
+		if wantDir {
+			if !info.IsDir() {
+				return fmt.Errorf("coordination mount %q: source %q is the wrong kind of file", m.ContainerPath, source)
+			}
+		} else if !info.Mode().IsRegular() {
 			return fmt.Errorf("coordination mount %q: source %q is the wrong kind of file", m.ContainerPath, source)
 		}
 		mounts[i].HostPath = source
@@ -288,21 +496,31 @@ func checkCoordinationMounts(mounts []runtime.Mount) error {
 	return nil
 }
 
-// stage installs this server's binary under its own content hash and
-// returns the digest and path. A staged copy that already hashes to the
-// digest is reused; anything else - missing, truncated, or a file whose
-// content no longer matches its name - is replaced atomically.
+// stage serializes content-addressed staging against collection. A staged
+// copy is reused only after its content and read-only mode are verified.
 func (c *coordination) stage() (digest, path string, err error) {
 	c.stageMu.Lock()
 	defer c.stageMu.Unlock()
+	return c.stageLocked()
+}
+
+func (c *coordination) stageLocked() (digest, path string, err error) {
 	digest, err = hashFile(c.selfExe)
 	if err != nil {
 		return "", "", fmt.Errorf("hash server binary: %w", err)
 	}
 	path = filepath.Join(c.binDir, bridgePrefix+digest)
 	if staged, herr := hashFile(path); herr == nil && staged == digest {
-		c.markStaged(digest)
-		return digest, path, nil
+		if info, serr := os.Lstat(path); serr == nil && info.Mode().IsRegular() && info.Mode().Perm() == bridgeMode.Perm() {
+			c.markStaged(digest)
+			return digest, path, nil
+		}
+		if info, serr := os.Lstat(path); serr == nil && info.Mode().IsRegular() {
+			if err := os.Chmod(path, bridgeMode); err == nil && fsyncDir(filepath.Dir(path)) == nil {
+				c.markStaged(digest)
+				return digest, path, nil
+			}
+		}
 	}
 	if err := os.MkdirAll(c.binDir, 0o755); err != nil {
 		return "", "", fmt.Errorf("create %s: %w", c.binDir, err)
@@ -402,19 +620,19 @@ func (s *Scheduler) releaseCoordination(run domain.RunID) {
 	if durable != nil {
 		slog.Warn("scheduler: fsync run state dir", "run", run, "error", durable)
 	}
-	if err := c.svc.Release(run); err != nil {
-		slog.Warn("scheduler: release coordination directory", "run", run, "error", err)
+	if c.svc != nil {
+		if err := c.svc.Release(run); err != nil {
+			slog.Warn("scheduler: release coordination directory", "run", run, "error", err)
+		}
 	}
 	if durable == nil {
 		s.collectStagedBridges()
 	}
 }
 
-// collectStagedBridges deletes staged binaries no run references any more.
-// The references are the sidecars themselves, so this doubles as recovery:
-// a server that just restarted rebuilds the live set from the sidecars that
-// survived, and a build referenced by a container it will re-attach to is
-// retained exactly because that container's sidecar is still there.
+// collectStagedBridges deletes staged binaries no durable reference names.
+// Run and terminal sidecars, plus verification creation-key references, are
+// retained until their owners explicitly release them after cleanup.
 func (s *Scheduler) collectStagedBridges() {
 	c := s.coordinationSeam()
 	if c == nil {
@@ -478,9 +696,10 @@ func (s *Scheduler) collectStagedBridges() {
 	}
 }
 
-// referencedBridges is the set of staged digests the surviving sidecars
-// name. A sidecar that cannot be read counts as referencing everything -
-// the caller aborts rather than collecting on partial information.
+// referencedBridges is the set of staged digests the surviving run and
+// member-terminal sidecars name. A sidecar that cannot be read counts as
+// referencing everything - the caller aborts rather than collecting on
+// partial information.
 func (s *Scheduler) referencedBridges() (map[string]bool, error) {
 	entries, err := os.ReadDir(s.cfg.StateDir)
 	if err != nil {
@@ -492,16 +711,67 @@ func (s *Scheduler) referencedBridges() (map[string]bool, error) {
 			continue
 		}
 		run := domain.RunID(strings.TrimSuffix(e.Name(), ".json"))
-		sc, err := s.readSidecar(run)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+		sc, readErr := s.readSidecar(run)
+		if readErr != nil {
+			if errors.Is(readErr, os.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return nil, readErr
 		}
 		if sc.BridgeDigest != "" {
 			referenced[sc.BridgeDigest] = true
 		}
+	}
+	terminalDir := s.terminalSidecarDir()
+	terminalEntries, err := os.ReadDir(terminalDir)
+	if !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range terminalEntries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			member := domain.MemberID(strings.TrimSuffix(e.Name(), ".json"))
+			sc, readErr := s.readTerminalSidecar(member)
+			if readErr != nil {
+				if errors.Is(readErr, os.ErrNotExist) {
+					continue
+				}
+				return nil, readErr
+			}
+			if sc.BridgeDigest != "" {
+				referenced[sc.BridgeDigest] = true
+			}
+		}
+	}
+	verificationDir := s.verificationBridgeRefDir()
+	verificationEntries, err := os.ReadDir(verificationDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return referenced, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range verificationEntries {
+		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".json") &&
+			!strings.HasPrefix(e.Name(), ".aether-verification-")) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(verificationDir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		var ref verificationBridgeRef
+		if err := json.Unmarshal(data, &ref); err != nil {
+			// A partially written reference is an unknown cleanup outcome:
+			// retain every staged byte rather than guessing what is live.
+			return nil, fmt.Errorf("scheduler: decode verification bridge ref %s: %w", e.Name(), err)
+		}
+		if err := validateVerificationBridgeRef(ref); err != nil {
+			return nil, err
+		}
+		referenced[ref.BridgeDigest] = true
 	}
 	return referenced, nil
 }
