@@ -264,6 +264,10 @@ export function CandidateReview({
       invalidateAuthority()
       return
     }
+    // The stream's live acknowledgement is also a recovery signal when a
+    // browser online event races the socket reconnect. Resync from the
+    // browser fact first; a stale live event must not unlock an offline tab.
+    setBrowserOnline(typeof navigator === 'undefined' || navigator.onLine)
     if (expanded) {
       invalidateAuthority()
       void loadWorkspacePackets()
