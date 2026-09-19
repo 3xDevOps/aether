@@ -379,12 +379,13 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	missionID, integratorRun := created.Mission.ID, created.Mission.CurrentIntegratorRunID
 	integratorSocket := waitMissionSocket(t, e.coordDir(integratorRun))
 
-	propose := func(objective, title, key string) string {
+	propose := func(objective, title, expectedPath, key string) string {
 		var out protocol.TaskMutationResult
 		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 			MissionID: missionID,
 			Revision: protocol.TaskRevision{
 				Title: title, Objective: objective, Status: string(domain.TaskRevisionProposed),
+				Scope: protocol.TaskScope{ExpectedPaths: []string{expectedPath}},
 			},
 			IdempotencyKey: key,
 		}, &out); err != nil {
@@ -395,8 +396,8 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		}
 		return out.Task.ID
 	}
-	taskA := propose(workerAObjective, "Docker worker A", "docker-propose-a")
-	taskB := propose(workerBObjective, "Docker worker B", "docker-propose-b")
+	taskA := propose(workerAObjective, "Docker worker A", "worker-a.txt", "docker-propose-a")
+	taskB := propose(workerBObjective, "Docker worker B", "worker-b.txt", "docker-propose-b")
 	for _, taskID := range []string{taskA, taskB} {
 		var out protocol.TaskMutationResult
 		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
