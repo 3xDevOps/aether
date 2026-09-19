@@ -255,10 +255,11 @@ type CandidateResolution struct {
 }
 
 type IntegrationResolveParams struct {
-	WorkspaceID    string                `json:"workspace_id"`
-	CandidateID    string                `json:"candidate_id"`
-	Files          []CandidateResolution `json:"files"`
-	IdempotencyKey string                `json:"idempotency_key"`
+	WorkspaceID     string                `json:"workspace_id"`
+	CandidateID     string                `json:"candidate_id"`
+	ExpectedVersion int64                 `json:"expected_version"`
+	Files           []CandidateResolution `json:"files"`
+	IdempotencyKey  string                `json:"idempotency_key"`
 }
 
 type IntegrationResolveResult struct {

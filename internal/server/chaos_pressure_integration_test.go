@@ -76,10 +76,10 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		}, &launched); err != nil {
 			t.Fatalf("run.launch %d: %v", i, err)
 		}
-		// Setup owns terminal control; avoid the queued steering grace period.
+		// Finish through the controlling attach; run.inject queues a delayed room request.
 		att := openAttach(t, env.client, launched.Run.ID)
 		waitOutput(t, att, "agent-ready")
-		if _, writeErr := att.stdin.Write([]byte("finish\n")); writeErr != nil {
+		if _, writeErr := att.stdin.Write([]byte("finish\r")); writeErr != nil {
 			t.Fatalf("finish load run %d: %v", i, writeErr)
 		}
 		waitOutput(t, att, "got:finish")

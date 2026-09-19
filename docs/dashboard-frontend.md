@@ -1228,10 +1228,13 @@ request.
 Candidate mutations are disabled while the connection is **Offline**,
 **Reconnecting**, or **Connecting**. A return to **Live** refetches candidates
 and the selected review before enabling controls, so stale revisions and
-requests are not reused. The panel preserves the gateway's real error rather
-than manufacturing a client-side result. Candidate review has no separate
-attention board, mission-progress surface, or agent decision path; it remains
-an evidence-linked human review flow.
+requests are not reused. A refreshed candidate with a new identity or version
+invalidates resolution drafts; an own partial **Apply resolutions** response
+keeps only untouched drafts that still conflict at the same assembly step.
+The panel preserves the gateway's real error rather than manufacturing a
+client-side result. Candidate review has no separate attention board,
+mission-progress surface, or agent decision path; it remains an evidence-linked
+human review flow.
 
 The wire methods and bounded records are documented in
 [integration.md](integration.md); this guide records only the dashboard

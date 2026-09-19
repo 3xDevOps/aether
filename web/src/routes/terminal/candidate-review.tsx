@@ -143,10 +143,12 @@ export function CandidateReview({
   const loadGeneration = useRef(0)
   const previousConnection = useRef(gatewayConnection)
   const candidateVersion = useRef<{ id: string; version: number } | null>(null)
-  const applyCandidate = useCallback((next: Candidate) => {
+  const applyCandidate = useCallback((next: Candidate, preserveResolutionDrafts = false) => {
     const current = candidateVersion.current
     if (current && current.id === next.candidate_id && next.version < current.version) return false
+    const changed = !current || current.id !== next.candidate_id || current.version !== next.version
     candidateVersion.current = { id: next.candidate_id, version: next.version }
+    if (changed && !preserveResolutionDrafts) setResolutions({})
     setCandidate(next)
     return true
   }, [])
@@ -237,7 +239,7 @@ export function CandidateReview({
         : null
       if (generation === loadGeneration.current) {
         setSummaries(listedCandidates.candidates)
-        if (refreshedCandidate && !applyCandidate(refreshedCandidate.candidate)) return
+        if (refreshedCandidate) applyCandidate(refreshedCandidate.candidate)
         setAuthorityReady(true)
       }
     } catch (cause) {
@@ -421,7 +423,7 @@ export function CandidateReview({
       const draft = resolutions[path]!
       return { path, content: draft.delete ? undefined : draft.content, delete: draft.delete }
     })
-    const params = { workspace_id: workspaceID, candidate_id: candidate.candidate_id, files, idempotency_key: '' }
+    const params = { workspace_id: workspaceID, candidate_id: candidate.candidate_id, expected_version: candidate.version, files, idempotency_key: '' }
     params.idempotency_key = idempotencyKey('resolve', params, mutationKeys)
     const generation = loadGeneration.current
     setBusy('resolve')
@@ -430,10 +432,16 @@ export function CandidateReview({
       const result = await client.integrationResolve(params)
       forgetIdempotencyKey('resolve', params, mutationKeys)
       if (generation !== loadGeneration.current) return
-      if (!applyCandidate(result.candidate)) return
+      const preserveUntouchedDrafts = candidate.candidate_id === result.candidate.candidate_id
+        && candidate.applied_inputs === result.candidate.applied_inputs
+      if (!applyCandidate(result.candidate, preserveUntouchedDrafts)) return
       setResolutions((current) => {
-        const next = { ...current }
-        submittedPaths.forEach((path) => { delete next[path] })
+        if (!preserveUntouchedDrafts) return {}
+        const conflicts = new Set(result.candidate.conflicts ?? [])
+        const next: Record<string, ResolutionDraft> = {}
+        Object.entries(current).forEach(([path, draft]) => {
+          if (!submittedPaths.includes(path) && conflicts.has(path)) next[path] = draft
+        })
         return next
       })
       setPatch(null)

@@ -66,7 +66,7 @@ POST /api/v1/integration.list
 {"workspace_id":"ws_123","limit":50}
 
 POST /api/v1/integration.resolve
-{"workspace_id":"ws_123","candidate_id":"cand_1","files":[{"path":"src/auth.go","content":"resolved content"}],"idempotency_key":"resolve-1"}
+{"workspace_id":"ws_123","candidate_id":"cand_1","expected_version":7,"files":[{"path":"src/auth.go","content":"resolved content"}],"idempotency_key":"resolve-1"}
 
 POST /api/v1/integration.verify
 {"workspace_id":"ws_123","candidate_id":"cand_1","candidate_revision":"0123456789abcdef0123456789abcdef01234567","argv":["go","test","./..."],"timeout_seconds":300,"idempotency_key":"verify-1"}
@@ -184,21 +184,31 @@ A candidate has a 30-day lifetime and these states:
 - `expired`: the lifetime elapsed (metadata is retained only for bounded
   cleanup/tombstone retention).
 
-`integration.resolve` accepts up to 32 ordered `files` entries of
-`{path, content, delete}`. `content` replaces a whole file, including an
-explicitly empty string; `delete: true` removes it. Omitted paths are untouched.
-Paths must be repository-relative and path-safe. Traversal, symlink traversal,
-and unresolved conflict-marker text are rejected. Remaining index conflicts
-keep the candidate `conflicted`, so files can be resolved in separate batches.
+`integration.resolve` accepts a required positive `expected_version`, up to 32
+ordered `files` entries of `{path, content, delete}`. `content` replaces a
+whole file, including an explicitly empty string; `delete: true` removes it.
+Omitted paths are untouched. Paths must be repository-relative and path-safe.
+Traversal, symlink traversal, and unresolved conflict-marker text are rejected.
+The request's `expected_version` must equal the current candidate `version`
+when it introduces a new idempotency key. A missing or nonpositive version is
+invalid; a stale version is rejected with `ErrConflict` before the server
+records an intent or changes Git. Use the returned candidate version for the
+next resolution batch.
+Remaining index conflicts keep the candidate `conflicted`, so files can be
+resolved in separate batches.
 
-The service records a resolution intent before changing Git. After an uncertain
-error, retry the same idempotency key and payload; a different resolution is
-blocked until the pending operation is reconciled. Resolutions continue the
-journaled assembly. A conflict-free
-candidate becomes `frozen`; a frozen candidate is never edited. The frozen
-revision, target ref, and expected target revision are carried into every
-verification and delivery request, so stale UI state cannot be adapted into a
-new action.
+The service records a resolution intent before changing Git. After an
+uncertain error, retry the exact same actor, idempotency key, positive
+`expected_version`, and file payload. Authorization happens before retry
+matching; an exact retry of a pending or completed operation reuses its
+original binding even when the candidate version has advanced. A changed actor,
+key, version, or payload is a new operation, not a retry; stale versions are
+rejected rather than applying old content to a newer candidate. A different
+new key is also rejected while another resolution remains pending. Resolutions
+continue the journaled assembly. A conflict-free candidate becomes `frozen`; a
+frozen candidate is never edited. The frozen revision, target ref, and expected
+target revision are carried into every verification and delivery request, so
+stale UI state cannot be adapted into a new action.
 
 ## Verification
 

@@ -419,7 +419,8 @@ func TestCandidateLifecycleResolveConflictToImmutableRevision(t *testing.T) {
 	}
 	resolved, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
 		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
-		Files: []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved\n"}}, IdempotencyKey: "resolve-conflict",
+		ExpectedVersion: candidate.Version,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved\n"}}, IdempotencyKey: "resolve-conflict",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -432,7 +433,8 @@ func TestCandidateLifecycleResolveConflictToImmutableRevision(t *testing.T) {
 	}
 	retry, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
 		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
-		Files: []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved\n"}}, IdempotencyKey: "resolve-conflict",
+		ExpectedVersion: candidate.Version,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved\n"}}, IdempotencyKey: "resolve-conflict",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -453,6 +455,71 @@ func TestCandidateLifecycleResolveConflictToImmutableRevision(t *testing.T) {
 		t.Fatalf("idempotent prepare changed frozen tree: %+v", preparedAgain)
 	}
 }
+func TestCandidateLifecycleResolveVersionFencePreservesPartialAssembly(t *testing.T) {
+	f := newCandidateLifecycleFixture(t, nil, false)
+	first := f.source(t, "candidate-version-one", "conflict.txt", "first\n", "packet-version-one", nil)
+	second := f.source(t, "candidate-version-two", "conflict.txt", "second\n", "packet-version-two", nil)
+	third := f.source(t, "candidate-version-three", "conflict.txt", "third\n", "packet-version-three", nil)
+	candidate := f.prepare(t, "candidate-version-fence", first, second, third)
+	if candidate.State != protocol.CandidateConflicted || len(candidate.Conflicts) != 1 || candidate.AppliedInputs != 1 {
+		t.Fatalf("initial repeated conflict candidate = %+v", candidate)
+	}
+
+	if _, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
+		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
+		ExpectedVersion: 0,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "missing version\n"}}, IdempotencyKey: "resolve-missing-version",
+	}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("nonpositive expected version error = %v, want invalid request", err)
+	}
+
+	partial, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
+		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
+		ExpectedVersion: candidate.Version,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved first\n"}}, IdempotencyKey: "resolve-first-conflict",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if partial.State != protocol.CandidateConflicted || len(partial.Conflicts) != 1 ||
+		partial.AppliedInputs != 2 || partial.Version <= candidate.Version ||
+		partial.CandidateRevision == candidate.CandidateRevision {
+		t.Fatalf("partial resolution = %+v, want second input applied and final conflict", partial)
+	}
+	beforeContent := f.candidateFile(t, partial, "conflict.txt")
+	if _, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
+		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
+		ExpectedVersion: candidate.Version,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "stale content\n"}}, IdempotencyKey: "resolve-stale-version",
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale expected version error = %v, want conflict", err)
+	}
+	unchanged, err := f.service.Show(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationShowParams{
+		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.State != partial.State || unchanged.Version != partial.Version ||
+		unchanged.CandidateRevision != partial.CandidateRevision || unchanged.AppliedInputs != partial.AppliedInputs ||
+		len(unchanged.Conflicts) != len(partial.Conflicts) || f.candidateFile(t, unchanged, "conflict.txt") != beforeContent {
+		t.Fatalf("candidate changed after stale resolve: before=%+v after=%+v", partial, unchanged)
+	}
+
+	frozen, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
+		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
+		ExpectedVersion: partial.Version,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved final\n"}}, IdempotencyKey: "resolve-final-conflict",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frozen.State != protocol.CandidateFrozen || len(frozen.Conflicts) != 0 ||
+		frozen.AppliedInputs != 3 || frozen.CandidateRevision == "" ||
+		f.candidateFile(t, frozen, "conflict.txt") != "resolved final\n" {
+		t.Fatalf("fresh resolution = %+v", frozen)
+	}
+}
 
 func TestCandidateLifecycleResolveRetryAfterFinalSaveFailure(t *testing.T) {
 	f := newCandidateLifecycleFixture(t, nil, false)
@@ -466,15 +533,17 @@ func TestCandidateLifecycleResolveRetryAfterFinalSaveFailure(t *testing.T) {
 	f.service.store = &candidateLifecycleFailingStore{DB: f.db, failOn: 2, err: saveErr}
 	params := protocol.IntegrationResolveParams{
 		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
-		Files:          []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved after retry\n"}},
-		IdempotencyKey: "resolve-final-save-fault",
+		ExpectedVersion: candidate.Version,
+		Files:           []protocol.CandidateResolution{{Path: "conflict.txt", Content: "resolved after retry\n"}},
+		IdempotencyKey:  "resolve-final-save-fault",
 	}
 	if _, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, params); !errors.Is(err, saveErr) {
 		t.Fatalf("faulted Resolve error = %v, want final-save error", err)
 	}
 	if _, err := f.service.Resolve(f.ctx, Actor{MemberID: f.owner.ID}, protocol.IntegrationResolveParams{
 		WorkspaceID: string(f.workspace.ID), CandidateID: candidate.CandidateID,
-		Files: params.Files, IdempotencyKey: "different-resolve-key",
+		ExpectedVersion: params.ExpectedVersion,
+		Files:           params.Files, IdempotencyKey: "different-resolve-key",
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("different-key Resolve while retry pending = %v, want conflict before Git", err)
 	}
