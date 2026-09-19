@@ -320,6 +320,10 @@ func buildCoordAgentImage(t *testing.T) (image, user string) {
 	dir := t.TempDir()
 	build := exec.Command("go", "build", "-o", filepath.Join(dir, "claude"), "./internal/server/testdata/coordagent")
 	build.Dir = repoRoot(t)
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build the in-container agent: %v (%s)", buildErr, out)
+	}
 	writeFile(t, filepath.Join(dir, "shell-coord-agent"), `#!/bin/sh
 set -eu
 task=${1:-shell coordination}
