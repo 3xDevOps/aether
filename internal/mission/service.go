@@ -2,8 +2,6 @@ package mission
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -209,11 +207,11 @@ func (s *Service) reconcile(ctx context.Context) error {
 			return err
 		}
 		for _, m := range missions {
-			if err := s.reconcileMission(ctx, m); err != nil {
-				slog.Warn("mission: reconcile mission", "mission", m.ID, "error", err)
+			if missionErr := s.reconcileMission(ctx, m); missionErr != nil {
+				slog.Warn("mission: reconcile mission", "mission", m.ID, "error", missionErr)
 			}
-			if err := s.reconcilePendingMissionChange(ctx, m.ID); err != nil {
-				slog.Warn("mission: reconcile mission notification", "mission", m.ID, "error", err)
+			if pendingErr := s.reconcilePendingMissionChange(ctx, m.ID); pendingErr != nil {
+				slog.Warn("mission: reconcile mission notification", "mission", m.ID, "error", pendingErr)
 			}
 		}
 		if next == "" {
@@ -243,11 +241,11 @@ func (s *Service) reconcilePendingMissionChange(ctx context.Context, missionID d
 	if s.cfg.Bus == nil {
 		return errors.New("mission: mission notification bus is unavailable")
 	}
-	if err := s.publishMissionChanged(ctx, missionID); err != nil {
-		return fmt.Errorf("mission: publish pending notification %s: %w", missionID, err)
+	if publishErr := s.publishMissionChanged(ctx, missionID); publishErr != nil {
+		return fmt.Errorf("mission: publish pending notification %s: %w", missionID, publishErr)
 	}
-	if err := s.cfg.Missions.AckMissionControlChange(ctx, missionID, version); err != nil {
-		return fmt.Errorf("mission: acknowledge pending notification %s at %d: %w", missionID, version, err)
+	if ackErr := s.cfg.Missions.AckMissionControlChange(ctx, missionID, version); ackErr != nil {
+		return fmt.Errorf("mission: acknowledge pending notification %s at %d: %w", missionID, version, ackErr)
 	}
 	return nil
 }
@@ -292,37 +290,37 @@ func (s *Service) authorizeAttemptKill(ctx context.Context, mission *domain.Miss
 		permissions.Target{Workspace: run.WorkspaceID, Owner: run.MemberID, Protected: run.Protected, SteerOthers: ws.SteerOthers})
 }
 
-func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest) (*domain.Run, error) {
+func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest) error {
 	if err := s.requireCoordination(); err != nil {
-		return nil, err
+		return err
 	}
 	if req.RunID == "" || req.RunOwnerID == "" || req.AccountOwner == "" {
-		return nil, errors.New("mission: recovered launch has incomplete durable attribution")
+		return errors.New("mission: recovered launch has incomplete durable attribution")
 	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()
 	admission, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, req.RunOwnerID, string(req.AccountOwner))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if admission.Account.ID != req.AccountOwner {
-		return nil, errors.New("mission: recovered account attribution changed")
+		return errors.New("mission: recovered account attribution changed")
 	}
 	if req.MissionID != "" {
 		current, missionErr := s.cfg.Missions.GetMission(ctx, req.MissionID)
 		if missionErr != nil {
-			return nil, missionErr
+			return missionErr
 		}
 		if req.AttemptID == "" {
 			if current.CurrentIntegratorRunID != req.RunID || current.IntegratorGeneration != req.IntegratorGeneration ||
 				current.Integrator.AccountMemberID != req.AccountOwner || current.Integrator.Harness != req.Harness ||
 				current.Integrator.Mode != req.Mode || current.IntegratorRunOwnerID != req.RunOwnerID {
-				return nil, fmt.Errorf("%w: recovered integrator assignment changed", store.ErrMissionStale)
+				return fmt.Errorf("%w: recovered integrator assignment changed", store.ErrMissionStale)
 			}
 		} else {
 			attempt, attemptErr := s.cfg.Missions.GetAttempt(ctx, req.AttemptID)
 			if attemptErr != nil {
-				return nil, attemptErr
+				return attemptErr
 			}
 			if attempt.MissionID != req.MissionID || attempt.RunID != req.RunID ||
 				attempt.IntegratorGeneration != req.IntegratorGeneration ||
@@ -330,18 +328,19 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 				attempt.RunOwnerID != req.RunOwnerID ||
 				attempt.AccountOwnerID != req.AccountOwner || attempt.Harness != req.Harness ||
 				attempt.Mode != req.Mode {
-				return nil, fmt.Errorf("%w: recovered worker assignment changed", store.ErrMissionStale)
+				return fmt.Errorf("%w: recovered worker assignment changed", store.ErrMissionStale)
 			}
 		}
 	}
 	if s.cfg.Cost != nil {
-		if err := s.cfg.Cost.Admit(ctx, req.WorkspaceID, req.RunOwnerID); err != nil {
-			return nil, err
+		if admitErr := s.cfg.Cost.Admit(ctx, req.WorkspaceID, req.RunOwnerID); admitErr != nil {
+			return admitErr
 		}
 	}
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
-	return s.cfg.Runs.LaunchMission(s.operationContext(ctx), req)
+	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), req)
+	return err
 }
 
 func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Attempt, run *domain.Run, obs MissionRunObservation) error {
@@ -377,7 +376,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 		_, runErr := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
 		if errors.Is(runErr, store.ErrNotFound) {
 			choice := mission.Integrator
-			_, launchErr := s.launchRecovered(ctx, MissionLaunchRequest{
+			launchErr := s.launchRecovered(ctx, MissionLaunchRequest{
 				WorkspaceID: mission.WorkspaceID, MissionID: mission.ID,
 				IntegratorGeneration: mission.IntegratorGeneration,
 				RunID:                mission.CurrentIntegratorRunID, ActorRunID: mission.CurrentIntegratorRunID,
@@ -401,11 +400,11 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 		}
 		if attempt.State == domain.AttemptSubmitted {
 			if attempt.CancelRequestedAt != nil {
-				if err := s.reconcileCancellation(ctx, mission, attempt); err != nil {
-					slog.Warn("mission: reconcile cancellation", "mission", mission.ID, "attempt", attempt.ID, "error", err)
+				if cancellationErr := s.reconcileCancellation(ctx, mission, attempt); cancellationErr != nil {
+					slog.Warn("mission: reconcile cancellation", "mission", mission.ID, "attempt", attempt.ID, "error", cancellationErr)
 				}
-			} else if err := s.reconcileSubmitted(ctx, mission, attempt); err != nil {
-				slog.Warn("mission: reconcile submitted attempt", "mission", mission.ID, "attempt", attempt.ID, "error", err)
+			} else if submittedErr := s.reconcileSubmitted(ctx, mission, attempt); submittedErr != nil {
+				slog.Warn("mission: reconcile submitted attempt", "mission", mission.ID, "attempt", attempt.ID, "error", submittedErr)
 			}
 			continue
 		}
@@ -419,12 +418,12 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				slog.Warn("mission: observe attempt", "attempt", attempt.ID, "error", observeErr)
 				continue
 			}
-			if err := s.settleObservedAttempt(ctx, attempt, current, obs); err != nil {
-				slog.Warn("mission: settle attempt", "attempt", attempt.ID, "error", err)
+			if settleErr := s.settleObservedAttempt(ctx, attempt, current, obs); settleErr != nil {
+				slog.Warn("mission: settle attempt", "attempt", attempt.ID, "error", settleErr)
 			}
 			if !obs.Settled() && attempt.CancelRequestedAt != nil {
-				if err := s.reconcileCancellation(ctx, mission, attempt); err != nil {
-					slog.Warn("mission: reconcile cancellation", "mission", mission.ID, "attempt", attempt.ID, "error", err)
+				if cancellationErr := s.reconcileCancellation(ctx, mission, attempt); cancellationErr != nil {
+					slog.Warn("mission: reconcile cancellation", "mission", mission.ID, "attempt", attempt.ID, "error", cancellationErr)
 				}
 			}
 			continue
@@ -461,7 +460,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			s.markAttemptUnknown(ctx, attempt, fmt.Sprintf("task revision changed from %d to %d", attempt.TaskRevision, task.Revision.Revision))
 			continue
 		}
-		_, launchErr := s.launchRecovered(ctx, MissionLaunchRequest{
+		launchErr := s.launchRecovered(ctx, MissionLaunchRequest{
 			WorkspaceID: mission.WorkspaceID, MissionID: mission.ID, AttemptID: attempt.ID,
 			IntegratorGeneration: attempt.IntegratorGeneration,
 			RunID:                attempt.RunID, ActorRunID: attempt.ActorRunID,
@@ -489,8 +488,8 @@ func (s *Service) reconcileCancellation(ctx context.Context, mission *domain.Mis
 	obs, observeErr := s.observeMissionRun(ctx, attempt.RunID)
 	if observeErr == nil {
 		if currentRun, runErr := s.cfg.Store.GetRun(ctx, attempt.RunID); runErr == nil && obs.Settled() && currentRun.Status.Terminal() {
-			if err := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCancelled, currentRun.Reason); err != nil {
-				return err
+			if updateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCancelled, currentRun.Reason); updateErr != nil {
+				return updateErr
 			}
 			return s.publishMissionChanged(ctx, mission.ID)
 		}
@@ -501,8 +500,8 @@ func (s *Service) reconcileCancellation(ctx context.Context, mission *domain.Mis
 	if err != nil {
 		return err
 	}
-	if err := s.authorizeAttemptKill(ctx, current, attempt); err != nil {
-		return err
+	if authorizeErr := s.authorizeAttemptKill(ctx, current, attempt); authorizeErr != nil {
+		return authorizeErr
 	}
 	control, err := s.cfg.MissionControl()
 	if err != nil {
@@ -549,8 +548,8 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 		return err
 	}
 	if obs.Settled() {
-		if err := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "retained"); err != nil {
-			return err
+		if updateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "retained"); updateErr != nil {
+			return updateErr
 		}
 		return s.publishMissionChanged(ctx, mission.ID)
 	}
@@ -560,8 +559,8 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 	if err != nil {
 		return err
 	}
-	if err := s.authorizeAttemptKill(ctx, current, attempt); err != nil {
-		return err
+	if authorizeErr := s.authorizeAttemptKill(ctx, current, attempt); authorizeErr != nil {
+		return authorizeErr
 	}
 	control, err := s.cfg.MissionControl()
 	if err != nil {
@@ -578,13 +577,6 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 		}
 		return s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID)
 	})
-}
-
-func (s *Service) mission(id string) (*domain.Mission, error) {
-	if strings.TrimSpace(id) == "" {
-		return nil, errors.New("mission_id is required")
-	}
-	return s.cfg.Missions.GetMission(context.Background(), domain.MissionID(id))
 }
 
 // Create persists the bounded human authorization and launches its
@@ -610,8 +602,8 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		return protocol.MissionCreateResult{}, err
 	}
 	if s.cfg.Cost != nil {
-		if err := s.cfg.Cost.Admit(ctx, domain.WorkspaceID(p.WorkspaceID), actor); err != nil {
-			return protocol.MissionCreateResult{}, err
+		if admitErr := s.cfg.Cost.Admit(ctx, domain.WorkspaceID(p.WorkspaceID), actor); admitErr != nil {
+			return protocol.MissionCreateResult{}, admitErr
 		}
 	}
 	if accountable.Pending {
@@ -637,14 +629,14 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		IdempotencyKey:               p.IdempotencyKey,
 		IntegratorAuthorizingHumanID: actor, IntegratorRunOwnerID: actor,
 	}
-	if err := s.requireCoordination(); err != nil {
-		return protocol.MissionCreateResult{}, err
+	if coordinationErr := s.requireCoordination(); coordinationErr != nil {
+		return protocol.MissionCreateResult{}, coordinationErr
 	}
-	if err := s.cfg.Missions.CreateMission(ctx, m); err != nil {
-		return protocol.MissionCreateResult{}, err
+	if createErr := s.cfg.Missions.CreateMission(ctx, m); createErr != nil {
+		return protocol.MissionCreateResult{}, createErr
 	}
-	if err := s.publishMissionChanged(ctx, m.ID); err != nil {
-		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, publishErr
 	}
 	if s.cfg.Runs == nil || m.CurrentIntegratorRunID == "" {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, errors.New("mission: integrator run reservation is unavailable")
@@ -691,19 +683,19 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
 	if s.cfg.Cost != nil {
-		if err := s.cfg.Cost.Admit(ctx, m.WorkspaceID, actor); err != nil {
-			return protocol.MissionReplaceIntegratorResult{}, err
+		if admitErr := s.cfg.Cost.Admit(ctx, m.WorkspaceID, actor); admitErr != nil {
+			return protocol.MissionReplaceIntegratorResult{}, admitErr
 		}
 	}
-	if err := s.requireCoordination(); err != nil {
-		return protocol.MissionReplaceIntegratorResult{}, err
+	if coordinationErr := s.requireCoordination(); coordinationErr != nil {
+		return protocol.MissionReplaceIntegratorResult{}, coordinationErr
 	}
 	replaced, err := s.cfg.Missions.ReplaceIntegrator(ctx, m.ID, p.ExpectedGeneration, choice, actor, actor, p.IdempotencyKey)
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
-	if err := s.publishMissionChanged(ctx, replaced.ID); err != nil {
-		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, err
+	if publishErr := s.publishMissionChanged(ctx, replaced.ID); publishErr != nil {
+		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, publishErr
 	}
 	if s.cfg.Runs == nil || replaced.CurrentIntegratorRunID == "" {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, errors.New("mission: integrator run reservation is unavailable")
@@ -890,8 +882,8 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if p.RunOwnerID != "" && p.RunOwnerID != string(m.AccountableHumanID) {
 		return nil, errors.New("mission: run_owner_id cannot impersonate another owner")
 	}
-	if err := s.requireCoordination(); err != nil {
-		return nil, err
+	if coordinationErr := s.requireCoordination(); coordinationErr != nil {
+		return nil, coordinationErr
 	}
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
@@ -908,17 +900,17 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if replayed {
 		return protocol.WorkerStartResult{Attempt: attemptWire(attempt), Replayed: true}, nil
 	}
-	if err := s.publishMissionChanged(ctx, m.ID); err != nil {
-		return nil, err
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return nil, publishErr
 	}
 	if s.cfg.Cost != nil {
-		if err := s.cfg.Cost.Admit(ctx, m.WorkspaceID, m.AccountableHumanID); err != nil {
-			s.markAttemptUnknown(ctx, attempt, err.Error())
-			return nil, err
+		if admitErr := s.cfg.Cost.Admit(ctx, m.WorkspaceID, m.AccountableHumanID); admitErr != nil {
+			s.markAttemptUnknown(ctx, attempt, admitErr.Error())
+			return nil, admitErr
 		}
 	}
 	if s.cfg.Runs == nil {
-		err := errors.New("mission: scheduler unavailable")
+		err = errors.New("mission: scheduler unavailable")
 		s.markAttemptUnknown(ctx, attempt, err.Error())
 		return nil, err
 	}
@@ -931,8 +923,8 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 		s.markAttemptUnknown(ctx, attempt, err.Error())
 		return nil, err
 	}
-	if err := s.cfg.Missions.BindAttemptRun(ctx, attempt.ID, launched.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration); err != nil {
-		return nil, err
+	if bindErr := s.cfg.Missions.BindAttemptRun(ctx, attempt.ID, launched.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration); bindErr != nil {
+		return nil, bindErr
 	}
 	attempt.RunID = launched.ID
 	_ = s.publishMissionChanged(ctx, m.ID)
@@ -1021,8 +1013,8 @@ func (s *Service) workerCancel(ctx context.Context, run domain.RunID, raw json.R
 	if !a.State.HoldsConcurrency() {
 		return protocol.WorkerMutationResult{Attempt: attemptWire(a), Replayed: true}, nil
 	}
-	if err := s.authorizeAttemptKill(ctx, m, a); err != nil {
-		return nil, err
+	if authorizeErr := s.authorizeAttemptKill(ctx, m, a); authorizeErr != nil {
+		return nil, authorizeErr
 	}
 	if s.cfg.MissionControl == nil {
 		return nil, errors.New("mission: mission control is unavailable")
@@ -1053,8 +1045,8 @@ func (s *Service) workerCancel(ctx context.Context, run domain.RunID, raw json.R
 		return s.cfg.Cancel.CancelMission(s.operationContext(ctx), a.RunID)
 	})
 	if requested != nil {
-		if err := s.publishMissionChanged(ctx, m.ID); err != nil {
-			return nil, err
+		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+			return nil, publishErr
 		}
 	}
 	if admitErr != nil {
@@ -1080,8 +1072,8 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 	if a.MissionID != m.ID || p.ExpectedIntegratorGeneration != m.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: stale worker authority", store.ErrMissionStale)
 	}
-	if err := s.authorizeAttempt(ctx, m, a); err != nil {
-		return nil, err
+	if authorizeErr := s.authorizeAttempt(ctx, m, a); authorizeErr != nil {
+		return nil, authorizeErr
 	}
 	if a.State.HoldsConcurrency() {
 		return nil, errors.New("mission: attempt is still active")
@@ -1125,12 +1117,4 @@ func attemptWire(a *domain.Attempt) protocol.Attempt {
 		out.CancelRequestedAt = &v
 	}
 	return out
-}
-
-func reservedID() domain.RunID {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return ""
-	}
-	return domain.RunID(hex.EncodeToString(b[:]))
 }

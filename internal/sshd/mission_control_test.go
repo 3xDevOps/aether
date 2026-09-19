@@ -189,12 +189,12 @@ func TestMissionTakeoverSurvivesExpiryAndFailedRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reacquire after restart: %v", err)
 	}
-	if err := restartedMission.AdmitInput(context.Background(), mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
+	if err = restartedMission.AdmitInput(context.Background(), mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
 		return nil
 	}); !errors.Is(err, store.ErrMissionTakeover) {
 		t.Fatalf("takeover after restart = %v, want ErrMissionTakeover", err)
 	}
-	if err := restarted.Release(string(e.run.ID), e.member.ID, restartedLease.SessionID, restartedLease.Generation); err != nil {
+	if err = restarted.Release(string(e.run.ID), e.member.ID, restartedLease.SessionID, restartedLease.Generation); err != nil {
 		t.Fatalf("release restart controller: %v", err)
 	}
 	human, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(e.member.ID), "human", false)
@@ -247,14 +247,14 @@ func TestMissionWorkerReleaseCASWithoutLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get worker attempt: %v", err)
 	}
-	if err := db.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "finished"); err != nil {
+	if err = db.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "finished"); err != nil {
 		t.Fatalf("finish worker attempt: %v", err)
 	}
-	if _, err := adapter.ReleaseHold(ctx, e.run.ID, e.member.ID, held.Generation+1); !errors.Is(err, store.ErrMissionStale) {
+	if _, err = adapter.ReleaseHold(ctx, e.run.ID, e.member.ID, held.Generation+1); !errors.Is(err, store.ErrMissionStale) {
 		t.Fatalf("stale release = %v, want ErrMissionStale", err)
 	}
 	actor := &domain.Member{DisplayName: "Release actor", PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Role: domain.RoleCollaborator}
-	if err := db.CreateMember(ctx, actor); err != nil {
+	if err = db.CreateMember(ctx, actor); err != nil {
 		t.Fatalf("create release actor: %v", err)
 	}
 	released, err := adapter.ReleaseHold(ctx, e.run.ID, actor.ID, held.Generation)

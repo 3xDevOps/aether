@@ -130,14 +130,14 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		memberID := ""
 		if r, gerr := s.cfg.Store.GetRun(ctx, p.run); gerr == nil && r != nil {
 			memberID = string(r.MemberID)
-			task, taskBytes, taskTruncated = boundStatusText(r.Task, protocol.CoordMaxStatusTaskBytes)
+			task, taskBytes, taskTruncated = boundStatusText(r.Task)
 		}
 		files := make([]string, 0, minStatusLen(len(p.files), protocol.CoordMaxStatusFiles))
 		for _, file := range p.files {
 			if len(files) == protocol.CoordMaxStatusFiles {
 				break
 			}
-			path, _, _ := boundStatusText(file, protocol.CoordMaxStatusPathBytes)
+			path, _, _ := boundStatusText(file)
 			files = append(files, path)
 		}
 		peer := protocol.CoordPeer{
@@ -154,7 +154,7 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	if err != nil {
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
-	task, taskBytes, taskTruncated := boundStatusText(self.Task, protocol.CoordMaxStatusTaskBytes)
+	task, taskBytes, taskTruncated := boundStatusText(self.Task)
 	capabilities := coordinationCapabilities
 	total, truncated := radarTotal, radarTruncated
 	if assignment != nil {
@@ -175,14 +175,14 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 func (s *Service) decoratePeer(ctx context.Context, peer protocol.CoordPeer) protocol.CoordPeer {
 	if peer.TaskBytes == 0 && peer.Task != "" {
 		peer.Task, peer.TaskBytes, peer.TaskTruncated =
-			boundStatusText(peer.Task, protocol.CoordMaxStatusTaskBytes)
+			boundStatusText(peer.Task)
 	}
 	if peer.MemberID == "" {
 		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err == nil && r != nil {
 			peer.MemberID = string(r.MemberID)
 			if peer.Task == "" {
 				peer.Task, peer.TaskBytes, peer.TaskTruncated =
-					boundStatusText(r.Task, protocol.CoordMaxStatusTaskBytes)
+					boundStatusText(r.Task)
 			}
 		}
 	}
@@ -222,7 +222,8 @@ func transportRateError() *protocol.Error {
 	}
 }
 
-func boundStatusText(value string, max int) (string, int, bool) {
+func boundStatusText(value string) (string, int, bool) {
+	const max = protocol.CoordMaxStatusTaskBytes
 	total := len(value)
 	if total <= max {
 		return cleanCoordText(value, max), total, false

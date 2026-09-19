@@ -815,7 +815,11 @@ account-sharing, mission-assignment, and authority-generation state at each
 consequential operation; it does not add eligible-controller administration,
 grant expiry, per-worker approval, or restricted credential modes.
 
-**This is the first major multiplayer demonstration:**
+**Deferred genuine two-harness demonstration:**
+
+The genuine vendor-harness demonstration is a follow-up tracked in the release
+PR, not a Release B merge gate. Real Docker/browser coverage with scripted
+fixtures remains required.
 
 > A human authorizes a bounded mission within existing team authority. An
 > integrator launches two workers using different harnesses. They negotiate a

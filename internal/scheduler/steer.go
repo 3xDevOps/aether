@@ -237,7 +237,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return fmt.Errorf("scheduler: inspect destroy-pending sidecar: %w", serr)
 	}
-	if err := s.persistEvidencePendingErr(id, identity); err != nil {
+	if err = s.persistEvidencePendingErr(id, identity); err != nil {
 		s.mu.Unlock()
 		return err
 	}

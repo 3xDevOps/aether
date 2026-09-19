@@ -711,12 +711,12 @@ func (s *Scheduler) referencedBridges() (map[string]bool, error) {
 			continue
 		}
 		run := domain.RunID(strings.TrimSuffix(e.Name(), ".json"))
-		sc, err := s.readSidecar(run)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+		sc, readErr := s.readSidecar(run)
+		if readErr != nil {
+			if errors.Is(readErr, os.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return nil, readErr
 		}
 		if sc.BridgeDigest != "" {
 			referenced[sc.BridgeDigest] = true
@@ -733,12 +733,12 @@ func (s *Scheduler) referencedBridges() (map[string]bool, error) {
 				continue
 			}
 			member := domain.MemberID(strings.TrimSuffix(e.Name(), ".json"))
-			sc, err := s.readTerminalSidecar(member)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
+			sc, readErr := s.readTerminalSidecar(member)
+			if readErr != nil {
+				if errors.Is(readErr, os.ErrNotExist) {
 					continue
 				}
-				return nil, err
+				return nil, readErr
 			}
 			if sc.BridgeDigest != "" {
 				referenced[sc.BridgeDigest] = true

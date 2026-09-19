@@ -197,25 +197,51 @@ Submit one durable outcome. A summary file of "-" reads standard input.
 	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
 
 Agent integration is limited to these five assignment-scoped operations.
-The mounted socket supplies caller identity; parameters are bounded JSON.
+The mounted socket supplies caller identity. JSON input is limited to 32 KiB.
 `,
-	"integration prepare":          "usage: aether-internal integration prepare --params-file FILE|- [--json]\n",
-	"integration show":             "usage: aether-internal integration show --params-file FILE|- [--json]\n",
-	"integration verify":           "usage: aether-internal integration verify --params-file FILE|- [--json]\n",
-	"integration request-delivery": "usage: aether-internal integration request-delivery --params-file FILE|- [--json]\n",
-	"integration deliver":          "usage: aether-internal integration deliver --params-file FILE|- [--json]\n",
-	"task show":                    "usage: aether-internal task show --task-id <id>\n",
-	"task list":                    "usage: aether-internal task list --mission-id <id>\n",
-	"task propose":                 "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
-	"task revise":                  "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
-	"task accept":                  "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"task accept-submission":       "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
-	"task abandon":                 "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"worker start":                 "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
-	"worker list":                  "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
-	"worker inspect":               "usage: aether-internal worker inspect --attempt-id <id>\n",
-	"worker cancel":                "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
-	"worker retry":                 "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
+	"integration prepare": `usage: aether-internal integration prepare --params-file FILE|- [--json]
+
+Required JSON: target_ref, expected_target_revision, idempotency_key.
+The server resolves omitted workspace_id, mission_id, and accepted submissions
+from the current integrator assignment. Explicit submissions select exact
+accepted inputs in the supplied order. Optional: required_sources.
+Retry uncertain outcomes with the same parameters and idempotency_key.
+`,
+	"integration show": `usage: aether-internal integration show --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id.
+Returns the exact candidate revision, verification results, and delivery state.
+`,
+	"integration verify": `usage: aether-internal integration verify --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id, candidate_revision, argv,
+idempotency_key. Optional: timeout_seconds.
+argv is a JSON string array. Poll show for the durable verification result.
+`,
+	"integration request-delivery": `usage: aether-internal integration request-delivery --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id, candidate_revision, verification_ids,
+action ("update_ref" or "proposal"), idempotency_key.
+This requests a human decision; it does not approve or deliver the candidate.
+`,
+	"integration deliver": `usage: aether-internal integration deliver --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id, request_id, request_version.
+Use the human-approved request returned by show. Replay the same request after
+an uncertain outcome; do not invent another delivery request.
+`,
+	"task show":              "usage: aether-internal task show --task-id <id>\n",
+	"task list":              "usage: aether-internal task list --mission-id <id>\n",
+	"task propose":           "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
+	"task abandon":           "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
+	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
+	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",
+	"worker cancel":          "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker retry":           "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
 }
 
 func writeHelp(out io.Writer, command string) (int, error) {
@@ -283,14 +309,16 @@ const skillWorkflow = `Workflow:
 5. Read the inbox once more before reporting, then take no new work after submission.
 `
 const integratorWorkflow = `Integrator candidate flow:
-  Prepare: aether-internal integration prepare --params-file /run/aether/prepare.json --json
-  Review:  aether-internal integration show --params-file /run/aether/show.json --json
-  Verify:  aether-internal integration verify --params-file /run/aether/verify.json --json
-  Request: aether-internal integration request-delivery --params-file /run/aether/request-delivery.json --json
+Create JSON parameter files outside read-only /run/aether, or use
+--params-file - to read JSON from stdin. Each command's --help lists its fields.
+  Prepare: aether-internal integration prepare --params-file /tmp/aether-prepare.json --json
+  Review:  aether-internal integration show --params-file /tmp/aether-show.json --json
+  Verify:  aether-internal integration verify --params-file /tmp/aether-verify.json --json
+  Request: aether-internal integration request-delivery --params-file /tmp/aether-request-delivery.json --json
 The request-delivery result is a human-decision boundary. Do not approve a
 delivery from the agent socket; a human reviews and decides through the
 authenticated review surface. Only after approval:
-  Deliver: aether-internal integration deliver --params-file /run/aether/deliver.json --json
+  Deliver: aether-internal integration deliver --params-file /tmp/aether-deliver.json --json
 Recovery: if a call reports unavailable after it may have committed, retry the
 same params file with the same idempotency_key; never invent a replacement key.
 `

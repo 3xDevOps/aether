@@ -61,12 +61,6 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if packet.Origin.Kind != protocol.EvidenceOriginRun {
 		return fmt.Errorf("mission: evidence packet origin is not a run")
 	}
-	if packet.RetainedRevision == "" {
-		// Pass the actual empty revision through to the store. Stores that
-		// support review-blocked submissions retain the missing-revision fact;
-		// strict stores return their durable not-ready error rather than
-		// allowing us to invent a revision.
-	}
 	ref := domain.SubmissionRef{
 		WorkspaceID:      m.WorkspaceID,
 		RunID:            run,
@@ -99,8 +93,8 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		if prior.Ref.WorkspaceID != report.WorkspaceID || prior.Ref.RunID != run || prior.Ref.EvidenceRef != packet.ID {
 			return errors.New("mission: existing submission identity does not match report")
 		}
-		if err := s.publishMissionChanged(ctx, m.ID); err != nil {
-			return err
+		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+			return publishErr
 		}
 		return nil
 	}

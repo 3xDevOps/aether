@@ -11,10 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// Integration params are bounded before they are decoded or sent over the
-// run-authenticated socket. The protocol's candidate payload limit is the
-// largest useful request; the socket still enforces its own line ceiling.
-const maxIntegrationParamsBytes = protocol.IntegrationMaxCandidatePayloadBytes
+const maxIntegrationParamsBytes = 32 << 10
 
 // integrationCommand is the deliberately closed agent integration surface.
 // The socket supplies the caller identity; params files never carry an actor,

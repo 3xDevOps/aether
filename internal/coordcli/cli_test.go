@@ -279,6 +279,34 @@ func TestCLIIntegrationFiveCommandSurface(t *testing.T) {
 		}
 	}
 }
+func TestCLIIntegrationErrorCodesMapToExitStatuses(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code int
+		exit int
+	}{
+		{name: "denied", code: protocol.CodeDenied, exit: ExitDenied},
+		{name: "conflict", code: protocol.CodeConflict, exit: ExitDenied},
+		{name: "invalid params", code: protocol.CodeInvalidParams, exit: ExitUsage},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+				if req.Method != protocol.MethodIntegrationShow {
+					return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+				}
+				return protocol.Response{Error: &protocol.Error{Code: test.code, Message: "integration.show: " + test.name}}
+			})
+			code, raw := runCLI(t, s.path, []string{"integration", "show", "--params-file", "-", "--json"}, `{}`)
+			if code != test.exit {
+				t.Fatalf("integration %s exit = %d, want %d; output=%s", test.name, code, test.exit, raw)
+			}
+			env := decodeEnvelope(t, raw)
+			if env.OK || env.Error == nil || env.Error.Code != test.code {
+				t.Fatalf("integration %s envelope = %+v", test.name, env)
+			}
+		})
+	}
+}
 
 func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
 	const ack = "ack-1"

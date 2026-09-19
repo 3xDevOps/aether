@@ -133,7 +133,7 @@ func validateMission(m *domain.Mission) error {
 		}
 		seen[key] = true
 	}
-	if m.IdempotencyKey == "" || len(m.IdempotencyKey) > 256 || strings.IndexAny(m.IdempotencyKey, "\r\n\x00") >= 0 {
+	if m.IdempotencyKey == "" || len(m.IdempotencyKey) > 256 || strings.ContainsAny(m.IdempotencyKey, "\r\n\x00") {
 		return errors.New("store: mission idempotency_key is invalid")
 	}
 	return nil
@@ -236,7 +236,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
@@ -318,7 +318,7 @@ func (d *DB) ListMissionsPage(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return nil, "", fmt.Errorf("store: list missions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Mission, 0, limit)
 	for rows.Next() {
 		m, scanErr := scanMission(rows)
@@ -339,14 +339,14 @@ func (d *DB) ListMissionsPage(ctx context.Context, workspaceID domain.WorkspaceI
 }
 
 func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expected uint64, choice domain.MissionIntegrator, authorizingHumanID, runOwnerID domain.MemberID, key string) (*domain.Mission, error) {
-	if id == "" || choice.AccountMemberID == "" || choice.Harness == "" || !choice.Mode.Valid() || key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 || expected == 0 {
+	if id == "" || choice.AccountMemberID == "" || choice.Harness == "" || !choice.Mode.Valid() || key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 || expected == 0 {
 		return nil, errors.New("store: replace integrator: invalid request")
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: replace integrator: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var receiptGen uint64
 	var receiptRun, receiptAccount, receiptHarness, receiptMode, receiptAuthorizing, receiptOwner string
 	err = tx.QueryRowContext(ctx, `SELECT generation, run_id, account_member_id, harness, mode, authorizing_human_id, run_owner_id FROM mission_integrator_replacements WHERE mission_id = ? AND idempotency_key = ?`, id, key).Scan(&receiptGen, &receiptRun, &receiptAccount, &receiptHarness, &receiptMode, &receiptAuthorizing, &receiptOwner)
@@ -365,8 +365,8 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: replace integrator receipt: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = ?`, id); err != nil {
-		return nil, fmt.Errorf("store: replace integrator lock: %w", err)
+	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = ?`, id); execErr != nil {
+		return nil, fmt.Errorf("store: replace integrator lock: %w", execErr)
 	}
 	m, err := scanMission(tx.QueryRowContext(ctx, `SELECT `+missionColumns+` FROM missions WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -385,14 +385,14 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	generation := m.IntegratorGeneration + 1
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); err != nil {
-		return nil, fmt.Errorf("store: replace integrator: %w", err)
+	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
+		return nil, fmt.Errorf("store: replace integrator: %w", execErr)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, generation, newRun, authorizingHumanID, runOwnerID, n); err != nil {
-		return nil, fmt.Errorf("store: replace integrator receipt: %w", mapConstraint(err, ErrConflict))
+	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, generation, newRun, authorizingHumanID, runOwnerID, n); execErr != nil {
+		return nil, fmt.Errorf("store: replace integrator receipt: %w", mapConstraint(execErr, ErrConflict))
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: replace integrator commit: %w", err)
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, fmt.Errorf("store: replace integrator commit: %w", commitErr)
 	}
 	m, err = d.GetMission(ctx, id)
 	if err != nil {
@@ -454,7 +454,7 @@ func (d *DB) CreateTask(ctx context.Context, t *domain.Task) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var taskCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, t.MissionID).Scan(&taskCount); err != nil {
 		return err
@@ -477,7 +477,7 @@ func (d *DB) CreateTask(ctx context.Context, t *domain.Task) error {
 	return nil
 }
 func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key string) (*domain.Task, bool, error) {
-	if key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 {
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return nil, false, errors.New("store: task create idempotency_key is invalid")
 	}
 	if t == nil || t.MissionID == "" || t.Revision == nil {
@@ -512,15 +512,15 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 	if err != nil {
 		return nil, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var existingID string
 	var existingRevision int
 	var found bool
 	err = tx.QueryRowContext(ctx, `SELECT result_id,result_revision FROM mission_mutation_receipts WHERE mission_id=? AND operation='task.create' AND idempotency_key=?`, t.MissionID, key).Scan(&existingID, &existingRevision)
 	if err == nil {
 		var stored string
-		if err := tx.QueryRowContext(ctx, `SELECT payload FROM mission_mutation_receipts WHERE mission_id=? AND operation='task.create' AND idempotency_key=?`, t.MissionID, key).Scan(&stored); err != nil {
-			return nil, false, err
+		if scanErr := tx.QueryRowContext(ctx, `SELECT payload FROM mission_mutation_receipts WHERE mission_id=? AND operation='task.create' AND idempotency_key=?`, t.MissionID, key).Scan(&stored); scanErr != nil {
+			return nil, false, scanErr
 		}
 		if stored != payload {
 			return nil, false, ErrMissionIdempotencyConflict
@@ -530,18 +530,18 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 		return nil, false, err
 	}
 	if found {
-		loaded, err := d.loadTask(ctx, tx, domain.TaskID(existingID))
-		if err != nil {
-			return nil, false, err
+		loaded, loadErr := d.loadTask(ctx, tx, domain.TaskID(existingID))
+		if loadErr != nil {
+			return nil, false, loadErr
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, false, err
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, false, commitErr
 		}
 		return loaded, true, nil
 	}
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_tasks WHERE mission_id=?`, t.MissionID).Scan(&count); err != nil {
-		return nil, false, err
+	if countErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_tasks WHERE mission_id=?`, t.MissionID).Scan(&count); countErr != nil {
+		return nil, false, countErr
 	}
 	if count >= domain.MaxMissionTasks {
 		return nil, false, ErrMissionLimit
@@ -622,7 +622,7 @@ func (d *DB) ListTasks(ctx context.Context, missionID domain.MissionID) ([]*doma
 	if err != nil {
 		return nil, fmt.Errorf("store: list tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []domain.TaskID
 	for rows.Next() {
 		if len(ids) == 1024 {
@@ -668,7 +668,7 @@ func (d *DB) loadTask(ctx context.Context, q interface {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var dep domain.TaskDependency
 		var created int64
@@ -735,7 +735,7 @@ func (d *DB) ProjectTask(ctx context.Context, id domain.TaskID) (*domain.Task, e
 }
 
 func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domain.TaskRevision, key string) (*domain.TaskRevision, error) {
-	if key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 {
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return nil, errors.New("store: task proposal idempotency_key is invalid")
 	}
 	if err := validateTaskRevision(r); err != nil {
@@ -753,16 +753,16 @@ func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET updated_at = updated_at WHERE id = ?`, id); err != nil {
-		return nil, err
+	defer func() { _ = tx.Rollback() }()
+	if _, execErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET updated_at = updated_at WHERE id = ?`, id); execErr != nil {
+		return nil, execErr
 	}
 	var missionID domain.MissionID
 	var current int
-	if err := tx.QueryRowContext(ctx, `SELECT mission_id, current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&missionID, &current); errors.Is(err, sql.ErrNoRows) {
+	if queryErr := tx.QueryRowContext(ctx, `SELECT mission_id, current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&missionID, &current); errors.Is(queryErr, sql.ErrNoRows) {
 		return nil, ErrNotFound
-	} else if err != nil {
-		return nil, err
+	} else if queryErr != nil {
+		return nil, queryErr
 	}
 	payload, err := mutationPayload(struct {
 		TaskID               domain.TaskID
@@ -779,39 +779,39 @@ func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 		return nil, err
 	}
 	if replayed {
-		existing, err := scanTaskRevision(tx.QueryRowContext(ctx, `SELECT task_id,revision,title,objective,scope,evidence_requirements,status,proposed_by_run_id,supersedes_revision,created_at,accepted_at FROM mission_task_revisions WHERE task_id=? AND revision=?`, resultID, resultRevision))
-		if err != nil {
-			return nil, err
+		existing, scanErr := scanTaskRevision(tx.QueryRowContext(ctx, `SELECT task_id,revision,title,objective,scope,evidence_requirements,status,proposed_by_run_id,supersedes_revision,created_at,accepted_at FROM mission_task_revisions WHERE task_id=? AND revision=?`, resultID, resultRevision))
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, commitErr
 		}
 		return existing, nil
 	}
 	var revisionCount int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_task_revisions WHERE task_id = ?`, id).Scan(&revisionCount); err != nil {
-		return nil, err
+	if countErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_task_revisions WHERE task_id = ?`, id).Scan(&revisionCount); countErr != nil {
+		return nil, countErr
 	}
 	if revisionCount >= domain.MaxTaskRevisions {
 		return nil, ErrMissionLimit
 	}
 	var next int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0) + 1 FROM mission_task_revisions WHERE task_id = ?`, id).Scan(&next); err != nil {
-		return nil, err
+	if nextErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0) + 1 FROM mission_task_revisions WHERE task_id = ?`, id).Scan(&next); nextErr != nil {
+		return nil, nextErr
 	}
 	if r.Revision != 0 && r.Revision != next {
 		return nil, fmt.Errorf("%w: expected task revision %d", ErrMissionStale, next)
 	}
 	now := missionNow(r.CreatedAt)
 	n, _ := encodeTime(now)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_task_revisions (task_id, revision, title, objective, scope, evidence_requirements, status, proposed_by_run_id, supersedes_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)`, id, next, r.Title, r.Objective, scope, reqs, r.ProposedByRunID, current, n); err != nil {
-		return nil, fmt.Errorf("store: propose task revision: %w", err)
+	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_task_revisions (task_id, revision, title, objective, scope, evidence_requirements, status, proposed_by_run_id, supersedes_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)`, id, next, r.Title, r.Objective, scope, reqs, r.ProposedByRunID, current, n); execErr != nil {
+		return nil, fmt.Errorf("store: propose task revision: %w", execErr)
 	}
-	if err := recordMutationReceipt(tx, ctx, missionID, "task.propose", key, payload, string(id), next, n); err != nil {
-		return nil, err
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.propose", key, payload, string(id), next, n); receiptErr != nil {
+		return nil, receiptErr
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, commitErr
 	}
 	r.TaskID, r.Revision, r.Status, r.SupersedesRevision, r.CreatedAt = id, next, domain.TaskRevisionProposed, current, now
 	return r, nil
@@ -822,23 +822,23 @@ func (d *DB) ReviseTask(ctx context.Context, id domain.TaskID, r *domain.TaskRev
 }
 
 func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision int, expectedGeneration uint64, key string) error {
-	if key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 {
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return errors.New("store: task acceptance idempotency_key is invalid")
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var missionID domain.MissionID
 	var generation uint64
-	if err := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(err, sql.ErrNoRows) {
+	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
 		return ErrNotFound
-	} else if err != nil {
-		return err
+	} else if missionErr != nil {
+		return missionErr
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT integrator_generation FROM missions WHERE id = ?`, missionID).Scan(&generation); err != nil {
-		return err
+	if generationErr := tx.QueryRowContext(ctx, `SELECT integrator_generation FROM missions WHERE id = ?`, missionID).Scan(&generation); generationErr != nil {
+		return generationErr
 	}
 	if expectedGeneration == 0 || generation != expectedGeneration {
 		return ErrMissionStale
@@ -861,17 +861,17 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
 	var previous int
-	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&previous); err != nil {
-		return err
+	if currentErr := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&previous); currentErr != nil {
+		return currentErr
 	}
 	// A revision change removes the prior output from the current accepted set
 	// only when that revision has an accepted output. Proposed work alone is
 	// not part of the set and must not advance its version.
 	var previousOutput int
 	if previous != revision {
-		err := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances WHERE mission_id = ? AND task_id = ? AND task_revision = ?`, missionID, id, previous).Scan(&previousOutput)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
+		previousErr := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances WHERE mission_id = ? AND task_id = ? AND task_revision = ?`, missionID, id, previous).Scan(&previousOutput)
+		if previousErr != nil && !errors.Is(previousErr, sql.ErrNoRows) {
+			return previousErr
 		}
 	}
 	if revision < previous {
@@ -879,8 +879,8 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 	}
 	if revision == previous {
 		var currentStatus string
-		if err := tx.QueryRowContext(ctx, `SELECT status FROM mission_task_revisions WHERE task_id=? AND revision=?`, id, revision).Scan(&currentStatus); err != nil {
-			return err
+		if statusErr := tx.QueryRowContext(ctx, `SELECT status FROM mission_task_revisions WHERE task_id=? AND revision=?`, id, revision).Scan(&currentStatus); statusErr != nil {
+			return statusErr
 		}
 		if currentStatus != string(domain.TaskRevisionProposed) {
 			return ErrConflict
@@ -895,26 +895,26 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 		return ErrConflict
 	}
 	if previous != revision {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status = 'superseded' WHERE task_id = ? AND revision = ? AND status = 'accepted'`, id, previous); err != nil {
-			return err
+		if _, supersedeErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status = 'superseded' WHERE task_id = ? AND revision = ? AND status = 'accepted'`, id, previous); supersedeErr != nil {
+			return supersedeErr
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET current_revision = ?, updated_at = ? WHERE id = ?`, revision, n, id); err != nil {
-		return err
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET current_revision = ?, updated_at = ? WHERE id = ?`, revision, n, id); updateErr != nil {
+		return updateErr
 	}
-	if err := recordMutationReceipt(tx, ctx, missionID, "task.accept", key, payload, string(id), revision, n); err != nil {
-		return err
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.accept", key, payload, string(id), revision, n); receiptErr != nil {
+		return receiptErr
 	}
 	if previousOutput == 1 {
-		if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); err != nil {
-			return err
+		if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); versionErr != nil {
+			return versionErr
 		}
 	}
 	return tx.Commit()
 }
 
 func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision int, deps []domain.TaskDependency, key string) error {
-	if key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 {
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return errors.New("store: task dependency idempotency_key is invalid")
 	}
 	if revision <= 0 || len(deps) > 128 {
@@ -924,15 +924,15 @@ func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET updated_at = updated_at WHERE id = ?`, id); err != nil {
-		return err
+	defer func() { _ = tx.Rollback() }()
+	if _, lockErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET updated_at = updated_at WHERE id = ?`, id); lockErr != nil {
+		return lockErr
 	}
 	var missionID domain.MissionID
-	if err := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(err, sql.ErrNoRows) {
+	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
 		return ErrNotFound
-	} else if err != nil {
-		return err
+	} else if missionErr != nil {
+		return missionErr
 	}
 	payload, err := mutationPayload(struct {
 		TaskID       domain.TaskID
@@ -951,11 +951,11 @@ func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision
 	}
 	var exists int
 	var revisionStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, id, revision).Scan(&revisionStatus); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	if revisionErr := tx.QueryRowContext(ctx, `SELECT status FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, id, revision).Scan(&revisionStatus); revisionErr != nil {
+		if errors.Is(revisionErr, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return revisionErr
 	}
 	if revisionStatus == string(domain.TaskRevisionAccepted) {
 		return ErrConflict
@@ -967,25 +967,25 @@ func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision
 	}
 	for rows.Next() {
 		var from, to domain.TaskID
-		if err := rows.Scan(&from, &to); err != nil {
-			rows.Close()
-			return err
+		if scanErr := rows.Scan(&from, &to); scanErr != nil {
+			_ = rows.Close()
+			return scanErr
 		}
 		adj[from] = append(adj[from], to)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, dep := range deps {
 		if dep.DependsOnTaskID == "" || dep.DependsOnRevision <= 0 || dep.DependsOnTaskID == id {
 			return ErrMissionCycle
 		}
 		var depMission domain.MissionID
-		if err := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, dep.DependsOnTaskID).Scan(&depMission); err != nil {
+		if depErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, dep.DependsOnTaskID).Scan(&depMission); depErr != nil {
 			return ErrNotFound
 		}
 		if depMission != missionID {
 			return ErrConflict
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, dep.DependsOnTaskID, dep.DependsOnRevision).Scan(&exists); err != nil {
+		if revisionErr := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, dep.DependsOnTaskID, dep.DependsOnRevision).Scan(&exists); revisionErr != nil {
 			return ErrNotFound
 		}
 		adj[id] = append(adj[id], dep.DependsOnTaskID)
@@ -1015,18 +1015,18 @@ func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision
 			return ErrMissionCycle
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM mission_task_dependencies WHERE task_id = ? AND task_revision = ?`, id, revision); err != nil {
-		return err
+	if _, deleteErr := tx.ExecContext(ctx, `DELETE FROM mission_task_dependencies WHERE task_id = ? AND task_revision = ?`, id, revision); deleteErr != nil {
+		return deleteErr
 	}
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
 	for _, dep := range deps {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO mission_task_dependencies (task_id, task_revision, depends_on_task_id, depends_on_revision, output_ref, created_at) VALUES (?, ?, ?, ?, ?, ?)`, id, revision, dep.DependsOnTaskID, dep.DependsOnRevision, dep.OutputRef, n); err != nil {
-			return fmt.Errorf("store: set task dependencies: %w", err)
+		if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_task_dependencies (task_id, task_revision, depends_on_task_id, depends_on_revision, output_ref, created_at) VALUES (?, ?, ?, ?, ?, ?)`, id, revision, dep.DependsOnTaskID, dep.DependsOnRevision, dep.OutputRef, n); insertErr != nil {
+			return fmt.Errorf("store: set task dependencies: %w", insertErr)
 		}
 	}
-	if err := recordMutationReceipt(tx, ctx, missionID, "task.dependencies", key, payload, string(id), revision, n); err != nil {
-		return err
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.dependencies", key, payload, string(id), revision, n); receiptErr != nil {
+		return receiptErr
 	}
 	return tx.Commit()
 }
@@ -1076,9 +1076,9 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if err != nil {
 		return nil, false, err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = ?`, r.MissionID); err != nil {
-		return nil, false, err
+	defer func() { _ = tx.Rollback() }()
+	if _, lockErr := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = ?`, r.MissionID); lockErr != nil {
+		return nil, false, lockErr
 	}
 	m, err := scanMission(tx.QueryRowContext(ctx, `SELECT `+missionColumns+` FROM missions WHERE id = ?`, r.MissionID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1110,10 +1110,10 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	}
 	var taskMission domain.MissionID
 	var taskRevisionStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT t.mission_id, r.status FROM mission_tasks t JOIN mission_task_revisions r ON r.task_id=t.id AND r.revision=? WHERE t.id=? AND t.current_revision=?`, r.TaskRevision, r.TaskID, r.TaskRevision).Scan(&taskMission, &taskRevisionStatus); errors.Is(err, sql.ErrNoRows) {
+	if taskErr := tx.QueryRowContext(ctx, `SELECT t.mission_id, r.status FROM mission_tasks t JOIN mission_task_revisions r ON r.task_id=t.id AND r.revision=? WHERE t.id=? AND t.current_revision=?`, r.TaskRevision, r.TaskID, r.TaskRevision).Scan(&taskMission, &taskRevisionStatus); errors.Is(taskErr, sql.ErrNoRows) {
 		return nil, false, ErrNotFound
-	} else if err != nil {
-		return nil, false, err
+	} else if taskErr != nil {
+		return nil, false, taskErr
 	}
 	if taskMission != r.MissionID {
 		return nil, false, ErrConflict
@@ -1122,36 +1122,36 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 		return nil, false, ErrMissionNotReady
 	}
 	var blocked int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_task_dependencies d WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=d.depends_on_revision)`, r.TaskID, r.TaskRevision).Scan(&blocked); err != nil {
-		return nil, false, err
+	if blockedErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_task_dependencies d WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=d.depends_on_revision)`, r.TaskID, r.TaskRevision).Scan(&blocked); blockedErr != nil {
+		return nil, false, blockedErr
 	}
 	if blocked > 0 {
 		return nil, false, ErrMissionNotReady
 	}
 	var takeover int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1`, r.MissionID, r.TaskID).Scan(&takeover); err != nil {
-		return nil, false, err
+	if takeoverErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1`, r.MissionID, r.TaskID).Scan(&takeover); takeoverErr != nil {
+		return nil, false, takeoverErr
 	}
 	if takeover > 0 {
 		return nil, false, ErrMissionTakeover
 	}
 	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ?`, r.MissionID).Scan(&total); err != nil {
-		return nil, false, err
+	if totalErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ?`, r.MissionID).Scan(&total); totalErr != nil {
+		return nil, false, totalErr
 	}
 	if total >= m.MaxTotalAttempts {
 		return nil, false, ErrMissionLimit
 	}
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ? AND state IN ('reserved','launching','running','unknown','submitted')`, r.MissionID).Scan(&active); err != nil {
-		return nil, false, err
+	if activeErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_attempts WHERE mission_id = ? AND state IN ('reserved','launching','running','unknown','submitted')`, r.MissionID).Scan(&active); activeErr != nil {
+		return nil, false, activeErr
 	}
 	if active >= m.MaxConcurrentAttempts {
 		return nil, false, ErrMissionLimit
 	}
 	var number int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); err != nil {
-		return nil, false, err
+	if numberErr := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM mission_attempts WHERE task_id = ?`, r.TaskID).Scan(&number); numberErr != nil {
+		return nil, false, numberErr
 	}
 	id, err := newID()
 	if err != nil {
@@ -1163,8 +1163,8 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if err != nil {
 		return nil, false, fmt.Errorf("store: reserve attempt: %w", mapConstraint(err, ErrConflict))
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, false, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, false, commitErr
 	}
 	a, err := d.getAttempt(ctx, domain.AttemptID(id))
 	return a, false, err
@@ -1218,21 +1218,21 @@ func (d *DB) BindAttemptRun(ctx context.Context, id domain.AttemptID, runID doma
 	return ErrMissionStale
 }
 func (d *DB) RequestAttemptCancellation(ctx context.Context, attemptID domain.AttemptID, actorRunID domain.RunID, generation uint64, key string) (*domain.Attempt, bool, error) {
-	if attemptID == "" || actorRunID == "" || generation == 0 || key == "" || len(key) > 256 || strings.IndexAny(key, "\r\n\x00") >= 0 {
+	if attemptID == "" || actorRunID == "" || generation == 0 || key == "" || len(key) > 256 || strings.ContainsAny(key, "\r\n\x00") {
 		return nil, false, errors.New("store: cancel attempt: invalid request")
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var missionID domain.MissionID
 	var currentRun domain.RunID
 	var currentGen uint64
-	if err := tx.QueryRowContext(ctx, `SELECT a.mission_id,m.current_integrator_run_id,m.integrator_generation FROM mission_attempts a JOIN missions m ON m.id=a.mission_id WHERE a.id=?`, attemptID).Scan(&missionID, &currentRun, &currentGen); errors.Is(err, sql.ErrNoRows) {
+	if attemptErr := tx.QueryRowContext(ctx, `SELECT a.mission_id,m.current_integrator_run_id,m.integrator_generation FROM mission_attempts a JOIN missions m ON m.id=a.mission_id WHERE a.id=?`, attemptID).Scan(&missionID, &currentRun, &currentGen); errors.Is(attemptErr, sql.ErrNoRows) {
 		return nil, false, ErrNotFound
-	} else if err != nil {
-		return nil, false, err
+	} else if attemptErr != nil {
+		return nil, false, attemptErr
 	}
 	if currentRun != actorRunID || currentGen != generation {
 		return nil, false, ErrMissionStale
@@ -1250,12 +1250,12 @@ func (d *DB) RequestAttemptCancellation(ctx context.Context, attemptID domain.At
 		return nil, false, err
 	}
 	if replayed {
-		a, err := scanAttempt(tx.QueryRowContext(ctx, `SELECT `+attemptColumns+` FROM mission_attempts WHERE id=?`, resultID))
-		if err != nil {
-			return nil, false, err
+		a, scanErr := scanAttempt(tx.QueryRowContext(ctx, `SELECT `+attemptColumns+` FROM mission_attempts WHERE id=?`, resultID))
+		if scanErr != nil {
+			return nil, false, scanErr
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, false, err
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, false, commitErr
 		}
 		return a, true, nil
 	}
@@ -1268,15 +1268,15 @@ func (d *DB) RequestAttemptCancellation(ctx context.Context, attemptID domain.At
 	if affected, _ := res.RowsAffected(); affected == 0 {
 		return nil, false, ErrMissionStale
 	}
-	if err := recordMutationReceipt(tx, ctx, missionID, "attempt.cancel", key, payload, string(attemptID), 0, n); err != nil {
-		return nil, false, err
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "attempt.cancel", key, payload, string(attemptID), 0, n); receiptErr != nil {
+		return nil, false, receiptErr
 	}
 	a, err := scanAttempt(tx.QueryRowContext(ctx, `SELECT `+attemptColumns+` FROM mission_attempts WHERE id=?`, attemptID))
 	if err != nil {
 		return nil, false, err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, false, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, false, commitErr
 	}
 	return a, false, nil
 }
@@ -1314,7 +1314,7 @@ func (d *DB) ListAttempts(ctx context.Context, missionID domain.MissionID, taskI
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Attempt, 0, 32)
 	for rows.Next() {
 		if len(out) == 1024 {
@@ -1391,7 +1391,7 @@ func (d *DB) SubmitAttempt(ctx context.Context, id domain.AttemptID, authority, 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var a *domain.Attempt
 	a, err = scanAttempt(tx.QueryRowContext(ctx, `SELECT `+attemptColumns+` FROM mission_attempts WHERE id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1404,19 +1404,19 @@ func (d *DB) SubmitAttempt(ctx context.Context, id domain.AttemptID, authority, 
 		return nil, ErrMissionStale
 	}
 	var current int
-	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id=?`, a.TaskID).Scan(&current); err != nil {
-		return nil, err
+	if currentErr := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id=?`, a.TaskID).Scan(&current); currentErr != nil {
+		return nil, currentErr
 	}
 	if current != a.TaskRevision {
 		return nil, ErrMissionStale
 	}
 	var latest domain.AttemptID
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM mission_attempts WHERE task_id=? AND task_revision=? ORDER BY number DESC LIMIT 1`, a.TaskID, a.TaskRevision).Scan(&latest); err != nil || latest != a.ID {
+	if latestErr := tx.QueryRowContext(ctx, `SELECT id FROM mission_attempts WHERE task_id=? AND task_revision=? ORDER BY number DESC LIMIT 1`, a.TaskID, a.TaskRevision).Scan(&latest); latestErr != nil || latest != a.ID {
 		return nil, ErrMissionStale
 	}
 	var missionWorkspace domain.WorkspaceID
-	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM missions WHERE id=?`, a.MissionID).Scan(&missionWorkspace); err != nil {
-		return nil, err
+	if workspaceErr := tx.QueryRowContext(ctx, `SELECT workspace_id FROM missions WHERE id=?`, a.MissionID).Scan(&missionWorkspace); workspaceErr != nil {
+		return nil, workspaceErr
 	}
 	if missionWorkspace != ref.WorkspaceID {
 		return nil, ErrConflict
@@ -1427,14 +1427,14 @@ func (d *DB) SubmitAttempt(ctx context.Context, id domain.AttemptID, authority, 
 	}
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_submissions (id, mission_id, task_id, task_revision, attempt_id, workspace_id, run_id, evidence_ref, retained_revision, evidence, scope_violations, state, proposed_by_run_id, integrator_generation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)`, subID, a.MissionID, a.TaskID, a.TaskRevision, a.ID, ref.WorkspaceID, ref.RunID, ref.EvidenceRef, ref.RetainedRevision, evidenceJSON, scopeJSON, a.ActorRunID, a.IntegratorGeneration, n); err != nil {
-		return nil, fmt.Errorf("store: submit attempt: %w", mapConstraint(err, ErrConflict))
+	if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_submissions (id, mission_id, task_id, task_revision, attempt_id, workspace_id, run_id, evidence_ref, retained_revision, evidence, scope_violations, state, proposed_by_run_id, integrator_generation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)`, subID, a.MissionID, a.TaskID, a.TaskRevision, a.ID, ref.WorkspaceID, ref.RunID, ref.EvidenceRef, ref.RetainedRevision, evidenceJSON, scopeJSON, a.ActorRunID, a.IntegratorGeneration, n); insertErr != nil {
+		return nil, fmt.Errorf("store: submit attempt: %w", mapConstraint(insertErr, ErrConflict))
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE mission_attempts SET state='submitted', finished_at=? WHERE id=? AND state IN ('reserved','launching','running','unknown')`, n, id); err != nil {
-		return nil, err
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_attempts SET state='submitted', finished_at=? WHERE id=? AND state IN ('reserved','launching','running','unknown')`, n, id); updateErr != nil {
+		return nil, updateErr
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, commitErr
 	}
 	return d.getSubmission(ctx, domain.SubmissionID(subID))
 }
@@ -1464,7 +1464,7 @@ func (d *DB) ListSubmissions(ctx context.Context, missionID domain.MissionID, ta
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]*domain.Submission, 0, 32)
 	for rows.Next() {
 		if len(out) == 1024 {
@@ -1526,7 +1526,7 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var missionID domain.MissionID
 	var taskID domain.TaskID
 	var taskRevision int
@@ -1537,12 +1537,12 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	var requiredJSON, evidenceJSON, scopeJSON string
 	var currentRun sql.NullString
 	var generation, setVersion uint64
-	if err := tx.QueryRowContext(ctx, `SELECT s.mission_id,s.task_id,s.task_revision,s.attempt_id,s.state,s.integrator_generation,s.retained_revision,s.evidence_ref,s.evidence,s.scope_violations,m.integrator_generation,m.accepted_set_version,m.current_integrator_run_id,r.evidence_requirements FROM mission_submissions s JOIN missions m ON m.id=s.mission_id JOIN mission_task_revisions r ON r.task_id=s.task_id AND r.revision=s.task_revision WHERE s.id=?`, id).Scan(&missionID, &taskID, &taskRevision, &attemptID, &state, &subGen, &retained, &evidenceRef, &evidenceJSON, &scopeJSON, &generation, &setVersion, &currentRun, &requiredJSON); errors.Is(err, sql.ErrNoRows) {
+	if submissionErr := tx.QueryRowContext(ctx, `SELECT s.mission_id,s.task_id,s.task_revision,s.attempt_id,s.state,s.integrator_generation,s.retained_revision,s.evidence_ref,s.evidence,s.scope_violations,m.integrator_generation,m.accepted_set_version,m.current_integrator_run_id,r.evidence_requirements FROM mission_submissions s JOIN missions m ON m.id=s.mission_id JOIN mission_task_revisions r ON r.task_id=s.task_id AND r.revision=s.task_revision WHERE s.id=?`, id).Scan(&missionID, &taskID, &taskRevision, &attemptID, &state, &subGen, &retained, &evidenceRef, &evidenceJSON, &scopeJSON, &generation, &setVersion, &currentRun, &requiredJSON); errors.Is(submissionErr, sql.ErrNoRows) {
 		return nil, ErrNotFound
-	} else if err != nil {
-		return nil, err
+	} else if submissionErr != nil {
+		return nil, submissionErr
 	}
-	if key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 {
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return nil, errors.New("store: submission acceptance idempotency_key is invalid")
 	}
 	payload, err := mutationPayload(struct {
@@ -1562,12 +1562,12 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	if replayed {
 		var accepted domain.Acceptance
 		var acceptedAt int64
-		if err := tx.QueryRowContext(ctx, `SELECT submission_id,mission_id,task_id,task_revision,accepted_set_version,integrator_generation,accepted_by_run_id,scope_disposition,accepted_at FROM mission_acceptances WHERE submission_id=?`, resultID).Scan(&accepted.SubmissionID, &accepted.MissionID, &accepted.TaskID, &accepted.TaskRevision, &accepted.AcceptedSetVersion, &accepted.IntegratorGeneration, &accepted.AcceptedByRunID, &accepted.ScopeDisposition, &acceptedAt); err != nil {
-			return nil, err
+		if acceptanceErr := tx.QueryRowContext(ctx, `SELECT submission_id,mission_id,task_id,task_revision,accepted_set_version,integrator_generation,accepted_by_run_id,scope_disposition,accepted_at FROM mission_acceptances WHERE submission_id=?`, resultID).Scan(&accepted.SubmissionID, &accepted.MissionID, &accepted.TaskID, &accepted.TaskRevision, &accepted.AcceptedSetVersion, &accepted.IntegratorGeneration, &accepted.AcceptedByRunID, &accepted.ScopeDisposition, &acceptedAt); acceptanceErr != nil {
+			return nil, acceptanceErr
 		}
 		accepted.AcceptedAt = decodeTime(acceptedAt)
-		if err := tx.Commit(); err != nil {
-			return nil, err
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, commitErr
 		}
 		return &accepted, nil
 	}
@@ -1576,8 +1576,8 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	}
 	var currentRevision int
 	var abandoned *int64
-	if err := tx.QueryRowContext(ctx, `SELECT current_revision, abandoned_at FROM mission_tasks WHERE id=?`, taskID).Scan(&currentRevision, &abandoned); err != nil {
-		return nil, err
+	if taskErr := tx.QueryRowContext(ctx, `SELECT current_revision, abandoned_at FROM mission_tasks WHERE id=?`, taskID).Scan(&currentRevision, &abandoned); taskErr != nil {
+		return nil, taskErr
 	}
 	if abandoned != nil || currentRevision != taskRevision {
 		return nil, ErrMissionStale
@@ -1615,48 +1615,48 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 		}
 	}
 	var currentAttempt domain.AttemptID
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM mission_attempts WHERE task_id=? AND task_revision=? ORDER BY number DESC LIMIT 1`, taskID, taskRevision).Scan(&currentAttempt); err != nil || currentAttempt != attemptID {
+	if attemptErr := tx.QueryRowContext(ctx, `SELECT id FROM mission_attempts WHERE task_id=? AND task_revision=? ORDER BY number DESC LIMIT 1`, taskID, taskRevision).Scan(&currentAttempt); attemptErr != nil || currentAttempt != attemptID {
 		return nil, ErrMissionStale
 	}
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
 	newVersion := setVersion + 1
-	if _, err := tx.ExecContext(ctx, `UPDATE mission_submissions SET state='accepted', decided_at=?, decision_by_run_id=? WHERE id=? AND state='proposed'`, n, acceptedBy, id); err != nil {
-		return nil, err
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_submissions SET state='accepted', decided_at=?, decision_by_run_id=? WHERE id=? AND state='proposed'`, n, acceptedBy, id); updateErr != nil {
+		return nil, updateErr
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, scope_disposition, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, missionID, taskID, taskRevision, newVersion, generation, acceptedBy, scopeDisposition, n); err != nil {
-		return nil, fmt.Errorf("store: accept submission: %w", mapConstraint(err, ErrConflict))
+	if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, scope_disposition, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, missionID, taskID, taskRevision, newVersion, generation, acceptedBy, scopeDisposition, n); insertErr != nil {
+		return nil, fmt.Errorf("store: accept submission: %w", mapConstraint(insertErr, ErrConflict))
 	}
-	if err := recordMutationReceipt(tx, ctx, missionID, "submission.accept", key, payload, string(id), taskRevision, n); err != nil {
-		return nil, err
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "submission.accept", key, payload, string(id), taskRevision, n); receiptErr != nil {
+		return nil, receiptErr
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); err != nil {
-		return nil, err
+	if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version = accepted_set_version + 1, updated_at = ? WHERE id = ?`, n, missionID); versionErr != nil {
+		return nil, versionErr
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, commitErr
 	}
 	return &domain.Acceptance{SubmissionID: id, MissionID: missionID, TaskID: taskID, TaskRevision: taskRevision, AcceptedSetVersion: newVersion, IntegratorGeneration: generation, AcceptedByRunID: acceptedBy, ScopeDisposition: scopeDisposition, AcceptedAt: now}, nil
 }
 
 func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, expectedGeneration uint64, key string) error {
-	if key == "" || strings.IndexAny(key, "\r\n\x00") >= 0 || len(key) > 256 {
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return errors.New("store: task abandon idempotency_key is invalid")
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var missionID domain.MissionID
-	if err := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id=?`, id).Scan(&missionID); errors.Is(err, sql.ErrNoRows) {
+	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id=?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
 		return ErrNotFound
-	} else if err != nil {
-		return err
+	} else if missionErr != nil {
+		return missionErr
 	}
 	var generation uint64
-	if err := tx.QueryRowContext(ctx, `SELECT integrator_generation FROM missions WHERE id=?`, missionID).Scan(&generation); err != nil {
-		return err
+	if generationErr := tx.QueryRowContext(ctx, `SELECT integrator_generation FROM missions WHERE id=?`, missionID).Scan(&generation); generationErr != nil {
+		return generationErr
 	}
 	if expectedGeneration == 0 || expectedGeneration != generation {
 		return ErrMissionStale
@@ -1678,8 +1678,8 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, expectedGenerati
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
 	var currentRevision int
-	if err := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id=?`, id).Scan(&currentRevision); err != nil {
-		return err
+	if revisionErr := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id=?`, id).Scan(&currentRevision); revisionErr != nil {
+		return revisionErr
 	}
 	// Abandonment removes an output from the current accepted set only when
 	// the task's current revision has an acceptance. Proposed work is ignored.
@@ -1696,15 +1696,15 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, expectedGenerati
 	if affected == 0 {
 		return ErrConflict
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status='abandoned' WHERE task_id=? AND revision=(SELECT current_revision FROM mission_tasks WHERE id=?)`, id, id); err != nil {
-		return err
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status='abandoned' WHERE task_id=? AND revision=(SELECT current_revision FROM mission_tasks WHERE id=?)`, id, id); updateErr != nil {
+		return updateErr
 	}
-	if err := recordMutationReceipt(tx, ctx, missionID, "task.abandon", key, payload, string(id), 0, n); err != nil {
-		return err
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.abandon", key, payload, string(id), 0, n); receiptErr != nil {
+		return receiptErr
 	}
 	if currentOutput == 1 {
-		if _, err := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version=accepted_set_version+1, updated_at=? WHERE id=?`, n, missionID); err != nil {
-			return err
+		if _, versionErr := tx.ExecContext(ctx, `UPDATE missions SET accepted_set_version=accepted_set_version+1, updated_at=? WHERE id=?`, n, missionID); versionErr != nil {
+			return versionErr
 		}
 	}
 	return tx.Commit()
@@ -1747,12 +1747,12 @@ func (d *DB) SetMissionWorkerTakeover(ctx context.Context, workerRun domain.RunI
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var a domain.MissionWorkerAssignment
-	if err := tx.QueryRowContext(ctx, `SELECT mission_id,task_id,id FROM mission_attempts WHERE run_id=? AND state IN ('reserved','launching','running','unknown','submitted') ORDER BY number DESC LIMIT 1`, workerRun).Scan(&a.MissionID, &a.TaskID, &a.AttemptID); errors.Is(err, sql.ErrNoRows) {
+	if attemptErr := tx.QueryRowContext(ctx, `SELECT mission_id,task_id,id FROM mission_attempts WHERE run_id=? AND state IN ('reserved','launching','running','unknown','submitted') ORDER BY number DESC LIMIT 1`, workerRun).Scan(&a.MissionID, &a.TaskID, &a.AttemptID); errors.Is(attemptErr, sql.ErrNoRows) {
 		return nil, ErrNotFound
-	} else if err != nil {
-		return nil, err
+	} else if attemptErr != nil {
+		return nil, attemptErr
 	}
 	a.WorkerRunID = workerRun
 	var currentGen uint64
@@ -1774,11 +1774,11 @@ func (d *DB) SetMissionWorkerTakeover(ctx context.Context, workerRun domain.RunI
 	if err != nil {
 		return nil, err
 	}
-	if err := enqueueMissionControlChange(ctx, tx, a.MissionID); err != nil {
-		return nil, err
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, a.MissionID); enqueueErr != nil {
+		return nil, enqueueErr
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, commitErr
 	}
 	a.MemberID, a.Active, a.Generation, a.UpdatedAt = member, active, currentGen, now
 	return &a, nil
@@ -1799,17 +1799,17 @@ func (d *DB) ReleaseMissionWorkerTakeover(ctx context.Context, workerRun domain.
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	const assignmentQuery = `SELECT t.mission_id,t.task_id,t.attempt_id,t.worker_run_id,t.member_id,t.active,t.generation,t.updated_at
 		FROM mission_worker_takeovers t JOIN missions m ON m.id=t.mission_id WHERE t.worker_run_id=?`
 	var a domain.MissionWorkerAssignment
 	var active int
 	var updated int64
-	if err := tx.QueryRowContext(ctx, assignmentQuery, workerRun).Scan(&a.MissionID, &a.TaskID, &a.AttemptID, &a.WorkerRunID, &a.MemberID, &active, &a.Generation, &updated); errors.Is(err, sql.ErrNoRows) {
+	if assignmentErr := tx.QueryRowContext(ctx, assignmentQuery, workerRun).Scan(&a.MissionID, &a.TaskID, &a.AttemptID, &a.WorkerRunID, &a.MemberID, &active, &a.Generation, &updated); errors.Is(assignmentErr, sql.ErrNoRows) {
 		return nil, ErrNotFound
-	} else if err != nil {
-		return nil, err
+	} else if assignmentErr != nil {
+		return nil, assignmentErr
 	}
 	if active == 0 || a.Generation != expectedGeneration {
 		return nil, ErrMissionStale
@@ -1823,18 +1823,18 @@ func (d *DB) ReleaseMissionWorkerTakeover(ctx context.Context, workerRun domain.
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return nil, ErrMissionStale
 	}
-	if err := enqueueMissionControlChange(ctx, tx, a.MissionID); err != nil {
-		return nil, err
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, a.MissionID); enqueueErr != nil {
+		return nil, enqueueErr
 	}
-	if err := tx.QueryRowContext(ctx, assignmentQuery, workerRun).Scan(&a.MissionID, &a.TaskID, &a.AttemptID, &a.WorkerRunID, &a.MemberID, &active, &a.Generation, &updated); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	if readErr := tx.QueryRowContext(ctx, assignmentQuery, workerRun).Scan(&a.MissionID, &a.TaskID, &a.AttemptID, &a.WorkerRunID, &a.MemberID, &active, &a.Generation, &updated); readErr != nil {
+		if errors.Is(readErr, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
-		return nil, err
+		return nil, readErr
 	}
 	a.Active, a.UpdatedAt = active != 0, decodeTime(updated)
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, commitErr
 	}
 	return &a, nil
 }
@@ -1846,10 +1846,10 @@ func (d *DB) PendingMissionControlChange(ctx context.Context, missionID domain.M
 	err := d.db.QueryRowContext(ctx, `SELECT generation,published_generation FROM mission_control_changes WHERE mission_id=?`, missionID).Scan(&generation, &published)
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
-		if err := d.db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id=?`, missionID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+		if existsErr := d.db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id=?`, missionID).Scan(&exists); errors.Is(existsErr, sql.ErrNoRows) {
 			return 0, ErrNotFound
-		} else if err != nil {
-			return 0, err
+		} else if existsErr != nil {
+			return 0, existsErr
 		}
 		return 0, nil
 	}
@@ -1879,10 +1879,10 @@ func (d *DB) AckMissionControlChange(ctx context.Context, missionID domain.Missi
 		return nil
 	}
 	var exists int
-	if err := d.db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id=?`, missionID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+	if missionErr := d.db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id=?`, missionID).Scan(&exists); errors.Is(missionErr, sql.ErrNoRows) {
 		return ErrNotFound
-	} else if err != nil {
-		return err
+	} else if missionErr != nil {
+		return missionErr
 	}
 	return nil
 }

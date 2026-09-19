@@ -360,7 +360,7 @@ func resolveJSON(raw, file string, in io.Reader, out any) error {
 		if err != nil {
 			return fmt.Errorf("read revision file: %w", err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		data, err = io.ReadAll(io.LimitReader(f, maxMissionSpecBytes+1))
 		if err != nil {
 			return fmt.Errorf("read revision file: %w", err)

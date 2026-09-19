@@ -13,6 +13,39 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
+type agentIntegrationNoop struct{}
+
+func (agentIntegrationNoop) Prepare(context.Context, feature.Actor, protocol.IntegrationPrepareParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) Show(context.Context, feature.Actor, protocol.IntegrationShowParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) List(context.Context, feature.Actor, protocol.IntegrationListParams) (protocol.IntegrationListResult, error) {
+	return protocol.IntegrationListResult{}, nil
+}
+func (agentIntegrationNoop) Patch(context.Context, feature.Actor, protocol.IntegrationShowParams) (protocol.IntegrationPatchResult, error) {
+	return protocol.IntegrationPatchResult{}, nil
+}
+func (agentIntegrationNoop) Resolve(context.Context, feature.Actor, protocol.IntegrationResolveParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) Verify(context.Context, feature.Actor, protocol.IntegrationVerifyParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) RequestDelivery(context.Context, feature.Actor, protocol.IntegrationRequestDeliveryParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) Decide(context.Context, feature.Actor, protocol.IntegrationDecideParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) Deliver(context.Context, feature.Actor, protocol.IntegrationDeliverParams) (protocol.Candidate, error) {
+	return protocol.Candidate{}, nil
+}
+func (agentIntegrationNoop) Delete(context.Context, feature.Actor, protocol.IntegrationDeleteParams) error {
+	return nil
+}
+
 func acceptedIntegrationPolicyFixture(t *testing.T) (*Service, *domain.Mission, *domain.Member, protocol.SubmissionRef) {
 	t.Helper()
 	ctx := context.Background()
@@ -36,6 +69,51 @@ func acceptedIntegrationPolicyFixture(t *testing.T) (*Service, *domain.Mission, 
 		WorkspaceID: string(submission.Ref.WorkspaceID), RunID: string(submission.Ref.RunID),
 		EvidenceRef: submission.Ref.EvidenceRef, RetainedRevision: submission.Ref.RetainedRevision,
 	}
+}
+
+func TestHandleAgentIntegrationPrepareDeniesStaleIntegrator(t *testing.T) {
+	ctx := context.Background()
+	svc, mission, _, _ := acceptedIntegrationPolicyFixture(t)
+	db := svc.cfg.Store.(*store.DB)
+	staleRun := mission.CurrentIntegratorRunID
+	replacement := regressionMember(t, db, "replacement-agent")
+	choice := domain.MissionIntegrator{
+		AccountMemberID: replacement.ID,
+		Harness:         "claude",
+		Mode:            domain.LaunchHeadless,
+	}
+	replaced, err := db.ReplaceIntegrator(ctx, mission.ID, mission.IntegratorGeneration, choice, replacement.ID, replacement.ID, "integration-agent-stale")
+	if err != nil {
+		t.Fatalf("replace integrator: %v", err)
+	}
+	regressionRun(t, db, replaced.CurrentIntegratorRunID, replaced.WorkspaceID, replacement.ID, "replacement-agent-run")
+
+	svc.SetIntegrationService(agentIntegrationNoop{})
+	_, err = svc.HandleAgent(ctx, staleRun, protocol.MethodIntegrationPrepare, []byte(`{
+		"target_ref":"refs/heads/main",
+		"expected_target_revision":"revision-1",
+		"idempotency_key":"stale-agent"
+	}`))
+	var perr *protocol.Error
+	if !errors.As(err, &perr) {
+		t.Fatalf("stale integration agent error = %v, want protocol error", err)
+	}
+	if perr.Code != protocol.CodeDenied {
+		t.Fatalf("stale integration agent code = %d, want %d", perr.Code, protocol.CodeDenied)
+	}
+	if perr.Message == "" {
+		t.Fatal("stale integration agent error message is empty")
+	}
+
+	_, err = svc.HandleAgent(ctx, replaced.CurrentIntegratorRunID, protocol.MethodIntegrationPrepare, []byte(`{`))
+	perr = nil
+	if !errors.As(err, &perr) {
+		t.Fatalf("malformed integration agent error = %v, want protocol error", err)
+	}
+	if perr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("malformed integration agent code = %d, want %d", perr.Code, protocol.CodeInvalidParams)
+	}
+
 }
 
 func TestIntegrationPrepareResolvesMissionAndRejectsForgedRefs(t *testing.T) {

@@ -73,12 +73,17 @@ the dashboard can open the member's environment terminal for installation and
 login. Exactly `claude`, `codex`, and `pi` qualify; everything else stays
 launchable for runs but is not offered in that setup flow.
 
-Every coordinated shipped harness receives the staged
-`/usr/local/bin/aether-internal` CLI and the run's private socket. No harness
-receives a default MCP registration flag or config file. The short discovery
-hint is delivered through each vendor's native per-launch startup mechanism
-where supported; the `skill` command loads the assignment-specific guidance.
-Runs without the CLI still have the advisory overlap notice.
+Every newly created managed runtime container receives the verified
+`/usr/local/bin/aether-internal` CLI, including taskless runs, custom images,
+member terminals, and verification containers. CLI availability does not grant
+run identity or enable disabled coordination.
+Staging failure refuses creation rather than silently omitting the CLI.
+
+No harness receives an automatic Aether MCP registration flag or config.
+Supported harnesses receive a short native per-launch discovery hint;
+`aether-internal skill` loads live assignment-specific guidance. Containers
+without run identity receive only general guidance, not borrowed authority.
+
 The startup switches follow the vendor references: [Claude CLI
 reference](https://code.claude.com/docs/en/cli-reference),
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),

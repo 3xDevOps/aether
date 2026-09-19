@@ -302,8 +302,9 @@ run ID and question ID returned by the run's own status and inbox results.
 
 ### Integrator candidate integration
 
-Only the current mission integrator may use the agent integration surface. It
-is exactly five commands:
+A candidate freezes selected accepted revisions for combined verification and
+human-approved delivery. Only the current mission integrator may use these
+agent commands:
 
 ```text
 integration prepare
@@ -313,55 +314,45 @@ integration request-delivery
 integration deliver
 ```
 
-Each command accepts `--params-file FILE|-` and `--json`. The file is a
-bounded JSON object up to 16 MiB using the corresponding `internal/protocol`
-parameter type; `-` reads bounded JSON from standard input. The mounted run
-the caller identity, so parameter JSON must not carry an actor, run owner, or
-approval identity. Every command returns the normal `schema_version`, `ok`,
-`result`, and structured `error` envelope with the normal CLI exit codes.
+Each accepts `--params-file FILE|-` and optional `--json`. JSON input is
+limited to 32 KiB; `-` reads standard input. The run socket supplies caller
+identity. Parameter JSON cannot grant a role or approval. Results use the
+normal `schema_version`, `ok`, `result`, and structured `error` envelope.
 There is no agent `decide`, `approve`, generic RPC, list, resolve, patch, or
 delete command.
 
-An integrator prepares, inspects, verifies, and requests delivery using
-explicit parameter files:
+Use each command's `--help` for its required JSON fields. Prepare requires
+`target_ref`, `expected_target_revision`, and `idempotency_key`; the server
+resolves omitted workspace, mission, and accepted inputs. Explicit
+`submissions` select an ordered subset of current accepted revisions.
+
+Create parameter files in a writable location, not the read-only
+`/run/aether` mount:
 
 ```sh
-/usr/local/bin/aether-internal integration prepare \
-  --params-file /run/aether/integration-prepare.json --json
-/usr/local/bin/aether-internal integration show \
-  --params-file /run/aether/integration-show.json --json
-/usr/local/bin/aether-internal integration verify \
-  --params-file /run/aether/integration-verify.json --json
-/usr/local/bin/aether-internal integration request-delivery \
-  --params-file /run/aether/integration-request.json --json
+aether-internal integration prepare --params-file /tmp/aether-prepare.json --json
+aether-internal integration show --params-file /tmp/aether-show.json --json
+aether-internal integration verify --params-file /tmp/aether-verify.json --json
+aether-internal integration request-delivery --params-file /tmp/aether-request.json --json
 ```
 
-`request-delivery` is the human-decision boundary. The integrator must stop
-there while an authenticated human reviews and decides; the agent socket
-cannot approve its own delivery. After the human decision authorizes the
-request, delivery is the exact command below:
+Verification is asynchronous; poll `show` for its durable result. Wait for a
+human delivery decision before executing the approved request:
 
 ```sh
-/usr/local/bin/aether-internal integration deliver \
-  --params-file /run/aether/integration-deliver.json --json
+aether-internal integration deliver --params-file /tmp/aether-deliver.json --json
 ```
 
-If a command reports the coordination socket as unavailable after it may have
-committed, recovery replays the same bounded params file and preserves every
-explicit mutation identity:
+Other mission work may continue, but changing the accepted submission set
+invalidates an older candidate's mission binding. A replacement integrator
+may continue a candidate when the accepted set is unchanged.
 
-```sh
-/usr/local/bin/aether-internal integration prepare \
-  --params-file /run/aether/integration-prepare.json --json
-/usr/local/bin/aether-internal integration request-delivery \
-  --params-file /run/aether/integration-request.json --json
-/usr/local/bin/aether-internal integration deliver \
-  --params-file /run/aether/integration-deliver.json --json
-```
-
-Do not replace an `idempotency_key` with a new value during recovery. A
-successful retry returns the original durable result; a denial, conflict, or
-invalid state remains a structured server error.
+After an uncertain outcome, retry the same parameters and mutation identity.
+Do not replace an `idempotency_key` merely because the connection failed;
+delivery retries use the same `request_id` and `request_version`. A denial,
+conflict, or invalid state remains a structured server error. See
+[Candidate integration](integration.md) for parameter records, retained
+verification evidence, human decisions, and exact delivery.
 
 ### Report an outcome
 

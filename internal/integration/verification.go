@@ -684,7 +684,7 @@ func (s *Service) cleanupVerificationRuntime(ctx context.Context, creationKey st
 		case err == nil && foundID == "":
 			return errors.New("runtime returned an empty container id for creation key")
 		case err == nil:
-			if err := destroyVerificationContainer(foundID, s.runtime); err != nil {
+			if err = destroyVerificationContainer(foundID, s.runtime); err != nil {
 				return err
 			}
 		case !errors.Is(err, runtime.ErrNotFound):

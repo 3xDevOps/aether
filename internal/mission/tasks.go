@@ -28,20 +28,20 @@ func (s *Service) handleTaskRead(ctx context.Context, run domain.RunID, method s
 	switch method {
 	case protocol.MethodTaskShow:
 		var p protocol.TaskShowParams
-		if err := json.Unmarshal(raw, &p); err != nil || strings.TrimSpace(p.TaskID) == "" {
+		if parseErr := json.Unmarshal(raw, &p); parseErr != nil || strings.TrimSpace(p.TaskID) == "" {
 			return nil, errors.New("mission: task.show requires task_id")
 		}
 		task, err := s.cfg.Missions.ProjectTask(ctx, domain.TaskID(p.TaskID))
 		if err != nil {
 			return nil, err
 		}
-		if err := taskVisibleToAssignment(task, mission, attempt); err != nil {
-			return nil, err
+		if visibleErr := taskVisibleToAssignment(task, mission, attempt); visibleErr != nil {
+			return nil, visibleErr
 		}
 		return protocol.TaskShowResult{Task: taskWire(task)}, nil
 	case protocol.MethodTaskList:
 		var p protocol.TaskListParams
-		if err := json.Unmarshal(raw, &p); err != nil || strings.TrimSpace(p.MissionID) == "" {
+		if parseErr := json.Unmarshal(raw, &p); parseErr != nil || strings.TrimSpace(p.MissionID) == "" {
 			return nil, errors.New("mission: task.list requires mission_id")
 		}
 		if domain.MissionID(p.MissionID) != mission.ID {
@@ -52,8 +52,8 @@ func (s *Service) handleTaskRead(ctx context.Context, run domain.RunID, method s
 			if err != nil {
 				return nil, err
 			}
-			if err := taskVisibleToAssignment(task, mission, attempt); err != nil {
-				return nil, err
+			if visibleErr := taskVisibleToAssignment(task, mission, attempt); visibleErr != nil {
+				return nil, visibleErr
 			}
 			return protocol.TaskListResult{Tasks: []protocol.Task{taskWire(task)}}, nil
 		}
@@ -100,8 +100,8 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		return s.acceptSubmissionLocked(ctx, run, raw, mission, attempt)
 	case protocol.MethodTaskPropose:
 		var p protocol.TaskProposeParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if parseErr := json.Unmarshal(raw, &p); parseErr != nil {
+			return nil, parseErr
 		}
 		if strings.TrimSpace(p.MissionID) == "" || !validTaskKey(p.IdempotencyKey) {
 			return nil, errors.New("mission: task.propose requires mission_id, revision, and idempotency_key")
@@ -112,17 +112,17 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if p.Revision.TaskID != "" {
 			return nil, errors.New("mission: task.propose does not accept task_id")
 		}
-		if err := s.authorizeMissionTaskActor(ctx, mission, attempt); err != nil {
-			return nil, err
+		if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, attempt); authorizeErr != nil {
+			return nil, authorizeErr
 		}
 		r := revisionFromWire(p.Revision, run)
 		// A worker may propose a split or a new task in its mission. The
 		t := &domain.Task{MissionID: mission.ID, Revision: r}
-		if err := s.createTask(ctx, t, p.IdempotencyKey); err != nil {
-			return nil, err
+		if createErr := s.createTask(ctx, t, p.IdempotencyKey); createErr != nil {
+			return nil, createErr
 		}
-		if err := s.publishMissionChanged(ctx, mission.ID); err != nil {
-			return nil, err
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
+			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, t.ID)
 		if err != nil {
@@ -132,8 +132,8 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 
 	case protocol.MethodTaskRevise:
 		var p protocol.TaskReviseParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if parseErr := json.Unmarshal(raw, &p); parseErr != nil {
+			return nil, parseErr
 		}
 		if strings.TrimSpace(p.TaskID) == "" || !validTaskKey(p.IdempotencyKey) {
 			return nil, errors.New("mission: task.revise requires task_id, revision, and idempotency_key")
@@ -142,11 +142,11 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if err != nil {
 			return nil, err
 		}
-		if err := taskVisibleToAssignment(task, mission, attempt); err != nil {
-			return nil, err
+		if visibleErr := taskVisibleToAssignment(task, mission, attempt); visibleErr != nil {
+			return nil, visibleErr
 		}
-		if err := s.authorizeMissionTaskActor(ctx, mission, attempt); err != nil {
-			return nil, err
+		if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, attempt); authorizeErr != nil {
+			return nil, authorizeErr
 		}
 		if p.Revision.TaskID != "" && domain.TaskID(p.Revision.TaskID) != task.ID {
 			return nil, fmt.Errorf("%w: revision task does not match target", store.ErrMissionStale)
@@ -165,8 +165,8 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if err != nil {
 			return nil, err
 		}
-		if err := s.publishMissionChanged(ctx, mission.ID); err != nil {
-			return nil, err
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
+			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, task.ID)
 		if err != nil {
@@ -179,8 +179,8 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 
 	case protocol.MethodTaskAccept:
 		var p protocol.TaskAcceptParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if parseErr := json.Unmarshal(raw, &p); parseErr != nil {
+			return nil, parseErr
 		}
 		if attempt != nil {
 			return nil, errors.New("mission: workers cannot accept task revisions")
@@ -192,20 +192,20 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if err != nil {
 			return nil, err
 		}
-		if err := taskVisibleToAssignment(task, mission, nil); err != nil {
-			return nil, err
+		if visibleErr := taskVisibleToAssignment(task, mission, nil); visibleErr != nil {
+			return nil, visibleErr
 		}
 		if p.ExpectedIntegratorGeneration != mission.IntegratorGeneration {
 			return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)
 		}
-		if err := s.authorizeMissionTaskActor(ctx, mission, nil); err != nil {
-			return nil, err
+		if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, nil); authorizeErr != nil {
+			return nil, authorizeErr
 		}
-		if err := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); err != nil {
-			return nil, err
+		if acceptErr := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); acceptErr != nil {
+			return nil, acceptErr
 		}
-		if err := s.publishMissionChanged(ctx, mission.ID); err != nil {
-			return nil, err
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
+			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, task.ID)
 		if err != nil {
@@ -215,8 +215,8 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 
 	case protocol.MethodTaskAbandon:
 		var p protocol.TaskAbandonParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if parseErr := json.Unmarshal(raw, &p); parseErr != nil {
+			return nil, parseErr
 		}
 		if attempt != nil {
 			return nil, errors.New("mission: workers cannot abandon tasks")
@@ -228,20 +228,20 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if err != nil {
 			return nil, err
 		}
-		if err := taskVisibleToAssignment(task, mission, nil); err != nil {
-			return nil, err
+		if visibleErr := taskVisibleToAssignment(task, mission, nil); visibleErr != nil {
+			return nil, visibleErr
 		}
-		if err := s.authorizeMissionTaskActor(ctx, mission, nil); err != nil {
-			return nil, err
+		if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, nil); authorizeErr != nil {
+			return nil, authorizeErr
 		}
 		if p.ExpectedIntegratorGeneration != mission.IntegratorGeneration {
 			return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)
 		}
-		if err := s.cfg.Missions.AbandonTask(ctx, task.ID, p.ExpectedIntegratorGeneration, p.IdempotencyKey); err != nil {
-			return nil, err
+		if abandonErr := s.cfg.Missions.AbandonTask(ctx, task.ID, p.ExpectedIntegratorGeneration, p.IdempotencyKey); abandonErr != nil {
+			return nil, abandonErr
 		}
-		if err := s.publishMissionChanged(ctx, mission.ID); err != nil {
-			return nil, err
+		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
+			return nil, publishErr
 		}
 		projected, err := s.cfg.Missions.ProjectTask(ctx, task.ID)
 		if err != nil {
@@ -252,20 +252,11 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		return nil, errors.New("mission: method not found")
 	}
 }
-func (s *Service) acceptSubmission(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
-	mission, attempt, err := s.resolveAssignment(ctx, run)
-	if err != nil {
-		return nil, err
-	}
-	return s.acceptSubmissionLocked(ctx, run, raw, mission, attempt)
-}
 
 func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, raw json.RawMessage, mission *domain.Mission, attempt *domain.Attempt) (any, error) {
 	var p protocol.TaskAcceptSubmissionParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, err
+	if parseErr := json.Unmarshal(raw, &p); parseErr != nil {
+		return nil, parseErr
 	}
 	if !validTaskKey(p.IdempotencyKey) || p.SubmissionID == "" || p.ExpectedIntegratorGeneration == 0 {
 		return nil, errors.New("mission: task.submission.accept requires submission_id, expected_integrator_generation, and idempotency_key")
@@ -287,15 +278,15 @@ func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, 
 	if err != nil {
 		return nil, err
 	}
-	if err := taskVisibleToAssignment(task, mission, nil); err != nil {
-		return nil, err
+	if visibleErr := taskVisibleToAssignment(task, mission, nil); visibleErr != nil {
+		return nil, visibleErr
 	}
-	if err := s.authorizeMissionTaskActor(ctx, mission, nil); err != nil {
-		return nil, err
+	if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, nil); authorizeErr != nil {
+		return nil, authorizeErr
 	}
 	if submission.State == domain.SubmissionProposed {
-		if err := s.validateSubmissionEvidence(ctx, mission, task, submission); err != nil {
-			return nil, err
+		if evidenceErr := s.validateSubmissionEvidence(ctx, mission, task, submission); evidenceErr != nil {
+			return nil, evidenceErr
 		}
 	}
 	if len(submission.ScopeViolations) > 0 && strings.TrimSpace(p.ScopeDisposition) == "" {
@@ -305,8 +296,8 @@ func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.publishMissionChanged(ctx, accepted.MissionID); err != nil {
-		return nil, err
+	if publishErr := s.publishMissionChanged(ctx, accepted.MissionID); publishErr != nil {
+		return nil, publishErr
 	}
 	return protocol.TaskMutationResult{Acceptance: &protocol.Acceptance{
 		SubmissionID: string(accepted.SubmissionID), MissionID: string(accepted.MissionID), TaskID: string(accepted.TaskID),
@@ -341,10 +332,10 @@ func (s *Service) validateSubmissionEvidence(ctx context.Context, mission *domai
 	if err != nil {
 		return fmt.Errorf("%w: retained evidence lookup failed: %v", store.ErrMissionNotReady, err)
 	}
-	if packet.ID != string(submission.Ref.EvidenceRef) ||
+	if packet.ID != submission.Ref.EvidenceRef ||
 		packet.WorkspaceID != string(mission.WorkspaceID) ||
 		packet.RunID != string(submission.Ref.RunID) ||
-		packet.RetainedRevision != string(submission.Ref.RetainedRevision) {
+		packet.RetainedRevision != submission.Ref.RetainedRevision {
 		return fmt.Errorf("%w: retained evidence identity does not match submission", store.ErrMissionNotReady)
 	}
 	if available, detail := packetEvidenceState(s.cfg.Now, packet); !available {

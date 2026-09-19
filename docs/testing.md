@@ -152,7 +152,7 @@ tailnet identity resolution so join and fallback scenarios need no real
 tailnet, `Harnesses` overrides registry argv templates so a registered
 harness (with its real profile root and credential mounts) can run a
 scripted agent - the first two double as deployment wiring - and
-`ServerBinary` names the binary staged as the in-container MCP bridge.
+`ServerBinary` names the executable staged for the CLI and optional MCP bridge.
 
 ### The container coordination scenario
 
@@ -166,17 +166,21 @@ under `go test` `/proc/self/exe` is not. So the scenario points
 `ServerBinary` at an `aether-server` it builds - the same one the chaos
 scenarios run as a child process.
 
-The agent has to be launched by the shipped `claude` profile, because a
-`Harnesses` argv override is respected verbatim and takes the MCP
-registration with it. So the scenario builds a run image whose `claude`
-executable is the fixture agent in `internal/server/testdata/coordagent`,
-running as a non-root user. The fixture knows no Aether paths: it takes the
-coordination directory from the `--mcp-config` it was handed and the bridge
-command from that config, the way a real harness would. What it found goes
-on its terminal, where the test reads it over a real attach: the modes,
-both binds read-only in the kernel's own mount table, a write the
-coordination directory refuses with EROFS, and every tool result. The
-daemon's own view of the two binds is checked beside it.
+The scenario uses the shipped `claude` profile with a non-root fixture agent
+from `internal/server/testdata/coordagent`. It explicitly invokes the optional
+bridge from the canonical executable mount; no automatic MCP registration is
+required. The fixture reports directory modes, read-only mounts from the
+kernel's mount table, EROFS on attempted writes, and tool results over a real
+attach. The daemon's mount view is checked alongside those observations.
+
+`TestIntegrationMissionCompositionInDocker` composes mission dispatch,
+proactive coordination, accepted retained submissions, combined verification,
+human approval, and exact delivery. It also checks failed verification,
+stale-target rejection, and integrator replacement. Its `claude`, `pi`, and
+`omp` executables are scripted fixtures, not genuine vendor-agent runs.
+`web/e2e/mission-candidate-review.spec.ts` drives launch, progress, worker
+control, and mission candidate preparation in a real browser and attaches a
+successful screenshot for visual inspection.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container

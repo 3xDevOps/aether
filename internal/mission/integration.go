@@ -149,11 +149,11 @@ func (s *Service) integrationService() (sshd.IntegrationService, error) {
 	return base, nil
 }
 
-func missionDenied(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", feature.ErrUnauthorized, fmt.Sprintf(format, args...))
+func missionDenied(message string) error {
+	return fmt.Errorf("%w: %s", feature.ErrUnauthorized, message)
 }
-func missionConflict(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", feature.ErrConflict, fmt.Sprintf(format, args...))
+func missionConflict(message string) error {
+	return fmt.Errorf("%w: %s", feature.ErrConflict, message)
 }
 
 func integrationReadOnly(op string) bool {
@@ -173,8 +173,8 @@ func (s *Service) AdmitIntegration(ctx context.Context, a feature.Admission) (re
 	if s == nil || s.cfg.Store == nil || s.cfg.Missions == nil {
 		return nil, feature.ErrUnavailable
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
 	}
 	mu := s.cfg.AuthorizationMu
 	if mu == nil {
@@ -214,8 +214,8 @@ func (s *Service) AdmitIntegration(ctx context.Context, a feature.Admission) (re
 		if a.Actor.RunID != "" {
 			return nil, missionDenied("run actor has no mission assignment")
 		}
-		if err := s.authorizeIntegrationActor(ctx, a, ""); err != nil {
-			return nil, err
+		if authorizeErr := s.authorizeIntegrationActor(ctx, a, ""); authorizeErr != nil {
+			return nil, authorizeErr
 		}
 		return func() { unlock() }, nil
 	}
@@ -236,8 +236,8 @@ func (s *Service) AdmitIntegration(ctx context.Context, a feature.Admission) (re
 	if m == nil {
 		return nil, store.ErrNotFound
 	}
-	if err := s.authorizeMissionIntegration(ctx, a, m); err != nil {
-		return nil, err
+	if authorizeErr := s.authorizeMissionIntegration(ctx, a, m); authorizeErr != nil {
+		return nil, authorizeErr
 	}
 	if integrationReadOnly(a.Operation) {
 		return func() { unlock() }, nil
@@ -289,7 +289,7 @@ func (s *Service) authorizeIntegrationActor(ctx context.Context, a feature.Admis
 		if workspaceID != "" && workspaceID != domain.WorkspaceID(a.Candidate.WorkspaceID) {
 			return missionDenied("candidate workspace does not match request")
 		}
-		if a.WorkspaceID != "" && domain.WorkspaceID(a.WorkspaceID) != domain.WorkspaceID(a.Candidate.WorkspaceID) {
+		if a.WorkspaceID != "" && a.WorkspaceID != domain.WorkspaceID(a.Candidate.WorkspaceID) {
 			return missionDenied("candidate workspace does not match request")
 		}
 		workspaceID = domain.WorkspaceID(a.Candidate.WorkspaceID)
@@ -330,8 +330,8 @@ func (s *Service) authorizeIntegrationActor(ctx context.Context, a feature.Admis
 	if member == nil || member.Pending {
 		return missionDenied("actor is unavailable")
 	}
-	if err := permissions.Check(integrationCapability(a.Operation), permissions.Actor{ID: member.ID, Role: member.Role}, target); err != nil {
-		return fmt.Errorf("%w: %v", feature.ErrUnauthorized, err)
+	if checkErr := permissions.Check(integrationCapability(a.Operation), permissions.Actor{ID: member.ID, Role: member.Role}, target); checkErr != nil {
+		return fmt.Errorf("%w: %v", feature.ErrUnauthorized, checkErr)
 	}
 	return nil
 }
@@ -553,62 +553,62 @@ func submissionRefsSubset(selected, current []protocol.SubmissionRef) bool {
 func (s *Service) handleIntegrationAgent(ctx context.Context, run domain.RunID, method string, raw json.RawMessage) (any, error) {
 	engine, err := s.integrationService()
 	if err != nil {
-		return nil, err
+		return nil, sshd.IntegrationServiceError(err)
 	}
 	actor := feature.Actor{RunID: run}
 	switch method {
 	case protocol.MethodIntegrationPrepare:
 		var p protocol.IntegrationPrepareParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(raw, &p); unmarshalErr != nil {
+			return nil, sshd.IntegrationServiceError(fmt.Errorf("%w: %v", feature.ErrInvalidRequest, unmarshalErr))
 		}
 		p, err = s.prepareIntegration(ctx, actor, p)
 		if err != nil {
-			return nil, err
+			return nil, sshd.IntegrationServiceError(err)
 		}
 		candidate, err := engine.Prepare(ctx, actor, p)
 		if err != nil {
-			return nil, err
+			return nil, sshd.IntegrationServiceError(err)
 		}
 		return protocol.IntegrationPrepareResult{Candidate: candidate}, nil
 	case protocol.MethodIntegrationShow:
 		var p protocol.IntegrationShowParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(raw, &p); unmarshalErr != nil {
+			return nil, sshd.IntegrationServiceError(fmt.Errorf("%w: %v", feature.ErrInvalidRequest, unmarshalErr))
 		}
 		candidate, err := engine.Show(ctx, actor, p)
 		if err != nil {
-			return nil, err
+			return nil, sshd.IntegrationServiceError(err)
 		}
 		return protocol.IntegrationShowResult{Candidate: candidate}, nil
 	case protocol.MethodIntegrationVerify:
 		var p protocol.IntegrationVerifyParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(raw, &p); unmarshalErr != nil {
+			return nil, sshd.IntegrationServiceError(fmt.Errorf("%w: %v", feature.ErrInvalidRequest, unmarshalErr))
 		}
 		candidate, err := engine.Verify(ctx, actor, p)
 		if err != nil {
-			return nil, err
+			return nil, sshd.IntegrationServiceError(err)
 		}
 		return protocol.IntegrationVerifyResult{Candidate: candidate}, nil
 	case protocol.MethodIntegrationRequestDelivery:
 		var p protocol.IntegrationRequestDeliveryParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(raw, &p); unmarshalErr != nil {
+			return nil, sshd.IntegrationServiceError(fmt.Errorf("%w: %v", feature.ErrInvalidRequest, unmarshalErr))
 		}
 		candidate, err := engine.RequestDelivery(ctx, actor, p)
 		if err != nil {
-			return nil, err
+			return nil, sshd.IntegrationServiceError(err)
 		}
 		return protocol.IntegrationRequestDeliveryResult{Candidate: candidate}, nil
 	case protocol.MethodIntegrationDeliver:
 		var p protocol.IntegrationDeliverParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+		if unmarshalErr := json.Unmarshal(raw, &p); unmarshalErr != nil {
+			return nil, sshd.IntegrationServiceError(fmt.Errorf("%w: %v", feature.ErrInvalidRequest, unmarshalErr))
 		}
 		candidate, err := engine.Deliver(ctx, actor, p)
 		if err != nil {
-			return nil, err
+			return nil, sshd.IntegrationServiceError(err)
 		}
 		return protocol.IntegrationDeliverResult{Candidate: candidate}, nil
 	default:

@@ -113,8 +113,8 @@ func TestTaskMutationUsesReplacementIntegratorAuthorizerAfterOriginalRevocation(
 	}
 	regressionRun(t, db, mission.CurrentIntegratorRunID, workspace.ID, replacement.ID, "integrator")
 	original.Pending = true
-	if err := db.UpdateMember(ctx, original); err != nil {
-		t.Fatalf("revoke original member: %v", err)
+	if updateErr := db.UpdateMember(ctx, original); updateErr != nil {
+		t.Fatalf("revoke original member: %v", updateErr)
 	}
 
 	svc, err := New(Config{Store: db, Missions: db, AuthorizationMu: &sync.Mutex{}})
@@ -139,8 +139,8 @@ func TestTaskMutationUsesReplacementIntegratorAuthorizerAfterOriginalRevocation(
 	}
 
 	replacement.Pending = true
-	if err := db.UpdateMember(ctx, replacement); err != nil {
-		t.Fatalf("revoke replacement member: %v", err)
+	if updateErr := db.UpdateMember(ctx, replacement); updateErr != nil {
+		t.Fatalf("revoke replacement member: %v", updateErr)
 	}
 	revise, err := json.Marshal(protocol.TaskReviseParams{
 		TaskID:         mutation.Task.ID,
@@ -150,8 +150,8 @@ func TestTaskMutationUsesReplacementIntegratorAuthorizerAfterOriginalRevocation(
 	if err != nil {
 		t.Fatalf("marshal revision: %v", err)
 	}
-	if _, err := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskRevise, revise); !errors.Is(err, permissions.ErrDenied) {
-		t.Fatalf("revoked replacement mutation error = %v, want ErrDenied", err)
+	if _, deniedErr := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskRevise, revise); !errors.Is(deniedErr, permissions.ErrDenied) {
+		t.Fatalf("revoked replacement mutation error = %v, want ErrDenied", deniedErr)
 	}
 }
 
@@ -219,8 +219,8 @@ func TestSubmissionAcceptanceRechecksRetainedEvidenceButReplaysAcceptedReceipt(t
 		if err != nil {
 			t.Fatalf("marshal acceptance: %v", err)
 		}
-		if _, err := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskAcceptSubmission, raw); !errors.Is(err, store.ErrMissionNotReady) {
-			t.Fatalf("expired evidence acceptance error = %v, want ErrMissionNotReady", err)
+		if _, acceptErr := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskAcceptSubmission, raw); !errors.Is(acceptErr, store.ErrMissionNotReady) {
+			t.Fatalf("expired evidence acceptance error = %v, want ErrMissionNotReady", acceptErr)
 		}
 		stillProposed, err := db.GetSubmission(ctx, submission.ID)
 		if err != nil {
@@ -253,16 +253,16 @@ func TestSubmissionAcceptanceRechecksRetainedEvidenceButReplaysAcceptedReceipt(t
 		if err != nil {
 			t.Fatalf("marshal acceptance: %v", err)
 		}
-		if _, err := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskAcceptSubmission, raw); err != nil {
-			t.Fatalf("available evidence acceptance: %v", err)
+		if _, acceptErr := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskAcceptSubmission, raw); acceptErr != nil {
+			t.Fatalf("available evidence acceptance: %v", acceptErr)
 		}
 		expires, err := time.Parse(time.RFC3339Nano, *reader.packet.ExpiresAt)
 		if err != nil {
 			t.Fatalf("parse packet expiry: %v", err)
 		}
 		*clock = expires.Add(time.Second)
-		if _, err := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskAcceptSubmission, raw); err != nil {
-			t.Fatalf("accepted receipt replay after expiry: %v", err)
+		if _, acceptErr := svc.HandleAgent(ctx, mission.CurrentIntegratorRunID, protocol.MethodTaskAcceptSubmission, raw); acceptErr != nil {
+			t.Fatalf("accepted receipt replay after expiry: %v", acceptErr)
 		}
 		accepted, err := db.GetSubmission(ctx, submission.ID)
 		if err != nil {

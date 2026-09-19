@@ -4,10 +4,6 @@
 // invokes the staged bridge itself, exactly as an optional user configuration
 // would.
 //
-// It knows nothing about Aether's own paths: the coordination directory is
-// the directory of the config it was pointed at, or the standard mounted
-// directory for a manually invoked bridge.
-//
 // It never exits. Its whole conversation with the test is its terminal, and
 // a run whose agent exits is a run the test can no longer attach to.
 package main
@@ -75,28 +71,10 @@ func main() {
 	}
 }
 func coordinate(ctx context.Context) error {
-	configPath := flagValue("--mcp-config")
 	dir := coordtransport.MountDir
 	command := coordtransport.BinaryPath
 	args := []string{"mcp"}
-	if configPath != "" {
-		// A user may still opt into MCP manually through a harness-owned
-		// config. The server never synthesizes this argument.
-		dir = filepath.Dir(configPath)
-		raw, err := os.ReadFile(configPath)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", configPath, err)
-		}
-		command, args, err = bridgeCommand(raw)
-		if err != nil {
-			return err
-		}
-	} else {
-		say("assets:manual-mcp")
-	}
-	// Traversing the coordination directory, reading the config out of it
-	// when manually supplied, and being refused a write to it are all the
-	// non-root user's own.
+	say("assets:manual-mcp")
 	if err := reportDir(dir); err != nil {
 		return err
 	}
@@ -159,37 +137,6 @@ func coordinate(ctx context.Context) error {
 	}
 	say("report:%s", strings.TrimSpace(string(raw)))
 	return nil
-}
-
-// flagValue returns the value of a "--flag value" pair in the argv the
-// harness was launched with.
-func flagValue(name string) string {
-	for i, arg := range os.Args {
-		if arg == name && i+1 < len(os.Args) {
-			return os.Args[i+1]
-		}
-	}
-	return ""
-}
-
-// bridgeCommand reads the stdio server the MCP config names.
-func bridgeCommand(raw []byte) (string, []string, error) {
-	var doc struct {
-		Servers map[string]struct {
-			Type    string   `json:"type"`
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		} `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return "", nil, fmt.Errorf("decode mcp config: %w", err)
-	}
-	for _, server := range doc.Servers {
-		if server.Type == "stdio" && server.Command != "" {
-			return server.Command, server.Args, nil
-		}
-	}
-	return "", nil, fmt.Errorf("mcp config names no stdio server: %s", raw)
 }
 
 // reportDir lists the coordination directory with the mode of every entry,
