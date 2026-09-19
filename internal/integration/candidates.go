@@ -392,6 +392,9 @@ func (s *Service) List(ctx context.Context, actor Actor, p protocol.IntegrationL
 }
 
 func (s *Service) Resolve(ctx context.Context, actor Actor, p protocol.IntegrationResolveParams) (protocol.Candidate, error) {
+	if p.ExpectedVersion <= 0 {
+		return protocol.Candidate{}, fmt.Errorf("%w: expected version must be positive", ErrInvalidRequest)
+	}
 	if p.IdempotencyKey == "" {
 		return protocol.Candidate{}, fmt.Errorf("%w: idempotency key required", ErrInvalidRequest)
 	}
@@ -427,6 +430,9 @@ func (s *Service) Resolve(ctx context.Context, actor Actor, p protocol.Integrati
 	}
 	if found && mutation.ResultID != "" {
 		return *c, nil
+	}
+	if !found && c.Version != p.ExpectedVersion {
+		return protocol.Candidate{}, fmt.Errorf("%w: candidate version is %d, expected %d", ErrConflict, c.Version, p.ExpectedVersion)
 	}
 	if c.State != protocol.CandidateConflicted {
 		return protocol.Candidate{}, fmt.Errorf("%w: candidate is not conflicted", ErrConflict)
