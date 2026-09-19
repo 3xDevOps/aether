@@ -76,14 +76,13 @@ func TestIntegrationChaosDiskPressure(t *testing.T) {
 		}, &launched); err != nil {
 			t.Fatalf("run.launch %d: %v", i, err)
 		}
-		// The fake agent parks on stdin; steering it is what ends the run.
+		// Finish through the controlling attach; run.inject queues a delayed room request.
 		att := openAttach(t, env.client, launched.Run.ID)
 		waitOutput(t, att, "agent-ready")
-		if err := env.ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
-			RunID: launched.Run.ID, Message: "finish", IdempotencyKey: fmt.Sprintf("pressure-finish-%d", i),
-		}, nil); err != nil {
-			t.Fatalf("run.inject %d: %v", i, err)
+		if _, err := att.stdin.Write([]byte("finish\r")); err != nil {
+			t.Fatalf("finish run %d: %v", i, err)
 		}
+		waitOutput(t, att, "got:finish")
 		att.close()
 		env.waitStatus(t, launched.Run.ID, domain.RunCompleted)
 		if err := env.ctrl.Call(protocol.MethodRunClose, protocol.RunCloseParams{
