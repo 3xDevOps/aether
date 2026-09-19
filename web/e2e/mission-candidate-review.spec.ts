@@ -121,7 +121,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
 
   await page.goto(alice.url)
   await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
-  await page.getByRole('button', { name: missionObjective, exact: false }).click()
+  await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
   const missionView = page.getByRole('region', { name: 'Mission tasks' })
   await expect(missionView).toBeVisible()
   await expect(missionView).toContainText('Working')
@@ -158,7 +158,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   const missionURL = new URL(alice.url)
   await page.goto(missionURL.toString())
   await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
-  await page.getByRole('button', { name: missionObjective, exact: false }).click()
+  await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
   const candidateReview = page.getByRole('region', { name: 'Candidate review' })
   await expect(candidateReview).toBeVisible({ timeout: terminalTimeout })
   await expect(candidateReview.getByTestId('mission-candidate-inputs')).toContainText(submission.ref.evidence_ref)
