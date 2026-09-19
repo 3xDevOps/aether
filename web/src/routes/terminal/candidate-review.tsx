@@ -97,7 +97,6 @@ function missionAcceptedSetLabel(submissions: MissionSubmission[]): string {
 }
 function targetRevision(runs: Run[], currentRunID: string): string {
   return runs.find((run) => run.id === currentRunID && run.base_commit)?.base_commit
-    || runs.find((run) => run.base_commit)?.base_commit
     || ''
 }
 export interface CandidateReviewProps {
