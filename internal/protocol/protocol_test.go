@@ -48,7 +48,8 @@ func TestAttachResumeIDWire(t *testing.T) {
 
 func TestAttachControlLeaseWire(t *testing.T) {
 	req := AttachRequest{
-		RunID: "run-1", ControlSessionID: "tab-1", ControlGeneration: 7,
+		RunID: "run-1", Screen: true, Interactive: true,
+		ControlSessionID: "tab-1", ControlGeneration: 7,
 		Takeover: true, ReleaseControl: true,
 	}
 	raw, err := json.Marshal(req)
@@ -59,8 +60,8 @@ func TestAttachControlLeaseWire(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ControlSessionID != req.ControlSessionID || got.ControlGeneration != req.ControlGeneration ||
-		!got.Takeover || !got.ReleaseControl {
+	if !got.Screen || !got.Interactive || got.ControlSessionID != req.ControlSessionID ||
+		got.ControlGeneration != req.ControlGeneration || !got.Takeover || !got.ReleaseControl {
 		t.Fatalf("control attach round trip = %+v, want %+v", got, req)
 	}
 }

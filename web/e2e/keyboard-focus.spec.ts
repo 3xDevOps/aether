@@ -55,7 +55,7 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
   // The fake agent exits, but this interactive run keeps its supervised shell
   // and remains usable until the member explicitly closes it.
-  await expect(page.locator('.xterm-rows')).toContainText('agent-ready')
+  await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready')
   await expect(page.locator('header').filter({ hasText: task })).toContainText('Working')
 }
 

@@ -3,10 +3,17 @@ package ptyhost
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 type snapshotResizeAttachment struct {
@@ -145,5 +152,353 @@ func TestResizePendingOverflowPublishesCursorAfterCommit(t *testing.T) {
 	}
 	if len(s.pendingScreen) != 0 {
 		t.Fatalf("pending output remained after resize completion: %d", len(s.pendingScreen))
+	}
+}
+
+func TestScreenCheckpointRecoversSplitUTF8Suffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.cast")
+	tr, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tr.close() }()
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	s := &session{
+		run:        RunSession("checkpoint"),
+		tr:         tr,
+		screen:     screen,
+		checkpoint: checkpointPath(path),
+		clients:    make(map[*client]struct{}),
+		ring:       newRing(1 << 20),
+		cols:       80,
+		rows:       24,
+	}
+	s.deliver([]byte("prefix\xc3"))
+	checkpointErr := s.checkpointNow()
+	if checkpointErr != nil {
+		t.Fatal(checkpointErr)
+	}
+	s.deliver([]byte{0xa9})
+	if err = tr.close(); err != nil {
+		t.Fatal(err)
+	}
+	recovered, _, ok, err := recoverCheckpoint(path)
+	if err != nil || !ok {
+		t.Fatalf("recover checkpoint: ok=%v err=%v", ok, err)
+	}
+	defer recovered.screen.dispose()
+	if got, want := recovered.screen.term.String(), s.screen.term.String(); got != want {
+		t.Fatalf("split UTF-8 checkpoint diverged: got %q want %q", got, want)
+	}
+}
+
+func TestCheckpointBoundaryKeepsConcurrentSuffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.cast")
+	tr, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		_ = tr.close()
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	s := &session{
+		run:        RunSession("checkpoint-suffix"),
+		tr:         tr,
+		screen:     screen,
+		checkpoint: checkpointPath(path),
+		clients:    make(map[*client]struct{}),
+		ring:       newRing(1 << 20),
+	}
+	s.deliver([]byte("prefix"))
+	s.mu.Lock()
+	capture, err := s.captureCheckpointLocked()
+	s.mu.Unlock()
+	if err != nil {
+		_ = tr.close()
+		t.Fatal(err)
+	}
+	s.deliver([]byte("suffix"))
+	if err = s.persistCheckpoint(capture); err != nil {
+		_ = tr.close()
+		t.Fatal(err)
+	}
+	_ = tr.close()
+	recovered, _, ok, err := recoverCheckpoint(path)
+	if err != nil || !ok {
+		t.Fatalf("recover checkpoint: ok=%v err=%v", ok, err)
+	}
+	defer recovered.screen.dispose()
+	if got, want := recovered.screen.term.String(), s.screen.term.String(); got != want {
+		t.Fatalf("checkpoint suffix diverged: got %q want %q", got, want)
+	}
+}
+
+func TestCheckpointPersistenceDoesNotHoldSessionLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.cast")
+	tr, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tr.close() }()
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	s := &session{
+		run:        RunSession("checkpoint-live"),
+		tr:         tr,
+		screen:     screen,
+		checkpoint: checkpointPath(path),
+		clients:    make(map[*client]struct{}),
+		ring:       newRing(1 << 20),
+	}
+	s.deliver([]byte("prefix\xc3"))
+	s.checkpointMu.Lock()
+	checkpointDone := make(chan error, 1)
+	go func() { checkpointDone <- s.checkpointNow() }()
+	var liveDone chan struct{}
+	defer func() {
+		s.checkpointMu.Unlock()
+		if checkpointErr := <-checkpointDone; checkpointErr != nil {
+			t.Error(checkpointErr)
+		}
+		if liveDone != nil {
+			<-liveDone
+		}
+	}()
+	waitFor(t, "checkpoint capture", func() bool {
+		tr.mu.Lock()
+		defer tr.mu.Unlock()
+		return len(tr.pending) == 0
+	})
+
+	const marker = "live-during-checkpoint"
+	suffix := append([]byte{0xa9}, bytes.Repeat([]byte("output\r\n"), 16<<10)...)
+	suffix = append(suffix, marker...)
+	liveDone = make(chan struct{})
+	active := false
+	go func() {
+		s.deliver(suffix)
+		active = s.isActive()
+		close(liveDone)
+	}()
+	select {
+	case <-liveDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("live output or control remained blocked by checkpoint persistence")
+	}
+	if !active || !strings.Contains(s.screen.term.String(), marker) {
+		t.Fatal("active terminal did not display output during checkpoint persistence")
+	}
+	recorded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(recorded, []byte(marker)) {
+		t.Fatal("ordinary transcript writes stalled behind checkpoint persistence")
+	}
+}
+
+func TestCheckpointCountsResizeFlushedUTF8AcrossRestart(t *testing.T) {
+	h, _ := newTestHost(t, func(cfg *Config) { cfg.ReplayBytes = 1 })
+	run := domain.RunID("run-checkpoint-utf8")
+	att1 := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunSession(run), att1); err != nil {
+		t.Fatal(err)
+	}
+	att1.writeOutput(t, "prefix\xc3")
+	s := h.lookup(RunSession(run))
+	waitFor(t, "pending UTF-8 output", func() bool {
+		s.tr.mu.Lock()
+		defer s.tr.mu.Unlock()
+		return len(s.tr.pending) == 1
+	})
+	s.tr.resize(80, 24)
+	s.tr.mu.Lock()
+	gotCount := s.tr.outputBytes
+	s.tr.mu.Unlock()
+	if gotCount != len([]byte("prefix\xc3")) {
+		t.Fatalf("resize-flushed output count = %d, want %d", gotCount, len([]byte("prefix\xc3")))
+	}
+	if err := s.checkpointNow(); err != nil {
+		t.Fatal(err)
+	}
+	att1.writeOutput(t, string([]byte{0xa9}))
+	want := []byte("prefix\xc3\xa9")
+	waitFor(t, "complete UTF-8 replay", func() bool {
+		s.tr.mu.Lock()
+		defer s.tr.mu.Unlock()
+		return s.tr.outputBytes == len(want)
+	})
+	if err := h.StopSession(context.Background(), RunSession(run)); err != nil {
+		t.Fatal(err)
+	}
+
+	att2 := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunSession(run), att2); err != nil {
+		t.Fatal(err)
+	}
+	kr, kw := io.Pipe()
+	t.Cleanup(func() {
+		_ = kw.Close()
+		_ = kr.Close()
+	})
+	conn := &replayConn{r: kr}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.Attach(context.Background(), RunSession(run), AttachClient{
+			Member: "replay", Cols: 80, Rows: 24, ReadOnly: true, Snapshot: true,
+		}, conn, nil)
+	}()
+	waitFor(t, "restart replay", func() bool { return len(conn.replayBytes()) == 1 })
+	_ = kw.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("replay attach: %v", err)
+	}
+	var replay []byte
+	for _, part := range conn.replayBytes() {
+		replay = append(replay, part...)
+	}
+	if !bytes.Equal(replay, want) {
+		t.Fatalf("restart replay = %q, want %q", replay, want)
+	}
+}
+
+func TestClientControlToggleFencesInputAndReconcilesGeometry(t *testing.T) {
+	s := &session{
+		clients: make(map[*client]struct{}),
+		ring:    newRing(1024),
+		cols:    80,
+		rows:    24,
+		stdin:   snapshotNopWriteCloser{},
+	}
+	c := newClient(nil, AttachClient{Cols: 80, Rows: 24})
+	other := newClient(nil, AttachClient{Cols: 100, Rows: 30, ReadOnly: true})
+	s.clients[c] = struct{}{}
+	s.clients[other] = struct{}{}
+	if err := s.setClientReadOnly(c, true); err != nil {
+		t.Fatal(err)
+	}
+	if !c.readOnly || s.imposesNow(c) {
+		t.Fatalf("control revoke left writable geometry state: readOnly=%v imposes=%v", c.readOnly, s.imposesNow(c))
+	}
+	if err := s.writeClientStdinContext(context.Background(), c, []byte("blocked")); err != ErrWriteDenied {
+		t.Fatalf("revoked input = %v, want ErrWriteDenied", err)
+	}
+	if err := s.setClientReadOnly(c, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.writeClientStdinContext(context.Background(), c, []byte("allowed")); err != nil {
+		t.Fatalf("granted input = %v", err)
+	}
+}
+
+func TestOlderCheckpointCannotReplaceNewerScreen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.cast")
+	tr, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tr.close() }()
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	s := &session{
+		run:        RunSession("checkpoint-order"),
+		tr:         tr,
+		screen:     screen,
+		checkpoint: checkpointPath(path),
+		clients:    make(map[*client]struct{}),
+		ring:       newRing(1 << 20),
+	}
+	capture := func() *checkpointCapture {
+		t.Helper()
+		s.mu.Lock()
+		captured, captureErr := s.captureCheckpointLocked()
+		s.mu.Unlock()
+		if captureErr != nil {
+			t.Fatal(captureErr)
+		}
+		return captured
+	}
+	s.deliver([]byte("checkpoint-old"))
+	older := capture()
+	defer older.boundary.release()
+	s.deliver([]byte("\r\x1b[2Kcheckpoint-latest"))
+	newer := capture()
+	defer newer.boundary.release()
+	if err = s.persistCheckpoint(newer); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.persistCheckpoint(older); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := os.ReadFile(checkpointPath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved screenCheckpoint
+	if err = json.Unmarshal(encoded, &saved); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := newTerminalScreen(saved.Cols, saved.Rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.dispose()
+	restored.write(saved.Data)
+	if text := restored.term.String(); !strings.Contains(text, "checkpoint-latest") {
+		t.Fatalf("persisted screen rolled back: %q", text)
+	}
+}
+
+func TestFinalizingSessionDefersArchiveFallback(t *testing.T) {
+	h, _ := newTestHost(t)
+	run := domain.RunID("finalizing-archive")
+	key := RunSession(run)
+	att := newFakeAtt()
+	if err := h.StartSession(context.Background(), key, att); err != nil {
+		t.Fatal(err)
+	}
+	s := h.lookup(key)
+	s.checkpointMu.Lock()
+	unlock := sync.OnceFunc(s.checkpointMu.Unlock)
+	defer unlock()
+	const want = "final-before-archive"
+	att.writeOutput(t, want)
+	_ = att.outW.Close()
+	waitFor(t, "session finalization", func() bool { return !s.isActive() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	attachErr := h.Attach(ctx, key, AttachClient{ReadOnly: true}, &bytes.Buffer{}, nil)
+	if !errors.Is(attachErr, context.DeadlineExceeded) {
+		t.Fatalf("attach during final persistence = %v, want cancellation before archive fallback", attachErr)
+	}
+	unlock()
+	if err := h.StopSession(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	replay, size, err := h.Replay(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = replay.Close() }()
+	data, err := io.ReadAll(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != want || size != len(want) {
+		t.Fatalf("finished archive = %q (%d bytes), want %q", data, size, want)
 	}
 }

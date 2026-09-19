@@ -57,7 +57,7 @@ test('a phone steers a run from the Actions menu and reads its diff', async ({
 
   // The agent writes result.txt a second after it greets, and the tab fetches
   // the patch once per revision, so Refresh is what asks again.
-  const pane = page.locator('.xterm-rows')
+  const pane = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(pane).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
 
   await page.getByRole('tab', { name: 'Diff' }).tap()

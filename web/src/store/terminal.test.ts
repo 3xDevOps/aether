@@ -19,6 +19,7 @@ function socket(close = vi.fn()): RunShellSocket {
     suspend: vi.fn(),
     resume: vi.fn(),
     resetWriteDenial: vi.fn(),
+    setControl: vi.fn(),
     isEnded: vi.fn(() => false),
   }
 }

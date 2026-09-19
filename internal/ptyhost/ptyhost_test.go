@@ -472,6 +472,64 @@ func TestRunAttachReplaysWholeTranscriptBeyondRing(t *testing.T) {
 		t.Fatalf("detach returned %v, want nil", err)
 	}
 }
+func TestRunAttachFramedHistoryAndCompactScreen(t *testing.T) {
+	h, _ := newTestHost(t, func(cfg *Config) { cfg.ReplayBytes = 8 })
+	att := newFakeAtt()
+	run := domain.RunID("run-framed-history")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	var early strings.Builder
+	for i := range snapshotScrollback + 40 {
+		fmt.Fprintf(&early, "early-%03d\r\n", i)
+	}
+	output := early.String() + "late-marker\r\n"
+	att.writeOutput(t, output)
+	s := h.lookup(RunSession(run))
+	waitFor(t, "complete framed transcript", func() bool {
+		s.tr.mu.Lock()
+		defer s.tr.mu.Unlock()
+		return s.tr.outputBytes == len(output)
+	})
+
+	readReplay := func(a AttachClient) []byte {
+		kr, kw := io.Pipe()
+		t.Cleanup(func() {
+			_ = kw.Close()
+			_ = kr.Close()
+		})
+		conn := &replayConn{r: kr}
+		errCh := make(chan error, 1)
+		go func() { errCh <- h.Attach(context.Background(), RunSession(run), a, conn, nil) }()
+		waitFor(t, "framed replay", func() bool { return len(conn.replayBytes()) == 1 })
+		_ = kw.Close()
+		if err := <-errCh; err != nil {
+			t.Fatalf("Attach: %v", err)
+		}
+		var replay []byte
+		for _, part := range conn.replayBytes() {
+			replay = append(replay, part...)
+		}
+		return replay
+	}
+
+	framed := readReplay(AttachClient{
+		Member: "framed", Cols: 80, Rows: 24, ReadOnly: true, Screen: false, Snapshot: true,
+	})
+	if string(framed) != output {
+		t.Fatalf("framed replay = %q, want complete raw history", framed)
+	}
+	compact := readReplay(AttachClient{
+		Member: "screen", Cols: 80, Rows: 24, ReadOnly: true, Screen: true,
+	})
+	if !bytes.Contains(compact, []byte("late-marker")) {
+		t.Fatalf("compact replay lacks current output: %q", compact)
+	}
+	if bytes.Contains(compact, []byte("early-000")) {
+		t.Fatalf("compact replay retained evicted early history: %q", compact)
+	}
+}
 
 func TestAttachReplayWriterReceivesTranscriptBeforeLiveOutput(t *testing.T) {
 	h, _ := newTestHost(t)
@@ -1864,8 +1922,6 @@ func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
 func TestRemoveRunTranscripts(t *testing.T) {
 	h, dir := newTestHost(t)
 	for _, name := range []string{
-		"run-1.cast",
-		"run-1.123.cast",
 		"run-shell-run-1-main.cast",
 		"run-2.cast",
 	} {
@@ -1873,13 +1929,15 @@ func TestRemoveRunTranscripts(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	w, err := newCastWriter(filepath.Join(dir, "run-1.cast"), 80, 24)
-	if err != nil {
-		t.Fatalf("create run transcript: %v", err)
-	}
-	w.output([]byte("purge-me"))
-	if err := w.close(); err != nil {
-		t.Fatalf("close run transcript: %v", err)
+	for _, name := range []string{"run-1.cast", "run-1.123.cast"} {
+		w, err := newCastWriter(filepath.Join(dir, name), 80, 24)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		w.output([]byte("purge-me"))
+		if err := w.close(); err != nil {
+			t.Fatalf("close %s: %v", name, err)
+		}
 	}
 	if _, err := h.Snapshot("run-1"); err != nil {
 		t.Fatalf("cache cold snapshot: %v", err)
@@ -1898,6 +1956,24 @@ func TestRemoveRunTranscripts(t *testing.T) {
 	}
 	if _, err := h.Snapshot("run-1"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("snapshot after transcript removal = %v, want missing recording", err)
+	}
+}
+
+func TestSnapshotSurfacesCorruptArchivedTranscript(t *testing.T) {
+	h, dir := newTestHost(t)
+	if err := os.WriteFile(filepath.Join(dir, "run-1.123.cast"), []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := newCastWriter(filepath.Join(dir, "run-1.cast"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.output([]byte("current"))
+	if err := w.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Snapshot("run-1"); err == nil || !strings.Contains(err.Error(), "decode transcript header") {
+		t.Fatalf("corrupt archive snapshot error = %v", err)
 	}
 }
 

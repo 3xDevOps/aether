@@ -89,6 +89,7 @@ function attachMainTab(): EnvTerminalSocket {
     suspend: vi.fn(),
     resume: vi.fn(),
     resetWriteDenial: vi.fn(),
+    setControl: vi.fn(),
     isEnded: vi.fn(() => false),
     close: vi.fn(),
   }

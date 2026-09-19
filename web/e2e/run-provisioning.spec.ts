@@ -101,7 +101,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
 
   await expect(page.getByText('Attached')).toBeVisible()
   await expect(page.getByText("Starting the run's container")).toBeHidden()
-  await expect(page.locator('.xterm-rows')).toContainText('agent-ready', {
+  await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready', {
     timeout: 3 * 60 * 1000,
   })
 })

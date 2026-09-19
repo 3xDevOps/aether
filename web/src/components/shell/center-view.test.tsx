@@ -83,6 +83,19 @@ describe('CenterView persistent terminal cache', () => {
     expect(inactive?.getAttribute('aria-hidden')).toBe('true')
     expect(inactive?.className).toContain('absolute')
   })
+  it('retains four busy surfaces while Board is active and revisits the oldest', () => {
+    render(<CenterView />)
+    for (const id of ids.slice(0, 4)) setRoute('terminal', id)
+    setRoute('board')
+
+    for (const id of ids.slice(0, 4)) {
+      expect(screen.getByTestId(`terminal-${id}`)).toBeDefined()
+    }
+    setRoute('terminal', 'run_a')
+    expect(screen.getByTestId('terminal-run_a').getAttribute('data-active')).toBe('true')
+    expect(mounts.run_a).toBe(1)
+  })
+
 
   it('keeps terminal-to-terminal entries mounted and marks only the current one active', () => {
     render(<CenterView />)
