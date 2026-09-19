@@ -508,6 +508,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		"argv":            []string{"sh", "-c", "printf 'fixture-failure\\n'; exit 17"},
 		"timeout_seconds": 30, "idempotency_key": "docker-verify-failed",
 	})
+	failed = waitMissionVerification(ctx, t, integratorRun, failed)
 	if !hasVerificationStatus(failed, protocol.VerificationFailed) {
 		t.Fatalf("failed verification was not durably recorded: %+v", failed.Verifications)
 	}
@@ -518,6 +519,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		"argv":            []string{"sh", "-c", "set -eu; /usr/local/bin/aether-internal --help >/tmp/help; /usr/local/bin/aether-internal skill >/tmp/skill; grep -q 'No coordination socket' /tmp/skill; test \"$(ls worker-*.txt | wc -l)\" = 2"},
 		"timeout_seconds": 30, "idempotency_key": "docker-verify-passed",
 	})
+	passed = waitMissionVerification(ctx, t, integratorRun, passed)
 	if !hasVerificationStatus(passed, protocol.VerificationPassed) {
 		t.Fatalf("successful verification was not durably recorded: %+v", passed.Verifications)
 	}
@@ -693,6 +695,21 @@ func runMissionIntegrationCLIResult(t *testing.T, runID, operation string, param
 		return protocol.Candidate{}, fmt.Errorf("decode integration %s result: %w", operation, err)
 	}
 	return result.Candidate, nil
+}
+
+func waitMissionVerification(ctx context.Context, t *testing.T, runID string, candidate protocol.Candidate) protocol.Candidate {
+	t.Helper()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for hasVerificationStatus(candidate, protocol.VerificationRunning) {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("verification did not settle: %+v: %v", candidate.Verifications, ctx.Err())
+		case <-ticker.C:
+		}
+		candidate = runMissionIntegrationCLI(t, runID, "show", map[string]any{"candidate_id": candidate.CandidateID})
+	}
+	return candidate
 }
 
 func waitMissionSubmissions(ctx context.Context, t *testing.T, ctrl *protocol.Client, missionID string, want int) protocol.MissionShowResult {
