@@ -145,7 +145,16 @@ func (s *Service) Start(ctx context.Context) error {
 	done := make(chan struct{})
 	s.cancel, s.runCtx, s.done = cancel, runCtx, done
 	s.mu.Unlock()
-	_ = s.reconcile(runCtx)
+	if err := s.reconcile(runCtx); err != nil {
+		cancel()
+		s.mu.Lock()
+		if s.done == done {
+			s.cancel, s.runCtx, s.done = nil, nil, nil
+		}
+		close(done)
+		s.mu.Unlock()
+		return fmt.Errorf("mission: recover durable state: %w", err)
+	}
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(5 * time.Second)

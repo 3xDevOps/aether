@@ -223,6 +223,13 @@ commits and publishes the branch, records `completed` for a clean exit or
 run remains available for review and an authorized member may close it as
 merged or abandoned, but neither headless status is relaunchable.
 
+Mission recovery also loads durable objectives and their bounded worker
+attempts. If the initial mission inventory scan fails, `aether-server serve`
+reports `server: start service mission: mission: recover durable state: <cause>`
+and exits instead of deferring the failed scan to periodic recovery. The
+underlying store error is preserved; fix that cause before restarting.
+Saved missions and attempt reservations are not deleted.
+
 ### TUI lifecycle and relaunch
 
 For `--mode tui`, container PID 1 supervises the harness. After any normal
