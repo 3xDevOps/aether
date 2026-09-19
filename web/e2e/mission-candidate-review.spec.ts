@@ -3,7 +3,7 @@
 // explicitly not a vendor-harness or credentialed-agent demonstration.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from './fixtures'
 import { runContainer } from './harness/docker'
@@ -39,39 +39,36 @@ async function waitForCoordCLI(runID: string, dataDir: string): Promise<void> {
 test('launches a bounded mission, controls a worker, and prepares its accepted candidate', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('mission-candidate-project')
-  // This is a scripted harness fixture, intentionally named as such. It stays
-  // alive while the test drives worker control and submits its durable report.
-  writeFileSync(
-    path.join(repo, 'agent.sh'),
-    '#!/bin/sh\nprintf "scripted mission fixture agent\\n"\nsleep 600\n',
-    { mode: 0o755 },
-  )
-  execFileSync('git', ['-C', repo, '-c', 'user.name=E2E fixture', '-c', 'user.email=e2e-fixture@example.invalid', 'add', 'agent.sh'])
-  execFileSync('git', ['-C', repo, '-c', 'user.name=E2E fixture', '-c', 'user.email=e2e-fixture@example.invalid', 'commit', '-q', '-m', 'scripted mission fixture agent'])
   const expectedTargetRevision = await seedWorkspace(alice, aether.server.addr, repo, 'mission-candidate-project')
   const aliceID = await memberID(alice)
+  aether.installAgent(aliceID, 'claude', 'printf "scripted mission fixture agent\\n"\nsleep 600')
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const workspaceID = workspaces[0]?.id
   if (!workspaceID) throw new Error('mission fixture workspace was not created')
 
   const missionObjective = 'mission candidate browser fixture'
-  const created = await alice.api.rpc<{
-    mission: {
-      id: string
-      current_integrator_run_id: string
-      integrator_generation: number
-    }
-  }>('mission.create', {
-    workspace_id: workspaceID,
-    objective: missionObjective,
-    accountable_human_id: aliceID,
-    integrator: { account_member_id: aliceID, harness: 'fake', mode: 'headless' },
-    execution_choices: [{ account_member_id: aliceID, harness: 'fake', mode: 'headless' }],
-    max_concurrent_attempts: 1,
-    max_total_attempts: 1,
-    idempotency_key: 'mission-candidate-browser-fixture',
-  })
-  const mission = created.mission
+  await page.goto(alice.url)
+  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
+  await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
+  await page.getByRole('button', { name: 'Launch swarm', exact: true }).click()
+  const launch = page.getByRole('dialog', { name: 'Launch a swarm' })
+  await expect(launch).toBeVisible()
+  await launch.getByPlaceholder('What outcome should the integrator coordinate?').fill(missionObjective)
+  await launch.getByLabel('Integrator mode', { exact: true }).click()
+  await page.getByRole('option', { name: 'Headless', exact: true }).click()
+  const workerChoice = launch.locator('label').filter({ hasText: '· claude' })
+  await workerChoice.getByRole('checkbox').check()
+  await workerChoice.getByRole('combobox').click()
+  await page.getByRole('option', { name: 'headless', exact: true }).click()
+  await launch.getByLabel('Max concurrent attempts').fill('1')
+  await launch.getByLabel('Max total attempts').fill('1')
+  await launch.getByRole('button', { name: 'Launch Swarm', exact: true }).click()
+  await expect(page.getByText('Swarm launched', { exact: true })).toBeVisible()
+  const { missions } = await alice.api.rpc<{
+    missions: { id: string; objective: string; current_integrator_run_id: string; integrator_generation: number }[]
+  }>('mission.list', { workspace_id: workspaceID })
+  const mission = missions.find((item) => item.objective === missionObjective)
+  if (!mission) throw new Error('browser launch did not create the mission')
   await waitForCoordCLI(mission.current_integrator_run_id, aether.server.dataDir)
 
   type TaskMutation = { task: { id: string; current_revision: number } }
@@ -99,7 +96,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
     '--task-id', proposed.task.id,
     '--task-revision', String(proposed.task.current_revision),
     '--dispatch-key', 'mission-candidate-worker',
-    '--harness', 'fake',
+    '--harness', 'claude',
     '--mode', 'headless',
     '--account-owner-id', aliceID,
     '--run-owner-id', aliceID,
@@ -123,7 +120,6 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await expect(room.getByRole('button', { name: 'Release control', exact: true })).toBeVisible({ timeout: 30_000 })
 
   await page.goto(alice.url)
-  const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
   await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
   await page.getByRole('button', { name: missionObjective, exact: false }).click()
   const missionView = page.getByRole('region', { name: 'Mission tasks' })
