@@ -753,13 +753,12 @@ func buildMissionAgentImage(t *testing.T) string {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "mission-agent"), `#!/bin/sh
 set -eu
-task=mission
-for arg in "$@"; do task=$arg; done
 
 help=$(/usr/local/bin/aether-internal --help)
 case "$help" in *"aether-internal"*) ;; *) echo "cli-help-missing" >&2; exit 1 ;; esac
 skill=$(/usr/local/bin/aether-internal skill)
 case "$skill" in *"Run:"*) ;; *) echo "cli-skill-missing" >&2; exit 1 ;; esac
+	task=$(printf '%s\n' "$skill" | sed -n 's/^Assignment: //p')
 
 case "$task" in
 	*"integrator"*)
