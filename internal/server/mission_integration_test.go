@@ -493,7 +493,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	if replay := runMissionIntegrationCLI(t, integratorRun, "prepare", prepareParams); replay.CandidateID != candidate.CandidateID {
 		t.Fatalf("prepare replay changed candidate identity: first=%s replay=%s", candidate.CandidateID, replay.CandidateID)
 	}
-	if _, err := runMissionIntegrationCLIExpectError(t, integratorRun, "prepare", map[string]any{
+	if _, err := runMissionIntegrationCLIResult(t, integratorRun, "prepare", map[string]any{
 		"mission_id": "mission-not-current", "target_ref": "refs/heads/main",
 		"expected_target_revision": base, "idempotency_key": "docker-conflicting-mission",
 	}); err == nil {
@@ -569,7 +569,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	if err := runGitUpdateRef(t, filepath.Join(e.dataDir, "repos", string(e.ws.ID)+".git"), "refs/heads/main", candidate.Submissions[0].RetainedRevision); err != nil {
 		t.Fatalf("advance stale target ref: %v", err)
 	}
-	if _, err := runMissionIntegrationCLIExpectError(t, integratorRun, "deliver", map[string]any{
+	if _, err := runMissionIntegrationCLIResult(t, integratorRun, "deliver", map[string]any{
 		"candidate_id": candidate.CandidateID, "request_id": requested.DeliveryRequest.RequestID,
 		"request_version": requested.DeliveryRequest.RequestVersion,
 	}); err == nil {
@@ -634,7 +634,7 @@ func runMissionIntegrationCLI(t *testing.T, runID, operation string, params any)
 	return candidate
 }
 
-func runMissionIntegrationCLIExpectError(t *testing.T, runID, operation string, params any) (protocol.Candidate, error) {
+func runMissionIntegrationCLIResult(t *testing.T, runID, operation string, params any) (protocol.Candidate, error) {
 	t.Helper()
 	data, err := json.Marshal(params)
 	if err != nil {
@@ -659,39 +659,6 @@ func runMissionIntegrationCLIExpectError(t *testing.T, runID, operation string, 
 		return protocol.Candidate{}, fmt.Errorf("integration %s: %s", operation, envelope.Error.Message)
 	}
 	var result protocol.IntegrationPrepareResult
-	if err := json.Unmarshal(envelope.Result, &result); err != nil {
-		return protocol.Candidate{}, fmt.Errorf("decode integration %s result: %w", operation, err)
-	}
-	return result.Candidate, nil
-}
-
-func runMissionIntegrationCLIResult(t *testing.T, runID, operation string, params any) (protocol.Candidate, error) {
-	t.Helper()
-	data, err := json.Marshal(params)
-	if err != nil {
-		return protocol.Candidate{}, err
-	}
-	cmd := exec.CommandContext(t.Context(), "docker", "exec", "-i", "aether-run-"+runID,
-		"/usr/local/bin/aether-internal", "integration", operation,
-		"--params-file", "-", "--json")
-	cmd.Stdin = bytes.NewReader(data)
-	out, err := cmd.Output()
-	if err != nil {
-		return protocol.Candidate{}, fmt.Errorf("cli exit: %w", err)
-	}
-	var envelope missionCLIEnvelope
-	if err := json.Unmarshal(out, &envelope); err != nil {
-		return protocol.Candidate{}, fmt.Errorf("decode CLI response %q: %w", out, err)
-	}
-	if !envelope.OK {
-		if envelope.Error == nil {
-			return protocol.Candidate{}, fmt.Errorf("integration %s failed without an error", operation)
-		}
-		return protocol.Candidate{}, fmt.Errorf("integration %s: %s", operation, envelope.Error.Message)
-	}
-	var result struct {
-		Candidate protocol.Candidate `json:"candidate"`
-	}
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		return protocol.Candidate{}, fmt.Errorf("decode integration %s result: %w", operation, err)
 	}
