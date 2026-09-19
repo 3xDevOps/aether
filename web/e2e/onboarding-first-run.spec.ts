@@ -53,7 +53,7 @@ test('the first run completes', async ({ page, aether }) => {
 
   // The agent's marker is pre-work output, not completion: only the
   // supervisor's exit line proves that the reusable login shell is ready.
-  const terminal = page.locator('.xterm-rows')
+  const terminal = page.locator('.xterm-rows:not([data-aether-frozen-view] *)')
   await expect(terminal).toContainText('[aether] harness exited with code 0', {
     timeout: 3 * 60 * 1000,
   })
@@ -61,7 +61,7 @@ test('the first run completes', async ({ page, aether }) => {
   // Drive the reusable shell through the visible terminal, rather than
   // inferring completion from the agent's earlier output. The octal prefix
   // keeps the response marker out of the echoed command.
-  await page.locator('.xterm-screen').click()
+  await page.locator('.xterm-screen:not([data-aether-frozen-view] *)').click()
   await page.keyboard.type('printf "\\157nboarding-shell-ready\\n"; cat result.txt\n')
   await expect(terminal).toContainText('onboarding-shell-ready', { timeout: 30_000 })
   await expect(terminal).toContainText('hello-from-agent', { timeout: 30_000 })

@@ -266,6 +266,46 @@ func TestMissionWorkerReleaseCASWithoutLease(t *testing.T) {
 	}
 }
 
+func TestMissionRevokedBootstrapDoesNotInstallTakeover(t *testing.T) {
+	e, db, mission := missionWorkerTestEnv(t)
+	e.srv.cfg.Control = control.New(control.Config{})
+	e.srv.cfg.Services.MissionControl = missionControlStoreAdapter{store: db, control: e.srv.cfg.Control}
+	e.pty.replay = []byte("replay")
+	interactive := &interactiveTestPTY{fakePTY: e.pty}
+	interactive.beforeAttach = func() {
+		snapshot, ok := e.srv.cfg.Control.Status(string(e.run.ID))
+		if !ok {
+			return
+		}
+		e.srv.cfg.Control.Fence(string(e.run.ID))
+		e.srv.cancelControlAttach(string(e.run.ID), snapshot.SessionID, snapshot.Generation, errAttachControlRevoked)
+	}
+	e.srv.cfg.PTY = interactive
+
+	wire, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{
+		ControlSessionID: "revoked-mission-bootstrap",
+	})
+	if !ack.OK {
+		t.Fatalf("view-only bootstrap failed: %+v", ack)
+	}
+	if data, record := wire.next(t); string(data) != "replay" || record != nil {
+		t.Fatalf("bootstrap output = %q/%+v, want replay", data, record)
+	}
+	_, revoked := wire.next(t)
+	if revoked == nil || revoked.OK || revoked.HasControl || revoked.ControlGeneration != ack.ControlGeneration {
+		t.Fatalf("revocation = %+v, want the admitted generation fenced", revoked)
+	}
+	admitted := false
+	err := e.srv.cfg.Services.MissionControl.AdmitInput(context.Background(),
+		mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
+			admitted = true
+			return nil
+		})
+	if err != nil || !admitted {
+		t.Fatalf("integrator input after revoked bootstrap = %v, admitted=%v", err, admitted)
+	}
+}
+
 func TestMissionTakeoverSerializesIntegratorAdmission(t *testing.T) {
 	e, _, mission := missionWorkerTestEnv(t)
 	clock := &missionControlTestClock{now: time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)}

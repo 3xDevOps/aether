@@ -18,14 +18,27 @@ import { useStore } from '@/store'
 // xterm allocates scrollback rows as output arrives; this is its supported
 // maximum, not a preallocated browser buffer.
 const maxTerminalScrollback = 4_294_967_295
+const maxAdaptiveTerminalCells = 1_000_000
+
+function adaptiveScrollback(cols: number, rows: number, requested: number): number {
+  if (requested >= maxTerminalScrollback) return requested
+  const width = Math.max(1, Math.floor(cols))
+  const viewportRows = Math.max(1, Math.floor(rows))
+  // Count normal scrollback plus both copies of the viewport (normal and
+  // alternate buffers) against the per-run cap.
+  const available = Math.floor(maxAdaptiveTerminalCells / width) - viewportRows * 2
+  return Math.max(0, Math.min(requested, available))
+}
 
 export interface XtermOptions {
   enabled?: boolean
   /** Follow the shared PTY without contributing this pane's size. */
   follow?: boolean
+  /** Maximum number of rows retained in xterm's normal scrollback. */
+  scrollback?: number
   onData?: (data: string) => void
   onResize?: (cols: number, rows: number) => void
-  /** Called synchronously before a terminal hyperlink opens. Return true to handle it. */
+  /** Called synchronously before a terminal hyperlink opens. Return true to handle. */
   onLink?: (uri: string) => boolean
 }
 
@@ -57,7 +70,16 @@ export interface XtermController {
    */
   ctrlArmed: boolean
   armCtrl: (armed: boolean) => void
+  /**
+   * Give a session hook a paint boundary around reset/replay. The default
+   * implementation keeps xterm's current viewport intact and refreshes it
+   * after the final ordered write; callers may use the boundary to keep a
+   * warm surface visible while replay is gated.
+   */
+  freeze?: () => void
+  thaw?: () => void
 }
+
 
 /**
  * The control code one character carries under Ctrl, or null when it has
@@ -169,6 +191,7 @@ function paint(host: HTMLDivElement, terminal: Terminal): void {
 export function useXterm({
   enabled = true,
   follow = false,
+  scrollback = maxTerminalScrollback,
   onData,
   onResize,
   onLink,
@@ -192,6 +215,11 @@ export function useXterm({
   const serverSize = useRef<{ cols: number; rows: number } | null>(null)
   const requestedSize = useRef(standardGeometry)
   const resizeRef = useRef<(() => void) | null>(null)
+  const frozenViewRef = useRef<HTMLElement | null>(null)
+  const clearFrozenView = useCallback(() => {
+    frozenViewRef.current?.remove()
+    frozenViewRef.current = null
+  }, [])
   followRef.current = follow
   onDataRef.current = onData
   onResizeRef.current = onResize
@@ -217,10 +245,42 @@ export function useXterm({
     serverSize.current = { cols, rows }
     terminal?.write('', () => {
       if (liveTerminal.current !== terminal) return
+      if (scrollback < maxTerminalScrollback) {
+        terminal.options.scrollback = adaptiveScrollback(cols, rows, Math.floor(scrollback))
+      }
       if (reset) terminal.reset()
       terminal.resize(cols, rows)
     })
-  }, [terminal])
+  }, [scrollback, terminal])
+  const freeze = useCallback(() => {
+    if (!host || !terminal || liveTerminal.current !== terminal || frozenViewRef.current) return
+    const parent = host.parentElement
+    if (!parent) return
+    const snapshot = host.cloneNode(true) as HTMLElement
+    snapshot.dataset.aetherFrozenView = 'true'
+    snapshot.setAttribute('aria-hidden', 'true')
+    snapshot.inert = true
+    snapshot.style.position = 'absolute'
+    snapshot.style.left = `${host.offsetLeft}px`
+    snapshot.style.top = `${host.offsetTop}px`
+    snapshot.style.width = `${host.offsetWidth}px`
+    snapshot.style.height = `${host.offsetHeight}px`
+    snapshot.style.zIndex = '1'
+    snapshot.style.pointerEvents = 'none'
+    snapshot.style.background = 'inherit'
+    parent.appendChild(snapshot)
+    frozenViewRef.current = snapshot
+  }, [host, terminal])
+  const thaw = useCallback(() => {
+    const current = terminal
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        clearFrozenView()
+        if (!current || liveTerminal.current !== current) return
+        current.refresh(0, Math.max(0, current.rows - 1))
+      })
+    })
+  }, [clearFrozenView, terminal])
   useEffect(() => {
     const intent = focusIntent.current
     if (!intent || !terminal) return
@@ -271,7 +331,7 @@ export function useXterm({
       // would throw its scrollback away, so the size is applied below.
       fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
       fontFamily: terminalFontFamily,
-      scrollback: maxTerminalScrollback,
+      scrollback: Math.max(0, Math.floor(scrollback)),
       scrollOnEraseInDisplay: true,
       cursorBlink: false,
       linkHandler: { activate: (_event, uri) => openLink(uri) },
@@ -286,8 +346,10 @@ export function useXterm({
       created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
       const searchAddon = new SearchAddon()
       created.loadAddon(searchAddon)
+      setSearch(searchAddon)
       created.open(host)
       liveTerminal.current = created
+      setTerminal(created)
 
       // xterm keeps a single custom key handler, so zoom, find and the
       // clipboard shortcuts are one chain: the first to claim the event stops
@@ -375,13 +437,12 @@ export function useXterm({
         input.dispose()
         resizeRef.current = null
       }
-      setTerminal(created)
-      setSearch(searchAddon)
     })
 
     return () => {
       active = false
       liveTerminal.current = null
+      clearFrozenView()
       armCtrl(false)
       cancelFontWait()
       teardown?.()
@@ -390,7 +451,7 @@ export function useXterm({
       setSearch(null)
       setFindOpen(false)
     }
-  }, [armCtrl, enabled, host])
+  }, [armCtrl, clearFrozenView, enabled, host, scrollback])
 
   useEffect(() => {
     resizeRef.current?.()
@@ -419,5 +480,7 @@ export function useXterm({
     focusTerminal,
     ctrlArmed,
     armCtrl,
+    freeze,
+    thaw,
   }
 }

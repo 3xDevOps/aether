@@ -54,15 +54,17 @@ type pendingOutputEvent struct {
 // transcript history, bounded replay ring for non-run terminals, and attached
 // clients.
 type session struct {
-	run        SessionKey
-	resumeID   string
-	generation uint64
-	att        runtime.Attachment
-	tr         *castWriter
-	history    []castSegment
-
-	stdinMu sync.Mutex
-	stdin   io.WriteCloser
+	run           SessionKey
+	resumeID      string
+	generation    uint64
+	att           runtime.Attachment
+	tr            *castWriter
+	history       []castSegment
+	checkpoint    string
+	checkpointMu  sync.Mutex
+	checkpointSeq uint64
+	stdinMu       sync.Mutex
+	stdin         io.WriteCloser
 
 	mu               sync.Mutex
 	clients          map[*client]struct{}
@@ -86,6 +88,8 @@ type session struct {
 	pendingScreen    []byte
 	pendingEvents    []pendingOutputEvent
 	finalSnapshot    ScreenSnapshot
+	checkpointErr    error
+	finishDone       chan struct{}
 	onTitle          func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
@@ -294,34 +298,48 @@ func (s *session) end() {
 		return
 	}
 	s.ended = true
-	s.finishLocked()
+	s.finishDone = make(chan struct{})
+	capture, tr := s.finishLocked()
 	s.ring = nil // no further attaches: release the replay buffer
 	if s.done != nil {
 		close(s.done)
 	}
+	finishDone := s.finishDone
 	s.mu.Unlock()
 	s.resizeMu.Unlock()
+	_ = s.persistCheckpoint(capture)
+	if tr != nil {
+		_ = tr.close()
+	}
+	s.mu.Lock()
+	// EOF must not expose a transcript whose final output is still buffered.
+	for c := range s.clients {
+		c.close(nil)
+	}
+	s.finishDone = nil
+	close(finishDone)
+	s.mu.Unlock()
 }
 
-func (s *session) finishLocked() {
+func (s *session) finishLocked() (*checkpointCapture, *castWriter) {
 	if len(s.pendingScreen) > 0 {
 		s.commitPendingOutputLocked(s.pendingScreen)
 		s.pendingEvents = nil
 		s.pendingScreen = nil
 	}
+	var capture *checkpointCapture
 	if s.screen != nil {
-		s.finalSnapshot = makeScreenSnapshot(s.screen, s.modes)
+		capture, _ = s.captureCheckpointLocked()
+		if capture != nil {
+			s.finalSnapshot = capture.snapshot
+		} else {
+			s.finalSnapshot = makeScreenSnapshot(s.screen, s.modes)
+		}
 		s.screen.dispose()
 		s.screen = nil
 	}
 	tr := s.tr
 	s.tr = nil
-	if tr != nil {
-		_ = tr.close()
-	}
-	for c := range s.clients {
-		c.close(nil)
-	}
 	if done := s.resizeDone; done != nil {
 		s.resizeDone = nil
 		s.resizeActive = false
@@ -329,39 +347,73 @@ func (s *session) finishLocked() {
 	} else {
 		s.resizeActive = false
 	}
+	return capture, tr
 }
 
-func (s *session) stop() {
-	s.resizeMu.Lock()
-	s.mu.Lock()
-	if s.stopped {
+func (s *session) stop() error {
+	for {
+		s.resizeMu.Lock()
+		s.mu.Lock()
+		if s.stopped {
+			done := s.finishDone
+			err := s.checkpointErr
+			s.mu.Unlock()
+			s.resizeMu.Unlock()
+			if done != nil {
+				<-done
+				s.mu.Lock()
+				err = s.checkpointErr
+				s.mu.Unlock()
+			}
+			return err
+		}
+		if s.ended && s.finishDone != nil {
+			done := s.finishDone
+			s.mu.Unlock()
+			s.resizeMu.Unlock()
+			<-done
+			continue
+		}
+		s.stopped = true
+		s.finishDone = make(chan struct{})
+		capture, tr := s.finishLocked()
+		// The sessions map keeps a lightweight stopped entry so StopSession
+		// remains idempotent. Release all attachment and transcript state that
+		// would otherwise retain runtime stream buffers for the life of the host.
+		att := s.att
+		clients := s.clients
+		s.ring = nil
+		s.clients = nil
+		s.att = nil
+		s.stdin = nil
+		s.title = titleScanner{}
+		s.modes = modeScanner{}
+		s.pendingEcho = nil
+		s.onTitle = nil
+		if !s.ended && s.done != nil {
+			close(s.done)
+		}
+		finishDone := s.finishDone
 		s.mu.Unlock()
 		s.resizeMu.Unlock()
-		return
+		err := s.persistCheckpoint(capture)
+		if tr != nil {
+			_ = tr.close()
+		}
+		for c := range clients {
+			c.close(nil)
+		}
+		if att != nil {
+			_ = att.Close()
+		}
+		close(finishDone)
+		s.mu.Lock()
+		if err == nil {
+			err = s.checkpointErr
+		}
+		s.mu.Unlock()
+		return err
 	}
-	s.stopped = true
-	s.finishLocked()
-	// The sessions map keeps a lightweight stopped entry so StopSession
-	// remains idempotent. Release all attachment and transcript state that
-	// would otherwise retain runtime stream buffers for the life of the host.
-	att := s.att
-	s.ring = nil
-	s.clients = nil
-	s.att = nil
-	s.stdin = nil
-	s.title = titleScanner{}
-	s.modes = modeScanner{}
-	s.pendingEcho = nil
-	s.onTitle = nil
-	if !s.ended && s.done != nil {
-		close(s.done)
-	}
-	s.mu.Unlock()
-	s.resizeMu.Unlock()
-	if att != nil {
-		_ = att.Close()
-	}
-
 }
 
 func (s *session) isActive() bool {
@@ -377,22 +429,6 @@ func (s *session) lastOutput() (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return s.lastOut, true
-}
-func (s *session) purgeSnapshot() {
-	s.mu.Lock()
-	s.finalSnapshot = ScreenSnapshot{}
-	s.mu.Unlock()
-}
-func (s *session) snapshot() (ScreenSnapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.finalSnapshot.Data) > 0 {
-		return cloneScreenSnapshot(s.finalSnapshot), nil
-	}
-	if s.screen == nil {
-		return ScreenSnapshot{}, errors.New("ptyhost: terminal snapshot unavailable")
-	}
-	return makeScreenSnapshot(s.screen, s.modes), nil
 }
 
 func (s *session) addClient(c *client) error {
@@ -432,12 +468,20 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 			}
 			continue
 		}
-		if s.stopped {
+		if s.stopped || s.ended {
+			stopped, done := s.stopped, s.finishDone
 			s.mu.Unlock()
-			return ErrNoSession
-		}
-		if s.ended {
-			s.mu.Unlock()
+			// Both errors admit disk replay, which needs the final cast flush.
+			if done != nil {
+				select {
+				case <-done:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			if stopped {
+				return ErrNoSession
+			}
 			return ErrSessionEnded
 		}
 		c.replayCols, c.replayRows = s.acceptedCols, s.acceptedRows
@@ -450,13 +494,15 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		// non-empty gap crossing one must rebuild the screen.
 		if c.resume && c.resumeID != "" && c.resumeID == s.resumeID {
 			if missed, ok := s.ring.since(c.cursor); ok &&
-				(!c.snapshot || len(missed) == 0 || c.cursor >= s.lastResizeCursor) {
+				(!c.snapshot || c.cursor >= s.lastResizeCursor) {
 				c.setReplay(missed)
 				c.resumed = true
 			}
 		}
 		if !c.resumed {
-			if _, isRun := s.run.Run(); isRun {
+			if c.screen {
+				c.setReplay(makeScreenSnapshot(s.screen, s.modes).Data)
+			} else if _, isRun := s.run.Run(); isRun {
 				replay, replayBytes, err := s.tr.snapshot(s.history)
 				if err != nil {
 					s.mu.Unlock()
@@ -488,6 +534,56 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		s.mu.Unlock()
 		return nil
 	}
+}
+
+func (s *session) setClientReadOnly(c *client, readOnly bool) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return ErrNoSession
+	}
+	if _, ok := s.clients[c]; !ok {
+		return ErrNoSession
+	}
+	if s.ended {
+		return ErrSessionEnded
+	}
+	if c.readOnly == readOnly {
+		return nil
+	}
+	c.readOnly = readOnly
+	s.reconcileLocked(false)
+	return nil
+}
+func (s *session) clientAttached(c *client) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.ended {
+		return false
+	}
+	_, ok := s.clients[c]
+	return ok
+}
+func (s *session) writeClientStdinContext(ctx context.Context, c *client, p []byte) error {
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return ErrNoSession
+	}
+	if s.ended {
+		s.mu.Unlock()
+		return ErrSessionEnded
+	}
+	if _, ok := s.clients[c]; !ok || c.readOnly {
+		s.mu.Unlock()
+		return ErrWriteDenied
+	}
+	s.mu.Unlock()
+	return s.writeStdinContextLocked(ctx, p)
 }
 
 func (s *session) removeClient(c *client) {

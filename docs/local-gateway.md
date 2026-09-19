@@ -164,6 +164,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/` and any other non-API path | the SPA (fallback to `index.html`) |
 | `POST` | `/api/v1/<rpc.method>` | any control-channel method, dispatched through the shared webgate |
 | `GET` | `/api/v1/run/<run_id>/patch` | `run.patch` |
+| `GET` | `/api/runs/<run_id>/terminal-history` | authenticated full raw ANSI terminal-history download |
 | `GET` | `/api/v1/disk` | `server.disk` |
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
@@ -182,6 +183,31 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. File and configuration exceptions are listed below.
+
+### `GET /api/runs/<run_id>/terminal-history`
+
+This authenticated download is the complete terminal archive for the run. The
+gateway streams the retained cast incarnations as raw ANSI bytes with
+`Content-Type: application/octet-stream` and
+`Content-Disposition: attachment; filename="terminal-history-<run_id>.ansi"`.
+It supplies the archive byte count as `Content-Length`; the stream ends at
+the archive boundary even if the run is live.
+It does not parse the bytes into a screen snapshot, buffer the archive
+in memory, acquire control, or write to the PTY. The dashboard exposes it as
+**Download full terminal history**. The same-origin rule and the gateway's
+normal bearer-token or Tailscale WhoIs authorization apply. If the run has no
+retained transcript, the route returns the gateway's normal not-found or
+unavailable refusal rather than an empty archive.
+
+Browsers without `showSaveFilePicker` use the same path with a native
+`POST /api/runs/<run_id>/terminal-history` form targeted at a new tab. The
+body is `application/x-www-form-urlencoded`, no larger than 8 KiB, and may
+contain only an optional `token` field. When present, the gateway copies that
+token into a cloned `Authorization: Bearer` check; it never accepts the token
+in the URL. The original `Origin` and normal member authorization still apply.
+The response uses the same raw-stream download headers and `Cache-Control:
+no-store`; errors remain JSON in the new tab. This fallback streams directly
+and does not build a Blob or buffer the archive in the browser.
 
 ### `POST /api/v1/<method>`
 
@@ -1028,194 +1054,171 @@ anything dropped.
 
 ### `GET /ws/attach/<run_id>`
 
-PTY attach. Output is binary, control is JSON, matching the terminal view's
-needs.
+PTY attach. Output is binary; JSON text frames carry the header, input,
+resize, control, geometry, and acknowledgements.
 
-1. Client sends one **text** frame with the attach header (the run comes
-   from the path). The header must arrive within 10 seconds or the socket
-   is closed. The dashboard requests write on first entry; a CLI read-only
-   mirror sends `{}`:
+1. Client sends one **text** header frame (the run comes from the path). The
+   header must arrive within 10 seconds or the socket closes. A dashboard run
+   terminal sends the interactive header:
 
    ```json
-   {"write":true,"cols":120,"rows":40}
-   {"write":true,"follow":true,"cols":80,"rows":24}
-   {"resume":true,"cursor":4120,"resume_id":"pty-incarnation-7","cols":120,"rows":40}
+   {
+     "write":true,"screen":true,"interactive":true,
+     "cols":120,"rows":40,"control_session_id":"tab-7"
+   }
    ```
 
-   `resume` asks to reattach while preserving parsed xterm state already held by
-   a dashboard client. For a cached client, it is sent after inactivity has
-   intentionally closed the old socket.
-   For that client, `cursor` is the raw-output boundary whose xterm writes have
-   settled, not merely bytes received, and `resume_id` is the nonempty
-   server-issued PTY incarnation ID from the ack that produced that screen.
-   The dashboard sends both with the same logical `control_session_id`; without
-   a known `resume_id`, it sends a full attach rather than an ambiguous cursor.
-   The ID changes on every PTY/server incarnation, so it fences a cursor across
-   restarts.
-   When resume is honored, the ack says `"resumed":true` and the replay is
-   exactly the bytes after that cursor - the gap - while the cached screen is
-   retained. When the ID or cursor cannot be honored, the ack says
-   `"resumed":false`, returns the current cursor and `resume_id`, and a run
-   attach receives the complete retained transcript again; the dashboard
-   applies it through the hidden, ordered replay transaction, so no historical
-   timelapse is visible. A reusable shell may instead receive its current-screen
-   replay.
+   `screen:true` requests a compact current-screen bootstrap: viewport,
+   cursor, terminal modes, colours, and alternate buffer, not the raw
+   transcript. The dashboard's normal xterm keeps bounded live scrollback
+   (up to 5,000 rows, then reduced as acknowledged geometry approaches its
+   cell limit). It is the dashboard run default. `screen:false` selects the
+   raw transcript stream; this is what raw CLI clients use when they need
+   complete history. `interactive:true` opts into same-stream acknowledged
+   control frames and is the dashboard run default. Shell and CLI attachments
+   do not gain this browser control protocol merely by using the attach
+   endpoint.
 
-   `release_control` combines lease release with this attach. At the PTY-host
-   commit boundary, the server holds the run-scoped authority lock, validates
-   the request's session and generation, admits the replacement, then releases
-   and fences the old lease before any replay, output, or geometry is sent. If
-   admission fails, the request is refused while the old writer and lease
-   remain intact. A successful commit cancels the displaced writer, then
-   continues as the replacement read-only PTY attach on this same request,
-   honoring `resume`/`cursor`, returning one normal attach ack, and streaming
-   output. Invalid, stale, or cross-member release is refused; release is not
-   an acknowledgement-only throwaway connection.
-
-   `follow` says the client renders the session at the size it already is
-   and imposes none of its own, so it is left out of the minimum the PTY is
-   sized to whether or not it can write (step 4). Its `cols` and `rows` do not
-   override a live or recorded screen's geometry. The dashboard follows from
-   a phone, mirroring and steering alike, which is how a 45-column screen
-   steers an agent without
-   reflowing that agent's screen for everyone else watching it.
-
-2. Server answers one **text** frame:
-   `{"ok":true,"framed":true,"cols":120,"rows":40,"replay":4096,"cursor":4120,"resume_id":"pty-incarnation-7"}`,
-   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
-   Every successful live run or shell attach ack includes the current nonempty
-   `resume_id`; finished transcript-only replays have no live PTY incarnation.
-   The ack's geometry is the captured screen's size, not an echo of the header.
-   A later accepted resize arrives after that screen's replay bytes.
-   The optional `replay` value is the exact number of binary output bytes
-   preceding live output. Clients split at that byte boundary even when one
-   binary frame contains the end of replay and the beginning of live output.
-   A declared replay length must be a finite, nonnegative safe integer; the
-   dashboard turns an invalid declaration into a final visible refusal rather
-   than attempting an allocation. Dashboard clients do not allocate
-   `Uint8Array(replay)` or any equivalent browser-sized declared-length
-   buffer. They start parsing each arriving frame-sized replay operation
-   immediately through one serial public xterm write chain while the host
-   remains hidden with CSS visibility; they do not retain replay bytes until
-   the full boundary arrives. Each completion is awaited before the next
-   operation, preserving xterm backpressure and wire order. Only the slice
-   containing the exact final replay byte is tagged `replay-end`; live records
-   and geometry received during replay queue behind the replay writes. After
-   the final replay-write callback, the host remains hidden for two
-   `requestAnimationFrame` turns so the xterm DOM paints the settled terminal,
-   then reveals it.
-   Every retained transcript byte is fed to xterm. xterm retains normal
-   scrollback and rows preserved by its configured full-screen erase behavior;
-   control bytes and cursor overwrites affect terminal state but are not
-   themselves scrollback rows. Terminal-generated replies and user input stay
-   muted from the ack through the final replay-write callback.
-   For a fresh run attach these bytes are the complete retained raw transcript,
-   including segments from earlier server incarnations. A successful resume
-   supplies only the missing raw output after the settled cursor. A failed
-   resume may repeat the complete run transcript, but that fallback uses the
-   same hidden, ordered replay transaction and returns the server's current
-   cursor and incarnation fence; it is never exposed as historical playback.
-   The dashboard's next `cursor` is therefore the output boundary settled by
-   xterm, paired with the ack's `resume_id`.
-
-   The server keeps full-transcript replay resource-bounded: it streams retained
-   segments lazily, opening and reading at most one segment at a time rather
-   than loading the complete history or opening every segment file at once.
-   A write attach is refused with `-32001`
-   unless the member holds the **steer** capability on that run; dropping
-   `"write"` always works for a member who can see the run. An unknown run is
-   refused with `-32000`.
-   A finished run supplies its complete transcript read-only, ending with the
-   session-end close below. A `queued`,
-   `provisioning` or `running` run with no session is refused with `-32004`
-   rather than held open - the container is still being built, or recovery is
-   starting the session - as is a finished run whose transcript was never
-   persisted. The refusal is the answer, so a client that means to wait for a
-   session has to retry rather than expect the socket to stay open.
-3. Server then streams terminal output as **binary** frames. The first
-   `replay` bytes are historical output; live output begins at the exact next
-   byte, including when that boundary falls inside a frame.
-4. Client sends **text** control frames:
+   A cached dashboard surface reconnects with its settled `cursor` and the
+   nonempty `resume_id` from the same PTY incarnation:
 
    ```json
-   {"type":"input","data":"ls -la\r"}
+   {
+     "write":true,"screen":true,"interactive":true,
+     "resume":true,"cursor":4120,"resume_id":"pty-incarnation-7",
+     "cols":120,"rows":40,"control_session_id":"tab-7",
+     "control_generation":8
+   }
+   ```
+
+   A valid same-incarnation resume sends only the bounded gap and keeps the
+   parsed screen. If the cursor, ring, geometry, or incarnation cannot serve
+   that gap, the ack says `"resumed":false` and the server sends a compact
+   current-screen bootstrap instead. The dashboard replaces that hidden
+   surface; it does not replay the complete archive. A finished run with
+   `screen:true` likewise supplies its compact screen read-only. Use
+   `GET /api/runs/<run_id>/terminal-history` for the complete raw archive.
+
+   `follow` remains available for a viewer that must render the session at its
+   acknowledged size without imposing local geometry. `cols` and `rows` do
+   not override a live or recorded screen's geometry.
+
+2. Server answers one **text** ack:
+
+   ```json
+   {
+     "ok":true,"framed":true,"cols":120,"rows":40,
+     "replay":4096,"cursor":4120,"resume_id":"pty-incarnation-7",
+     "resumed":false,"has_control":true,"control_generation":8
+   }
+   ```
+
+   A refusal is `{"ok":false,"code":-32001,"error":"..."}` followed by a
+   close. `replay` is the exact number of binary bootstrap bytes before live
+   output; with `screen:true` those bytes are the compact snapshot, while
+   `screen:false` uses the complete raw replay. A binary frame may straddle
+   that boundary. The ack's geometry is the captured screen's size, not an
+   echo of the header. Successful live attaches return a nonempty
+   `resume_id`; finished transcript-only snapshots have no live incarnation.
+   The dashboard keeps the surface hidden while it parses framed records,
+   serializes xterm writes, and mutes input and terminal-generated replies.
+
+   The backend's ordered terminal stream uses binary records on the SSH
+   subsystem: an `o` byte and four-byte big-endian payload length precede each
+   output record, a `g` byte plus two four-byte dimensions carry geometry, and
+   a `c` byte plus a four-byte length carries one JSON control record. At the
+   webgate boundary those records are decoded and stripped: output payloads are
+   sent to the browser as binary WebSocket messages, while geometry and control
+   records become JSON text messages. The server-hosted gateway performs the same
+   translation without the SSH hop, so the browser never receives `o`/`g`/`c`
+   record headers.
+   Replay counts exclude the backend record headers. The browser never allocates
+   a transcript-sized buffer from `replay`; it processes frame-sized records in
+   wire order and reveals the settled screen after the final write. Client frames
+   are capped at 64 KiB; the SPA splits larger input in ordered frames.
+
+   A write attach requires **steer** permission and otherwise refuses with
+   `-32001`; an unknown run is `-32000`. A `queued`, `provisioning`, or
+   `running` run without a session is `-32004` rather than a held socket.
+   A finished run remains readable through its snapshot or raw replay,
+   depending on `screen`.
+
+3. Server then streams terminal output as **binary** frames. For framed
+   dashboard output, live bytes begin after the ack-declared bootstrap
+   boundary. Raw clients consume the same boundary without dashboard parsing.
+
+4. Client sends **text** frames:
+
+   ```json
+   {"type":"input","data":"ls -la\r","control_generation":8}
    {"type":"resize","cols":132,"rows":50}
+   {"type":"control","request_id":17,"write":true}
+   {"type":"control","request_id":18,"write":false,"control_generation":8}
+   {"type":"control","request_id":19,"write":true,"takeover":true,
+    "control_generation":8}
    ```
 
-   Input from a read-only attach is ignored; its resizes are not, because
-   whether they count is the session's to decide. The shared terminal
-   geometry is the per-dimension minimum over the attaches that impose one:
-   every write-capable attach, plus a read-only one while it is the only
-   attach that is not a `follow` client. So a narrow writer reflows the
-   agent's screen for everyone, a follower never does, and a lone watcher
-   sizes the PTY to its own window the way `ssh` does - until a second
-   attach arrives, when it stops imposing and the minimum is recomputed
-   without it.
-5. Server sends one **text** control frame to attached dashboard clients
-   whenever the runtime accepts a changed PTY size:
+   `control` changes the lease on this same WebSocket; it does not reconnect
+   or replay. The optional `takeover:true` explicitly displaces the current
+   controller. Include the current `control_generation` when fencing a
+   release, takeover, or input. Read-only input is ignored and stale input is
+   rejected rather than reaching the PTY.
+
+5. The server answers each requested control change on the same ordered
+   stream:
+
+   ```json
+   {
+     "type":"control","request_id":17,"ok":true,
+     "has_control":true,"control_session_id":"tab-7",
+     "control_generation":9
+   }
+   ```
+
+   A refusal keeps the same `type` and `request_id` and adds `code` and
+   `error`; it also reports the authoritative `has_control`,
+   `control_session_id`, and `control_generation`. A lease revocation that
+   was not requested is an unsolicited `type:"control"` frame with no
+   `request_id`; the displaced client remains a read-only observer. The
+   browser changes its input state only from this acknowledged metadata, not
+   from the requested `write` bit.
+
+6. Server sends one **text** geometry frame whenever the runtime accepts a
+   changed shared PTY size:
 
    ```json
    {"type":"geometry","cols":132,"rows":43}
    ```
 
-   Every dashboard terminal renders at this size, including writers: another
-   writer can make the effective grid smaller than the local pane. The pane's
-   requested geometry remains separate from the rendered grid. Geometry and
-   output use one ordered stream between the server and gateway: a resize
-   reaches the browser before the repaint drawn at that size. A reattach learns
-   the initial size from the ack.
-   The ordered stream keeps fresh-run replay and successful resume from
-   exposing intermediate redraw frames: each replay operation is parsed
-   serially as it arrives while the terminal remains hidden, and the final
-   replay callback is followed by two `requestAnimationFrame` turns before
-   the settled surface is revealed. A successful resume keeps the existing
-   screen. Raw screen-bearing attachments request a redraw nudge; adapter taps
-   do not.
+   The geometry frame is ordered before output drawn at that size. The PTY is
+   the per-dimension minimum over attaches that impose geometry; a follower
+   is excluded. A dashboard phone follows the acknowledged size and does not
+   reflow the agent's screen.
 
-   Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
-   across several ordered `input` frames.
-6. The server re-checks the attach's authorization every few seconds. A
-   write attach whose member loses **steer** (role change, handoff, run
-   protection, workspace policy) closes with **1008**, reason
-   `steer permission withdrawn`; the SPA reconnects as a read-only mirror.
-   A member removed or set back to pending closes with **1008**, reason
-   `membership withdrawn`, and the SPA stops reconnecting. The run's
-   terminal session ending - the run shell exiting, or a finished run's replay
-   draining - closes with **1000**, reason `session ended`, and the SPA
-   stops reconnecting; any other end closes with **1011**.
+7. The server re-checks authorization periodically. On an interactive attach,
+   losing **steer** sends an unsolicited `type:"control"` notification on the
+   same WebSocket, with `ok:false`, `has_control:false`, the authoritative
+   `control_session_id`, and the exact `control_generation` that was revoked.
+   The socket stays open as a read-only mirror; the dashboard disables input
+   without replaying or reconnecting. A raw legacy (non-interactive) attach
+   keeps the named close behavior: **1008**, reason `steer permission
+   withdrawn`. Membership withdrawal closes every attach with **1008**, reason
+   `membership withdrawn`, and stops reconnecting. A terminal session ending
+   closes with **1000**, reason `session ended`; other failures use **1011**.
 
-Closing the socket detaches; the run is unaffected.
+Closing the socket detaches; the run is unaffected. A cached dashboard primary
+intentionally closes its socket while inactive, removing Watching presence,
+control transport, and geometry participation while retaining the parsed
+current screen in browser memory. This cache is not server persistence and is
+not restored across reloads or browser tabs. Re-activation uses the bounded
+same-incarnation resume when possible, otherwise a compact snapshot.
 
-For a cached dashboard primary, inactivity intentionally closes the socket.
-That ordinary detach removes Watching presence, active control transport, and
-geometry participation; the browser keeps the parsed xterm state and logical
-control-session identity only while its memory cache retains the entry. This
-client cache is not server persistence. A completed entry whose session ended
-does not reconnect unless that same run is relaunched; a relaunch records a
-fresh full attach while parked and opens it when the entry becomes active.
-
-Dashboard attachments request `framed:true` and require the server to confirm it
-in the ack. An older server that ignores the request is refused with an update
-error rather than having raw bytes decoded as terminal records. After the ack,
-an `o` byte and four-byte big-endian payload length precede each output record;
-a `g` byte and two four-byte big-endian dimensions form a geometry record. The
-gateway decodes these sequentially into WebSocket frames. Replay counts exclude
-frame headers. Dashboard resume cursors count original session output only
-through the xterm-settled boundary described above. The dashboard starts each
-frame-sized replay operation as it arrives, but one serial xterm write chain
-preserves geometry/output wire order and backpressure; it never allocates a
-transcript-sized replay buffer or runs an independent geometry pump.
-For a persistent dashboard dock, `rebind(next)` means that a new terminal host
-has taken over: the client cancels any old replay parser or drain with an
-explicit cancellation signal, drops the old socket, installs the new handlers,
-and starts one fresh full replay after cancellation. The dock does not issue a
-separate reopen after rebind.
-
-CLI attachments do not request framing and retain their raw terminal stream:
-they consume the ack-declared replay byte count, then continue with live bytes.
-They do not receive the dashboard's segmented, ordered, hidden-surface
-presentation. A writable CLI attach still discards input that arrives before
-its announced replay has been written; it does not defer those keystrokes.
+CLI attachments do not request framing or `interactive`; they retain their raw
+terminal stream and consume the ack-declared replay byte count before treating
+following bytes as live. A CLI `screen:false` attach receives complete raw
+history, while a dashboard `screen:true` attach receives the compact current
+screen. A writable CLI attach still discards input that arrives before its
+announced replay has been written; it does not defer those keystrokes.
 
 #### Run shell tabs
 

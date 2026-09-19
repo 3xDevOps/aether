@@ -255,7 +255,7 @@ describe('environment terminal dock', () => {
     xterm.terminal.reset.mockClear()
     act(() => attach.handlers?.onAttached?.(true, standardGeometry, true))
     expect(xterm.terminal.reset).not.toHaveBeenCalled()
-    act(() => attach.handlers?.onReplayStart?.(0))
+    act(() => attach.handlers?.onReplayStart?.(0, false))
     expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
     expect(host.style.visibility).toBe('')
   })

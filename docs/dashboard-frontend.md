@@ -1263,23 +1263,26 @@ generation epoch, so a key is never reused across either boundary. The cache
 contains only runs the member has visited: it does not prefetch runs and is not
 persisted across reloads or browser tabs.
 
+The normal run xterm requests up to 5,000 scrollback rows. Once the server
+acknowledges geometry, xterm adapts the combined normal and alternate buffers
+to stay near 1,000,000 cells; wider terminals therefore retain fewer rows.
+`CenterView` trims inactive entries by their reported cell weights, with at
+most four surfaces and its inactive-cell guard. This is a bounded cache
+policy, not a fixed per-terminal or global scrollback promise.
+
 When a cached primary becomes inactive because the route changes, its
 WebSocket is intentionally closed. That detach removes its Watching presence,
 active control transport, and geometry participation, while retaining the
-parsed xterm screen/scrollback and the logical control-session identity.
-Reactivation renders that parsed state immediately and reconnects with
-`resume` only after pending xterm writes settle. The attach ack's server-issued
-`resume_id` fences the settled cursor to one PTY incarnation; a missing ID means
-a full attach, and a mismatched ID is acknowledged with `resumed:false`,
-the current cursor, and the current ID before the complete retained transcript
-is applied through the hidden serial replay transaction. A write completion while
-parked immediately reports the latest combined normal-plus-alternate buffer
-weight. A completed entry whose session ended stays parked and does not
-reconnect unless that same run is relaunched; then it full-attaches once active.
+parsed current screen and bounded scrollback in browser memory. Reactivation
+renders that warm surface immediately and reconnects with `resume` only after
+pending xterm writes settle. The attach ack's server-issued `resume_id` fences
+the settled cursor to one PTY incarnation. A valid same-incarnation resume
+supplies only the bounded gap; an invalid cursor, ring, geometry, or
+incarnation falls back to a compact current-screen bootstrap through the
+hidden serial transaction. A completed entry whose session ended stays parked
+and does not reconnect unless that same run is relaunched; then it performs a
+fresh bootstrap once active.
 
-Inactive entries are trimmed least-recently-used to an approximate 4,000,000
-xterm-cell budget, with at most four entries total and one most-recent
-overweight entry allowed. The active entry is protected while selected.
 Run deletion, an attach's final refusal, and an identity or data-generation
 change invalidate entries; LRU eviction disposes inactive entries. An
 invalidated active entry remains only long enough to show its refusal, then is
@@ -1307,14 +1310,16 @@ keyboard stop and overflow scrolling; it does not use a component-level tab
 primitive.
 
 `TerminalPane` keeps xterm's host geometry intact while layering the shared
-toolbar and Find over it. During replay it receives `replaying={replaying}`:
-the xterm host is hidden with CSS visibility while each frame-sized replay
-operation is parsed through one serial xterm write chain, and the pane says
-**Restoring terminal history** until the final replay write callback. The run
-terminal, run-shell tabs, and environment dock all pass `setReplaying` to their
-shared replay gate, so all three surfaces reveal only a settled terminal. After
-that callback, two `requestAnimationFrame` turns let the xterm DOM paint the
-settled state before visibility is removed.
+toolbar and Find over it. During a dashboard run's compact current-screen
+bootstrap it receives `replaying={replaying}`: the xterm host is hidden with
+CSS visibility while each frame-sized operation is parsed through one serial
+xterm write chain, and the pane says **Restoring terminal history** until the
+final replay write callback. That status covers bootstrap parsing; it is not a
+request for the downloadable complete archive. The run terminal, run-shell
+tabs, and environment dock all pass `setReplaying` to their shared replay gate,
+so all three surfaces reveal only a settled terminal. After that callback, two
+`requestAnimationFrame` turns let the xterm DOM paint the settled state before
+visibility is removed.
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
 supplies its connection and steering controls immediately after those tools.
@@ -1412,8 +1417,9 @@ displayed it. When a new xterm host adopts one, the dock calls
 `Attachment.rebind()` with fresh callbacks. `rebind(next)` is a
 host-replacement boundary: it cancels any old replay parser or drain with an
 explicit cancellation signal, drops the old socket, updates the handlers, and
-starts one fresh full replay after cancellation. Docks must not separately
-call `reopen()` after `rebind()`. Run shell callbacks guard the current
+starts one fresh full replay for the shell or environment dock after
+cancellation. Docks must not separately call `reopen()` after `rebind()`. Run
+shell callbacks guard the current
 `{ runID, tab }`; the environment dock guards its current tab. Host
 subscriptions are removed on cleanup, while closing a tab or an exited shell
 unregisters its socket. Thus route changes and tab remounts cannot deliver late
@@ -1435,85 +1441,66 @@ names the container only while there is one to stop, because Reset outlives
 it. Stopping therefore carries the rest of the status forward rather than
 replacing it, so the image survives the container in what the dock knows as
 well as on the server, and Reset stays on offer with the environment stopped.
-A stop or reset that fails renders the server's error inside the dialog that
-caused it. When the terminal is running and `saved_image` is empty, it shows
-the hint **Installs here reach agents after you save.** From the moment a tab
-opens until its attach is acked, a spinner covers the terminal. Once an ack
-declares positive replay, the xterm host remains hidden with CSS visibility
-and the pane says **Restoring terminal history** while each frame-sized replay
-operation is parsed serially as it arrives; it is revealed only after the
-final replay write callback and two `requestAnimationFrame` turns have let
-the xterm DOM paint the settled state. A zero-length replay settles the gate
-immediately because there is no historical write to render. The status words
-follow what
+When the terminal is running and `saved_image` is empty, it shows the hint
+**Installs here reach agents after you save.** From the moment a tab opens until
+its attach is acked, a spinner covers the terminal. Once a dashboard run ack
+declares a compact bootstrap, the xterm host remains hidden with CSS visibility
+and the pane says **Restoring terminal history** while each frame-sized
+operation is parsed serially as it arrives; it is revealed only after the final
+replay write callback and two `requestAnimationFrame` turns have let the xterm
+DOM paint the settled state. Run-shell tabs and the environment dock use the
+same settled-surface gate for their own stream mode. A zero-length replay
+settles the gate immediately because there is no bootstrap write to render.
+The status words follow what
 the dock knows: a terminal it has not seen running is **Starting your
 environment container**, which is the wait Docker's container start accounts
 for; a second tab, a tab switch or an expanded dock is **Connecting to your
 environment**, with no container to start. A refused or failed start replaces
 the terminal with the gateway's own error instead.
 
-- **The socket is `attach.ts`**, framework-free and the only part with logic
-  worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-  terminal and event stream reconnect on the same jittered schedule, and it
-  splits large input (a paste) into several ordered frames under the gateway's
-  64 KiB frame cap, never splitting a surrogate pair. Its `Attachment`
-  interface also supports `rebind()` and `reopen()`; `rebind()` follows the
-  host-replacement lifecycle above, while `reopen()` is reserved for an
-  explicit attach transition such as resume, takeover, or release.
-- **Controller lease and complete replay on entry.** A desktop owner's first
-  attach requests write; the server grants it only when no controller exists.
-  Other members enter as mirrors, and a second tab cannot become a second
-  writer. The toggle reattaches rather than upgrading in place. Until a member
-  has taken control once, a live run opened as a mirror says **Read-only
-  mirror. Take control to type into the agent.** A run that is starting shows
-  its spinner instead; a run that is not steerable says **This run is not
-  running**. Whether a member may steer is the server's answer, never the
-  client's guess: a `-32001` refusal downgrades the attach to a mirror and
-  disables the toggle. An occupied write request is a conflict and needs the
-  Run Room's confirmed takeover.
+- **The socket is `attach.ts`**, framework-free. It reuses `backoff()` from
+  `src/lib/stream.ts`, splits paste input below the gateway's 64 KiB frame cap,
+  and keeps callbacks bound to the current terminal host. The primary run
+  header requests `screen:true` and `interactive:true`; shells and CLI
+  attachments keep their existing stream modes. `screen:true` bootstraps the
+  compact current screen and bounded scrollback. The complete raw archive is
+  downloaded separately through the authenticated
+  `GET /api/runs/<run>/terminal-history` action.
+- **Controller lease and compact bootstrap.** A desktop owner's first attach
+  asks for write; the server grants it only when no controller exists. Other
+  members enter as mirrors, and a second tab cannot become a second writer.
+  Until a member has taken control once, a live run opened as a mirror says
+  **Read-only mirror. Take control to type into the agent.** A run that is
+  starting shows its spinner instead; a run that is not steerable says **This
+  run is not running**. Whether a member may steer is the server's answer:
+  `-32001` downgrades the attach to a mirror and disables the toggle. An
+  occupied write request is a conflict and needs the Run Room's confirmed
+  takeover.
 
-  A fresh run attach receives the complete retained transcript in the ordinary
-  terminal, including segments from earlier server incarnations. The ack's
-  `replay` count is the exact replay/live byte boundary, even when a WebSocket
-  frame straddles it. `connectAttach` begins parsing each frame-sized replay
-  operation as it arrives, retaining only those frame-sized operations and
-  geometry records needed for its serial wire-order queue; it never allocates a
-  `Uint8Array` (or equivalent) whose size is the declared replay length. Each
-  replay operation passes through a public xterm write callback in sequence,
-  waiting for completion before the next operation so xterm backpressure is
-  preserved. Only the slice containing the exact final replay byte is tagged
-  `replay-end`; live output and geometry received during replay queue behind
-  that serial transaction. The hidden `TerminalPane` is revealed only after
-  the final replay callback and two `requestAnimationFrame` turns, so the
-  xterm DOM paints the settled current screen before live output is presented.
-  Every retained transcript byte is fed to xterm. xterm retains normal
-  scrollback and rows preserved by its configured full-screen erase behavior;
-  control bytes and cursor overwrites affect terminal state but are not
-  themselves scrollback rows. Input and terminal-generated replies remain
-  muted from the ack through the final replay-write callback, so historical
-  redraws never appear as playback. There is no separate History player.
+  The attach ack's `replay` count is the exact bootstrap/live byte boundary,
+  even when a WebSocket frame straddles it. For a fresh, live, or finished
+  dashboard run attach, those bytes are the compact current-screen snapshot,
+  not the complete retained transcript. A valid same-incarnation
+  `resume`/`cursor`/`resume_id` supplies only the bounded gap and keeps the
+  warm screen. If the cursor or ring cannot serve it, `resumed:false` selects
+  a compact snapshot fallback. `connectAttach` parses frame-sized operations
+  through one serial xterm write chain, keeps the host hidden, mutes input and
+  terminal-generated replies, and reveals the settled screen only after the
+  final write callback and two animation frames. It never allocates a
+  transcript-sized browser buffer.
 
-  `Release control` sends `release_control` with the current control session and
-  generation on that same replacement attach request. At the PTY-host commit
-  boundary, the server holds the run-scoped authority lock, validates that
-  session and generation, admits the replacement, then releases and fences the
-  old lease before any replay, output, or geometry. If admission fails, the
-  request is refused while the old writer and lease remain intact. A successful
-  commit cancels the displaced writer; the replacement continues as the
-  read-only PTY attach on the same request, honors `resume`/`resume_id`/`cursor`,
-  returns one normal attach ack, and then streams output. A successful live ack's
-  nonempty `resume_id` fences the cursor to that PTY incarnation; without a
-  stored ID the client sends a full attach, and a mismatch is acknowledged with
-  `resumed:false`, the current cursor, and current ID. Invalid, stale, or
-  cross-member release is refused. A successful resume supplies only bytes
-  after the xterm-settled `cursor`; if resume cannot be honored, the server may
-  replay the complete retained run transcript again and the dashboard applies
-  that fallback through the same hidden, serial ordered transaction. Taking
-  control and releasing it preserve the existing terminal when resume succeeds;
-  when fallback is needed, they still produce no visible historical playback. The
-  server streams retained segments lazily, opening and reading at most one
-  segment at a time, so complete history does not require every segment to be
-  loaded or left open.
+  **Control changes stay on this WebSocket.** The client sends
+  `{"type":"control","request_id":17,"write":true,"takeover":true,
+  "control_generation":8}` (omit `takeover` unless explicitly displacing a
+  controller). The ordered response has `type:"control"`, the same
+  `request_id`, `ok`, optional `code`/`error`, and authoritative
+  `has_control`, `control_session_id`, and `control_generation`. An
+  unsolicited lease or **Steer** revocation has no `request_id`; it carries
+  `ok:false`, `has_control:false`, and the exact revoked generation. An
+  interactive attach remains open as a read-only mirror, with no replay or
+  reconnect. Input carries the current `control_generation`; stale input is
+  fenced. Take and release do not reconnect or replay, and the UI changes its
+  writable state only from acknowledged metadata.
 - **A missing session is not a dead terminal.** `-32004` means the run has
   no PTY session, and `internal/sshd/attach.go` refuses rather than waits
   for one, so the client is what has to tell a container that is still
@@ -1557,14 +1544,15 @@ the terminal with the gateway's own error instead.
   a denial outlives the socket that produced it: leaving the tab and coming
   back would show a live terminal beside a stale error, with steering greyed
   out even after `run.handoff` granted it.
-- **A 1008 close is read, not guessed at.** The server re-checks a live
-  attach's authorization every few seconds, the gateway relays a loss as a
-  1008 close, and the close reason names which gate fell: `steer permission
-  withdrawn` just downgrades - the client reconnects immediately as a
-  read-only mirror - while a dead token or `membership withdrawn` would refuse
-  every reconnect, so those stop the loop and surface the reason. A refusal
-  frame arrives with its own 1008 close, which is why the client reacts to the
-  code only when no refusal preceded it.
+- **Interactive revocation stays on the mirror socket.** The server
+  re-checks a live attach's authorization every few seconds. Losing **Steer**
+  sends an unsolicited control notification on the existing interactive
+  WebSocket; the client applies its exact revoked generation, disables input,
+  and remains a read-only mirror without replaying or reconnecting. A raw
+  legacy (non-interactive) attach retains the named **1008** close, reason
+  `steer permission withdrawn`. Membership withdrawal also uses **1008**,
+  reason `membership withdrawn`, and stops reconnecting. A refusal frame's own
+  close is handled only when no prior control response explains it.
 - **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
   chains zoom, find, and `clipboardKeys` in that order; the first to claim a
   key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but
