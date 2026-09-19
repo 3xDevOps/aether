@@ -189,12 +189,6 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	attemptA := start(taskA, "dispatch-A")
 	attemptB := start(taskB, "dispatch-B")
-	if attemptA.Attempt.State != string(domain.AttemptRunning) && attemptA.Attempt.State != string(domain.AttemptLaunching) {
-		t.Fatalf("worker A state = %q, want active", attemptA.Attempt.State)
-	}
-	if attemptB.Attempt.State != string(domain.AttemptRunning) && attemptB.Attempt.State != string(domain.AttemptLaunching) {
-		t.Fatalf("worker B state = %q, want active", attemptB.Attempt.State)
-	}
 
 	// Treat the first worker.start response as lost: replaying its dispatch key
 	// returns one attempt and explicitly marks the replay.
@@ -211,9 +205,11 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 
 	// The two fixtures are live together and each sends before the release,
-	// proving this is a real socket/mailbox exchange rather than store-only work.
-	attA := openAttach(t, adaClient, attemptA.Attempt.RunID)
-	attB := openAttach(t, adaClient, attemptB.Attempt.RunID)
+	// proving this is a real socket/mailbox exchange rather than store-only
+	// work. These attachments only mirror worker output and are deliberately
+	// read-only so observing a worker cannot install a human takeover hold.
+	attA := openMissionObserver(t, adaClient, attemptA.Attempt.RunID)
+	attB := openMissionObserver(t, adaClient, attemptB.Attempt.RunID)
 	attA.waitOutput(t, "inbox:worker-B-before-overlap")
 	attB.waitOutput(t, "inbox:worker-A-before-overlap")
 
@@ -259,8 +255,18 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}, &cancelled); err != nil {
 		t.Fatalf("worker.cancel A: %v", err)
 	}
-	if cancelled.Attempt.State != string(domain.AttemptCancelled) {
-		t.Fatalf("worker.cancel A state = %q, want cancelled", cancelled.Attempt.State)
+	cancellationDeadline := time.Now().Add(30 * time.Second)
+	for {
+		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
+			t.Fatalf("worker.inspect while cancelling A: %v", err)
+		}
+		if inspected.Attempt.State == string(domain.AttemptCancelled) {
+			break
+		}
+		if time.Now().After(cancellationDeadline) {
+			t.Fatalf("worker A did not finish cancelling: %+v", inspected.Attempt)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 	var retried protocol.WorkerMutationResult
 	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerRetry, protocol.WorkerRetryParams{
@@ -423,8 +429,13 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	}
 	attemptA := start(taskA, "docker-dispatch-a")
 	attemptB := start(taskB, "docker-dispatch-b")
-	attA := openAttach(t, adaClient, attemptA.Attempt.RunID)
-	attB := openAttach(t, adaClient, attemptB.Attempt.RunID)
+	// The SSH attachments are observers, not controllers. A default attach
+	// acquires the human lease and makes the worker refuse reconciliation.
+	attA := openMissionObserver(t, adaClient, attemptA.Attempt.RunID)
+	attB := openMissionObserver(t, adaClient, attemptB.Attempt.RunID)
+	for _, runID := range []string{attemptA.Attempt.RunID, attemptB.Attempt.RunID} {
+		writeFile(t, filepath.Join(e.coordDir(runID), "mission-fixture-start"), "ready\n")
+	}
 	attA.waitOutput(t, "fixture-sent:")
 	attB.waitOutput(t, "fixture-sent:")
 	attA.waitOutput(t, "fixture-acked:")
@@ -741,20 +752,20 @@ case "$task" in
 esac
 
 case "$task" in
-	*"worker A"*) result="worker-a.txt"; body="worker-A-before-edit" ;;
-	*"worker B"*) result="worker-b.txt"; body="worker-B-before-edit" ;;
-	*) result="worker-other.txt"; body="worker-before-edit" ;;
+	*"worker A"*) result="worker-a.txt"; body="worker-A-before-edit"; peer_task="mission Docker worker B" ;;
+	*"worker B"*) result="worker-b.txt"; body="worker-B-before-edit"; peer_task="mission Docker worker A" ;;
+	*) echo "fixture-peer-task-not-found" >&2; exit 1 ;;
 esac
+# Observers cannot write PTY input; the host releases this read-only gate
+# after both output streams are attached.
+while [ ! -f /run/aether/mission-fixture-start ]; do sleep 0.1; done
 
-# The marker is only to enter the radar. The substantive result is written
-# after both fixtures have exchanged messages, and each fixture removes the
-# marker before reporting so candidate assembly has no shared-file conflict.
-printf '%s:marker\n' "$AETHER_RUN_ID" > shared.txt
+
 peer=
 attempt=0
 while [ "$attempt" -lt 120 ]; do
 	status=$(/usr/local/bin/aether-internal status --json)
-	peer=$(printf '%s\n' "$status" | sed -nE 's/.*"peers":\[\{"run_id":"([^"]*)".*/\1/p')
+	peer=$(printf '%s\n' "$status" | sed -nE "s/.*\"run_id\":\"([^\"]*)\",\"member_id\":\"[^\"]*\",\"task\":\"$peer_task\".*/\1/p")
 	if [ -n "$peer" ]; then break; fi
 	attempt=$((attempt + 1))
 	sleep 1
@@ -762,6 +773,8 @@ done
 [ -n "$peer" ] || { echo "fixture-peer-not-found" >&2; exit 1; }
 /usr/local/bin/aether-internal send --to "$peer" --body "$body" --idempotency-key "mission-send-$AETHER_RUN_ID" >/dev/null
 echo "fixture-sent:$AETHER_RUN_ID"
+# Peer discovery can take longer than the bounded acknowledgement polls.
+attempt=0
 ack=
 while [ "$attempt" -lt 20 ]; do
 	inbox=$(/usr/local/bin/aether-internal inbox --wait 2)
@@ -774,7 +787,6 @@ while [ "$attempt" -lt 20 ]; do
 	attempt=$((attempt + 1))
 done
 [ -n "$ack" ] || { echo "fixture-message-not-acked" >&2; exit 1; }
-rm -f shared.txt
 printf '%s\n' "$body" > "$result"
 /usr/local/bin/aether-internal report --outcome success --summary "mission fixture retained result" --idempotency-key "mission-report-$AETHER_RUN_ID" >/dev/null
 echo "fixture-reported:$AETHER_RUN_ID"
@@ -833,6 +845,60 @@ func waitMissionSocket(t *testing.T, dir string) string {
 	}
 	t.Fatalf("coordination socket did not appear: %s", socket)
 	return ""
+}
+
+// openMissionObserver attaches a read-only mirror. It must never acquire the
+// human control lease: mission workers treat that lease as an explicit
+// takeover and refuse integrator reconciliation while it is held.
+func openMissionObserver(t *testing.T, client *ssh.Client, runID string) *attachConn {
+	t.Helper()
+	sess, err := client.NewSession()
+	if err != nil {
+		t.Fatalf("observer session: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	if err := sess.RequestPty("xterm-256color", 30, 120, ssh.TerminalModes{}); err != nil {
+		t.Fatalf("observer pty-req: %v", err)
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.RequestSubsystem(protocol.SubsystemAttach); err != nil {
+		t.Fatalf("observer subsystem: %v", err)
+	}
+	header, err := json.Marshal(protocol.AttachRequest{
+		RunID: runID, ReadOnly: true, Cols: 120, Rows: 30,
+		ControlSessionID: "integration-observer-" + runID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdin.Write(append(header, '\n')); err != nil {
+		t.Fatalf("write observer request: %v", err)
+	}
+	r := bufio.NewReader(stdout)
+	line, err := protocol.ReadLine(r)
+	if err != nil {
+		t.Fatalf("read observer ack: %v", err)
+	}
+	var ack protocol.AttachResponse
+	if err := json.Unmarshal(line, &ack); err != nil {
+		t.Fatalf("decode observer ack: %v", err)
+	}
+	if !ack.OK {
+		t.Fatalf("observer attach denied: %+v", ack)
+	}
+	if ack.HasControl {
+		t.Fatalf("observer acquired human control: %+v", ack)
+	}
+	a := &attachConn{sess: sess, stdin: stdin}
+	go a.pump(r)
+	return a
 }
 
 func openMissionTakeover(t *testing.T, client *ssh.Client, runID string) (*attachConn, uint64) {

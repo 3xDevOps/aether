@@ -136,11 +136,17 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 	boCtrl, boClient := srv.control(t, e.bo.key)
 
 	runA := e.launch(t, adaCtrl, "shell coordination A", "pi")
+	attA := openAttach(t, adaClient, runA.ID)
+	if _, err := attA.stdin.Write([]byte("aether-cli-start\r")); err != nil {
+		t.Fatalf("start pi shell fixture: %v", err)
+	}
 	// A taskless terminal must still receive the CLI and skill workflow.
 	runB := e.launch(t, boCtrl, "", "omp")
-	attA := openAttach(t, adaClient, runA.ID)
-	cli := newDockerCLI(t)
 	attB := openAttach(t, boClient, runB.ID)
+	if _, err := attB.stdin.Write([]byte("aether-cli-start\r")); err != nil {
+		t.Fatalf("start omp shell fixture: %v", err)
+	}
+	cli := newDockerCLI(t)
 	mountsOK := true
 	for _, run := range []protocol.Run{runA, runB} {
 		if !e.assertRealizedMounts(ctx, t, cli, run.ID, user) {
@@ -288,6 +294,9 @@ func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 	ctrl, memberClient := srv.control(t, e.ada.key)
 	run := e.launch(t, ctrl, "", "pi")
 	att := openAttach(t, memberClient, run.ID)
+	if _, err := att.stdin.Write([]byte("aether-cli-start\r")); err != nil {
+		t.Fatalf("start disabled shell fixture: %v", err)
+	}
 	att.waitOutput(t, "cli-no-auto-mcp:")
 	att.waitOutput(t, "cli-help:")
 	att.waitOutput(t, "cli-skill-no-socket:")
@@ -311,19 +320,22 @@ func buildCoordAgentImage(t *testing.T) (image, user string) {
 	dir := t.TempDir()
 	build := exec.Command("go", "build", "-o", filepath.Join(dir, "claude"), "./internal/server/testdata/coordagent")
 	build.Dir = repoRoot(t)
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the in-container agent: %v (%s)", err, out)
-	}
 	writeFile(t, filepath.Join(dir, "shell-coord-agent"), `#!/bin/sh
 set -eu
 task=${1:-shell coordination}
 
-printf '%s:initial\n' "$AETHER_RUN_ID" > shared.txt
 fail() {
 	echo "cli-fail:$*" >&2
 	exit 1
 }
+
+# The test releases the fixture only after the attach subsystem acknowledges
+# its stream, so every marker below is observable rather than a startup race.
+if ! IFS= read -r start; then
+	fail "start handshake"
+fi
+[ "$start" = "aether-cli-start" ] || fail "start handshake"
+printf '%s:initial\n' "$AETHER_RUN_ID" > shared.txt
 for arg in "$@"; do
 	[ "$arg" = "--mcp-config" ] && fail "automatic MCP config"
 done
@@ -339,8 +351,11 @@ case "$skill" in
 	?*) echo "cli-skill-available:$AETHER_RUN_ID" ;;
 	*) fail "skill output was empty" ;;
 esac
-digest=$(sha256sum /opt/aether/aether-server /usr/local/bin/aether-internal |
+# The CLI and bridge are the same staged binary when coordination is live,
+# but the CLI remains intentionally present when the bridge is disabled.
+digest=$(sha256sum /usr/local/bin/aether-internal |
 	awk 'NR == 1 {print $1}')
+[ -n "$digest" ] || fail "digest unavailable"
 echo "cli-digest:$digest"
 
 # The disabled server still gives every image the version-matched CLI, but it
