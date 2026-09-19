@@ -159,7 +159,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await page.goto(missionURL.toString())
   await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
   await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
-  const candidateReview = page.getByRole('region', { name: 'Candidate review' })
+  const candidateReview = page.getByRole('region', { name: 'Candidate review', exact: true })
   await expect(candidateReview).toBeVisible({ timeout: terminalTimeout })
   await expect(candidateReview.getByTestId('mission-candidate-inputs')).toContainText(submission.ref.evidence_ref)
   await expect(candidateReview.getByLabel('Target ref')).toHaveValue('refs/heads/main')
@@ -174,11 +174,13 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   if (!candidateID) throw new Error('mission candidate prepare returned no candidate')
   const prepared = await alice.api.rpc<{
     candidate: {
+      state: string
       mission_id?: string
       mission_accepted_set_version?: number
       submissions: Array<{ workspace_id: string; run_id: string; evidence_ref: string; retained_revision: string }>
     }
   }>('integration.show', { workspace_id: workspaceID, candidate_id: candidateID })
+  expect(prepared.candidate.state).toBe('frozen')
   expect(prepared.candidate.mission_id).toBe(mission.id)
   expect(prepared.candidate.mission_accepted_set_version).toBe(1)
   expect(prepared.candidate.submissions).toEqual([{
