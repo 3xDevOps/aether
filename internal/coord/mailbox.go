@@ -205,7 +205,8 @@ func missionRPCError(method string, err error) *protocol.Error {
 	switch {
 	case errors.Is(err, store.ErrMissionStale), errors.Is(err, store.ErrMissionTakeover):
 		code = protocol.CodeDenied
-	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady):
+	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady),
+		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict):
 		code = protocol.CodeConflict
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}

@@ -2,7 +2,9 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func (h *coordHarness) dial(t *testing.T, run domain.RunID) *protocol.Client {
@@ -526,5 +529,75 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 		}
 		return // the server dropped the wedged connection
 	}
+
 	t.Fatal("the server never dropped a connection that stopped reading responses")
+}
+
+type missionTransportStub struct {
+	err error
+}
+
+func (m missionTransportStub) Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error) {
+	return protocol.CoordMissionAssignment{}, nil
+}
+
+func (m missionTransportStub) Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error) {
+	return nil, nil
+}
+
+func (m missionTransportStub) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
+	return nil, m.err
+}
+
+func (m missionTransportStub) ValidateReport(context.Context, domain.RunID) error {
+	return nil
+}
+
+func (m missionTransportStub) ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error {
+	return nil
+}
+
+func TestMissionTransportMapsMissionErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cause    error
+		wantCode int
+	}{
+		"mission": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionIdempotencyConflict),
+			wantCode: protocol.CodeConflict,
+		},
+		"coordination": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrIdempotencyConflict),
+			wantCode: protocol.CodeConflict,
+		},
+		"real-error": {
+			cause:    errors.New("database unavailable"),
+			wantCode: protocol.CodeInternal,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cause, wantCode := tc.cause, tc.wantCode
+			h := newHarness(t, 1, func(c *Config) {
+				c.Mission = missionTransportStub{err: cause}
+			})
+			ctx := context.Background()
+			h.start()
+			run := h.run(0)
+			if _, err := h.svc.Provision(ctx, run, nil); err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+
+			err := h.dial(t, run).Call(protocol.MethodTaskPropose, protocol.TaskProposeParams{}, nil)
+			var rpcErr *protocol.Error
+			if !errors.As(err, &rpcErr) {
+				t.Fatalf("task.propose error = %v, want protocol error", err)
+			}
+			if rpcErr.Code != wantCode {
+				t.Fatalf("task.propose code = %d, want %d", rpcErr.Code, wantCode)
+			}
+			if want := protocol.MethodTaskPropose + ": " + cause.Error(); rpcErr.Message != want {
+				t.Fatalf("task.propose message = %q, want %q", rpcErr.Message, want)
+			}
+		})
+	}
 }
