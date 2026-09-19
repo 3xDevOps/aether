@@ -56,6 +56,7 @@ type localState struct {
 	mu      sync.Mutex
 	cfg     cli.Config
 	mtime   time.Time
+	backend Backend
 	sync    *localops.SyncManager
 	forward *localops.ForwardManager
 }
@@ -64,7 +65,7 @@ type localState struct {
 // fails: an unlinked (zero) cli.Config simply reports linked:false and
 // refuses the verbs that need a repo.
 func newLocalState(cfg Config) *localState {
-	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager(), forward: localops.NewForwardManager()}
+	state := &localState{cfg: cfg.CLI, backend: cfg.Backend, sync: localops.NewSyncManager(), forward: localops.NewForwardManager()}
 	if path, err := cli.Path(); err == nil {
 		if info, err := os.Stat(path); err == nil {
 			state.mtime = info.ModTime()
@@ -105,7 +106,14 @@ func (s *localState) snapshot() cli.Config {
 					}
 					cfg = named
 				}
+				// Repo and profile metadata do not affect Dial; keep live
+				// streams up when only those fields changed.
+				relink := s.cfg.Addr != cfg.Addr || s.cfg.User != cfg.User ||
+					s.cfg.Key != cfg.Key || s.cfg.KnownHosts != cfg.KnownHosts
 				s.cacheConfig(cfg)
+				if relink && s.backend != nil {
+					s.backend.Relink(cfg, nil)
+				}
 			}
 		}
 	}
