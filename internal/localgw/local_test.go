@@ -70,6 +70,26 @@ func (b *verbStubBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
 
 func (b *verbStubBackend) Relink(cli.Config, *cli.Conn) {}
 
+type externalLinkBackend struct {
+	verbStubBackend
+	cfg cli.Config
+}
+
+func (b *externalLinkBackend) Relink(cfg cli.Config, _ *cli.Conn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cfg = cfg
+}
+
+func (b *externalLinkBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.cfg.Addr == "" {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server address required"}
+	}
+	return b.apiStubBackend.Call(ctx, method, params)
+}
+
 func TestLocalForwardLifecycle(t *testing.T) {
 	port := freeLocalForwardPort(t)
 	g := newVerbGateway(t, &verbStubBackend{}, cli.Config{})
@@ -327,6 +347,27 @@ func TestLocalSnapshotRefreshesConfigAfterMtimeChange(t *testing.T) {
 
 	if got := state.snapshot(); got.Repo != updated.Repo {
 		t.Fatalf("refreshed repo = %q, want %q", got.Repo, updated.Repo)
+	}
+}
+
+func TestExternalLinkRefreshesBackend(t *testing.T) {
+	useTempConfigDir(t)
+	backend := &externalLinkBackend{
+		verbStubBackend: verbStubBackend{apiStubBackend: apiStubBackend{
+			results: map[string]json.RawMessage{
+				protocol.MethodMemberGit: json.RawMessage(`{"member":{"id":"mem_1","display_name":"Alice"}}`),
+			},
+		}},
+	}
+	g := newVerbGateway(t, backend, cli.Config{})
+	defer func() { _ = g.Close() }()
+
+	saveConfigAt(t, cli.Config{Addr: "host:2222", User: "alice"}, time.Unix(1_700_000_000, 0))
+	if rec := do(g, http.MethodPost, "/local/v1/link.status", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("link.status = %d: %s", rec.Code, rec.Body)
+	}
+	if rec := do(g, http.MethodPost, "/api/v1/member.git", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("member.git after external link = %d: %s", rec.Code, rec.Body)
 	}
 }
 
