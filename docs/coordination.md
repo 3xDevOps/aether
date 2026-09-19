@@ -5,6 +5,14 @@ coordination is enabled, each run also gets a small, durable channel for
 communicating with the other runs that the radar authorizes. The channel is
 advisory: it does not lock files, pause work, or decide which change wins.
 
+Candidate verification and delivery is a separate authenticated service
+described in [integration.md](integration.md). Coordination records remain
+observations/evidence; they do not constitute an accepted submission, a
+frozen candidate revision, or a landed upstream change. Agent integration
+verbs are provided by the mission-policy adapter, not by this standalone
+human coordination surface; this guide does not claim those verbs or a new
+agent CLI are shipped here.
+
 ## Run-mounted surfaces
 
 The server keeps coordination data below its private data directory:

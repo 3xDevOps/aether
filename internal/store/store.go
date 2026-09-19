@@ -127,6 +127,18 @@ type Store interface {
 	// ListRunSteerers returns those members, ordered by member ID.
 	ListRunSteerers(ctx context.Context, run domain.RunID) ([]*domain.Member, error)
 
+	// Integration candidates are durable aggregate envelopes with indexed
+	// idempotency bindings and optimistic version checks. Candidate payloads
+	// are independent of source runs so run deletion cannot cascade them.
+	CreateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate) error
+	GetIntegrationCandidate(ctx context.Context, id string) (*IntegrationCandidate, error)
+	GetIntegrationCandidateByKey(ctx context.Context, workspace domain.WorkspaceID, actorKey, idempotencyKey string) (*IntegrationCandidate, error)
+	UpdateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate, expectedVersion int64) error
+	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, limit int) ([]*IntegrationCandidateSummary, error)
+	ListIntegrationCleanupCandidates(ctx context.Context, now time.Time, limit int) ([]*IntegrationCandidate, error)
+	ListIntegrationCleanupCandidatesAfter(ctx context.Context, now time.Time, afterID string, limit int) ([]*IntegrationCandidate, error)
+	DeleteIntegrationCandidate(ctx context.Context, id string, expectedVersion int64) error
+
 	// Profile snapshots are content-addressed per member+harness.
 	// SaveProfileSnapshot assigns ID/CreatedAt when zero; if the digest
 	// already exists for that member+harness the existing row is returned

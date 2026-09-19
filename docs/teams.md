@@ -251,11 +251,61 @@ which adds the `aether` git remote. Run branches (`aether/run-*`) are
 server-owned - clients cannot force-push or delete them, because the branch is
 the artifact. Every other branch behaves like a normal git remote.
 
-The checkout Origin does not change workspace base ownership. Aether publishes
-each run's branch to the workspace repo and nowhere else, and `aether pull`
-still brings it into your clone. Pushing that run branch to checkout Origin
-is somebody's own act: the agent inside the run can `git push origin <branch>`,
-or you can push it from your clone after reviewing and merging.
+The checkout Origin does not change workspace base ownership. For run
+completion, Aether publishes each run's `aether/run-*` branch to the workspace
+repo; candidate delivery is a separate review path, not another run-branch
+publication. `aether pull` still brings a published run branch into your clone.
+Pushing that run branch to checkout Origin is somebody's own act: the agent
+inside the run can `git push origin <branch>`, or you can push it from your
+clone after reviewing and merging.
+
+## Candidate integration
+
+Candidate integration is the review boundary for combining retained run
+submissions. It does not change run ownership or the mission scheduler. A
+candidate is prepared from an ordered list whose entries carry
+`workspace_id`, `run_id`, `evidence_ref`, and `retained_revision`, plus a full
+`target_ref` in the form `refs/heads/<branch>` and its exact
+`expected_target_revision`. Optional `required_sources` names are checked
+while the packet is copied; a required unavailable or truncated source fails
+preparation rather than becoming an empty observation. The candidate stores an
+evidence snapshot and candidate-owned Git refs and transcript artifacts, so
+later source cleanup does not change what was reviewed.
+Packet snapshots are bounded to 1 MiB total per candidate.
+
+Assembly happens in a server-owned isolated checkout, never in a live run
+checkout. Inputs are applied in their submitted order while preserving each
+source base. A conflict leaves the journal and checkout available for explicit
+file resolutions; the candidate freezes only after every input is applied.
+Once frozen, its candidate revision and inputs cannot be edited. The review
+surface labels evidence as observations: a server verification records the
+exact argv, observed image, runtime identity and working directory, bounded
+resource and timeout details, setup/environment provenance, exit and bounded
+output, and checks that the frozen tree was not changed, but a passed
+verification is not proof of semantic correctness.
+
+Delivery is a human gate over the exact candidate revision, verification IDs,
+target ref, expected target revision, and action. The caller and approver must
+still be active members with the existing **Push** capability when the action
+is performed; no candidate operation grants a new permission. On a local
+target, `update_ref` uses an atomic expected-old compare-and-swap and refuses
+if the target moved. A mirrored target cannot be updated directly: `proposal`
+creates the public `refs/heads/aether/proposal-<request-id>` ref and a private
+receipt without changing the upstream-owned base. A human fetches that proposal
+and pushes it through the normal protected upstream review route; **proposed**
+does not mean landed.
+
+Candidate-owned evidence has its own bounded lifetime: candidates live for 30
+days, and verification results and delivery requests expire no later than the
+candidate (verification validity is 24 hours). Original evidence packets may
+be deleted or expire after ownership transfer without deleting the candidate's
+copies. A missing or checksum-mismatched owned artifact makes the candidate
+unavailable and blocks verification and delivery; it is never silently
+reconstructed from the original packet. Expiry or deletion first fences new
+actions, then cleans owned resources; recoverable resources remain when that
+transition or cleanup cannot be completed. See [integration.md](integration.md)
+for the method-level contract and [failure-handling.md](failure-handling.md)
+for restart and cleanup behavior.
 
 In a **local-only** workspace, the base branch is client-writable. It is
 usually already there by the time the second member links: whoever created the
