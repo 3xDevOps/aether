@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -31,21 +30,25 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
 
 // ReconcileReport is called for every finalized report outbox row, including
 // ordinary runs and historical mission identities. Only the current worker
-// assignment can create a mission submission; all other known identities are
-// safe no-ops so a retired run cannot monopolize publication retries.
+// assignment can create a mission submission. A failure report still cancels
+// that worker after the attempt is terminal so cancellation and publication
+// can retry; other identities remain no-ops.
 func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
+	if report == nil {
+		return errors.New("mission: report is required for worker reconciliation")
+	}
 	m, attempt, err := s.resolveAssignment(ctx, run)
 	if err != nil {
-		if errors.Is(err, store.ErrMissionStale) || errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil
+		}
+		if errors.Is(err, store.ErrMissionStale) {
+			return s.reconcileStaleFailedReport(ctx, run, report, packet)
 		}
 		return err
 	}
 	if m == nil || attempt == nil {
 		return nil
-	}
-	if report == nil {
-		return errors.New("mission: report is required for worker reconciliation")
 	}
 	if report.RunID != run || report.WorkspaceID != m.WorkspaceID || report.WorkspaceID == "" {
 		return fmt.Errorf("mission: report identity does not match worker assignment")
@@ -104,21 +107,7 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		// The durable coord.report already exists; keep the worker running.
 		return s.publishMissionChanged(ctx, m.ID)
 	case store.CoordOutcomeFailure:
-		if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, report.Summary); stateErr != nil {
-			if errors.Is(stateErr, store.ErrMissionStale) {
-				return nil
-			}
-			return stateErr
-		}
-		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
-			return publishErr
-		}
-		if s.cfg.Cancel != nil {
-			if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
-				slog.Warn("mission: cancel failed worker", "run", attempt.RunID, "error", cancelErr)
-			}
-		}
-		return nil
+		return s.failAssignedWorker(ctx, m, attempt, report.Summary)
 	case store.CoordOutcomeSuccess:
 	default:
 		return fmt.Errorf("mission: unsupported report outcome %q", report.Outcome)
@@ -139,6 +128,56 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	}
 	return s.publishMissionChanged(ctx, m.ID)
 }
+
+func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
+	if report == nil || report.Outcome != store.CoordOutcomeFailure {
+		return nil
+	}
+	attempt, err := s.cfg.Missions.GetAttemptByRun(ctx, run)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if attempt == nil || attempt.RunID != run {
+		return nil
+	}
+	m, err := s.cfg.Missions.GetMission(ctx, attempt.MissionID)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return nil
+	}
+	if report.RunID != run || report.WorkspaceID != m.WorkspaceID || report.WorkspaceID == "" {
+		return fmt.Errorf("mission: report identity does not match worker assignment")
+	}
+	if packet.ID == "" || packet.RunID != string(run) || packet.WorkspaceID != string(m.WorkspaceID) {
+		return fmt.Errorf("mission: evidence packet identity does not match worker assignment")
+	}
+	if !containsString(report.EvidenceRefs, packet.ID) {
+		return fmt.Errorf("mission: report does not retain evidence packet %s", packet.ID)
+	}
+	return s.failAssignedWorker(ctx, m, attempt, report.Summary)
+}
+
+func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, detail string) error {
+	if m == nil || attempt == nil || attempt.RunID == "" {
+		return errors.New("mission: failed worker assignment is required")
+	}
+	if s.cfg.Cancel == nil {
+		return errors.New("mission: scheduler cancel unavailable")
+	}
+	if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
+		return fmt.Errorf("mission: cancel failed worker %s: %w", attempt.RunID, cancelErr)
+	}
+	if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail); stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
+		return stateErr
+	}
+	return s.publishMissionChanged(ctx, m.ID)
+}
+
 func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) []domain.SubmissionEvidence {
 	available, detail := packetEvidenceState(s.cfg.Now, packet)
 	facts := make([]domain.SubmissionEvidence, 0, len(packet.Sources)+len(report.InputEvidenceRefs)+1)
