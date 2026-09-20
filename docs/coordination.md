@@ -158,7 +158,7 @@ acceptance; it does not imply that the recipient has read the item.
 A task-bearing coordinated run receives this launch instruction automatically:
 
 ```
-Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
+Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished.
 ```
 
 No skill package, manual identity argument, or credential setup is required.
@@ -368,6 +368,11 @@ verification evidence, human decisions, and exact delivery.
 summary is required. `--evidence-ref` may be repeated, and `--summary-file`
 accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
+
+A worker report is one-shot and terminal. Success submits the attempt and the
+server then stops that worker. Failure fails the attempt without treating it as
+a task result. Blocked is a durable observation and does not stop the worker or
+submit the task. Waiting on a peer uses ask/inbox, never report.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to

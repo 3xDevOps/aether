@@ -223,6 +223,11 @@ commits and publishes the branch, records `completed` for a clean exit or
 run remains available for review and an authorized member may close it as
 merged or abandoned, but neither headless status is relaunchable.
 
+Mission-assigned integrator and worker runs keep that same persistent supervisor
+even in headless mode, so a one-shot harness exit does not destroy the container
+or mark the run completed. They stay until Close, Kill, a successful worker
+report, or worker cancel.
+
 Mission recovery also loads durable objectives and their bounded worker
 attempts. If the initial mission inventory scan fails, `aether-server serve`
 reports `server: start service mission: mission: recover durable state: <cause>`

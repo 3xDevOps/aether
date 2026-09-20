@@ -304,9 +304,9 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 const skillWorkflow = `Workflow:
 1. Inspect the assignment and acceptance requirements before acting.
 2. Stay within the assigned scope; do not invent identity or authority.
-3. Use aether-internal to read the inbox at natural checkpoints and ask authorized peers when blocked.
-4. Keep evidence for the work you perform and report success, failure, or blocked.
-5. Read the inbox once more before reporting, then take no new work after submission.
+3. Read the inbox at checkpoints. When blocked on a peer, ask them; do not report.
+4. Keep working until the assigned task is complete. aether-internal report is one-shot and terminal: a successful worker report submits the attempt and the server then stops this worker.
+5. Report success only with required evidence after the work is actually finished. Report failure only when the task cannot be completed. Never report because you are idle, waiting, or the human left. Read the inbox once more before a terminal report, then take no new work.
 `
 const integratorWorkflow = `Integrator candidate flow:
 Create JSON parameter files outside read-only /run/aether, or use
@@ -375,7 +375,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 					return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
 				}
 			case "worker":
-				if _, err := io.WriteString(out, "Worker scope: read and propose changes only for the assigned task; do not spawn workers.\n"); err != nil {
+				if _, err := io.WriteString(out, "Worker scope: read and propose changes only for the assigned task; do not spawn workers. Report only after the assigned task is finished or irrecoverable; a report is terminal.\n"); err != nil {
 					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
 				}
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -97,6 +98,30 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 			return publishErr
 		}
 		return nil
+	}
+	switch report.Outcome {
+	case store.CoordOutcomeBlocked:
+		// The durable coord.report already exists; keep the worker running.
+		return s.publishMissionChanged(ctx, m.ID)
+	case store.CoordOutcomeFailure:
+		if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, report.Summary); stateErr != nil {
+			if errors.Is(stateErr, store.ErrMissionStale) {
+				return nil
+			}
+			return stateErr
+		}
+		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+			return publishErr
+		}
+		if s.cfg.Cancel != nil {
+			if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
+				slog.Warn("mission: cancel failed worker", "run", attempt.RunID, "error", cancelErr)
+			}
+		}
+		return nil
+	case store.CoordOutcomeSuccess:
+	default:
+		return fmt.Errorf("mission: unsupported report outcome %q", report.Outcome)
 	}
 	evidence := s.reportEvidence(ctx, report, packet)
 	if len(evidence) == 0 {

@@ -306,7 +306,7 @@ Where conflict coordination is on and the launch has a task, Aether adds this
 short discovery instruction before substituting `{task}`:
 
 ```
-Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.
+Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished.
 ```
 
 For a taskless launch, the same instruction is delivered through the
@@ -325,8 +325,9 @@ The server stages that `/usr/local/bin/aether-internal` CLI and the run's
 `/run/aether/coord3.sock` automatically. No manual skill install, identity
 flag, repository instruction, or persistent member-home write is needed.
 The agent should run `aether-internal skill` before acting, then use the CLI
-for coordination and outcome reporting. The co-author rule still asks the
-agent to read `/run/aether/co-authors` before each commit. Only the prompt
+for coordination. Report a terminal outcome only after the assigned work is
+finished. The co-author rule still asks the agent to read
+`/run/aether/co-authors` before each commit. Only the prompt
 the harness receives changes: the stored task, branch slug, and every CLI and
 dashboard surface keep what the member typed. See [coordination.md](coordination.md).
 
