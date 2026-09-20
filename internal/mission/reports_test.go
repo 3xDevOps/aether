@@ -208,8 +208,8 @@ func TestReconcileReportFailureReturnsCancelError(t *testing.T) {
 	if getErr != nil {
 		t.Fatalf("get attempt: %v", getErr)
 	}
-	if attempt.State == domain.AttemptFailed {
-		t.Fatalf("attempt marked failed after cancel error: %q", attempt.State)
+	if attempt.State != domain.AttemptFailed {
+		t.Fatalf("attempt state after cancel error = %q, want failed", attempt.State)
 	}
 	if len(fix.canceller.runs) != 1 || fix.canceller.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", fix.canceller.runs, fix.attempt.RunID)
@@ -217,6 +217,28 @@ func TestReconcileReportFailureReturnsCancelError(t *testing.T) {
 	if fix.bus.calls != 0 {
 		t.Fatalf("publish calls = %d, want 0 after cancel error", fix.bus.calls)
 	}
+}
+
+type settlingCanceller struct {
+	db      *store.DB
+	attempt *domain.Attempt
+	runs    []domain.RunID
+}
+
+func (c *settlingCanceller) CancelMission(ctx context.Context, run domain.RunID) error {
+	c.runs = append(c.runs, run)
+	if c.db == nil || c.attempt == nil {
+		return nil
+	}
+	current, err := c.db.GetAttempt(ctx, c.attempt.ID)
+	if err != nil {
+		return err
+	}
+	err = c.db.UpdateAttemptState(ctx, current.ID, current.RunID, current.AuthorityGeneration, current.IntegratorGeneration, domain.AttemptCancelled, "killed")
+	if errors.Is(err, store.ErrMissionStale) {
+		return nil
+	}
+	return err
 }
 
 func TestReconcileReportFailureCancelsBeforePublishError(t *testing.T) {
@@ -261,5 +283,28 @@ func TestReconcileReportFailureCancelsBeforePublishError(t *testing.T) {
 	}
 	if fix.bus.calls != 3 {
 		t.Fatalf("publish calls after recovery = %d, want 3", fix.bus.calls)
+	}
+}
+
+func TestReconcileReportFailureKeepsReportedOutcomeAcrossCancel(t *testing.T) {
+	ctx := context.Background()
+	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
+	settler := &settlingCanceller{db: fix.db, attempt: fix.attempt}
+	fix.svc.cfg.Cancel = settler
+	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
+		t.Fatalf("ReconcileReport failure: %v", err)
+	}
+	attempt, err := fix.db.GetAttempt(ctx, fix.attempt.ID)
+	if err != nil {
+		t.Fatalf("get attempt: %v", err)
+	}
+	if attempt.State != domain.AttemptFailed {
+		t.Fatalf("attempt state after raced cancel = %q, want failed", attempt.State)
+	}
+	if attempt.LastError != report.Summary {
+		t.Fatalf("attempt detail = %q, want %q", attempt.LastError, report.Summary)
+	}
+	if len(settler.runs) != 1 || settler.runs[0] != fix.attempt.RunID {
+		t.Fatalf("CancelMission calls = %v, want [%s]", settler.runs, fix.attempt.RunID)
 	}
 }

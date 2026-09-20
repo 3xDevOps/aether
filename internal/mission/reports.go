@@ -169,11 +169,13 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 	if s.cfg.Cancel == nil {
 		return errors.New("mission: scheduler cancel unavailable")
 	}
+	if attempt.State.HoldsConcurrency() {
+		if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail); stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
+			return stateErr
+		}
+	}
 	if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
 		return fmt.Errorf("mission: cancel failed worker %s: %w", attempt.RunID, cancelErr)
-	}
-	if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail); stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
-		return stateErr
 	}
 	return s.publishMissionChanged(ctx, m.ID)
 }
