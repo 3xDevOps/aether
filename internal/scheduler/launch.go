@@ -278,7 +278,8 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	}
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
-	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile); err != nil {
+	persistSupervisor := opts.AssignedRunID != ""
+	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile, persistSupervisor); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -290,7 +291,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // the row underneath the in-flight launch. Any error after the row exists
 // marks the run failed ("provisioning: <err>"), or abandoned ("killed")
 // when a kill was accepted meanwhile.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile) error {
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	entry := &supervised{
 		runID:       run.ID,
 		workspaceID: run.WorkspaceID,
@@ -315,14 +316,14 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile); err != nil {
+	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile, persistSupervisor); err != nil {
 		s.failProvisioning(run, actor.ID, err)
 		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile) error {
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
 	if err != nil {
 		return fmt.Errorf("create checkout: %w", err)
@@ -370,7 +371,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	// reason Profile.Env's does: what the server needs the container to
 	// have is not a preference.
 	maps.Copy(plan.Env, coordEnv)
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan))
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}

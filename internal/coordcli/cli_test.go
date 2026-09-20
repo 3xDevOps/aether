@@ -142,8 +142,10 @@ func TestCLISkillPrintsAssignmentAndWorkflow(t *testing.T) {
 		!strings.Contains(raw, "remaining_total=3") ||
 		!strings.Contains(raw, "integration request-delivery --params-file") ||
 		!strings.Contains(raw, "human-decision boundary") ||
-		!strings.Contains(raw, "same idempotency_key") {
-		t.Fatalf("skill output %q does not include live identity, assignment, integrator allowance, or integration recovery workflow", raw)
+		!strings.Contains(raw, "same idempotency_key") ||
+		!strings.Contains(raw, "aether-internal report is one-shot and terminal") ||
+		!strings.Contains(raw, "When blocked on a peer, ask them; do not report.") {
+		t.Fatalf("skill output %q does not include live identity, assignment, integrator allowance, integration recovery workflow, or terminal-report guidance", raw)
 	}
 	if strings.Contains(raw, "No coordination socket") {
 		t.Fatalf("skill treated a reachable socket as unavailable: %q", raw)
@@ -158,7 +160,7 @@ func TestCLISkillPrintsWorkerScope(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
 	}
-	if !strings.Contains(raw, "Worker scope: read and propose changes only for the assigned task; do not spawn workers.") {
+	if !strings.Contains(raw, "Worker scope: read and propose changes only for the assigned task; do not spawn workers. Report only after the assigned task is finished or irrecoverable; a report is terminal.") {
 		t.Fatalf("worker skill output = %q", raw)
 	}
 	if strings.Contains(raw, "integration.") || strings.Contains(raw, "human-decision boundary") {
@@ -184,6 +186,10 @@ func TestCLIGeneralSkillWithoutSocket(t *testing.T) {
 	}
 	if strings.Contains(raw, "Run:") || strings.Contains(raw, "Assignment:") {
 		t.Fatalf("general skill claimed live assignment: %q", raw)
+	}
+	if !strings.Contains(raw, "aether-internal report is one-shot and terminal") ||
+		!strings.Contains(raw, "When blocked on a peer, ask them; do not report.") {
+		t.Fatalf("general skill omitted terminal-report workflow: %q", raw)
 	}
 }
 

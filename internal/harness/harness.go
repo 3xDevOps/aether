@@ -34,11 +34,11 @@ const TaskPlaceholder = "{task}"
 // The staged CLI fetches the actual assignment from the run socket; this text
 // carries no authority, identity, or task details.
 const (
-	DiscoveryInstruction = "Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome."
+	DiscoveryInstruction = "Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished."
 	DiscoveryFileName    = "discovery.md"
 	// developer_instructions is the Codex config key for additional
 	// instructions; model_instructions_file would replace built-ins.
-	codexDiscoverySetting = "developer_instructions=\"Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome.\""
+	codexDiscoverySetting = "developer_instructions=\"Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished.\""
 )
 
 // CoordPlaceholder is replaced by the container path of the run's
