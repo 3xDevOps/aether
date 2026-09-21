@@ -22,6 +22,8 @@ const (
 	retainedCloseReason       = "closed; retained container"
 	retainedExpiredReason     = "retained container expired"
 	retainedUnavailableReason = "retained container unavailable"
+	recoveryPTYRetryInitial   = 10 * time.Millisecond
+	recoveryPTYRetryMax       = 250 * time.Millisecond
 	// defaultExitProbeTimeout is Config.ExitProbeTimeout's default: the
 	// short non-destructive Wait window used on startup to learn whether a
 	// container already exited before attach.
@@ -1301,6 +1303,37 @@ func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *
 	}
 }
 
+func (s *Scheduler) startRecoveryPTYSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
+	backoff := recoveryPTYRetryInitial
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := s.cfg.PTY.StartSession(ctx, key, att)
+		if !errors.Is(err, ptyhost.ErrSnapshotPending) {
+			return err
+		}
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		}
+		if backoff < recoveryPTYRetryMax/2 {
+			backoff *= 2
+		} else {
+			backoff = recoveryPTYRetryMax
+		}
+	}
+}
+
 func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc sidecar, cid runtime.ID) {
 	// Sidecars written before captured HOME and RunUser fields were introduced
 	// need a live inspection. A failed inspection is inconclusive metadata,
@@ -1352,9 +1385,12 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 		if werr := s.cfg.Git.StartDiffWatch(ctx, r.WorkspaceID, r.ID); werr != nil {
 			slog.Warn("scheduler: restart diff watch", "run", r.ID, "error", werr)
 		}
-		if serr := s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
+		if serr := s.startRecoveryPTYSession(ctx, ptyhost.RunSession(r.ID), att); serr != nil {
 			_ = att.Close()
 			s.cfg.Git.StopDiffWatch(r.ID)
+			if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(serr, ctxErr) {
+				return
+			}
 			s.cleanupFailedRecoveryAttachment(ctx, entry, cid)
 			return
 		}

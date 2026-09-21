@@ -41,9 +41,10 @@ var errScreenDimensions = errors.New("ptyhost: terminal dimensions out of bounds
 // attach and by a finished run. Data is a replayable VT stream, not a raw
 // transcript tail.
 type ScreenSnapshot struct {
-	Cols uint
-	Rows uint
-	Data []byte
+	Cols     uint
+	Rows     uint
+	Data     []byte
+	Position TerminalPosition
 }
 
 type terminalScreen struct {
@@ -524,9 +525,9 @@ func (s *terminalScreen) appendPendingContinuation(data []byte) []byte {
 	return append(data, s.utf8Pending[:s.utf8PendingLen]...)
 }
 
-func makeScreenSnapshot(screen *terminalScreen, modes modeScanner) ScreenSnapshot {
+func makeScreenSnapshot(screen *terminalScreen, modes modeScanner, position TerminalPosition) ScreenSnapshot {
 	if screen == nil || screen.term == nil {
-		return ScreenSnapshot{}
+		return ScreenSnapshot{Position: position}
 	}
 	serialized := screen.snapshot()
 	preamble := modes.preamble()
@@ -539,7 +540,7 @@ func makeScreenSnapshot(screen *terminalScreen, modes modeScanner) ScreenSnapsho
 	// preamble or cancel the parser state we are handing off.
 	data = append(data, preamble...)
 	data = screen.appendPendingContinuation(data)
-	return ScreenSnapshot{Cols: screen.cols, Rows: screen.rows, Data: data}
+	return ScreenSnapshot{Cols: screen.cols, Rows: screen.rows, Data: data, Position: position}
 }
 
 func cloneScreenSnapshot(in ScreenSnapshot) ScreenSnapshot {

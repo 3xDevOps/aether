@@ -79,6 +79,14 @@ func (g *fakeGit) ReceivePack(_ context.Context, ws domain.WorkspaceID, stdin io
 	return 0, nil
 }
 
+type fakeRecentReplay struct {
+	data     []byte
+	cols     uint
+	rows     uint
+	position ptyhost.TerminalPosition
+	complete bool
+}
+
 // fakePTY records attach parameters, replays canned output, and echoes
 // keystrokes prefixed with "echo:". transcripts backs the Replay seam:
 // a run with an entry replays it, anything else reports os.ErrNotExist.
@@ -92,6 +100,9 @@ type fakePTY struct {
 	transcripts map[domain.RunID][]byte
 	snapshots   map[domain.RunID]ptyhost.ScreenSnapshot
 	cols        uint
+	snapshotErr error
+	recent      map[domain.RunID]fakeRecentReplay
+	recentLimit int
 	rows        uint
 	readOnly    bool
 	follow      bool
@@ -116,8 +127,35 @@ func (p *fakePTY) Replay(run domain.RunID) (io.ReadCloser, int, error) {
 	return io.NopCloser(bytes.NewReader(data)), len(data), nil
 }
 
+func (p *fakePTY) RecentReplay(run domain.RunID, maxBytes int) (ptyhost.ReplayWindow, error) {
+	p.mu.Lock()
+	p.recentLimit = maxBytes
+	recent, ok := p.recent[run]
+	p.mu.Unlock()
+	if !ok {
+		return ptyhost.ReplayWindow{}, fmt.Errorf("ptyhost: open recent transcript: %w", os.ErrNotExist)
+	}
+	data := append([]byte(nil), recent.data...)
+	if len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+	}
+	return ptyhost.ReplayWindow{
+		Reader:   io.NopCloser(bytes.NewReader(data)),
+		Bytes:    len(data),
+		Cols:     recent.cols,
+		Rows:     recent.rows,
+		Position: recent.position,
+		Complete: recent.complete,
+	}, nil
+}
+
 func (p *fakePTY) Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error) {
 	p.mu.Lock()
+	if p.snapshotErr != nil {
+		err := p.snapshotErr
+		p.mu.Unlock()
+		return ptyhost.ScreenSnapshot{}, err
+	}
 	if snap, ok := p.snapshots[run]; ok {
 		snap.Data = append([]byte(nil), snap.Data...)
 		p.mu.Unlock()

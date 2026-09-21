@@ -803,6 +803,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}
 	errCh := make(chan error, 1)
 	go func() {
+		resumePosition := req.ResumePosition()
 		errCh <- s.cfg.PTY.Attach(attachCtx, key, ptyhost.AttachClient{
 			Cols:     cols,
 			Rows:     rows,
@@ -830,8 +831,12 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			Screen:         req.Screen,
 			Follow:         req.Follow,
 			Resume:         req.Resume,
-			Cursor:         req.Cursor,
-			ResumeID:       req.ResumeID,
+			Position: ptyhost.TerminalPosition{
+				Epoch:    ptyhost.TerminalEpoch(resumePosition.Epoch),
+				Sequence: ptyhost.TerminalSequence(resumePosition.Sequence),
+			},
+			Cursor:   uint64(resumePosition.Sequence),
+			ResumeID: string(resumePosition.Epoch),
 		}, conn, st.resize)
 	}()
 
@@ -954,10 +959,12 @@ func replayableStatus(st domain.RunStatus) bool {
 	return st.Terminal()
 }
 
-// serveReplay streams a finished run's complete recorded transcript and ends
-// the channel cleanly (exit-status 0), reporting whether it served. A framed
-// dashboard attach still uses the final snapshot's geometry, but its output is
-// the same complete history a raw client receives.
+const maxFinishedScreenReplayBytes = 1 << 20
+
+// serveReplay streams a finished run's recorded output and ends the channel
+// cleanly (exit-status 0), reporting whether it served. Screen attaches prefer
+// the compact final snapshot, then a bounded recent transcript while snapshot
+// repair is pending. Raw and explicit full-history attaches retain Replay.
 func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed, screen bool, controlSnap control.Snapshot, controlHeld bool) bool {
 	var (
 		rc          io.ReadCloser
@@ -968,12 +975,23 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 		snap, snapErr := s.cfg.PTY.Snapshot(run.ID)
 		if snapErr != nil {
 			slog.Warn("sshd: snapshot finished run", "run", run.ID, "error", snapErr)
-			return false
-		}
-		cols, rows = snap.Cols, snap.Rows
-		if screen {
-			replayBytes = len(snap.Data)
-			rc = io.NopCloser(bytes.NewReader(snap.Data))
+			if screen {
+				window, recentErr := s.cfg.PTY.RecentReplay(run.ID, maxFinishedScreenReplayBytes)
+				if recentErr != nil {
+					if !errors.Is(recentErr, os.ErrNotExist) {
+						slog.Warn("sshd: open recent transcript for attach replay", "run", run.ID, "error", recentErr)
+					}
+					return false
+				}
+				rc, replayBytes = window.Reader, window.Bytes
+				cols, rows = window.Cols, window.Rows
+			}
+		} else {
+			cols, rows = snap.Cols, snap.Rows
+			if screen {
+				replayBytes = len(snap.Data)
+				rc = io.NopCloser(bytes.NewReader(snap.Data))
+			}
 		}
 	}
 	if rc == nil {

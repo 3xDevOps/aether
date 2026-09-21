@@ -260,10 +260,12 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
           sourceGeometryRef.current = null
           void refs.current.setGeometry(size.cols, size.rows, false)
         }
+        const attachedControl = attachment.controlMetadata?.()
         updateControl({
-          control_session_id: attachment.controlMetadata?.().control_session_id ?? '',
-          control_generation: attachment.controlMetadata?.().control_generation ?? 0,
+          control_session_id: attachedControl?.control_session_id ?? '',
+          control_generation: attachedControl?.control_generation ?? 0,
           has_control: write,
+          ...(attachedControl?.position === undefined ? {} : { position: attachedControl.position }),
         })
         setSessionMissing(false)
         setTerminal(runID, { message: null, refused: false, write })

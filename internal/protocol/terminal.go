@@ -149,13 +149,17 @@ func (r *TerminalReader) Read(p []byte) (n int, geometry [2]uint, err error) {
 // Outbound results carry has_control explicitly, including false; inbound
 // commands continue to use DashAttachControl's compact omitempty encoding.
 func MarshalTerminalControl(control DashAttachControl) ([]byte, error) {
-	type terminalControlFrame struct {
-		DashAttachControl
+	type wire DashAttachControl
+	out := wire(control)
+	out.ResumeID, out.Cursor = legacyTerminalPosition(control.Position, control.ResumeID, control.Cursor)
+	return json.Marshal(struct {
+		wire
 		HasControl bool `json:"has_control"`
-	}
-	return json.Marshal(terminalControlFrame{
-		DashAttachControl: control,
-		HasControl:        control.HasControl,
+		Cursor     any  `json:"cursor,omitempty"`
+	}{
+		wire:       out,
+		HasControl: control.HasControl,
+		Cursor:     marshalTerminalCursor(out.Cursor),
 	})
 }
 

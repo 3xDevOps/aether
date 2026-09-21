@@ -111,33 +111,42 @@ func renameAsideTranscript(path string) error {
 // v2 transcript. A partial first line is discarded because the read window
 // may begin in the middle of a JSON event.
 func readCastTail(path string, maxBytes int) ([]byte, error) {
-	if maxBytes <= 0 {
-		return nil, nil
+	out, _, err := readCastTailWindow(path, maxBytes, maxBytes*8)
+	return out, err
+}
+
+// readCastTailWindow bounds both decoded output and bytes read from disk.
+// JSON escaping expands one terminal byte to at most six cast bytes; the
+// small extra margin covers event framing without making a giant event a
+// request-path scan.
+func readCastTailWindow(path string, maxBytes, maxRawBytes int) ([]byte, int, error) {
+	if maxBytes <= 0 || maxRawBytes <= 0 {
+		return nil, 0, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	window := int64(maxBytes) * 4
-	if window < 0 || window > info.Size() {
+	window := int64(maxRawBytes)
+	if window > info.Size() {
 		window = info.Size()
 	}
 	if window == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	raw := make([]byte, int(window))
 	if _, err := io.ReadFull(io.NewSectionReader(f, info.Size()-window, window), raw); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if info.Size() > window {
 		i := bytes.IndexByte(raw, '\n')
 		if i < 0 {
-			return nil, nil
+			return nil, int(window), nil
 		}
 		raw = raw[i+1:]
 	}
@@ -167,6 +176,57 @@ func readCastTail(path string, maxBytes int) ([]byte, error) {
 		if i := bytes.IndexByte(out, '\n'); i >= 0 {
 			out = out[i+1:]
 		}
+	}
+	return out, int(window), nil
+}
+
+// readRecentCast returns a bounded output suffix from the newest transcript
+// incarnations. It lists segment names but never inspects output counts or
+// decodes more than a fixed disk window, even if a run has years of history.
+func readRecentCast(path string, maxBytes int) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, nil
+	}
+	paths, err := priorCastPaths(path)
+	if err != nil {
+		return nil, err
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		paths = append(paths, path)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
+	if len(paths) == 0 {
+		return nil, os.ErrNotExist
+	}
+
+	// Six bytes cover the worst JSON escape expansion. Two more bytes per
+	// output byte leave framing/headroom while keeping total I/O fixed.
+	rawBudget := maxBytes * 8
+	if rawBudget < 0 {
+		rawBudget = int(^uint(0) >> 1)
+	}
+	var chunks [][]byte
+	total := 0
+	for i := len(paths) - 1; i >= 0 && total < maxBytes && rawBudget > 0; i-- {
+		want := maxBytes - total
+		chunk, used, readErr := readCastTailWindow(paths[i], want, rawBudget)
+		if readErr != nil {
+			return nil, readErr
+		}
+		rawBudget -= used
+		if len(chunk) == 0 {
+			continue
+		}
+		chunks = append(chunks, chunk)
+		total += len(chunk)
+	}
+	out := make([]byte, 0, total)
+	for i := len(chunks) - 1; i >= 0; i-- {
+		out = append(out, chunks[i]...)
+	}
+	if len(out) > maxBytes {
+		out = out[len(out)-maxBytes:]
 	}
 	return out, nil
 }
@@ -325,6 +385,9 @@ func priorCastPaths(path string) ([]string, error) {
 }
 
 func openFullCastReplay(path string) (io.ReadCloser, int, error) {
+	if replay, total, ok := openCheckpointCastReplay(path); ok {
+		return replay, total, nil
+	}
 	segments, err := priorCastSegments(path)
 	if err != nil {
 		return nil, 0, err
@@ -339,6 +402,27 @@ func openFullCastReplay(path string) (io.ReadCloser, int, error) {
 		total += segment.outputBytes
 	}
 	return openCastReplay(segments, nil), total, nil
+}
+
+func openCheckpointCastReplay(path string) (io.ReadCloser, int, bool) {
+	checkpoint, err := decodeCheckpoint(checkpointPath(path))
+	if err != nil || checkpoint.Version != screenCheckpointVersion {
+		return nil, 0, false
+	}
+	segments, err := validateCheckpointSegments(path, checkpoint, true)
+	if err != nil || checkpoint.CastOutputBytes > uint64(^uint(0)>>1) {
+		return nil, 0, false
+	}
+	return openCastReplay(segments, nil), int(checkpoint.CastOutputBytes), true
+}
+
+func newestCastHeader(path string) (castHeader, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return castHeader{}, err
+	}
+	defer func() { _ = f.Close() }()
+	return readCastHeader(f)
 }
 func legacyCastIncarnation(info os.FileInfo, header castHeader) int64 {
 	id := legacyCastFileID(info)

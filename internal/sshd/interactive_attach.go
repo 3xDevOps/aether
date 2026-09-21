@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 // interactiveControlQueueSize bounds control replies for one attach. A
@@ -41,6 +42,7 @@ type attachConn struct {
 	controlCancel     context.CancelCauseFunc
 	replayOnce        sync.Once
 	mu                sync.Mutex
+	highWater         protocol.TerminalPosition
 	sent              bool
 	first             chan struct{}
 	writeErr          error
@@ -60,9 +62,9 @@ func newAttachConn(ch subsystemConn, r *bufio.Reader, ack any, framed bool, befo
 }
 
 // SetGeometry takes the session's PTY size from the host. Before the ack
-// goes out it is what the ack reports; afterwards framed clients receive a
-// geometry record in the same stream as output. Raw clients receive no
-// geometry bytes.
+// goes out it is what the ack reports; afterwards framed clients receive an
+// ordered geometry record. Interactive records also carry the exact terminal
+// high-water at that stream boundary. Raw clients receive no geometry bytes.
 func (c *attachConn) SetGeometry(cols, rows uint) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -76,7 +78,15 @@ func (c *attachConn) SetGeometry(cols, rows uint) {
 		return
 	}
 	if c.framed && c.writeErr == nil {
-		if err := protocol.WriteTerminalGeometry(c.ch, cols, rows); err != nil {
+		var err error
+		if c.interactive {
+			geometry := protocol.DashAttachControl{Type: protocol.DashAttachGeometry, Cols: cols, Rows: rows}
+			geometry.SetHighWater(c.highWater)
+			err = protocol.WriteTerminalControl(c.ch, geometry)
+		} else {
+			err = protocol.WriteTerminalGeometry(c.ch, cols, rows)
+		}
+		if err != nil {
 			c.writeErr = err
 			slog.Warn("sshd: write terminal geometry", "error", err)
 			c.ch.exit(1)
@@ -85,18 +95,28 @@ func (c *attachConn) SetGeometry(cols, rows uint) {
 	}
 }
 
-// SetResume records how the session answered a resume. It lands in the
-// ack, so it must arrive before WriteReplay sends it - Host.Attach calls
-// it straight after the client joins, which is where both are decided.
-func (c *attachConn) SetResume(cursor uint64, resumed bool, resumeID string) {
+// SetTerminalPosition records how the session answered a resume. It lands in
+// the ack, so it must arrive before WriteReplay sends it.
+func (c *attachConn) SetTerminalPosition(position ptyhost.TerminalPosition, resumed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.sent {
 		return
 	}
-	if ack, ok := c.ack.(*protocol.AttachResponse); ok {
-		ack.Cursor, ack.Resumed, ack.ResumeID = cursor, resumed, resumeID
+	c.highWater = protocol.TerminalPosition{
+		Epoch: protocol.TerminalEpoch(position.Epoch), Sequence: protocol.TerminalSequence(position.Sequence),
 	}
+	if ack, ok := c.ack.(*protocol.AttachResponse); ok {
+		ack.SetHighWater(c.highWater)
+		ack.Resumed = resumed
+	}
+}
+
+// SetResume preserves compatibility with hosts that still use ResumeWriter.
+func (c *attachConn) SetResume(cursor uint64, resumed bool, resumeID string) {
+	c.SetTerminalPosition(ptyhost.TerminalPosition{
+		Epoch: ptyhost.TerminalEpoch(resumeID), Sequence: ptyhost.TerminalSequence(cursor),
+	}, resumed)
 }
 
 func (c *attachConn) sendOK() {
@@ -181,6 +201,7 @@ func (c *attachConn) controlWriter() {
 			if c.writeErr != nil {
 				err = c.writeErr
 			} else {
+				control.SetHighWater(c.highWater)
 				err = protocol.WriteTerminalControl(c.ch, control)
 			}
 			c.mu.Unlock()
@@ -325,10 +346,22 @@ func (c *attachConn) Write(p []byte) (int, error) {
 	if c.writeErr != nil {
 		return 0, c.writeErr
 	}
+	var n int
+	var err error
 	if c.framed {
-		return protocol.WriteTerminalOutput(c.ch, p)
+		n, err = protocol.WriteTerminalOutput(c.ch, p)
+	} else {
+		n, err = c.ch.Write(p)
 	}
-	return c.ch.Write(p)
+	if n > 0 && c.highWater.Valid() {
+		sequence := uint64(c.highWater.Sequence)
+		if uint64(n) > ^uint64(0)-sequence {
+			c.highWater = protocol.TerminalPosition{}
+		} else {
+			c.highWater.Sequence = protocol.TerminalSequence(sequence + uint64(n))
+		}
+	}
+	return n, err
 }
 
 // revokeOnCurrentControlChange keeps one bounded monitor for an interactive

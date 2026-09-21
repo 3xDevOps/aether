@@ -436,6 +436,36 @@ type SubscribeResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// TerminalEpoch identifies one logical terminal incarnation. An empty epoch
+// is the legacy/unknown value and must never authorize a delta resume.
+type TerminalEpoch string
+
+// TerminalSequence counts client-visible terminal bytes in publication order.
+type TerminalSequence uint64
+
+// TerminalPosition is the atomic high-water mark for terminal output. Epoch
+// and Sequence must always be copied and compared together.
+type TerminalPosition struct {
+	Epoch    TerminalEpoch    `json:"resume_id,omitempty"`
+	Sequence TerminalSequence `json:"cursor,omitempty"`
+}
+
+// Valid reports whether the position carries the incarnation fence required
+// for a safe delta resume. Sequence zero is a valid position.
+func (p TerminalPosition) Valid() bool { return p.Epoch != "" }
+
+func terminalPosition(position TerminalPosition, resumeID string, cursor uint64) TerminalPosition {
+	if position != (TerminalPosition{}) {
+		return position
+	}
+	return TerminalPosition{Epoch: TerminalEpoch(resumeID), Sequence: TerminalSequence(cursor)}
+}
+
+func legacyTerminalPosition(position TerminalPosition, resumeID string, cursor uint64) (string, uint64) {
+	position = terminalPosition(position, resumeID, cursor)
+	return string(position.Epoch), uint64(position.Sequence)
+}
+
 // AttachRequest is the single header line a client sends after opening the
 // attach subsystem. Geometry precedence is pty-req > header > 80x24, and a
 // Follow client's geometry is not part of the session's at all.
@@ -466,13 +496,13 @@ type AttachRequest struct {
 	// client keeps what it has, which is what makes taking control a
 	// change of state rather than a redraw.
 	Resume bool `json:"resume,omitempty"`
-	// Cursor is how much of the session's output this client already has,
-	// taken from the ack it is resuming from. The session replays exactly
-	// what followed it, so nothing produced during the reattach is lost.
-	Cursor uint64 `json:"cursor,omitempty"`
-	// ResumeID identifies the PTY process incarnation whose cursor the client
-	// retains. A resume is honored only when it matches the current session.
+	// Cursor and ResumeID preserve source compatibility for callers awaiting
+	// the position integration pass. New code uses Position so the epoch and
+	// sequence cannot come from different observations.
+	Cursor   uint64 `json:"cursor,omitempty"`
 	ResumeID string `json:"resume_id,omitempty"`
+	// Position is encoded with the legacy flat resume_id and cursor keys.
+	Position TerminalPosition `json:"-"`
 	// ControlSessionID identifies one logical client tab across reconnects.
 	ControlSessionID string `json:"control_session_id,omitempty"`
 	// ControlGeneration is the fenced generation the client expects.
@@ -481,6 +511,38 @@ type AttachRequest struct {
 	Takeover bool `json:"takeover,omitempty"`
 	// ReleaseControl releases this session's controller lease.
 	ReleaseControl bool `json:"release_control,omitempty"`
+}
+
+// ResumePosition returns the atomic position, adapting legacy callers that
+// still populate ResumeID and Cursor separately.
+func (r AttachRequest) ResumePosition() TerminalPosition {
+	return terminalPosition(r.Position, r.ResumeID, r.Cursor)
+}
+
+// SetResumePosition updates the typed value and its legacy compatibility fields.
+func (r *AttachRequest) SetResumePosition(position TerminalPosition) {
+	r.Position = position
+	r.ResumeID, r.Cursor = legacyTerminalPosition(position, "", 0)
+}
+
+// MarshalJSON preserves the legacy flat resume_id/cursor wire shape.
+func (r AttachRequest) MarshalJSON() ([]byte, error) {
+	type wire AttachRequest
+	out := wire(r)
+	out.ResumeID, out.Cursor = legacyTerminalPosition(r.Position, r.ResumeID, r.Cursor)
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON accepts old payloads with missing or zero position fields.
+func (r *AttachRequest) UnmarshalJSON(data []byte) error {
+	type wire AttachRequest
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = AttachRequest(decoded)
+	r.Position = TerminalPosition{Epoch: TerminalEpoch(r.ResumeID), Sequence: TerminalSequence(r.Cursor)}
+	return nil
 }
 
 // AttachResponse acknowledges an AttachRequest with the session's live
@@ -493,17 +555,15 @@ type AttachResponse struct {
 	Framed bool `json:"framed,omitempty"`
 	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
 	Replay int `json:"replay,omitempty"`
-	// Cursor is how much of the session's output this client holds once
-	// the replay is parsed. A client that reattaches sends it back to
-	// resume from exactly there.
-	Cursor uint64 `json:"cursor,omitempty"`
-	// ResumeID identifies the PTY process incarnation that produced Cursor.
-	// It is returned on every successful live attach, including fallback.
+	// Cursor and ResumeID preserve source compatibility for legacy producers
+	// and consumers. Position is the authoritative atomic high-water value.
+	Cursor   uint64 `json:"cursor,omitempty"`
 	ResumeID string `json:"resume_id,omitempty"`
+	// Position is encoded with the legacy flat resume_id and cursor keys.
+	Position TerminalPosition `json:"-"`
 	// Resumed answers a request to resume: true when the replay is only
 	// what this client missed, false when the session could not serve
-	// from its cursor and the replay is the whole scrollback instead -
-	// which the client has to clear its screen for.
+	// from its position and the replay is the whole scrollback instead.
 	Resumed bool `json:"resumed,omitempty"`
 	// ControllerID is the member currently holding writable control.
 	ControllerID string `json:"controller_id,omitempty"`
@@ -515,6 +575,51 @@ type AttachResponse struct {
 	HasControl bool   `json:"has_control,omitempty"`
 	Code       int    `json:"code,omitempty"`
 	Error      string `json:"error,omitempty"`
+}
+
+// HighWater returns the atomic terminal position, adapting legacy producers
+// that still populate ResumeID and Cursor separately.
+func (r AttachResponse) HighWater() TerminalPosition {
+	return terminalPosition(r.Position, r.ResumeID, r.Cursor)
+}
+
+// SetHighWater updates the typed value and its legacy compatibility fields.
+func (r *AttachResponse) SetHighWater(position TerminalPosition) {
+	r.Position = position
+	r.ResumeID, r.Cursor = legacyTerminalPosition(position, "", 0)
+}
+
+// MarshalJSON preserves numeric cursors for legacy peers while quoting values
+// above JavaScript's exact integer range.
+func (r AttachResponse) MarshalJSON() ([]byte, error) {
+	type wire AttachResponse
+	out := wire(r)
+	out.ResumeID, out.Cursor = legacyTerminalPosition(r.Position, r.ResumeID, r.Cursor)
+	return json.Marshal(struct {
+		wire
+		Cursor any `json:"cursor,omitempty"`
+	}{wire: out, Cursor: marshalTerminalCursor(out.Cursor)})
+}
+
+// UnmarshalJSON accepts numeric and lossless decimal-string cursors and
+// materializes one atomic high-water position.
+func (r *AttachResponse) UnmarshalJSON(data []byte) error {
+	type wire AttachResponse
+	var decoded struct {
+		wire
+		Cursor json.RawMessage `json:"cursor"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	cursor, err := unmarshalTerminalCursor(decoded.Cursor)
+	if err != nil {
+		return err
+	}
+	decoded.wire.Cursor = cursor
+	*r = AttachResponse(decoded.wire)
+	r.Position = TerminalPosition{Epoch: TerminalEpoch(r.ResumeID), Sequence: TerminalSequence(r.Cursor)}
+	return nil
 }
 
 // Exit statuses of the attach subsystem. 0 is the run's terminal session

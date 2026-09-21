@@ -173,7 +173,7 @@ describe('connectAttach', () => {
       takeover: true,
       resume: true,
       resume_id: 'pty-incarnation-1',
-      cursor: 0,
+      cursor: '0',
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 4,
     })
@@ -187,7 +187,7 @@ describe('connectAttach', () => {
       takeover: true,
       resume: true,
       resume_id: 'pty-incarnation-2',
-      cursor: 0,
+      cursor: '0',
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 5,
     })
@@ -200,7 +200,7 @@ describe('connectAttach', () => {
       release_control: true,
       resume: true,
       resume_id: 'pty-incarnation-3',
-      cursor: 0,
+      cursor: '0',
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 6,
     })
@@ -297,7 +297,166 @@ describe('connectAttach', () => {
     expect(StubSocket.last().frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-1',
-      cursor: 105,
+      cursor: '105',
+    })
+    a.close()
+  })
+
+  it('keeps a newer parsed position over deferred same-epoch geometry', async () => {
+    let finishGeometry!: () => void
+    const events: string[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (chunk, kind, settled) => {
+        events.push(`${kind}:${new TextDecoder().decode(chunk)}`)
+        settled?.()
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      onGeometry: () => new Promise<void>((resolve) => {
+        finishGeometry = resolve
+      }),
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({
+      data: JSON.stringify({ ok: true, cursor: 102, replay: 2, resume_id: 'pty-a' }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'geometry',
+        ok: true,
+        cols: 100,
+        rows: 30,
+        cursor: 102,
+        resume_id: 'pty-a',
+      }),
+    })
+    socket.onmessage?.({ data: new TextEncoder().encode('abXYZ').buffer })
+
+    finishGeometry()
+    await vi.waitFor(() => expect(events).toEqual(['replay-end:ab', 'live:XYZ']))
+    a.reopen({ resume: true })
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '105',
+    })
+    a.close()
+  })
+
+  it('uses the acknowledged high-water instead of adding replay length', async () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ resume_id: 'pty-a', cursor: 100, replay: 5 })
+    socket.onmessage?.({ data: new TextEncoder().encode('abcde').buffer })
+    await vi.waitFor(() => expect(output.join('')).toBe('abcde'))
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '100',
+    })
+    a.close()
+  })
+
+  it('does not combine an epoch with a sequence-only control update', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ resume_id: 'pty-a', cursor: 100 })
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'control', ok: true, has_control: false, cursor: 999 }),
+    })
+    expect(receivedControl).toMatchObject({ position: { epoch: 'pty-a', sequence: '100' } })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '100',
+    })
+    a.close()
+  })
+
+  it('atomically adopts a different epoch even with a lower sequence', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ resume_id: 'pty-a', cursor: 100 })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        ok: true,
+        has_control: false,
+        resume_id: 'pty-b',
+        cursor: 20,
+      }),
+    })
+    expect(receivedControl).toMatchObject({ position: { epoch: 'pty-b', sequence: '20' } })
+    expect(a.controlMetadata!()).toMatchObject({ position: { epoch: 'pty-b', sequence: '20' } })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-b',
+      cursor: '20',
+    })
+    a.close()
+  })
+
+  it('falls back to full replay for a sequence outside JSON safe integers', () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({
+      data: JSON.stringify({ ok: true, resume_id: 'pty-a', cursor: Number.MAX_SAFE_INTEGER + 1 }),
+    })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    expect(replacement.frames()[0]).not.toHaveProperty('resume_id')
+    expect(replacement.frames()[0]).not.toHaveProperty('cursor')
+    a.close()
+  })
+
+  it('round-trips a uint64 sequence as a decimal string', () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        resume_id: 'pty-a',
+        cursor: '18446744073709551615',
+      }),
+    })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '18446744073709551615',
     })
     a.close()
   })
@@ -331,7 +490,7 @@ describe('connectAttach', () => {
     expect(attempted.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 100,
+      cursor: '100',
     })
     ack({ cursor: 200, resumed: false, resume_id: 'pty-incarnation-b' })
 
@@ -341,7 +500,7 @@ describe('connectAttach', () => {
     expect(next.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-b',
-      cursor: 200,
+      cursor: '200',
     })
     a.close()
   })
@@ -376,7 +535,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 105,
+      cursor: '105',
     })
     a.close()
   })
@@ -413,7 +572,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 105,
+      cursor: '105',
       control_session_id: sessionID,
     })
     a.close()
@@ -635,7 +794,7 @@ describe('connectAttach', () => {
     expect(StubSocket.last().frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 18,
+      cursor: '18',
     })
     a.close()
   })
@@ -743,7 +902,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 6,
+      cursor: '6',
     })
     a.close()
 
@@ -1190,7 +1349,7 @@ describe('connectAttach', () => {
       release_control: true,
       resume: true,
       resume_id: 'pty-incarnation-1',
-      cursor: 10,
+      cursor: '10',
     })
     a.close()
   })
