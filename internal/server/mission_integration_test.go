@@ -430,7 +430,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
 		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
 		Decision: string(domain.MissionPlanReject), IdempotencyKey: "mission-decide-reject-2",
-	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+	}, nil); controlErrorCode(err) != protocol.CodeInvalidState {
 		t.Fatalf("mission.plan.decide reject on an amendment = %v, want CodeInvalidState", err)
 	}
 	var amended protocol.MissionPlanDecideResult
