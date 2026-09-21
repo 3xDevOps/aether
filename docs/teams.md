@@ -683,7 +683,8 @@ revision:
 - widens the approved scope - an `expected_paths` entry outside the union of
   the approved tasks' expected paths;
 - drops an exclusion the task's approved revision carried;
-- was an item of a round a human sent back for changes.
+- belongs to a task whose latest review round a human sent back for changes;
+  only a round that approves the task again lifts that hold.
 
 `material` is the proposer's own declaration, not a server inference. It is
 recorded on the revision and is the sixth reason a revision needs a human

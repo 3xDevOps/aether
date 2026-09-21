@@ -503,7 +503,8 @@ func (d *DB) proposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 // AcceptTaskRevision is the integrator's task.accept. After activation the
 // integrator still accepts revisions alone, but only inside the plan a human
 // approved: anything that introduces new work, is declared material, reaches
-// outside the approved scope, or was already sent back has to go through
+// outside the approved scope, or belongs to a task a human sent back has to go
+// through
 // mission.plan.submit. acceptedBy records the run that accepted, so a
 // self-accepted revision is distinguishable from one a human approved.
 func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision int, expectedGeneration uint64, acceptedBy domain.RunID, key string) error {
@@ -639,15 +640,20 @@ func selfAcceptanceWithinApprovedPlan(ctx context.Context, tx *sql.Tx, missionID
 			return fmt.Errorf("%w: task %s revision %d drops exclusion %s from the approved scope; submit it with mission plan submit", ErrMissionAmendmentRequired, id, revision, dropped[0])
 		}
 	}
-	var sentBack uint64
-	sentBackErr := tx.QueryRowContext(ctx, `SELECT i.plan_version FROM mission_plan_items i
+	// A task whose latest decided round was sent back stays with the human
+	// until a round approves it again: the refusal is keyed on the task, not
+	// the revision number, so re-proposing the declined change as a fresh
+	// revision does not get around the decision.
+	var lastDecision string
+	var lastRound uint64
+	lastErr := tx.QueryRowContext(ctx, `SELECT v.decision, v.plan_version FROM mission_plan_items i
 		JOIN mission_plan_reviews v ON v.mission_id=i.mission_id AND v.plan_version=i.plan_version
-		WHERE i.task_id=? AND i.revision=? AND v.decision='revise'`, id, revision).Scan(&sentBack)
-	if sentBackErr != nil && !errors.Is(sentBackErr, sql.ErrNoRows) {
-		return fmt.Errorf("store: read plan items of task %s revision %d: %w", id, revision, sentBackErr)
+		WHERE i.task_id=? AND v.decision<>'' ORDER BY v.plan_version DESC LIMIT 1`, id).Scan(&lastDecision, &lastRound)
+	if lastErr != nil && !errors.Is(lastErr, sql.ErrNoRows) {
+		return fmt.Errorf("store: read plan rounds of task %s: %w", id, lastErr)
 	}
-	if sentBackErr == nil {
-		return fmt.Errorf("%w: task %s revision %d was sent back in plan version %d; revise it and submit it with mission plan submit", ErrMissionAmendmentRequired, id, revision, sentBack)
+	if lastErr == nil && lastDecision == string(domain.MissionPlanRevise) {
+		return fmt.Errorf("%w: task %s was sent back in plan version %d; submit its next revision with mission plan submit", ErrMissionAmendmentRequired, id, lastRound)
 	}
 	return nil
 }

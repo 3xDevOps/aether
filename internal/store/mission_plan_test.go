@@ -790,6 +790,24 @@ func TestMissionSelfAcceptanceStaysInsideTheApprovedPlan(t *testing.T) {
 		if !errors.Is(err, ErrMissionAmendmentRequired) || !strings.Contains(err.Error(), "was sent back in plan version 2") {
 			t.Fatalf("accept a revision sent back = %v, want the amendment refusal naming the round", err)
 		}
+		// Re-proposing the declined change as a fresh, unmarked revision must
+		// not get around the decision either.
+		successor := propose(t, db, mission, task, "propose-3", &domain.TaskRevision{Title: "bigger", Objective: "bigger", Scope: approvedScope})
+		err = db.AcceptTaskRevision(ctx, task.ID, successor, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-3")
+		if !errors.Is(err, ErrMissionAmendmentRequired) || !strings.Contains(err.Error(), "was sent back in plan version 2") {
+			t.Fatalf("accept a successor of a revision sent back = %v, want the amendment refusal", err)
+		}
+		// Another round that approves the task lifts the hold.
+		if _, err := db.SubmitMissionPlan(ctx, mission.ID, mission.CurrentIntegratorRunID, "second try", "submit-3"); err != nil {
+			t.Fatalf("SubmitMissionPlan: %v", err)
+		}
+		if _, err := db.DecideMissionPlan(ctx, mission.ID, 3, domain.MissionPlanApprove, "", member, "decide-3"); err != nil {
+			t.Fatalf("DecideMissionPlan: %v", err)
+		}
+		tweak := propose(t, db, mission, task, "propose-4", &domain.TaskRevision{Title: "bigger, reworded", Objective: "bigger, reworded", Scope: approvedScope})
+		if err := db.AcceptTaskRevision(ctx, task.ID, tweak, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-4"); err != nil {
+			t.Fatalf("self-accept after the task was re-approved: %v", err)
+		}
 	})
 }
 

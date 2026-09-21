@@ -80,7 +80,8 @@ runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
 `integration.prepare`, `integration.show`, `integration.verify`,
 `integration.request_delivery`, `integration.deliver`,
-`mission.question.ask`, `mission.plan.show`, and `mission.plan.submit`. These
+`mission.question.ask`, `mission.clarification.complete`, `mission.plan.show`,
+and `mission.plan.submit`. These
 methods use the same run-authenticated socket but are not part of the base
 `coord.*` set.
 Every allow-list is derived from the current assignment, not from
@@ -364,7 +365,8 @@ these holds:
   mission, which includes the task's own);
 - the revision drops an exclusion carried by the task's current accepted
   revision;
-- a human already sent that revision back in a `request changes` round.
+- belongs to a task whose latest review round was sent back with `request
+  changes`; only a round that approves the task again lifts that hold.
 
 Each of those has to go through `mission plan submit` instead. `material` is
 the proposer's own declaration on the revision JSON, not something the server
