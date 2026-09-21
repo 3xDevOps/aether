@@ -193,9 +193,11 @@ function TerminalTools({
 function FindBar({
   search,
   onClose,
+  onNavigate,
 }: {
   search: SearchAddon | null
   onClose: () => void
+  onNavigate?: () => void
 }) {
   const [term, setTerm] = useState('')
   const [missing, setMissing] = useState(false)
@@ -212,6 +214,7 @@ function FindBar({
       return
     }
     const found = direction === 'next' ? search.findNext(term) : search.findPrevious(term)
+    if (found) onNavigate?.()
     setMissing(!found)
   }
 
@@ -337,6 +340,7 @@ export function TerminalPane({
         ) : (
           <FindBar
             search={controller.search}
+            onNavigate={controller.noteViewportInteraction}
             onClose={() => {
               controller.focusTerminal()
               controller.setFindOpen(false)
@@ -347,8 +351,15 @@ export function TerminalPane({
       </div>
       <div
         ref={controller.hostRef}
-        className={cn('min-h-0 flex-1 overflow-hidden bg-background p-2 text-foreground', className)}
-        style={replaying ? { visibility: 'hidden' } : undefined}
+        className={cn(
+          'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-background p-2 text-foreground',
+          className,
+        )}
+        style={{
+          overflowY: 'hidden',
+          overscrollBehaviorY: 'none',
+          visibility: replaying ? 'hidden' : undefined,
+        }}
       />
       {coarse && writable && <TerminalKeys controller={controller} />}
       {children}

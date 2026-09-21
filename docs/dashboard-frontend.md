@@ -1273,6 +1273,10 @@ to stay near 1,000,000 cells; wider terminals therefore retain fewer rows.
 most four surfaces and its inactive-cell guard. This is a bounded cache
 policy, not a fixed per-terminal or global scrollback promise.
 
+Those limits apply to both warm cached surfaces and compact bootstraps. Either
+may omit older rows that remain available in the retained raw archive; the
+dashboard scrollback is not a full-history guarantee.
+
 When a cached primary becomes inactive because the route changes, its
 WebSocket is intentionally closed. That detach removes its Watching presence,
 active control transport, and geometry participation, while retaining the
@@ -1316,13 +1320,26 @@ primitive.
 toolbar and Find over it. During a dashboard run's compact current-screen
 bootstrap it receives `replaying={replaying}`: the xterm host is hidden with
 CSS visibility while each frame-sized operation is parsed through one serial
-xterm write chain, and the pane says **Restoring terminal history** until the
-final replay write callback. That status covers bootstrap parsing; it is not a
-request for the downloadable complete archive. The run terminal, run-shell
-tabs, and environment dock all pass `setReplaying` to their shared replay gate,
-so all three surfaces reveal only a settled terminal. After that callback, two
-`requestAnimationFrame` turns let the xterm DOM paint the settled state before
-visibility is removed.
+xterm write chain. The pane says **Restoring terminal history** throughout the
+parse, paint delay, and saved-viewport restoration; the status clears only when
+the surface is ready to reveal. It describes compact bootstrap restoration,
+not a request for the separately retained raw archive. The run terminal,
+run-shell tabs, and environment dock all use this shared replay gate. User
+input and terminal-generated replies remain muted through the final replay write
+callback. That callback opens input; a full replay remains hidden for two
+paint turns, then its queued viewport restoration settles before visibility
+is restored.
+
+xterm is the sole vertical scroll owner. The host and every ancestor terminal
+pane suppress vertical overflow rather than creating a competing browser
+scroller. Native xterm behavior follows output while its viewport is at the
+bottom and keeps a user-scrolled viewport pinned above the bottom. Before a
+full structural replay or a column resize that can reflow rows, the controller
+captures that follow state or the pinned bottom offset. It restores the intent
+only for the same operation, with no intervening wheel, touch, scrollbar, or
+scroll-key interaction, and only if the active normal/alternate buffer still
+matches. A stale restoration never overrides a user's newer scroll position.
+
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
 supplies its connection and steering controls immediately after those tools.
@@ -1373,9 +1390,10 @@ A following terminal therefore:
   local measurements and resize reports, while `setGeometry()` applies the
   server's grid just as on desktop. The header carries `standardGeometry`
   (80x24) only for a session being created, such as a new shell tab.
-  Every terminal pane has `overflow-auto` so an oversized grid remains
-  reachable. While steering, the flag still keeps this viewer out of the
-  shared size calculation.
+  The terminal pane exposes horizontal overflow only, so a grid wider than the
+  phone can be panned sideways without creating an outer vertical scroller.
+  While steering, the flag still keeps this viewer out of the shared size
+  calculation.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no
@@ -1392,8 +1410,9 @@ than spending it on the wrong byte. The two copy actions carry a visible
 word beside them under `coarse:`, because a tooltip is the only other thing
 telling them apart and hover is what opens one.
 
-The pane scrolls the cursor into view whenever it moves or the host takes
-focus on a phone, where the row being written on can be outside the pane.
+The phone's outer pane is a horizontal pan area only. Vertical wheel and touch
+gestures remain xterm scrollback operations; neither the pane nor its ancestors
+compete for vertical scrolling.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
@@ -1449,11 +1468,12 @@ When the terminal is running and `saved_image` is empty, it shows the hint
 its attach is acked, a spinner covers the terminal. Once a dashboard run ack
 declares a compact bootstrap, the xterm host remains hidden with CSS visibility
 and the pane says **Restoring terminal history** while each frame-sized
-operation is parsed serially as it arrives; it is revealed only after the final
-replay write callback and two `requestAnimationFrame` turns have let the xterm
-DOM paint the settled state. Run-shell tabs and the environment dock use the
-same settled-surface gate for their own stream mode. A zero-length replay
-settles the gate immediately because there is no bootstrap write to render.
+operation is parsed serially as it arrives. Input and terminal-generated
+replies open only after the final replay write settles; the host remains hidden
+through the paint delay and viewport restoration described above. Run-shell
+tabs and the environment dock use the same settled-surface gate for their own
+stream mode. A zero-length replay has no bootstrap bytes or paint delay; any
+saved-viewport restoration still settles before the host is revealed.
 The status words follow what
 the dock knows: a terminal it has not seen running is **Starting your
 environment container**, which is the wait Docker's container start accounts
@@ -1466,7 +1486,7 @@ the terminal with the gateway's own error instead.
   and keeps callbacks bound to the current terminal host. The primary run
   header requests `screen:true` and `interactive:true`; shells and CLI
   attachments keep their existing stream modes. `screen:true` bootstraps the
-  compact current screen and bounded scrollback. The complete raw archive is
+  compact current screen and bounded scrollback. The retained raw archive is
   downloaded separately through the authenticated
   `GET /api/runs/<run>/terminal-history` action.
 - **Controller lease and compact bootstrap.** A desktop owner's first attach
@@ -1487,10 +1507,10 @@ the terminal with the gateway's own error instead.
   `resume`/`cursor`/`resume_id` supplies only the bounded gap and keeps the
   warm screen. If the cursor or ring cannot serve it, `resumed:false` selects
   a compact snapshot fallback. `connectAttach` parses frame-sized operations
-  through one serial xterm write chain, keeps the host hidden, mutes input and
-  terminal-generated replies, and reveals the settled screen only after the
-  final write callback and two animation frames. It never allocates a
-  transcript-sized browser buffer.
+  through one serial xterm write chain. Input and terminal-generated replies
+  remain muted through the final write callback; then input opens while the
+  host stays hidden through two animation frames and structural viewport
+  restoration. It never allocates a transcript-sized browser buffer.
 
   **Control changes stay on this WebSocket.** The client sends
   `{"type":"control","request_id":17,"write":true,"takeover":true,

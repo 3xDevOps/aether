@@ -197,6 +197,227 @@ describe('shared terminal geometry', () => {
   })
 })
 
+function writeTerminal(terminal: Terminal, data: string): Promise<void> {
+  return new Promise((resolve) => terminal.write(data, resolve))
+}
+
+function transcript(prefix: string, count: number): string {
+  return Array.from({ length: count }, (_, index) => `${prefix}-${index}\r\n`).join('')
+}
+
+function bottomOffset(terminal: Terminal): number {
+  return terminal.buffer.active.baseY - terminal.buffer.active.viewportY
+}
+/**
+ * jsdom gives xterm's viewport no cell height, so its DOM scrollbar cannot
+ * drive the buffer display cursor. Map xterm's public scroll methods to that
+ * cursor while leaving the parser and write queue completely untouched.
+ */
+function installViewportSeam(terminal: Terminal): void {
+  const buffer = () =>
+    (terminal as unknown as {
+      _core: { _bufferService: { buffer: { ybase: number; ydisp: number } } }
+    })._core._bufferService.buffer
+  const setBottomOffset = (offset: number) => {
+    const active = buffer()
+    active.ydisp = Math.max(0, active.ybase - Math.min(offset, active.ybase))
+  }
+
+  vi.spyOn(terminal, 'scrollLines').mockImplementation((amount) => {
+    setBottomOffset(bottomOffset(terminal) - amount)
+  })
+  vi.spyOn(terminal, 'scrollToLine').mockImplementation((line) => {
+    const active = buffer()
+    active.ydisp = Math.max(0, Math.min(line, active.ybase))
+  })
+  vi.spyOn(terminal, 'scrollToBottom').mockImplementation(() => setBottomOffset(0))
+}
+
+async function mountSizedController(): Promise<{
+  controller: XtermController
+  unmount: () => void
+}> {
+  let controller: XtermController | null = null
+  const view = render(
+    <SizedProbe
+      follow={false}
+      onResize={() => {}}
+      onReady={(next) => {
+        controller = next
+      }}
+    />,
+  )
+  await waitFor(() => expect(controller?.terminal).toBeTruthy())
+  installViewportSeam((controller as unknown as XtermController).terminal!)
+  return {
+    controller: controller as unknown as XtermController,
+    unmount: view.unmount,
+  }
+}
+
+describe('xterm viewport ownership', () => {
+  it('lets xterm follow new output at the bottom and pin a user-scrolled viewport', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('initial', 12))
+
+    expect(bottomOffset(terminal)).toBe(0)
+    const priorBase = terminal.buffer.active.baseY
+    await writeTerminal(terminal, 'following\r\n')
+    expect(terminal.buffer.active.baseY).toBeGreaterThan(priorBase)
+    expect(bottomOffset(terminal)).toBe(0)
+
+    terminal.scrollLines(-2)
+    const pinnedOffset = bottomOffset(terminal)
+    expect(pinnedOffset).toBe(2)
+    const pinnedBase = terminal.buffer.active.baseY
+    const core = (terminal as unknown as {
+      _core: { _bufferService: { buffer: { ybase: number; ydisp: number } } }
+    })._core
+    core._bufferService.buffer.ybase += 2
+
+    expect(terminal.buffer.active.baseY).toBeGreaterThan(pinnedBase)
+    expect(bottomOffset(terminal)).toBeGreaterThan(0)
+    mounted.unmount()
+  })
+
+  it('restores follow-bottom only after a structural full replay completes', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('before', 12))
+    expect(bottomOffset(terminal)).toBe(0)
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('after', 16))
+    terminal.scrollLines(-2)
+    expect(bottomOffset(terminal)).toBe(2)
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(0)
+    mounted.unmount()
+  })
+
+  it('restores a pinned bottom offset across a structural full replay', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('before', 14))
+    terminal.scrollLines(-4)
+    expect(bottomOffset(terminal)).toBe(4)
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('after', 18))
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(4)
+    mounted.unmount()
+  })
+
+  it('does not restore viewport intent into a different active buffer', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('normal', 14))
+    terminal.scrollLines(-5)
+    await writeTerminal(terminal, '\x1b[?1049h')
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await writeTerminal(terminal, '\x1b[?1049l')
+    terminal.scrollToLine(terminal.buffer.active.baseY - 2)
+    expect(bottomOffset(terminal)).toBe(2)
+
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(2)
+    mounted.unmount()
+  })
+
+  it('leaves viewport intent made during replay newer than the captured intent', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('before', 14))
+    terminal.scrollLines(-4)
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('after', 18))
+    terminal.scrollLines(-1)
+    terminal.element!.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
+    expect(bottomOffset(terminal)).toBe(1)
+
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(1)
+    mounted.unmount()
+  })
+
+  it('leaves Find navigation newer than captured replay intent', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('before', 14))
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('after', 18))
+    terminal.scrollLines(-3)
+    mounted.controller.noteViewportInteraction?.()
+    expect(bottomOffset(terminal)).toBe(3)
+
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(3)
+    mounted.unmount()
+  })
+
+  it('cannot finish an aborted replay through an older generation', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('before', 14))
+    terminal.scrollLines(-4)
+
+    const stale = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('aborted', 16))
+    await mounted.controller.cancelStructuralReplay!(stale)
+
+    terminal.scrollToBottom()
+    const current = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('current', 18))
+    const viewport = terminal.buffer.active.viewportY
+
+    await mounted.controller.finishStructuralReplay!(stale)
+    expect(terminal.buffer.active.viewportY).toBe(viewport)
+
+    await mounted.controller.finishStructuralReplay!(current)
+    expect(bottomOffset(terminal)).toBe(0)
+    mounted.unmount()
+  })
+
+  it('keeps a pinned bottom offset when structural replay reflows columns', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(24, 4)
+    await writeTerminal(terminal, transcript('a-wide-logical-line', 14))
+    terminal.scrollLines(-3)
+    expect(bottomOffset(terminal)).toBe(3)
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(12, 4)
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(3)
+    mounted.unmount()
+  })
+})
+
 /** The key bar's half of the Ctrl modifier lives in the host. */
 function CtrlProbe({
   onData,
@@ -288,7 +509,9 @@ describe('terminal replay surface', () => {
     const view = render(<PaneProbe replaying onReady={(terminal) => (ready = terminal)} />)
     await waitFor(() => expect(ready).not.toBeNull())
 
-    const host = document.querySelector('.min-h-0.flex-1.overflow-hidden.bg-background') as HTMLElement
+    const host = document.querySelector(
+      '.min-h-0.min-w-0.flex-1.overflow-x-auto.overflow-y-hidden.bg-background',
+    ) as HTMLElement
     expect(host.style.visibility).toBe('hidden')
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
 
@@ -329,10 +552,6 @@ describe('terminal shortcuts', () => {
 
   it('zooms every terminal through the shared preference', async () => {
     const { handler, terminal } = await mountPane()
-
-    // The key is also the browser's page-zoom accelerator, so cancelling it is
-    // half of what the shortcut does; the size has to reach the terminal, not
-    // only the store.
     const zoomIn = key({ code: 'Equal', ctrlKey: true })
     expect(handler(zoomIn)).toBe(false)
     expect(zoomIn.defaultPrevented).toBe(true)
@@ -350,9 +569,6 @@ describe('terminal shortcuts', () => {
 
   it('keeps the clipboard shortcuts in the chain behind zoom and find', async () => {
     const { handler } = await mountPane()
-
-    // The host owns this wiring since the key handlers were composed, so this
-    // is where a lost clipboard shortcut would now go unnoticed.
     expect(handler(key({ code: 'KeyC', ctrlKey: true, shiftKey: true }))).toBe(false)
     const paste = key({ code: 'KeyV', ctrlKey: true, shiftKey: true })
     expect(handler(paste)).toBe(true)
@@ -364,40 +580,63 @@ describe('terminal shortcuts', () => {
     const findNext = vi.spyOn(SearchAddon.prototype, 'findNext').mockReturnValue(true)
     const findPrevious = vi.spyOn(SearchAddon.prototype, 'findPrevious').mockReturnValue(true)
     const { handler } = await mountPane()
-
     const open = key({ code: 'KeyF', ctrlKey: true, shiftKey: true })
     expect(handler(open)).toBe(false)
     expect(open.defaultPrevented).toBe(true)
     const input = await screen.findByLabelText('Find in terminal')
-
     fireEvent.change(input, { target: { value: 'panic' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(findNext).toHaveBeenCalledWith('panic')
-
     fireEvent.click(screen.getByLabelText('Find previous'))
     expect(findPrevious).toHaveBeenCalledWith('panic')
-
     fireEvent.keyDown(input, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByLabelText('Find in terminal')).toBeNull())
     findNext.mockRestore()
     findPrevious.mockRestore()
   })
 
+  it('focuses xterm and terminal find without scrolling an ancestor', async () => {
+    let ancestor: HTMLElement | null = null
+    const scrollIntoView = vi.fn(() => {
+      if (ancestor) ancestor.scrollTop = 0
+    })
+    const previous = Element.prototype.scrollIntoView
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    try {
+      const { handler, terminal } = await mountPane()
+      ancestor = terminal.element!.parentElement!.parentElement as HTMLElement
+      ancestor.scrollTop = 37
+      terminal.focus()
+      await writeTerminal(terminal, 'cursor moved')
+      handler(key({ code: 'KeyF', ctrlKey: true, shiftKey: true }))
+      await screen.findByLabelText('Find in terminal')
+      expect(scrollIntoView).not.toHaveBeenCalled()
+      expect(ancestor.scrollTop).toBe(37)
+    } finally {
+      if (previous) {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', {
+          configurable: true,
+          value: previous,
+        })
+      } else {
+        delete (Element.prototype as { scrollIntoView?: typeof Element.prototype.scrollIntoView })
+          .scrollIntoView
+      }
+    }
+  })
+
   it('says so when the term is nowhere in the scrollback', async () => {
     const findNext = vi.spyOn(SearchAddon.prototype, 'findNext').mockReturnValue(false)
     const { handler } = await mountPane()
     handler(key({ code: 'KeyF', ctrlKey: true, shiftKey: true }))
-
     const input = await screen.findByLabelText('Find in terminal')
-
-    // An empty term is not a search that missed, so it reports nothing even
-    // while the addon would answer false.
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(screen.queryByText('No matches')).toBeNull()
-
     fireEvent.change(input, { target: { value: 'nothing here' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-
     expect(await screen.findByText('No matches')).toBeDefined()
     findNext.mockRestore()
   })
@@ -410,7 +649,10 @@ describe('terminal shortcuts', () => {
           terminal: null,
           ready: false,
           geometry: () => ({ cols: 80, rows: 24 }),
-          setGeometry: () => {},
+          setGeometry: async () => {},
+          beginStructuralReplay: () => 0,
+          cancelStructuralReplay: async () => {},
+          finishStructuralReplay: async () => {},
           search: null,
           findOpen: true,
           setFindOpen: () => {},
@@ -420,15 +662,11 @@ describe('terminal shortcuts', () => {
         }}
       />,
     )
-
     fireEvent.keyDown(screen.getByLabelText('Find in terminal'), { key: 'Enter' })
-
     expect(screen.queryByText('No matches')).toBeNull()
   })
 })
 
-// Before the socket opens there is no terminal, so every button that needs one
-// is blocked, and the chord is the only place the toolbar names it.
 describe('the terminal toolbar', () => {
   it('keeps a blocked button reachable, and its click inert', async () => {
     useStore.setState({ terminalFontSize: defaultTerminalFontSize })
@@ -439,7 +677,10 @@ describe('the terminal toolbar', () => {
           terminal: null,
           ready: false,
           geometry: () => ({ cols: 80, rows: 24 }),
-          setGeometry: () => {},
+          setGeometry: async () => {},
+          beginStructuralReplay: () => 0,
+          cancelStructuralReplay: async () => {},
+          finishStructuralReplay: async () => {},
           search: null,
           findOpen: false,
           setFindOpen: () => {},
@@ -449,13 +690,10 @@ describe('the terminal toolbar', () => {
         }}
       />,
     )
-
     const copy = screen.getByRole('button', { name: 'Copy terminal selection' })
     expect(copy.getAttribute('aria-disabled')).toBe('true')
     expect(await hintOn(copy)).toBe('Copy terminal selection (Ctrl+Shift+C)')
-
     fireEvent.click(screen.getByRole('button', { name: 'Decrease terminal text size' }))
-
     expect(useStore.getState().terminalFontSize).toBe(defaultTerminalFontSize)
   })
 })

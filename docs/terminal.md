@@ -32,8 +32,9 @@ boundary arrives or allocate a browser-sized buffer from the declared length.
 Only the slice containing the exact final replay byte is tagged `replay-end`;
 live output and geometry stay in wire order behind xterm's write backpressure.
 Terminal-generated replies and user input stay muted from the ack through the
-final replay write callback. After that callback, two `requestAnimationFrame`
-turns let the xterm DOM paint the settled state before the surface is revealed.
+final replay write callback. Input may resume after that callback, but the
+surface stays hidden until two paint turns and any saved viewport restoration
+have settled; only then is the terminal revealed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
 When a persistent dock host is replaced, `rebind` cancels the old replay drain
 with its cancellation signal, drops the old socket, installs the new handlers,
@@ -282,10 +283,11 @@ that, and the size is recomputed without you.
 
 On a phone every terminal here - a run's, its shells, and this one - shows
 the session at the size it already is rather than at the phone's own width,
-and pans across it. It follows that size: when someone with a bigger screen
-resizes the terminal, the phone redraws at the new one. Nothing a phone does
-changes that size, watching or steering, so an agent's screen is never
-reflowed by a phone.
+and provides horizontal panning across an oversized grid. That outer pan never
+becomes a second vertical scroll area: xterm still owns vertical history. The
+phone follows the shared size, so when someone with a bigger screen resizes the
+terminal, it redraws at the new one. Nothing a phone does changes that size,
+watching or steering, so an agent's screen is never reflowed by a phone.
 
 On a phone every run - including one you own - opens as a read-only mirror,
 where on a desktop an unoccupied owner's first attach may already have
@@ -339,7 +341,7 @@ alternate buffer weights. A completed entry whose session ended does not
 reconnect unless that same run is relaunched; that transition records a refresh
 while parked and performs a fresh bootstrap once active.
 
-### Current screen and complete terminal history
+### Current screen and retained terminal archive
 
 A dashboard run attach requests `screen:true` and `interactive:true`. Its
 bootstrap is a compact VT snapshot of the current viewport, cursor, modes,
@@ -348,16 +350,29 @@ browser keeps bounded live scrollback: a normal run requests up to 5,000 rows
 and then adapts the normal and alternate buffers to the acknowledged geometry's
 cell limit. A live, fallback, or finished run therefore opens at the current
 screen rather than showing a historical timelapse. Input and terminal-generated
-replies stay muted until the hidden snapshot is parsed and the settled surface
-is revealed.
+replies stay muted through the final hidden snapshot write. Input may resume
+after that write; paint and saved-viewport restoration still settle before the
+surface is revealed.
 
-The complete archive is a separate operation. Use the dashboard's **Download
+The snapshot and browser scrollback are bounded, so they may omit older rows
+even while those rows still exist in the retained raw archive. Do not treat
+what can be reached by scrolling in the dashboard as the complete history.
+
+xterm is the sole owner of vertical terminal scrolling. At the bottom it
+follows new output. After you scroll up it stays on the history being read
+instead of jumping to the newest output. Before a full snapshot replay or a
+column change that reflows rows, the dashboard records whether the viewport
+was following the bottom or its distance above the bottom and restores that
+intent afterward. It does not apply a saved position if you scroll during the
+operation or if the terminal switches between its normal and alternate buffers.
+
+The retained raw archive is a separate operation. Use the dashboard's **Download
 full terminal history** action, which makes an authenticated
 `GET /api/runs/{run}/terminal-history` request and downloads the raw ANSI bytes
 from all retained cast incarnations. It does not control or alter the PTY.
 `aether attach` remains the raw CLI stream: it requests `screen:false`,
 consumes the ack-declared replay byte count, and then treats following bytes as
-live. CLI output is complete raw history, not the dashboard's compact snapshot.
+live. CLI output is retained raw history, not the dashboard's compact snapshot.
 The CLI's pre-replay input-discard rule remains unchanged.
 
 ### Reattaching after an update

@@ -24,10 +24,16 @@ const xterm = vi.hoisted(() => ({
   },
   ready: true,
   geometry: () => ({ cols: 80, rows: 24 }),
+  structuralGeneration: 0,
+  beginStructuralReplay: vi.fn(),
+  cancelStructuralReplay: vi.fn(),
+  finishStructuralReplay: vi.fn(),
   setGeometry: vi.fn(),
   search: null,
   findOpen: false,
   setFindOpen: vi.fn(),
+  ctrlArmed: false,
+  armCtrl: vi.fn(),
   focusTerminal: vi.fn(),
 }))
 
@@ -91,7 +97,17 @@ describe('environment terminal dock', () => {
     useStore.getState().resetEnvTerminal()
     attach.handlers = null
     vi.clearAllMocks()
+    xterm.structuralGeneration = 0
+    xterm.ctrlArmed = false
+    xterm.armCtrl.mockReset()
+    xterm.beginStructuralReplay.mockReset()
+    xterm.beginStructuralReplay.mockImplementation(() => ++xterm.structuralGeneration)
+    xterm.cancelStructuralReplay.mockReset()
+    xterm.cancelStructuralReplay.mockResolvedValue(undefined)
+    xterm.finishStructuralReplay.mockReset()
+    xterm.finishStructuralReplay.mockResolvedValue(undefined)
     xterm.terminal.write.mockReset()
+    xterm.terminal.write.mockImplementation((_chunk: Uint8Array | string, done?: () => void) => done?.())
     xterm.input = null
     vi.mocked(api.terminalStatus).mockReset()
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: false, tabs: [] })
@@ -158,7 +174,10 @@ describe('environment terminal dock', () => {
     const oldSocket = StubSocket.last()
     const oldMessage = oldSocket.onmessage
     const oldClose = oldSocket.onclose
-    act(() => oldHandlers?.onAttached(true, standardGeometry))
+    act(() => {
+      oldHandlers?.onAttached(true, standardGeometry)
+      oldHandlers?.onReplayStart?.(0, true)
+    })
 
     xterm.terminal.write.mockClear()
     fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
@@ -170,7 +189,10 @@ describe('environment terminal dock', () => {
     const currentHandlers = attach.handlers
     const currentSocket = StubSocket.last()
     const currentMessage = currentSocket.onmessage
-    act(() => currentHandlers?.onAttached(true, standardGeometry))
+    act(() => {
+      currentHandlers?.onAttached(true, standardGeometry)
+      currentHandlers?.onReplayStart?.(0, true)
+    })
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     const currentOutput = new TextEncoder().encode('current output')
@@ -183,9 +205,11 @@ describe('environment terminal dock', () => {
 
     expect(useStore.getState().envTerminal.activeTab).toBe('t2')
     expect(screen.queryByRole('status')).toBeNull()
-    const writes = xterm.terminal.write.mock.calls.map(([chunk]) => chunk)
-    expect(writes).toHaveLength(1)
-    expect(Array.from(writes[0] as Uint8Array)).toEqual(Array.from(currentOutput))
+    const outputWrites = xterm.terminal.write.mock.calls
+      .map(([chunk]) => chunk as Uint8Array)
+      .filter((chunk) => chunk.byteLength > 0)
+    expect(outputWrites).toHaveLength(1)
+    expect(Array.from(outputWrites[0])).toEqual(Array.from(currentOutput))
   })
 
   it('opens the environment forward dialog when forwarding is available', async () => {
@@ -217,9 +241,24 @@ describe('environment terminal dock', () => {
         data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.terminal.write).toHaveBeenCalledWith(new Uint8Array(), expect.any(Function))
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[0].value,
+    )
     xterm.input?.('allowed before replay')
     expect(attach.send).toHaveBeenCalledWith('allowed before replay')
     attach.send.mockClear()
+    xterm.beginStructuralReplay.mockClear()
+    xterm.cancelStructuralReplay.mockClear()
+    xterm.finishStructuralReplay.mockClear()
+    xterm.setGeometry.mockClear()
+    let restore: (() => void) | undefined
+    xterm.finishStructuralReplay.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { restore = resolve }),
+    )
 
     let finish: (() => void) | undefined
     xterm.terminal.write.mockImplementation((_chunk: Uint8Array, done?: () => void) => {
@@ -230,6 +269,11 @@ describe('environment terminal dock', () => {
         data: JSON.stringify({ ok: true, replay: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
+    expect(xterm.beginStructuralReplay).toHaveBeenCalledTimes(1)
+    expect(xterm.setGeometry).toHaveBeenCalledWith(80, 24, true)
+    expect(xterm.beginStructuralReplay.mock.invocationCallOrder[0]).toBeLessThan(
+      xterm.setGeometry.mock.invocationCallOrder[0],
+    )
     xterm.input?.('blocked')
     expect(attach.send).not.toHaveBeenCalled()
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
@@ -242,24 +286,77 @@ describe('environment terminal dock', () => {
     expect(host.style.visibility).toBe('hidden')
 
     act(() => finish?.())
+    await waitFor(() => expect(xterm.finishStructuralReplay).toHaveBeenCalled())
+    xterm.input?.('blocked while restoring viewport')
+    expect(attach.send).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    act(() => restore?.())
     await waitFor(() =>
       expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[0].value,
     )
     expect(host.style.visibility).toBe('')
 
     xterm.input?.('allowed')
     expect(attach.send).toHaveBeenCalledWith('allowed')
 
+    xterm.beginStructuralReplay.mockClear()
+    xterm.cancelStructuralReplay.mockClear()
+    xterm.finishStructuralReplay.mockClear()
     // A resumed attach reports zero replay and must not clear the only
     // settled copy already on screen.
     xterm.terminal.reset.mockClear()
     act(() => attach.handlers?.onAttached?.(true, standardGeometry, true))
     expect(xterm.terminal.reset).not.toHaveBeenCalled()
     act(() => attach.handlers?.onReplayStart?.(0, false))
+    act(() => finish?.())
+    expect(xterm.beginStructuralReplay).not.toHaveBeenCalled()
+    expect(xterm.cancelStructuralReplay).not.toHaveBeenCalled()
+    expect(xterm.finishStructuralReplay).not.toHaveBeenCalled()
     expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
     expect(host.style.visibility).toBe('')
   })
 
+
+  it('cancels an aborted full environment replay without restoring it', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry, false)
+      attach.handlers?.onReplayStart?.(3, true)
+    })
+    const generation = xterm.beginStructuralReplay.mock.results[0].value
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+
+    act(() => attach.handlers?.onReplayAbort?.(true))
+
+    await waitFor(() => expect(xterm.cancelStructuralReplay).toHaveBeenCalledWith(generation))
+    expect(xterm.finishStructuralReplay).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+  })
+
+  it('reveals a completed replay when viewport restoration rejects', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    xterm.finishStructuralReplay.mockRejectedValueOnce(new Error('restore failed'))
+    render(<TerminalDock />)
+    await waitFor(() => expect(attach.handlers).not.toBeNull())
+
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry, false)
+      attach.handlers?.onReplayStart?.(0, true)
+    })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[0].value,
+    )
+  })
   it('does not let a stale replay callback reveal a newer replay', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     render(<TerminalDock />)
@@ -298,6 +395,10 @@ describe('environment terminal dock', () => {
     act(() => secondFinish?.())
     await waitFor(() =>
       expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
+    )
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledTimes(1)
+    expect(xterm.finishStructuralReplay).toHaveBeenCalledWith(
+      xterm.beginStructuralReplay.mock.results[1].value,
     )
   })
   it('confirms before stopping the running environment', async () => {
@@ -529,14 +630,20 @@ describe('environment terminal dock', () => {
     render(<TerminalDock />)
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
     await waitFor(() => expect(attach.handlers).not.toBeNull())
-    act(() => attach.handlers?.onAttached(true, standardGeometry))
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry)
+      attach.handlers?.onReplayStart?.(0, true)
+    })
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     // A second tab runs another shell in the container that is already up.
     fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
     expect(await screen.findByText('Connecting to your environment')).toBeDefined()
     expect(screen.queryByText('Starting your environment container')).toBeNull()
-    act(() => attach.handlers?.onAttached(true, standardGeometry))
+    act(() => {
+      attach.handlers?.onAttached(true, standardGeometry)
+      attach.handlers?.onReplayStart?.(0, true)
+    })
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
 
     // And neither does switching back to the first tab.

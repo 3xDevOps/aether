@@ -31,14 +31,15 @@ export interface RunTerminalSessionInput {
   initialized: boolean
   terminal: Terminal | null
   geometry: () => { cols: number; rows: number }
-  setGeometry: (cols: number, rows: number, reset?: boolean) => void
+  setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   phone: boolean
   automaticWrite: boolean
   authorityKey: string
   onInvalidate?: () => void
   onWeight?: (weight: number) => void
-  freeze?: () => void
-  thaw?: () => void
+  beginStructuralReplay?: () => number
+  cancelStructuralReplay?: (generation: number) => void | Promise<void>
+  finishStructuralReplay?: (generation: number) => void | Promise<void>
 }
 
 export interface RunTerminalSessionResult {
@@ -58,14 +59,21 @@ interface SessionRefs {
   active: boolean
   terminal: Terminal | null
   geometry: () => { cols: number; rows: number }
-  setGeometry: (cols: number, rows: number, reset?: boolean) => void
+  setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   phone: boolean
   automaticWrite: boolean
   authorityKey: string
   onInvalidate?: () => void
   onWeight?: (weight: number) => void
-  freeze?: () => void
-  thaw?: () => void
+  beginStructuralReplay?: () => number
+  cancelStructuralReplay?: (generation: number) => void | Promise<void>
+  finishStructuralReplay?: (generation: number) => void | Promise<void>
+}
+
+interface StructuralReplayOwner {
+  generation: number
+  cancel?: (generation: number) => void | Promise<void>
+  finish?: (generation: number) => void | Promise<void>
 }
 
 function terminalWeight(terminal: Terminal | null): number {
@@ -106,7 +114,12 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const activeRef = useRef(active)
   const latestActiveRef = useRef(active)
   const explicitWriteRef = useRef<boolean | null>(null)
-  const fullReplayPreparedRef = useRef(false)
+  const structuralReplayRef = useRef<StructuralReplayOwner | null>(null)
+  const replayRevisionRef = useRef(0)
+  const acceptedReplayRef = useRef(false)
+  const abortedReplayRef = useRef(false)
+  const sourceGeometryRef = useRef<Promise<void> | null>(null)
+  const writeRevisionRef = useRef(0)
   const previousAuthorityRef = useRef(authorityKey)
   const previousAutomaticRef = useRef(automaticWrite)
   const previousPhoneRef = useRef(phone)
@@ -114,37 +127,68 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const relaunchPendingRef = useRef(false)
   terminalRef.current = terminal
   latestActiveRef.current = active
+  const beginStructuralReplay = useCallback((): StructuralReplayOwner | null => {
+    const owner = refs.current
+    const generation = owner.beginStructuralReplay?.()
+    return generation === undefined
+      ? null
+      : {
+          generation,
+          cancel: owner.cancelStructuralReplay,
+          finish: owner.finishStructuralReplay,
+        }
+  }, [refs])
   const gate = useMemo(
     () =>
       replayGate(
         (chunk, done) => {
           const current = terminalRef.current
+          const revision = writeRevisionRef.current
           if (!current) {
             done?.()
             return
           }
-          current.write(chunk, () => {
-            done?.()
-            if (!latestActiveRef.current) refs.current.onWeight?.(terminalWeight(current))
-          })
+          const write = () => {
+            if (terminalRef.current !== current || writeRevisionRef.current !== revision) {
+              done?.()
+              return
+            }
+            current.write(chunk, () => {
+              done?.()
+              if (!latestActiveRef.current) refs.current.onWeight?.(terminalWeight(current))
+            })
+          }
+          const sourceGeometry = sourceGeometryRef.current
+          if (sourceGeometry) void sourceGeometry.then(write, write)
+          else write()
         },
         (visible, full) => {
+          const revision = ++replayRevisionRef.current
           if (visible) {
-            if (full && !fullReplayPreparedRef.current) {
-              refs.current.freeze?.()
-              fullReplayPreparedRef.current = true
+            if (full && structuralReplayRef.current === null) {
+              structuralReplayRef.current = beginStructuralReplay()
             }
-            setReplaying(true)
-          } else {
-            if (full && fullReplayPreparedRef.current) {
-              refs.current.thaw?.()
-              fullReplayPreparedRef.current = false
-            }
-            setReplaying(false)
+            setReplaying(full === true)
+            return
           }
+
+          const replay = full ? structuralReplayRef.current : null
+          if (full) structuralReplayRef.current = null
+          const completion =
+            replay === null
+              ? undefined
+              : replay.finish?.(replay.generation)
+          void Promise.resolve(completion).then(
+            () => {
+              if (replayRevisionRef.current === revision) setReplaying(false)
+            },
+            () => {
+              if (replayRevisionRef.current === revision) setReplaying(false)
+            },
+          )
         },
       ),
-    [refs],
+    [beginStructuralReplay, refs],
   )
 
   const updateControl = useCallback(
@@ -195,11 +239,27 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.write,
       onAttached: (write, size, resumed) => {
-        if (!resumed && !fullReplayPreparedRef.current) {
-          refs.current.freeze?.()
-          fullReplayPreparedRef.current = true
+        abortedReplayRef.current = false
+        acceptedReplayRef.current = true
+        if (!resumed) {
+          writeRevisionRef.current++
+          if (structuralReplayRef.current === null) {
+            structuralReplayRef.current = beginStructuralReplay()
+          }
+          const sourceGeometry = Promise.resolve(refs.current.setGeometry(size.cols, size.rows, true))
+          sourceGeometryRef.current = sourceGeometry
+          void sourceGeometry.then(
+            () => {
+              if (sourceGeometryRef.current === sourceGeometry) sourceGeometryRef.current = null
+            },
+            () => {
+              if (sourceGeometryRef.current === sourceGeometry) sourceGeometryRef.current = null
+            },
+          )
+        } else {
+          sourceGeometryRef.current = null
+          void refs.current.setGeometry(size.cols, size.rows, false)
         }
-        refs.current.setGeometry(size.cols, size.rows, !resumed)
         updateControl({
           control_session_id: attachment.controlMetadata?.().control_session_id ?? '',
           control_generation: attachment.controlMetadata?.().control_generation ?? 0,
@@ -208,16 +268,37 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         setSessionMissing(false)
         setTerminal(runID, { message: null, refused: false, write })
       },
-      onReplayAbort: (full) => gate.cancel(full),
+      onReplayAbort: (full) => {
+        abortedReplayRef.current = full
+        acceptedReplayRef.current = false
+        writeRevisionRef.current++
+        sourceGeometryRef.current = null
+        gate.cancel(full)
+        if (!full) return
+        const replay = structuralReplayRef.current
+        structuralReplayRef.current = null
+        if (replay !== null) {
+          void Promise.resolve(replay.cancel?.(replay.generation)).catch(() => undefined)
+        }
+      },
       onReplayStart: (bytes, full) => {
-        if (bytes > 0) {
-          gate.start(full ? 'full' : 'delta')
-        } else {
-          // A zero-byte full replay still completes the frozen-screen
-          // transaction. Set the mode explicitly because a prior resumed
-          // replay may have left the gate in delta mode.
-          if (full) gate.start('full')
-          gate.unmute()
+        const accepted = acceptedReplayRef.current
+        const aborted = abortedReplayRef.current
+        acceptedReplayRef.current = false
+        abortedReplayRef.current = false
+        gate.start(full ? 'full' : 'delta')
+        if (bytes === 0 && accepted) {
+          void gate.write(new Uint8Array(), 'replay-end')
+        } else if (bytes === 0 && full && aborted) {
+          const writeRevision = writeRevisionRef.current
+          const replayRevision = replayRevisionRef.current
+          void Promise.resolve().then(() => {
+            if (
+              writeRevisionRef.current !== writeRevision ||
+              replayRevisionRef.current !== replayRevision
+            ) return
+            void gate.write(new Uint8Array(), 'replay-end')
+          })
         }
       },
       onControl: updateControl,
@@ -225,9 +306,33 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
       onState: (connection) =>
         setTerminal(runID, connection === 'offline' ? { connection, write: false } : { connection }),
       onRefused: (message, code) => {
-        gate.unmute()
-        terminalRef.current?.reset()
-        refs.current.onInvalidate?.()
+        abortedReplayRef.current = false
+        acceptedReplayRef.current = false
+        const writeRevision = ++writeRevisionRef.current
+        const replayRevision = replayRevisionRef.current
+        sourceGeometryRef.current = null
+        const current = terminalRef.current
+        const replay = structuralReplayRef.current
+        structuralReplayRef.current = null
+        const currentRefusal = () =>
+          writeRevisionRef.current === writeRevision &&
+          replayRevisionRef.current === replayRevision
+        const reset = current
+          ? refs.current.setGeometry(current.cols, current.rows, true)
+          : undefined
+        void Promise.resolve(reset)
+          .catch(() => undefined)
+          .then(() =>
+            !currentRefusal() || replay === null
+              ? undefined
+              : replay.cancel?.(replay.generation),
+          )
+          .catch(() => undefined)
+          .then(() => {
+            if (!currentRefusal()) return
+            gate.unmute()
+            refs.current.onInvalidate?.()
+          })
         setSessionMissing(code === codeUnavailable)
         setTerminal(runID, { message, refused: true, write: false })
       },
@@ -253,12 +358,32 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     })
     attachmentRef.current = attachment
     if (relaunchPendingRef.current) relaunchPendingRef.current = false
-  }, [active, gate, initialized, run, runID, setTerminal, terminal, updateControl, onControlResult, refs])
+  }, [
+    active,
+    beginStructuralReplay,
+    gate,
+    initialized,
+    run,
+    runID,
+    setTerminal,
+    terminal,
+    updateControl,
+    onControlResult,
+    refs,
+  ])
 
   useEffect(() => {
     return () => {
       attachmentRef.current?.close()
       attachmentRef.current = null
+      writeRevisionRef.current++
+      replayRevisionRef.current++
+      sourceGeometryRef.current = null
+      const replay = structuralReplayRef.current
+      structuralReplayRef.current = null
+      if (replay !== null) {
+        void Promise.resolve(replay.cancel?.(replay.generation)).catch(() => undefined)
+      }
     }
   }, [runID, terminal])
 
@@ -342,7 +467,11 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     setSessionMissing(false)
     setTerminal(runID, { message: null, refused: false })
     const attachment = attachmentRef.current
-    if (attachment && !attachment.isEnded()) attachment.reopen()
+    if (attachment && !attachment.isEnded()) {
+      writeRevisionRef.current++
+      replayRevisionRef.current++
+      attachment.reopen()
+    }
   }, [runID, setTerminal])
 
   return {

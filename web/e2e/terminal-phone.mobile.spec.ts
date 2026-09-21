@@ -117,7 +117,30 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
         pannable: host.scrollWidth > host.clientWidth,
       }
     })
+  const panState = (toEnd = false) =>
+    page.locator('.xterm:not([data-aether-frozen-view] *)').evaluate((el, panToEnd) => {
+      let owner = el.parentElement as HTMLElement | null
+      while (owner && owner !== document.body && owner.scrollWidth <= owner.clientWidth) {
+        owner = owner.parentElement
+      }
+      if (!owner || owner === document.body) throw new Error('terminal has no horizontal pan owner')
+      const maximum = owner.scrollWidth - owner.clientWidth
+      if (panToEnd) owner.scrollLeft = maximum
+      return {
+        left: owner.scrollLeft,
+        maximum,
+        top: owner.scrollTop,
+        overflowY: getComputedStyle(owner).overflowY,
+        pageTop: window.scrollY,
+      }
+    }, toEnd)
   expect(await grid()).toEqual({ cols: desktopCols, pannable: true })
+  const initialPan = await panState(true)
+  expect(initialPan.maximum).toBeGreaterThan(0)
+  expect(initialPan.left).toBe(initialPan.maximum)
+  expect(initialPan.top).toBe(0)
+  expect(initialPan.overflowY).toBe('hidden')
+  expect(initialPan.pageTop).toBe(0)
 
   // Taking over through Run Room is explicit because the desktop viewer
   // still owns the controller lease.
@@ -141,12 +164,20 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
     .getByRole('toolbar', { name: 'Terminal keys' })
     .getByRole('button', { name: 'Esc' })
     .tap()
+  const focusedPan = await panState()
+  expect(focusedPan.left).toBeGreaterThan(0)
+  expect(focusedPan.top).toBe(0)
+  expect(focusedPan.pageTop).toBe(0)
 
   // The soft keyboard shortens the layout, which is what would make a
   // terminal that fitted its pane re-fit and resize the session with it.
   const restore = await shrinkToKeyboardHeight(page)
   await expect(rows).toHaveCount(desktopRows)
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
+  const keyboardPan = await panState()
+  expect(keyboardPan.left).toBeGreaterThan(0)
+  expect(keyboardPan.top).toBe(0)
+  expect(keyboardPan.overflowY).toBe('hidden')
   await restore()
 
   // The other way round: the desktop viewer's window changes, and the phone

@@ -4,8 +4,10 @@ import '@/routes/terminal'
 import type { RunStatus } from '@/lib/types'
 import type * as apiModule from '@/lib/api'
 import type * as attachModule from '@/routes/terminal/attach'
+import type * as xtermHostModule from '@/components/xterm-host'
 import { useStore } from '@/store'
 import {
+  getShellSocket,
   initialRunShellDock,
   type RunShellDockState,
   unregisterShellSocket,
@@ -13,7 +15,43 @@ import {
 import { run } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-const replayGateCalls = vi.hoisted(() => ({ starts: 0, unmutes: 0 }))
+const replayGateCalls = vi.hoisted(() => ({
+  starts: [] as attachModule.ReplayMode[],
+  writes: [] as attachModule.AttachDataKind[],
+  cancels: [] as boolean[],
+}))
+const structuralReplayCalls = vi.hoisted(() => ({
+  begins: [] as number[],
+  cancels: [] as number[],
+  finishes: [] as number[],
+}))
+
+vi.mock('@/components/xterm-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof xtermHostModule>()
+  return {
+    ...actual,
+    useXterm: (options?: xtermHostModule.XtermOptions) => {
+      const controller = actual.useXterm(options)
+      return {
+        ...controller,
+        beginStructuralReplay: () => {
+          const generation = controller.beginStructuralReplay?.()
+          if (generation === undefined) throw new Error('structural replay unavailable')
+          structuralReplayCalls.begins.push(generation)
+          return generation
+        },
+        cancelStructuralReplay: async (generation: number) => {
+          structuralReplayCalls.cancels.push(generation)
+          await controller.cancelStructuralReplay?.(generation)
+        },
+        finishStructuralReplay: async (generation: number) => {
+          structuralReplayCalls.finishes.push(generation)
+          await controller.finishStructuralReplay?.(generation)
+        },
+      }
+    },
+  }
+})
 
 vi.mock('@/routes/terminal/attach', async (importOriginal) => {
   const actual = await importOriginal<typeof attachModule>()
@@ -21,18 +59,26 @@ vi.mock('@/routes/terminal/attach', async (importOriginal) => {
     ...actual,
     replayGate: (
       write: (chunk: Uint8Array, done?: () => void) => void,
-      onReplaying?: (replaying: boolean) => void,
+      onReplaying?: (replaying: boolean, full?: boolean) => void,
     ) => {
       const gate = actual.replayGate(write, onReplaying)
       return {
         ...gate,
-        start: () => {
-          replayGateCalls.starts++
-          gate.start()
+        start: (mode: attachModule.ReplayMode = 'full') => {
+          replayGateCalls.starts.push(mode)
+          gate.start(mode)
         },
-        unmute: () => {
-          replayGateCalls.unmutes++
-          gate.unmute()
+        cancel: (full = true) => {
+          replayGateCalls.cancels.push(full)
+          gate.cancel(full)
+        },
+        write: (
+          chunk: Uint8Array,
+          kind: attachModule.AttachDataKind,
+          settled?: () => void,
+        ) => {
+          replayGateCalls.writes.push(kind)
+          return gate.write(chunk, kind, settled)
         },
       }
     },
@@ -69,8 +115,12 @@ function mount({
   return render(<View params={{ runId: runID }} />)
 }
 beforeEach(() => {
-  replayGateCalls.starts = 0
-  replayGateCalls.unmutes = 0
+  replayGateCalls.starts.length = 0
+  replayGateCalls.writes.length = 0
+  replayGateCalls.cancels.length = 0
+  structuralReplayCalls.begins.length = 0
+  structuralReplayCalls.cancels.length = 0
+  structuralReplayCalls.finishes.length = 0
   for (const runID of ['run_1', 'run_2']) {
     for (const tab of ['t1', 't2', 't3', 't4']) unregisterShellSocket(runID, tab)
   }
@@ -180,7 +230,8 @@ describe('run-shell dock', () => {
         data: JSON.stringify({ ok: true, replay: 3, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
       })
     })
-    expect(replayGateCalls.starts).toBe(1)
+    expect(replayGateCalls.starts).toEqual(['full'])
+    expect(structuralReplayCalls.begins).toHaveLength(1)
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     const terminalDockElement = screen.getByRole('region', { name: 'Terminal dock' })
     const host = terminalDockElement.querySelector(
@@ -191,12 +242,94 @@ describe('run-shell dock', () => {
     act(() => {
       shell.onmessage?.({ data: new TextEncoder().encode('out').buffer })
     })
-    expect(replayGateCalls.starts).toBe(1)
+    expect(replayGateCalls.starts).toEqual(['full'])
 
     await waitFor(() =>
       expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
     )
     expect(host.style.visibility).toBe('')
+    expect(replayGateCalls.writes).toContain('replay-end')
+    expect(structuralReplayCalls.finishes).toEqual(structuralReplayCalls.begins)
+    view.unmount()
+  })
+
+  it('completes an accepted zero-byte shell replay through the full reveal', async () => {
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+    const shell = StubSocket.opened[1]
+
+    act(() => {
+      shell.onopen?.()
+      shell.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+    })
+
+    expect(replayGateCalls.starts).toEqual(['full'])
+    expect(replayGateCalls.writes).toEqual(['replay-end'])
+    await waitFor(() => expect(structuralReplayCalls.finishes).toEqual(structuralReplayCalls.begins))
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    view.unmount()
+  })
+
+  it('cancels the structural shell replay when a full replay aborts', async () => {
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+    const shell = StubSocket.opened[1]
+
+    act(() => {
+      shell.onopen?.()
+      shell.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 3, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+      shell.onclose?.({ code: 1006 })
+    })
+
+    await waitFor(() => expect(structuralReplayCalls.cancels).toEqual(structuralReplayCalls.begins))
+    expect(structuralReplayCalls.finishes).toEqual([])
+    expect(replayGateCalls.cancels).toContain(true)
+    view.unmount()
+  })
+
+  it('keeps resumed shell replay delta-only', async () => {
+    const view = mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+    const first = StubSocket.opened[1]
+    act(() => {
+      first.onopen?.()
+      first.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 0, cursor: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+    })
+    await waitFor(() => expect(structuralReplayCalls.finishes).toEqual(structuralReplayCalls.begins))
+
+    replayGateCalls.starts.length = 0
+    replayGateCalls.writes.length = 0
+    structuralReplayCalls.begins.length = 0
+    structuralReplayCalls.cancels.length = 0
+    structuralReplayCalls.finishes.length = 0
+    getShellSocket('run_1', 't1')?.reopen({ resume: true })
+    const shells = () => StubSocket.opened.filter((socket) => socket.url.includes('?shell=t1'))
+    await waitFor(() => expect(shells()).toHaveLength(2))
+    const resumed = shells()[1]
+    act(() => resumed.onopen?.())
+    expect(resumed.frames()[0]).toMatchObject({ resume: true, cursor: 0 })
+    act(() => {
+      resumed.onmessage?.({
+        data: JSON.stringify({ ok: true, resumed: true, replay: 1, cursor: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
+      })
+      resumed.onmessage?.({ data: new Uint8Array([1]).buffer })
+    })
+
+    await waitFor(() => expect(replayGateCalls.writes).toContain('replay-end'))
+    expect(replayGateCalls.starts).toEqual(['delta'])
+    expect(structuralReplayCalls.begins).toEqual([])
+    expect(structuralReplayCalls.cancels).toEqual([])
+    expect(structuralReplayCalls.finishes).toEqual([])
+    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
     view.unmount()
   })
   it('ignores late callbacks from a prior run sharing the active shell tab', async () => {
@@ -228,6 +361,7 @@ describe('run-shell dock', () => {
 
     await waitFor(() => expect(shellFor('run_2')).toBeDefined())
     const currentShell = shellFor('run_2')
+    structuralReplayCalls.begins.length = 0
     act(() => {
       currentShell?.onopen?.()
       currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
@@ -237,6 +371,7 @@ describe('run-shell dock', () => {
       oldShell?.onmessage?.({ data: new TextEncoder().encode('A output').buffer })
       oldShell?.onclose?.({ code: 1000 })
     })
+    expect(structuralReplayCalls.begins).toHaveLength(1)
 
     await vi.waitFor(() =>
       expect(

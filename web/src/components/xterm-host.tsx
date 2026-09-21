@@ -56,11 +56,13 @@ export interface XtermController {
   /** The pane's requested geometry, independent of the shared PTY grid. */
   geometry: () => { cols: number; rows: number }
   /** Apply an attach reset or server resize in order with terminal output. */
-  setGeometry: (cols: number, rows: number, reset?: boolean) => void
+  setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   /** Backs the find bar `TerminalPane` draws over this terminal. */
   search: SearchAddon | null
   findOpen: boolean
   setFindOpen: (open: boolean) => void
+  /** Record viewport navigation that must supersede a pending restoration. */
+  noteViewportInteraction?: () => void
   /** Focuses xterm now, or records the focused action owner until it mounts. */
   focusTerminal: () => void
   /**
@@ -70,14 +72,57 @@ export interface XtermController {
    */
   ctrlArmed: boolean
   armCtrl: (armed: boolean) => void
-  /**
-   * Give a session hook a paint boundary around reset/replay. The default
-   * implementation keeps xterm's current viewport intact and refreshes it
-   * after the final ordered write; callers may use the boundary to keep a
-   * warm surface visible while replay is gated.
-   */
-  freeze?: () => void
-  thaw?: () => void
+  /** Capture this pane's viewport before a structural reset/replay. */
+  beginStructuralReplay?: () => number
+  /** Abandon a structural replay without restoring its captured viewport. */
+  cancelStructuralReplay?: (generation: number) => void | Promise<void>
+  /** Restore compatible viewport intent after every ordered replay operation. */
+  finishStructuralReplay?: (generation: number) => void | Promise<void>
+}
+type BufferType = 'normal' | 'alternate'
+
+interface ViewportIntent {
+  buffer: BufferType
+  followBottom: boolean
+  bottomOffset: number
+  interactionRevision: number
+}
+
+interface StructuralReplay {
+  generation: number
+  terminal: Terminal
+  intent: ViewportIntent
+}
+
+function activeBufferType(terminal: Terminal): BufferType {
+  return terminal.buffer.active === terminal.buffer.alternate ? 'alternate' : 'normal'
+}
+
+function captureViewport(terminal: Terminal, interactionRevision: number): ViewportIntent {
+  const buffer = terminal.buffer.active
+  const bottomOffset = Math.max(0, buffer.baseY - buffer.viewportY)
+  return {
+    buffer: activeBufferType(terminal),
+    followBottom: bottomOffset === 0,
+    bottomOffset,
+    interactionRevision,
+  }
+}
+function restoreViewport(
+  terminal: Terminal,
+  intent: ViewportIntent,
+  interactionRevision: number,
+): void {
+  if (
+    interactionRevision !== intent.interactionRevision ||
+    activeBufferType(terminal) !== intent.buffer
+  ) return
+  if (intent.followBottom) {
+    terminal.scrollToBottom()
+  } else {
+    terminal.scrollToLine(Math.max(0, terminal.buffer.active.baseY - intent.bottomOffset))
+  }
+  terminal.refresh(0, Math.max(0, terminal.rows - 1))
 }
 
 
@@ -215,15 +260,16 @@ export function useXterm({
   const serverSize = useRef<{ cols: number; rows: number } | null>(null)
   const requestedSize = useRef(standardGeometry)
   const resizeRef = useRef<(() => void) | null>(null)
-  const frozenViewRef = useRef<HTMLElement | null>(null)
-  const clearFrozenView = useCallback(() => {
-    frozenViewRef.current?.remove()
-    frozenViewRef.current = null
-  }, [])
+  const viewportInteractionRevision = useRef(0)
+  const structuralGeneration = useRef(0)
+  const structuralReplay = useRef<StructuralReplay | null>(null)
   followRef.current = follow
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  const noteViewportInteraction = useCallback(() => {
+    viewportInteractionRevision.current++
+  }, [])
   const armCtrl = useCallback((armed: boolean) => {
     ctrlArmedRef.current = armed
     setCtrlArmed(armed)
@@ -243,44 +289,90 @@ export function useXterm({
   )
   const setGeometry = useCallback((cols: number, rows: number, reset = false) => {
     serverSize.current = { cols, rows }
-    terminal?.write('', () => {
-      if (liveTerminal.current !== terminal) return
-      if (scrollback < maxTerminalScrollback) {
-        terminal.options.scrollback = adaptiveScrollback(cols, rows, Math.floor(scrollback))
+    const current = terminal
+    if (!current || liveTerminal.current !== current) return Promise.resolve()
+    const reflowGeneration = structuralGeneration.current
+    const reflowIntent =
+      !reset && current.cols !== cols && structuralReplay.current === null
+        ? captureViewport(current, viewportInteractionRevision.current)
+        : null
+    return new Promise<void>((resolve, reject) => {
+      try {
+        current.write('', () => {
+          try {
+            if (liveTerminal.current === current) {
+              if (scrollback < maxTerminalScrollback) {
+                current.options.scrollback = adaptiveScrollback(cols, rows, Math.floor(scrollback))
+              }
+              if (reset) current.reset()
+              current.resize(cols, rows)
+            }
+            if (
+              liveTerminal.current === current &&
+              reflowIntent &&
+              structuralGeneration.current === reflowGeneration &&
+              structuralReplay.current === null
+            ) {
+              restoreViewport(current, reflowIntent, viewportInteractionRevision.current)
+            }
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      } catch (error) {
+        reject(error)
       }
-      if (reset) terminal.reset()
-      terminal.resize(cols, rows)
     })
   }, [scrollback, terminal])
-  const freeze = useCallback(() => {
-    if (!host || !terminal || liveTerminal.current !== terminal || frozenViewRef.current) return
-    const parent = host.parentElement
-    if (!parent) return
-    const snapshot = host.cloneNode(true) as HTMLElement
-    snapshot.dataset.aetherFrozenView = 'true'
-    snapshot.setAttribute('aria-hidden', 'true')
-    snapshot.inert = true
-    snapshot.style.position = 'absolute'
-    snapshot.style.left = `${host.offsetLeft}px`
-    snapshot.style.top = `${host.offsetTop}px`
-    snapshot.style.width = `${host.offsetWidth}px`
-    snapshot.style.height = `${host.offsetHeight}px`
-    snapshot.style.zIndex = '1'
-    snapshot.style.pointerEvents = 'none'
-    snapshot.style.background = 'inherit'
-    parent.appendChild(snapshot)
-    frozenViewRef.current = snapshot
-  }, [host, terminal])
-  const thaw = useCallback(() => {
+  const beginStructuralReplay = useCallback(() => {
+    const generation = ++structuralGeneration.current
     const current = terminal
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        clearFrozenView()
-        if (!current || liveTerminal.current !== current) return
-        current.refresh(0, Math.max(0, current.rows - 1))
-      })
+    structuralReplay.current =
+      current && liveTerminal.current === current
+        ? {
+            generation,
+            terminal: current,
+            intent: captureViewport(current, viewportInteractionRevision.current),
+          }
+        : null
+    return generation
+  }, [terminal])
+  const cancelStructuralReplay = useCallback((generation: number) => {
+    const replay = structuralReplay.current
+    if (!replay || replay.generation !== generation) return Promise.resolve()
+    structuralReplay.current = null
+    if (liveTerminal.current !== replay.terminal) return Promise.resolve()
+    return new Promise<void>((resolve) => replay.terminal.write('', resolve))
+  }, [])
+  const finishStructuralReplay = useCallback((generation: number) => {
+    const replay = structuralReplay.current
+    if (!replay || replay.generation !== generation) return Promise.resolve()
+    const current = replay.terminal
+    if (liveTerminal.current !== current) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      try {
+        current.write('', () => {
+          try {
+            const active = structuralReplay.current
+            if (
+              active?.generation === generation &&
+              active.terminal === current &&
+              liveTerminal.current === current
+            ) {
+              structuralReplay.current = null
+              restoreViewport(current, active.intent, viewportInteractionRevision.current)
+            }
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      } catch (error) {
+        reject(error)
+      }
     })
-  }, [clearFrozenView, terminal])
+  }, [])
   useEffect(() => {
     const intent = focusIntent.current
     if (!intent || !terminal) return
@@ -318,6 +410,8 @@ export function useXterm({
     serverSize.current = null
     requestedSize.current = standardGeometry
 
+    viewportInteractionRevision.current = 0
+    structuralReplay.current = null
     // The DOM renderer, deliberately: @xterm/addon-webgl 0.19.0 reuses stale
     // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
     // until a forced refresh (xtermjs/xterm.js#6038; the fix is unreleased).
@@ -357,6 +451,12 @@ export function useXterm({
       const clipboard = clipboardKeys(created)
       created.attachCustomKeyEventHandler((ev) => {
         if (ev.type !== 'keydown') return clipboard(ev)
+        if (
+          ev.shiftKey &&
+          (ev.code === 'PageUp' || ev.code === 'PageDown' || ev.code === 'Home' || ev.code === 'End')
+        ) {
+          viewportInteractionRevision.current++
+        }
         const zoom = terminalZoomKey(ev)
         if (zoom) {
           ev.preventDefault()
@@ -394,23 +494,19 @@ export function useXterm({
       resizeRef.current = resize
       resize()
 
-      // At a fixed size the grid is larger than the pane, so the row being
-      // written on can sit outside it: a pane that never followed the
-      // cursor would leave new output below the fold. A tap matters for
-      // the same reason - it is what raises the keyboard over the rows.
-      // `scrollIntoView` is absent in jsdom, and the cursor cell only
-      // exists once a renderer has drawn one.
-      const showCursor = () => {
-        if (!followRef.current) return
-        requestAnimationFrame(() => {
-          host
-            .querySelector('.xterm-cursor')
-            ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-        })
+      // xterm owns vertical history. Track only browser gestures that can
+      // change its viewport; parser-driven scrolling from ordinary writes is
+      // deliberately not an interaction and keeps xterm's native pin/follow
+      // behavior intact.
+      const noteViewportInteraction = () => {
+        viewportInteractionRevision.current++
       }
-      host.addEventListener('focusin', showCursor)
-      const cursor = created.onCursorMove(showCursor)
-
+      const noteScrollbarInteraction = (event: PointerEvent) => {
+        if (event.target === host.querySelector('.xterm-viewport')) noteViewportInteraction()
+      }
+      host.addEventListener('wheel', noteViewportInteraction, { passive: true })
+      host.addEventListener('touchmove', noteViewportInteraction, { passive: true })
+      host.addEventListener('pointerdown', noteScrollbarInteraction)
       const input = created.onData((data) => {
         if (!ctrlArmedRef.current) {
           onDataRef.current?.(data)
@@ -430,8 +526,9 @@ export function useXterm({
       const observer = new ResizeObserver(resize)
       observer.observe(host)
       teardown = () => {
-        cursor.dispose()
-        host.removeEventListener('focusin', showCursor)
+        host.removeEventListener('wheel', noteViewportInteraction)
+        host.removeEventListener('touchmove', noteViewportInteraction)
+        host.removeEventListener('pointerdown', noteScrollbarInteraction)
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
@@ -442,7 +539,7 @@ export function useXterm({
     return () => {
       active = false
       liveTerminal.current = null
-      clearFrozenView()
+      if (structuralReplay.current?.terminal === created) structuralReplay.current = null
       armCtrl(false)
       cancelFontWait()
       teardown?.()
@@ -451,7 +548,7 @@ export function useXterm({
       setSearch(null)
       setFindOpen(false)
     }
-  }, [armCtrl, clearFrozenView, enabled, host, scrollback])
+  }, [armCtrl, enabled, host, scrollback])
 
   useEffect(() => {
     resizeRef.current?.()
@@ -479,8 +576,10 @@ export function useXterm({
     setFindOpen,
     focusTerminal,
     ctrlArmed,
+    noteViewportInteraction,
     armCtrl,
-    freeze,
-    thaw,
+    beginStructuralReplay,
+    cancelStructuralReplay,
+    finishStructuralReplay,
   }
 }

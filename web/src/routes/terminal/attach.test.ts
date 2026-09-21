@@ -603,7 +603,9 @@ describe('connectAttach', () => {
       onState: () => {},
       onRefused: () => {},
       onWriteDenied: () => {},
-      onGeometry: (cols, rows) => events.push(`geometry:${cols}x${rows}`),
+      onGeometry: (cols, rows) => {
+        events.push(`geometry:${cols}x${rows}`)
+      },
       geometry: () => ({ cols: 80, rows: 24 }),
       wantsWrite: () => false,
     })
@@ -644,7 +646,9 @@ describe('connectAttach', () => {
       onState: () => {},
       onRefused: () => {},
       onWriteDenied: () => {},
-      onGeometry: (cols, rows) => geometries.push([cols, rows]),
+      onGeometry: (cols, rows) => {
+        geometries.push([cols, rows])
+      },
       geometry: () => ({ cols: 80, rows: 24 }),
       wantsWrite: () => false,
     })
