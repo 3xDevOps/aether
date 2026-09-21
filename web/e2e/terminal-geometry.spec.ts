@@ -72,8 +72,14 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
       .getByRole('button', { name: /shared geometry regression/ })
       .click()
     const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible > div')
+    const screen = page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
     const assertGrid = async (cols: number, height: number) => {
       await expect(rows).toHaveCount(height)
+      // The font-size check leaves the viewport on an older row. xterm does not
+      // draw that scroll on the viewport element, so wheel back to the live row
+      // before reading the marker. One notch is enough: xterm scales the delta.
+      await screen.hover()
+      await page.mouse.wheel(0, 600)
       writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
       await expect(rows.nth(height - 1)).toHaveText(`${' '.repeat(cols - 1)}X`)
     }
@@ -85,7 +91,6 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     // xterm draws the viewport itself, so the DOM scroll height stays equal to
     // the screen. Wheel up until the pinned line is no longer the bottom marker,
     // then a larger font has to keep that line.
-    const screen = page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
     await screen.hover()
     for (let step = 0; step < 8; step++) await page.mouse.wheel(0, -600)
     const pinned = (await rows.first().innerText()).trim()
