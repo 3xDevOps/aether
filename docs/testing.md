@@ -47,8 +47,8 @@ Layers, per the design spec's testing strategy:
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
   `aether-server`. They own the paths a person walks in the dashboard, which
-  no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
-  job.
+  no Go test and no jsdom test reaches. CI runs them as two `dashboard-e2e`
+  shards, half the spec files each (`make test-e2e E2E_ARGS="--shard=1/2"`).
 
 Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
 install and reinstall must preserve the CLI and unrelated files in the

@@ -10,7 +10,7 @@ permissions:
 # run to completion so every main commit keeps its own CI verdict and
 # cache write.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Decides which jobs a change needs. It checks out nothing and takes
@@ -45,9 +45,10 @@ jobs:
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
 
-  build-and-test:
+  # The static checks, apart from the tests so neither waits on the other.
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,17 +58,6 @@ jobs:
           go-version-file: go.mod
           cache: false
       - uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-      # `make build` builds the embedded dashboard SPA before Go compiles.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: web/.bun-version
-          no-cache: true
-      - uses: ./.github/actions/bun-cache
         with:
           mode: restore
       - name: Public boundary
@@ -93,6 +83,32 @@ jobs:
       - name: Vulnerability scan (advisory)
         run: make vulncheck
         continue-on-error: true
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      # `make build` builds the embedded dashboard SPA before Go compiles.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: ./.github/actions/bun-cache
+        with:
+          mode: restore
       - name: Unit tests
         run: make test
       - name: Shell script tests
@@ -246,10 +262,18 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
+    name: dashboard-e2e (${{ matrix.shard }}/2)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    # Two runners, half the specs each: the suite runs one browser at a
+    # time because every scenario starts real containers, so splitting the
+    # files is the only way to shorten it.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -294,14 +318,14 @@ jobs:
         run: bunx playwright install --with-deps chromium
         working-directory: web
       - name: Dashboard end-to-end suite
-        run: make test-e2e
+        run: make test-e2e E2E_ARGS="--shard=${{ matrix.shard }}/2"
       # Uploaded on a pass too: the mobile project attaches a full-page
       # screenshot of every phone scenario, and a layout can be wrong with
       # every assertion green. Not on a cancelled job, which has no report.
       - uses: actions/upload-artifact@v4
         if: success() || failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: web/playwright-report/
           retention-days: 7
       - uses: actions/cache/save@v4
@@ -433,13 +457,15 @@ jobs:
         with:
           mode: save
 
+  # The server and CLI matrix `make release` cross-compiles, without the
+  # Android shell: that build is the slow half and runs beside this one in
+  # `android`, so a pull request waits for the longer of the two rather than
+  # their sum.
   release-build:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # The Android build runs a Gradle daemon in a container; a wedged one
-    # would otherwise hold the runner for GitHub's six-hour default.
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -462,13 +488,31 @@ jobs:
       - uses: ./.github/actions/bun-cache
         with:
           mode: restore
-      # `make release` builds the Android shell too, in its pinned SDK
-      # container, so a broken shell fails the pull request. The container
-      # carries the SDK; only Gradle's dependency and distribution caches are
-      # worth keeping between runs, and actions/cache stores paths relative to
-      # the workspace, so the Makefile's default cache directory is moved into
-      # it. Restored on every run; saved only after a push to main, so main's
-      # entries stay the one hot copy every pull request restores.
+      - name: Cross-compile release matrix
+        run: make release RELEASE_ANDROID=0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/
+          retention-days: 7
+
+  # The Android shell, in its pinned SDK container, so a broken shell fails
+  # the pull request. The container carries the SDK; only Gradle's dependency
+  # and distribution caches are worth keeping between runs, and actions/cache
+  # stores paths relative to the workspace, so the Makefile's default cache
+  # directory is moved into it. Restored on every run; saved only after a
+  # push to main, so main's entries stay the one hot copy every pull request
+  # restores. A Gradle daemon in a container can wedge, which the cap bounds.
+  android:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # full history so git describe can version the build
       - uses: actions/cache/restore@v4
         with:
           path: .gradle-cache
@@ -484,10 +528,10 @@ jobs:
       # points at v4.4.3, while v4.4.4 is the current v4 release and carries
       # the newer known-wrapper checksums this step reads.
       - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - name: Cross-compile release matrix
+      - name: Build the Android shell
         env:
           ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
-        run: make release
+        run: make android
       # The daemon logs and the compiled-script caches are large and
       # machine-specific; saving them would cost more than it returns.
       - name: Trim the Gradle cache before it is saved
@@ -498,11 +542,6 @@ jobs:
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: dist/
-          retention-days: 7
 
   # Scans the binaries the release matrix just produced with the Defender
   # build that ships on the runner. A detection here is the same failure a

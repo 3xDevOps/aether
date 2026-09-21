@@ -140,9 +140,10 @@ test-integration:
 # against a real `aether gui` gateway and a real aether-server, so it runs on
 # the binaries `build` produces: the CLI serves the dashboard out of its own
 # embedded web/dist. It needs Docker, real git, and Playwright's browser
-# (`cd web && bunx playwright install chromium`, once).
+# (`cd web && bunx playwright install chromium`, once). E2E_ARGS reaches
+# `playwright test`; CI passes `--shard=N/2`.
 test-e2e: build
-	cd web && $(BUN) run test:e2e
+	cd web && $(BUN) run test:e2e $(E2E_ARGS)
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
@@ -239,7 +240,9 @@ deploy: dashboard
 	sh scripts/deploy.sh
 
 # The Windows .syso files come first because the Windows CLI builds read
-# them. Each build's output is captured so a failure prints whole.
+# them. Each build's output is captured so a failure prints whole. The
+# Android shell is built last; RELEASE_ANDROID=0 leaves it out, which CI
+# uses to build it in a job of its own beside this one.
 release: dashboard
 	@mkdir -p $(DIST)
 	@job_dir=$$(mktemp -d); \
@@ -283,7 +286,7 @@ release: dashboard
 		fi; \
 	done; \
 	exit $$failed
-	@$(MAKE) android
+	@[ '$(RELEASE_ANDROID)' = 0 ] || $(MAKE) android
 
 clean:
 	rm -rf $(DIST) cmd/aether/resource_windows_*.syso \
