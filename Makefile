@@ -130,9 +130,11 @@ test:
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it: set
-# INTEGRATION_PKGS to run one package, INTEGRATION_SKIP to run all but some.
+# INTEGRATION_PKGS to run one package, INTEGRATION_SKIP to run all but some,
+# and INTEGRATION_GOFLAGS to split one package by test name (`-run` or
+# `-skip`).
 test-integration:
-	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS)
+	go test -race -timeout=30m -tags integration $(INTEGRATION_GOFLAGS) $(INTEGRATION_PKGS)
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on

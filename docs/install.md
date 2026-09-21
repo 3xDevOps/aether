@@ -1174,7 +1174,7 @@ steps run before any toolchain is installed, so a missing secret or a tag such
 as `v0.5` ends the release in seconds instead of after the whole matrix is
 built - which used to leave the published release with no assets and
 `/releases/latest` pointing at it. Only an admin publisher runs this release
-job on the self-hosted runner labeled `moss`; other publishers are skipped.
+job; other publishers are skipped.
 
 `make release` also builds and signs the [Android app](#android-app), the
 APK and the app bundle, in a pinned SDK container, so the release needs

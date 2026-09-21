@@ -3,8 +3,7 @@ description: >
   Restore bun's global install cache (~/.bun/install/cache) on every run,
   and save it only after a push to main. Separate from setup-bun's own
   cache, which covers only the downloaded bun binary. Same rule as the Go
-  cache: pull_request_target's GITHUB_REF is the base branch, so only a
-  push can safely add to main's cache scope.
+  cache: main's entries are the one hot copy every pull request restores.
 inputs:
   mode:
     description: "restore or save"
@@ -17,12 +16,12 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ~/.bun/install/cache
-        key: bun-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('web/bun.lock') }}
+        key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
         restore-keys: |
-          bun-${{ runner.os }}-${{ runner.environment }}-
+          bun-${{ runner.os }}-
     - name: Save bun cache
       if: inputs.mode == 'save' && github.event_name == 'push'
       uses: actions/cache/save@v4
       with:
         path: ~/.bun/install/cache
-        key: bun-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('web/bun.lock') }}
+        key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}

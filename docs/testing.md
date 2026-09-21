@@ -16,11 +16,15 @@ Layers, per the design spec's testing strategy:
   `make test-integration` (real Docker, real git), which covers only the
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
   to one package and `INTEGRATION_SKIP` leaves some out, as in
-  `make test-integration INTEGRATION_PKGS=./internal/server`. CI runs them on
-  every PR from `.github/workflows/ci.yml`: the `integration` matrix shards
-  them by package, one job each for `internal/server` and `internal/scheduler`
-  and one for the rest, and the `smoke` job runs `internal/harness` on the
-  images it builds. Those jobs are the merge gate the E2E suite owns.
+  `make test-integration INTEGRATION_PKGS=./internal/server`, and
+  `INTEGRATION_GOFLAGS` splits one package by test name, as in
+  `INTEGRATION_GOFLAGS="-run TestIntegrationMission"`. CI runs them on every
+  PR from `.github/workflows/ci.yml` on GitHub-hosted runners: the
+  `integration` matrix shards them by package - `internal/server` in two
+  jobs, the mission tests and the rest, one job for `internal/scheduler` and
+  one for every other package - and the `smoke` job runs `internal/harness`
+  on the images it builds. A docs-only pull request skips those jobs. They
+  are the merge gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`

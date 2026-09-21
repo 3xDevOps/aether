@@ -10,23 +10,22 @@ permissions:
   contents: write
   packages: write
 
-# `make release` writes inside the source tree - cmd/aether/resource_windows_*.syso,
-# which it also removes, and the Android build's android/app/build - and every
-# release job targets the same self-hosted label. Two overlapping releases
-# sharing a working directory would race over both, so they queue instead.
+# Two releases publishing at once would race over the image tags and
+# /releases/latest, so they queue instead.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  runner-policy:
+  # Only an admin publisher releases; this job checks out nothing.
+  publisher-policy:
     permissions:
       contents: read
     runs-on: ubuntu-latest
     outputs:
       allowed: ${{ steps.select.outputs.allowed }}
     steps:
-      - name: Select runner
+      - name: Check the publisher
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,9 +41,9 @@ jobs:
           fi
 
   release:
-    needs: runner-policy
-    if: ${{ needs.runner-policy.outputs.allowed == 'true' }}
-    runs-on: [self-hosted, Linux, X64, moss]
+    needs: publisher-policy
+    if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
+    runs-on: ubuntu-latest
     # The same Gradle-in-a-container build as ci.yml's release-build, plus the
     # image push and its smoke checks. This job also holds the release-*
     # concurrency group, so a wedged one would block the next release for
@@ -123,7 +122,6 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: make release VERSION="$GITHUB_REF_NAME"
-      # The runner is self-hosted, so RUNNER_TEMP is not wiped for us.
       - name: Remove the signing keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/aether-android.jks"
