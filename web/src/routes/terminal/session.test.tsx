@@ -138,14 +138,14 @@ describe('useRunTerminalSession', () => {
       socket.onmessage?.({ data: new TextEncoder().encode('abc').buffer })
     })
 
-    expect(order).toEqual(['begin', 'geometry:start', 'write'])
+    expect(order).toEqual(['begin', 'geometry:start'])
     expect(mounted.finishStructuralReplay).not.toHaveBeenCalled()
 
     await act(async () => {
       geometryDone()
       await Promise.resolve()
     })
-    expect(order).toEqual(['begin', 'geometry:start', 'write', 'geometry:done'])
+    expect(order).toEqual(['begin', 'geometry:start', 'geometry:done', 'write'])
     expect(mounted.finishStructuralReplay).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -156,11 +156,88 @@ describe('useRunTerminalSession', () => {
     expect(order).toEqual([
       'begin',
       'geometry:start',
-      'write',
       'geometry:done',
+      'write',
       'write:done',
       'finish:7',
     ])
+    mounted.unmount()
+  })
+
+  it('keeps a zero-byte full replay hidden through paint and structural finish', async () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn((callback: FrameRequestCallback) => {
+        frames.push(callback)
+        return frames.length
+      }),
+    )
+    const order: string[] = []
+    let geometryDone!: () => void
+    let finishDone!: () => void
+    const mounted = mount(true, {
+      beginStructuralReplay: vi.fn(() => {
+        order.push('begin')
+        return 9
+      }),
+      setGeometry: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            order.push('geometry:start')
+            geometryDone = () => {
+              order.push('geometry:done')
+              resolve()
+            }
+          }),
+      ),
+      finishStructuralReplay: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            order.push('finish')
+            finishDone = resolve
+          }),
+      ),
+    })
+    mounted.terminal.write = vi.fn((chunk: Uint8Array, done?: () => void) => {
+      order.push(`write:${chunk.length}`)
+      done?.()
+    }) as unknown as Terminal['write']
+    const socket = StubSocket.last()
+
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, cols: 80, rows: 24, replay: 0 }),
+      })
+    })
+
+    expect(order).toEqual(['begin', 'geometry:start'])
+    expect(mounted.result.current.replaying).toBe(true)
+    expect(mounted.finishStructuralReplay).not.toHaveBeenCalled()
+    expect(frames).toHaveLength(0)
+
+    await act(async () => {
+      geometryDone()
+      await Promise.resolve()
+    })
+    expect(order).toEqual(['begin', 'geometry:start', 'geometry:done', 'write:0'])
+    expect(frames).toHaveLength(1)
+
+    act(() => frames.shift()?.(0))
+    expect(mounted.result.current.replaying).toBe(true)
+    expect(mounted.finishStructuralReplay).not.toHaveBeenCalled()
+    expect(frames).toHaveLength(1)
+
+    act(() => frames.shift()?.(16))
+    expect(mounted.finishStructuralReplay).toHaveBeenCalledWith(9)
+    expect(mounted.result.current.replaying).toBe(true)
+
+    await act(async () => {
+      finishDone()
+      await Promise.resolve()
+    })
+    expect(mounted.result.current.replaying).toBe(false)
     mounted.unmount()
   })
 
@@ -228,6 +305,70 @@ describe('useRunTerminalSession', () => {
         'invalidate',
       ]),
     )
+    mounted.unmount()
+  })
+
+  it('keeps stale refusal cleanup from revealing or invalidating a replacement replay', async () => {
+    let resetDone!: () => void
+    let cancelDone!: () => void
+    let geometryCalls = 0
+    let generation = 0
+    const onInvalidate = vi.fn()
+    const mounted = mount(true, {
+      beginStructuralReplay: vi.fn(() => ++generation),
+      setGeometry: vi.fn(() => {
+        geometryCalls++
+        if (geometryCalls !== 2) return Promise.resolve()
+        return new Promise<void>((resolve) => {
+          resetDone = resolve
+        })
+      }),
+      cancelStructuralReplay: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            cancelDone = resolve
+          }),
+      ),
+      onInvalidate,
+    })
+    const refused = StubSocket.last()
+    act(() => {
+      refused.onopen?.()
+      refused.onmessage?.({
+        data: JSON.stringify({ ok: true, cols: 80, rows: 24, replay: 3 }),
+      })
+      refused.onmessage?.({
+        data: JSON.stringify({ ok: false, error: 'replay refused' }),
+      })
+    })
+
+    await act(async () => {
+      resetDone()
+      await Promise.resolve()
+    })
+    expect(mounted.cancelStructuralReplay).toHaveBeenCalledWith(1)
+
+    act(() => mounted.result.current.retry())
+    const replacement = StubSocket.last()
+    expect(replacement).not.toBe(refused)
+    act(() => {
+      replacement.onopen?.()
+      replacement.onmessage?.({
+        data: JSON.stringify({ ok: true, cols: 80, rows: 24, replay: 3 }),
+      })
+    })
+    expect(mounted.beginStructuralReplay).toHaveBeenCalledTimes(2)
+    expect(mounted.result.current.replaying).toBe(true)
+
+    await act(async () => {
+      cancelDone()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(onInvalidate).not.toHaveBeenCalled()
+    expect(mounted.result.current.replaying).toBe(true)
+    expect(mounted.cancelStructuralReplay).toHaveBeenCalledTimes(1)
     mounted.unmount()
   })
 

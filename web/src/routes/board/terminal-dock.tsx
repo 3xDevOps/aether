@@ -42,6 +42,13 @@ import {
 } from '@/store/env-terminal'
 
 const maxTabs = 6
+const emptyReplay = new Uint8Array()
+
+interface StructuralReplayState {
+  attachmentGeneration: number
+  controllerGeneration: number
+  revision: number
+}
 
 export interface TerminalDockProps {
   /** API client used by a caller that owns a test or embedded surface. */
@@ -92,8 +99,45 @@ export function TerminalDock({
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const terminalRef = useRef<XtermController['terminal']>(null)
+  const controllerRef = useRef<XtermController | null>(null)
+  const attachmentGenerationRef = useRef(0)
+  const replayRevisionRef = useRef(0)
+  const structuralReplayRef = useRef<StructuralReplayState | null>(null)
   const gate = useRef(
-    replayGate((chunk, done) => terminalRef.current?.write(chunk, done), setReplaying),
+    replayGate(
+      (chunk, done) => terminalRef.current?.write(chunk, done),
+      (nextReplaying, full = true) => {
+        if (nextReplaying) {
+          setReplaying(full)
+          return
+        }
+        if (!full) {
+          setReplaying(false)
+          return
+        }
+        const replay = structuralReplayRef.current
+        if (!replay) {
+          setReplaying(false)
+          return
+        }
+        const controller = controllerRef.current
+        void (async () => {
+          try {
+            await controller?.finishStructuralReplay?.(replay.controllerGeneration)
+          } catch {
+            // The parsed replay is still authoritative. A failed viewport
+            // restore must not leave it permanently hidden.
+          }
+          if (
+            structuralReplayRef.current !== replay ||
+            replayRevisionRef.current !== replay.revision ||
+            attachmentGenerationRef.current !== replay.attachmentGeneration
+          ) return
+          structuralReplayRef.current = null
+          setReplaying(false)
+        })()
+      },
+    ),
   )
   // A member can have this terminal open on more than one screen; a phone
   // follows what the others made it rather than shrinking it for them.
@@ -128,6 +172,7 @@ export function TerminalDock({
       )
     },
   })
+  controllerRef.current = controller
   const terminal = controller.terminal
   terminalRef.current = terminal
   const { geometry, setGeometry } = controller
@@ -207,7 +252,18 @@ export function TerminalDock({
     if (!activeTab || !terminal) return
 
     const socketKey = activeTab
-    const isCurrent = () => activeTabRef.current === socketKey
+    const attachmentGeneration = ++attachmentGenerationRef.current
+    let replayAccepted = false
+    const isCurrent = () =>
+      attachmentGenerationRef.current === attachmentGeneration &&
+      activeTabRef.current === socketKey
+    const cancelStructuralReplay = () => {
+      const replay = structuralReplayRef.current
+      if (!replay || replay.attachmentGeneration !== attachmentGeneration) return
+      structuralReplayRef.current = null
+      replayRevisionRef.current++
+      void controllerRef.current?.cancelStructuralReplay?.(replay.controllerGeneration)
+    }
     const handlers = {
       onData: (chunk: Uint8Array, kind: AttachDataKind, settled?: () => void) =>
         emitEnvTerminalSocketData(socketKey, chunk, kind, settled),
@@ -215,19 +271,34 @@ export function TerminalDock({
         if (isCurrent()) {
           setEnvTerminalSocketReady(socketKey, true)
           setAttachedTab(socketKey)
-          gate.current.unmute()
+          replayAccepted = true
+          if (resumed) {
+            cancelStructuralReplay()
+          } else {
+            const controllerGeneration = controllerRef.current?.beginStructuralReplay?.()
+            const revision = ++replayRevisionRef.current
+            structuralReplayRef.current =
+              controllerGeneration === undefined
+                ? null
+                : { attachmentGeneration, controllerGeneration, revision }
+          }
           setGeometry(size.cols, size.rows, !resumed)
           const status = useStore.getState().envTerminal.status
           setStatus({ ...(status ?? { running: false, tabs: [] }), running: true }, null)
         }
       },
-      onReplayAbort: () => {
-        if (isCurrent()) gate.current.cancel()
-      },
-      onReplayStart: (bytes: number) => {
+      onReplayAbort: (full = true) => {
         if (!isCurrent()) return
-        if (bytes > 0) gate.current.start()
-        else gate.current.unmute()
+        replayAccepted = false
+        if (full) cancelStructuralReplay()
+        gate.current.cancel(full)
+      },
+      onReplayStart: (bytes: number, full = true) => {
+        if (!isCurrent()) return
+        if (!replayAccepted) return
+        replayAccepted = false
+        gate.current.start(full ? 'full' : 'delta')
+        if (bytes === 0) void gate.current.write(emptyReplay, 'replay-end')
       },
       onState: (connection: ConnectionState) => {
         if (!isCurrent()) return
@@ -280,6 +351,11 @@ export function TerminalDock({
     const unsubscribe = subscribeEnvTerminalSocket(socketKey, gate.current.write)
     return () => {
       unsubscribe()
+      cancelStructuralReplay()
+      if (attachmentGenerationRef.current === attachmentGeneration) {
+        attachmentGenerationRef.current++
+        gate.current.cancel(true)
+      }
       if (activeTabRef.current !== socketKey) unregisterEnvTerminalSocket(socketKey)
     }
   }, [activeTab, closeTab, geometry, phone, reset, rpc, setGeometry, setStatus, terminal])

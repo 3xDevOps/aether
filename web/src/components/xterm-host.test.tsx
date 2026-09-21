@@ -356,6 +356,25 @@ describe('xterm viewport ownership', () => {
     mounted.unmount()
   })
 
+  it('leaves Find navigation newer than captured replay intent', async () => {
+    const mounted = await mountSizedController()
+    const terminal = mounted.controller.terminal!
+    await mounted.controller.setGeometry(20, 4)
+    await writeTerminal(terminal, transcript('before', 14))
+
+    const generation = mounted.controller.beginStructuralReplay!()
+    await mounted.controller.setGeometry(20, 4, true)
+    await writeTerminal(terminal, transcript('after', 18))
+    terminal.scrollLines(-3)
+    mounted.controller.noteViewportInteraction?.()
+    expect(bottomOffset(terminal)).toBe(3)
+
+    await mounted.controller.finishStructuralReplay!(generation)
+
+    expect(bottomOffset(terminal)).toBe(3)
+    mounted.unmount()
+  })
+
   it('cannot finish an aborted replay through an older generation', async () => {
     const mounted = await mountSizedController()
     const terminal = mounted.controller.terminal!

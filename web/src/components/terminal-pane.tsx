@@ -193,9 +193,11 @@ function TerminalTools({
 function FindBar({
   search,
   onClose,
+  onNavigate,
 }: {
   search: SearchAddon | null
   onClose: () => void
+  onNavigate?: () => void
 }) {
   const [term, setTerm] = useState('')
   const [missing, setMissing] = useState(false)
@@ -211,6 +213,7 @@ function FindBar({
       setMissing(false)
       return
     }
+    onNavigate?.()
     const found = direction === 'next' ? search.findNext(term) : search.findPrevious(term)
     setMissing(!found)
   }
@@ -337,6 +340,7 @@ export function TerminalPane({
         ) : (
           <FindBar
             search={controller.search}
+            onNavigate={controller.noteViewportInteraction}
             onClose={() => {
               controller.focusTerminal()
               controller.setFindOpen(false)

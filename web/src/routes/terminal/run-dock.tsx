@@ -28,10 +28,17 @@ import {
 const maxShellTabs = 4
 const shellRefusal = 'You can view this run but not open a shell in it'
 const shellControlMoved = 'Read-only shell. Another session controls this run.'
+const emptyReplay = new Uint8Array()
 
 interface ShellAttachmentIdentity {
   runID: string
   tab: string
+}
+
+interface StructuralReplayState {
+  attachmentGeneration: number
+  controllerGeneration: number
+  revision: number
 }
 
 export function RunDock({ runID }: { runID: string }) {
@@ -57,11 +64,48 @@ export function RunDock({ runID }: { runID: string }) {
   const [replaying, setReplaying] = useState(false)
   const currentAttachmentRef = useRef<ShellAttachmentIdentity | null>(null)
   const terminalRef = useRef<XtermController['terminal']>(null)
+  const controllerRef = useRef<XtermController | null>(null)
+  const attachmentGenerationRef = useRef(0)
+  const replayRevisionRef = useRef(0)
+  const structuralReplayRef = useRef<StructuralReplayState | null>(null)
   const writeRequested = useRef<Record<string, boolean>>({})
   const controlHeld = useRef<Record<string, boolean>>({})
   const [controlState, setControlState] = useState<{ key: string; held: boolean } | null>(null)
   const gate = useRef(
-    replayGate((chunk, done) => terminalRef.current?.write(chunk, done), setReplaying),
+    replayGate(
+      (chunk, done) => terminalRef.current?.write(chunk, done),
+      (nextReplaying, full = true) => {
+        if (nextReplaying) {
+          setReplaying(full)
+          return
+        }
+        if (!full) {
+          setReplaying(false)
+          return
+        }
+        const replay = structuralReplayRef.current
+        if (!replay) {
+          setReplaying(false)
+          return
+        }
+        const controller = controllerRef.current
+        void (async () => {
+          try {
+            await controller?.finishStructuralReplay?.(replay.controllerGeneration)
+          } catch {
+            // The parsed replay is still authoritative. A failed viewport
+            // restore must not leave it permanently hidden.
+          }
+          if (
+            structuralReplayRef.current !== replay ||
+            replayRevisionRef.current !== replay.revision ||
+            attachmentGenerationRef.current !== replay.attachmentGeneration
+          ) return
+          structuralReplayRef.current = null
+          setReplaying(false)
+        })()
+      },
+    ),
   )
   // terminal replace one that may have been holding the keyboard: the server
   // refuses a shell, the agent exits the last one, the run stops running.
@@ -110,6 +154,7 @@ export function RunDock({ runID }: { runID: string }) {
       getShellSocket(runID, activeTab)?.resize(cols, rows)
     },
   })
+  controllerRef.current = controller
   const terminal = controller.terminal
   terminalRef.current = terminal
   const { geometry, setGeometry } = controller
@@ -141,12 +186,25 @@ export function RunDock({ runID }: { runID: string }) {
     const socketKey = activeTab
     const identity: ShellAttachmentIdentity = { runID, tab: socketKey }
     const controlKey = `${runID}:${socketKey}`
+    const attachmentGeneration = ++attachmentGenerationRef.current
+    let replayAccepted = false
     if (writeRequested.current[controlKey] === undefined) {
       writeRequested.current[controlKey] = true
     }
     const isCurrent = () => {
       const current = currentAttachmentRef.current
-      return current?.runID === identity.runID && current.tab === identity.tab
+      return (
+        attachmentGenerationRef.current === attachmentGeneration &&
+        current?.runID === identity.runID &&
+        current.tab === identity.tab
+      )
+    }
+    const cancelStructuralReplay = () => {
+      const replay = structuralReplayRef.current
+      if (!replay || replay.attachmentGeneration !== attachmentGeneration) return
+      structuralReplayRef.current = null
+      replayRevisionRef.current++
+      void controllerRef.current?.cancelStructuralReplay?.(replay.controllerGeneration)
     }
     const clearAttached = () => {
       if (isCurrent()) setAttachedIdentity(null)
@@ -168,18 +226,33 @@ export function RunDock({ runID }: { runID: string }) {
         // unmute its replay.
         if (isCurrent()) {
           setAttachedIdentity(identity)
-          gate.current.unmute()
+          replayAccepted = true
+          if (resumed) {
+            cancelStructuralReplay()
+          } else {
+            const controllerGeneration = controllerRef.current?.beginStructuralReplay?.()
+            const revision = ++replayRevisionRef.current
+            structuralReplayRef.current =
+              controllerGeneration === undefined
+                ? null
+                : { attachmentGeneration, controllerGeneration, revision }
+          }
           setGeometry(size.cols, size.rows, !resumed)
           setShellRefused(runID, null)
         }
       },
-      onReplayAbort: () => {
-        if (isCurrent()) gate.current.cancel()
-      },
-      onReplayStart: (bytes: number) => {
+      onReplayAbort: (full = true) => {
         if (!isCurrent()) return
-        if (bytes > 0) gate.current.start()
-        else gate.current.unmute()
+        replayAccepted = false
+        if (full) cancelStructuralReplay()
+        gate.current.cancel(full)
+      },
+      onReplayStart: (bytes: number, full = true) => {
+        if (!isCurrent()) return
+        if (!replayAccepted) return
+        replayAccepted = false
+        gate.current.start(full ? 'full' : 'delta')
+        if (bytes === 0) void gate.current.write(emptyReplay, 'replay-end')
       },
       onState: (connection: ConnectionState) => {
         if (isCurrent()) {
@@ -225,6 +298,11 @@ export function RunDock({ runID }: { runID: string }) {
     return () => {
       unsubscribe()
       clearAttached()
+      cancelStructuralReplay()
+      if (attachmentGenerationRef.current === attachmentGeneration) {
+        attachmentGenerationRef.current++
+        gate.current.cancel(true)
+      }
     }
   }, [
     activeTab,

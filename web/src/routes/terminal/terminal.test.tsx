@@ -362,7 +362,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('writes PTY output frames into the terminal', () => {
+  it('writes PTY output frames into the terminal', async () => {
     // The blank-terminal regression: the attach delivered frames but the
     // view never handed them to xterm, so the pane stayed empty forever.
     const write = vi.spyOn(Terminal.prototype, 'write')
@@ -372,10 +372,12 @@ describe('terminal view', () => {
     const chunk = new TextEncoder().encode('agent says hi').buffer
     act(() => StubSocket.last().onmessage?.({ data: chunk }))
 
-    const written = write.mock.calls.map(([data]) =>
-      typeof data === 'string' ? data : new TextDecoder().decode(data),
-    )
-    expect(written).toContain('agent says hi')
+    await waitFor(() => {
+      const written = write.mock.calls.map(([data]) =>
+        typeof data === 'string' ? data : new TextDecoder().decode(data),
+      )
+      expect(written).toContain('agent says hi')
+    })
     write.mockRestore()
     view.unmount()
   })
@@ -621,6 +623,7 @@ describe('terminal view', () => {
     const callbacks: Array<() => void> = []
     write.mockImplementation((chunk, done) => {
       if (chunk instanceof Uint8Array && done) callbacks.push(done)
+      else done?.()
     })
     const view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
@@ -638,7 +641,7 @@ describe('terminal view', () => {
       socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
     })
     const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
-    expect(callbacks).toHaveLength(1)
+    await waitFor(() => expect(callbacks).toHaveLength(1))
     expect(host.style.visibility).toBe('hidden')
     const View = terminalRoute()
     view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
@@ -683,10 +686,11 @@ describe('terminal view', () => {
         data: JSON.stringify({ ok: false, code: -32000, error: 'final refusal' }),
       })
     })
-
-    expect(reset).toHaveBeenCalled()
-    expect(invalidate).toHaveBeenCalledTimes(1)
-    expect(pane()).not.toContain('stale output')
+    await waitFor(() => {
+      expect(reset).toHaveBeenCalled()
+      expect(invalidate).toHaveBeenCalledTimes(1)
+      expect(pane()).not.toContain('stale output')
+    })
     reset.mockRestore()
     view.unmount()
   })
@@ -750,7 +754,7 @@ describe('terminal view', () => {
 
     act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    expect(callbacks).toHaveLength(1)
+    await waitFor(() => expect(callbacks).toHaveLength(1))
 
     // A completed session parks offline after the exact replay boundary, but
     // the pane stays hidden while xterm parses the final replay frame.
@@ -793,9 +797,8 @@ describe('terminal view', () => {
     })
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
+    await waitFor(() => expect(callbacks).toHaveLength(1))
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
-
-    expect(callbacks).toHaveLength(1)
     const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
     expect(host.style.visibility).toBe('hidden')
     const View = terminalRoute()
@@ -811,7 +814,7 @@ describe('terminal view', () => {
     write.mockRestore()
     view.unmount()
   })
-  it('reveals a completed session when an offline close aborts before replay ends', () => {
+  it('reveals a completed session when an offline close aborts before replay ends', async () => {
     const view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
     act(() => {
@@ -833,18 +836,20 @@ describe('terminal view', () => {
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     expect(host.style.visibility).toBe('hidden')
 
-    // No replay-end frame arrived: the close's explicit replay abort settles
-    // the gate instead of leaving an incomplete transcript latched.
+    // No replay-end frame arrived: parking the ended session synthesizes the
+    // boundary so reveal still waits for paint and structural completion.
     act(() => {
       socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
       socket.onclose?.({ code: 1000, reason: 'session ended' })
     })
 
-    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
-    expect(host.style.visibility).toBe('')
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+      expect(host.style.visibility).toBe('')
+    })
     view.unmount()
   })
-  it('settles the hidden replay overlay when wake replacement is refused', () => {
+  it('settles the hidden replay overlay when wake replacement is refused', async () => {
     const view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
     act(() => {
@@ -876,8 +881,10 @@ describe('terminal view', () => {
       })
     })
 
-    expect(host.style.visibility).toBe('')
-    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    await waitFor(() => {
+      expect(host.style.visibility).toBe('')
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    })
     expect(screen.getByText('replacement refused')).toBeDefined()
     view.unmount()
   })

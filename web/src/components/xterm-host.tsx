@@ -61,6 +61,8 @@ export interface XtermController {
   search: SearchAddon | null
   findOpen: boolean
   setFindOpen: (open: boolean) => void
+  /** Record viewport navigation that must supersede a pending restoration. */
+  noteViewportInteraction?: () => void
   /** Focuses xterm now, or records the focused action owner until it mounts. */
   focusTerminal: () => void
   /**
@@ -265,6 +267,9 @@ export function useXterm({
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  const noteViewportInteraction = useCallback(() => {
+    viewportInteractionRevision.current++
+  }, [])
   const armCtrl = useCallback((armed: boolean) => {
     ctrlArmedRef.current = armed
     setCtrlArmed(armed)
@@ -571,6 +576,7 @@ export function useXterm({
     setFindOpen,
     focusTerminal,
     ctrlArmed,
+    noteViewportInteraction,
     armCtrl,
     beginStructuralReplay,
     cancelStructuralReplay,

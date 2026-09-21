@@ -111,6 +111,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const structuralReplayRef = useRef<number | null>(null)
   const replayRevisionRef = useRef(0)
   const acceptedReplayRef = useRef(false)
+  const abortedReplayRef = useRef(false)
   const sourceGeometryRef = useRef<Promise<void> | null>(null)
   const writeRevisionRef = useRef(0)
   const previousAuthorityRef = useRef(authorityKey)
@@ -221,6 +222,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     attachment = connectAttach(() => api.attachSocket(runID), {
       onData: gate.write,
       onAttached: (write, size, resumed) => {
+        abortedReplayRef.current = false
         acceptedReplayRef.current = true
         if (!resumed) {
           writeRevisionRef.current++
@@ -228,6 +230,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
             structuralReplayRef.current = refs.current.beginStructuralReplay?.() ?? null
           }
           const sourceGeometry = Promise.resolve(refs.current.setGeometry(size.cols, size.rows, true))
+          sourceGeometryRef.current = sourceGeometry
           void sourceGeometry.then(
             () => {
               if (sourceGeometryRef.current === sourceGeometry) sourceGeometryRef.current = null
@@ -249,6 +252,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         setTerminal(runID, { message: null, refused: false, write })
       },
       onReplayAbort: (full) => {
+        abortedReplayRef.current = full
         acceptedReplayRef.current = false
         writeRevisionRef.current++
         sourceGeometryRef.current = null
@@ -262,31 +266,53 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
       },
       onReplayStart: (bytes, full) => {
         const accepted = acceptedReplayRef.current
+        const aborted = abortedReplayRef.current
         acceptedReplayRef.current = false
+        abortedReplayRef.current = false
         gate.start(full ? 'full' : 'delta')
-        if (bytes === 0 && accepted) gate.unmute()
+        if (bytes === 0 && accepted) {
+          void gate.write(new Uint8Array(), 'replay-end')
+        } else if (bytes === 0 && full && aborted) {
+          const writeRevision = writeRevisionRef.current
+          const replayRevision = replayRevisionRef.current
+          void Promise.resolve().then(() => {
+            if (
+              writeRevisionRef.current !== writeRevision ||
+              replayRevisionRef.current !== replayRevision
+            ) return
+            void gate.write(new Uint8Array(), 'replay-end')
+          })
+        }
       },
       onControl: updateControl,
       onControlResult,
       onState: (connection) =>
         setTerminal(runID, connection === 'offline' ? { connection, write: false } : { connection }),
       onRefused: (message, code) => {
+        abortedReplayRef.current = false
         acceptedReplayRef.current = false
-        writeRevisionRef.current++
+        const writeRevision = ++writeRevisionRef.current
+        const replayRevision = replayRevisionRef.current
         sourceGeometryRef.current = null
         const current = terminalRef.current
         const generation = structuralReplayRef.current
         structuralReplayRef.current = null
+        const currentRefusal = () =>
+          writeRevisionRef.current === writeRevision &&
+          replayRevisionRef.current === replayRevision
         const reset = current
           ? refs.current.setGeometry(current.cols, current.rows, true)
           : undefined
         void Promise.resolve(reset)
           .catch(() => undefined)
-          .then(() => generation === null
-            ? undefined
-            : refs.current.cancelStructuralReplay?.(generation))
+          .then(() =>
+            !currentRefusal() || generation === null
+              ? undefined
+              : refs.current.cancelStructuralReplay?.(generation),
+          )
           .catch(() => undefined)
           .then(() => {
+            if (!currentRefusal()) return
             gate.unmute()
             refs.current.onInvalidate?.()
           })
@@ -407,7 +433,11 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     setSessionMissing(false)
     setTerminal(runID, { message: null, refused: false })
     const attachment = attachmentRef.current
-    if (attachment && !attachment.isEnded()) attachment.reopen()
+    if (attachment && !attachment.isEnded()) {
+      writeRevisionRef.current++
+      replayRevisionRef.current++
+      attachment.reopen()
+    }
   }, [runID, setTerminal])
 
   return {
