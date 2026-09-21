@@ -398,21 +398,21 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	// while it is read, and an amendment is approved or sent back, never
 	// rejected.
 	var amendmentTask protocol.TaskMutationResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 		MissionID:      missionID,
 		Revision:       protocol.TaskRevision{Title: "worker C", Objective: "mission shell worker C", Material: true},
 		IdempotencyKey: "propose-C",
 	}, &amendmentTask); err != nil {
 		t.Fatalf("task.propose during an active mission: %v", err)
 	}
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
 		TaskID: amendmentTask.Task.ID, Revision: amendmentTask.Task.CurrentRevision,
 		ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "accept-C",
 	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
 		t.Fatalf("task.accept of new work = %v, want CodeInvalidState", err)
 	}
 	var amendment protocol.MissionPlanSubmitResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
 		Summary: "add worker C", IdempotencyKey: "mission-submit-2",
 	}, &amendment); err != nil {
 		t.Fatalf("mission.plan.submit amendment: %v", err)
@@ -420,7 +420,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if amendment.Plan.Phase != string(domain.MissionPhaseAmendmentReview) || amendment.Plan.PlanVersion != submitted.Plan.PlanVersion+1 {
 		t.Fatalf("plan state after the amendment submit = %+v, want amendment_review at the next version", amendment.Plan)
 	}
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
 		MissionID:      missionID,
 		Revision:       protocol.TaskRevision{Title: "worker D", Objective: "mission shell worker D"},
 		IdempotencyKey: "propose-D",
@@ -938,7 +938,10 @@ while [ "$attempt" -lt 20 ]; do
 done
 [ -n "$ack" ] || { echo "fixture-message-not-acked" >&2; exit 1; }
 printf '%s\n' "$body" > "$result"
-/usr/local/bin/aether-internal report --outcome success --summary "mission fixture retained result" --idempotency-key "mission-report-$AETHER_RUN_ID" >/dev/null
+if ! reported=$(/usr/local/bin/aether-internal report --outcome success --summary "mission fixture retained result" --idempotency-key "mission-report-$AETHER_RUN_ID" 2>&1); then
+	echo "fixture-report-failed:$reported"
+	exit 1
+fi
 echo "fixture-reported:$AETHER_RUN_ID"
 `)
 	uid, gid := os.Getuid(), os.Getgid()
@@ -1155,4 +1158,21 @@ func controlErrorCode(err error) int {
 		return rpcErr.Code
 	}
 	return 0
+}
+
+// pacedCall retries a socket call that the per-run transport budget refused
+// (burst 30, one request per second) until the context ends. The
+// orchestration test makes far more calls in a burst than an agent would.
+func pacedCall(ctx context.Context, socket, method string, params, result any) error {
+	for {
+		err := coordtransport.Call(ctx, socket, method, params, result)
+		if err == nil || !strings.Contains(err.Error(), "transport request rate limit exceeded") {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
 }
