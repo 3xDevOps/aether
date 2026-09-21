@@ -403,12 +403,16 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         setTerminal(runID, { message, refused: true, write: false })
       },
       onWriteDenied: () => {
-        explicitWriteRef.current = null
+        // False, not null: null falls through to automatic write and the
+        // next attach would ask again. A denial stays a mirror.
+        explicitWriteRef.current = false
         clearWriteIntent(runID)
         setTerminal(runID, { steerDenied: true, write: false })
       },
       onControlLost: () => {
-        explicitWriteRef.current = null
+        // An occupied lease must reconnect as a mirror. Leaving the ref null
+        // makes an owner ask for write again and conflict in a loop.
+        explicitWriteRef.current = false
         clearWriteIntent(runID)
         setControlMetadata(undefined)
         setTerminal(runID, { steerDenied: false, write: false })

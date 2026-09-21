@@ -333,6 +333,33 @@ describe('useRunTerminalSession', () => {
     second.unmount()
   })
 
+  it('reconnects an owner as a mirror after an occupied write lease', () => {
+    vi.useFakeTimers()
+    const mounted = mount({}, initialTerminal, { currentAutomaticWrite: true })
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+    expect(socket.frames()[0]).toMatchObject({ write: true })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: -32003,
+          error: 'control occupied',
+          has_control: false,
+        }),
+      })
+      socket.onclose?.({ code: 1008 })
+    })
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    const retry = StubSocket.last()
+    act(() => retry.onopen?.())
+    expect(retry.frames()[0]).not.toHaveProperty('write')
+    mounted.unmount()
+    vi.useRealTimers()
+  })
+
   it('clears intent when the run is deleted or its authority changes', () => {
     const deleted = mount()
     act(() => deleted.result.current.takeControl())
