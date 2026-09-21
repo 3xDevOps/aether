@@ -601,3 +601,32 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestMissionMethodWhitelistPlanGate: the allow-list, not the capability
+// advertisement, is what makes a method reachable from a run. The two human
+// decisions are control-channel-only and must stay unreachable from any agent.
+func TestMissionMethodWhitelistPlanGate(t *testing.T) {
+	for _, method := range []string{
+		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionPlanShow,
+		protocol.MethodMissionPlanSubmit,
+	} {
+		if !isMissionMethod(method) {
+			t.Errorf("plan gate method %q is not admitted to mission dispatch", method)
+		}
+	}
+	h := newHarness(t, 1)
+	for _, method := range []string{
+		protocol.MethodMissionQuestionAnswer,
+		protocol.MethodMissionPlanDecide,
+	} {
+		if isMissionMethod(method) {
+			t.Errorf("human decision method %q is admitted to mission dispatch", method)
+		}
+		line := []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`)
+		resp := h.svc.handle(context.Background(), h.runs[0].ID, line)
+		if resp.Error == nil || resp.Error.Code != protocol.CodeMethodNotFound {
+			t.Errorf("%s over the agent socket = %+v, want CodeMethodNotFound", method, resp.Error)
+		}
+	}
+}

@@ -160,16 +160,78 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	taskA := propose(workerAObjective, "worker A", "propose-A")
 	taskB := propose(workerBObjective, "worker B", "propose-B")
-	for _, task := range []domain.TaskID{taskA, taskB} {
-		var accepted protocol.TaskMutationResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
-			TaskID: string(task), Revision: 1, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
-			IdempotencyKey: "accept-" + string(task),
-		}, &accepted); err != nil {
-			t.Fatalf("task.accept %s: %v", task, err)
-		}
-		if accepted.Task.Status != string(domain.TaskReady) {
-			t.Fatalf("task %s status after accept = %q, want ready", task, accepted.Task.Status)
+
+	// The plan gate: no worker runs and no revision is accepted until the
+	// accountable human answers the integrator and approves the plan.
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-before-approval",
+		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id),
+		RunOwnerID: string(e.ada.id), ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("worker.start before plan approval error = %v, want CodeInvalidState", err)
+	}
+	var asked protocol.MissionQuestionResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which checkout flow?", IdempotencyKey: "mission-ask-1",
+	}, &asked); err != nil {
+		t.Fatalf("mission.question.ask: %v", err)
+	}
+	var pending protocol.MissionPlanShowResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, &pending); err != nil {
+		t.Fatalf("mission.plan.show: %v", err)
+	}
+	if pending.Plan.Phase != string(domain.MissionPhasePlanning) || pending.Plan.OpenQuestions != 1 {
+		t.Fatalf("plan state before the answer = %+v, want planning with one open question", pending.Plan)
+	}
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "submitted too early", IdempotencyKey: "mission-submit-early",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("mission.plan.submit with an unanswered question = %v, want CodeInvalidState", err)
+	}
+	if err := boCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
+		QuestionID: asked.Question.ID, Answer: "not mine to answer", IdempotencyKey: "mission-answer-bo",
+	}, nil); err == nil {
+		t.Fatal("mission.question.answer from a non-accountable collaborator was accepted")
+	}
+	var answered protocol.MissionQuestionResult
+	if err := adaCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
+		QuestionID: asked.Question.ID, Answer: "the existing checkout flow", IdempotencyKey: "mission-answer-1",
+	}, &answered); err != nil {
+		t.Fatalf("mission.question.answer: %v", err)
+	}
+	if answered.Question.AnsweredAt == nil || answered.Question.AnsweredByMemberID != string(e.ada.id) {
+		t.Fatalf("answered question = %+v, want an answer attributed to the accountable human", answered.Question)
+	}
+	var submitted protocol.MissionPlanSubmitResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "two bounded worker tasks", IdempotencyKey: "mission-submit-1",
+	}, &submitted); err != nil {
+		t.Fatalf("mission.plan.submit: %v", err)
+	}
+	if submitted.Plan.Phase != string(domain.MissionPhasePlanReview) || submitted.Plan.PlanVersion == 0 {
+		t.Fatalf("plan state after submit = %+v, want plan_review at a non-zero version", submitted.Plan)
+	}
+	var approved protocol.MissionPlanDecideResult
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: submitted.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "mission-decide-1",
+	}, &approved); err != nil {
+		t.Fatalf("mission.plan.decide: %v", err)
+	}
+	if approved.Mission.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("mission phase after approval = %q, want active", approved.Mission.Phase)
+	}
+	// Approval accepted both revisions; the integrator never accepted its own.
+	var readyTasks protocol.TaskListResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &readyTasks); err != nil {
+		t.Fatalf("task.list after approval: %v", err)
+	}
+	if len(readyTasks.Tasks) != 2 {
+		t.Fatalf("task.list after approval returned %d tasks, want 2", len(readyTasks.Tasks))
+	}
+	for _, task := range readyTasks.Tasks {
+		if task.Status != string(domain.TaskReady) {
+			t.Fatalf("task %s status after approval = %q, want ready", task.ID, task.Status)
 		}
 	}
 

@@ -58,15 +58,14 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, lockErr := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = ?`, r.MissionID); lockErr != nil {
-		return nil, false, lockErr
-	}
-	m, err := scanMission(tx.QueryRowContext(ctx, `SELECT `+missionColumns+` FROM missions WHERE id = ?`, r.MissionID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, ErrNotFound
-	}
+	m, err := lockMissionRow(ctx, tx, r.MissionID)
 	if err != nil {
 		return nil, false, err
+	}
+	// A mission never owns an attempt outside active: dispatch is refused
+	// before active, and active is not re-enterable.
+	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive); phaseErr != nil {
+		return nil, false, phaseErr
 	}
 	if r.IntegratorGeneration != 0 && r.IntegratorGeneration != m.IntegratorGeneration {
 		return nil, false, ErrMissionStale

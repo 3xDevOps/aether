@@ -2489,18 +2489,20 @@ shell falls back to padding for the system bars itself on a WebView older
 than Chromium 140, so check `chrome://version` on the phone before
 concluding the page is wrong.
 
-## Missions and Launch Swarm
+## Missions and swarm creation
 
 The launch dialog keeps **Single agent** as its default. When the gateway
 advertises `mission.create`, it also offers **Swarm**: one concise objective,
 an integrator account/harness/mode, an explicit list of allowed worker
 account/harness/mode choices, and finite concurrent and total-attempt limits.
-The form sends the exact selected values to `mission.create`, including a
-client idempotency key, then navigates to `missions/<server-issued-id>`. A
-failed retry keeps that key; client-generated IDs are never used as mission
-authority. The server bounds these finite limits at eight concurrent attempts
-and 128 total attempts; the form rejects values outside those bounds before
-sending.
+Its submit button is **Create swarm**, matching the missions header action,
+and success toasts `Swarm created`; creating a swarm starts the integrator,
+not the workers. The form sends the exact selected values to
+`mission.create`, including a client idempotency key, then navigates to
+`missions/<server-issued-id>`. A failed retry keeps that key;
+client-generated IDs are never used as mission authority. The server bounds
+these finite limits at eight concurrent attempts and 128 total attempts; the
+form rejects values outside those bounds before sending.
 
 `routes/missions` is registered through `routes/index.ts`, and the
 `MissionsSlice` is composed into the root store. Hydration reads
@@ -2514,6 +2516,59 @@ revision/artifact references visible. A worker success or exit is not enough
 to render Done: the server must accept a submission for the current task
 revision, with the required evidence available and any scope disposition
 explicitly recorded.
+
+### The plan gate
+
+A mission is in one of four phases - `planning`, `plan_review`, `active`,
+`rejected` - and only `active` dispatches workers. The phase chip replaces
+the generic `Mission` chip on every mission card: `Planning`,
+`Planning · N questions for you`, `Plan ready for review`, `Active`,
+`Rejected`. The detail view's status line answers the phase first and falls
+back to the task-derived string only in `active`.
+
+A phase banner sits under the mission header in every phase and says what
+the human must do next. When `current_integrator_run_id` names a run whose
+status in the store is terminal, the banner adds `The integrator run <id>
+has exited; replace the integrator to continue` with the **Replace
+integrator** control inline, in `planning`, `plan_review` and `active` - an
+integrator that exited while waiting for a decision is recovered, not hidden
+behind a friendlier message. A `rejected` mission's integrator is cancelled on
+purpose and `mission.replace-integrator` is refused in that phase, so the
+sentence and the control are not shown there.
+
+In `planning`, **Questions from the integrator** lists every question the
+integrator asked. Each unanswered one takes a textarea and an **Answer**
+button sending `mission.question.answer` with the deterministic key
+`question-answer-<question_id>`, so a retry replays rather than answering
+twice. Answered questions show the answer and who answered. If a question
+this member is typing into arrives answered - the `mission.changed` refetch
+replaces the whole projection - the textarea stays mounted with the draft
+intact under `Answered by <display name>`, rather than dropping what was
+typed. The feedback from the most recent **Request changes** decision is
+shown above the tasks, which render as a read-only **Draft plan**.
+
+In `plan_review`, **Plan review** shows the integrator's summary, the plan
+version, the same read-only task list, and **Approve**, **Request changes**
+(feedback required) and **Reject**. Each sends `mission.plan.decide` with the
+observed `expected_plan_version` and the key
+`plan-decide-<mission_id>-<plan_version>-<decision>`: retrying the same
+button replays, while a different button or a refreshed plan version is a
+fresh mutation. A member who is neither the mission's accountable human nor
+an admin still sees the whole plan, above the line `Only the accountable
+human or an admin may decide this plan.` Both gate controls need the
+capability, launch permission, and that identity:
+`cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
+
+Outside `active` there is no attempt to show, so attempt chips, the
+`proposal` blocker chip (the banner already says the plan awaits approval)
+and the candidate section are hidden. In every phase after `planning`, the
+questions and the decided review rounds collapse into
+**Planning history**.
+
+Answer and decision failures live in component state and render through the
+same `ErrorNotice` as a failed release, verbatim. They never go through
+`setMissionError`, which the next `setMissionDetail` or `mission.changed`
+refetch would wipe, and a failed answer leaves the draft intact.
 
 Run links use the existing terminal route. Take control and Release control
 continue to enforce the normal run controller and durable worker hold.

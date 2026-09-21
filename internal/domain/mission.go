@@ -19,6 +19,81 @@ type MissionIntegrator struct {
 	Mode            LaunchMode `json:"mode"`
 }
 
+// MissionPhase is the human gate a mission currently sits behind. A mission
+// starts in MissionPhasePlanning and reaches MissionPhaseActive only through a human
+// plan decision; MissionPhaseActive and MissionPhaseRejected are terminal.
+//
+//	planning    --mission.plan.submit-->  plan_review
+//	plan_review --decide approve------->  active
+//	plan_review --decide revise-------->  planning
+//	plan_review --decide reject-------->  rejected
+type MissionPhase string
+
+const (
+	MissionPhasePlanning   MissionPhase = "planning"
+	MissionPhasePlanReview MissionPhase = "plan_review"
+	MissionPhaseActive     MissionPhase = "active"
+	MissionPhaseRejected   MissionPhase = "rejected"
+)
+
+// MissionPlanDecision is the human verdict on one submitted plan version.
+type MissionPlanDecision string
+
+const (
+	MissionPlanApprove MissionPlanDecision = "approve"
+	MissionPlanRevise  MissionPlanDecision = "revise"
+	MissionPlanReject  MissionPlanDecision = "reject"
+)
+
+func (d MissionPlanDecision) Valid() bool {
+	return d == MissionPlanApprove || d == MissionPlanRevise || d == MissionPlanReject
+}
+
+// MissionPhaseAfterDecision is the only legal phase transition out of
+// plan_review. It reports false for a decision that is not one of the three.
+func MissionPhaseAfterDecision(d MissionPlanDecision) (MissionPhase, bool) {
+	switch d {
+	case MissionPlanApprove:
+		return MissionPhaseActive, true
+	case MissionPlanRevise:
+		return MissionPhasePlanning, true
+	case MissionPlanReject:
+		return MissionPhaseRejected, true
+	default:
+		return "", false
+	}
+}
+
+type MissionQuestionID string
+
+// MissionQuestion is one clarifying question the integrator asked the
+// accountable human. AnsweredAt is nil until a human answers.
+type MissionQuestion struct {
+	ID                 MissionQuestionID
+	MissionID          MissionID
+	Seq                int
+	Body               string
+	AskedByRunID       RunID
+	AskedAt            time.Time
+	Answer             string
+	AnsweredByMemberID MemberID
+	AnsweredAt         *time.Time
+}
+
+// MissionPlanReview is one round of plan submission and human decision.
+// DecidedAt is non-nil exactly when Decision is non-empty.
+type MissionPlanReview struct {
+	MissionID         MissionID
+	PlanVersion       uint64
+	Summary           string
+	SubmittedByRunID  RunID
+	SubmittedAt       time.Time
+	Decision          MissionPlanDecision
+	Feedback          string
+	DecidedByMemberID MemberID
+	DecidedAt         *time.Time
+}
+
 type Mission struct {
 	ID                           MissionID
 	WorkspaceID                  WorkspaceID
@@ -33,15 +108,22 @@ type Mission struct {
 	IntegratorRunOwnerID         MemberID
 	IntegratorGeneration         uint64
 	AcceptedSetVersion           uint64
-	IdempotencyKey               string
-	CreatedAt                    time.Time
-	UpdatedAt                    time.Time
+	Phase                        MissionPhase
+	PlanVersion                  uint64
+	// OpenQuestions is populated only by store.GetMission and
+	// store.ListMissionsPage. Transaction-local mission reads leave it zero
+	// and no store decision may consult it.
+	OpenQuestions  int
+	IdempotencyKey string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 const (
 	MaxMissionConcurrentAttempts = 8
 	MaxMissionTotalAttempts      = 128
 	MaxMissionTasks              = 128
+	MaxMissionQuestions          = 32
 	MaxTaskRevisions             = 64
 	MaxTaskDependencies          = 128
 	MaxTaskEvidenceRequirements  = 64

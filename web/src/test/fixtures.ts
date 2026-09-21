@@ -6,6 +6,8 @@ import type {
   EvidencePacket,
   Member,
   Mission,
+  MissionPlanReview,
+  MissionQuestion,
   RoomMessage,
   RoomStatusResult,
   Run,
@@ -81,8 +83,34 @@ export function mission(over: Partial<Mission> = {}): Mission {
     current_integrator_run_id: 'run_integrator',
     integrator_generation: 1,
     accepted_set_version: 0,
+    phase: 'active',
+    plan_version: 1,
+    open_questions: 0,
     created_at: '2026-08-14T10:00:00Z',
     updated_at: '2026-08-14T10:00:00Z',
+    ...over,
+  }
+}
+
+export function missionQuestion(over: Partial<MissionQuestion> = {}): MissionQuestion {
+  return {
+    id: 'question_1',
+    mission_id: 'mission_1',
+    seq: 1,
+    body: 'which checkout flow?',
+    asked_by_run_id: 'run_integrator',
+    asked_at: '2026-08-14T10:01:00Z',
+    ...over,
+  }
+}
+
+export function missionPlanReview(over: Partial<MissionPlanReview> = {}): MissionPlanReview {
+  return {
+    mission_id: 'mission_1',
+    plan_version: 1,
+    summary: 'split the checkout rewrite into two bounded tasks',
+    submitted_by_run_id: 'run_integrator',
+    submitted_at: '2026-08-14T10:02:00Z',
     ...over,
   }
 }
@@ -273,8 +301,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runList: vi.fn(async () => [run()]),
     runGet: vi.fn(async () => run()),
     missionCreate: vi.fn(async () => ({ mission: mission() })),
-    missionShow: vi.fn(async () => ({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [] })),
+    missionShow: vi.fn(async () => ({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [], plan_reviews: [] })),
     missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: undefined })),
+    missionQuestionAnswer: vi.fn(async () => ({ question: missionQuestion({ answer: 'the guest flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }) })),
+    missionPlanDecide: vi.fn(async () => ({ mission: mission() })),
     missionWorkerRelease: vi.fn(async () => ({ run_id: 'run_worker', takeover_active: false, takeover_generation: 2 })),
     missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),

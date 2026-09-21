@@ -95,6 +95,9 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 	if mission == nil {
 		return nil, fmt.Errorf("%w: run has no mission assignment", store.ErrMissionStale)
 	}
+	if phaseErr := taskMutationPhase(mission, method); phaseErr != nil {
+		return nil, phaseErr
+	}
 	switch method {
 	case protocol.MethodTaskAcceptSubmission:
 		return s.acceptSubmissionLocked(ctx, run, raw, mission, attempt)
@@ -251,6 +254,23 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 	default:
 		return nil, errors.New("mission: method not found")
 	}
+}
+
+// taskMutationPhase repeats the store's gate before any work: the draft plan
+// may be shaped in planning, but accepting anything is a post-approval act,
+// and plan_review freezes the plan the human is reading.
+func taskMutationPhase(mission *domain.Mission, method string) error {
+	switch method {
+	case protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission:
+		if mission.Phase != domain.MissionPhaseActive {
+			return missionPhaseRefusal(mission, method)
+		}
+	default:
+		if mission.Phase != domain.MissionPhasePlanning && mission.Phase != domain.MissionPhaseActive {
+			return missionPhaseRefusal(mission, method)
+		}
+	}
+	return nil
 }
 
 func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, raw json.RawMessage, mission *domain.Mission, attempt *domain.Attempt) (any, error) {

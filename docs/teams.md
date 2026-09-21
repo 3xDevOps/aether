@@ -628,6 +628,40 @@ authority, or foreign holder is refused without clearing it; an integrator or
 worker cannot release the hold through its assignment socket. Releasing a
 hold changes control state, not account sharing.
 
+A mission starts in the `planning` phase and dispatches no worker until a human
+approves its plan. Two control-channel methods carry that decision. Both need
+the `run.launch` permission (collaborator or admin) and are refused unless the
+authenticated member is the mission's accountable human or holds the `admin`
+role, so an accountable human demoted to viewer can no longer answer or decide
+and an admin must take over:
+
+- `mission.question.answer` answers one clarifying question the integrator
+  asked. The answering member is the session, never a request field.
+- `mission.plan.decide` approves, requests changes to, or rejects one plan
+  version. Approval re-resolves the mission's own launch admission first, so an
+  accountable human who lost `run.launch` or the integrator's account share
+  cannot carry the mission past the gate. Requesting changes and rejecting do
+  not, so a plan whose accountable human lost that admission can still be
+  closed out by an admin.
+
+Reading the gate is not deciding it. `mission.show` stays a View read: every
+member sees the questions, the answers, the plan summaries, and the feedback
+attached to each review round.
+
+Rejecting a plan cancels the mission's integrator run. That cancellation needs
+no per-run Kill check: the run is the mission's own reserved integrator and the
+decider is already the accountable human or an admin. Cancellation is the
+reconcile loop's job and is retried every pass until the run is terminal, so a
+rejection survives a server restart.
+
+`mission.replace-integrator` is the recovery when an integrator run exits, in
+`planning`, `plan_review`, and `active` alike. It changes neither the phase nor
+the plan version and leaves an undecided review round decidable. A rejected
+mission refuses it.
+
+After approval the integrator accepts later task revisions itself. The human
+gate is the plan, not every revision that follows it.
+
 Mission progress has the same evidence boundary as the dashboard: a worker
 report or process success does not make a task **Done**. The current task
 revision must have an accepted submission with required evidence available,

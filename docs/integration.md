@@ -397,7 +397,10 @@ remains recoverable. Candidate tombstone metadata
 is retained for at most 30 days; public proposal refs are never removed as
 candidate-private artifacts.
 
-The candidate schema is migration **32**; mission migrations **33–38** follow
-it in `internal/store/migrate.go`. Shipped migrations remain unchanged.
-Operators should inspect `schema_migrations` and expect version 38, not infer
-schema from a client build or reuse a database from an incompatible branch.
+The candidate schema is migration **32**; mission migrations **33–39** follow
+it in `internal/store/migrate.go`. Migration 39 adds the plan gate:
+`missions.phase` (defaulting to `active`, so existing missions keep
+dispatching), `missions.plan_version`, `mission_questions`, and
+`mission_plan_reviews`. Shipped migrations remain unchanged. Operators should
+inspect `schema_migrations` and expect version 39, not infer schema from a
+client build or reuse a database from an incompatible branch.

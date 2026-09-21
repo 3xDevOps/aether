@@ -29,6 +29,8 @@ type MissionService interface {
 	List(context.Context, protocol.MissionListParams) (protocol.MissionListResult, error)
 	Show(context.Context, protocol.MissionShowParams) (protocol.MissionShowResult, error)
 	ReplaceIntegrator(context.Context, domain.MemberID, protocol.MissionReplaceIntegratorParams) (protocol.MissionReplaceIntegratorResult, error)
+	AnswerQuestion(context.Context, domain.MemberID, protocol.MissionQuestionAnswerParams) (protocol.MissionQuestionResult, error)
+	DecidePlan(context.Context, domain.MemberID, protocol.MissionPlanDecideParams) (protocol.MissionPlanDecideResult, error)
 }
 
 // AuthorizeLaunch resolves and checks every mutable fact required before a
@@ -108,6 +110,11 @@ func init() {
 	registerMethod(protocol.MethodMissionShow, (*Server).missionShow)
 	registerGuarded(protocol.MethodMissionWorkerRelease, permissions.Steer, runTarget, (*Server).missionWorkerRelease)
 	registerMethod(protocol.MethodMissionReplaceIntegrator, (*Server).missionReplaceIntegrator)
+	// Launch is the coarse role screen only. The accountable-human-or-admin
+	// rule lives in the mission service, which holds the same authorization
+	// mutex these handlers must not take.
+	registerGuarded(protocol.MethodMissionQuestionAnswer, permissions.Launch, nil, (*Server).missionQuestionAnswer)
+	registerGuarded(protocol.MethodMissionPlanDecide, permissions.Launch, nil, (*Server).missionPlanDecide)
 }
 
 func (s *Server) missions() (MissionService, *protocol.Error) {
@@ -262,6 +269,38 @@ func (s *Server) missionReplaceIntegrator(ctx context.Context, member domain.Mem
 		return nil, perr
 	}
 	out, callErr := svc.ReplaceIntegrator(ctx, member, p)
+	if callErr != nil {
+		return nil, rpcError(callErr)
+	}
+	return out, nil
+}
+
+func (s *Server) missionQuestionAnswer(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc, err := s.missions()
+	if err != nil {
+		return nil, err
+	}
+	p, perr := decodeParams[protocol.MissionQuestionAnswerParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	out, callErr := svc.AnswerQuestion(ctx, member, p)
+	if callErr != nil {
+		return nil, rpcError(callErr)
+	}
+	return out, nil
+}
+
+func (s *Server) missionPlanDecide(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc, err := s.missions()
+	if err != nil {
+		return nil, err
+	}
+	p, perr := decodeParams[protocol.MissionPlanDecideParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	out, callErr := svc.DecidePlan(ctx, member, p)
 	if callErr != nil {
 		return nil, rpcError(callErr)
 	}

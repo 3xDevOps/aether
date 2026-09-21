@@ -50,7 +50,7 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await page.goto(alice.url)
   const surfaces = page.getByRole('navigation', { name: 'Surfaces' })
   await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
-  await page.getByRole('button', { name: 'Launch swarm', exact: true }).click()
+  await page.getByRole('button', { name: 'Create swarm', exact: true }).click()
   const launch = page.getByRole('dialog', { name: 'Launch a swarm' })
   await expect(launch).toBeVisible()
   await launch.getByPlaceholder('What outcome should the integrator coordinate?').fill(missionObjective)
@@ -62,14 +62,27 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await page.getByRole('option', { name: 'headless', exact: true }).click()
   await launch.getByLabel('Max concurrent attempts').fill('1')
   await launch.getByLabel('Max total attempts').fill('1')
-  await launch.getByRole('button', { name: 'Launch Swarm', exact: true }).click()
-  await expect(page.getByText('Swarm launched', { exact: true })).toBeVisible()
+  await launch.getByRole('button', { name: 'Create swarm', exact: true }).click()
+  await expect(page.getByText('Swarm created', { exact: true })).toBeVisible()
   const { missions } = await alice.api.rpc<{
     missions: { id: string; objective: string; current_integrator_run_id: string; integrator_generation: number }[]
   }>('mission.list', { workspace_id: workspaceID })
   const mission = missions.find((item) => item.objective === missionObjective)
   if (!mission) throw new Error('browser launch did not create the mission')
   await waitForCoordCLI(mission.current_integrator_run_id, aether.server.dataDir)
+
+  // The plan gate. The integrator cannot submit a plan before the human has
+  // answered, and no worker can start before the human approves.
+  runCoordCLI<{ question: { id: string } }>(mission.current_integrator_run_id, [
+    'mission', 'question', 'ask',
+    '--body', 'which checkout flow?',
+    '--idempotency-key', 'mission-candidate-ask',
+  ])
+  const answerBox = page.getByLabel('Answer question 1', { exact: true })
+  await expect(answerBox).toBeVisible({ timeout: terminalTimeout })
+  await answerBox.fill('the guest checkout flow')
+  await page.getByRole('button', { name: 'Answer', exact: true }).click()
+  await expect(page.getByText('Answered by Alice', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   type TaskMutation = { task: { id: string; current_revision: number } }
   const proposed = runCoordCLI<TaskMutation>(
@@ -83,13 +96,18 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
       evidence_requirements: [],
     }),
   )
-  runCoordCLI<TaskMutation>(mission.current_integrator_run_id, [
-    'task', 'accept',
-    '--task-id', proposed.task.id,
-    '--revision', String(proposed.task.current_revision),
-    '--expected-integrator-generation', String(mission.integrator_generation),
-    '--idempotency-key', 'mission-candidate-accept-task',
+  // Approval accepts every proposed revision, so the integrator never accepts
+  // its own plan.
+  runCoordCLI<{ plan: { phase: string } }>(mission.current_integrator_run_id, [
+    'mission', 'plan', 'submit',
+    '--summary', 'one bounded task produces the candidate fixture output',
+    '--idempotency-key', 'mission-candidate-plan',
   ])
+  const approve = page.getByRole('button', { name: 'Approve', exact: true })
+  await expect(approve).toBeVisible({ timeout: terminalTimeout })
+  await approve.click()
+  await expect(page.getByRole('region', { name: 'Mission tasks' })).toBeVisible({ timeout: 30_000 })
+
   const started = runCoordCLI<{ attempt: { id: string; run_id: string } }>(mission.current_integrator_run_id, [
     'worker', 'start',
     '--mission-id', mission.id,

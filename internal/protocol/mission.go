@@ -9,6 +9,12 @@ const (
 	MethodMissionReplaceIntegrator = "mission.replace-integrator"
 	MethodMissionWorkerRelease     = "mission.worker.release"
 
+	MethodMissionQuestionAsk    = "mission.question.ask"
+	MethodMissionQuestionAnswer = "mission.question.answer"
+	MethodMissionPlanShow       = "mission.plan.show"
+	MethodMissionPlanSubmit     = "mission.plan.submit"
+	MethodMissionPlanDecide     = "mission.plan.decide"
+
 	MethodTaskShow             = "task.show"
 	MethodTaskList             = "task.list"
 	MethodTaskPropose          = "task.propose"
@@ -50,8 +56,50 @@ type Mission struct {
 	IntegratorRunOwnerID         string                   `json:"integrator_run_owner_id,omitempty"`
 	IntegratorGeneration         uint64                   `json:"integrator_generation"`
 	AcceptedSetVersion           uint64                   `json:"accepted_set_version"`
+	Phase                        string                   `json:"phase"`
+	PlanVersion                  uint64                   `json:"plan_version"`
+	OpenQuestions                int                      `json:"open_questions"`
 	CreatedAt                    string                   `json:"created_at"`
 	UpdatedAt                    string                   `json:"updated_at"`
+}
+
+// MissionQuestion is one clarifying question the integrator asked the
+// accountable human. AnsweredAt is absent until a human answers.
+type MissionQuestion struct {
+	ID                 string  `json:"id"`
+	MissionID          string  `json:"mission_id"`
+	Seq                int     `json:"seq"`
+	Body               string  `json:"body"`
+	AskedByRunID       string  `json:"asked_by_run_id"`
+	AskedAt            string  `json:"asked_at"`
+	Answer             string  `json:"answer,omitempty"`
+	AnsweredByMemberID string  `json:"answered_by_member_id,omitempty"`
+	AnsweredAt         *string `json:"answered_at,omitempty"`
+}
+
+// MissionPlanReview is one round of plan submission and human decision.
+type MissionPlanReview struct {
+	MissionID         string  `json:"mission_id"`
+	PlanVersion       uint64  `json:"plan_version"`
+	Summary           string  `json:"summary"`
+	SubmittedByRunID  string  `json:"submitted_by_run_id"`
+	SubmittedAt       string  `json:"submitted_at"`
+	Decision          string  `json:"decision,omitempty"`
+	Feedback          string  `json:"feedback,omitempty"`
+	DecidedByMemberID string  `json:"decided_by_member_id,omitempty"`
+	DecidedAt         *string `json:"decided_at,omitempty"`
+}
+
+// MissionPlanState is what the integrator sees of its own mission's gate. It
+// is deliberately not protocol.Mission: no agent method returns the mission
+// record. LatestFeedback is the feedback of the most recent revise decision.
+type MissionPlanState struct {
+	MissionID            string `json:"mission_id"`
+	Phase                string `json:"phase"`
+	PlanVersion          uint64 `json:"plan_version"`
+	IntegratorGeneration uint64 `json:"integrator_generation"`
+	OpenQuestions        int    `json:"open_questions"`
+	LatestFeedback       string `json:"latest_feedback,omitempty"`
 }
 
 type TaskScope struct {
@@ -218,6 +266,66 @@ type MissionShowResult struct {
 	Attempts    []Attempt                `json:"attempts,omitempty"`
 	Submissions []Submission             `json:"submissions,omitempty"`
 	Diagnostics []MissionScopeDiagnostic `json:"diagnostics,omitempty"`
+	Questions   []MissionQuestion        `json:"questions,omitempty"`
+	PlanReviews []MissionPlanReview      `json:"plan_reviews,omitempty"`
+}
+
+// MissionQuestionAskParams are the params of mission.question.ask. The mission
+// is the integrator's own, resolved from the socket, never a parameter.
+type MissionQuestionAskParams struct {
+	Body           string `json:"body"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// MissionQuestionAnswerParams are the params of mission.question.answer. The
+// answering member is the authenticated session, never a parameter.
+type MissionQuestionAnswerParams struct {
+	QuestionID     string `json:"question_id"`
+	Answer         string `json:"answer"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// MissionQuestionResult is the result of mission.question.ask and
+// mission.question.answer.
+type MissionQuestionResult struct {
+	Question MissionQuestion `json:"question"`
+}
+
+// MissionPlanShowParams are the params of mission.plan.show. WaitSeconds of 0
+// or omitted returns immediately; anything outside 0..CoordMaxInboxWaitSeconds
+// is invalid params.
+type MissionPlanShowParams struct {
+	WaitSeconds int `json:"wait_seconds,omitempty"`
+}
+
+type MissionPlanShowResult struct {
+	Plan        MissionPlanState    `json:"plan"`
+	Questions   []MissionQuestion   `json:"questions"`
+	PlanReviews []MissionPlanReview `json:"plan_reviews"`
+}
+
+type MissionPlanSubmitParams struct {
+	Summary        string `json:"summary"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type MissionPlanSubmitResult struct {
+	Plan MissionPlanState `json:"plan"`
+}
+
+// MissionPlanDecideParams are the params of mission.plan.decide. Decision is
+// exactly approve, revise, or reject; Feedback is required for revise. The
+// deciding member is the authenticated session, never a parameter.
+type MissionPlanDecideParams struct {
+	MissionID           string `json:"mission_id"`
+	ExpectedPlanVersion uint64 `json:"expected_plan_version"`
+	Decision            string `json:"decision"`
+	Feedback            string `json:"feedback,omitempty"`
+	IdempotencyKey      string `json:"idempotency_key"`
+}
+
+type MissionPlanDecideResult struct {
+	Mission Mission `json:"mission"`
 }
 
 type MissionReplaceIntegratorParams struct {
@@ -333,10 +441,18 @@ type WorkerMutationResult struct {
 }
 
 func MissionFromDomain(m *domain.Mission) Mission {
-	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, MaxConcurrentAttempts: m.MaxConcurrentAttempts, MaxTotalAttempts: m.MaxTotalAttempts, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
+	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, MaxConcurrentAttempts: m.MaxConcurrentAttempts, MaxTotalAttempts: m.MaxTotalAttempts, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), PlanVersion: m.PlanVersion, OpenQuestions: m.OpenQuestions, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
 	out.ExecutionChoices = make([]MissionExecutionChoice, len(m.ExecutionChoices))
 	for i, c := range m.ExecutionChoices {
 		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode)}
 	}
 	return out
+}
+
+func MissionQuestionFromDomain(q *domain.MissionQuestion) MissionQuestion {
+	return MissionQuestion{ID: string(q.ID), MissionID: string(q.MissionID), Seq: q.Seq, Body: q.Body, AskedByRunID: string(q.AskedByRunID), AskedAt: rfc3339(q.AskedAt), Answer: q.Answer, AnsweredByMemberID: string(q.AnsweredByMemberID), AnsweredAt: rfc3339Ptr(q.AnsweredAt)}
+}
+
+func MissionPlanReviewFromDomain(r *domain.MissionPlanReview) MissionPlanReview {
+	return MissionPlanReview{MissionID: string(r.MissionID), PlanVersion: r.PlanVersion, Summary: r.Summary, SubmittedByRunID: string(r.SubmittedByRunID), SubmittedAt: rfc3339(r.SubmittedAt), Decision: string(r.Decision), Feedback: r.Feedback, DecidedByMemberID: string(r.DecidedByMemberID), DecidedAt: rfc3339Ptr(r.DecidedAt)}
 }

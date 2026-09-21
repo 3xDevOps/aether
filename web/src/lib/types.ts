@@ -48,6 +48,9 @@ export interface Run {
   base_checked_at?: string | null
 }
 /** Release B mission orchestration wire objects. IDs and revisions are server authority. */
+/** Where a mission sits in the human plan gate. Only `active` dispatches workers. */
+export type MissionPhase = 'planning' | 'plan_review' | 'active' | 'rejected'
+export type MissionPlanDecision = 'approve' | 'revise' | 'reject'
 export type MissionTaskStatus = 'ready' | 'working' | 'review' | 'done' | 'proposed' | 'abandoned' | 'blocked'
 export type MissionTaskRevisionStatus = 'proposed' | 'accepted' | 'superseded' | 'abandoned'
 export type MissionAttemptState =
@@ -88,8 +91,36 @@ export interface Mission {
   current_integrator_run_id: string
   integrator_generation: number
   accepted_set_version: number
+  phase: MissionPhase
+  plan_version: number
+  /** Unanswered questions; only mission.show and mission.list compute it. */
+  open_questions: number
   created_at: string
   updated_at: string
+}
+
+export interface MissionQuestion {
+  id: string
+  mission_id: string
+  seq: number
+  body: string
+  asked_by_run_id: string
+  asked_at: string
+  answer?: string
+  answered_by_member_id?: string
+  answered_at?: string | null
+}
+
+export interface MissionPlanReview {
+  mission_id: string
+  plan_version: number
+  summary: string
+  submitted_by_run_id: string
+  submitted_at: string
+  decision?: MissionPlanDecision
+  feedback?: string
+  decided_by_member_id?: string
+  decided_at?: string | null
 }
 
 export interface MissionTaskScope {
@@ -245,6 +276,16 @@ export interface MissionShowResult {
   attempts?: MissionAttempt[]
   submissions?: MissionSubmission[]
   diagnostics?: MissionScopeDiagnostic[]
+  questions?: MissionQuestion[]
+  plan_reviews?: MissionPlanReview[]
+}
+
+export interface MissionQuestionResult {
+  question: MissionQuestion
+}
+
+export interface MissionPlanDecideResult {
+  mission: Mission
 }
 
 export interface MissionListResult {

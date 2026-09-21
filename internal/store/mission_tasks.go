@@ -125,6 +125,13 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	mission, err := lockMissionRow(ctx, tx, t.MissionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if phaseErr := requireMissionPhase(mission, "task.propose", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
+		return nil, false, phaseErr
+	}
 	var existingID string
 	var existingRevision int
 	var found bool
@@ -346,7 +353,19 @@ func (d *DB) ProjectTask(ctx context.Context, id domain.TaskID) (*domain.Task, e
 	return t, nil
 }
 
+// ProposeTaskRevision is the integrator's task.revise. It also runs while the
+// mission is still planning, where it rewrites the draft in place; see
+// proposeTaskRevision.
 func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domain.TaskRevision, key string) (*domain.TaskRevision, error) {
+	return d.proposeTaskRevision(ctx, id, r, key, "task.revise", domain.MissionPhasePlanning, domain.MissionPhaseActive)
+}
+
+// ReviseTask is a worker's task.revise, which only an approved plan admits.
+func (d *DB) ReviseTask(ctx context.Context, id domain.TaskID, r *domain.TaskRevision, key string) (*domain.TaskRevision, error) {
+	return d.proposeTaskRevision(ctx, id, r, key, "task.revise", domain.MissionPhaseActive)
+}
+
+func (d *DB) proposeTaskRevision(ctx context.Context, id domain.TaskID, r *domain.TaskRevision, key, operation string, allowed ...domain.MissionPhase) (*domain.TaskRevision, error) {
 	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
 		return nil, errors.New("store: task proposal idempotency_key is invalid")
 	}
@@ -366,14 +385,19 @@ func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	mission, err := lockMissionRowForTask(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if phaseErr := requireMissionPhase(mission, operation, allowed...); phaseErr != nil {
+		return nil, phaseErr
+	}
+	missionID := mission.ID
 	if _, execErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET updated_at = updated_at WHERE id = ?`, id); execErr != nil {
 		return nil, execErr
 	}
-	var missionID domain.MissionID
 	var current int
-	if queryErr := tx.QueryRowContext(ctx, `SELECT mission_id, current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&missionID, &current); errors.Is(queryErr, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	} else if queryErr != nil {
+	if queryErr := tx.QueryRowContext(ctx, `SELECT current_revision FROM mission_tasks WHERE id = ?`, id).Scan(&current); queryErr != nil {
 		return nil, queryErr
 	}
 	payload, err := mutationPayload(struct {
@@ -419,6 +443,25 @@ func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_task_revisions (task_id, revision, title, objective, scope, evidence_requirements, status, proposed_by_run_id, supersedes_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)`, id, next, r.Title, r.Objective, scope, reqs, r.ProposedByRunID, current, n); execErr != nil {
 		return nil, fmt.Errorf("store: propose task revision: %w", execErr)
 	}
+	// While planning, accept is forbidden, so nothing would ever advance
+	// current_revision and the human would review a stale draft. Superseding
+	// the never-accepted draft and moving current_revision to the new revision
+	// makes the plan the integrator wrote the plan the human reads. No attempt
+	// or submission can reference a never-accepted revision, so it is safe.
+	if mission.Phase == domain.MissionPhasePlanning {
+		var currentStatus string
+		if statusErr := tx.QueryRowContext(ctx, `SELECT status FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, id, current).Scan(&currentStatus); statusErr != nil {
+			return nil, statusErr
+		}
+		if currentStatus == string(domain.TaskRevisionProposed) {
+			if _, supersedeErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status = 'superseded' WHERE task_id = ? AND revision = ? AND status = 'proposed'`, id, current); supersedeErr != nil {
+				return nil, fmt.Errorf("store: supersede planning task revision: %w", supersedeErr)
+			}
+			if _, advanceErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET current_revision = ?, updated_at = ? WHERE id = ?`, next, n, id); advanceErr != nil {
+				return nil, fmt.Errorf("store: advance planning task revision: %w", advanceErr)
+			}
+		}
+	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.propose", key, payload, string(id), next, n); receiptErr != nil {
 		return nil, receiptErr
 	}
@@ -427,10 +470,6 @@ func (d *DB) ProposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 	}
 	r.TaskID, r.Revision, r.Status, r.SupersedesRevision, r.CreatedAt = id, next, domain.TaskRevisionProposed, current, now
 	return r, nil
-}
-
-func (d *DB) ReviseTask(ctx context.Context, id domain.TaskID, r *domain.TaskRevision, key string) (*domain.TaskRevision, error) {
-	return d.ProposeTaskRevision(ctx, id, r, key)
 }
 
 func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision int, expectedGeneration uint64, key string) error {
@@ -442,17 +481,15 @@ func (d *DB) AcceptTaskRevision(ctx context.Context, id domain.TaskID, revision 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var missionID domain.MissionID
-	var generation uint64
-	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if missionErr != nil {
-		return missionErr
+	mission, err := lockMissionRowForTask(ctx, tx, id)
+	if err != nil {
+		return err
 	}
-	if generationErr := tx.QueryRowContext(ctx, `SELECT integrator_generation FROM missions WHERE id = ?`, missionID).Scan(&generation); generationErr != nil {
-		return generationErr
+	if phaseErr := requireMissionPhase(mission, "task.accept", domain.MissionPhaseActive); phaseErr != nil {
+		return phaseErr
 	}
-	if expectedGeneration == 0 || generation != expectedGeneration {
+	missionID := mission.ID
+	if expectedGeneration == 0 || mission.IntegratorGeneration != expectedGeneration {
 		return ErrMissionStale
 	}
 	payload, err := mutationPayload(struct {
@@ -652,17 +689,15 @@ func (d *DB) AbandonTask(ctx context.Context, id domain.TaskID, expectedGenerati
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var missionID domain.MissionID
-	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id=?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if missionErr != nil {
-		return missionErr
+	mission, err := lockMissionRowForTask(ctx, tx, id)
+	if err != nil {
+		return err
 	}
-	var generation uint64
-	if generationErr := tx.QueryRowContext(ctx, `SELECT integrator_generation FROM missions WHERE id=?`, missionID).Scan(&generation); generationErr != nil {
-		return generationErr
+	if phaseErr := requireMissionPhase(mission, "task.abandon", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
+		return phaseErr
 	}
-	if expectedGeneration == 0 || expectedGeneration != generation {
+	missionID := mission.ID
+	if expectedGeneration == 0 || expectedGeneration != mission.IntegratorGeneration {
 		return ErrMissionStale
 	}
 	payload, err := mutationPayload(struct {

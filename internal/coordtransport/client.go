@@ -28,29 +28,46 @@ func callTimeout(method string, params any) time.Duration {
 	switch method {
 	case protocol.MethodCoordReport:
 		timeout = callReportTimeout
-	case protocol.MethodCoordInbox:
-		timeout = callMargin
-		wait := 0
-		switch p := params.(type) {
-		case protocol.CoordInboxParams:
-			wait = p.WaitSeconds
-		case *protocol.CoordInboxParams:
-			if p != nil {
-				wait = p.WaitSeconds
-			}
-		}
-		if wait < 0 {
-			wait = 0
-		}
-		if wait > protocol.CoordMaxInboxWaitSeconds {
-			wait = protocol.CoordMaxInboxWaitSeconds
-		}
-		timeout += time.Duration(wait) * time.Second
+	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
+		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
 	}
-	if timeout > callDeadlineCeiling && method != protocol.MethodCoordInbox {
+	if timeout > callDeadlineCeiling && !longPoll(method) {
 		return callDeadlineCeiling
 	}
 	return timeout
+}
+
+// longPoll reports whether the server may hold the request open for the
+// caller's wait_seconds, which is what exempts it from the deadline ceiling.
+func longPoll(method string) bool {
+	return method == protocol.MethodCoordInbox || method == protocol.MethodMissionPlanShow
+}
+
+// pollWaitSeconds clamps the caller's wait to the same bound the server
+// enforces, so a malformed or future value cannot stretch the client call.
+func pollWaitSeconds(params any) int {
+	wait := 0
+	switch p := params.(type) {
+	case protocol.CoordInboxParams:
+		wait = p.WaitSeconds
+	case *protocol.CoordInboxParams:
+		if p != nil {
+			wait = p.WaitSeconds
+		}
+	case protocol.MissionPlanShowParams:
+		wait = p.WaitSeconds
+	case *protocol.MissionPlanShowParams:
+		if p != nil {
+			wait = p.WaitSeconds
+		}
+	}
+	if wait < 0 {
+		return 0
+	}
+	if wait > protocol.CoordMaxInboxWaitSeconds {
+		return protocol.CoordMaxInboxWaitSeconds
+	}
+	return wait
 }
 
 // Call makes one coordination request on socket and decodes its result

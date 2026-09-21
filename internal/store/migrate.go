@@ -1196,6 +1196,37 @@ ALTER TABLE mission_attempts ADD COLUMN last_error TEXT NOT NULL DEFAULT '';
 	`
 ALTER TABLE mission_create_receipts ADD COLUMN initial_run_id TEXT NOT NULL DEFAULT '';
 `,
+	`
+ALTER TABLE missions ADD COLUMN phase TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE missions ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE mission_questions (
+	id                    TEXT PRIMARY KEY,
+	mission_id            TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	seq                   INTEGER NOT NULL CHECK (seq > 0),
+	body                  TEXT NOT NULL,
+	asked_by_run_id       TEXT NOT NULL,
+	asked_at              INTEGER NOT NULL,
+	answer                TEXT NOT NULL DEFAULT '',
+	answered_by_member_id TEXT NOT NULL DEFAULT '',
+	answered_at           INTEGER,
+	UNIQUE (mission_id, seq)
+);
+CREATE INDEX idx_mission_questions_open ON mission_questions(mission_id, answered_at);
+
+CREATE TABLE mission_plan_reviews (
+	mission_id           TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	plan_version         INTEGER NOT NULL CHECK (plan_version > 0),
+	summary              TEXT NOT NULL,
+	submitted_by_run_id  TEXT NOT NULL,
+	submitted_at         INTEGER NOT NULL,
+	decision             TEXT NOT NULL DEFAULT '' CHECK (decision IN ('', 'approve', 'revise', 'reject')),
+	feedback             TEXT NOT NULL DEFAULT '',
+	decided_by_member_id TEXT NOT NULL DEFAULT '',
+	decided_at           INTEGER,
+	PRIMARY KEY (mission_id, plan_version)
+);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

@@ -35,6 +35,11 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if err != nil {
 		return nil, err
 	}
+	// A mission never owns an attempt outside active: dispatch is impossible
+	// before a human approves the plan, and active is not re-enterable.
+	if m.Phase != domain.MissionPhaseActive {
+		return nil, missionPhaseRefusal(m, "worker dispatch")
+	}
 	task, err := s.cfg.Missions.GetTask(ctx, domain.TaskID(p.TaskID))
 	if err != nil {
 		return nil, err

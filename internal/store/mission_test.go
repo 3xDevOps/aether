@@ -10,15 +10,32 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
+// mustCreateMission returns a mission whose plan a human already approved.
+// The gate that stands between creation and that state is covered on its own
+// in mission_plan_test.go; every other mission test is about what an approved
+// mission does, so it skips straight past the gate.
 func mustCreateMission(t *testing.T, db *DB, workspace domain.WorkspaceID, member domain.MemberID, concurrent, total int) *domain.Mission {
+	t.Helper()
+	m := mustCreatePlanningMission(t, db, workspace, member, concurrent, total, "mission-create-1")
+	if _, err := db.db.ExecContext(context.Background(), `UPDATE missions SET phase=?, plan_version=1 WHERE id=?`, domain.MissionPhaseActive, m.ID); err != nil {
+		t.Fatalf("approve mission plan: %v", err)
+	}
+	m.Phase, m.PlanVersion = domain.MissionPhaseActive, 1
+	return m
+}
+
+func mustCreatePlanningMission(t *testing.T, db *DB, workspace domain.WorkspaceID, member domain.MemberID, concurrent, total int, key string) *domain.Mission {
 	t.Helper()
 	m := &domain.Mission{
 		WorkspaceID: workspace, Objective: "ship the bounded change", AccountableHumanID: member,
 		Integrator:            domain.MissionIntegrator{AccountMemberID: member, Harness: "claude", Mode: domain.LaunchHeadless},
-		MaxConcurrentAttempts: concurrent, MaxTotalAttempts: total, IdempotencyKey: "mission-create-1",
+		MaxConcurrentAttempts: concurrent, MaxTotalAttempts: total, IdempotencyKey: key,
 	}
 	if err := db.CreateMission(context.Background(), m); err != nil {
 		t.Fatalf("CreateMission: %v", err)
+	}
+	if m.Phase != domain.MissionPhasePlanning || m.PlanVersion != 0 {
+		t.Fatalf("new mission = phase %s plan version %d, want planning and 0", m.Phase, m.PlanVersion)
 	}
 	return m
 }

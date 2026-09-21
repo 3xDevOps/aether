@@ -139,6 +139,8 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 		MaxConcurrentAttempts: m.MaxConcurrentAttempts,
 		MaxTotalAttempts:      m.MaxTotalAttempts,
 		TotalAttempts:         len(attempts),
+		Phase:                 string(m.Phase),
+		PlanVersion:           m.PlanVersion,
 	}
 	for _, candidate := range attempts {
 		if candidate != nil && candidate.State.HoldsConcurrency() {
@@ -148,6 +150,19 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 	if attempt == nil {
 		out.Role = missionRoleIntegrator
 		out.Capabilities = integratorCapabilities()
+		// Only an unapproved plan has open questions or pending feedback to
+		// act on, so the two extra reads stay off the approved-mission path.
+		if m.Phase == domain.MissionPhasePlanning || m.Phase == domain.MissionPhasePlanReview {
+			current, missionErr := s.cfg.Missions.GetMission(ctx, m.ID)
+			if missionErr != nil {
+				return protocol.CoordMissionAssignment{}, missionErr
+			}
+			reviews, reviewErr := s.cfg.Missions.ListMissionPlanReviews(ctx, m.ID)
+			if reviewErr != nil {
+				return protocol.CoordMissionAssignment{}, reviewErr
+			}
+			out.OpenQuestions, out.LatestFeedback = current.OpenQuestions, latestReviseFeedback(reviews)
+		}
 		return out, nil
 	}
 	out.Role = missionRoleWorker
@@ -167,6 +182,9 @@ func integratorCapabilities() []string {
 		protocol.MethodTaskAccept,
 		protocol.MethodTaskAcceptSubmission,
 		protocol.MethodTaskAbandon,
+		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionPlanShow,
+		protocol.MethodMissionPlanSubmit,
 		protocol.MethodWorkerStart,
 		protocol.MethodWorkerList,
 		protocol.MethodWorkerInspect,

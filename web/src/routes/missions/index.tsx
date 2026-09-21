@@ -31,6 +31,15 @@ import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
+import {
+  ErrorNotice,
+  PhaseBanner,
+  PhaseChip,
+  PlanningHistory,
+  missionPhase,
+  PlanReviewSection,
+  QuestionsSection,
+} from '@/routes/missions/plan-gate'
 
 function newIdempotencyKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -58,7 +67,15 @@ const statusColor: Record<MissionTask['status'], 'accent' | 'default' | 'success
   blocked: 'danger',
 }
 
-function missionStatus(tasks: MissionTask[], submissions: MissionSubmission[]): string {
+function missionStatus(mission: Mission, tasks: MissionTask[], submissions: MissionSubmission[]): string {
+  switch (missionPhase(mission)) {
+    case 'planning':
+      return 'Planning'
+    case 'plan_review':
+      return 'Plan ready for review'
+    case 'rejected':
+      return 'Rejected'
+  }
   if (!tasks.length) return 'Preparing'
   const acceptedDone = tasks.every(
     (task) =>
@@ -115,6 +132,8 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
               attempts: result.attempts ?? [],
               submissions: result.submissions ?? [],
               diagnostics: result.diagnostics ?? [],
+              questions: result.questions ?? [],
+              plan_reviews: result.plan_reviews ?? [],
             })
           }
         }
@@ -168,7 +187,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
         actions={
           canLaunch ? (
             <Button size="sm" onClick={() => useStore.getState().openPaletteDialog('launch')}>
-              Launch swarm
+              Create swarm
             </Button>
           ) : undefined
         }
@@ -198,9 +217,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
                     <p className="break-words font-medium">{mission.objective}</p>
                     <p className="mt-1 font-mono text-[11px] text-muted-foreground">{mission.id}</p>
                   </div>
-                  <Chip color="accent" variant="soft" size="sm">
-                    <Chip.Label>Mission</Chip.Label>
-                  </Chip>
+                  <PhaseChip mission={mission} />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>Integrator {mission.integrator.harness}</span>
@@ -262,6 +279,20 @@ function MissionDetailView({
   const canRelease =
     cap.hasMethod('mission.worker.release') &&
     allowed('launch', self)
+  // The gate is the accountable human's own decision; an admin stands in.
+  const gateAuthority =
+    Boolean(mission) &&
+    allowed('launch', self) &&
+    (self.id === mission?.accountable_human_id || self.role === 'admin')
+  const canAnswer = cap.hasMethod('mission.question.answer') && gateAuthority
+  const canDecide = cap.hasMethod('mission.plan.decide') && gateAuthority
+  const planReviews = detail?.plan_reviews ?? []
+  const pendingReview = planReviews.find(
+    (review) => review.plan_version === mission?.plan_version && !review.decision,
+  )
+  const latestFeedback = [...planReviews].reverse().find((review) => review.decision === 'revise')?.feedback
+  const phase = mission ? missionPhase(mission) : 'active'
+  const readOnly = phase !== 'active'
   const releaseTakeover = async (attempt: MissionAttempt) => {
     if (!attempt.takeover_active || attempt.takeover_generation == null || !attempt.run_id || releasingAttemptID) return
     setReleaseError(null)
@@ -280,11 +311,31 @@ function MissionDetailView({
     }
   }
 
+  const taskList = detail ? (
+    <>
+      {detail.tasks.length === 0 && <p className="text-sm text-muted-foreground">The integrator has not proposed tasks yet.</p>}
+      {detail.tasks.map((task) => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          attempts={(detail.attempts ?? []).filter((attempt) => attempt.task_id === task.id)}
+          submissions={(detail.submissions ?? []).filter((submission) => submission.task_id === task.id)}
+          diagnostics={(detail.diagnostics ?? []).filter((diagnostic) => diagnostic.task_id === task.id)}
+          readOnly={readOnly}
+          canRelease={canRelease}
+          onRelease={releaseTakeover}
+          releasingAttemptID={releasingAttemptID}
+          onRun={(runID) => navigate('terminal', { runId: runID })}
+        />
+      ))}
+    </>
+  ) : null
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader
         title={mission?.objective ?? 'Mission'}
-        subtitle={mission ? `${missionStatus(detail?.tasks ?? [], detail?.submissions ?? [])} · ${mission.id}` : undefined}
+        subtitle={mission ? `${missionStatus(mission, detail?.tasks ?? [], detail?.submissions ?? [])} · ${mission.id}` : undefined}
         actions={
           <>
             <Button size="sm" variant="outline" onClick={onBack}>
@@ -303,6 +354,7 @@ function MissionDetailView({
         {loading && !detail && <p className="text-sm text-muted-foreground">Loading mission…</p>}
         {mission && detail && (
           <>
+            <PhaseBanner mission={mission} canReplace={canReplace} onReplace={() => setReplaceOpen(true)} />
             <section className="border bg-card p-3" aria-label="Mission authorization">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -342,39 +394,64 @@ function MissionDetailView({
               </div>
             </section>
 
-            <section className="mt-3 space-y-2" aria-label="Mission tasks">
-              <h2 className="text-sm font-semibold">Tasks</h2>
-              {detail.tasks.length === 0 && <p className="text-sm text-muted-foreground">The integrator has not proposed tasks yet.</p>}
-              {detail.tasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  attempts={(detail.attempts ?? []).filter((attempt) => attempt.task_id === task.id)}
-                  submissions={(detail.submissions ?? []).filter((submission) => submission.task_id === task.id)}
-                  diagnostics={(detail.diagnostics ?? []).filter((diagnostic) => diagnostic.task_id === task.id)}
-                  canRelease={canRelease}
-                  onRelease={releaseTakeover}
-                  releasingAttemptID={releasingAttemptID}
-                  onRun={(runID) => navigate('terminal', { runId: runID })}
-                />
-              ))}
-            </section>
-            <section className="mt-3 border bg-card p-3" aria-label="Mission candidate review">
-              <h2 className="text-sm font-semibold">Candidate progress</h2>
-              <p className="mt-1 text-xs text-muted-foreground">Prepare and review the current accepted mission set through the existing verification and delivery workflow. Task status alone never implies delivery.</p>
-              {integratorRunID ? (
-                <CandidateReview
-                  workspaceID={mission.workspace_id}
-                  currentRunID={integratorRunID}
-                  missionID={mission.id}
-                  missionSubmissions={acceptedSubmissions}
-                  initialExpanded
+            {phase === 'planning' && (
+              <>
+                <QuestionsSection
+                  questions={detail.questions ?? []}
+                  canAnswer={canAnswer}
                   client={client}
+                  onAnswered={onRefresh}
                 />
-              ) : (
-                <p className="mt-2 text-xs text-muted-foreground">Waiting for the integrator run before candidate preparation can begin.</p>
-              )}
-            </section>
+                {latestFeedback && (
+                  <div className="mt-3 border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs">
+                    <p className="font-medium">Changes you requested</p>
+                    <p className="mt-0.5 whitespace-pre-wrap break-words">{latestFeedback}</p>
+                  </div>
+                )}
+                <section className="mt-3 space-y-2" aria-label="Draft plan">
+                  <h2 className="text-sm font-semibold">Draft plan</h2>
+                  {taskList}
+                </section>
+              </>
+            )}
+            {phase === 'plan_review' && (
+              <PlanReviewSection
+                mission={mission}
+                review={pendingReview}
+                canDecide={canDecide}
+                client={client}
+                onDecided={onRefresh}
+              >
+                {taskList}
+              </PlanReviewSection>
+            )}
+            {(phase === 'active' || phase === 'rejected') && (
+              <section className="mt-3 space-y-2" aria-label="Mission tasks">
+                <h2 className="text-sm font-semibold">Tasks</h2>
+                {taskList}
+              </section>
+            )}
+            {phase === 'active' && (
+              <section className="mt-3 border bg-card p-3" aria-label="Mission candidate review">
+                <h2 className="text-sm font-semibold">Candidate progress</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Prepare and review the current accepted mission set through the existing verification and delivery workflow. Task status alone never implies delivery.</p>
+                {integratorRunID ? (
+                  <CandidateReview
+                    workspaceID={mission.workspace_id}
+                    currentRunID={integratorRunID}
+                    missionID={mission.id}
+                    missionSubmissions={acceptedSubmissions}
+                    initialExpanded
+                    client={client}
+                  />
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">Waiting for the integrator run before candidate preparation can begin.</p>
+                )}
+              </section>
+            )}
+            {phase !== 'planning' && (
+              <PlanningHistory questions={detail.questions ?? []} reviews={planReviews} />
+            )}
           </>
         )}
       </div>
@@ -398,6 +475,7 @@ function TaskCard({
   attempts,
   submissions,
   diagnostics,
+  readOnly,
   canRelease,
   onRelease,
   releasingAttemptID,
@@ -407,12 +485,16 @@ function TaskCard({
   attempts: MissionAttempt[]
   submissions: MissionSubmission[]
   diagnostics: MissionScopeDiagnostic[]
+  /** Outside `active` the plan is a draft: no attempt exists, and the
+   * proposal blocker is the gate itself, which the phase banner already says. */
+  readOnly: boolean
   canRelease: boolean
   onRelease: (attempt: MissionAttempt) => void
   releasingAttemptID: string | null
   onRun: (runID: string) => void
 }) {
   const revision = task.revision
+  const blockers = (task.blockers ?? []).filter((blocker) => !readOnly || blocker.kind !== 'proposal')
   const accepted = submissions.find(
     (submission) =>
       submission.state === 'accepted' && submission.task_revision === task.current_revision,
@@ -442,10 +524,10 @@ function TaskCard({
           </div>
         </div>
       )}
-      {(task.blockers ?? []).length > 0 && (
+      {blockers.length > 0 && (
         <div className="mt-3 border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs">
           <p className="font-medium">Blockers</p>
-          {(task.blockers ?? []).map((blocker, index) => (
+          {blockers.map((blocker, index) => (
             <p key={`${blocker.kind}-${index}`} className="mt-0.5">
               {blocker.kind}: {blocker.action} <span className="font-mono text-muted-foreground">({blocker.owner_run_id ?? 'unassigned'})</span>
             </p>
@@ -479,7 +561,7 @@ function TaskCard({
           {accepted.acceptance?.scope_disposition && <p className="mt-0.5">Scope disposition: {accepted.acceptance.scope_disposition}</p>}
         </div>
       )}
-      <div className="mt-3 flex flex-wrap gap-1">
+      {!readOnly && <div className="mt-3 flex flex-wrap gap-1">
         {attempts.map((attempt) => (
           <div key={attempt.id} className="flex flex-wrap items-center gap-1 border px-2 py-1 text-xs">
             <span>Attempt {attempt.number} · {attempt.cancel_requested_at && !['completed', 'failed', 'cancelled', 'superseded', 'abandoned'].includes(attempt.state) ? 'Cancellation pending' : attempt.state}</span>
@@ -491,7 +573,7 @@ function TaskCard({
             {(attempt.orchestration_hold || attempt.takeover_active) && <span className="basis-full text-state-needs-attention">Release control here or from the worker run after expiry or restart.</span>}
           </div>
         ))}
-      </div>
+      </div>}
     </article>
   )
 }
@@ -505,10 +587,6 @@ function ScopeFacts({ scope }: { scope: MissionTaskScope }) {
   ]
   if (!facts.length) return <p className="mt-0.5 text-muted-foreground">No scope details reported.</p>
   return <ul className="mt-0.5 list-disc pl-4">{facts.map((fact) => <li key={fact}>{fact}</li>)}</ul>
-}
-
-function ErrorNotice({ error }: { error: string }) {
-  return <p role="alert" className="mb-3 break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">{error}</p>
 }
 
 function IntegratorReplacement({

@@ -87,6 +87,31 @@ func regressionMission(t *testing.T, db *store.DB, workspace domain.WorkspaceID,
 	}
 	return m
 }
+
+// regressionApprovePlan drives the real plan gate - ask, answer, submit,
+// approve - so the mission reaches active and can dispatch. Approval accepts
+// the proposed current revision of every non-abandoned task, so callers create
+// their tasks before calling this.
+func regressionApprovePlan(t *testing.T, db *store.DB, m *domain.Mission) *domain.Mission {
+	t.Helper()
+	ctx := context.Background()
+	question, err := db.InsertMissionQuestion(ctx, m.ID, m.CurrentIntegratorRunID, "which flow?", "plan-ask-1")
+	if err != nil {
+		t.Fatalf("ask plan question: %v", err)
+	}
+	if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, m.AccountableHumanID, "this flow", "plan-answer-1"); answerErr != nil {
+		t.Fatalf("answer plan question: %v", answerErr)
+	}
+	review, err := db.SubmitMissionPlan(ctx, m.ID, m.CurrentIntegratorRunID, "regression plan", "plan-submit-1")
+	if err != nil {
+		t.Fatalf("submit plan: %v", err)
+	}
+	approved, err := db.DecideMissionPlan(ctx, m.ID, review.PlanVersion, domain.MissionPlanApprove, "", m.AccountableHumanID, "plan-approve-1")
+	if err != nil {
+		t.Fatalf("approve plan: %v", err)
+	}
+	return approved
+}
 func regressionRun(t *testing.T, db *store.DB, runID domain.RunID, workspace domain.WorkspaceID, member domain.MemberID, task string) {
 	t.Helper()
 	r := &domain.Run{
@@ -166,13 +191,14 @@ func setupSubmissionRegression(t *testing.T) (*store.DB, *domain.Mission, *domai
 	task := &domain.Task{
 		MissionID: mission.ID,
 		Revision: &domain.TaskRevision{
-			Title: "evidence task", Objective: "evidence task", Status: domain.TaskRevisionAccepted,
+			Title: "evidence task", Objective: "evidence task", Status: domain.TaskRevisionProposed,
 			EvidenceRequirements: []domain.EvidenceRequirement{{Kind: "test"}},
 		},
 	}
 	if err := db.CreateTask(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	mission = regressionApprovePlan(t, db, mission)
 	attempt, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
 		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
 		DispatchKey: "evidence-dispatch", Harness: "claude", Mode: domain.LaunchHeadless,
