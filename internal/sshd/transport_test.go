@@ -516,6 +516,79 @@ func TestAttachFinishedRunUsesFramedTranscript(t *testing.T) {
 	}
 }
 
+func TestAttachFinishedFramedHistoryIgnoresPendingSnapshot(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	e.pty.setErr(errNoSession)
+	e.pty.snapshotErr = ptyhost.ErrSnapshotPending
+	e.pty.setTranscript(e.run.ID, []byte("complete recorded output"))
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+	r := bufio.NewReader(pipe)
+	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `","framed":true}` + "\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if !ack.OK || ack.Cols != 80 || ack.Rows != 24 || ack.Replay != len("complete recorded output") {
+		t.Fatalf("ack = %+v, want default geometry and complete transcript length", ack)
+	}
+	reader := &protocol.TerminalReader{Reader: r}
+	buf := make([]byte, len("complete recorded output"))
+	n, size, err := reader.Read(buf)
+	if n != len(buf) || string(buf[:n]) != "complete recorded output" || size != [2]uint{} || err != nil {
+		t.Fatalf("replay record = n=%d size=%v err=%v data=%q", n, size, err, buf[:n])
+	}
+}
+
+func TestAttachFinishedScreenUsesRecentReplayWhileSnapshotPending(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	e.pty.setErr(errNoSession)
+	e.pty.snapshotErr = ptyhost.ErrSnapshotPending
+	e.pty.recent = map[domain.RunID]fakeRecentReplay{
+		e.run.ID: {
+			data: []byte("recent output"), cols: 132, rows: 43,
+			position: ptyhost.TerminalPosition{Epoch: "unproven", Sequence: 99},
+		},
+	}
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+		t.Fatalf("UpdateRunStatus: %v", err)
+	}
+
+	pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
+	r := bufio.NewReader(pipe)
+	if _, err := pipe.Write([]byte(`{"run_id":"` + string(e.run.ID) + `","framed":true,"screen":true}` + "\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var ack protocol.AttachResponse
+	readJSONLine(t, r, &ack)
+	if !ack.OK || ack.Cols != 132 || ack.Rows != 43 || ack.Replay != len("recent output") {
+		t.Fatalf("ack = %+v, want bounded recent replay geometry and length", ack)
+	}
+	if position := ack.HighWater(); position.Valid() {
+		t.Fatalf("ack high-water = %+v, want none for incomplete replay window", position)
+	}
+	e.pty.mu.Lock()
+	recentLimit := e.pty.recentLimit
+	e.pty.mu.Unlock()
+	if recentLimit != 1<<20 {
+		t.Fatalf("recent replay limit = %d, want 1 MiB", recentLimit)
+	}
+	reader := &protocol.TerminalReader{Reader: r}
+	buf := make([]byte, len("recent output"))
+	n, size, err := reader.Read(buf)
+	if n != len(buf) || string(buf[:n]) != "recent output" || size != [2]uint{} || err != nil {
+		t.Fatalf("replay record = n=%d size=%v err=%v data=%q", n, size, err, buf[:n])
+	}
+	if _, _, err := reader.Read(buf); !errors.Is(err, io.EOF) {
+		t.Fatalf("after replay read = %v, want EOF", err)
+	}
+}
+
 // TestAttachFinishedRunWithoutTranscriptStillRefuses pins the fallback: a
 // finished run whose transcript predates recording keeps the no-session
 // refusal instead of a bogus empty replay.

@@ -21,6 +21,8 @@ type PTYAttacher interface {
 	// Replay streams a run's recorded transcript as raw terminal bytes and
 	// reports their count; os.ErrNotExist when the run never recorded one.
 	Replay(run domain.RunID) (io.ReadCloser, int, error)
+	// RecentReplay returns a bounded suffix of a run's recorded transcript.
+	RecentReplay(run domain.RunID, maxBytes int) (ptyhost.ReplayWindow, error)
 	// Snapshot returns the compact current screen for a finished-run attach.
 	Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error)
 }

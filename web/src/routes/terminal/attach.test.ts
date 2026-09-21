@@ -302,6 +302,57 @@ describe('connectAttach', () => {
     a.close()
   })
 
+  it('keeps a newer parsed position over deferred same-epoch geometry', async () => {
+    let finishGeometry!: () => void
+    const events: string[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (chunk, kind, settled) => {
+        events.push(`${kind}:${new TextDecoder().decode(chunk)}`)
+        settled?.()
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      onGeometry: () => new Promise<void>((resolve) => {
+        finishGeometry = resolve
+      }),
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({
+      data: JSON.stringify({ ok: true, cursor: 102, replay: 2, resume_id: 'pty-a' }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'geometry',
+        ok: true,
+        cols: 100,
+        rows: 30,
+        cursor: 102,
+        resume_id: 'pty-a',
+      }),
+    })
+    socket.onmessage?.({ data: new TextEncoder().encode('abXYZ').buffer })
+
+    finishGeometry()
+    await vi.waitFor(() => expect(events).toEqual(['replay-end:ab', 'live:XYZ']))
+    a.reopen({ resume: true })
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '105',
+    })
+    a.close()
+  })
+
   it('uses the acknowledged high-water instead of adding replay length', async () => {
     const a = attach()
     const socket = StubSocket.last()
@@ -342,7 +393,7 @@ describe('connectAttach', () => {
     a.close()
   })
 
-  it('adopts one server high-water position from control state on reconnect', () => {
+  it('atomically adopts a different epoch even with a lower sequence', () => {
     const a = attach()
     const socket = StubSocket.last()
     socket.onopen?.()
@@ -353,11 +404,11 @@ describe('connectAttach', () => {
         ok: true,
         has_control: false,
         resume_id: 'pty-b',
-        cursor: 200,
+        cursor: 20,
       }),
     })
-    expect(receivedControl).toMatchObject({ position: { epoch: 'pty-b', sequence: '200' } })
-    expect(a.controlMetadata!()).toMatchObject({ position: { epoch: 'pty-b', sequence: '200' } })
+    expect(receivedControl).toMatchObject({ position: { epoch: 'pty-b', sequence: '20' } })
+    expect(a.controlMetadata!()).toMatchObject({ position: { epoch: 'pty-b', sequence: '20' } })
 
     a.reopen({ resume: true })
     const replacement = StubSocket.last()
@@ -365,7 +416,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-b',
-      cursor: '200',
+      cursor: '20',
     })
     a.close()
   })

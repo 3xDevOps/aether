@@ -110,6 +110,73 @@ func TestDashboardPositionWireCompatibility(t *testing.T) {
 	}
 }
 
+func TestDashboardAttachRequestCursorUnmarshal(t *testing.T) {
+	valid := []struct {
+		name    string
+		payload string
+		epoch   TerminalEpoch
+		want    uint64
+	}{
+		{
+			name:    "safe number",
+			payload: `{"resume_id":"pty-safe","cursor":9007199254740991}`,
+			epoch:   "pty-safe",
+			want:    9007199254740991,
+		},
+		{
+			name:    "quoted max uint64",
+			payload: `{"resume_id":"pty-max","cursor":"18446744073709551615"}`,
+			epoch:   "pty-max",
+			want:    ^uint64(0),
+		},
+		{
+			name:    "zero",
+			payload: `{"resume_id":"pty-zero","cursor":0}`,
+			epoch:   "pty-zero",
+			want:    0,
+		},
+	}
+	for _, tc := range valid {
+		t.Run(tc.name, func(t *testing.T) {
+			var got DashAttachRequest
+			if err := json.Unmarshal([]byte(tc.payload), &got); err != nil {
+				t.Fatal(err)
+			}
+			wantPosition := TerminalPosition{Epoch: tc.epoch, Sequence: TerminalSequence(tc.want)}
+			if got.Cursor != tc.want || got.Position != wantPosition || got.ResumePosition() != wantPosition {
+				t.Fatalf("decoded request = %+v, want cursor %d and position %+v", got, tc.want, wantPosition)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name    string
+		payload string
+	}{
+		{name: "malformed string", payload: `{"resume_id":"new","cursor":"12x"}`},
+		{name: "overflow", payload: `{"resume_id":"new","cursor":18446744073709551616}`},
+		{name: "negative", payload: `{"resume_id":"new","cursor":-1}`},
+		{name: "fraction", payload: `{"resume_id":"new","cursor":1.5}`},
+		{name: "noncanonical string", payload: `{"resume_id":"new","cursor":"01"}`},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			original := DashAttachRequest{
+				ResumeID: "pty-original",
+				Cursor:   7,
+				Position: TerminalPosition{Epoch: "pty-original", Sequence: 7},
+			}
+			got := original
+			if err := json.Unmarshal([]byte(tc.payload), &got); err == nil {
+				t.Fatalf("json.Unmarshal(%s) succeeded, want error", tc.payload)
+			}
+			if got != original {
+				t.Fatalf("failed unmarshal mutated request to %+v, want %+v", got, original)
+			}
+		})
+	}
+}
+
 func TestAttachResponsePositionAndResumedWire(t *testing.T) {
 	for _, resumed := range []bool{false, true} {
 		response := AttachResponse{
@@ -133,6 +200,24 @@ func TestAttachResponsePositionAndResumedWire(t *testing.T) {
 		if !resumed && strings.Contains(string(raw), `"resumed"`) {
 			t.Fatalf("false resumed response changed legacy omission: %s", raw)
 		}
+	}
+}
+
+func TestAttachResponseQuotesUnsafeJavaScriptCursor(t *testing.T) {
+	want := TerminalPosition{Epoch: "pty-max", Sequence: TerminalSequence(^uint64(0))}
+	raw, err := json.Marshal(AttachResponse{OK: true, Position: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"cursor":"18446744073709551615"`) {
+		t.Fatalf("response = %s, want lossless quoted cursor", raw)
+	}
+	var got AttachResponse
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.HighWater() != want {
+		t.Fatalf("response high-water = %+v, want %+v", got.HighWater(), want)
 	}
 }
 

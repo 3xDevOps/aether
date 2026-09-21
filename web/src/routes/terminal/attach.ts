@@ -422,7 +422,13 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   >()
   const applyPendingServerPosition = () => {
     if (pendingServerPosition === null || replayPending() || pendingLiveWrites.size > 0) return
-    parsedPosition = pendingServerPosition
+    if (
+      parsedPosition === null ||
+      parsedPosition.epoch !== pendingServerPosition.epoch ||
+      BigInt(parsedPosition.sequence) < BigInt(pendingServerPosition.sequence)
+    ) {
+      parsedPosition = pendingServerPosition
+    }
     pendingServerPosition = null
   }
   const adoptServerPosition = (position: TerminalPosition) => {

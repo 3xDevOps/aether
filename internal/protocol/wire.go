@@ -589,22 +589,35 @@ func (r *AttachResponse) SetHighWater(position TerminalPosition) {
 	r.ResumeID, r.Cursor = legacyTerminalPosition(position, "", 0)
 }
 
-// MarshalJSON preserves the legacy flat resume_id/cursor wire shape.
+// MarshalJSON preserves numeric cursors for legacy peers while quoting values
+// above JavaScript's exact integer range.
 func (r AttachResponse) MarshalJSON() ([]byte, error) {
 	type wire AttachResponse
 	out := wire(r)
 	out.ResumeID, out.Cursor = legacyTerminalPosition(r.Position, r.ResumeID, r.Cursor)
-	return json.Marshal(out)
+	return json.Marshal(struct {
+		wire
+		Cursor any `json:"cursor,omitempty"`
+	}{wire: out, Cursor: marshalTerminalCursor(out.Cursor)})
 }
 
-// UnmarshalJSON accepts old responses and materializes one atomic high-water.
+// UnmarshalJSON accepts numeric and lossless decimal-string cursors and
+// materializes one atomic high-water position.
 func (r *AttachResponse) UnmarshalJSON(data []byte) error {
 	type wire AttachResponse
-	var decoded wire
+	var decoded struct {
+		wire
+		Cursor json.RawMessage `json:"cursor"`
+	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*r = AttachResponse(decoded)
+	cursor, err := unmarshalTerminalCursor(decoded.Cursor)
+	if err != nil {
+		return err
+	}
+	decoded.wire.Cursor = cursor
+	*r = AttachResponse(decoded.wire)
 	r.Position = TerminalPosition{Epoch: TerminalEpoch(r.ResumeID), Sequence: TerminalSequence(r.Cursor)}
 	return nil
 }

@@ -959,26 +959,47 @@ func replayableStatus(st domain.RunStatus) bool {
 	return st.Terminal()
 }
 
-// serveReplay streams a finished run's complete recorded transcript and ends
-// the channel cleanly (exit-status 0), reporting whether it served. A framed
-// dashboard attach still uses the final snapshot's geometry, but its output is
-// the same complete history a raw client receives.
+const maxFinishedScreenReplayBytes = 1 << 20
+
+// serveReplay streams a finished run's recorded output and ends the channel
+// cleanly (exit-status 0), reporting whether it served. Screen attaches prefer
+// the compact final snapshot, then a bounded recent transcript while snapshot
+// repair is pending. Raw and explicit full-history attaches retain Replay.
 func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed, screen bool, controlSnap control.Snapshot, controlHeld bool) bool {
 	var (
-		rc          io.ReadCloser
-		replayBytes int
-		err         error
+		rc             io.ReadCloser
+		replayBytes    int
+		replayPosition protocol.TerminalPosition
+		err            error
 	)
 	if framed {
 		snap, snapErr := s.cfg.PTY.Snapshot(run.ID)
 		if snapErr != nil {
 			slog.Warn("sshd: snapshot finished run", "run", run.ID, "error", snapErr)
-			return false
-		}
-		cols, rows = snap.Cols, snap.Rows
-		if screen {
-			replayBytes = len(snap.Data)
-			rc = io.NopCloser(bytes.NewReader(snap.Data))
+			if screen {
+				window, recentErr := s.cfg.PTY.RecentReplay(run.ID, maxFinishedScreenReplayBytes)
+				if recentErr != nil {
+					if !errors.Is(recentErr, os.ErrNotExist) {
+						slog.Warn("sshd: open recent transcript for attach replay", "run", run.ID, "error", recentErr)
+					}
+					return false
+				}
+				rc, replayBytes = window.Reader, window.Bytes
+				cols, rows = window.Cols, window.Rows
+				position := protocol.TerminalPosition{
+					Epoch:    protocol.TerminalEpoch(window.Position.Epoch),
+					Sequence: protocol.TerminalSequence(window.Position.Sequence),
+				}
+				if window.Complete && position.Valid() {
+					replayPosition = position
+				}
+			}
+		} else {
+			cols, rows = snap.Cols, snap.Rows
+			if screen {
+				replayBytes = len(snap.Data)
+				rc = io.NopCloser(bytes.NewReader(snap.Data))
+			}
 		}
 	}
 	if rc == nil {
@@ -993,6 +1014,9 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 	defer func() { _ = rc.Close() }()
 	ack := protocol.AttachResponse{
 		OK: true, Cols: cols, Rows: rows, Replay: replayBytes, Framed: framed,
+	}
+	if replayPosition.Valid() {
+		ack.SetHighWater(replayPosition)
 	}
 	if s.cfg.Control != nil {
 		s.attachControlAck(&ack, controlSnap, controlHeld)

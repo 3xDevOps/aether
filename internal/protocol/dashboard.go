@@ -1,6 +1,10 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+)
 
 // Attach transport types for the local gateway (internal/localgw). The
 // gateway's HTTP/WS surface has no login of its own: it is spawned by
@@ -62,13 +66,60 @@ func (r DashAttachRequest) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON accepts old dashboard headers and materializes Position.
 func (r *DashAttachRequest) UnmarshalJSON(data []byte) error {
 	type wire DashAttachRequest
-	var decoded wire
+	var decoded struct {
+		wire
+		Cursor json.RawMessage `json:"cursor"`
+	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*r = DashAttachRequest(decoded)
+	cursor, err := unmarshalTerminalCursor(decoded.Cursor)
+	if err != nil {
+		return err
+	}
+	decoded.wire.Cursor = cursor
+	*r = DashAttachRequest(decoded.wire)
 	r.Position = TerminalPosition{Epoch: TerminalEpoch(r.ResumeID), Sequence: TerminalSequence(r.Cursor)}
 	return nil
+}
+
+func unmarshalTerminalCursor(raw json.RawMessage) (uint64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+
+	decimal := string(raw)
+	if raw[0] == '"' {
+		if err := json.Unmarshal(raw, &decimal); err != nil {
+			return 0, err
+		}
+		if decimal == "" || (len(decimal) > 1 && decimal[0] == '0') {
+			return 0, fmt.Errorf("invalid cursor %q: must be a canonical decimal uint64", decimal)
+		}
+		for i := range decimal {
+			if decimal[i] < '0' || decimal[i] > '9' {
+				return 0, fmt.Errorf("invalid cursor %q: must be a canonical decimal uint64", decimal)
+			}
+		}
+	}
+
+	cursor, err := strconv.ParseUint(decimal, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid cursor %q: %w", decimal, err)
+	}
+	return cursor, nil
+}
+
+const maxJSONSafeTerminalCursor = uint64(1<<53 - 1)
+
+func marshalTerminalCursor(cursor uint64) any {
+	if cursor == 0 {
+		return nil
+	}
+	if cursor <= maxJSONSafeTerminalCursor {
+		return cursor
+	}
+	return strconv.FormatUint(cursor, 10)
 }
 
 // Control frame kinds on /ws/attach/{run}. Input and resize travel from
@@ -120,11 +171,19 @@ func (c *DashAttachControl) SetHighWater(position TerminalPosition) {
 
 func (c *DashAttachControl) UnmarshalJSON(data []byte) error {
 	type wire DashAttachControl
-	var decoded wire
+	var decoded struct {
+		wire
+		Cursor json.RawMessage `json:"cursor"`
+	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*c = DashAttachControl(decoded)
+	cursor, err := unmarshalTerminalCursor(decoded.Cursor)
+	if err != nil {
+		return err
+	}
+	decoded.wire.Cursor = cursor
+	*c = DashAttachControl(decoded.wire)
 	c.Position = TerminalPosition{Epoch: TerminalEpoch(c.ResumeID), Sequence: TerminalSequence(c.Cursor)}
 	return nil
 }
