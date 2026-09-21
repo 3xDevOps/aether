@@ -53,7 +53,7 @@ func TestResizeSnapshotMatchesColdCast(t *testing.T) {
 	s := &session{
 		att:          att,
 		tr:           tr,
-		ring:         newRing(1 << 20),
+		ring:         newRingAt(1<<20, TerminalPosition{}),
 		clients:      make(map[*client]struct{}),
 		cols:         80,
 		rows:         30,
@@ -113,7 +113,7 @@ func TestResizePendingOverflowPublishesCursorAfterCommit(t *testing.T) {
 	}
 	s := &session{
 		att:     att,
-		ring:    newRing(maxClientBuffer + 1),
+		ring:    newRingAt(maxClientBuffer+1, TerminalPosition{}),
 		clients: make(map[*client]struct{}),
 		cols:    80,
 		rows:    30,
@@ -129,8 +129,8 @@ func TestResizePendingOverflowPublishesCursorAfterCommit(t *testing.T) {
 
 	fill := bytes.Repeat([]byte{'a'}, maxClientBuffer)
 	s.deliver(fill)
-	if got := s.ring.written; got != 0 {
-		t.Fatalf("ring cursor advanced while resize was pending: %d", got)
+	if got := s.ring.position().Sequence; got != 0 {
+		t.Fatalf("ring position advanced while resize was pending: %d", got)
 	}
 
 	outputDone := make(chan struct{})
@@ -147,8 +147,8 @@ func TestResizePendingOverflowPublishesCursorAfterCommit(t *testing.T) {
 	close(att.release)
 	<-resizeDone
 	<-outputDone
-	if got, want := s.ring.written, uint64(maxClientBuffer+1); got != want {
-		t.Fatalf("ring cursor = %d, want %d after committed handoff", got, want)
+	if got, want := s.ring.position().Sequence, TerminalSequence(maxClientBuffer+1); got != want {
+		t.Fatalf("ring position = %d, want %d after committed handoff", got, want)
 	}
 	if len(s.pendingScreen) != 0 {
 		t.Fatalf("pending output remained after resize completion: %d", len(s.pendingScreen))
@@ -167,13 +167,15 @@ func TestScreenCheckpointRecoversSplitUTF8Suffix(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer screen.dispose()
+	position := TerminalPosition{Epoch: "checkpoint-test"}
 	s := &session{
 		run:        RunSession("checkpoint"),
+		resumeID:   string(position.Epoch),
 		tr:         tr,
 		screen:     screen,
 		checkpoint: checkpointPath(path),
 		clients:    make(map[*client]struct{}),
-		ring:       newRing(1 << 20),
+		ring:       newRingAt(1<<20, position),
 		cols:       80,
 		rows:       24,
 	}
@@ -208,13 +210,15 @@ func TestCheckpointBoundaryKeepsConcurrentSuffix(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer screen.dispose()
+	position := TerminalPosition{Epoch: "checkpoint-suffix-test"}
 	s := &session{
 		run:        RunSession("checkpoint-suffix"),
+		resumeID:   string(position.Epoch),
 		tr:         tr,
 		screen:     screen,
 		checkpoint: checkpointPath(path),
 		clients:    make(map[*client]struct{}),
-		ring:       newRing(1 << 20),
+		ring:       newRingAt(1<<20, position),
 	}
 	s.deliver([]byte("prefix"))
 	s.mu.Lock()
@@ -258,7 +262,7 @@ func TestCheckpointPersistenceDoesNotHoldSessionLock(t *testing.T) {
 		screen:     screen,
 		checkpoint: checkpointPath(path),
 		clients:    make(map[*client]struct{}),
-		ring:       newRing(1 << 20),
+		ring:       newRingAt(1<<20, TerminalPosition{}),
 	}
 	s.deliver([]byte("prefix\xc3"))
 	s.checkpointMu.Lock()
@@ -375,7 +379,7 @@ func TestCheckpointCountsResizeFlushedUTF8AcrossRestart(t *testing.T) {
 func TestClientControlToggleFencesInputAndReconcilesGeometry(t *testing.T) {
 	s := &session{
 		clients: make(map[*client]struct{}),
-		ring:    newRing(1024),
+		ring:    newRingAt(1024, TerminalPosition{}),
 		cols:    80,
 		rows:    24,
 		stdin:   snapshotNopWriteCloser{},
@@ -419,7 +423,7 @@ func TestOlderCheckpointCannotReplaceNewerScreen(t *testing.T) {
 		screen:     screen,
 		checkpoint: checkpointPath(path),
 		clients:    make(map[*client]struct{}),
-		ring:       newRing(1 << 20),
+		ring:       newRingAt(1<<20, TerminalPosition{}),
 	}
 	capture := func() *checkpointCapture {
 		t.Helper()
@@ -500,5 +504,121 @@ func TestFinalizingSessionDefersArchiveFallback(t *testing.T) {
 	}
 	if string(data) != want || size != len(want) {
 		t.Fatalf("finished archive = %q (%d bytes), want %q", data, size, want)
+	}
+}
+
+func TestInjectionBannerAdvancesTerminalPosition(t *testing.T) {
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	start := TerminalPosition{Epoch: "banner", Sequence: 41}
+	s := &session{
+		resumeID: "banner",
+		ring:     newRingAt(1<<20, start),
+		clients:  make(map[*client]struct{}),
+		screen:   screen,
+	}
+	banner := renderBanner("Ana", "blue", "ship it")
+	if err = s.annotateInjection(context.Background(), "Ana", "blue", "ship it"); err != nil {
+		t.Fatal(err)
+	}
+	position := s.ring.position()
+	if want := start.Sequence + TerminalSequence(len(banner)); position != (TerminalPosition{Epoch: start.Epoch, Sequence: want}) {
+		t.Fatalf("position after banner = %+v, want epoch %q sequence %d", position, start.Epoch, want)
+	}
+	if delta, ok := s.ring.since(start); !ok || !bytes.Equal(delta, banner) {
+		t.Fatalf("banner delta = %q, ok=%v, want %q", delta, ok, banner)
+	}
+}
+
+func TestScreenSnapshotAndDeltaMeetAtExactPosition(t *testing.T) {
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	seed := TerminalPosition{Epoch: "seam", Sequence: 100}
+	s := &session{
+		resumeID: "seam",
+		ring:     newRingAt(1024, seed),
+		clients:  make(map[*client]struct{}),
+		screen:   screen,
+	}
+	s.deliver([]byte("before"))
+	s.mu.Lock()
+	snapshot := s.screenSnapshotLocked()
+	s.mu.Unlock()
+	if snapshot.Position != (TerminalPosition{Epoch: seed.Epoch, Sequence: 106}) {
+		t.Fatalf("snapshot position = %+v", snapshot.Position)
+	}
+	s.deliver([]byte("after"))
+	delta, ok := s.ring.since(snapshot.Position)
+	if !ok || string(delta) != "after" {
+		t.Fatalf("snapshot delta = %q, ok=%v", delta, ok)
+	}
+	restored := restoreScreenSnapshot(t, snapshot)
+	if _, err = restored.Write(delta); err != nil {
+		t.Fatal(err)
+	}
+	assertEquivalentScreen(t, s.screen.term, restored)
+	cloned := cloneScreenSnapshot(snapshot)
+	if cloned.Position != snapshot.Position {
+		t.Fatalf("cloned position = %+v, want %+v", cloned.Position, snapshot.Position)
+	}
+}
+
+func TestConcurrentOutputAndSnapshotPreserveOrdering(t *testing.T) {
+	screen, err := newTerminalScreen(80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer screen.dispose()
+	s := &session{
+		resumeID: "concurrent",
+		ring:     newRingAt(1024, TerminalPosition{Epoch: "concurrent", Sequence: 17}),
+		clients:  make(map[*client]struct{}),
+		screen:   screen,
+	}
+	s.deliver([]byte("base"))
+	start := make(chan struct{})
+	snapshotCh := make(chan ScreenSnapshot, 1)
+	delivered := make(chan struct{})
+	go func() {
+		<-start
+		s.mu.Lock()
+		snapshotCh <- s.screenSnapshotLocked()
+		s.mu.Unlock()
+	}()
+	go func() {
+		<-start
+		s.deliver([]byte("-concurrent"))
+		close(delivered)
+	}()
+	close(start)
+	snapshot := <-snapshotCh
+	<-delivered
+	delta, ok := s.ring.since(snapshot.Position)
+	if !ok {
+		t.Fatalf("snapshot position %+v was not resumable", snapshot.Position)
+	}
+	restored := restoreScreenSnapshot(t, snapshot)
+	if _, err = restored.Write(delta); err != nil {
+		t.Fatal(err)
+	}
+	assertEquivalentScreen(t, s.screen.term, restored)
+}
+
+func TestStopIgnoresCheckpointDiagnostic(t *testing.T) {
+	s := &session{
+		clients:       make(map[*client]struct{}),
+		checkpointErr: errors.New("checkpoint storage unavailable"),
+	}
+	if err := s.stop(); err != nil {
+		t.Fatalf("first stop returned checkpoint diagnostic: %v", err)
+	}
+	if err := s.stop(); err != nil {
+		t.Fatalf("idempotent stop returned checkpoint diagnostic: %v", err)
 	}
 }

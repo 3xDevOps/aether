@@ -6,68 +6,6 @@ import (
 	"sync"
 )
 
-// ring keeps the last max bytes of raw PTY output for replay-on-attach.
-// written counts every byte the session has ever produced, so a client
-// that says how far it got can be handed exactly what it missed.
-type ring struct {
-	max     int
-	buf     []byte
-	dropped bool
-	written uint64
-}
-
-func newRing(max int) *ring { return &ring{max: max} }
-
-func (r *ring) write(p []byte) {
-	r.written += uint64(len(p))
-	if len(p) >= r.max {
-		if len(p) > r.max || len(r.buf) > 0 {
-			r.dropped = true
-		}
-		r.buf = append(r.buf[:0], p[len(p)-r.max:]...)
-		return
-	}
-	if len(r.buf)+len(p) > r.max {
-		r.dropped = true
-	}
-	r.buf = append(r.buf, p...)
-	if n := len(r.buf) - r.max; n > 0 {
-		r.buf = append(r.buf[:0], r.buf[n:]...)
-	}
-}
-
-func (r *ring) seed(p []byte, written uint64) {
-	r.buf = append(r.buf[:0], p...)
-	r.written = written
-	r.dropped = written > uint64(len(r.buf))
-}
-
-// since returns the bytes written after cursor, and whether the ring
-// still holds all of them. A cursor from further back than the ring
-// retains - or one ahead of what has been written, which no honest
-// client can hold - reports false, and the caller replays everything
-// instead.
-func (r *ring) since(cursor uint64) ([]byte, bool) {
-	if cursor > r.written {
-		return nil, false
-	}
-	behind := r.written - cursor
-	if behind > uint64(len(r.buf)) {
-		return nil, false
-	}
-	return append([]byte(nil), r.buf[uint64(len(r.buf))-behind:]...), true
-}
-
-func (r *ring) bytes() []byte {
-	start := 0
-	if r.dropped {
-		if i := bytes.IndexByte(r.buf, '\n'); i >= 0 {
-			start = i + 1
-		}
-	}
-	return append([]byte(nil), r.buf[start:]...)
-}
-
 // resizeBoundary is an unresolved geometry event. writeLoop waits for done
 // without holding any session/client lock, then emits the callback only when
 // the runtime accepted the geometry.
@@ -131,13 +69,11 @@ type client struct {
 	snapshot bool
 	screen   bool
 	// resume means this client kept the screen from a previous attach, so
-	// it is sent only what it missed and provokes no redraw. cursor is how
-	// far it got, and resumed records whether the ring could still answer
-	// from there - when it could not, the attach falls back to a full
-	// replay and the client has to clear its screen after all.
+	// it is sent only what it missed and provokes no redraw. position is the
+	// exact terminal boundary it already holds; resumed records whether the
+	// ring could still answer from there.
 	resume      bool
-	cursor      uint64
-	resumeID    string
+	position    TerminalPosition
 	resumed     bool
 	replayCols  uint
 	replayRows  uint
@@ -155,6 +91,12 @@ type client struct {
 }
 
 func newClient(conn io.ReadWriter, a AttachClient) *client {
+	position := a.Position
+	if position == (TerminalPosition{}) {
+		position = TerminalPosition{
+			Epoch: TerminalEpoch(a.ResumeID), Sequence: TerminalSequence(a.Cursor),
+		}
+	}
 	c := &client{
 		conn:     conn,
 		readOnly: a.ReadOnly,
@@ -162,8 +104,7 @@ func newClient(conn io.ReadWriter, a AttachClient) *client {
 		snapshot: a.Screen || a.Snapshot,
 		screen:   a.Screen,
 		resume:   a.Resume,
-		cursor:   a.Cursor,
-		resumeID: a.ResumeID,
+		position: position,
 		cols:     a.Cols,
 		rows:     a.Rows,
 		replay:   io.NopCloser(bytes.NewReader(nil)),
@@ -219,8 +160,16 @@ func (s *session) imposesNow(c *client) bool {
 }
 
 func (c *client) tellResume(resumeID string) {
+	position := c.position
+	if position.Epoch == "" {
+		position.Epoch = TerminalEpoch(resumeID)
+	}
+	if w, ok := c.conn.(TerminalPositionWriter); ok {
+		w.SetTerminalPosition(position, c.resumed)
+		return
+	}
 	if w, ok := c.conn.(ResumeWriter); ok {
-		w.SetResume(c.cursor, c.resumed, resumeID)
+		w.SetResume(uint64(position.Sequence), c.resumed, string(position.Epoch))
 	}
 }
 

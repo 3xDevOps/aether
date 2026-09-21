@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -266,6 +267,53 @@ func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
 	}
 }
 
+func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "recent.cast")
+	first, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.output([]byte("first-life\n"))
+	if err := first.close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.output([]byte("second-life\n"))
+	if err := second.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readRecentCast(path, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "first-life\nsecond-life\n" {
+		t.Fatalf("recent replay = %q", got)
+	}
+
+	// A huge newest event cannot make the helper read past its fixed raw
+	// window. Starting in the middle of that event returns no partial output.
+	large := filepath.Join(t.TempDir(), "large.cast")
+	w, err := newCastWriter(large, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.output(bytes.Repeat([]byte("x"), 1<<20))
+	if err := w.close(); err != nil {
+		t.Fatal(err)
+	}
+	window, used, err := readCastTailWindow(large, 16, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used != 128 || len(window) != 0 {
+		t.Fatalf("bounded window used=%d output=%d, want 128 and 0", used, len(window))
+	}
+}
+
 func TestRestartReplaysCompleteTranscriptHistory(t *testing.T) {
 	h, _ := newTestHost(t, func(cfg *Config) { cfg.ReplayBytes = 8 })
 	run := domain.RunID("run-replay-restart")
@@ -343,8 +391,19 @@ func TestRestartSeedsReplayModesFromTranscriptHistory(t *testing.T) {
 
 	for restart := range 2 {
 		next := newFakeAtt()
-		if err := h.StartSession(ctx, RunSession(run), next); err != nil {
-			t.Fatalf("recovery %d StartSession: %v", restart, err)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			err := h.StartSession(ctx, RunSession(run), next)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, ErrSnapshotPending) {
+				t.Fatalf("recovery %d StartSession: %v", restart, err)
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("recovery %d checkpoint repair did not finish", restart)
+			}
+			time.Sleep(time.Millisecond)
 		}
 		s := h.lookup(RunSession(run))
 		c := newClient(nil, AttachClient{Cols: 120, Rows: 30})

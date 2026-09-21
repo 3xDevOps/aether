@@ -658,3 +658,48 @@ func TestInteractiveControlQueueDoesNotBlockFence(t *testing.T) {
 		t.Fatalf("second control = %+v, want request 2", reader.Control)
 	}
 }
+
+func TestInteractiveGeometryCarriesOrderedHighWater(t *testing.T) {
+	ch := newBlockedControlConn()
+	close(ch.release)
+	ack := &protocol.AttachResponse{OK: true}
+	conn := newAttachConn(ch, bufio.NewReader(bytes.NewReader(nil)), ack, true, nil)
+	conn.interactive = true
+	conn.SetTerminalPosition(ptyhost.TerminalPosition{Epoch: "epoch", Sequence: 7}, true)
+	if err := conn.WriteReplay(bytes.NewReader(nil), 0); err != nil {
+		t.Fatalf("write replay: %v", err)
+	}
+	if _, err := conn.Write([]byte("abc")); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	conn.SetGeometry(100, 40)
+
+	wire := ch.data.Bytes()
+	ackEnd := bytes.IndexByte(wire, '\n')
+	if ackEnd < 0 {
+		t.Fatal("missing attach ack")
+	}
+	var gotAck protocol.AttachResponse
+	if err := json.Unmarshal(wire[:ackEnd], &gotAck); err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if got := gotAck.HighWater(); got.Epoch != "epoch" || got.Sequence != 7 || !gotAck.Resumed {
+		t.Fatalf("ack high-water = %+v resumed=%v", got, gotAck.Resumed)
+	}
+
+	reader := protocol.TerminalReader{Reader: bytes.NewReader(wire[ackEnd+1:])}
+	buf := make([]byte, 8)
+	n, _, err := reader.Read(buf)
+	if err != nil || string(buf[:n]) != "abc" {
+		t.Fatalf("read output = %q, %v", buf[:n], err)
+	}
+	if _, _, err := reader.Read(buf); err != nil {
+		t.Fatalf("read geometry control: %v", err)
+	}
+	if reader.Control == nil || reader.Control.Type != protocol.DashAttachGeometry {
+		t.Fatalf("geometry control = %+v", reader.Control)
+	}
+	if got := reader.Control.HighWater(); got.Epoch != "epoch" || got.Sequence != 10 {
+		t.Fatalf("geometry high-water = %+v, want epoch/10", got)
+	}
+}

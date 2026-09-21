@@ -45,9 +45,9 @@ const maxPendingEcho = 8 << 10
 var errSlowClient = errors.New("ptyhost: client too slow, detached")
 
 type pendingOutputEvent struct {
-	end    int
-	raw    bool
-	marker string
+	end     int
+	visible bool
+	marker  string
 }
 
 // session is one persistent PTY session: the adopted attachment, its pump,
@@ -66,31 +66,31 @@ type session struct {
 	stdinMu       sync.Mutex
 	stdin         io.WriteCloser
 
-	mu               sync.Mutex
-	clients          map[*client]struct{}
-	ring             *ring
-	cols             uint // desired effective geometry
-	rows             uint
-	acceptedCols     uint // last runtime geometry accepted
-	acceptedRows     uint
-	lastResizeCursor uint64
-	geoGen           uint64  // bumped whenever the PTY must be (re)sized
-	geoApplied       uint64  // last geoGen an applier has picked up
-	geoTold          [2]uint // last size the clients were told about
-	ended            bool
-	stopped          bool
-	lastOut          time.Time
-	paintQuietUntil  time.Time
-	done             chan struct{}
-	title            titleScanner
-	modes            modeScanner
-	screen           *terminalScreen
-	pendingScreen    []byte
-	pendingEvents    []pendingOutputEvent
-	finalSnapshot    ScreenSnapshot
-	checkpointErr    error
-	finishDone       chan struct{}
-	onTitle          func(string)
+	mu                 sync.Mutex
+	clients            map[*client]struct{}
+	ring               *ring
+	cols               uint // desired effective geometry
+	rows               uint
+	acceptedCols       uint // last runtime geometry accepted
+	acceptedRows       uint
+	lastResizeSequence TerminalSequence
+	geoGen             uint64  // bumped whenever the PTY must be (re)sized
+	geoApplied         uint64  // last geoGen an applier has picked up
+	geoTold            [2]uint // last size the clients were told about
+	ended              bool
+	stopped            bool
+	lastOut            time.Time
+	paintQuietUntil    time.Time
+	done               chan struct{}
+	title              titleScanner
+	modes              modeScanner
+	screen             *terminalScreen
+	pendingScreen      []byte
+	pendingEvents      []pendingOutputEvent
+	finalSnapshot      ScreenSnapshot
+	checkpointErr      error
+	finishDone         chan struct{}
+	onTitle            func(string)
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
@@ -110,6 +110,24 @@ type session struct {
 	// geometry-aware clients before each application, so output delivery can
 	// continue without taking this lock while the runtime is in flight.
 	resizeMu sync.Mutex
+}
+
+// currentPositionLocked returns the terminal boundary represented by screen.
+// Callers hold s.mu.
+func (s *session) currentPositionLocked() TerminalPosition {
+	if s.ring != nil {
+		return s.ring.position()
+	}
+	if s.finalSnapshot.Position.Epoch != "" {
+		return s.finalSnapshot.Position
+	}
+	return TerminalPosition{Epoch: TerminalEpoch(s.resumeID)}
+}
+
+// screenSnapshotLocked atomically captures VT state and its output high-water.
+// Callers hold s.mu.
+func (s *session) screenSnapshotLocked() ScreenSnapshot {
+	return makeScreenSnapshot(s.screen, s.modes, s.currentPositionLocked())
 }
 
 func (s *session) pump() {
@@ -197,19 +215,19 @@ func (s *session) deliver(p []byte) {
 }
 
 // queuePendingOutputLocked appends one ordered output event to the single
-// bounded byte buffer held across a resize. raw controls ring publication;
-// markers belong only to the transcript.
-func (s *session) queuePendingOutputLocked(p []byte, raw bool, marker string) {
+// bounded byte buffer held across a resize. visible controls sequence/ring
+// publication; markers belong only to the transcript.
+func (s *session) queuePendingOutputLocked(p []byte, visible bool, marker string) {
 	s.pendingScreen = append(s.pendingScreen, p...)
 	s.pendingEvents = append(s.pendingEvents, pendingOutputEvent{
-		end:    len(s.pendingScreen),
-		raw:    raw,
-		marker: marker,
+		end:     len(s.pendingScreen),
+		visible: visible,
+		marker:  marker,
 	})
 }
 
-// commitOutputLocked applies raw PTY output to every durable/live
-// representation. Callers hold s.mu.
+// commitOutputLocked applies client-visible output to every durable/live
+// representation, advancing the ring before enqueueing clients. Callers hold s.mu.
 func (s *session) commitOutputLocked(p []byte) {
 	if len(p) == 0 {
 		return
@@ -259,7 +277,7 @@ func (s *session) commitPendingOutputLocked(p []byte) {
 			end = len(p)
 		}
 		chunk := p[offset:end]
-		if event.raw && s.ring != nil {
+		if event.visible && s.ring != nil {
 			s.ring.write(chunk)
 		}
 		if s.tr != nil {
@@ -333,7 +351,7 @@ func (s *session) finishLocked() (*checkpointCapture, *castWriter) {
 		if capture != nil {
 			s.finalSnapshot = capture.snapshot
 		} else {
-			s.finalSnapshot = makeScreenSnapshot(s.screen, s.modes)
+			s.finalSnapshot = s.screenSnapshotLocked()
 		}
 		s.screen.dispose()
 		s.screen = nil
@@ -356,16 +374,12 @@ func (s *session) stop() error {
 		s.mu.Lock()
 		if s.stopped {
 			done := s.finishDone
-			err := s.checkpointErr
 			s.mu.Unlock()
 			s.resizeMu.Unlock()
 			if done != nil {
 				<-done
-				s.mu.Lock()
-				err = s.checkpointErr
-				s.mu.Unlock()
 			}
-			return err
+			return nil
 		}
 		if s.ended && s.finishDone != nil {
 			done := s.finishDone
@@ -396,7 +410,7 @@ func (s *session) stop() error {
 		finishDone := s.finishDone
 		s.mu.Unlock()
 		s.resizeMu.Unlock()
-		err := s.persistCheckpoint(capture)
+		_ = s.persistCheckpoint(capture)
 		if tr != nil {
 			_ = tr.close()
 		}
@@ -407,12 +421,7 @@ func (s *session) stop() error {
 			_ = att.Close()
 		}
 		close(finishDone)
-		s.mu.Lock()
-		if err == nil {
-			err = s.checkpointErr
-		}
-		s.mu.Unlock()
-		return err
+		return nil
 	}
 }
 
@@ -488,20 +497,20 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		if c.replayCols == 0 || c.replayRows == 0 {
 			c.replayCols, c.replayRows = s.cols, s.rows
 		}
-		// A resumed terminal can consume a raw gap only when its cursor
-		// belongs to this exact PTY process and no accepted resize occurred
+		// A resumed terminal can consume a raw gap only when its position
+		// belongs to this exact terminal epoch and no accepted resize occurred
 		// before that gap. Resize events are not in the raw ring, so a
 		// non-empty gap crossing one must rebuild the screen.
-		if c.resume && c.resumeID != "" && c.resumeID == s.resumeID {
-			if missed, ok := s.ring.since(c.cursor); ok &&
-				(!c.snapshot || c.cursor >= s.lastResizeCursor) {
+		if c.resume && c.position.Epoch != "" {
+			if missed, ok := s.ring.since(c.position); ok &&
+				(!c.snapshot || c.position.Sequence >= s.lastResizeSequence) {
 				c.setReplay(missed)
 				c.resumed = true
 			}
 		}
 		if !c.resumed {
 			if c.screen {
-				c.setReplay(makeScreenSnapshot(s.screen, s.modes).Data)
+				c.setReplay(s.screenSnapshotLocked().Data)
 			} else if _, isRun := s.run.Run(); isRun {
 				replay, replayBytes, err := s.tr.snapshot(s.history)
 				if err != nil {
@@ -511,15 +520,15 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 				c.replay = replay
 				c.replayBytes = replayBytes
 			} else if c.snapshot {
-				c.setReplay(makeScreenSnapshot(s.screen, s.modes).Data)
+				c.setReplay(s.screenSnapshotLocked().Data)
 			} else {
 				// A raw byte tail no longer carries modes set at startup.
 				c.setReplay(append(s.modes.preamble(), s.ring.bytes()...))
 			}
 		}
-		// Where the replay leaves this client, so it can say where it got
-		// to if it comes back.
-		c.cursor = s.ring.written
+		// The replay and this position are captured under the same lock. New
+		// output is queued only after the client is registered below.
+		c.position = s.ring.position()
 		s.clients[c] = struct{}{}
 		if err := ctx.Err(); err != nil {
 			delete(s.clients, c)
@@ -728,10 +737,10 @@ func (s *session) applyResize() {
 		s.pendingScreen = nil
 	}
 	if applied && changed && s.ring != nil {
-		// A resume cursor below this point crosses the geometry event and
+		// A resume position below this point crosses the geometry event and
 		// must rebuild from the now-committed screen rather than consume a
 		// raw gap against the old grid.
-		s.lastResizeCursor = s.ring.written
+		s.lastResizeSequence = s.ring.position().Sequence
 	}
 	tell := applied && s.geoTold != [2]uint{cols, rows}
 	if tell {
@@ -853,18 +862,17 @@ func (s *session) annotateInjection(ctx context.Context, actorName, actorColor, 
 			}
 		}
 		if s.resizeActive {
-			s.queuePendingOutputLocked(banner, false, marker)
-		} else {
-			if s.screen != nil {
-				s.screen.write(banner)
+			s.queuePendingOutputLocked(banner, true, marker)
+			// Live clients stay responsive while durable publication waits for
+			// the resize boundary; pendingEvents preserves this exact order.
+			for c := range s.clients {
+				c.enqueue(banner)
 			}
+		} else {
+			s.commitOutputLocked(banner)
 			if s.tr != nil {
-				s.tr.output(banner)
 				s.tr.marker(marker)
 			}
-		}
-		for c := range s.clients {
-			c.enqueue(banner)
 		}
 		s.mu.Unlock()
 		return nil

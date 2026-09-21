@@ -21,28 +21,118 @@ func TestAttachRequestShellWire(t *testing.T) {
 		t.Fatalf("attach request = %s, want shell field", raw)
 	}
 }
-func TestAttachResumeIDWire(t *testing.T) {
-	req := AttachRequest{RunID: "run-1", Resume: true, Cursor: 17, ResumeID: "pty-incarnation"}
+func TestAttachPositionWireCompatibility(t *testing.T) {
+	const oldPayload = `{"run_id":"run-1","resume":true,"resume_id":"pty-old","cursor":17}`
+	var old AttachRequest
+	if err := json.Unmarshal([]byte(oldPayload), &old); err != nil {
+		t.Fatal(err)
+	}
+	wantOld := TerminalPosition{Epoch: "pty-old", Sequence: 17}
+	if old.Position != wantOld || old.ResumePosition() != wantOld || old.ResumeID != "pty-old" || old.Cursor != 17 {
+		t.Fatalf("old attach position = %+v fields=(%q,%d), want %+v", old.Position, old.ResumeID, old.Cursor, wantOld)
+	}
+
+	const maxSequence = TerminalSequence(^uint64(0))
+	req := AttachRequest{
+		RunID: "run-1", Resume: true,
+		Position: TerminalPosition{Epoch: "pty-new", Sequence: maxSequence},
+	}
 	raw, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"resume_id":"pty-incarnation"`) {
-		t.Fatalf("attach request = %s, want resume_id field", raw)
+	if got := string(raw); !strings.Contains(got, `"resume_id":"pty-new"`) ||
+		!strings.Contains(got, `"cursor":18446744073709551615`) || strings.Contains(got, `"Position"`) {
+		t.Fatalf("new attach request wire shape = %s", got)
 	}
-	var got AttachRequest
-	if unmarshalErr := json.Unmarshal(raw, &got); unmarshalErr != nil {
-		t.Fatal(unmarshalErr)
+	var roundTrip AttachRequest
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatal(err)
 	}
-	if got.ResumeID != req.ResumeID {
-		t.Fatalf("attach request resume_id = %q, want %q", got.ResumeID, req.ResumeID)
+	if roundTrip.Position != req.Position {
+		t.Fatalf("large position round trip = %+v, want %+v", roundTrip.Position, req.Position)
 	}
-	ack, err := json.Marshal(AttachResponse{OK: true, Cursor: 23, ResumeID: "pty-incarnation"})
+}
+
+func TestAttachPositionAcceptsAbsentEpochAndZeroValues(t *testing.T) {
+	var req AttachRequest
+	if err := json.Unmarshal([]byte(`{"run_id":"run-1","resume":true,"cursor":9}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Position != (TerminalPosition{Sequence: 9}) || req.Position.Valid() {
+		t.Fatalf("epochless request position = %+v, want invalid sequence 9", req.Position)
+	}
+
+	var empty DashAttachRequest
+	if err := json.Unmarshal([]byte(`{"resume":true,"cursor":0}`), &empty); err != nil {
+		t.Fatal(err)
+	}
+	if empty.Position != (TerminalPosition{}) || empty.ResumePosition().Valid() {
+		t.Fatalf("zero dashboard position = %+v, want invalid zero position", empty.Position)
+	}
+}
+
+func TestDashboardPositionWireCompatibility(t *testing.T) {
+	want := TerminalPosition{Epoch: "pty-dashboard", Sequence: 42}
+	header, err := json.Marshal(DashAttachRequest{Resume: true, Position: want})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(ack), `"resume_id":"pty-incarnation"`) {
-		t.Fatalf("attach response = %s, want resume_id field", ack)
+	if got := string(header); !strings.Contains(got, `"resume_id":"pty-dashboard"`) || !strings.Contains(got, `"cursor":42`) {
+		t.Fatalf("dashboard header = %s, want flat position", got)
+	}
+	var decoded DashAttachRequest
+	if err := json.Unmarshal(header, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ResumePosition() != want {
+		t.Fatalf("dashboard position = %+v, want %+v", decoded.ResumePosition(), want)
+	}
+
+	var compatibility DashAttachRequest
+	compatibility.SetResumePosition(want)
+	if compatibility.ResumeID != "pty-dashboard" || compatibility.Cursor != 42 {
+		t.Fatalf("legacy compatibility fields = (%q,%d), want (%q,%d)", compatibility.ResumeID, compatibility.Cursor, "pty-dashboard", 42)
+	}
+
+	controlOut := DashAttachControl{Type: DashAttachControlFrame, OK: true}
+	controlOut.SetHighWater(want)
+	state, err := json.Marshal(controlOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var control DashAttachControl
+	if err := json.Unmarshal(state, &control); err != nil {
+		t.Fatal(err)
+	}
+	if control.HighWater() != want {
+		t.Fatalf("control high-water = %+v, want %+v", control.HighWater(), want)
+	}
+}
+
+func TestAttachResponsePositionAndResumedWire(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		response := AttachResponse{
+			OK: true, Resumed: resumed,
+			Position: TerminalPosition{Epoch: "pty-response", Sequence: 23},
+		}
+		raw, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got AttachResponse
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.HighWater() != response.Position || got.Resumed != resumed {
+			t.Fatalf("response resumed=%v decoded as %+v", resumed, got)
+		}
+		if resumed && !strings.Contains(string(raw), `"resumed":true`) {
+			t.Fatalf("resumed response omitted true flag: %s", raw)
+		}
+		if !resumed && strings.Contains(string(raw), `"resumed"`) {
+			t.Fatalf("false resumed response changed legacy omission: %s", raw)
+		}
 	}
 }
 

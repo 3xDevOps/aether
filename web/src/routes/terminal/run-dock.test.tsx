@@ -316,7 +316,7 @@ describe('run-shell dock', () => {
     await waitFor(() => expect(shells()).toHaveLength(2))
     const resumed = shells()[1]
     act(() => resumed.onopen?.())
-    expect(resumed.frames()[0]).toMatchObject({ resume: true, cursor: 0 })
+    expect(resumed.frames()[0]).toMatchObject({ resume: true, cursor: '0' })
     act(() => {
       resumed.onmessage?.({
         data: JSON.stringify({ ok: true, resumed: true, replay: 1, cursor: 1, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),

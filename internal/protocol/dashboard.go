@@ -1,5 +1,7 @@
 package protocol
 
+import "encoding/json"
+
 // Attach transport types for the local gateway (internal/localgw). The
 // gateway's HTTP/WS surface has no login of its own: it is spawned by
 // `aether gui`, which holds the SSH identity and hands the browser a
@@ -25,17 +27,48 @@ type DashAttachRequest struct {
 	// Resume is AttachRequest.Resume: reattach without the scrollback
 	// replay, keeping the screen this client already has.
 	Resume bool `json:"resume,omitempty"`
-	// Cursor is AttachRequest.Cursor: how much of the output this client
-	// already holds, so a resume replays only what it missed.
-	Cursor uint64 `json:"cursor,omitempty"`
-	// ResumeID identifies the PTY process incarnation that produced Cursor.
-	ResumeID string `json:"resume_id,omitempty"`
+	// Cursor and ResumeID preserve compatibility for gateway callers awaiting
+	// the position integration pass. New code uses Position atomically.
+	Cursor   uint64           `json:"cursor,omitempty"`
+	ResumeID string           `json:"resume_id,omitempty"`
+	Position TerminalPosition `json:"-"`
 	// ControlSessionID is stable for one browser terminal tab across
 	// reconnects and distinct for two tabs by the same member.
 	ControlSessionID  string `json:"control_session_id,omitempty"`
 	ControlGeneration uint64 `json:"control_generation,omitempty"`
 	Takeover          bool   `json:"takeover,omitempty"`
 	ReleaseControl    bool   `json:"release_control,omitempty"`
+}
+
+// ResumePosition returns the request's atomic terminal position.
+func (r DashAttachRequest) ResumePosition() TerminalPosition {
+	return terminalPosition(r.Position, r.ResumeID, r.Cursor)
+}
+
+// SetResumePosition updates the typed value and legacy compatibility fields.
+func (r *DashAttachRequest) SetResumePosition(position TerminalPosition) {
+	r.Position = position
+	r.ResumeID, r.Cursor = legacyTerminalPosition(position, "", 0)
+}
+
+// MarshalJSON preserves the legacy flat resume_id/cursor wire shape.
+func (r DashAttachRequest) MarshalJSON() ([]byte, error) {
+	type wire DashAttachRequest
+	out := wire(r)
+	out.ResumeID, out.Cursor = legacyTerminalPosition(r.Position, r.ResumeID, r.Cursor)
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON accepts old dashboard headers and materializes Position.
+func (r *DashAttachRequest) UnmarshalJSON(data []byte) error {
+	type wire DashAttachRequest
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = DashAttachRequest(decoded)
+	r.Position = TerminalPosition{Epoch: TerminalEpoch(r.ResumeID), Sequence: TerminalSequence(r.Cursor)}
+	return nil
 }
 
 // Control frame kinds on /ws/attach/{run}. Input and resize travel from
@@ -68,4 +101,30 @@ type DashAttachControl struct {
 	Error             string `json:"error,omitempty"`
 	HasControl        bool   `json:"has_control,omitempty"`
 	ControlSessionID  string `json:"control_session_id,omitempty"`
+	// Cursor and ResumeID are the legacy flat encoding of Position.
+	Cursor   uint64           `json:"cursor,omitempty"`
+	ResumeID string           `json:"resume_id,omitempty"`
+	Position TerminalPosition `json:"-"`
+}
+
+// HighWater returns the atomic terminal position carried by this state frame.
+func (c DashAttachControl) HighWater() TerminalPosition {
+	return terminalPosition(c.Position, c.ResumeID, c.Cursor)
+}
+
+// SetHighWater updates the typed value and legacy compatibility fields.
+func (c *DashAttachControl) SetHighWater(position TerminalPosition) {
+	c.Position = position
+	c.ResumeID, c.Cursor = legacyTerminalPosition(position, "", 0)
+}
+
+func (c *DashAttachControl) UnmarshalJSON(data []byte) error {
+	type wire DashAttachControl
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = DashAttachControl(decoded)
+	c.Position = TerminalPosition{Epoch: TerminalEpoch(c.ResumeID), Sequence: TerminalSequence(c.Cursor)}
+	return nil
 }

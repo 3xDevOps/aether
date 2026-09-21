@@ -803,6 +803,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	}
 	errCh := make(chan error, 1)
 	go func() {
+		resumePosition := req.ResumePosition()
 		errCh <- s.cfg.PTY.Attach(attachCtx, key, ptyhost.AttachClient{
 			Cols:     cols,
 			Rows:     rows,
@@ -830,8 +831,12 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			Screen:         req.Screen,
 			Follow:         req.Follow,
 			Resume:         req.Resume,
-			Cursor:         req.Cursor,
-			ResumeID:       req.ResumeID,
+			Position: ptyhost.TerminalPosition{
+				Epoch:    ptyhost.TerminalEpoch(resumePosition.Epoch),
+				Sequence: ptyhost.TerminalSequence(resumePosition.Sequence),
+			},
+			Cursor:   uint64(resumePosition.Sequence),
+			ResumeID: string(resumePosition.Epoch),
 		}, conn, st.resize)
 	}()
 

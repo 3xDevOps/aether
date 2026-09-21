@@ -40,7 +40,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 	// server fences the writer before admitting this replacement, and the
 	// gateway must not forward input while that transition is in flight.
 	allowWrite := req.Write && !req.ReleaseControl
-	term, ack, err := s.Backend.Attach(s.Ctx, protocol.AttachRequest{
+	attachReq := protocol.AttachRequest{
 		RunID:             r.PathValue("run"),
 		ReadOnly:          !allowWrite,
 		Screen:            req.Screen,
@@ -50,14 +50,14 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Shell:             shell,
 		Follow:            req.Follow,
 		Resume:            req.Resume,
-		Cursor:            req.Cursor,
-		ResumeID:          req.ResumeID,
 		ControlSessionID:  req.ControlSessionID,
 		ControlGeneration: req.ControlGeneration,
 		Takeover:          req.Takeover,
 		ReleaseControl:    req.ReleaseControl,
 		Framed:            true,
-	})
+	}
+	attachReq.SetResumePosition(req.ResumePosition())
+	term, ack, err := s.Backend.Attach(s.Ctx, attachReq)
 	if err == nil && ack.OK && !ack.Framed {
 		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
 		ack = protocol.AttachResponse{Code: protocol.CodeInternal, Error: err.Error()}

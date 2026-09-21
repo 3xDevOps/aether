@@ -1854,7 +1854,7 @@ func TestStopSessionsWithPrefix(t *testing.T) {
 	}
 }
 func TestRingBytesReturnsAllWhenUnwrapped(t *testing.T) {
-	r := newRing(8)
+	r := newRingAt(8, TerminalPosition{})
 	r.write([]byte("abc\n"))
 	if got := string(r.bytes()); got != "abc\n" {
 		t.Fatalf("unwrapped ring bytes = %q, want %q", got, "abc\n")
@@ -1862,7 +1862,7 @@ func TestRingBytesReturnsAllWhenUnwrapped(t *testing.T) {
 }
 
 func TestRingBytesStartsAtLineBoundaryAfterWrap(t *testing.T) {
-	r := newRing(10)
+	r := newRingAt(10, TerminalPosition{})
 	r.write([]byte("12345\n6789x"))
 	if got := string(r.bytes()); got != "6789x" {
 		t.Fatalf("wrapped ring bytes = %q, want %q", got, "6789x")
@@ -1870,7 +1870,7 @@ func TestRingBytesStartsAtLineBoundaryAfterWrap(t *testing.T) {
 }
 
 func TestRingBytesReturnsAllWrappedBytesWithoutNewline(t *testing.T) {
-	r := newRing(5)
+	r := newRingAt(5, TerminalPosition{})
 	r.write([]byte("abcdef"))
 	if got := string(r.bytes()); got != "bcdef" {
 		t.Fatalf("wrapped ring without newline = %q, want %q", got, "bcdef")
@@ -1939,9 +1939,13 @@ func TestRemoveRunTranscripts(t *testing.T) {
 			t.Fatalf("close %s: %v", name, err)
 		}
 	}
-	if _, err := h.Snapshot("run-1"); err != nil {
-		t.Fatalf("cache cold snapshot: %v", err)
+	if _, err := h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
+		t.Fatalf("start cold snapshot repair: %v", err)
 	}
+	waitFor(t, "cold snapshot repair", func() bool {
+		_, err := h.Snapshot("run-1")
+		return err == nil
+	})
 
 	if err := h.RemoveRunTranscripts(t.Context(), "run-1"); err != nil {
 		t.Fatalf("RemoveRunTranscripts: %v", err)
@@ -1972,9 +1976,13 @@ func TestSnapshotSurfacesCorruptArchivedTranscript(t *testing.T) {
 	if err := w.close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Snapshot("run-1"); err == nil || !strings.Contains(err.Error(), "decode transcript header") {
-		t.Fatalf("corrupt archive snapshot error = %v", err)
+	if _, err := h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
+		t.Fatalf("corrupt archive initial snapshot error = %v, want pending", err)
 	}
+	waitFor(t, "corrupt archive repair failure", func() bool {
+		_, err := h.Snapshot("run-1")
+		return errors.Is(err, ErrSnapshotUnavailable) && strings.Contains(err.Error(), "decode transcript header")
+	})
 }
 
 // TestStartSessionReplacesEndedSession: a run-shell tab whose shell exited
@@ -2391,7 +2399,7 @@ func TestResizeQueuesGeometryBeforeRepaint(t *testing.T) {
 	s = &session{
 		att:     att,
 		tr:      tr,
-		ring:    newRing(1024),
+		ring:    newRingAt(1024, TerminalPosition{}),
 		clients: map[*client]struct{}{c: {}},
 		cols:    120,
 		rows:    30,

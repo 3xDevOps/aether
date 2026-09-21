@@ -82,10 +82,18 @@ describe('useRunTerminalSession', () => {
     act(() => {
       socket.onopen?.()
       socket.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 0, control_generation: 0, has_control: false }),
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          resume_id: 'epoch',
+          cursor: '7',
+          control_generation: 0,
+          has_control: false,
+        }),
       })
     })
     expect(socket.frames()[0]).toMatchObject({ screen: true, interactive: true })
+    expect(result.current.controlMetadata?.position).toEqual({ epoch: 'epoch', sequence: '7' })
 
     act(() => result.current.takeControl())
     expect(result.current.state.write).toBe(false)
