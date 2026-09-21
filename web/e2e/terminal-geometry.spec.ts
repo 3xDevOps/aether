@@ -82,22 +82,17 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await assertGrid(72, 22)
     // The larger viewer must keep proposing its pane, not feed 60x18 back
     // into the minimum and stop the shared terminal ever growing again.
-    const viewport = page.locator('.xterm-viewport:visible')
-    const bottomRows = () =>
-      viewport.evaluate((element) => {
-        const viewport = element as HTMLElement
-        const rowHeight = viewport.clientHeight / 22
-        return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
-      })
-    const pinnedRows = await viewport.evaluate((element) => {
-      const viewport = element as HTMLElement
-      const rowHeight = viewport.clientHeight / 22
-      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight - rowHeight * 3)
-      return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
-    })
-    expect(pinnedRows).toBeGreaterThan(2)
+    // xterm draws the viewport itself, so the DOM scroll height stays equal to
+    // the screen. Wheel up until the pinned line is no longer the bottom marker,
+    // then a larger font has to keep that line.
+    const screen = page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+    await screen.hover()
+    for (let step = 0; step < 8; step++) await page.mouse.wheel(0, -600)
+    const pinned = (await rows.first().innerText()).trim()
+    expect(pinned).toContain('geometry-scroll-')
+    await expect(rows.last()).not.toHaveText(/X$/)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
-    await expect.poll(bottomRows).toBeCloseTo(pinnedRows, 0)
+    await expect(rows.first()).toContainText(pinned)
     await assertGrid(72, 22)
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
