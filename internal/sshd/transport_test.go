@@ -553,6 +553,7 @@ func TestAttachFinishedScreenUsesRecentReplayWhileSnapshotPending(t *testing.T) 
 		e.run.ID: {
 			data: []byte("recent output"), cols: 132, rows: 43,
 			position: ptyhost.TerminalPosition{Epoch: "unproven", Sequence: 99},
+			complete: true,
 		},
 	}
 	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
@@ -570,7 +571,7 @@ func TestAttachFinishedScreenUsesRecentReplayWhileSnapshotPending(t *testing.T) 
 		t.Fatalf("ack = %+v, want bounded recent replay geometry and length", ack)
 	}
 	if position := ack.HighWater(); position.Valid() {
-		t.Fatalf("ack high-water = %+v, want none for incomplete replay window", position)
+		t.Fatalf("ack high-water = %+v, want none for bounded fallback replay", position)
 	}
 	e.pty.mu.Lock()
 	recentLimit := e.pty.recentLimit

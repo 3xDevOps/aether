@@ -967,10 +967,9 @@ const maxFinishedScreenReplayBytes = 1 << 20
 // repair is pending. Raw and explicit full-history attaches retain Replay.
 func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint, framed, screen bool, controlSnap control.Snapshot, controlHeld bool) bool {
 	var (
-		rc             io.ReadCloser
-		replayBytes    int
-		replayPosition protocol.TerminalPosition
-		err            error
+		rc          io.ReadCloser
+		replayBytes int
+		err         error
 	)
 	if framed {
 		snap, snapErr := s.cfg.PTY.Snapshot(run.ID)
@@ -986,13 +985,6 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 				}
 				rc, replayBytes = window.Reader, window.Bytes
 				cols, rows = window.Cols, window.Rows
-				position := protocol.TerminalPosition{
-					Epoch:    protocol.TerminalEpoch(window.Position.Epoch),
-					Sequence: protocol.TerminalSequence(window.Position.Sequence),
-				}
-				if window.Complete && position.Valid() {
-					replayPosition = position
-				}
 			}
 		} else {
 			cols, rows = snap.Cols, snap.Rows
@@ -1014,9 +1006,6 @@ func (s *Server) serveReplay(ch subsystemConn, run *domain.Run, cols, rows uint,
 	defer func() { _ = rc.Close() }()
 	ack := protocol.AttachResponse{
 		OK: true, Cols: cols, Rows: rows, Replay: replayBytes, Framed: framed,
-	}
-	if replayPosition.Valid() {
-		ack.SetHighWater(replayPosition)
 	}
 	if s.cfg.Control != nil {
 		s.attachControlAck(&ack, controlSnap, controlHeld)
