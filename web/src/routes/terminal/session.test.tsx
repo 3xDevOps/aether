@@ -415,7 +415,15 @@ describe('useRunTerminalSession', () => {
         }),
       })
     })
-    expect(socket.frames().filter((frame) => frame.type === 'control')).toEqual([])
+    expect(
+      socket.frames().filter(
+        (frame) =>
+          typeof frame === 'object' &&
+          frame !== null &&
+          'type' in frame &&
+          frame.type === 'control',
+      ),
+    ).toEqual([])
     mounted.unmount()
   })
 
