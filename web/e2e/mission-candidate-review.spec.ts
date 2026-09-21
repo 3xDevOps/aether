@@ -82,7 +82,10 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await expect(answerBox).toBeVisible({ timeout: terminalTimeout })
   await answerBox.fill('the guest checkout flow')
   await page.getByRole('button', { name: 'Answer', exact: true }).click()
-  await expect(page.getByText('Answered by Alice', { exact: true })).toBeVisible({ timeout: 30_000 })
+  // The stored answer renders under an attribution line once the refetch
+  // lands; the member's display name is whatever the fixture registered.
+  await expect(page.getByText(/^Answered by /)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('the guest checkout flow', { exact: true })).toBeVisible()
 
   type TaskMutation = { task: { id: string; current_revision: number } }
   const proposed = runCoordCLI<TaskMutation>(
