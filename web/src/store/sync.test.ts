@@ -100,6 +100,30 @@ describe('hydrate', () => {
 
     expect(store.getState().runs.run_1.unanswered_questions).toBe(2)
   })
+  it('prunes write intents absent from the run snapshot and preserves surviving intents', async () => {
+    const store = createRootStore()
+    const surviving = {
+      write: true,
+      identityKey: 'member:alice',
+      terminalCacheEpoch: 1,
+      authorityKey: 'authority:run_1',
+      runCreatedAt: '2026-08-14T10:00:00Z',
+    }
+    store.getState().setTerminalWriteIntent('run_1', surviving)
+    store.getState().setTerminalWriteIntent('run_deleted', {
+      ...surviving,
+      authorityKey: 'authority:run_deleted',
+    })
+
+    await hydrate(
+      store,
+      fakeApi({ runList: vi.fn(async () => [run({ id: 'run_1' })]) }),
+    )
+
+    expect(store.getState().terminalWriteIntents).toEqual({ run_1: surviving })
+    expect(store.getState().terminalWriteIntents.run_1).toBe(surviving)
+  })
+
 
 
   // Both shells turn `aether://run/<id>` into `<dashboard>?run=<id>`, so the
@@ -527,6 +551,13 @@ describe('applyEvent', () => {
   it('removes a run when the server publishes its deletion', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
+    store.getState().setTerminalWriteIntent('run_1', {
+      write: true,
+      identityKey: 'member:alice',
+      terminalCacheEpoch: 1,
+      authorityKey: 'authority:run_1',
+      runCreatedAt: store.getState().runs.run_1.created_at,
+    })
 
     expect(await applyEvent(
       store,
@@ -534,6 +565,7 @@ describe('applyEvent', () => {
       fakeApi(),
     )).toBe(true)
 
+    expect(store.getState().terminalWriteIntents.run_1).toBeUndefined()
     expect(store.getState().runs.run_1).toBeUndefined()
     expect(store.getState().lastSeq).toBe(7)
   })

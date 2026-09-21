@@ -27,6 +27,14 @@ type PTYAttacher interface {
 	Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error)
 }
 
+// PTYHistoryReader is the read-only transcript extension implemented by the
+// production PTY host. Inputs are validated and normalized before dispatch;
+// implementations return at most limit lines in chronological order. It stays
+// separate so attach-only adapters remain small.
+type PTYHistoryReader interface {
+	History(ctx context.Context, run domain.RunID, before, query string, limit int) (ptyhost.HistoryPage, error)
+}
+
 // RunLauncherWithOptions is the optional extension implemented by schedulers
 // that can pin a launch to a caller-supplied base observation. Keeping it
 // separate preserves the strict Launch seam for older adapters and tests.

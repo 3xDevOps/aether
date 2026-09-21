@@ -8,7 +8,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,6 +251,114 @@ func TestTranscriptPreservedAcrossRestart(t *testing.T) {
 		t.Fatalf("full replay = %q, want both transcript incarnations", got)
 	}
 }
+
+func TestLegacyRotatedCastsReplayAndRepairCheckpoints(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "run.cast")
+
+	first, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.output([]byte("canonical-old\n"))
+	if err = first.close(); err != nil {
+		t.Fatal(err)
+	}
+	firstHeader, err := inspectCastHeader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.output([]byte("legacy-middle\n"))
+	if err = second.close(); err != nil {
+		t.Fatal(err)
+	}
+	secondHeader, err := inspectCastHeader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(dir, "run."+strconv.FormatInt(secondHeader.incarnation, 10)+".cast")
+	if err = os.Rename(path, legacy); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := newCastWriter(path, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.output([]byte("current\n"))
+	if err = latest.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A valid current cast belonging to run.123 is not run's archive: its
+	// header incarnation does not match the ambiguous decimal suffix.
+	dotted := filepath.Join(dir, "run.123.cast")
+	sibling, err := newCastWriter(dotted, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling.output([]byte("other-run\n"))
+	if err = sibling.close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"run.0.cast", "run.01.cast", "run.-1.cast", "run.no.cast"} {
+		if err = os.WriteFile(filepath.Join(dir, name), []byte("not an archive"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	paths, err := priorCastPaths(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(dir, stableCastSegmentName(path, firstHeader.incarnation))
+	wantPaths := []string{canonical, legacy}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("prior cast paths = %v, want %v", paths, wantPaths)
+	}
+
+	assertReplay := func() {
+		t.Helper()
+		replay, total, err := openFullCastReplay(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(replay)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = replay.Close(); err != nil {
+			t.Fatal(err)
+		}
+		want := "canonical-old\nlegacy-middle\ncurrent\n"
+		if string(got) != want || total != len(want) {
+			t.Fatalf("replay = %q (%d bytes), want %q (%d bytes)", got, total, want, len(want))
+		}
+	}
+	assertReplay()
+	if _, err := repairColdSnapshot(path); err != nil {
+		t.Fatalf("repair legacy checkpoint: %v", err)
+	}
+	assertReplay()
+}
+
+func TestLegacyCastDiscoveryIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "run.cast")
+	for i := 1; i <= maxLegacyCastHeaderInspections+1; i++ {
+		name := "run." + strconv.Itoa(i) + ".cast"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("corrupt"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := priorCastPaths(path); err == nil || !strings.Contains(err.Error(), "discovery limit exceeded") {
+		t.Fatalf("priorCastPaths error = %v, want legacy discovery limit", err)
+	}
+}
+
 func TestReadCastTailDecodesOutputAndIgnoresOtherEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tail.cast")
 	w, err := newCastWriter(path, 80, 24)
@@ -274,7 +387,7 @@ func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	first.output([]byte("first-life\n"))
-	if err := first.close(); err != nil {
+	if err = first.close(); err != nil {
 		t.Fatal(err)
 	}
 	second, err := newCastWriter(path, 80, 24)
@@ -282,7 +395,7 @@ func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	second.output([]byte("second-life\n"))
-	if err := second.close(); err != nil {
+	if err = second.close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -302,7 +415,7 @@ func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.output(bytes.Repeat([]byte("x"), 1<<20))
-	if err := w.close(); err != nil {
+	if err = w.close(); err != nil {
 		t.Fatal(err)
 	}
 	window, used, err := readCastTailWindow(large, 16, 128)
@@ -468,5 +581,42 @@ func TestLateMarkerAppendsAfterClose(t *testing.T) {
 	}
 	if len(markers) != 2 || markers[0] != "open marker" || markers[1] != "inject by Ana: ship it" {
 		t.Fatalf("markers = %v, want the open marker and the late append", markers)
+	}
+}
+
+func TestTranscriptLifecycleRegistryRetiresWithoutSplitLocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.cast")
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var active atomic.Int32
+	var split atomic.Bool
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 100; j++ {
+				lifecycle := acquireTranscriptLifecycle(path)
+				lifecycle.entry.mu.Lock()
+				if active.Add(1) != 1 {
+					split.Store(true)
+				}
+				runtime.Gosched()
+				active.Add(-1)
+				lifecycle.entry.mu.Unlock()
+				lifecycle.release()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if split.Load() {
+		t.Fatal("same transcript path was protected by split lifecycle locks")
+	}
+	transcriptLifecycleRegistry.Lock()
+	_, retained := transcriptLifecycleRegistry.entries[path]
+	transcriptLifecycleRegistry.Unlock()
+	if retained {
+		t.Fatal("unused transcript lifecycle entry was not retired")
 	}
 }

@@ -82,7 +82,7 @@ func TestDashboardPositionWireCompatibility(t *testing.T) {
 		t.Fatalf("dashboard header = %s, want flat position", got)
 	}
 	var decoded DashAttachRequest
-	if err := json.Unmarshal(header, &decoded); err != nil {
+	if err = json.Unmarshal(header, &decoded); err != nil {
 		t.Fatal(err)
 	}
 	if decoded.ResumePosition() != want {

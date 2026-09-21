@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 )
 
 const resumeIDBytes = 32
+const historyCursorKeyFile = ".history-cursor-key"
 
 func newResumeID() (string, error) {
 	var raw [resumeIDBytes]byte
@@ -114,7 +116,8 @@ const drainTimeout = 5 * time.Second
 
 // Host manages one persistent PTY session per key.
 type Host struct {
-	cfg Config
+	historyCursorKey [32]byte
+	cfg              Config
 
 	mu             sync.Mutex
 	sessions       map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
@@ -122,6 +125,87 @@ type Host struct {
 	snapshots      map[SessionKey]*snapshotResult
 	nextGeneration uint64
 	closed         bool
+}
+
+func syncHistoryCursorKeyDirectory(dir string) error {
+	// Windows cannot flush a read-only directory handle.
+	if goruntime.GOOS == "windows" {
+		return nil
+	}
+	dirFile, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	syncErr := dirFile.Sync()
+	closeErr := dirFile.Close()
+	return errors.Join(syncErr, closeErr)
+}
+
+func loadHistoryCursorKey(dir string) ([32]byte, error) {
+	path := filepath.Join(dir, historyCursorKeyFile)
+	read := func() ([32]byte, error) {
+		var key [32]byte
+		info, err := os.Lstat(path)
+		if err != nil {
+			return key, err
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+			return key, errors.New("ptyhost: history cursor key has insecure permissions")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return key, err
+		}
+		if len(data) != len(key) {
+			return key, errors.New("ptyhost: history cursor key has invalid length")
+		}
+		copy(key[:], data)
+		return key, nil
+	}
+	if key, err := read(); err == nil {
+		return key, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return [32]byte{}, err
+	}
+
+	var generated [32]byte
+	if _, err := rand.Read(generated[:]); err != nil {
+		return generated, fmt.Errorf("ptyhost: generate history cursor key: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+historyCursorKeyFile+"-*")
+	if err != nil {
+		return generated, fmt.Errorf("ptyhost: create history cursor key: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err = tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return generated, fmt.Errorf("ptyhost: secure history cursor key: %w", err)
+	}
+	if _, err = tmp.Write(generated[:]); err != nil {
+		_ = tmp.Close()
+		return generated, fmt.Errorf("ptyhost: write history cursor key: %w", err)
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return generated, fmt.Errorf("ptyhost: sync history cursor key: %w", err)
+	}
+	if err = tmp.Close(); err != nil {
+		return generated, fmt.Errorf("ptyhost: close history cursor key: %w", err)
+	}
+	if err = os.Link(tmpPath, path); err == nil {
+		if err = syncHistoryCursorKeyDirectory(dir); err != nil {
+			return generated, fmt.Errorf("ptyhost: sync history cursor key directory: %w", err)
+		}
+		return generated, nil
+	} else if !errors.Is(err, os.ErrExist) {
+		return generated, fmt.Errorf("ptyhost: publish history cursor key: %w", err)
+	}
+	key, err := read()
+	if err != nil {
+		return generated, fmt.Errorf("ptyhost: load history cursor key: %w", err)
+	}
+	return key, nil
 }
 
 type snapshotResult struct {
@@ -150,12 +234,18 @@ func New(cfg Config) (*Host, error) {
 	if err := os.MkdirAll(cfg.TranscriptDir, 0o755); err != nil {
 		return nil, fmt.Errorf("ptyhost: create transcript dir: %w", err)
 	}
-	return &Host{
+	h := &Host{
 		cfg:       cfg,
 		sessions:  make(map[SessionKey]*session),
 		starting:  make(map[SessionKey]struct{}),
 		snapshots: make(map[SessionKey]*snapshotResult),
-	}, nil
+	}
+	historyCursorKey, err := loadHistoryCursorKey(cfg.TranscriptDir)
+	if err != nil {
+		return nil, err
+	}
+	h.historyCursorKey = historyCursorKey
+	return h, nil
 }
 
 // Close stops all sessions and flushes their transcripts.
@@ -371,10 +461,13 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 		return fmt.Errorf("%w: %q", err, run)
 	}
 	name := string(run)
+	transcript := filepath.Join(h.cfg.TranscriptDir, name+".cast")
+	archives, err := removablePriorCastPaths(ctx, transcript)
+	if err != nil {
+		return fmt.Errorf("ptyhost: find run transcript history: %w", err)
+	}
+	paths := append(archives, transcript, checkpointPath(transcript))
 	patterns := []string{
-		filepath.Join(h.cfg.TranscriptDir, name+".cast"),
-		filepath.Join(h.cfg.TranscriptDir, name+".*.cast"),
-		filepath.Join(h.cfg.TranscriptDir, name+".screen"),
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),
 	}
@@ -383,10 +476,14 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 		if err != nil {
 			return fmt.Errorf("ptyhost: find run transcripts: %w", err)
 		}
-		for _, path := range matches {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("ptyhost: remove run transcript: %w", err)
-			}
+		paths = append(paths, matches...)
+	}
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ptyhost: remove run transcript: %w", err)
 		}
 	}
 	h.mu.Lock()
@@ -548,6 +645,18 @@ func (h *Host) Snapshot(run domain.RunID) (snapshot ScreenSnapshot, err error) {
 func (h *Host) transcriptPath(key SessionKey) string {
 	name := strings.ReplaceAll(string(key), ":", "-")
 	return filepath.Join(h.cfg.TranscriptDir, name+".cast")
+}
+
+// flushLiveTranscript makes output already accepted by a live session visible
+// to history. Holding the session lock keeps end/stop from detaching and
+// closing the writer between the nil check and the flush.
+func (s *session) flushLiveTranscript() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tr == nil {
+		return nil
+	}
+	return s.tr.flush()
 }
 
 // Inject writes message plus submit (the harness's submit sequence, e.g. a

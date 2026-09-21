@@ -378,6 +378,25 @@ export interface TerminalStatusResult {
   tabs?: string[]
 }
 
+export interface TerminalHistoryParams {
+  run_id: string
+  before?: string
+  query?: string
+  limit?: number
+}
+
+export interface TerminalHistoryLine {
+  cursor: string
+  time: number
+  text: string
+}
+
+export interface TerminalHistoryResult {
+  lines: TerminalHistoryLine[]
+  next_cursor?: string
+  has_more: boolean
+}
+
 export interface EnvSaveResult {
   image: string
 }

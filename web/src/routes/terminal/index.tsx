@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 import { toast } from 'sonner'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
@@ -51,12 +51,7 @@ function TerminalView(props: RouteProps) {
   return <TerminalRoute key={props.params.runId} {...props} />
 }
 
-function TerminalRoute({
-  params,
-  active = true,
-  onTerminalWeight,
-  onTerminalInvalidate,
-}: RouteProps) {
+function TerminalRoute({ params }: RouteProps) {
   const runID = params.runId
   const run = useStore((s) => s.runs[runID])
   const workspaceID = run?.workspace_id
@@ -65,16 +60,12 @@ function TerminalRoute({
   )
   const capability = useCapability()
   const self = useSelf()
+  const identityKey = useStore((s) => s.identityKey)
+  const terminalCacheEpoch = useStore((s) => s.terminalCacheEpoch)
   const controlTaken = useStore((s) => s.terminalControlTaken)
   const phone = useMediaQuery(phoneScreen)
   const known = run !== undefined
   const starting = run !== undefined && startingStatuses.includes(run.status)
-  // An inactive cache entry does not create a terminal or socket on its first
-  // render. Once it has been active, xterm remains enabled while parked.
-  const [initialized, setInitialized] = useState(() => active && known)
-  useEffect(() => {
-    if (active && known) setInitialized(true)
-  }, [active, known])
 
   const steerable = run?.status === 'running' || run?.status === 'needs-attention'
   const automaticWrite =
@@ -95,7 +86,7 @@ function TerminalRoute({
   const sendRef = useRef<(data: string) => void>(() => {})
   const resizeRef = useRef<(cols: number, rows: number) => void>(() => {})
   const controller = useXterm({
-    enabled: known && initialized,
+    enabled: known,
     follow: phone,
     scrollback: 5000,
     onData: (data) => sendRef.current(data),
@@ -119,26 +110,17 @@ function TerminalRoute({
       )
     },
   })
-  const invalidate = useCallback(() => {
-    onTerminalInvalidate?.()
-  }, [onTerminalInvalidate])
-  const reportWeight = useCallback(
-    (cells: number) => onTerminalWeight?.(cells),
-    [onTerminalWeight],
-  )
   const session = useRunTerminalSession({
     runID,
     run,
-    active,
-    initialized,
     terminal: controller.terminal,
     geometry: controller.geometry,
     setGeometry: controller.setGeometry,
     phone,
+    identityKey,
+    terminalCacheEpoch,
     automaticWrite,
     authorityKey,
-    onInvalidate: invalidate,
-    onWeight: reportWeight,
     beginStructuralReplay: controller.beginStructuralReplay,
     cancelStructuralReplay: controller.cancelStructuralReplay,
     finishStructuralReplay: controller.finishStructuralReplay,
@@ -221,15 +203,14 @@ function TerminalRoute({
     </div>
   )
 
-  // Cached inactive views retain only this primary terminal. RunHeader, tabs,
-  // Run Dock, and Run Room are active-route-only so fixed IDs stay unique.
-  const panelProps = active
-    ? runTabPanel('terminal', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden')
-    : { className: 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden' }
+  const panelProps = runTabPanel(
+    'terminal',
+    'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+  )
 
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden pr-8">
-      {active && <RunHeader run={run} subtitle={run.branch} active="terminal" />}
+      <RunHeader run={run} subtitle={run.branch} active="terminal" />
       <div {...panelProps}>
         <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
@@ -238,28 +219,26 @@ function TerminalRoute({
               controller={controller}
               writable={state.write && !starting && !replaying}
               imageTarget={runID}
-              toolbarEnd={active ? attachmentControls : undefined}
+              toolbarEnd={attachmentControls}
               imageUploadEnabled={
-                active && !starting && state.connection === 'live' && state.write && !state.steerDenied
+                !starting && state.connection === 'live' && state.write && !state.steerDenied
               }
               replaying={replaySpinner}
             >
               {starting && <TerminalSpinner label="Starting the run's container" />}
             </TerminalPane>
           </div>
-          {active && <RunDock runID={runID} />}
+          <RunDock runID={runID} />
         </div>
       </div>
-      {active && (
-        <RunRoom
-          key={runID}
-          run={run}
-          selfID={self.id}
-          control={controlMetadata}
-          onTakeControl={takeControl}
-          onReleaseControl={releaseControl}
-        />
-      )}
+      <RunRoom
+        key={runID}
+        run={run}
+        selfID={self.id}
+        control={controlMetadata}
+        onTakeControl={takeControl}
+        onReleaseControl={releaseControl}
+      />
     </div>
   )
 }

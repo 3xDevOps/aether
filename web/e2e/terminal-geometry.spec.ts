@@ -6,6 +6,11 @@ import { memberID, seedWorkspace } from './harness/setup'
 const painter = `stty -echo
 paint() {
   set -- $(stty size)
+  i=0
+  while [ "$i" -lt 30 ]; do
+    printf 'geometry-scroll-%s\r\n' "$i"
+    i=$((i + 1))
+  done
   printf '\\033[2J\\033[H'
   printf '\\033[%s;%sHX' "$1" "$2"
 }

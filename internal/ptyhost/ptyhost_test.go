@@ -1923,40 +1923,97 @@ func TestRemoveRunTranscripts(t *testing.T) {
 	h, dir := newTestHost(t)
 	for _, name := range []string{
 		"run-shell-run-1-main.cast",
+		"run-shell-run-1-main.screen",
 		"run-2.cast",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("transcript"), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	for _, name := range []string{"run-1.cast", "run-1.123.cast"} {
-		w, err := newCastWriter(filepath.Join(dir, name), 80, 24)
-		if err != nil {
-			t.Fatalf("create %s: %v", name, err)
-		}
-		w.output([]byte("purge-me"))
-		if err := w.close(); err != nil {
-			t.Fatalf("close %s: %v", name, err)
-		}
+	current := filepath.Join(dir, "run-1.cast")
+	old, err := newCastWriter(current, 80, 24)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
+	old.output([]byte("purge-old"))
+	if err = old.close(); err != nil {
+		t.Fatal(err)
+	}
+	oldHeader, err := inspectCastHeader(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(dir, fmt.Sprintf("run-1.%d.cast", oldHeader.incarnation))
+	if err = os.Rename(current, legacy); err != nil {
+		t.Fatal(err)
+	}
+	canonicalWriter, err := newCastWriter(current, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWriter.output([]byte("purge-canonical"))
+	if err = canonicalWriter.close(); err != nil {
+		t.Fatal(err)
+	}
+	canonicalHeader, err := inspectCastHeader(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(dir, stableCastSegmentName(current, canonicalHeader.incarnation))
+	if err = os.Rename(current, canonical); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := newCastWriter(current, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.output([]byte("purge-current"))
+	if err = latest.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// This is the current transcript of a different, dotted run. Its header
+	// identity does not match the decimal filename suffix, so removing run-1
+	// must not mistake it for run-1's legacy archive.
+	dotted := filepath.Join(dir, "run-1.123.cast")
+	sibling, err := newCastWriter(dotted, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling.output([]byte("keep-sibling"))
+	if err = sibling.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
 		t.Fatalf("start cold snapshot repair: %v", err)
 	}
 	waitFor(t, "cold snapshot repair", func() bool {
 		_, err := h.Snapshot("run-1")
 		return err == nil
 	})
+	if _, err := os.Stat(checkpointPath(current)); err != nil {
+		t.Fatalf("repaired checkpoint missing before removal: %v", err)
+	}
 
 	if err := h.RemoveRunTranscripts(t.Context(), "run-1"); err != nil {
 		t.Fatalf("RemoveRunTranscripts: %v", err)
 	}
-	for _, name := range []string{"run-1.cast", "run-1.123.cast", "run-shell-run-1-main.cast"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("%s still exists (err %v)", name, err)
+	for _, path := range []string{
+		current,
+		legacy,
+		canonical,
+		checkpointPath(current),
+		filepath.Join(dir, "run-shell-run-1-main.cast"),
+		filepath.Join(dir, "run-shell-run-1-main.screen"),
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s still exists (err %v)", filepath.Base(path), err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "run-2.cast")); err != nil {
-		t.Errorf("unrelated transcript missing: %v", err)
+	for _, path := range []string{dotted, filepath.Join(dir, "run-2.cast")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unrelated transcript %s missing: %v", filepath.Base(path), err)
+		}
 	}
 	if _, err := h.Snapshot("run-1"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("snapshot after transcript removal = %v, want missing recording", err)
@@ -1973,15 +2030,15 @@ func TestSnapshotSurfacesCorruptArchivedTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.output([]byte("current"))
-	if err := w.close(); err != nil {
+	if err = w.close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
+	if _, err = h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
 		t.Fatalf("corrupt archive initial snapshot error = %v, want pending", err)
 	}
 	waitFor(t, "corrupt archive repair failure", func() bool {
-		_, err := h.Snapshot("run-1")
-		return errors.Is(err, ErrSnapshotUnavailable) && strings.Contains(err.Error(), "decode transcript header")
+		_, snapErr := h.Snapshot("run-1")
+		return errors.Is(snapErr, ErrSnapshotUnavailable) && strings.Contains(snapErr.Error(), "decode transcript header")
 	})
 }
 

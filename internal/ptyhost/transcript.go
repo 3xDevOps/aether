@@ -3,6 +3,7 @@ package ptyhost
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +18,48 @@ import (
 	"unicode/utf8"
 )
 
-const transcriptFlushInterval = 2 * time.Second
+const (
+	transcriptFlushInterval        = 2 * time.Second
+	maxLegacyCastHeaderInspections = 128
+)
+
+type transcriptLifecycleEntry struct {
+	mu   sync.RWMutex
+	refs int
+}
+
+type transcriptLifecycleRef struct {
+	path  string
+	entry *transcriptLifecycleEntry
+}
+
+var transcriptLifecycleRegistry = struct {
+	sync.Mutex
+	entries map[string]*transcriptLifecycleEntry
+}{
+	entries: make(map[string]*transcriptLifecycleEntry),
+}
+
+func acquireTranscriptLifecycle(path string) transcriptLifecycleRef {
+	transcriptLifecycleRegistry.Lock()
+	entry := transcriptLifecycleRegistry.entries[path]
+	if entry == nil {
+		entry = new(transcriptLifecycleEntry)
+		transcriptLifecycleRegistry.entries[path] = entry
+	}
+	entry.refs++
+	transcriptLifecycleRegistry.Unlock()
+	return transcriptLifecycleRef{path: path, entry: entry}
+}
+
+func (r transcriptLifecycleRef) release() {
+	transcriptLifecycleRegistry.Lock()
+	r.entry.refs--
+	if r.entry.refs == 0 {
+		delete(transcriptLifecycleRegistry.entries, r.path)
+	}
+	transcriptLifecycleRegistry.Unlock()
+}
 
 type castHeader struct {
 	Version     int               `json:"version"`
@@ -53,6 +95,12 @@ type castWriter struct {
 }
 
 func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
+	lifecycle := acquireTranscriptLifecycle(path)
+	lifecycle.entry.mu.Lock()
+	defer func() {
+		lifecycle.entry.mu.Unlock()
+		lifecycle.release()
+	}()
 	if err := renameAsideTranscript(path); err != nil {
 		return nil, err
 	}
@@ -88,19 +136,32 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 	} else {
 		w.logicalBytes = int64(n)
 	}
+	if err := w.bw.Flush(); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("ptyhost: flush transcript header: %w", err)
+	}
 	go w.flushLoop()
 	return w, nil
 }
 
 // renameAsideTranscript preserves an existing non-empty transcript (a prior
-// incarnation of the run, e.g. before a reboot-recovery restart) by renaming
-// it to <run-id>.<unix-nanos>.cast. Transcripts are never truncated.
+// incarnation of the run, e.g. before a reboot-recovery restart) under the
+// stable incarnation name that history cursors can resolve directly.
 func renameAsideTranscript(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil || fi.Size() == 0 {
 		return nil
 	}
-	aside := fmt.Sprintf("%s.%d.cast", strings.TrimSuffix(path, ".cast"), time.Now().UnixNano())
+	segment, err := inspectCastHeader(path)
+	if err != nil {
+		return err
+	}
+	aside := filepath.Join(filepath.Dir(path), stableCastSegmentName(path, segment.incarnation))
+	if _, err := os.Stat(aside); err == nil {
+		return fmt.Errorf("ptyhost: preserve prior transcript: stable segment already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("ptyhost: inspect prior transcript target: %w", err)
+	}
 	if err := os.Rename(path, aside); err != nil {
 		return fmt.Errorf("ptyhost: preserve prior transcript: %w", err)
 	}
@@ -181,8 +242,8 @@ func readCastTailWindow(path string, maxBytes, maxRawBytes int) ([]byte, int, er
 }
 
 // readRecentCast returns a bounded output suffix from the newest transcript
-// incarnations. It lists segment names but never inspects output counts or
-// decodes more than a fixed disk window, even if a run has years of history.
+// incarnations. Legacy names receive a header identity check, but output
+// counts and decoded tail bytes remain bounded regardless of retained age.
 func readRecentCast(path string, maxBytes int) ([]byte, error) {
 	if maxBytes <= 0 {
 		return nil, nil
@@ -247,6 +308,21 @@ func (w *castWriter) flushLoop() {
 			w.mu.Unlock()
 		}
 	}
+}
+
+// flush makes complete output events visible to read-only history requests.
+func (w *castWriter) flush() error {
+	w.lifetimeMu.RLock()
+	defer w.lifetimeMu.RUnlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil
+	}
+	if err := w.flushStagedLocked(); err != nil {
+		return err
+	}
+	return w.bw.Flush()
 }
 
 func (w *castWriter) output(p []byte) {
@@ -364,24 +440,167 @@ func priorCastSegments(path string) ([]castSegment, error) {
 	if err != nil {
 		return nil, err
 	}
+	currentStart := currentCastStart(path)
 	segments := make([]castSegment, 0, len(paths))
-	for _, path := range paths {
-		segment, err := inspectCastSegment(path)
+	for _, segmentPath := range paths {
+		segment, err := inspectCastSegment(segmentPath)
 		if err != nil {
 			return nil, err
+		}
+		name := filepath.Base(segmentPath)
+		incarnation, stable := castSegmentIncarnation(path, name)
+		if stable {
+			if incarnation != segment.incarnation {
+				return nil, errors.New("ptyhost: transcript segment identity mismatch")
+			}
+		} else {
+			rotation, legacy := legacyCastSegmentIncarnation(path, name)
+			if !legacy || !legacyCastArchive(segmentPath, rotation, currentStart) {
+				return nil, errors.New("ptyhost: transcript segment identity mismatch")
+			}
 		}
 		segments = append(segments, segment)
 	}
 	return segments, nil
 }
 
+// priorCastPaths accepts the unambiguous current grammar without I/O. In the
+// legacy decimal grammar the suffix was the rotation time, not the header's
+// incarnation: a valid archive therefore starts no later than its suffix,
+// which in turn is no later than the current cast. That ordering excludes a
+// readable current cast for a dotted run. Unreadable candidates remain visible
+// so repair reports corruption instead of silently dropping recorded history.
 func priorCastPaths(path string) ([]string, error) {
+	return discoverPriorCastPaths(context.Background(), path, maxLegacyCastHeaderInspections)
+}
+
+// removablePriorCastPaths performs the same identity-safe discovery without
+// the request-path inspection cap. Removal is maintenance work and must drain
+// arbitrarily long retained histories, while remaining cancellable.
+func removablePriorCastPaths(ctx context.Context, path string) ([]string, error) {
+	return discoverPriorCastPaths(ctx, path, 0)
+}
+
+func discoverPriorCastPaths(ctx context.Context, path string, maxLegacy int) ([]string, error) {
 	matches, err := filepath.Glob(strings.TrimSuffix(path, ".cast") + ".*.cast")
 	if err != nil {
 		return nil, fmt.Errorf("ptyhost: find transcript history: %w", err)
 	}
-	sort.Strings(matches)
-	return matches, nil
+	type candidate struct {
+		path  string
+		order int64
+	}
+	candidates := make([]candidate, 0, len(matches))
+	legacyHeaders := 0
+	currentStart := currentCastStart(path)
+	for _, match := range matches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		name := filepath.Base(match)
+		order, ok := castSegmentIncarnation(path, name)
+		if !ok {
+			order, ok = legacyCastSegmentIncarnation(path, name)
+			if !ok {
+				continue
+			}
+			legacyHeaders++
+			if maxLegacy > 0 && legacyHeaders > maxLegacy {
+				return nil, errors.New("ptyhost: legacy transcript segment discovery limit exceeded")
+			}
+			if !legacyCastArchive(match, order, currentStart) {
+				continue
+			}
+		}
+		candidates = append(candidates, candidate{path: match, order: order})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].order == candidates[j].order {
+			return candidates[i].path < candidates[j].path
+		}
+		return candidates[i].order < candidates[j].order
+	})
+	paths := make([]string, len(candidates))
+	for i := range candidates {
+		paths[i] = candidates[i].path
+	}
+	return paths, nil
+}
+
+func currentCastStart(path string) int64 {
+	header, err := newestCastHeader(path)
+	if err != nil {
+		return 0
+	}
+	return castHeaderStart(header)
+}
+
+func castHeaderStart(header castHeader) int64 {
+	if header.Incarnation > 0 {
+		return header.Incarnation
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if header.Timestamp > 0 && header.Timestamp <= maxInt64/int64(time.Second) {
+		return header.Timestamp * int64(time.Second)
+	}
+	return 0
+}
+
+func legacyCastArchive(path string, rotation, currentStart int64) bool {
+	header, err := newestCastHeader(path)
+	if err != nil {
+		// A syntactically valid but corrupt legacy candidate must reach replay
+		// and repair so callers learn that retained history is unavailable.
+		return true
+	}
+	start := castHeaderStart(header)
+	if start == 0 {
+		return true
+	}
+	return start <= rotation && (currentStart == 0 || rotation <= currentStart)
+}
+
+// Stable cast segments use a delimiter that cannot occur in a run ID. A
+// decimal suffix alone is ambiguous with the current cast of a dotted run
+// whose ID ends in that suffix.
+func stableCastSegmentName(path string, incarnation int64) string {
+	stem := strings.TrimSuffix(filepath.Base(path), ".cast")
+	return stem + ".~" + strconv.FormatInt(incarnation, 10) + ".cast"
+}
+
+func castSegmentIncarnation(path, name string) (int64, bool) {
+	if filepath.Base(name) != name {
+		return 0, false
+	}
+	stem := strings.TrimSuffix(filepath.Base(path), ".cast")
+	if !strings.HasPrefix(name, stem+".~") || !strings.HasSuffix(name, ".cast") {
+		return 0, false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(name, stem+".~"), ".cast")
+	incarnation, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || incarnation <= 0 || id != strconv.FormatInt(incarnation, 10) {
+		return 0, false
+	}
+	return incarnation, true
+}
+
+// Legacy segment names predate the unambiguous .~ delimiter. They are used
+// only on compatibility paths that inspect the header before accepting them;
+// history discovery must never classify them by filename alone.
+func legacyCastSegmentIncarnation(path, name string) (int64, bool) {
+	if filepath.Base(name) != name {
+		return 0, false
+	}
+	stem := strings.TrimSuffix(filepath.Base(path), ".cast")
+	if !strings.HasPrefix(name, stem+".") || !strings.HasSuffix(name, ".cast") {
+		return 0, false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(name, stem+"."), ".cast")
+	incarnation, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || incarnation <= 0 || id != strconv.FormatInt(incarnation, 10) {
+		return 0, false
+	}
+	return incarnation, true
 }
 
 func openFullCastReplay(path string) (io.ReadCloser, int, error) {

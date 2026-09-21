@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import type * as apiModule from '@/lib/api'
 import type { Run } from '@/lib/types'
-import type { RouteProps } from '@/routes/registry'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
@@ -28,7 +27,6 @@ function terminalRoute() {
 function mount(
   seed: Partial<TerminalState> = {},
   over: Partial<Run> = {},
-  route: Partial<RouteProps> = {},
 ) {
   const View = terminalRoute()
   useStore.getState().upsertRun(run(over))
@@ -37,7 +35,7 @@ function mount(
     terminals: { run_1: { ...initialTerminal, ...seed } },
     terminalControlTaken: false,
   })
-  return render(<View {...route} params={{ runId: 'run_1' }} />)
+  return render(<View params={{ runId: 'run_1' }} />)
 }
 
 function attached(
@@ -269,13 +267,12 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('retries control when cached run authority changes', async () => {
-    const view = mount({}, { member_id: bob.id })
+  it('retries control after unmounting and revisiting with new authority', async () => {
+    let view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
     const denied = StubSocket.last()
-    expect(denied.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
     act(() =>
       denied.onmessage?.({
         data: JSON.stringify({
@@ -291,15 +288,16 @@ describe('terminal view', () => {
     )
     expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.unmount()
     act(() => useStore.getState().upsertRun(run()))
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
 
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const authorized = StubSocket.last()
     act(() => authorized.onopen?.())
-    expect(authorized.frames()[0]).toMatchObject({ write: true, resume: true })
+    expect(authorized.frames()[0]).toMatchObject({ write: true, screen: true })
+    expect(authorized.frames()[0]).not.toHaveProperty('resume')
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
     view.unmount()
   })
@@ -381,16 +379,16 @@ describe('terminal view', () => {
     write.mockRestore()
     view.unmount()
   })
-  it('does not initialize a cached run until its first active visit', () => {
-    const view = mount({}, {}, { active: false })
-    expect(StubSocket.opened).toHaveLength(0)
+  it('initializes the terminal for a known mounted run', () => {
+    const view = mount()
+    const socket = StubSocket.last()
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
     expect(StubSocket.opened).toHaveLength(1)
+
     view.unmount()
+    expect(socket.closed).toBe(true)
   })
-  it('unmounts parked Run Dock, Run Room, and run header while retaining the primary pane', async () => {
+  it('renders the complete route UI only while mounted', async () => {
     const view = mount()
     attached()
     await waitFor(() => expect(document.querySelector('.xterm')).toBeDefined())
@@ -400,156 +398,71 @@ describe('terminal view', () => {
     expect(screen.getByRole('tabpanel')).toBeDefined()
     const pane = document.querySelector('.xterm')
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.unmount()
 
     expect(screen.queryByRole('button', { name: 'Open Run Room' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()
     expect(screen.queryByRole('tablist', { name: 'Run tabs' })).toBeNull()
     expect(screen.queryByRole('tabpanel')).toBeNull()
-    expect(pane?.isConnected).toBe(true)
-
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
-    expect(screen.getByRole('button', { name: 'Open Run Room' })).toBeDefined()
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
-    expect(screen.getByRole('tablist', { name: 'Run tabs' })).toBeDefined()
-    expect(screen.getByRole('tabpanel')).toBeDefined()
-    view.unmount()
+    expect(pane?.isConnected).toBe(false)
   })
 
-  it('parks a live run without a hidden socket and resumes its parsed output', async () => {
-    const view = mount()
+  it('unmounts a live run and remounts a fresh screen snapshot', async () => {
+    let view = mount()
     attached({ cols: 20, rows: 4 })
     const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
     act(() =>
       StubSocket.last().onmessage?.({
-        data: new TextEncoder().encode('retained output').buffer,
+        data: new TextEncoder().encode('old output').buffer,
       }),
     )
-    await vi.waitFor(() => expect(pane()).toContain('retained output'))
-
+    await vi.waitFor(() => expect(pane()).toContain('old output'))
+    const oldPane = document.querySelector('.xterm')
     const socket = StubSocket.last()
-    const weight = vi.fn()
-    const View = terminalRoute()
-    view.rerender(
-      <View
-        params={{ runId: 'run_1' }}
-        active={false}
-        onTerminalWeight={weight}
-      />,
-    )
 
+    view.unmount()
     expect(socket.closed).toBe(true)
-    expect(StubSocket.opened).toHaveLength(1)
-    expect(weight).toHaveBeenCalledWith(expect.any(Number))
-    expect(weight.mock.calls[0][0]).toBeGreaterThan(0)
+    expect(oldPane?.isConnected).toBe(false)
 
-    view.rerender(
-      <View
-        params={{ runId: 'run_1' }}
-        active
-        onTerminalWeight={weight}
-      />,
-    )
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
-    const resumed = StubSocket.last()
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).toMatchObject({ screen: true })
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+
     act(() => {
-      resumed.onopen?.()
-      resumed.onmessage?.({
+      replacement.onmessage?.({
         data: JSON.stringify({
           ok: true,
-          replay: 0,
+          replay: 14,
           cols: 20,
           rows: 4,
-          resumed: true,
           resume_id: 'pty-incarnation-run',
         }),
       })
+      replacement.onmessage?.({ data: new TextEncoder().encode('current output').buffer })
     })
-    expect(resumed.frames()[0]).toMatchObject({
-      resume: true,
-      resume_id: 'pty-incarnation-run',
-    })
-    expect(pane()).toContain('retained output')
+    await vi.waitFor(() => expect(pane()).toContain('current output'))
+    expect(pane()).not.toContain('old output')
     view.unmount()
   })
-  it('reports retained normal and alternate buffer weight', async () => {
-    const open = vi.spyOn(Terminal.prototype, 'open')
-    const view = mount()
-    const terminal = open.mock.contexts[0] as Terminal
-    attached({ cols: 20, rows: 4 })
-    await new Promise<void>((done) => terminal.write('normal output', done))
-    await new Promise<void>((done) => terminal.write('\x1b[?1049halt output', done))
-
-    const weight = vi.fn()
-    const View = terminalRoute()
-    view.rerender(
-      <View
-        params={{ runId: 'run_1' }}
-        active={false}
-        onTerminalWeight={weight}
-      />,
-    )
-
-    const expected = (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
-    expect(terminal.buffer.normal.length).toBeGreaterThan(0)
-    expect(terminal.buffer.alternate.length).toBeGreaterThan(0)
-    expect(weight).toHaveBeenCalledWith(expected)
-    open.mockRestore()
-    view.unmount()
-  })
-  it('reports the larger weight when a deferred live multiline write settles while parked', async () => {
-    const originalWrite = Terminal.prototype.write
-    const write = vi.spyOn(Terminal.prototype, 'write')
-    write.mockImplementation(function (this: Terminal, chunk, done) {
-      if (chunk instanceof Uint8Array && done) {
-        // Let xterm parse the bytes, but defer the completion observed by the
-        // attach until the next turn so parking can happen first.
-        return originalWrite.call(this, chunk, () => setTimeout(done, 0))
-      }
-      return originalWrite.call(this, chunk, done)
-    })
-
-    const view = mount()
-    attached({ cols: 20, rows: 4 })
-    const weight = vi.fn()
-    const View = terminalRoute()
-    const socket = StubSocket.last()
-    act(() => {
-      socket.onmessage?.({
-        data: new TextEncoder().encode('line one\nline two\nline three').buffer,
-      })
-      view.rerender(
-        <View
-          params={{ runId: 'run_1' }}
-          active={false}
-          onTerminalWeight={weight}
-        />,
-      )
-    })
-
-    const terminal = write.mock.instances.find(
-      (instance): instance is Terminal => instance instanceof Terminal,
-    )
-    if (!terminal) throw new Error('xterm terminal did not receive the live write')
-    const parkedCalls = weight.mock.calls.length
-    await waitFor(() => expect(weight.mock.calls.length).toBeGreaterThan(parkedCalls))
-    const expected = (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
-    expect(weight.mock.calls.at(-1)?.[0]).toBe(expected)
-    write.mockRestore()
-    view.unmount()
-  })
-  it('does not reopen an ended completed run when its cached view is revisited', () => {
-    const view = mount({}, { status: 'completed' })
+  it('fresh-attaches an ended completed run when revisited', async () => {
+    let view = mount({}, { status: 'completed' })
     attached()
     const socket = StubSocket.last()
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
 
+    view.unmount()
     const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    view = render(<View params={{ runId: 'run_1' }} />)
 
-    expect(StubSocket.opened).toHaveLength(1)
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).toMatchObject({ screen: true })
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
     view.unmount()
   })
   it('does not reopen an ended completed run when follow mode changes', () => {
@@ -579,21 +492,20 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('records a parked same-run relaunch and full-attaches only on activation', async () => {
-    const view = mount({}, { status: 'completed', member_id: bob.id })
+  it('full-attaches a same-run relaunch after an unmounted visit', async () => {
+    let view = mount({}, { status: 'completed', member_id: bob.id })
     attached(undefined, 'pty-incarnation-ended')
     const endedSocket = StubSocket.last()
     act(() => endedSocket.onclose?.({ code: 1000, reason: 'session ended' }))
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.unmount()
     act(() => useStore.getState().upsertRun(run({ status: 'running', member_id: bob.id })))
-    expect(StubSocket.opened).toHaveLength(1)
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
 
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const replacement = StubSocket.last()
-    replacement.onopen?.()
+    act(() => replacement.onopen?.())
     expect(replacement.frames()[0]).not.toHaveProperty('resume')
     expect(replacement.frames()[0]).not.toHaveProperty('cursor')
     view.unmount()
@@ -618,14 +530,14 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('keeps an in-flight replay hidden and requests a full replay after parking', async () => {
+  it('cancels an in-flight replay on unmount and requests a fresh replay on revisit', async () => {
     const write = vi.spyOn(Terminal.prototype, 'write')
     const callbacks: Array<() => void> = []
     write.mockImplementation((chunk, done) => {
       if (chunk instanceof Uint8Array && done) callbacks.push(done)
       else done?.()
     })
-    const view = mount({}, { status: 'completed' })
+    let view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -643,10 +555,13 @@ describe('terminal view', () => {
     const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
     await waitFor(() => expect(callbacks).toHaveLength(1))
     expect(host.style.visibility).toBe('hidden')
+
+    view.unmount()
+    expect(socket.closed).toBe(true)
+    act(() => callbacks[0]?.())
+
     const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
-    expect(host.style.visibility).toBe('hidden')
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    view = render(<View params={{ runId: 'run_1' }} />)
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const replacement = StubSocket.last()
     act(() => replacement.onopen?.())
@@ -655,7 +570,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('disposes the attachment and xterm when the route is evicted', () => {
+  it('disposes the attachment and xterm when the route unmounts', () => {
     const dispose = vi.spyOn(Terminal.prototype, 'dispose')
     const view = mount()
     attached()
@@ -667,10 +582,9 @@ describe('terminal view', () => {
     dispose.mockRestore()
   })
 
-  it('resets cached output and invalidates it on a final refusal', async () => {
+  it('resets mounted output on a final refusal', async () => {
     const reset = vi.spyOn(Terminal.prototype, 'reset')
-    const invalidate = vi.fn()
-    const view = mount({}, {}, { onTerminalInvalidate: invalidate })
+    const view = mount()
     attached()
     const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
     act(() =>
@@ -688,7 +602,6 @@ describe('terminal view', () => {
     })
     await waitFor(() => {
       expect(reset).toHaveBeenCalled()
-      expect(invalidate).toHaveBeenCalledTimes(1)
       expect(pane()).not.toContain('stale output')
     })
     reset.mockRestore()
@@ -756,7 +669,7 @@ describe('terminal view', () => {
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     await waitFor(() => expect(callbacks).toHaveLength(1))
 
-    // A completed session parks offline after the exact replay boundary, but
+    // A completed session stays offline after the exact replay boundary, but
     // the pane stays hidden while xterm parses the final replay frame.
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
@@ -770,7 +683,7 @@ describe('terminal view', () => {
     write.mockRestore()
     view.unmount()
   })
-  it('finishes an ended replay after the route is parked and reveals it on revisit', async () => {
+  it('cancels an ended replay on unmount and replays afresh on revisit', async () => {
     const originalWrite = Terminal.prototype.write
     const write = vi.spyOn(Terminal.prototype, 'write')
     const callbacks: Array<() => void> = []
@@ -781,7 +694,7 @@ describe('terminal view', () => {
       }
       return originalWrite.call(this, chunk, done)
     })
-    const view = mount({}, { status: 'completed' })
+    let view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -794,23 +707,20 @@ describe('terminal view', () => {
           resume_id: 'pty-incarnation-run',
         }),
       })
+      socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
     })
-    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
     await waitFor(() => expect(callbacks).toHaveLength(1))
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
-    expect(host.style.visibility).toBe('hidden')
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
-    expect(host.style.visibility).toBe('hidden')
 
+    view.unmount()
     act(() => callbacks[0]?.())
-    await waitFor(() =>
-      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
-    )
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
-    expect(host.style.visibility).toBe('')
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
     write.mockRestore()
     view.unmount()
   })
@@ -836,8 +746,8 @@ describe('terminal view', () => {
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     expect(host.style.visibility).toBe('hidden')
 
-    // No replay-end frame arrived: parking the ended session synthesizes the
-    // boundary so reveal still waits for paint and structural completion.
+    // No replay-end frame arrived: ending the session synthesizes the boundary
+    // so reveal still waits for paint and structural completion.
     act(() => {
       socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
       socket.onclose?.({ code: 1000, reason: 'session ended' })
