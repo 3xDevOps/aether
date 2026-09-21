@@ -112,12 +112,33 @@ func missionWorkerTestEnv(t *testing.T) (*testEnv, *store.DB, *domain.Mission) {
 			Revision: &domain.TaskRevision{
 				Title:     "worker",
 				Objective: "worker task",
-				Status:    domain.TaskRevisionAccepted,
+				Status:    domain.TaskRevisionProposed,
 			},
 		}
 		if err := db.CreateTask(ctx, task); err != nil {
 			t.Fatalf("create task: %v", err)
 		}
+		// A mission only dispatches once a human has approved its plan, so
+		// this fixture walks the real gate rather than writing the phase.
+		question, askErr := db.InsertMissionQuestion(ctx, mission.ID, mission.CurrentIntegratorRunID, "which flow?", "takeover-ask")
+		if askErr != nil {
+			t.Fatalf("ask plan question: %v", askErr)
+		}
+		if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "this flow", "takeover-answer"); answerErr != nil {
+			t.Fatalf("answer plan question: %v", answerErr)
+		}
+		if _, completeErr := db.CompleteMissionClarification(ctx, mission.ID, mission.CurrentIntegratorRunID, "takeover-clarify"); completeErr != nil {
+			t.Fatalf("complete clarification: %v", completeErr)
+		}
+		review, submitErr := db.SubmitMissionPlan(ctx, mission.ID, mission.CurrentIntegratorRunID, "takeover plan", "takeover-submit")
+		if submitErr != nil {
+			t.Fatalf("submit plan: %v", submitErr)
+		}
+		approved, approveErr := db.DecideMissionPlan(ctx, mission.ID, review.PlanVersion, domain.MissionPlanApprove, "", member.ID, "takeover-approve")
+		if approveErr != nil {
+			t.Fatalf("approve plan: %v", approveErr)
+		}
+		mission = approved
 		if _, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
 			MissionID:            mission.ID,
 			TaskID:               task.ID,

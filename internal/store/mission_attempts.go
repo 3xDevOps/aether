@@ -58,15 +58,15 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, lockErr := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = ?`, r.MissionID); lockErr != nil {
-		return nil, false, lockErr
-	}
-	m, err := scanMission(tx.QueryRowContext(ctx, `SELECT `+missionColumns+` FROM missions WHERE id = ?`, r.MissionID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, ErrNotFound
-	}
+	m, err := lockMissionRow(ctx, tx, r.MissionID)
 	if err != nil {
 		return nil, false, err
+	}
+	// Dispatch needs an approved plan; amendment_review keeps dispatching the
+	// already-approved set, and a pending revision cannot be reserved because
+	// it is not the task's current revision.
+	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview); phaseErr != nil {
+		return nil, false, phaseErr
 	}
 	if r.IntegratorGeneration != 0 && r.IntegratorGeneration != m.IntegratorGeneration {
 		return nil, false, ErrMissionStale
@@ -101,6 +101,18 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	}
 	if taskRevisionStatus != string(domain.TaskRevisionAccepted) {
 		return nil, false, ErrMissionNotReady
+	}
+	// A task the amendment under review changes is held back whole: starting
+	// work on the approved revision now would be work the human is deciding
+	// whether to redirect.
+	if m.Phase == domain.MissionPhaseAmendmentReview {
+		var underReview int
+		if reviewErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_plan_items WHERE mission_id=? AND plan_version=? AND task_id=?`, r.MissionID, m.PlanVersion, r.TaskID).Scan(&underReview); reviewErr != nil {
+			return nil, false, fmt.Errorf("store: read plan items of task %s: %w", r.TaskID, reviewErr)
+		}
+		if underReview > 0 {
+			return nil, false, fmt.Errorf("%w: task %s has a revision awaiting human approval; wait for the decision", ErrMissionNotReady, r.TaskID)
+		}
 	}
 	var blocked int
 	if blockedErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_task_dependencies d WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=d.depends_on_revision)`, r.TaskID, r.TaskRevision).Scan(&blocked); blockedErr != nil {

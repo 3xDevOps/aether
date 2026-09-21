@@ -79,8 +79,11 @@ The `coord.*` wire and its six base methods are unchanged. Mission-assigned
 runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
 `integration.prepare`, `integration.show`, `integration.verify`,
-`integration.request_delivery`, and `integration.deliver`. These methods use
-the same run-authenticated socket but are not part of the base `coord.*` set.
+`integration.request_delivery`, `integration.deliver`,
+`mission.question.ask`, `mission.clarification.complete`, `mission.plan.show`,
+and `mission.plan.submit`. These
+methods use the same run-authenticated socket but are not part of the base
+`coord.*` set.
 Every allow-list is derived from the current assignment, not from
 caller-supplied roles or identities. A mission may authorize its integrator
 and active worker runs as peers before any file overlap exists; ordinary runs
@@ -251,6 +254,148 @@ when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
 
+### The mission plan gate
+
+A mission is created in the `planning` phase, and no worker starts until a
+human approves the plan. After approval, a change the integrator cannot make
+alone goes back to the human as an amendment. The phase is mission state;
+every method below is refused in the wrong phase with code `-32002`.
+
+| Phase | Worker dispatch | Integrator task mutations |
+| --- | --- | --- |
+| `planning` | refused | `task propose`, `task revise`, `task abandon` allowed; `task accept` and `task accept-submission` refused |
+| `clarified` | refused | same as `planning`; `mission question ask` returns the mission to `planning` |
+| `plan_review` | refused | all refused; the plan is frozen while a human reads it |
+| `active` | allowed | all allowed, within the limits on `task accept` below |
+| `amendment_review` | allowed, for the already-approved set only | `task accept-submission` allowed; `propose`, `revise`, `abandon`, and `accept` refused |
+| `rejected` | refused | all refused |
+
+Transitions are exactly:
+
+```
+planning         --mission clarification complete-->  clarified
+clarified        --mission plan submit------------->  plan_review
+plan_review      --approve------------------------->  active
+plan_review      --request changes----------------->  planning
+plan_review      --reject-------------------------->  rejected
+active           --mission plan submit------------->  amendment_review
+amendment_review --approve------------------------->  active
+amendment_review --request changes----------------->  active
+clarified        --mission question ask------------>  planning
+rejected: terminal
+```
+
+`reject` is refused on an amendment: an amendment is approved or sent back for
+changes, and the integrator drops it by abandoning its tasks or revisions.
+
+Only the current integrator may use these commands, and only for its own
+mission; none of them takes a mission ID:
+
+```sh
+/usr/local/bin/aether-internal mission question ask \
+  --body 'Which checkout flow should this replace?' \
+  --idempotency-key mission-ask-1
+/usr/local/bin/aether-internal mission plan show --wait 30
+/usr/local/bin/aether-internal mission clarification complete \
+  --idempotency-key mission-clarify-1
+/usr/local/bin/aether-internal mission plan submit \
+  --summary 'What will be built and why.' \
+  --idempotency-key mission-submit-1
+```
+
+`ask`, `clarification complete`, and `submit` require an explicit
+`--idempotency-key`; unlike `send` and `ask --to`, the CLI never generates one
+for them. `--body-file` and `--summary-file` accept a path or `-` for standard
+input, and both bodies are capped at 4 KiB. `mission question ask` asks the
+accountable human, who answers in the dashboard; `ask --to <run-id>` asks a
+peer agent run, which answers with `reply`. They are separate mailboxes.
+
+`mission plan show` returns the phase, plan version, integrator generation,
+open question count, and the feedback of the most recent request for changes,
+plus every question and review round. `--wait` asks the server to wait up to 30
+seconds for one of those to change; it returns unchanged when the wait elapses.
+A value outside 0 through 30 is a usage error before any request is sent.
+Waiting for a human is not being blocked: do not report an outcome while
+waiting.
+
+Questions are optional. `mission clarification complete` is how the integrator
+declares that the objective is specified well enough to plan; it is refused
+while a question the integrator asked is unanswered. Asking a further question
+from `clarified` returns the mission to `planning` until that question is
+answered. An initial plan can only be submitted from `clarified`.
+
+While the mission is in `planning` or `clarified`, revising a task replaces the
+draft: the previous revision is superseded and the new one becomes current
+without any human action, so the review always reads the latest draft.
+
+`mission.plan.decide` is the human boundary. It is not an agent command and is
+not reachable from the run socket; the accountable human or an admin approves,
+requests changes, or rejects from the dashboard. Approval accepts exactly the
+revisions the submitted round recorded, in one transaction, and moves the
+mission to `active`.
+
+#### Amendments to an approved plan
+
+In `active`, a submit sends an amendment: the pending set is every
+non-abandoned task's highest proposed revision at or above its current
+revision. Submitting at least one such task or revision is the only
+precondition. The mission moves to `amendment_review`, and while a human reads
+it:
+
+- Already-approved work keeps running. Workers still start, retry, cancel, and
+  their submissions are still accepted.
+- Nothing the amendment introduces can start: a pending revision is `proposed`,
+  and only a task's current accepted revision is ever reserved. `worker start`
+  on a task that has an item in the round under review is refused outright.
+- `task propose`, `task revise`, `task abandon`, and `task accept` are refused.
+
+`approve` returns the mission to `active` with the round's revisions accepted;
+`request changes` also returns it to `active`, with the feedback recorded and
+the proposals still `proposed`, so the integrator can revise and submit again,
+or drop them.
+
+The integrator still accepts small revisions of approved tasks itself with
+`task accept`. The server refuses that accept, with code `-32002`, when any of
+these holds:
+
+- the task has never been approved, so the revision is new work;
+- the revision declares `"material": true`;
+- an `expected_paths` entry is not covered by the approved scope union (the
+  union of `expected_paths` over every accepted current revision of the
+  mission, which includes the task's own);
+- the revision drops an exclusion carried by the task's current accepted
+  revision;
+- belongs to a task whose latest review round was sent back with `request
+  changes`; only a round that approves the task again lifts that hold.
+
+Each of those has to go through `mission plan submit` instead. `material` is
+the proposer's own declaration on the revision JSON, not something the server
+infers: it is an audit fact recorded on the revision, and the sixth reason a
+revision needs a human round. Declare `expected_paths` on every task, because
+after approval anything outside them is a widening that needs an amendment.
+
+Drop a pending revision without touching the task:
+
+```sh
+/usr/local/bin/aether-internal task abandon \
+  --task-id task-1 --revision 3 \
+  --expected-integrator-generation 4 \
+  --idempotency-key abandon-revision-3
+```
+
+Without `--revision`, the whole task is abandoned. With it, only that pending
+revision is marked abandoned; the task, its current revision, and the accepted
+set version are untouched.
+
+`aether-internal skill` prints the current phase, plan version, open question
+count, and latest feedback for an integrator run, followed by the instructions
+for that phase: the planning flow above in `planning`, the propose-and-submit
+lines in `clarified`, the wait in `plan_review`, the wait plus the candidate
+flow in `amendment_review`, the amendment rules and the candidate flow in
+`active`, and in `rejected` the
+statement that the run is being cancelled and must not report an outcome. Run
+`skill` again after the phase changes.
+
 ### Inspect and manage mission tasks and workers
 
 Task and worker commands use the authority attached to the run's socket. They
@@ -273,6 +418,13 @@ requires `--expected-accepted-set-version`. If the server's exact submission
 result reports non-empty `ScopeViolations`, the caller must explicitly assess
 those deviations by passing `--scope-disposition '<reason>'`; the client does
 not generate or infer a path list, and an empty reason is not an assessment.
+
+Which of these the server accepts depends on the mission phase, as the table
+above states: `propose`, `revise`, and `abandon` in `planning`, `clarified`,
+and `active`; `accept` only in `active`, and only within the limits listed
+under amendments; `accept-submission` in `active` and `amendment_review`; and
+nothing at all in `plan_review` or `rejected`. `abandon` takes an optional
+`--revision <n>` that drops one pending revision instead of the task.
 
 Worker starts and retries require explicit `--dispatch-key` values. The
 dispatch key is also the idempotency key for that operation, so replaying the

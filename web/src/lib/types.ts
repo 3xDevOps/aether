@@ -48,6 +48,17 @@ export interface Run {
   base_checked_at?: string | null
 }
 /** Release B mission orchestration wire objects. IDs and revisions are server authority. */
+/** Where a mission sits in the human plan gate. Only `active` and
+ * `amendment_review` dispatch workers, and `amendment_review` dispatches only
+ * the set a human already approved. */
+export type MissionPhase =
+  | 'planning'
+  | 'clarified'
+  | 'plan_review'
+  | 'active'
+  | 'amendment_review'
+  | 'rejected'
+export type MissionPlanDecision = 'approve' | 'revise' | 'reject'
 export type MissionTaskStatus = 'ready' | 'working' | 'review' | 'done' | 'proposed' | 'abandoned' | 'blocked'
 export type MissionTaskRevisionStatus = 'proposed' | 'accepted' | 'superseded' | 'abandoned'
 export type MissionAttemptState =
@@ -88,8 +99,52 @@ export interface Mission {
   current_integrator_run_id: string
   integrator_generation: number
   accepted_set_version: number
+  phase: MissionPhase
+  plan_version: number
+  /** Unanswered questions; only mission.show and mission.list compute it. */
+  open_questions: number
   created_at: string
   updated_at: string
+}
+
+export interface MissionQuestion {
+  id: string
+  mission_id: string
+  seq: number
+  body: string
+  asked_by_run_id: string
+  asked_at: string
+  answer?: string
+  answered_by_member_id?: string
+  answered_at?: string | null
+}
+
+export interface MissionPlanReview {
+  mission_id: string
+  plan_version: number
+  summary: string
+  submitted_by_run_id: string
+  submitted_at: string
+  /** `clarified` for an initial plan, `active` for an amendment. */
+  submitted_phase: 'clarified' | 'active'
+  decision?: MissionPlanDecision
+  feedback?: string
+  decided_by_member_id?: string
+  decided_at?: string | null
+  items?: MissionPlanItem[]
+}
+
+/** One task revision a plan round put in front of a human. `widening` is the
+ * server's own list of paths and dropped exclusions that reach outside the
+ * approved plan; the dashboard never recomputes it. */
+export interface MissionPlanItem {
+  task_id: string
+  revision: number
+  new_task: boolean
+  material: boolean
+  widening?: string[]
+  title: string
+  supersedes_revision?: number
 }
 
 export interface MissionTaskScope {
@@ -121,8 +176,12 @@ export interface MissionTaskRevision {
   scope: MissionTaskScope
   evidence_requirements: MissionEvidenceRequirement[]
   status: MissionTaskRevisionStatus
+  /** The proposer's declaration that the change needs a human plan round. */
+  material?: boolean
   proposed_by_run_id?: string
   supersedes_revision?: number
+  accepted_by_member_id?: string
+  accepted_by_run_id?: string
   created_at: string
   accepted_at?: string | null
 }
@@ -147,6 +206,8 @@ export interface MissionTask {
   mission_id: string
   current_revision: number
   revision?: MissionTaskRevision | null
+  /** A proposed revision above `current_revision`; it cannot be dispatched. */
+  pending_revision?: MissionTaskRevision | null
   dependencies?: MissionTaskDependency[]
   status: MissionTaskStatus
   blockers?: MissionTaskBlocker[]
@@ -245,6 +306,16 @@ export interface MissionShowResult {
   attempts?: MissionAttempt[]
   submissions?: MissionSubmission[]
   diagnostics?: MissionScopeDiagnostic[]
+  questions?: MissionQuestion[]
+  plan_reviews?: MissionPlanReview[]
+}
+
+export interface MissionQuestionResult {
+  question: MissionQuestion
+}
+
+export interface MissionPlanDecideResult {
+  mission: Mission
 }
 
 export interface MissionListResult {

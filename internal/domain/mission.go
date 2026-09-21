@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"path"
+	"strings"
+	"time"
+)
 
 type MissionID string
 type TaskID string
@@ -19,6 +23,139 @@ type MissionIntegrator struct {
 	Mode            LaunchMode `json:"mode"`
 }
 
+// MissionPhase is the human gate a mission currently sits behind. A mission
+// starts in MissionPhasePlanning and reaches MissionPhaseActive only through a
+// human plan decision; MissionPhaseRejected is terminal.
+//
+//	planning         --mission.clarification.complete-->  clarified
+//	clarified        --mission.question.ask----------->   planning
+//	clarified        --mission.plan.submit----------->    plan_review
+//	plan_review      --decide approve--------------->     active
+//	plan_review      --decide revise---------------->     planning
+//	plan_review      --decide reject---------------->     rejected
+//	active           --mission.plan.submit----------->    amendment_review
+//	amendment_review --decide approve--------------->     active
+//	amendment_review --decide revise---------------->     active
+type MissionPhase string
+
+const (
+	MissionPhasePlanning        MissionPhase = "planning"
+	MissionPhaseClarified       MissionPhase = "clarified"
+	MissionPhasePlanReview      MissionPhase = "plan_review"
+	MissionPhaseActive          MissionPhase = "active"
+	MissionPhaseAmendmentReview MissionPhase = "amendment_review"
+	MissionPhaseRejected        MissionPhase = "rejected"
+)
+
+// MissionPlanDecision is the human verdict on one submitted plan version.
+type MissionPlanDecision string
+
+const (
+	MissionPlanApprove MissionPlanDecision = "approve"
+	MissionPlanRevise  MissionPlanDecision = "revise"
+	MissionPlanReject  MissionPlanDecision = "reject"
+)
+
+func (d MissionPlanDecision) Valid() bool {
+	return d == MissionPlanApprove || d == MissionPlanRevise || d == MissionPlanReject
+}
+
+// MissionPhaseAfterDecision is the only legal phase transition out of a review
+// phase. It reports false for anything else, including reject on an amendment:
+// an amendment leaves the approved plan standing, so there is nothing to
+// reject.
+func MissionPhaseAfterDecision(current MissionPhase, d MissionPlanDecision) (MissionPhase, bool) {
+	switch current {
+	case MissionPhasePlanReview:
+		switch d {
+		case MissionPlanApprove:
+			return MissionPhaseActive, true
+		case MissionPlanRevise:
+			return MissionPhasePlanning, true
+		case MissionPlanReject:
+			return MissionPhaseRejected, true
+		}
+	case MissionPhaseAmendmentReview:
+		switch d {
+		case MissionPlanApprove, MissionPlanRevise:
+			return MissionPhaseActive, true
+		}
+	}
+	return "", false
+}
+
+// ScopeCovers reports whether p lies inside one of the declared scope paths:
+// an exact match or a directory prefix, both cleaned first. It is the single
+// path rule the mission scope uses, shared by the store's scope-widening check
+// and the service's overlap diagnostics.
+func ScopeCovers(declared []string, p string) bool {
+	p = path.Clean(strings.TrimSpace(p))
+	if p == "." || p == "" {
+		return false
+	}
+	for _, raw := range declared {
+		base := path.Clean(strings.TrimSpace(raw))
+		if base == "." || base == "" {
+			continue
+		}
+		if base == p || strings.HasPrefix(p, base+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+type MissionQuestionID string
+
+// MissionQuestion is one clarifying question the integrator asked the
+// accountable human. AnsweredAt is nil until a human answers.
+type MissionQuestion struct {
+	ID                 MissionQuestionID
+	MissionID          MissionID
+	Seq                int
+	Body               string
+	AskedByRunID       RunID
+	AskedAt            time.Time
+	Answer             string
+	AnsweredByMemberID MemberID
+	AnsweredAt         *time.Time
+}
+
+// MissionPlanReview is one round of plan submission and human decision.
+// DecidedAt is non-nil exactly when Decision is non-empty. SubmittedPhase is
+// the phase the round left: clarified for an initial plan, active for an
+// amendment.
+type MissionPlanReview struct {
+	MissionID         MissionID
+	PlanVersion       uint64
+	Summary           string
+	SubmittedByRunID  RunID
+	SubmittedAt       time.Time
+	SubmittedPhase    MissionPhase
+	Decision          MissionPlanDecision
+	Feedback          string
+	DecidedByMemberID MemberID
+	DecidedAt         *time.Time
+	Items             []MissionPlanItem
+}
+
+// MissionPlanItem is one task revision a plan round put in front of a human.
+// It is written at submit and never rewritten, so a round sent back for
+// changes keeps the record of exactly what was declined. Widening holds the
+// expected paths and the dropped exclusions that reach outside the approved
+// scope, computed against the approved union at submit and empty for an
+// initial plan.
+type MissionPlanItem struct {
+	PlanVersion        uint64
+	TaskID             TaskID
+	Revision           int
+	NewTask            bool
+	Material           bool
+	Widening           []string
+	Title              string
+	SupersedesRevision int
+}
+
 type Mission struct {
 	ID                           MissionID
 	WorkspaceID                  WorkspaceID
@@ -33,15 +170,22 @@ type Mission struct {
 	IntegratorRunOwnerID         MemberID
 	IntegratorGeneration         uint64
 	AcceptedSetVersion           uint64
-	IdempotencyKey               string
-	CreatedAt                    time.Time
-	UpdatedAt                    time.Time
+	Phase                        MissionPhase
+	PlanVersion                  uint64
+	// OpenQuestions is populated only by store.GetMission and
+	// store.ListMissionsPage. Transaction-local mission reads leave it zero
+	// and no store decision may consult it.
+	OpenQuestions  int
+	IdempotencyKey string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 const (
 	MaxMissionConcurrentAttempts = 8
 	MaxMissionTotalAttempts      = 128
 	MaxMissionTasks              = 128
+	MaxMissionQuestions          = 32
 	MaxTaskRevisions             = 64
 	MaxTaskDependencies          = 128
 	MaxTaskEvidenceRequirements  = 64
@@ -99,15 +243,21 @@ type TaskScope struct {
 }
 
 type TaskRevision struct {
-	TaskID               TaskID
-	Revision             int
-	Title                string
-	Objective            string
-	Scope                TaskScope
+	TaskID    TaskID
+	Revision  int
+	Title     string
+	Objective string
+	Scope     TaskScope
+	// Material is the proposer's declaration that this revision changes what
+	// the human approved. It is an audit fact and, with the scope rules in
+	// store.AcceptTaskRevision, a reason the revision needs a human round.
+	Material             bool
 	EvidenceRequirements []EvidenceRequirement
 	Status               TaskRevisionStatus
 	ProposedByRunID      RunID
 	SupersedesRevision   int
+	AcceptedByMemberID   MemberID
+	AcceptedByRunID      RunID
 	CreatedAt            time.Time
 	AcceptedAt           *time.Time
 }
@@ -133,6 +283,11 @@ type Task struct {
 	MissionID       MissionID
 	CurrentRevision int
 	Revision        *TaskRevision
+	// PendingRevision is the task's highest-numbered proposed revision above
+	// CurrentRevision, nil when there is none. It is the proposed side of an
+	// amendment: it is never dispatched, because it is not the current
+	// revision.
+	PendingRevision *TaskRevision
 	Dependencies    []TaskDependency
 	Status          TaskStatus
 	Blockers        []TaskBlocker

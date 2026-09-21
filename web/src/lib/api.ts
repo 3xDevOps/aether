@@ -31,6 +31,9 @@ import type {
   Member,
   MissionCreateResult,
   MissionListResult,
+  MissionPlanDecideResult,
+  MissionPlanDecision,
+  MissionQuestionResult,
   MissionReplaceIntegratorResult,
   MissionShowResult,
   MissionWorkerReleaseResult,
@@ -436,6 +439,18 @@ export const api = {
     }
     idempotency_key: string
   }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
+  missionQuestionAnswer: (params: {
+    question_id: string
+    answer: string
+    idempotency_key: string
+  }) => call<MissionQuestionResult>('mission.question.answer', params),
+  missionPlanDecide: (params: {
+    mission_id: string
+    expected_plan_version: number
+    decision: MissionPlanDecision
+    feedback?: string
+    idempotency_key: string
+  }) => call<MissionPlanDecideResult>('mission.plan.decide', params),
   missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
     call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),

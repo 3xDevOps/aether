@@ -103,6 +103,8 @@ func TestRPCErrorMapping(t *testing.T) {
 		{errMemberPending, protocol.CodeDenied},
 		{errNoSession, protocol.CodeUnavailable},
 		{errSessionEnded, protocol.CodeUnavailable},
+		{store.ErrMissionPhase, protocol.CodeInvalidState},
+		{fmt.Errorf("task.accept: %w", store.ErrMissionAmendmentRequired), protocol.CodeInvalidState},
 		{errors.New("boom"), protocol.CodeInternal},
 	}
 	for _, tt := range tests {

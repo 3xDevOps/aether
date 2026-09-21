@@ -120,6 +120,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = report(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "task", "worker":
 		result, err = missionCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In, cfg.ErrOut)
+	case "mission":
+		result, err = planCommand(ctx, cfg.Socket, args[1:], cfg.In)
 	case "integration":
 		if len(args) < 2 {
 			return fail(cfg.Out, protocol.CodeInvalidParams, "integration requires a subcommand")
@@ -146,6 +148,7 @@ Commands:
   inbox     read the at-least-once inbox
   ask       ask an authorized peer a durable question
   reply     answer a durable question
+  mission   ask the accountable human and submit the plan for review
   task      inspect and mutate mission task revisions
   worker    inspect and manage mission worker attempts
   integration run the five integrator candidate operations
@@ -179,6 +182,54 @@ Ask one durable, correlated question. A body file of "-" reads standard input.
 	"reply": `usage: aether-internal reply --question-id <id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
 
 Reply to the sender of one durable question. A body file of "-" reads standard input.
+`,
+	"mission": `usage: aether-internal mission <clarification|question|plan> <subcommand> [options]
+
+mission question ask asks the accountable human, who answers in the dashboard.
+ask --to <run-id> asks a peer agent run, which answers with reply. They are
+separate mailboxes. The mission is the run's own; no command takes a mission ID.
+`,
+	"mission clarification": `usage: aether-internal mission clarification complete --idempotency-key <key>
+
+Declare that clarification is done and the plan can be written. Only the
+integrator may complete it, and only while the mission is in the planning
+phase.
+`,
+	"mission clarification complete": `usage: aether-internal mission clarification complete --idempotency-key <key>
+
+Move the mission from planning to clarified. Questions are optional, but the
+call is refused while a question you asked is unanswered.
+`,
+	"mission question": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
+
+mission question ask asks the accountable human, who answers in the dashboard.
+ask --to <run-id> asks a peer agent run, which answers with reply. They are
+separate mailboxes.
+`,
+	"mission question ask": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
+
+Ask the accountable human one clarifying question. A body file of "-" reads
+standard input. Only the integrator may ask, in the planning and clarified
+phases; asking in clarified returns the mission to planning until the question
+is answered.
+`,
+	"mission plan": `usage: aether-internal mission plan <show|submit> [options]
+
+show reads the gate state, questions, and review rounds. submit sends the
+proposed tasks to the accountable human for a decision.
+`,
+	"mission plan show": `usage: aether-internal mission plan show [--wait <seconds>]
+
+Read the mission phase, plan version, open questions, and review rounds.
+--wait asks the server to wait up to 30 seconds for a change; it is not a
+client polling loop.
+`,
+	"mission plan submit": `usage: aether-internal mission plan submit (--summary <text> | --summary-file <path>) --idempotency-key <key>
+
+Submit the pending tasks and revisions as a plan for human review. For an
+initial plan, clarification must be complete first; from the active phase this
+submits an amendment to the approved plan. A summary file of "-" reads standard
+input.
 `,
 	"task": `usage: aether-internal task <show|list|propose|revise|accept|accept-submission|abandon> [options]
 
@@ -236,7 +287,7 @@ an uncertain outcome; do not invent another delivery request.
 	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
 	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
-	"task abandon":           "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
 	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
 	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
 	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",
@@ -371,8 +422,8 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 					assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
 					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
 				}
-				if _, err := io.WriteString(out, integratorWorkflow); err != nil {
-					return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
+				if err := writeSkillPhase(out, assignment); err != nil {
+					return ExitFailure, err
 				}
 			case "worker":
 				if _, err := io.WriteString(out, "Worker scope: read and propose changes only for the assigned task; do not spawn workers. Report only after the assigned task is finished or irrecoverable; a report is terminal.\n"); err != nil {
