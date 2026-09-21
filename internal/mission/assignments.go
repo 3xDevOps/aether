@@ -150,9 +150,12 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 	if attempt == nil {
 		out.Role = missionRoleIntegrator
 		out.Capabilities = integratorCapabilities()
-		// Only an unapproved plan has open questions or pending feedback to
-		// act on, so the two extra reads stay off the approved-mission path.
-		if m.Phase == domain.MissionPhasePlanning || m.Phase == domain.MissionPhasePlanReview {
+		// Only a mission with an undecided round has open questions or pending
+		// feedback to act on, so the two extra reads stay off the approved
+		// path: active is the one phase where nothing is waiting on a human.
+		switch m.Phase {
+		case domain.MissionPhasePlanning, domain.MissionPhaseClarified,
+			domain.MissionPhasePlanReview, domain.MissionPhaseAmendmentReview:
 			current, missionErr := s.cfg.Missions.GetMission(ctx, m.ID)
 			if missionErr != nil {
 				return protocol.CoordMissionAssignment{}, missionErr
@@ -183,6 +186,7 @@ func integratorCapabilities() []string {
 		protocol.MethodTaskAcceptSubmission,
 		protocol.MethodTaskAbandon,
 		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionClarificationComplete,
 		protocol.MethodMissionPlanShow,
 		protocol.MethodMissionPlanSubmit,
 		protocol.MethodWorkerStart,

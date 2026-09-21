@@ -18,6 +18,10 @@ func TestCLIMissionPlanUsageErrors(t *testing.T) {
 	}{
 		{name: "mission without subcommand", args: []string{"mission"}},
 		{name: "unknown group", args: []string{"mission", "wat", "show"}},
+		{name: "clarification without subcommand", args: []string{"mission", "clarification"}},
+		{name: "unknown clarification command", args: []string{"mission", "clarification", "start"}},
+		{name: "clarification complete without key", args: []string{"mission", "clarification", "complete"}},
+		{name: "clarification complete with positional argument", args: []string{"mission", "clarification", "complete", "--idempotency-key", "clarify-1", "extra"}},
 		{name: "question without subcommand", args: []string{"mission", "question"}},
 		{name: "unknown question command", args: []string{"mission", "question", "answer"}},
 		{name: "plan without subcommand", args: []string{"mission", "plan"}},
@@ -63,6 +67,10 @@ func TestCLIMissionPlanUsageTextNamesRequiredFlags(t *testing.T) {
 	if got := decodeEnvelope(t, raw).Error.Message; got != "mission question ask requires --body or --body-file and --idempotency-key" {
 		t.Fatalf("ask usage message = %q", got)
 	}
+	_, raw = runCLI(t, "", []string{"mission", "clarification", "complete"}, "")
+	if got := decodeEnvelope(t, raw).Error.Message; got != "mission clarification complete requires --idempotency-key" {
+		t.Fatalf("clarification usage message = %q", got)
+	}
 	_, raw = runCLI(t, "", []string{"mission", "plan", "show", "--wait", "31"}, "")
 	if got := decodeEnvelope(t, raw).Error.Message; got != "mission plan show: --wait must be between 0 and 30" {
 		t.Fatalf("show usage message = %q", got)
@@ -72,6 +80,7 @@ func TestCLIMissionPlanUsageTextNamesRequiredFlags(t *testing.T) {
 func TestCLIMissionPlanHelpIsSocketIndependent(t *testing.T) {
 	for _, args := range [][]string{
 		{"mission", "--help"},
+		{"mission", "clarification", "complete", "--help"},
 		{"mission", "question", "ask", "--help"},
 		{"mission", "plan", "show", "--help"},
 		{"mission", "plan", "submit", "--help"},
@@ -91,6 +100,16 @@ func TestCLIMissionPlanHelpIsSocketIndependent(t *testing.T) {
 		!strings.Contains(commandUsages["mission"], "separate mailboxes") {
 		t.Fatalf("mission usage does not distinguish the human mailbox from peer ask: %q", commandUsages["mission"])
 	}
+	if !strings.Contains(commandUsages["mission"], "<clarification|question|plan>") {
+		t.Fatalf("mission usage omits the clarification group: %q", commandUsages["mission"])
+	}
+	if !strings.Contains(commandUsages["mission plan submit"], "clarification must be complete") {
+		t.Fatalf("submit usage omits the clarification precondition: %q", commandUsages["mission plan submit"])
+	}
+	if !strings.Contains(commandUsages["task abandon"], "[--revision <n>]") ||
+		!strings.Contains(commandUsages["task abandon"], "drops only that pending revision") {
+		t.Fatalf("task abandon usage omits the per-revision form: %q", commandUsages["task abandon"])
+	}
 }
 
 func TestCLIMissionPlanEnvelopesAndParams(t *testing.T) {
@@ -105,6 +124,15 @@ func TestCLIMissionPlanEnvelopesAndParams(t *testing.T) {
 			t.Fatalf("%s carried a caller-supplied mission or run identity: %+v", req.Method, raw)
 		}
 		switch req.Method {
+		case protocol.MethodMissionClarificationComplete:
+			var p protocol.MissionClarificationCompleteParams
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				t.Fatalf("decode clarification complete: %v", err)
+			}
+			if p.IdempotencyKey != "clarify-1" {
+				t.Fatalf("clarification complete params = %+v", p)
+			}
+			return protocol.Response{Result: json.RawMessage(`{"plan":{"mission_id":"mission-1","phase":"clarified","plan_version":0,"integrator_generation":1}}`)}
 		case protocol.MethodMissionQuestionAsk:
 			var p protocol.MissionQuestionAskParams
 			if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -137,7 +165,17 @@ func TestCLIMissionPlanEnvelopesAndParams(t *testing.T) {
 		}
 	})
 
-	code, raw := runCLI(t, s.path, []string{"mission", "question", "ask", "--body-file", "-", "--idempotency-key", "ask-1"}, "which checkout flow?")
+	code, raw := runCLI(t, s.path, []string{"mission", "clarification", "complete", "--idempotency-key", "clarify-1"}, "")
+	if code != ExitOK {
+		t.Fatalf("mission clarification complete = code %d, envelope %s", code, raw)
+	}
+	var clarified protocol.MissionClarificationCompleteResult
+	decodeResult(t, raw, &clarified)
+	if clarified.Plan.Phase != "clarified" {
+		t.Fatalf("clarified plan state = %+v", clarified.Plan)
+	}
+
+	code, raw = runCLI(t, s.path, []string{"mission", "question", "ask", "--body-file", "-", "--idempotency-key", "ask-1"}, "which checkout flow?")
 	if code != ExitOK || !decodeEnvelope(t, raw).OK {
 		t.Fatalf("mission question ask = code %d, envelope %s", code, raw)
 	}
@@ -193,20 +231,36 @@ func TestCLISkillPhaseText(t *testing.T) {
 			assignment: `"phase":"planning","plan_version":0,"open_questions":2`,
 			want: []string{
 				"Phase: planning\nPlan version: 0\nOpen questions: 2\n",
-				"aether-internal mission question ask --body 'question' --idempotency-key <key>",
+				"  1. Decide whether the objective is specified well enough to plan. If not,\n     ask the accountable human; this asks the human, not a peer run:\n       aether-internal mission question ask --body 'question' --idempotency-key <key>",
+				"  2. When you have what you need (questions are optional), say so:\n       aether-internal mission clarification complete --idempotency-key <key>\n     This is refused while a question you asked is unanswered.",
+				"     Declare expected_paths for every task: after approval, work outside\n     them needs a human-approved amendment.",
 				"aether-internal mission plan show --wait 30",
 				"aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>",
 				"No worker can start until a human approves the plan.",
 			},
-			absent: []string{"Latest feedback", "human-decision boundary"},
+			absent: []string{"Latest feedback", "human-decision boundary", "at least one question"},
 		},
 		{
 			name:       "planning after revise",
 			assignment: `"phase":"planning","plan_version":1,"open_questions":0,"latest_feedback":"split the migration out"`,
 			want: []string{
-				"Phase: planning\nPlan version: 1\nOpen questions: 0\nLatest feedback: split the migration out\n",
-				"Revise an existing task rather than proposing a duplicate",
+				"Phase: planning\nPlan version: 1\nOpen questions: 0\nLatest feedback: split the migration out\nPlanning flow:",
 			},
+		},
+		{
+			name:       "clarified",
+			assignment: `"phase":"clarified","plan_version":0`,
+			want: []string{
+				"Phase: clarified\nPlan version: 0\nClarification is complete. Propose or revise tasks, then submit the plan:\n",
+				"  aether-internal task list --mission-id <mission-id>\n  aether-internal task propose --mission-id <mission-id> --idempotency-key <key> --revision-file /tmp/aether-task.json\n  aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>\n",
+				"Declare expected_paths for every task. No worker can start until a human\napproves the plan.\n",
+			},
+			absent: []string{"Planning flow:", "Latest feedback", "human-decision boundary"},
+		},
+		{
+			name:       "clarified after revise",
+			assignment: `"phase":"clarified","plan_version":1,"latest_feedback":"split the migration out"`,
+			want:       []string{"Phase: clarified\nPlan version: 1\nLatest feedback: split the migration out\nClarification is complete."},
 		},
 		{
 			name:       "plan review",
@@ -222,11 +276,27 @@ func TestCLISkillPhaseText(t *testing.T) {
 			name:       "active",
 			assignment: `"phase":"active","plan_version":3`,
 			want: []string{
-				"Phase: active\nPlan version: 3 (approved)\n",
+				"Phase: active\nPlan version: 3 (approved)\nChanging the approved plan:\n",
+				"  A revision you accept yourself must stay within the approved plan: not\n  marked \"material\": true, and expected_paths inside the approved paths. The\n  server refuses task accept otherwise.",
+				"  A material change - new scope, new subsystems, more work, a changed\n  constraint or success criterion - is proposed with \"material\": true, then\n  submitted for human approval:\n    aether-internal mission plan submit --summary 'what changes and why' --idempotency-key <key>",
+				"  revise that task. Drop a pending revision with\n    aether-internal task abandon --task-id <task> --revision <n> --expected-integrator-generation <g> --idempotency-key <key>\n",
+				"  Drop a whole task you proposed this round with the same command and no\n  --revision:\n    aether-internal task abandon --task-id <task> --expected-integrator-generation <g> --idempotency-key <key>\n",
 				"Integrator candidate flow:",
 				"human-decision boundary",
 			},
 			absent: []string{"Planning flow:", "A human is reviewing the plan."},
+		},
+		{
+			name:       "amendment review",
+			assignment: `"phase":"amendment_review","plan_version":4,"latest_feedback":"narrow the migration"`,
+			want: []string{
+				"Phase: amendment_review\nPlan version: 4\nLatest feedback: narrow the migration\n",
+				"A human is reviewing the amendment. Approved work continues: you may accept\nsubmissions, inspect, cancel, and retry workers on approved tasks. Do not\npropose, revise, abandon, or accept task revisions; the server refuses them.\n",
+				"Wait for the decision by repeating this call until the phase changes:\n  aether-internal mission plan show --wait 30\n",
+				"Waiting is not being blocked and is not an outcome; do not run\naether-internal report. When the phase changes, run aether-internal skill\nagain.\n",
+				"Integrator candidate flow:",
+			},
+			absent: []string{"Planning flow:", "A human is reviewing the plan.", "Changing the approved plan:"},
 		},
 		{
 			name:       "rejected",
@@ -271,6 +341,38 @@ func TestCLISkillWorkerHasNoPhaseText(t *testing.T) {
 	}
 	if strings.Contains(raw, "Phase:") || strings.Contains(raw, "Planning flow:") {
 		t.Fatalf("worker skill printed integrator plan-gate text: %q", raw)
+	}
+}
+
+func TestCLITaskAbandonCarriesTheOptionalRevision(t *testing.T) {
+	var got []protocol.TaskAbandonParams
+	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+		if req.Method != protocol.MethodTaskAbandon {
+			t.Fatalf("unexpected method %s", req.Method)
+		}
+		var p protocol.TaskAbandonParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			t.Fatalf("decode abandon: %v", err)
+		}
+		got = append(got, p)
+		return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","mission_id":"mission-1","status":"abandoned","current_revision":1}}`)}
+	})
+
+	base := []string{"task", "abandon", "--task-id", "task-1", "--expected-integrator-generation", "4", "--idempotency-key", "abandon-1"}
+	if code, raw := runCLI(t, s.path, base, ""); code != ExitOK {
+		t.Fatalf("task abandon = code %d, envelope %s", code, raw)
+	}
+	if code, raw := runCLI(t, s.path, append(append([]string{}, base...), "--revision", "3"), ""); code != ExitOK {
+		t.Fatalf("task abandon --revision = code %d, envelope %s", code, raw)
+	}
+	if len(got) != 2 {
+		t.Fatalf("abandon calls = %d, want 2", len(got))
+	}
+	if got[0].Revision != 0 || got[0].TaskID != "task-1" || got[0].ExpectedIntegratorGeneration != 4 {
+		t.Fatalf("whole-task abandon params = %+v, want revision 0", got[0])
+	}
+	if got[1].Revision != 3 {
+		t.Fatalf("per-revision abandon params = %+v, want revision 3", got[1])
 	}
 }
 

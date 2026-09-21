@@ -204,7 +204,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, nil); authorizeErr != nil {
 			return nil, authorizeErr
 		}
-		if acceptErr := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); acceptErr != nil {
+		if acceptErr := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, run, p.IdempotencyKey); acceptErr != nil {
 			return nil, acceptErr
 		}
 		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
@@ -240,7 +240,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if p.ExpectedIntegratorGeneration != mission.IntegratorGeneration {
 			return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)
 		}
-		if abandonErr := s.cfg.Missions.AbandonTask(ctx, task.ID, p.ExpectedIntegratorGeneration, p.IdempotencyKey); abandonErr != nil {
+		if abandonErr := s.cfg.Missions.AbandonTask(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); abandonErr != nil {
 			return nil, abandonErr
 		}
 		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
@@ -257,16 +257,25 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 }
 
 // taskMutationPhase repeats the store's gate before any work: the draft plan
-// may be shaped in planning, but accepting anything is a post-approval act,
-// and plan_review freezes the plan the human is reading.
+// may be shaped while it is being written, but accepting a revision is a
+// post-approval act, and a review phase freezes the plan the human is reading.
 func taskMutationPhase(mission *domain.Mission, method string) error {
 	switch method {
-	case protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission:
+	case protocol.MethodTaskAccept:
 		if mission.Phase != domain.MissionPhaseActive {
 			return missionPhaseRefusal(mission, method)
 		}
+	case protocol.MethodTaskAcceptSubmission:
+		// Finishing work the human already approved is not a plan change, so
+		// it continues through an amendment round. AcceptSubmission has no
+		// store phase gate; this check is the only thing enforcing it.
+		if mission.Phase != domain.MissionPhaseActive && mission.Phase != domain.MissionPhaseAmendmentReview {
+			return missionPhaseRefusal(mission, method)
+		}
 	default:
-		if mission.Phase != domain.MissionPhasePlanning && mission.Phase != domain.MissionPhaseActive {
+		switch mission.Phase {
+		case domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhaseActive:
+		default:
 			return missionPhaseRefusal(mission, method)
 		}
 	}
@@ -418,6 +427,7 @@ func revisionFromWire(in protocol.TaskRevision, run domain.RunID) *domain.TaskRe
 	r := &domain.TaskRevision{
 		TaskID: domain.TaskID(in.TaskID), Revision: in.Revision, Title: in.Title,
 		Objective: in.Objective, Scope: scopeFromWire(in.Scope),
+		Material:           in.Material,
 		SupersedesRevision: in.SupersedesRevision, ProposedByRunID: run,
 		Status: domain.TaskRevisionProposed,
 	}
@@ -455,6 +465,10 @@ func taskWire(t *domain.Task) protocol.Task {
 		r := revisionWire(t.Revision)
 		out.Revision = &r
 	}
+	if t.PendingRevision != nil {
+		r := revisionWire(t.PendingRevision)
+		out.PendingRevision = &r
+	}
 	if len(t.Dependencies) > 0 {
 		out.Dependencies = make([]protocol.TaskDependency, len(t.Dependencies))
 		for i, d := range t.Dependencies {
@@ -471,7 +485,7 @@ func taskWire(t *domain.Task) protocol.Task {
 }
 
 func revisionWire(r *domain.TaskRevision) protocol.TaskRevision {
-	out := protocol.TaskRevision{TaskID: string(r.TaskID), Revision: r.Revision, Title: r.Title, Objective: r.Objective, Scope: scopeWire(r.Scope), Status: string(r.Status), ProposedByRunID: string(r.ProposedByRunID), SupersedesRevision: r.SupersedesRevision, CreatedAt: rfc3339Task(r.CreatedAt)}
+	out := protocol.TaskRevision{TaskID: string(r.TaskID), Revision: r.Revision, Title: r.Title, Objective: r.Objective, Scope: scopeWire(r.Scope), Material: r.Material, Status: string(r.Status), ProposedByRunID: string(r.ProposedByRunID), SupersedesRevision: r.SupersedesRevision, AcceptedByMemberID: string(r.AcceptedByMemberID), AcceptedByRunID: string(r.AcceptedByRunID), CreatedAt: rfc3339Task(r.CreatedAt)}
 	if len(r.EvidenceRequirements) > 0 {
 		out.EvidenceRequirements = make([]protocol.EvidenceRequirement, len(r.EvidenceRequirements))
 		for i, e := range r.EvidenceRequirements {

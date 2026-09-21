@@ -183,11 +183,22 @@ Ask one durable, correlated question. A body file of "-" reads standard input.
 
 Reply to the sender of one durable question. A body file of "-" reads standard input.
 `,
-	"mission": `usage: aether-internal mission <question|plan> <subcommand> [options]
+	"mission": `usage: aether-internal mission <clarification|question|plan> <subcommand> [options]
 
 mission question ask asks the accountable human, who answers in the dashboard.
 ask --to <run-id> asks a peer agent run, which answers with reply. They are
 separate mailboxes. The mission is the run's own; no command takes a mission ID.
+`,
+	"mission clarification": `usage: aether-internal mission clarification complete --idempotency-key <key>
+
+Declare that clarification is done and the plan can be written. Only the
+integrator may complete it, and only while the mission is in the planning
+phase.
+`,
+	"mission clarification complete": `usage: aether-internal mission clarification complete --idempotency-key <key>
+
+Move the mission from planning to clarified. Questions are optional, but the
+call is refused while a question you asked is unanswered.
 `,
 	"mission question": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
 
@@ -198,8 +209,9 @@ separate mailboxes.
 	"mission question ask": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
 
 Ask the accountable human one clarifying question. A body file of "-" reads
-standard input. Only the integrator may ask, and only while the mission is in
-the planning phase.
+standard input. Only the integrator may ask, in the planning and clarified
+phases; asking in clarified returns the mission to planning until the question
+is answered.
 `,
 	"mission plan": `usage: aether-internal mission plan <show|submit> [options]
 
@@ -214,8 +226,10 @@ client polling loop.
 `,
 	"mission plan submit": `usage: aether-internal mission plan submit (--summary <text> | --summary-file <path>) --idempotency-key <key>
 
-Submit the proposed tasks as a plan for human review. Every question must be
-answered first. A summary file of "-" reads standard input.
+Submit the pending tasks and revisions as a plan for human review. For an
+initial plan, clarification must be complete first; from the active phase this
+submits an amendment to the approved plan. A summary file of "-" reads standard
+input.
 `,
 	"task": `usage: aether-internal task <show|list|propose|revise|accept|accept-submission|abandon> [options]
 
@@ -273,7 +287,7 @@ an uncertain outcome; do not invent another delivery request.
 	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
 	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
-	"task abandon":           "usage: aether-internal task abandon --task-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
 	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
 	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
 	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",

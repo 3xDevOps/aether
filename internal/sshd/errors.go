@@ -105,7 +105,7 @@ func rpcError(err error) *protocol.Error {
 			errors.Is(err, scheduler.ErrTerminalNotRunning), errors.Is(err, scheduler.ErrGitHubNotLoggedIn),
 			errors.Is(err, scheduler.ErrGitHubScopeMissing), errors.Is(err, scheduler.ErrGitHubCLIMissing),
 			errors.Is(err, scheduler.ErrGitHubCLIBroken), errors.Is(err, scheduler.ErrGitHubCLIOutdated),
-			errors.Is(err, store.ErrMissionPhase):
+			errors.Is(err, store.ErrMissionPhase), errors.Is(err, store.ErrMissionAmendmentRequired):
 			code = protocol.CodeInvalidState
 		case errors.Is(err, errWriteDenied), errors.Is(err, errMemberRemoved),
 			errors.Is(err, errMemberPending), errors.Is(err, permissions.ErrDenied):

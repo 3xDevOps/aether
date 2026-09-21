@@ -570,6 +570,17 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 			cause:    fmt.Errorf("wrapped: %w", store.ErrIdempotencyConflict),
 			wantCode: protocol.CodeConflict,
 		},
+		"phase": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionPhase),
+			wantCode: protocol.CodeInvalidState,
+		},
+		// A revision the integrator may not accept alone is the same class of
+		// answer as a phase refusal: the call is well-formed, the state says
+		// no until a human decides.
+		"amendment-required": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionAmendmentRequired),
+			wantCode: protocol.CodeInvalidState,
+		},
 		"real-error": {
 			cause:    errors.New("database unavailable"),
 			wantCode: protocol.CodeInternal,
@@ -608,6 +619,7 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 func TestMissionMethodWhitelistPlanGate(t *testing.T) {
 	for _, method := range []string{
 		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionClarificationComplete,
 		protocol.MethodMissionPlanShow,
 		protocol.MethodMissionPlanSubmit,
 	} {

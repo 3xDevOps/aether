@@ -96,6 +96,12 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
       evidence_requirements: [],
     }),
   )
+  // Clarification is explicit: the plan cannot be submitted until the
+  // integrator declares it has what it asked for.
+  runCoordCLI<{ plan: { phase: string } }>(mission.current_integrator_run_id, [
+    'mission', 'clarification', 'complete',
+    '--idempotency-key', 'mission-candidate-clarify',
+  ])
   // Approval accepts every proposed revision, so the integrator never accepts
   // its own plan.
   runCoordCLI<{ plan: { phase: string } }>(mission.current_integrator_run_id, [

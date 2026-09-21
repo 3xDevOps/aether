@@ -2519,26 +2519,32 @@ explicitly recorded.
 
 ### The plan gate
 
-A mission is in one of four phases - `planning`, `plan_review`, `active`,
-`rejected` - and only `active` dispatches workers. The phase chip replaces
-the generic `Mission` chip on every mission card: `Planning`,
-`Planning · N questions for you`, `Plan ready for review`, `Active`,
-`Rejected`. The detail view's status line answers the phase first and falls
-back to the task-derived string only in `active`.
+A mission is in one of six phases - `planning`, `clarified`, `plan_review`,
+`active`, `amendment_review`, `rejected`. `active` dispatches workers;
+`amendment_review` keeps dispatching the set a human already approved while
+the human decides an amendment, and no other phase dispatches at all. The
+phase chip replaces the generic `Mission` chip on every mission card:
+`Planning`, `Planning · N questions for you`, `Preparing plan`, `Plan ready
+for review`, `Active`, `Amendment ready for review`, `Rejected`. The detail
+view's status line answers the phase first and falls back to the
+task-derived string only in `active`.
 
 A phase banner sits under the mission header in every phase and says what
 the human must do next. When `current_integrator_run_id` names a run whose
 status in the store is terminal, the banner adds `The integrator run <id>
 has exited; replace the integrator to continue` with the **Replace
-integrator** control inline, in `planning`, `plan_review` and `active` - an
-integrator that exited while waiting for a decision is recovered, not hidden
-behind a friendlier message. A `rejected` mission's integrator is cancelled on
+integrator** control inline, in every phase but `rejected` - an integrator
+that exited while waiting for a decision is recovered, not hidden behind a
+friendlier message. A `rejected` mission's integrator is cancelled on
 purpose and `mission.replace-integrator` is refused in that phase, so the
 sentence and the control are not shown there.
 
 In `planning`, **Questions from the integrator** lists every question the
-integrator asked. Each unanswered one takes a textarea and an **Answer**
-button sending `mission.question.answer` with the deterministic key
+integrator asked. Questions are optional - the integrator declares
+clarification complete when it has what it needs - so the section can stay
+at `The integrator has not asked anything yet.` for a whole mission. Each
+unanswered question takes a textarea and an **Answer** button sending
+`mission.question.answer` with the deterministic key
 `question-answer-<question_id>`, so a retry replays rather than answering
 twice. Answered questions show the answer and who answered. If a question
 this member is typing into arrives answered - the `mission.changed` refetch
@@ -2546,6 +2552,13 @@ replaces the whole projection - the textarea stays mounted with the draft
 intact under `Answered by <display name>`, rather than dropping what was
 typed. The feedback from the most recent **Request changes** decision is
 shown above the tasks, which render as a read-only **Draft plan**.
+
+In `clarified` the integrator has declared it has what it needs and the
+server refuses another answer, so **Questions from the integrator** is a
+record rather than a form: it opens with `Clarification complete.` and shows
+every question with its answer, above the same read-only **Draft plan**.
+Asking a follow-up question returns the mission to `planning`, where the
+answer form is offered again.
 
 In `plan_review`, **Plan review** shows the integrator's summary, the plan
 version, the same read-only task list, and **Approve**, **Request changes**
@@ -2559,11 +2572,38 @@ human or an admin may decide this plan.` Both gate controls need the
 capability, launch permission, and that identity:
 `cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
 
-Outside `active` there is no attempt to show, so attempt chips, the
-`proposal` blocker chip (the banner already says the plan awaits approval)
-and the candidate section are hidden. In every phase after `planning`, the
-questions and the decided review rounds collapse into
-**Planning history**.
+In `amendment_review` the integrator has submitted a change to a plan that
+is already approved. **Amendment review** shows the summary, the plan
+version, and one card per item of the round - read from the undecided review
+at the mission's current plan version, never from the last review in the
+list. A `new_task` item is a **New work** card built from the task's current
+revision; any other item is a **Changed task** card showing the approved
+revision beside the proposed one, with the objective, expected paths and
+exclusions of each. A `material` item carries a `Material` chip. The paths
+and dropped exclusions highlighted as widening the approved scope are the
+item's server-computed `widening` list; the dashboard has no path rule of
+its own. Intended-overlap diagnostics for the item's task are listed under
+its card. An item whose task or pending revision is gone from the projection
+renders its title and revision number with `This revision is no longer
+pending.` The controls are **Approve** and **Request changes** only: the
+server refuses to reject an amendment, because the approved work it amends
+keeps running either way. Below the section, the Tasks and candidate
+sections stay visible, attempt chips included - those workers are still
+running.
+
+In `active` and `amendment_review`, a task carrying a `pending_revision`
+shows a `Revision pending` chip, `Material revision pending` when the
+revision is declared material, and names the pending revision number and
+title under the task. A pending revision is never the task's current
+revision, so it cannot be dispatched.
+
+Attempt chips render only where the mission can dispatch, so they are hidden
+outside `active` and `amendment_review`. The `proposal` blocker chip is
+hidden in every phase except `active`: everywhere else the proposal is
+waiting on the human, which the phase banner already says, and repeating it
+as a blocker reads as a fault. The candidate section renders in `active` and
+`amendment_review`. In every phase after `clarified`, the questions and the
+decided review rounds collapse into **Planning history**.
 
 Answer and decision failures live in component state and render through the
 same `ErrorNotice` as a failed release, verbatim. They never go through

@@ -629,7 +629,13 @@ worker cannot release the hold through its assignment socket. Releasing a
 hold changes control state, not account sharing.
 
 A mission starts in the `planning` phase and dispatches no worker until a human
-approves its plan. Two control-channel methods carry that decision. Both need
+approves its plan. The integrator may ask clarifying questions, then declares
+clarification complete (`clarified`) and submits the plan for review
+(`plan_review`). After approval the mission is `active`; a further plan
+submitted from `active` is an **amendment** and puts the mission in
+`amendment_review` until the same human decides it.
+
+Two control-channel methods carry that decision. Both need
 the `run.launch` permission (collaborator or admin) and are refused unless the
 authenticated member is the mission's accountable human or holds the `admin`
 role, so an accountable human demoted to viewer can no longer answer or decide
@@ -642,7 +648,9 @@ and an admin must take over:
   accountable human who lost `run.launch` or the integrator's account share
   cannot carry the mission past the gate. Requesting changes and rejecting do
   not, so a plan whose accountable human lost that admission can still be
-  closed out by an admin.
+  closed out by an admin. Rejecting an amendment is refused: the approved plan
+  stands either way, so an amendment is approved or sent back for changes and
+  the integrator abandons its tasks or revisions to drop it.
 
 Reading the gate is not deciding it. `mission.show` stays a View read: every
 member sees the questions, the answers, the plan summaries, and the feedback
@@ -655,12 +663,38 @@ reconcile loop's job and is retried every pass until the run is terminal, so a
 rejection survives a server restart.
 
 `mission.replace-integrator` is the recovery when an integrator run exits, in
-`planning`, `plan_review`, and `active` alike. It changes neither the phase nor
-the plan version and leaves an undecided review round decidable. A rejected
-mission refuses it.
+`planning`, `clarified`, `plan_review`, `active`, and `amendment_review` alike.
+It changes neither the phase nor the plan version and leaves an undecided
+review round decidable. A rejected mission refuses it.
 
-After approval the integrator accepts later task revisions itself. The human
-gate is the plan, not every revision that follows it.
+An amendment does not stop the approved plan. While a mission is in
+`amendment_review` the integrator still starts, retries, cancels, and inspects
+workers on approved tasks and still accepts their submissions; it cannot
+propose, revise, abandon, or accept task revisions, and it cannot dispatch a
+task whose revision is in the round under review.
+
+After approval the integrator accepts later revisions of already-approved tasks
+itself, but only within what the human approved. The server refuses
+`task.accept` and directs the revision through `mission.plan.submit` when the
+revision:
+
+- belongs to a task that was never approved (new work);
+- is declared `material` by its proposer;
+- widens the approved scope - an `expected_paths` entry outside the union of
+  the approved tasks' expected paths;
+- drops an exclusion the task's approved revision carried;
+- was an item of a round a human sent back for changes.
+
+`material` is the proposer's own declaration, not a server inference. It is
+recorded on the revision and is the sixth reason a revision needs a human
+round.
+
+Every approved round is auditable without reading history: the plan review row
+records who submitted it, from which phase, who decided it and when, and one
+plan item per task in the round with that task's revision, whether it was new
+work, whether it was material, and which paths or exclusions widened the
+approved scope. Each revision records its proposer, and, once accepted, the
+member or integrator run that accepted it.
 
 Mission progress has the same evidence boundary as the dashboard: a worker
 report or process success does not make a task **Done**. The current task

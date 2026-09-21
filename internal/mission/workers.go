@@ -35,9 +35,10 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if err != nil {
 		return nil, err
 	}
-	// A mission never owns an attempt outside active: dispatch is impossible
-	// before a human approves the plan, and active is not re-enterable.
-	if m.Phase != domain.MissionPhaseActive {
+	// Dispatch needs an approved plan; amendment_review keeps dispatching the
+	// already-approved set, and a pending revision cannot be reserved because
+	// it is not the task's current revision.
+	if m.Phase != domain.MissionPhaseActive && m.Phase != domain.MissionPhaseAmendmentReview {
 		return nil, missionPhaseRefusal(m, "worker dispatch")
 	}
 	task, err := s.cfg.Missions.GetTask(ctx, domain.TaskID(p.TaskID))

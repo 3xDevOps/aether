@@ -32,6 +32,7 @@ import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import {
+  AmendmentReviewSection,
   ErrorNotice,
   PhaseBanner,
   PhaseChip,
@@ -71,8 +72,12 @@ function missionStatus(mission: Mission, tasks: MissionTask[], submissions: Miss
   switch (missionPhase(mission)) {
     case 'planning':
       return 'Planning'
+    case 'clarified':
+      return 'Preparing plan'
     case 'plan_review':
       return 'Plan ready for review'
+    case 'amendment_review':
+      return 'Amendment ready for review'
     case 'rejected':
       return 'Rejected'
   }
@@ -292,7 +297,9 @@ function MissionDetailView({
   )
   const latestFeedback = [...planReviews].reverse().find((review) => review.decision === 'revise')?.feedback
   const phase = mission ? missionPhase(mission) : 'active'
-  const readOnly = phase !== 'active'
+  // `amendment_review` keeps dispatching the approved set, so its attempts are
+  // real; only the pending revisions in the round are frozen.
+  const readOnly = phase !== 'active' && phase !== 'amendment_review'
   const releaseTakeover = async (attempt: MissionAttempt) => {
     if (!attempt.takeover_active || attempt.takeover_generation == null || !attempt.run_id || releasingAttemptID) return
     setReleaseError(null)
@@ -322,6 +329,7 @@ function MissionDetailView({
           submissions={(detail.submissions ?? []).filter((submission) => submission.task_id === task.id)}
           diagnostics={(detail.diagnostics ?? []).filter((diagnostic) => diagnostic.task_id === task.id)}
           readOnly={readOnly}
+          showProposalBlocker={phase === 'active'}
           canRelease={canRelease}
           onRelease={releaseTakeover}
           releasingAttemptID={releasingAttemptID}
@@ -394,11 +402,12 @@ function MissionDetailView({
               </div>
             </section>
 
-            {phase === 'planning' && (
+            {(phase === 'planning' || phase === 'clarified') && (
               <>
                 <QuestionsSection
                   questions={detail.questions ?? []}
-                  canAnswer={canAnswer}
+                  canAnswer={canAnswer && phase === 'planning'}
+                  complete={phase === 'clarified'}
                   client={client}
                   onAnswered={onRefresh}
                 />
@@ -425,13 +434,24 @@ function MissionDetailView({
                 {taskList}
               </PlanReviewSection>
             )}
-            {(phase === 'active' || phase === 'rejected') && (
+            {phase === 'amendment_review' && (
+              <AmendmentReviewSection
+                mission={mission}
+                review={pendingReview}
+                tasks={detail.tasks}
+                diagnostics={detail.diagnostics ?? []}
+                canDecide={canDecide}
+                client={client}
+                onDecided={onRefresh}
+              />
+            )}
+            {(phase === 'active' || phase === 'amendment_review' || phase === 'rejected') && (
               <section className="mt-3 space-y-2" aria-label="Mission tasks">
                 <h2 className="text-sm font-semibold">Tasks</h2>
                 {taskList}
               </section>
             )}
-            {phase === 'active' && (
+            {(phase === 'active' || phase === 'amendment_review') && (
               <section className="mt-3 border bg-card p-3" aria-label="Mission candidate review">
                 <h2 className="text-sm font-semibold">Candidate progress</h2>
                 <p className="mt-1 text-xs text-muted-foreground">Prepare and review the current accepted mission set through the existing verification and delivery workflow. Task status alone never implies delivery.</p>
@@ -449,7 +469,7 @@ function MissionDetailView({
                 )}
               </section>
             )}
-            {phase !== 'planning' && (
+            {phase !== 'planning' && phase !== 'clarified' && (
               <PlanningHistory questions={detail.questions ?? []} reviews={planReviews} />
             )}
           </>
@@ -476,6 +496,7 @@ function TaskCard({
   submissions,
   diagnostics,
   readOnly,
+  showProposalBlocker,
   canRelease,
   onRelease,
   releasingAttemptID,
@@ -485,16 +506,19 @@ function TaskCard({
   attempts: MissionAttempt[]
   submissions: MissionSubmission[]
   diagnostics: MissionScopeDiagnostic[]
-  /** Outside `active` the plan is a draft: no attempt exists, and the
-   * proposal blocker is the gate itself, which the phase banner already says. */
+  /** Where the mission cannot dispatch, no attempt exists to chip. */
   readOnly: boolean
+  /** Outside `active` a proposal is waiting on the human, which the phase
+   * banner already says; repeating it as a blocker reads as a fault. */
+  showProposalBlocker: boolean
   canRelease: boolean
   onRelease: (attempt: MissionAttempt) => void
   releasingAttemptID: string | null
   onRun: (runID: string) => void
 }) {
   const revision = task.revision
-  const blockers = (task.blockers ?? []).filter((blocker) => !readOnly || blocker.kind !== 'proposal')
+  const pending = task.pending_revision
+  const blockers = (task.blockers ?? []).filter((blocker) => showProposalBlocker || blocker.kind !== 'proposal')
   const accepted = submissions.find(
     (submission) =>
       submission.state === 'accepted' && submission.task_revision === task.current_revision,
@@ -508,10 +532,22 @@ function TaskCard({
             {task.id} · revision {task.current_revision}
           </p>
         </div>
-        <Chip color={statusColor[task.status]} variant="soft" size="sm">
-          <Chip.Label>{statusLabel[task.status]}</Chip.Label>
-        </Chip>
+        <div className="flex flex-wrap gap-1">
+          {pending && (
+            <Chip color="warning" variant="soft" size="sm">
+              <Chip.Label>{pending.material ? 'Material revision pending' : 'Revision pending'}</Chip.Label>
+            </Chip>
+          )}
+          <Chip color={statusColor[task.status]} variant="soft" size="sm">
+            <Chip.Label>{statusLabel[task.status]}</Chip.Label>
+          </Chip>
+        </div>
       </div>
+      {pending && (
+        <p className="mt-1 break-words text-xs text-muted-foreground">
+          Revision {pending.revision}: {pending.title}
+        </p>
+      )}
       {revision && (
         <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
           <div>

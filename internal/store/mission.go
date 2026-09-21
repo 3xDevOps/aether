@@ -20,6 +20,7 @@ var (
 	ErrMissionNotReady            = errors.New("store: mission task not ready")
 	ErrMissionTakeover            = errors.New("store: mission worker under human control")
 	ErrMissionPhase               = errors.New("store: mission phase forbids this operation")
+	ErrMissionAmendmentRequired   = errors.New("store: revision requires human approval")
 )
 
 // MissionStore is intentionally separate from Store. Services can type-assert
@@ -38,7 +39,7 @@ type MissionStore interface {
 	ProjectTask(context.Context, domain.TaskID) (*domain.Task, error)
 	ProposeTaskRevision(context.Context, domain.TaskID, *domain.TaskRevision, string) (*domain.TaskRevision, error)
 	ReviseTask(context.Context, domain.TaskID, *domain.TaskRevision, string) (*domain.TaskRevision, error)
-	AcceptTaskRevision(context.Context, domain.TaskID, int, uint64, string) error
+	AcceptTaskRevision(context.Context, domain.TaskID, int, uint64, domain.RunID, string) error
 	SetTaskDependencies(context.Context, domain.TaskID, int, []domain.TaskDependency, string) error
 	ReserveAttempt(context.Context, *domain.AttemptReservation) (*domain.Attempt, bool, error)
 	GetAttempt(context.Context, domain.AttemptID) (*domain.Attempt, error)
@@ -53,7 +54,8 @@ type MissionStore interface {
 	AcceptSubmission(context.Context, domain.SubmissionID, domain.RunID, uint64, uint64, string, string) (*domain.Acceptance, error)
 	PendingMissionControlChange(context.Context, domain.MissionID) (uint64, error)
 	AckMissionControlChange(context.Context, domain.MissionID, uint64) error
-	AbandonTask(context.Context, domain.TaskID, uint64, string) error
+	AbandonTask(context.Context, domain.TaskID, int, uint64, string) error
+	CompleteMissionClarification(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	InsertMissionQuestion(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionQuestion, error)
 	AnswerMissionQuestion(context.Context, domain.MissionQuestionID, domain.MemberID, string, string) (*domain.MissionQuestion, error)
 	GetMissionQuestion(context.Context, domain.MissionQuestionID) (*domain.MissionQuestion, error)
@@ -383,7 +385,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: replace integrator receipt: %w", err)
 	}
-	if phaseErr := requireMissionPhase(m, "mission.replace-integrator", domain.MissionPhasePlanning, domain.MissionPhasePlanReview, domain.MissionPhaseActive); phaseErr != nil {
+	if phaseErr := requireMissionPhase(m, "mission.replace-integrator", domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhasePlanReview, domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview); phaseErr != nil {
 		return nil, phaseErr
 	}
 	if expected != m.IntegratorGeneration {
@@ -490,8 +492,12 @@ func missionPhaseReason(phase domain.MissionPhase) string {
 	switch phase {
 	case domain.MissionPhasePlanning:
 		return "a human must approve the plan first"
+	case domain.MissionPhaseClarified:
+		return "the integrator is preparing the plan for review"
 	case domain.MissionPhasePlanReview:
 		return "the plan is frozen while a human reviews it"
+	case domain.MissionPhaseAmendmentReview:
+		return "the amendment is frozen while a human reviews it"
 	case domain.MissionPhaseRejected:
 		return "a human rejected the plan"
 	default:

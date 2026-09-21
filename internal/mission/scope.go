@@ -65,7 +65,7 @@ func (s *Service) scopeDiagnostics(ctx context.Context, tasks []*domain.Task, at
 			if b == nil || b.Revision == nil {
 				continue
 			}
-			shared := intersectPaths(a.Revision.Scope.ExpectedPaths, b.Revision.Scope.ExpectedPaths)
+			shared := intersectPaths(plannedScope(a).ExpectedPaths, plannedScope(b).ExpectedPaths)
 			if len(shared) == 0 {
 				continue
 			}
@@ -174,6 +174,16 @@ func (s *Service) scopeDiagnostics(ctx context.Context, tasks []*domain.Task, at
 	return out, nil
 }
 
+// plannedScope is the scope a task is heading for: a pending revision is what
+// the human is being asked to approve, so an amendment's intended overlap
+// describes the proposed paths rather than the approved ones.
+func plannedScope(t *domain.Task) domain.TaskScope {
+	if t.PendingRevision != nil {
+		return t.PendingRevision.Scope
+	}
+	return t.Revision.Scope
+}
+
 func latestSubmission(submissions []*domain.Submission, taskID domain.TaskID, revision int) *domain.Submission {
 	var selected *domain.Submission
 	for _, sub := range submissions {
@@ -217,7 +227,7 @@ func intersectPaths(a, b []string) []string {
 }
 
 func pathsOverlap(a, b string) bool {
-	return scopeContains([]string{a}, b) || scopeContains([]string{b}, a)
+	return domain.ScopeCovers([]string{a}, b) || domain.ScopeCovers([]string{b}, a)
 }
 
 // scopeViolations returns changed paths outside an accepted task scope.
@@ -226,28 +236,11 @@ func pathsOverlap(a, b string) bool {
 func scopeViolations(scope domain.TaskScope, paths []string) []string {
 	out := make([]string, 0)
 	for _, changed := range paths {
-		if !scopeContains(scope.ExpectedPaths, changed) || scopeContains(scope.Exclusions, changed) {
+		if !domain.ScopeCovers(scope.ExpectedPaths, changed) || domain.ScopeCovers(scope.Exclusions, changed) {
 			out = append(out, changed)
 		}
 	}
 	return cleanPaths(out)
-}
-
-func scopeContains(declared []string, observed string) bool {
-	observed = path.Clean(strings.TrimSpace(observed))
-	if observed == "." || observed == "" {
-		return false
-	}
-	for _, raw := range declared {
-		base := path.Clean(strings.TrimSpace(raw))
-		if base == "." || base == "" {
-			continue
-		}
-		if base == observed || strings.HasPrefix(observed, base+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 func cleanPaths(in []string) []string {

@@ -9,14 +9,24 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// planCommand routes the two-level mission question and plan group. The
-// mission is the caller's own, resolved from the run socket, so none of these
-// commands takes a mission ID.
+// planCommand routes the two-level mission clarification, question, and plan
+// group. The mission is the caller's own, resolved from the run socket, so
+// none of these commands takes a mission ID.
 func planCommand(ctx context.Context, socket string, args []string, in io.Reader) (any, error) {
 	if len(args) == 0 {
-		return nil, usageError("mission requires a subcommand: question or plan")
+		return nil, usageError("mission requires a subcommand: clarification, question, or plan")
 	}
 	switch args[0] {
+	case "clarification":
+		if len(args) < 2 {
+			return nil, usageError("mission clarification requires a subcommand: complete")
+		}
+		switch args[1] {
+		case "complete":
+			return missionClarificationComplete(ctx, socket, args[2:])
+		default:
+			return nil, usageError("unknown mission clarification command: " + args[1])
+		}
 	case "question":
 		if len(args) < 2 {
 			return nil, usageError("mission question requires a subcommand: ask")
@@ -42,6 +52,23 @@ func planCommand(ctx context.Context, socket string, args []string, in io.Reader
 	default:
 		return nil, usageError("unknown mission command: " + args[0])
 	}
+}
+
+func missionClarificationComplete(ctx context.Context, socket string, args []string) (protocol.MissionClarificationCompleteResult, error) {
+	fs := newFlags("mission clarification complete")
+	key := fs.String("idempotency-key", "", "stable key used to replay this mutation")
+	if err := parseFlags(fs, args); err != nil {
+		return protocol.MissionClarificationCompleteResult{}, err
+	}
+	if *key == "" || fs.NArg() != 0 {
+		return protocol.MissionClarificationCompleteResult{}, usageError("mission clarification complete requires --idempotency-key")
+	}
+	p := protocol.MissionClarificationCompleteParams{IdempotencyKey: *key}
+	var out protocol.MissionClarificationCompleteResult
+	if err := coordtransport.Call(ctx, socket, protocol.MethodMissionClarificationComplete, p, &out); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func missionQuestionAsk(ctx context.Context, socket string, args []string, in io.Reader) (protocol.MissionQuestionResult, error) {
@@ -116,25 +143,33 @@ func missionPlanSubmit(ctx context.Context, socket string, args []string, in io.
 }
 
 const planningFlow = `Planning flow:
-  1. Ask the accountable human at least one question. The objective is short
-     on purpose; name the decisions you would otherwise guess. This asks the
-     human, not a peer run:
+  1. Decide whether the objective is specified well enough to plan. If not,
+     ask the accountable human; this asks the human, not a peer run:
        aether-internal mission question ask --body 'question' --idempotency-key <key>
-  2. Wait for answers. The call returns as soon as an answer or decision
-     lands, and also returns unchanged after the wait elapses:
+     Wait for answers; the call returns when something changes and also
+     returns unchanged after the wait elapses. Repeat while open_questions
+     is above zero. Waiting is not being blocked: do not report an outcome.
        aether-internal mission plan show --wait 30
-     Repeat it while open_questions is above zero. Waiting is not being
-     blocked: do not report an outcome.
+  2. When you have what you need (questions are optional), say so:
+       aether-internal mission clarification complete --idempotency-key <key>
+     This is refused while a question you asked is unanswered.
   3. Check what is already proposed, then propose or revise:
        aether-internal task list --mission-id <mission-id>
        aether-internal task propose --mission-id <mission-id> \
          --idempotency-key <key> --revision-file /tmp/aether-task.json
-     Revise an existing task rather than proposing a duplicate: after a
-     revise decision the tasks you proposed last round are still there.
-  4. Submit the plan for human review. You cannot submit while a question is
-     unanswered:
+     Declare expected_paths for every task: after approval, work outside
+     them needs a human-approved amendment.
+  4. Submit the plan for human review:
        aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>
 No worker can start until a human approves the plan.
+`
+
+const clarifiedFlow = `Clarification is complete. Propose or revise tasks, then submit the plan:
+  aether-internal task list --mission-id <mission-id>
+  aether-internal task propose --mission-id <mission-id> --idempotency-key <key> --revision-file /tmp/aether-task.json
+  aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>
+Declare expected_paths for every task. No worker can start until a human
+approves the plan.
 `
 
 const planReviewWait = `A human is reviewing the plan. Do not propose, revise, abandon, or accept
@@ -147,9 +182,36 @@ again and follow the text for the new phase. If this run is stopped while
 waiting, a human relaunches the integrator with Replace integrator.
 `
 
+const amendmentReviewWait = `A human is reviewing the amendment. Approved work continues: you may accept
+submissions, inspect, cancel, and retry workers on approved tasks. Do not
+propose, revise, abandon, or accept task revisions; the server refuses them.
+Wait for the decision by repeating this call until the phase changes:
+  aether-internal mission plan show --wait 30
+Waiting is not being blocked and is not an outcome; do not run
+aether-internal report. When the phase changes, run aether-internal skill
+again.
+`
+
 const planRejected = `A human rejected the plan and this run is being cancelled. Do not start work,
 do not change tasks, and do not report an outcome: the cancellation is the
 terminal event.
+`
+
+const activeAmendments = `Changing the approved plan:
+  A revision you accept yourself must stay within the approved plan: not
+  marked "material": true, and expected_paths inside the approved paths. The
+  server refuses task accept otherwise.
+  A material change - new scope, new subsystems, more work, a changed
+  constraint or success criterion - is proposed with "material": true, then
+  submitted for human approval:
+    aether-internal mission plan submit --summary 'what changes and why' --idempotency-key <key>
+  Approved work keeps running while the human decides; the new work cannot
+  start before approval. Cancel or wait for a worker on a task before you
+  revise that task. Drop a pending revision with
+    aether-internal task abandon --task-id <task> --revision <n> --expected-integrator-generation <g> --idempotency-key <key>
+  Drop a whole task you proposed this round with the same command and no
+  --revision:
+    aether-internal task abandon --task-id <task> --expected-integrator-generation <g> --idempotency-key <key>
 `
 
 // writeSkillPhase prints the plan-gate text for the integrator's own mission
@@ -167,6 +229,18 @@ func writeSkillPhase(out io.Writer, assignment *protocol.CoordMissionAssignment)
 		if _, err := io.WriteString(out, planningFlow); err != nil {
 			return fmt.Errorf("write skill planning flow: %w", err)
 		}
+		return nil
+	case "clarified":
+		if _, err := fmt.Fprintf(out, "Phase: clarified\nPlan version: %d\n", assignment.PlanVersion); err != nil {
+			return fmt.Errorf("write skill phase: %w", err)
+		}
+		if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(out, clarifiedFlow); err != nil {
+			return fmt.Errorf("write skill clarified flow: %w", err)
+		}
+		return nil
 	case "plan_review":
 		if _, err := fmt.Fprintf(out, "Phase: plan_review\nPlan version: %d\n", assignment.PlanVersion); err != nil {
 			return fmt.Errorf("write skill phase: %w", err)
@@ -177,19 +251,34 @@ func writeSkillPhase(out io.Writer, assignment *protocol.CoordMissionAssignment)
 		if _, err := io.WriteString(out, planReviewWait); err != nil {
 			return fmt.Errorf("write skill plan review wait: %w", err)
 		}
+		return nil
 	case "rejected":
 		if _, err := io.WriteString(out, "Phase: rejected\n"+planRejected); err != nil {
 			return fmt.Errorf("write skill phase: %w", err)
+		}
+		return nil
+	case "amendment_review":
+		if _, err := fmt.Fprintf(out, "Phase: amendment_review\nPlan version: %d\n", assignment.PlanVersion); err != nil {
+			return fmt.Errorf("write skill phase: %w", err)
+		}
+		if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(out, amendmentReviewWait); err != nil {
+			return fmt.Errorf("write skill amendment review wait: %w", err)
 		}
 	case "active":
 		if _, err := fmt.Fprintf(out, "Phase: active\nPlan version: %d (approved)\n", assignment.PlanVersion); err != nil {
 			return fmt.Errorf("write skill phase: %w", err)
 		}
-		fallthrough
-	default:
-		if _, err := io.WriteString(out, integratorWorkflow); err != nil {
-			return fmt.Errorf("write skill integration workflow: %w", err)
+		if _, err := io.WriteString(out, activeAmendments); err != nil {
+			return fmt.Errorf("write skill amendment guidance: %w", err)
 		}
+	}
+	// active and amendment_review both keep dispatching approved work, so both
+	// continue into the candidate flow, as does an assignment with no phase.
+	if _, err := io.WriteString(out, integratorWorkflow); err != nil {
+		return fmt.Errorf("write skill integration workflow: %w", err)
 	}
 	return nil
 }

@@ -21,6 +21,8 @@ type planGateFixture struct {
 	workspace *domain.Workspace
 	member    *domain.Member
 	canceller *recordingCanceller
+	launcher  *recordingLauncher
+	evidence  *mutableEvidenceReader
 	// reads carries one signal per question read the service performs, so a
 	// test that must land a change after mission.plan.show has taken its
 	// snapshot can order the two instead of racing them.
@@ -54,7 +56,7 @@ func newPlanGateFixture(t *testing.T) *planGateFixture {
 		WorkspaceID: workspace.ID, Objective: "plan gate mission", AccountableHumanID: member.ID,
 		Integrator:            domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
 		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless}},
-		MaxConcurrentAttempts: 1, MaxTotalAttempts: 2, IdempotencyKey: "plan-gate-mission",
+		MaxConcurrentAttempts: 2, MaxTotalAttempts: 4, IdempotencyKey: "plan-gate-mission",
 		IntegratorAuthorizingHumanID: member.ID, IntegratorRunOwnerID: member.ID,
 	}
 	if err := db.CreateMission(ctx, m); err != nil {
@@ -65,16 +67,21 @@ func newPlanGateFixture(t *testing.T) *planGateFixture {
 	}
 	regressionRun(t, db, m.CurrentIntegratorRunID, workspace.ID, member.ID, "integrator")
 	canceller := &recordingCanceller{}
+	launcher := &recordingLauncher{db: db}
+	evidence := &mutableEvidenceReader{}
 	reads := make(chan struct{}, 1)
 	svc, err := New(Config{
 		Store: db, Missions: &planShowProbe{MissionStore: db, reads: reads},
-		Cancel: canceller, AuthorizationMu: &sync.Mutex{},
+		Cancel: canceller, Runs: launcher, Evidence: evidence, AuthorizationMu: &sync.Mutex{},
 		RequireCoordination: func() error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("new mission service: %v", err)
 	}
-	return &planGateFixture{db: db, svc: svc, mission: m, workspace: workspace, member: member, canceller: canceller, reads: reads}
+	return &planGateFixture{
+		db: db, svc: svc, mission: m, workspace: workspace, member: member,
+		canceller: canceller, launcher: launcher, evidence: evidence, reads: reads,
+	}
 }
 
 func (f *planGateFixture) call(t *testing.T, run domain.RunID, method string, params any) (any, error) {
@@ -122,6 +129,29 @@ func (f *planGateFixture) answerAll(t *testing.T, keyPrefix string) {
 	}
 }
 
+// clarify declares clarification complete, which is what the initial plan
+// submit needs. Questions are optional, so every round answers first and then
+// says it has what it needs.
+func (f *planGateFixture) clarify(t *testing.T, round string) {
+	t.Helper()
+	f.mustCall(t, protocol.MethodMissionClarificationComplete, protocol.MissionClarificationCompleteParams{
+		IdempotencyKey: "clarify-" + round,
+	})
+}
+
+// submit sends the plan and returns the version now awaiting a decision.
+func (f *planGateFixture) submit(t *testing.T, round string, wantPhase domain.MissionPhase) uint64 {
+	t.Helper()
+	out := f.mustCall(t, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "what will be built and why", IdempotencyKey: "submit-" + round,
+	})
+	submitted, ok := out.(protocol.MissionPlanSubmitResult)
+	if !ok || submitted.Plan.Phase != string(wantPhase) {
+		t.Fatalf("mission.plan.submit result = %#v, want %s", out, wantPhase)
+	}
+	return submitted.Plan.PlanVersion
+}
+
 // proposeAndSubmit walks the whole gate up to the human decision and returns
 // the submitted plan version.
 func (f *planGateFixture) proposeAndSubmit(t *testing.T, round string) uint64 {
@@ -135,14 +165,8 @@ func (f *planGateFixture) proposeAndSubmit(t *testing.T, round string) uint64 {
 		Revision:       protocol.TaskRevision{Title: "plan task " + round, Objective: "plan task " + round},
 		IdempotencyKey: "propose-" + round,
 	})
-	out := f.mustCall(t, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "what will be built and why", IdempotencyKey: "submit-" + round,
-	})
-	submitted, ok := out.(protocol.MissionPlanSubmitResult)
-	if !ok || submitted.Plan.Phase != string(domain.MissionPhasePlanReview) {
-		t.Fatalf("mission.plan.submit result = %#v, want plan_review", out)
-	}
-	return submitted.Plan.PlanVersion
+	f.clarify(t, round)
+	return f.submit(t, round, domain.MissionPhasePlanReview)
 }
 
 func (f *planGateFixture) workerStart(t *testing.T) error {
@@ -226,10 +250,10 @@ func TestPlanApproveActivatesAndReviseReturnsToPlanningWithFeedback(t *testing.T
 	}
 
 	// A revise round reuses the same tasks, so the second submission needs no
-	// new task: the draft the integrator already proposed is still there.
-	f.mustCall(t, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "second round", IdempotencyKey: "submit-2",
-	})
+	// new task: the draft the integrator already proposed is still there. It
+	// does need clarification again, because revise returned it to planning.
+	f.clarify(t, "2")
+	f.submit(t, "2", domain.MissionPhasePlanReview)
 	approved, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
 		MissionID: string(f.mission.ID), ExpectedPlanVersion: version + 1,
 		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-approve-1",
@@ -329,9 +353,8 @@ func TestPlanHumanDecisionsRefuseANonAccountableCollaborator(t *testing.T) {
 		Revision:       protocol.TaskRevision{Title: "plan task", Objective: "plan task"},
 		IdempotencyKey: "propose-1",
 	})
-	f.mustCall(t, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "what will be built", IdempotencyKey: "submit-1",
-	})
+	f.clarify(t, "1")
+	f.submit(t, "1", domain.MissionPhasePlanReview)
 	if _, decideErr := f.svc.DecidePlan(ctx, other.ID, protocol.MissionPlanDecideParams{
 		MissionID: string(f.mission.ID), ExpectedPlanVersion: 1,
 		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-foreign",
@@ -430,6 +453,7 @@ func TestPlanGateMethodsRefuseAWorkerSocket(t *testing.T) {
 	}
 	for _, method := range []string{
 		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionClarificationComplete,
 		protocol.MethodMissionPlanShow,
 		protocol.MethodMissionPlanSubmit,
 	} {
@@ -462,9 +486,8 @@ func TestPlanRejectStaysAvailableAfterAccountableHumanLosesLaunch(t *testing.T) 
 		Revision:       protocol.TaskRevision{Title: "plan task", Objective: "plan task"},
 		IdempotencyKey: "propose-1",
 	})
-	f.mustCall(t, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
-		Summary: "what will be built", IdempotencyKey: "submit-1",
-	})
+	f.clarify(t, "1")
+	f.submit(t, "1", domain.MissionPhasePlanReview)
 
 	// The accountable human is demoted while the plan sits in review.
 	f.member.Role = domain.RoleViewer

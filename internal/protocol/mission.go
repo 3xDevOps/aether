@@ -9,11 +9,12 @@ const (
 	MethodMissionReplaceIntegrator = "mission.replace-integrator"
 	MethodMissionWorkerRelease     = "mission.worker.release"
 
-	MethodMissionQuestionAsk    = "mission.question.ask"
-	MethodMissionQuestionAnswer = "mission.question.answer"
-	MethodMissionPlanShow       = "mission.plan.show"
-	MethodMissionPlanSubmit     = "mission.plan.submit"
-	MethodMissionPlanDecide     = "mission.plan.decide"
+	MethodMissionQuestionAsk           = "mission.question.ask"
+	MethodMissionQuestionAnswer        = "mission.question.answer"
+	MethodMissionClarificationComplete = "mission.clarification.complete"
+	MethodMissionPlanShow              = "mission.plan.show"
+	MethodMissionPlanSubmit            = "mission.plan.submit"
+	MethodMissionPlanDecide            = "mission.plan.decide"
 
 	MethodTaskShow             = "task.show"
 	MethodTaskList             = "task.list"
@@ -78,16 +79,33 @@ type MissionQuestion struct {
 }
 
 // MissionPlanReview is one round of plan submission and human decision.
+// SubmittedPhase is clarified for an initial plan and active for an amendment.
 type MissionPlanReview struct {
-	MissionID         string  `json:"mission_id"`
-	PlanVersion       uint64  `json:"plan_version"`
-	Summary           string  `json:"summary"`
-	SubmittedByRunID  string  `json:"submitted_by_run_id"`
-	SubmittedAt       string  `json:"submitted_at"`
-	Decision          string  `json:"decision,omitempty"`
-	Feedback          string  `json:"feedback,omitempty"`
-	DecidedByMemberID string  `json:"decided_by_member_id,omitempty"`
-	DecidedAt         *string `json:"decided_at,omitempty"`
+	MissionID         string            `json:"mission_id"`
+	PlanVersion       uint64            `json:"plan_version"`
+	Summary           string            `json:"summary"`
+	SubmittedByRunID  string            `json:"submitted_by_run_id"`
+	SubmittedAt       string            `json:"submitted_at"`
+	SubmittedPhase    string            `json:"submitted_phase"`
+	Decision          string            `json:"decision,omitempty"`
+	Feedback          string            `json:"feedback,omitempty"`
+	DecidedByMemberID string            `json:"decided_by_member_id,omitempty"`
+	DecidedAt         *string           `json:"decided_at,omitempty"`
+	Items             []MissionPlanItem `json:"items,omitempty"`
+}
+
+// MissionPlanItem is one task revision a plan round put in front of a human.
+// Widening lists the expected paths and dropped exclusions that reach outside
+// the plan the human already approved; it is computed by the server at submit
+// and is empty for an initial plan.
+type MissionPlanItem struct {
+	TaskID             string   `json:"task_id"`
+	Revision           int      `json:"revision"`
+	NewTask            bool     `json:"new_task"`
+	Material           bool     `json:"material"`
+	Widening           []string `json:"widening,omitempty"`
+	Title              string   `json:"title"`
+	SupersedesRevision int      `json:"supersedes_revision,omitempty"`
 }
 
 // MissionPlanState is what the integrator sees of its own mission's gate. It
@@ -123,16 +141,22 @@ type EvidenceRequirement struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// TaskRevision carries Material both ways: the proposer declares it on
+// task.propose and task.revise, and it is read back as the audit fact that
+// sent the revision through a human plan round.
 type TaskRevision struct {
 	TaskID               string                `json:"task_id"`
 	Revision             int                   `json:"revision"`
 	Title                string                `json:"title"`
 	Objective            string                `json:"objective"`
 	Scope                TaskScope             `json:"scope"`
+	Material             bool                  `json:"material,omitempty"`
 	EvidenceRequirements []EvidenceRequirement `json:"evidence_requirements"`
 	Status               string                `json:"status"`
 	ProposedByRunID      string                `json:"proposed_by_run_id,omitempty"`
 	SupersedesRevision   int                   `json:"supersedes_revision,omitempty"`
+	AcceptedByMemberID   string                `json:"accepted_by_member_id,omitempty"`
+	AcceptedByRunID      string                `json:"accepted_by_run_id,omitempty"`
 	CreatedAt            string                `json:"created_at"`
 	AcceptedAt           *string               `json:"accepted_at,omitempty"`
 }
@@ -158,6 +182,7 @@ type Task struct {
 	MissionID       string           `json:"mission_id"`
 	CurrentRevision int              `json:"current_revision"`
 	Revision        *TaskRevision    `json:"revision,omitempty"`
+	PendingRevision *TaskRevision    `json:"pending_revision,omitempty"`
 	Dependencies    []TaskDependency `json:"dependencies,omitempty"`
 	Status          string           `json:"status"`
 	Blockers        []TaskBlocker    `json:"blockers,omitempty"`
@@ -291,6 +316,17 @@ type MissionQuestionResult struct {
 	Question MissionQuestion `json:"question"`
 }
 
+// MissionClarificationCompleteParams are the params of
+// mission.clarification.complete. The mission is the integrator's own,
+// resolved from the socket, never a parameter.
+type MissionClarificationCompleteParams struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type MissionClarificationCompleteResult struct {
+	Plan MissionPlanState `json:"plan"`
+}
+
 // MissionPlanShowParams are the params of mission.plan.show. WaitSeconds of 0
 // or omitted returns immediately; anything outside 0..CoordMaxInboxWaitSeconds
 // is invalid params.
@@ -374,8 +410,12 @@ type TaskAcceptParams struct {
 	ExpectedIntegratorGeneration uint64 `json:"expected_integrator_generation"`
 	IdempotencyKey               string `json:"idempotency_key"`
 }
+
+// TaskAbandonParams abandons a whole task, or, with Revision set to a pending
+// revision, drops only that revision and leaves the task standing.
 type TaskAbandonParams struct {
 	TaskID                       string `json:"task_id"`
+	Revision                     int    `json:"revision,omitempty"`
 	ExpectedIntegratorGeneration uint64 `json:"expected_integrator_generation"`
 	IdempotencyKey               string `json:"idempotency_key"`
 }
@@ -454,5 +494,12 @@ func MissionQuestionFromDomain(q *domain.MissionQuestion) MissionQuestion {
 }
 
 func MissionPlanReviewFromDomain(r *domain.MissionPlanReview) MissionPlanReview {
-	return MissionPlanReview{MissionID: string(r.MissionID), PlanVersion: r.PlanVersion, Summary: r.Summary, SubmittedByRunID: string(r.SubmittedByRunID), SubmittedAt: rfc3339(r.SubmittedAt), Decision: string(r.Decision), Feedback: r.Feedback, DecidedByMemberID: string(r.DecidedByMemberID), DecidedAt: rfc3339Ptr(r.DecidedAt)}
+	out := MissionPlanReview{MissionID: string(r.MissionID), PlanVersion: r.PlanVersion, Summary: r.Summary, SubmittedByRunID: string(r.SubmittedByRunID), SubmittedAt: rfc3339(r.SubmittedAt), SubmittedPhase: string(r.SubmittedPhase), Decision: string(r.Decision), Feedback: r.Feedback, DecidedByMemberID: string(r.DecidedByMemberID), DecidedAt: rfc3339Ptr(r.DecidedAt)}
+	if len(r.Items) > 0 {
+		out.Items = make([]MissionPlanItem, len(r.Items))
+		for i, item := range r.Items {
+			out.Items[i] = MissionPlanItem{TaskID: string(item.TaskID), Revision: item.Revision, NewTask: item.NewTask, Material: item.Material, Widening: item.Widening, Title: item.Title, SupersedesRevision: item.SupersedesRevision}
+		}
+	}
+	return out
 }

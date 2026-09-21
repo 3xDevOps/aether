@@ -88,10 +88,10 @@ func regressionMission(t *testing.T, db *store.DB, workspace domain.WorkspaceID,
 	return m
 }
 
-// regressionApprovePlan drives the real plan gate - ask, answer, submit,
-// approve - so the mission reaches active and can dispatch. Approval accepts
-// the proposed current revision of every non-abandoned task, so callers create
-// their tasks before calling this.
+// regressionApprovePlan drives the real plan gate - ask, answer, complete
+// clarification, submit, approve - so the mission reaches active and can
+// dispatch. Approval accepts the pending revision of every non-abandoned task,
+// so callers create their tasks before calling this.
 func regressionApprovePlan(t *testing.T, db *store.DB, m *domain.Mission) *domain.Mission {
 	t.Helper()
 	ctx := context.Background()
@@ -101,6 +101,9 @@ func regressionApprovePlan(t *testing.T, db *store.DB, m *domain.Mission) *domai
 	}
 	if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, m.AccountableHumanID, "this flow", "plan-answer-1"); answerErr != nil {
 		t.Fatalf("answer plan question: %v", answerErr)
+	}
+	if _, completeErr := db.CompleteMissionClarification(ctx, m.ID, m.CurrentIntegratorRunID, "plan-clarify-1"); completeErr != nil {
+		t.Fatalf("complete clarification: %v", completeErr)
 	}
 	review, err := db.SubmitMissionPlan(ctx, m.ID, m.CurrentIntegratorRunID, "regression plan", "plan-submit-1")
 	if err != nil {

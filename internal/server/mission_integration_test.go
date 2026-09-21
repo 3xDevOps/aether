@@ -183,10 +183,15 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if pending.Plan.Phase != string(domain.MissionPhasePlanning) || pending.Plan.OpenQuestions != 1 {
 		t.Fatalf("plan state before the answer = %+v, want planning with one open question", pending.Plan)
 	}
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
+		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-early"},
+		nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("mission.clarification.complete with an unanswered question = %v, want CodeInvalidState", err)
+	}
 	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
 		Summary: "submitted too early", IdempotencyKey: "mission-submit-early",
 	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
-		t.Fatalf("mission.plan.submit with an unanswered question = %v, want CodeInvalidState", err)
+		t.Fatalf("mission.plan.submit before clarification is complete = %v, want CodeInvalidState", err)
 	}
 	if err := boCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
 		QuestionID: asked.Question.ID, Answer: "not mine to answer", IdempotencyKey: "mission-answer-bo",
@@ -201,6 +206,14 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if answered.Question.AnsweredAt == nil || answered.Question.AnsweredByMemberID != string(e.ada.id) {
 		t.Fatalf("answered question = %+v, want an answer attributed to the accountable human", answered.Question)
+	}
+	var clarified protocol.MissionClarificationCompleteResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
+		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-1"}, &clarified); err != nil {
+		t.Fatalf("mission.clarification.complete: %v", err)
+	}
+	if clarified.Plan.Phase != string(domain.MissionPhaseClarified) || clarified.Plan.OpenQuestions != 0 {
+		t.Fatalf("plan state after clarification = %+v, want clarified with no open question", clarified.Plan)
 	}
 	var submitted protocol.MissionPlanSubmitResult
 	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
@@ -365,6 +378,67 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if !containsTaskStatus(shown.Tasks, string(taskA), string(domain.TaskReview)) {
 		t.Fatalf("task A did not remain Review after missing evidence: %+v", shown.Tasks)
+	}
+
+	// New work after activation goes through the same human gate: the
+	// integrator cannot accept it alone, the amendment freezes plan changes
+	// while it is read, and an amendment is approved or sent back, never
+	// rejected.
+	var amendmentTask protocol.TaskMutationResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+		MissionID:      missionID,
+		Revision:       protocol.TaskRevision{Title: "worker C", Objective: "mission shell worker C", Material: true},
+		IdempotencyKey: "propose-C",
+	}, &amendmentTask); err != nil {
+		t.Fatalf("task.propose during an active mission: %v", err)
+	}
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
+		TaskID: amendmentTask.Task.ID, Revision: amendmentTask.Task.CurrentRevision,
+		ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "accept-C",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("task.accept of new work = %v, want CodeInvalidState", err)
+	}
+	var amendment protocol.MissionPlanSubmitResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "add worker C", IdempotencyKey: "mission-submit-2",
+	}, &amendment); err != nil {
+		t.Fatalf("mission.plan.submit amendment: %v", err)
+	}
+	if amendment.Plan.Phase != string(domain.MissionPhaseAmendmentReview) || amendment.Plan.PlanVersion != submitted.Plan.PlanVersion+1 {
+		t.Fatalf("plan state after the amendment submit = %+v, want amendment_review at the next version", amendment.Plan)
+	}
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+		MissionID:      missionID,
+		Revision:       protocol.TaskRevision{Title: "worker D", Objective: "mission shell worker D"},
+		IdempotencyKey: "propose-D",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("task.propose during an amendment = %v, want CodeInvalidState", err)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanReject), IdempotencyKey: "mission-decide-reject-2",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("mission.plan.decide reject on an amendment = %v, want CodeInvalidState", err)
+	}
+	var amended protocol.MissionPlanDecideResult
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "mission-decide-2",
+	}, &amended); err != nil {
+		t.Fatalf("mission.plan.decide amendment: %v", err)
+	}
+	if amended.Mission.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("mission phase after approving the amendment = %q, want active", amended.Mission.Phase)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
+		t.Fatalf("mission.show after the amendment: %v", err)
+	}
+	if !containsTaskStatus(shown.Tasks, amendmentTask.Task.ID, string(domain.TaskReady)) {
+		t.Fatalf("amended task %s is not ready after approval: %+v", amendmentTask.Task.ID, shown.Tasks)
+	}
+	if len(shown.PlanReviews) != 2 || shown.PlanReviews[1].SubmittedPhase != string(domain.MissionPhaseActive) ||
+		len(shown.PlanReviews[1].Items) != 1 || !shown.PlanReviews[1].Items[0].NewTask {
+		t.Fatalf("plan reviews after the amendment = %+v, want a second round recording one new task", shown.PlanReviews)
 	}
 
 	// Replacing the integrator bumps generation and invalidates the old socket.

@@ -323,7 +323,8 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 		// The phase is re-read under the authorization lock, so a decision
 		// that landed while this launch was queued is authoritative here.
 		switch current.Phase {
-		case domain.MissionPhasePlanning, domain.MissionPhasePlanReview, domain.MissionPhaseActive:
+		case domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhasePlanReview,
+			domain.MissionPhaseActive, domain.MissionPhaseAmendmentReview:
 		default:
 			return fmt.Errorf("%w: mission phase %s does not launch an integrator", store.ErrMissionStale, current.Phase)
 		}
@@ -863,7 +864,8 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 		return s.handleTaskRead(ctx, run, method, raw)
 	case protocol.MethodTaskPropose, protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission, protocol.MethodTaskAbandon:
 		return s.handleTaskMutation(ctx, run, method, raw)
-	case protocol.MethodMissionQuestionAsk, protocol.MethodMissionPlanShow, protocol.MethodMissionPlanSubmit:
+	case protocol.MethodMissionQuestionAsk, protocol.MethodMissionClarificationComplete,
+		protocol.MethodMissionPlanShow, protocol.MethodMissionPlanSubmit:
 		return s.handlePlanAgent(ctx, run, method, raw)
 	case protocol.MethodWorkerStart:
 		return s.workerStart(ctx, run, raw)

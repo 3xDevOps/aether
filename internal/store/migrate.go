@@ -1197,8 +1197,13 @@ ALTER TABLE mission_attempts ADD COLUMN last_error TEXT NOT NULL DEFAULT '';
 ALTER TABLE mission_create_receipts ADD COLUMN initial_run_id TEXT NOT NULL DEFAULT '';
 `,
 	`
-ALTER TABLE missions ADD COLUMN phase TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE missions ADD COLUMN phase TEXT NOT NULL DEFAULT 'active'
+	CHECK (phase IN ('planning', 'clarified', 'plan_review', 'active', 'amendment_review', 'rejected'));
 ALTER TABLE missions ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE mission_task_revisions ADD COLUMN material INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mission_task_revisions ADD COLUMN accepted_by_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_task_revisions ADD COLUMN accepted_by_run_id TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE mission_questions (
 	id                    TEXT PRIMARY KEY,
@@ -1220,11 +1225,25 @@ CREATE TABLE mission_plan_reviews (
 	summary              TEXT NOT NULL,
 	submitted_by_run_id  TEXT NOT NULL,
 	submitted_at         INTEGER NOT NULL,
+	submitted_phase      TEXT NOT NULL CHECK (submitted_phase IN ('clarified', 'active')),
 	decision             TEXT NOT NULL DEFAULT '' CHECK (decision IN ('', 'approve', 'revise', 'reject')),
 	feedback             TEXT NOT NULL DEFAULT '',
 	decided_by_member_id TEXT NOT NULL DEFAULT '',
 	decided_at           INTEGER,
 	PRIMARY KEY (mission_id, plan_version)
+);
+
+CREATE TABLE mission_plan_items (
+	mission_id   TEXT NOT NULL,
+	plan_version INTEGER NOT NULL,
+	task_id      TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	revision     INTEGER NOT NULL,
+	new_task     INTEGER NOT NULL DEFAULT 0,
+	material     INTEGER NOT NULL DEFAULT 0,
+	widening     TEXT NOT NULL DEFAULT '[]',
+	PRIMARY KEY (mission_id, plan_version, task_id),
+	FOREIGN KEY (mission_id, plan_version) REFERENCES mission_plan_reviews(mission_id, plan_version) ON DELETE CASCADE,
+	CHECK (json_valid(widening))
 );
 `,
 }

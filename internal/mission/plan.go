@@ -46,6 +46,8 @@ func (s *Service) handlePlanAgent(ctx context.Context, run domain.RunID, method 
 	switch method {
 	case protocol.MethodMissionQuestionAsk:
 		return s.questionAsk(ctx, run, raw)
+	case protocol.MethodMissionClarificationComplete:
+		return s.clarificationComplete(ctx, run, raw)
 	case protocol.MethodMissionPlanShow:
 		return s.planShow(ctx, run, raw)
 	case protocol.MethodMissionPlanSubmit:
@@ -82,6 +84,38 @@ func (s *Service) questionAsk(ctx context.Context, run domain.RunID, raw json.Ra
 		return nil, publishErr
 	}
 	return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, nil
+}
+
+// clarificationComplete is the integrator declaring that it has what it needs
+// to plan. Questions are optional; this call is what separates "still asking"
+// from "ready to submit", and the store refuses it while an answer is pending.
+func (s *Service) clarificationComplete(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
+	var p protocol.MissionClarificationCompleteParams
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+	}
+	if !validTaskKey(p.IdempotencyKey) {
+		return nil, errors.New("mission: mission.clarification.complete requires idempotency_key")
+	}
+	s.cfg.AuthorizationMu.Lock()
+	defer s.cfg.AuthorizationMu.Unlock()
+	m, err := s.integratorMission(ctx, run, "")
+	if err != nil {
+		return nil, err
+	}
+	if _, completeErr := s.cfg.Missions.CompleteMissionClarification(ctx, m.ID, run, p.IdempotencyKey); completeErr != nil {
+		return nil, completeErr
+	}
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return nil, publishErr
+	}
+	state, _, _, err := s.planState(ctx, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	return protocol.MissionClarificationCompleteResult{Plan: state}, nil
 }
 
 func (s *Service) planSubmit(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {

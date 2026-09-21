@@ -127,6 +127,9 @@ func missionWorkerTestEnv(t *testing.T) (*testEnv, *store.DB, *domain.Mission) {
 		if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "this flow", "takeover-answer"); answerErr != nil {
 			t.Fatalf("answer plan question: %v", answerErr)
 		}
+		if _, completeErr := db.CompleteMissionClarification(ctx, mission.ID, mission.CurrentIntegratorRunID, "takeover-clarify"); completeErr != nil {
+			t.Fatalf("complete clarification: %v", completeErr)
+		}
 		review, submitErr := db.SubmitMissionPlan(ctx, mission.ID, mission.CurrentIntegratorRunID, "takeover plan", "takeover-submit")
 		if submitErr != nil {
 			t.Fatalf("submit plan: %v", submitErr)
