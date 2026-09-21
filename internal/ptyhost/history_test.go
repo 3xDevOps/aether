@@ -739,7 +739,7 @@ func TestHistorySegmentDiscoveryIsSnapshottedOncePerRequest(t *testing.T) {
 		}
 	}
 	discovery := historySegmentDiscovery{}
-	work := newHistoryWorkDeadline(context.Background(), maxHistoryPageTime)
+	work := newHistoryWorkDeadline(context.Background())
 	segment, ok, err := discovery.nextSegment(context.Background(), work, path, path)
 	if err != nil || !ok || filepath.Base(segment.path) != stableCastSegmentName(path, 300) {
 		t.Fatalf("first discovered segment = %q, %v, %v", segment.path, ok, err)
@@ -839,7 +839,7 @@ func TestHistoryReverseReaderStopsAfterOneBoundedReadPastDeadline(t *testing.T) 
 	}
 
 	ctx := historyDeadlineTestContext(3)
-	work := newHistoryWorkDeadline(ctx, maxHistoryPageTime)
+	work := newHistoryWorkDeadline(ctx)
 	budget := historyReverseBlock * 2
 	reader := historyReverseReader{ctx: ctx, work: work, budget: &budget, maxEvents: maxHistoryEvents}
 	defer reader.close()
@@ -894,7 +894,7 @@ func TestHistoryElapsedBudgetReturnsAuthenticatedResumableCursor(t *testing.T) {
 
 func TestHistoryDecoderStopsAtBoundedDeadlineInterval(t *testing.T) {
 	ctx := historyDeadlineTestContext(2)
-	work := newHistoryWorkDeadline(ctx, maxHistorySearchTime)
+	work := newHistoryWorkDeadline(ctx)
 	decoder := newHistoryDecoder(ctx, work, func(historyDecodedLine) {})
 	err := decoder.feed(historyEvent{data: []byte(strings.Repeat("x", 8192))})
 	if !errors.Is(err, errHistoryWorkDeadline) {

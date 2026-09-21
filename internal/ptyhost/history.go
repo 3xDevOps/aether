@@ -29,10 +29,10 @@ const (
 	maxHistoryEventBytes    = 1 << 20
 	maxHistoryPageRawRead   = 8 << 20
 	maxHistorySearchRawRead = 2 << 20
+	maxHistoryEvents        = 4096
+	maxHistoryDecodeBytes   = 3 << 19
 	// Allow bounded headroom for slow disks and race instrumentation.
-	maxHistorySearchTime       = 1 * time.Second
-	maxHistoryEvents           = 4096
-	maxHistoryDecodeBytes      = 3 << 19
+	// Page and search share this budget.
 	maxHistoryPageTime         = 1 * time.Second
 	maxHistoryDiscoveryTime    = 250 * time.Millisecond
 	maxHistoryDirectoryEntries = 4096
@@ -62,12 +62,14 @@ type historyWorkDeadline struct {
 	elapsed bool
 }
 
-func newHistoryWorkDeadline(ctx context.Context, window time.Duration) *historyWorkDeadline {
+func newHistoryWorkDeadline(ctx context.Context) *historyWorkDeadline {
 	now, _ := ctx.Value(historyClockContextKey{}).(historyClock)
 	if now == nil {
 		now = time.Now
 	}
-	return &historyWorkDeadline{at: now().Add(window), now: now}
+	// Page and search share one work budget. Separate constants would be the
+	// same value, which is what the unused-parameter check rejects.
+	return &historyWorkDeadline{at: now().Add(maxHistoryPageTime), now: now}
 }
 
 func (d *historyWorkDeadline) check(ctx context.Context) (bool, error) {

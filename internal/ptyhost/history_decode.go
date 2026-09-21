@@ -165,7 +165,7 @@ func (d *historyDecoder) feedByte(b byte, position historyPosition, timeMS int64
 	d.feedRune(rune(b), position, timeMS)
 }
 
-func (d *historyDecoder) feedRune(r rune, position historyPosition, timeMS int64) {
+func (d *historyDecoder) feedRune(r rune, _ historyPosition, _ int64) {
 	switch r {
 	case 0x1b:
 		d.ansi = 1
@@ -190,7 +190,7 @@ func (d *historyDecoder) feedRune(r rune, position historyPosition, timeMS int64
 	case 0x90, 0x98, 0x9d, 0x9e, 0x9f:
 		d.ansi = 3
 	default:
-		if r >= 0x20 && r != 0x7f && !(r >= 0x80 && r <= 0x9f) {
+		if r >= 0x20 && r != 0x7f && (r < 0x80 || r > 0x9f) {
 			d.writeRune(r)
 		}
 	}

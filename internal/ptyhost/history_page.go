@@ -97,7 +97,7 @@ func historyDeadlinePage(key []byte, run domain.RunID, query, set string, segmen
 
 func pageHistory(ctx context.Context, key []byte, run domain.RunID, limit int, cutoff historyPosition, set, path string, segments []historySegment, discovery *historySegmentDiscovery) (HistoryPage, error) {
 	budget := maxHistoryPageRawRead
-	work := newHistoryWorkDeadline(ctx, maxHistoryPageTime)
+	work := newHistoryWorkDeadline(ctx)
 	reader := historyReverseReader{ctx: ctx, work: work, budget: &budget, maxEvents: maxHistoryEvents}
 	defer reader.close()
 	deadlinePage := func() HistoryPage {
@@ -241,7 +241,7 @@ func pageHistory(ctx context.Context, key []byte, run domain.RunID, limit int, c
 func searchHistory(ctx context.Context, key []byte, run domain.RunID, query string, limit int, cutoff historyPosition, set, path string, segments []historySegment, discovery *historySegmentDiscovery) (HistoryPage, error) {
 	overlapBudget := maxHistoryEventBytes + 1
 	budget := maxHistorySearchRawRead - overlapBudget
-	work := newHistoryWorkDeadline(ctx, maxHistorySearchTime)
+	work := newHistoryWorkDeadline(ctx)
 	reader := historyReverseReader{ctx: ctx, work: work, budget: &budget, maxEvents: maxHistoryEvents}
 	defer reader.close()
 	deadlinePage := func() HistoryPage {

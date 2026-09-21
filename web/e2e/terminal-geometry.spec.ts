@@ -7,12 +7,13 @@ const painter = `stty -echo
 paint() {
   set -- $(stty size)
   i=0
-  while [ "$i" -lt 30 ]; do
+  while [ "$i" -lt 40 ]; do
     printf 'geometry-scroll-%s\r\n' "$i"
     i=$((i + 1))
   done
-  printf '\\033[2J\\033[H'
-  printf '\\033[%s;%sHX' "$1" "$2"
+  # Clear only the cursor line. A full erase drops the scrolled rows, and
+  # then a font-size change has no pinned offset to preserve.
+  printf '\\033[%s;1H\\033[2K\\033[%s;%sHX' "$1" "$1" "$2"
 }
 trap paint WINCH
 paint
