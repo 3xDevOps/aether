@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -193,10 +194,22 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
 		t.Fatalf("mission.plan.submit before clarification is complete = %v, want CodeInvalidState", err)
 	}
-	if err := boCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
-		QuestionID: asked.Question.ID, Answer: "not mine to answer", IdempotencyKey: "mission-answer-bo",
-	}, nil); err == nil {
-		t.Fatal("mission.question.answer from a non-accountable collaborator was accepted")
+	// Every seeded member is an admin, and an admin may answer for the
+	// accountable human; the refusal is for a plain collaborator.
+	_, cyKey := writeClientKey(t)
+	cy := &domain.Member{
+		DisplayName: "Cy", PublicKey: string(ssh.MarshalAuthorizedKey(cyKey.PublicKey())),
+		Color: "#4363d8", Role: domain.RoleCollaborator,
+	}
+	if err := srv.srv.Store().CreateMember(ctx, cy); err != nil {
+		t.Fatalf("seed collaborator: %v", err)
+	}
+	cyCtrl, cyClient := srv.control(t, cyKey)
+	defer cyClient.Close()
+	if err := cyCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
+		QuestionID: asked.Question.ID, Answer: "not mine to answer", IdempotencyKey: "mission-answer-cy",
+	}, nil); controlErrorCode(err) != protocol.CodeDenied {
+		t.Fatalf("mission.question.answer from a non-accountable collaborator = %v, want denied", err)
 	}
 	var answered protocol.MissionQuestionResult
 	if err := adaCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
@@ -534,15 +547,23 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	}
 	taskA := propose(workerAObjective, "Docker worker A", "worker-a.txt", "docker-propose-a")
 	taskB := propose(workerBObjective, "Docker worker B", "worker-b.txt", "docker-propose-b")
-	for _, taskID := range []string{taskA, taskB} {
-		var out protocol.TaskMutationResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
-			TaskID: taskID, Revision: 1,
-			ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
-			IdempotencyKey:               "docker-accept-" + taskID,
-		}, &out); err != nil {
-			t.Fatalf("task.accept %s: %v", taskID, err)
-		}
+	// The objective needs no clarification: the integrator says so and
+	// submits, and the accountable human approves both tasks at once.
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
+		protocol.MissionClarificationCompleteParams{IdempotencyKey: "docker-clarify"}, nil); err != nil {
+		t.Fatalf("mission.clarification.complete: %v", err)
+	}
+	var submitted protocol.MissionPlanSubmitResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "two Docker workers", IdempotencyKey: "docker-submit",
+	}, &submitted); err != nil {
+		t.Fatalf("mission.plan.submit: %v", err)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: submitted.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "docker-decide",
+	}, nil); err != nil {
+		t.Fatalf("mission.plan.decide: %v", err)
 	}
 
 	start := func(taskID, dispatch string) protocol.WorkerStartResult {
@@ -1124,4 +1145,14 @@ func releaseMissionTakeover(t *testing.T, client *ssh.Client, runID, sessionID s
 	if !ack.OK {
 		t.Fatalf("release denied: %+v", ack)
 	}
+}
+
+// controlErrorCode is the wire code of a control-channel error, or 0 for a
+// nil or untyped error.
+func controlErrorCode(err error) int {
+	var rpcErr *protocol.Error
+	if errors.As(err, &rpcErr) {
+		return rpcErr.Code
+	}
+	return 0
 }
