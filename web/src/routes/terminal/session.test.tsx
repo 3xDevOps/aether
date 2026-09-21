@@ -399,6 +399,55 @@ describe('useRunTerminalSession', () => {
     mounted.unmount()
   })
 
+  it('puts a pre-ack control request on the attach header', () => {
+    const mounted = mount()
+    const socket = StubSocket.last()
+    act(() => mounted.result.current.takeControl(true))
+    act(() => socket.onopen?.())
+    expect(socket.frames()[0]).toMatchObject({ write: true, takeover: true })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          control_generation: 0,
+          has_control: false,
+        }),
+      })
+    })
+    expect(socket.frames().filter((frame) => frame.type === 'control')).toEqual([])
+    mounted.unmount()
+  })
+
+  it('releases a write grant when authority changes after the header is sent', () => {
+    const mounted = mount({}, initialTerminal, { currentAutomaticWrite: true })
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+    const header = socket.frames()[0] as { write?: boolean; control_session_id?: string }
+    expect(header.write).toBe(true)
+    mounted.rerender({
+      currentAutomaticWrite: false,
+      currentAuthorityKey: 'mem_alice:viewer:mem_alice:false:',
+    })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          control_session_id: header.control_session_id,
+          control_generation: 3,
+          has_control: true,
+        }),
+      })
+    })
+    expect(socket.frames().at(-1)).toMatchObject({
+      type: 'control',
+      write: false,
+      control_generation: 3,
+    })
+    mounted.unmount()
+  })
+
   it('resets displayed state before xterm becomes available', () => {
     const stale = {
       connection: 'offline' as const,

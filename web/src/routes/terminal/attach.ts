@@ -372,6 +372,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // completely; no later resume may trust that partial screen.
   let replayInvalid = false
   let attached = false
+  let pendingControl: { write: boolean; takeover: boolean } | null = null
   // Sticky for the life of the attachment: once the server has said this
   // member cannot steer, every reconnect is a mirror.
   let writeDenied = false
@@ -827,7 +828,9 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.binaryType = 'arraybuffer'
     socket = ws
-    const askedWrite = handlers.wantsWrite() && !writeDenied
+    // Read again when the socket opens. A control click during CONNECTING
+    // changes the header; one after the header is queued until the ack.
+    let askedWrite = handlers.wantsWrite() && !writeDenied
     const follows = handlers.follows?.() ?? false
     const screen = handlers.screen?.()
     const interactive = handlers.interactive?.()
@@ -837,6 +840,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
 
     ws.onopen = () => {
       if (disposed || refused || socket !== ws) return
+      const queued = pendingControl
+      pendingControl = null
+      const queuedTakeover = queued?.takeover === true
+      askedWrite = (queued ? queued.write : handlers.wantsWrite()) && !writeDenied
       const { cols, rows } = handlers.geometry()
       // A mirror sends no "write" key at all; every attach still carries
       // its stable control-session identity alongside geometry.
@@ -850,7 +857,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if ((askedWrite || options.releaseControl) && controlGeneration > 0 && (hasControl || options.takeover)) {
         header.control_generation = controlGeneration
       }
-      if (options.takeover || (askedWrite && hasControl)) header.takeover = true
+      if (options.takeover || queuedTakeover || (askedWrite && hasControl)) header.takeover = true
       if (options.releaseControl) header.release_control = true
       if (askedWrite) header.write = true
       if (follows) header.follow = true
@@ -1001,6 +1008,9 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           resume && ack.resumed === true,
         )
         if (disposed || refused || socket !== ws) return
+        // A control change that arrived while this socket was still connecting
+        // has to correct the lease the header just established.
+        flushPendingControl()
         // Keep this immediately after the callback: WebSocket events are
         // serialized, so replayGate is muted before the first binary frame.
         handlers.onReplayStart?.(replayBytes, replayIsFull)
@@ -1014,6 +1024,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       answered = true
       // A refused write is not a dead attach: drop the request and mirror.
       if (ack.code === codeDenied && askedWrite) {
+        pendingControl = null
         writeDenied = true
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
         handlers.onWriteDenied()
@@ -1026,6 +1037,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // write preference and reconnect as a mirror so it can still observe
       // the terminal.
       if (ack.code === codeConflict && askedWrite) {
+        pendingControl = null
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
         handlers.onControlLost?.()
         attempt = 0
@@ -1275,7 +1287,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     if (handlers.interactive?.() === true) frame.control_generation = controlGeneration
     control(frame)
   }
-  const setControl = (write: boolean, takeover = false) => {
+  const dispatchControl = (write: boolean, takeover = false) => {
     if (!attached || !socket) return
     const requestID = ++controlRequestID
     // An ordinary mirror acquisition must not fence itself to the owner it
@@ -1299,6 +1311,20 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     if (takeover) frame.takeover = true
     if (generation > 0) frame.control_generation = generation
     socket.send(JSON.stringify(frame))
+  }
+  const setControl = (write: boolean, takeover = false) => {
+    if (!attached || !socket) {
+      pendingControl = { write, takeover }
+      return
+    }
+    pendingControl = null
+    dispatchControl(write, takeover)
+  }
+  const flushPendingControl = () => {
+    if (!pendingControl) return
+    const request = pendingControl
+    pendingControl = null
+    dispatchControl(request.write, request.takeover)
   }
 
   // A phone that was in a pocket comes back to a dead socket and a frozen

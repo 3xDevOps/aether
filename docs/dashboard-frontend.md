@@ -1119,9 +1119,9 @@ in the tree. An open dock's body is the panel its selected tab names; a shut
 dock has no body, and a dock
 holding no tabs is no tab list at all, so neither names anything.
 
-Opening a run tab swaps the active center view. The previously active strip
-unmounts; a cached primary terminal retains only its terminal surface, hidden
-and inert, so the strip the next route draws takes the focus back. Otherwise
+Opening a run tab swaps the active center view. The previously active view
+unmounts, including its terminal, so the strip the next route draws takes the
+focus back. Otherwise
 every tab press would drop a keyboard reader on `body`. It is armed
 from the activation rather than the key press, and only from one the keyboard
 produced, which carries no click count: a press that is cancelled arms
@@ -1253,53 +1253,27 @@ offer **Back to board**. The launch paths seed the run they just started -
 both template launches and the onboarding first-run form, the way
 `launch-dialog.tsx` does - so a launch never lands on the deleted claim.
 
-`CenterView` retains visited `TerminalView` subtrees in its bounded cache while
-the run route changes. A first visit creates the terminal only for a known run;
-if that run has ended with no recorded terminal, the attach is refused and the
-cached pane is never allowed to show the previous run's output under the new
-run's name.
-
-**Primary run terminals are cached, not destroyed by navigation.** `CenterView`
-keeps up to four recently visited primary run terminals mounted in browser
-memory. Cache keys include the authenticated identity and the terminal data
-generation epoch, so a key is never reused across either boundary. The cache
-contains only runs the member has visited: it does not prefetch runs and is not
-persisted across reloads or browser tabs.
+`CenterView` mounts only the active route. A terminal key includes the route,
+the authenticated identity, the terminal data-generation epoch, and the run id,
+so a change of identity or epoch remounts the surface instead of reusing it.
+Leaving the terminal closes its WebSocket. Coming back attaches again at the
+compact current screen; it does not keep a hidden terminal warm and it does
+not replay the retained archive into xterm.
 
 The normal run xterm requests up to 5,000 scrollback rows. Once the server
 acknowledges geometry, xterm adapts the combined normal and alternate buffers
 to stay near 1,000,000 cells; wider terminals therefore retain fewer rows.
-`CenterView` trims inactive entries by their reported cell weights, with at
-most four surfaces and its inactive-cell guard. This is a bounded cache
-policy, not a fixed per-terminal or global scrollback promise.
+That bound is the live surface. Older recorded output is a separate
+**Terminal history** dialog: bounded pages of normalized text, fetched on
+demand, never a full-archive download and never written back into xterm.
 
-Those limits apply to both warm cached surfaces and compact bootstraps. Either
-may omit older rows that remain available in the retained raw archive; the
-dashboard scrollback is not a full-history guarantee.
+A same-incarnation resume, when the current surface is still mounted, supplies
+only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
+back to a compact current-screen bootstrap through the hidden serial
+transaction. A finished run stays read-only until that same run is relaunched.
 
-When a cached primary becomes inactive because the route changes, its
-WebSocket is intentionally closed. That detach removes its Watching presence,
-active control transport, and geometry participation, while retaining the
-parsed current screen and bounded scrollback in browser memory. Reactivation
-renders that warm surface immediately and reconnects with `resume` only after
-pending xterm writes settle. The attach ack's server-issued `resume_id` fences
-the settled cursor to one PTY incarnation. A valid same-incarnation resume
-supplies only the bounded gap; an invalid cursor, ring, geometry, or
-incarnation falls back to a compact current-screen bootstrap through the
-hidden serial transaction. A completed entry whose session ended stays parked
-and does not reconnect unless that same run is relaunched; then it performs a
-fresh bootstrap once active.
-
-Run deletion, an attach's final refusal, and an identity or data-generation
-change invalidate entries; LRU eviction disposes inactive entries. An
-invalidated active entry remains only long enough to show its refusal, then is
-disposed when it becomes inactive. Generation changes dispose the old
-generation immediately.
-
-The Terminal view is a vertical split. Only the active terminal renders its
-RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`; inactive cached
-entries retain only the primary TerminalPane/xterm. This keeps auxiliary fixed
-IDs and portals unique and restores focus handoff when the entry becomes active.
+The Terminal view is a vertical split. The active terminal renders its
+RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`.
 The agent terminal keeps flexible space above a `RunDock` below it. The first
 header section contains the title and metadata on two lines; the next contains
 tabs and actions on one line. The terminal strip left-aligns connection and
@@ -1447,9 +1421,9 @@ subscriptions are removed on cleanup, while closing a tab or an exited shell
 unregisters its socket. Thus route changes and tab remounts cannot deliver late
 output, resizes, or image actions to a disposed host; only the selected shell
 tab mounts an xterm host and transcript replay restores its content.
-The primary agent attach follows the cache lifecycle above: route changes
-suspend it rather than dispose its parsed terminal; eviction, invalidation, or
-unmount closes it permanently.
+The primary agent attach closes when its route unmounts. A return visit
+opens a new compact current-screen attach rather than revealing a retained
+terminal.
 
 The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running. Stopping the container and discarding the saved image
@@ -1486,9 +1460,8 @@ the terminal with the gateway's own error instead.
   and keeps callbacks bound to the current terminal host. The primary run
   header requests `screen:true` and `interactive:true`; shells and CLI
   attachments keep their existing stream modes. `screen:true` bootstraps the
-  compact current screen and bounded scrollback. The retained raw archive is
-  downloaded separately through the authenticated
-  `GET /api/runs/<run>/terminal-history` action.
+  compact current screen and bounded scrollback. Older output is the paged
+  `terminal.history` dialog. The dashboard does not download the raw archive.
 - **Controller lease and compact bootstrap.** A desktop owner's first attach
   asks for write; the server grants it only when no controller exists. Other
   members enter as mirrors, and a second tab cannot become a second writer.
