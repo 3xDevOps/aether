@@ -32,6 +32,8 @@ const xterm = vi.hoisted(() => ({
   search: null,
   findOpen: false,
   setFindOpen: vi.fn(),
+  ctrlArmed: false,
+  armCtrl: vi.fn(),
   focusTerminal: vi.fn(),
 }))
 
@@ -96,6 +98,8 @@ describe('environment terminal dock', () => {
     attach.handlers = null
     vi.clearAllMocks()
     xterm.structuralGeneration = 0
+    xterm.ctrlArmed = false
+    xterm.armCtrl.mockReset()
     xterm.beginStructuralReplay.mockReset()
     xterm.beginStructuralReplay.mockImplementation(() => ++xterm.structuralGeneration)
     xterm.cancelStructuralReplay.mockReset()
@@ -251,6 +255,10 @@ describe('environment terminal dock', () => {
     xterm.cancelStructuralReplay.mockClear()
     xterm.finishStructuralReplay.mockClear()
     xterm.setGeometry.mockClear()
+    let restore: (() => void) | undefined
+    xterm.finishStructuralReplay.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { restore = resolve }),
+    )
 
     let finish: (() => void) | undefined
     xterm.terminal.write.mockImplementation((_chunk: Uint8Array, done?: () => void) => {
@@ -278,6 +286,11 @@ describe('environment terminal dock', () => {
     expect(host.style.visibility).toBe('hidden')
 
     act(() => finish?.())
+    await waitFor(() => expect(xterm.finishStructuralReplay).toHaveBeenCalled())
+    xterm.input?.('blocked while restoring viewport')
+    expect(attach.send).not.toHaveBeenCalled()
+    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
+    act(() => restore?.())
     await waitFor(() =>
       expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
     )

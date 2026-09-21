@@ -213,8 +213,8 @@ function FindBar({
       setMissing(false)
       return
     }
-    onNavigate?.()
     const found = direction === 'next' ? search.findNext(term) : search.findPrevious(term)
+    if (found) onNavigate?.()
     setMissing(!found)
   }
 

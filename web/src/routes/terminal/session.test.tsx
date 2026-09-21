@@ -43,22 +43,28 @@ function mount(active = true, viewport: Partial<SessionViewport> = {}) {
     terminals: { run_1: initialTerminal },
   })
   const result = renderHook(
-    ({ currentActive }) =>
+    ({
+      currentActive,
+      currentTerminal = terminal,
+    }: {
+      currentActive: boolean
+      currentTerminal?: Terminal
+    }) =>
       useRunTerminalSession({
         runID: 'run_1',
         run: useStore.getState().runs.run_1,
         active: currentActive,
         initialized: true,
-        terminal,
+        terminal: currentTerminal,
         geometry: () => ({ cols: 80, rows: 24 }),
         ...replay,
         phone: false,
         automaticWrite: false,
         authorityKey: 'mem_alice:collaborator:mem_alice:false:',
       }),
-    { initialProps: { currentActive: active } },
+    { initialProps: { currentActive: active } as { currentActive: boolean; currentTerminal?: Terminal } },
   )
-  return { ...result, terminal, ...replay }
+  return { ...result, terminal, ...replay, viewport: replay }
 }
 
 beforeEach(() => {
@@ -224,6 +230,10 @@ describe('useRunTerminalSession', () => {
     expect(order).toEqual(['begin', 'geometry:start', 'geometry:done', 'write:0'])
     expect(frames).toHaveLength(1)
 
+    const replacementFinish = vi.fn(async () => {})
+    mounted.viewport.finishStructuralReplay = replacementFinish
+    mounted.rerender({ currentActive: true })
+
     act(() => frames.shift()?.(0))
     expect(mounted.result.current.replaying).toBe(true)
     expect(mounted.finishStructuralReplay).not.toHaveBeenCalled()
@@ -231,6 +241,7 @@ describe('useRunTerminalSession', () => {
 
     act(() => frames.shift()?.(16))
     expect(mounted.finishStructuralReplay).toHaveBeenCalledWith(9)
+    expect(replacementFinish).not.toHaveBeenCalled()
     expect(mounted.result.current.replaying).toBe(true)
 
     await act(async () => {
@@ -308,11 +319,35 @@ describe('useRunTerminalSession', () => {
     mounted.unmount()
   })
 
+  it('cancels structural replay through its original controller on replacement', () => {
+    const ownerCancel = vi.fn(async () => {})
+    const replacementCancel = vi.fn(async () => {})
+    const mounted = mount(true, {
+      beginStructuralReplay: vi.fn(() => 13),
+      cancelStructuralReplay: ownerCancel,
+    })
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, cols: 80, rows: 24, replay: 3 }),
+      })
+    })
+
+    mounted.viewport.cancelStructuralReplay = replacementCancel
+    mounted.rerender({ currentActive: true, currentTerminal: fakeTerminal() })
+
+    expect(ownerCancel).toHaveBeenCalledWith(13)
+    expect(replacementCancel).not.toHaveBeenCalled()
+    mounted.unmount()
+  })
+
   it('keeps stale refusal cleanup from revealing or invalidating a replacement replay', async () => {
     let resetDone!: () => void
     let cancelDone!: () => void
     let geometryCalls = 0
     let generation = 0
+    const replacementCancel = vi.fn(async () => {})
     const onInvalidate = vi.fn()
     const mounted = mount(true, {
       beginStructuralReplay: vi.fn(() => ++generation),
@@ -342,11 +377,15 @@ describe('useRunTerminalSession', () => {
       })
     })
 
+    mounted.viewport.cancelStructuralReplay = replacementCancel
+    mounted.rerender({ currentActive: true })
+
     await act(async () => {
       resetDone()
       await Promise.resolve()
     })
     expect(mounted.cancelStructuralReplay).toHaveBeenCalledWith(1)
+    expect(replacementCancel).not.toHaveBeenCalled()
 
     act(() => mounted.result.current.retry())
     const replacement = StubSocket.last()
@@ -397,6 +436,10 @@ describe('useRunTerminalSession', () => {
     act(() => mounted.rerender({ currentActive: true }))
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const resumed = StubSocket.last()
+    let replayDone!: () => void
+    mounted.terminal.write = vi.fn((_chunk: unknown, done?: () => void) => {
+      replayDone = done ?? (() => {})
+    }) as unknown as Terminal['write']
     act(() => {
       resumed.onopen?.()
       resumed.onmessage?.({
@@ -412,6 +455,8 @@ describe('useRunTerminalSession', () => {
     })
 
     expect(resumed.frames()[0]).toMatchObject({ resume: true })
+    expect(mounted.result.current.replaying).toBe(false)
+    act(() => replayDone())
     await waitFor(() => expect(mounted.result.current.replaying).toBe(false))
     expect(mounted.beginStructuralReplay).not.toHaveBeenCalled()
     expect(mounted.cancelStructuralReplay).not.toHaveBeenCalled()

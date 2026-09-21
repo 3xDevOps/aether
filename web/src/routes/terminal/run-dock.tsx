@@ -37,6 +37,7 @@ interface ShellAttachmentIdentity {
 
 interface StructuralReplayState {
   attachmentGeneration: number
+  controller: XtermController
   controllerGeneration: number
   revision: number
 }
@@ -68,6 +69,7 @@ export function RunDock({ runID }: { runID: string }) {
   const attachmentGenerationRef = useRef(0)
   const replayRevisionRef = useRef(0)
   const structuralReplayRef = useRef<StructuralReplayState | null>(null)
+  const fullReplaySettlingGenerationRef = useRef<number | null>(null)
   const writeRequested = useRef<Record<string, boolean>>({})
   const controlHeld = useRef<Record<string, boolean>>({})
   const [controlState, setControlState] = useState<{ key: string; held: boolean } | null>(null)
@@ -85,13 +87,18 @@ export function RunDock({ runID }: { runID: string }) {
         }
         const replay = structuralReplayRef.current
         if (!replay) {
+          if (
+            fullReplaySettlingGenerationRef.current !== null &&
+            attachmentGenerationRef.current === fullReplaySettlingGenerationRef.current
+          ) {
+            fullReplaySettlingGenerationRef.current = null
+          }
           setReplaying(false)
           return
         }
-        const controller = controllerRef.current
         void (async () => {
           try {
-            await controller?.finishStructuralReplay?.(replay.controllerGeneration)
+            await replay.controller.finishStructuralReplay?.(replay.controllerGeneration)
           } catch {
             // The parsed replay is still authoritative. A failed viewport
             // restore must not leave it permanently hidden.
@@ -101,6 +108,9 @@ export function RunDock({ runID }: { runID: string }) {
             replayRevisionRef.current !== replay.revision ||
             attachmentGenerationRef.current !== replay.attachmentGeneration
           ) return
+          if (fullReplaySettlingGenerationRef.current === replay.attachmentGeneration) {
+            fullReplaySettlingGenerationRef.current = null
+          }
           structuralReplayRef.current = null
           setReplaying(false)
         })()
@@ -143,6 +153,7 @@ export function RunDock({ runID }: { runID: string }) {
         current?.runID !== runID ||
         current.tab !== activeTab ||
         controlHeld.current[key] !== true ||
+        fullReplaySettlingGenerationRef.current !== null ||
         gate.current.muted()
       ) return
       getShellSocket(runID, activeTab)?.send(data)
@@ -201,10 +212,14 @@ export function RunDock({ runID }: { runID: string }) {
     }
     const cancelStructuralReplay = () => {
       const replay = structuralReplayRef.current
-      if (!replay || replay.attachmentGeneration !== attachmentGeneration) return
-      structuralReplayRef.current = null
-      replayRevisionRef.current++
-      void controllerRef.current?.cancelStructuralReplay?.(replay.controllerGeneration)
+      if (replay?.attachmentGeneration === attachmentGeneration) {
+        structuralReplayRef.current = null
+        replayRevisionRef.current++
+        void replay.controller.cancelStructuralReplay?.(replay.controllerGeneration)
+      }
+      if (fullReplaySettlingGenerationRef.current === attachmentGeneration) {
+        fullReplaySettlingGenerationRef.current = null
+      }
     }
     const clearAttached = () => {
       if (isCurrent()) setAttachedIdentity(null)
@@ -230,12 +245,19 @@ export function RunDock({ runID }: { runID: string }) {
           if (resumed) {
             cancelStructuralReplay()
           } else {
-            const controllerGeneration = controllerRef.current?.beginStructuralReplay?.()
+            fullReplaySettlingGenerationRef.current = attachmentGeneration
+            const replayController = controllerRef.current
+            const controllerGeneration = replayController?.beginStructuralReplay?.()
             const revision = ++replayRevisionRef.current
             structuralReplayRef.current =
-              controllerGeneration === undefined
+              replayController === null || controllerGeneration === undefined
                 ? null
-                : { attachmentGeneration, controllerGeneration, revision }
+                : {
+                    attachmentGeneration,
+                    controller: replayController,
+                    controllerGeneration,
+                    revision,
+                  }
           }
           setGeometry(size.cols, size.rows, !resumed)
           setShellRefused(runID, null)
@@ -251,6 +273,7 @@ export function RunDock({ runID }: { runID: string }) {
         if (!isCurrent()) return
         if (!replayAccepted) return
         replayAccepted = false
+        if (full) fullReplaySettlingGenerationRef.current = attachmentGeneration
         gate.current.start(full ? 'full' : 'delta')
         if (bytes === 0) void gate.current.write(emptyReplay, 'replay-end')
       },
@@ -400,7 +423,7 @@ export function RunDock({ runID }: { runID: string }) {
           )}
           <TerminalPane
             controller={controller}
-            writable={activeHasControl}
+            writable={activeHasControl && !replaying}
             replaying={replaying}
             className="min-h-0 flex-1 overflow-auto"
             imageTarget={runID}

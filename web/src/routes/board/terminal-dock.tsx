@@ -46,6 +46,7 @@ const emptyReplay = new Uint8Array()
 
 interface StructuralReplayState {
   attachmentGeneration: number
+  controller: XtermController
   controllerGeneration: number
   revision: number
 }
@@ -103,6 +104,7 @@ export function TerminalDock({
   const attachmentGenerationRef = useRef(0)
   const replayRevisionRef = useRef(0)
   const structuralReplayRef = useRef<StructuralReplayState | null>(null)
+  const fullReplaySettlingGenerationRef = useRef<number | null>(null)
   const gate = useRef(
     replayGate(
       (chunk, done) => terminalRef.current?.write(chunk, done),
@@ -117,13 +119,18 @@ export function TerminalDock({
         }
         const replay = structuralReplayRef.current
         if (!replay) {
+          if (
+            fullReplaySettlingGenerationRef.current !== null &&
+            attachmentGenerationRef.current === fullReplaySettlingGenerationRef.current
+          ) {
+            fullReplaySettlingGenerationRef.current = null
+          }
           setReplaying(false)
           return
         }
-        const controller = controllerRef.current
         void (async () => {
           try {
-            await controller?.finishStructuralReplay?.(replay.controllerGeneration)
+            await replay.controller.finishStructuralReplay?.(replay.controllerGeneration)
           } catch {
             // The parsed replay is still authoritative. A failed viewport
             // restore must not leave it permanently hidden.
@@ -133,6 +140,9 @@ export function TerminalDock({
             replayRevisionRef.current !== replay.revision ||
             attachmentGenerationRef.current !== replay.attachmentGeneration
           ) return
+          if (fullReplaySettlingGenerationRef.current === replay.attachmentGeneration) {
+            fullReplaySettlingGenerationRef.current = null
+          }
           structuralReplayRef.current = null
           setReplaying(false)
         })()
@@ -146,7 +156,12 @@ export function TerminalDock({
     enabled: activeTab !== null && !dock.collapsed,
     follow: phone,
     onData: (data) => {
-      if (!activeTab || activeTabRef.current !== activeTab || gate.current.muted()) return
+      if (
+        !activeTab ||
+        activeTabRef.current !== activeTab ||
+        fullReplaySettlingGenerationRef.current !== null ||
+        gate.current.muted()
+      ) return
       getEnvTerminalSocket(activeTab)?.send(data)
     },
     onResize: (cols, rows) => {
@@ -259,10 +274,14 @@ export function TerminalDock({
       activeTabRef.current === socketKey
     const cancelStructuralReplay = () => {
       const replay = structuralReplayRef.current
-      if (!replay || replay.attachmentGeneration !== attachmentGeneration) return
-      structuralReplayRef.current = null
-      replayRevisionRef.current++
-      void controllerRef.current?.cancelStructuralReplay?.(replay.controllerGeneration)
+      if (replay?.attachmentGeneration === attachmentGeneration) {
+        structuralReplayRef.current = null
+        replayRevisionRef.current++
+        void replay.controller.cancelStructuralReplay?.(replay.controllerGeneration)
+      }
+      if (fullReplaySettlingGenerationRef.current === attachmentGeneration) {
+        fullReplaySettlingGenerationRef.current = null
+      }
     }
     const handlers = {
       onData: (chunk: Uint8Array, kind: AttachDataKind, settled?: () => void) =>
@@ -275,12 +294,19 @@ export function TerminalDock({
           if (resumed) {
             cancelStructuralReplay()
           } else {
-            const controllerGeneration = controllerRef.current?.beginStructuralReplay?.()
+            fullReplaySettlingGenerationRef.current = attachmentGeneration
+            const replayController = controllerRef.current
+            const controllerGeneration = replayController?.beginStructuralReplay?.()
             const revision = ++replayRevisionRef.current
             structuralReplayRef.current =
-              controllerGeneration === undefined
+              replayController === null || controllerGeneration === undefined
                 ? null
-                : { attachmentGeneration, controllerGeneration, revision }
+                : {
+                    attachmentGeneration,
+                    controller: replayController,
+                    controllerGeneration,
+                    revision,
+                  }
           }
           setGeometry(size.cols, size.rows, !resumed)
           const status = useStore.getState().envTerminal.status
@@ -297,6 +323,7 @@ export function TerminalDock({
         if (!isCurrent()) return
         if (!replayAccepted) return
         replayAccepted = false
+        if (full) fullReplaySettlingGenerationRef.current = attachmentGeneration
         gate.current.start(full ? 'full' : 'delta')
         if (bytes === 0) void gate.current.write(emptyReplay, 'replay-end')
       },
@@ -543,6 +570,7 @@ export function TerminalDock({
             ) : (
               <TerminalPane
                 controller={controller}
+                writable={!replaying}
                 className="overflow-auto"
                 replaying={replaying}
                 imageTargetKey={activeTab ?? undefined}

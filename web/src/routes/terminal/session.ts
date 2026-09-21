@@ -70,6 +70,12 @@ interface SessionRefs {
   finishStructuralReplay?: (generation: number) => void | Promise<void>
 }
 
+interface StructuralReplayOwner {
+  generation: number
+  cancel?: (generation: number) => void | Promise<void>
+  finish?: (generation: number) => void | Promise<void>
+}
+
 function terminalWeight(terminal: Terminal | null): number {
   if (!terminal) return 0
   return (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
@@ -108,7 +114,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const activeRef = useRef(active)
   const latestActiveRef = useRef(active)
   const explicitWriteRef = useRef<boolean | null>(null)
-  const structuralReplayRef = useRef<number | null>(null)
+  const structuralReplayRef = useRef<StructuralReplayOwner | null>(null)
   const replayRevisionRef = useRef(0)
   const acceptedReplayRef = useRef(false)
   const abortedReplayRef = useRef(false)
@@ -121,6 +127,17 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const relaunchPendingRef = useRef(false)
   terminalRef.current = terminal
   latestActiveRef.current = active
+  const beginStructuralReplay = useCallback((): StructuralReplayOwner | null => {
+    const owner = refs.current
+    const generation = owner.beginStructuralReplay?.()
+    return generation === undefined
+      ? null
+      : {
+          generation,
+          cancel: owner.cancelStructuralReplay,
+          finish: owner.finishStructuralReplay,
+        }
+  }, [refs])
   const gate = useMemo(
     () =>
       replayGate(
@@ -149,18 +166,18 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
           const revision = ++replayRevisionRef.current
           if (visible) {
             if (full && structuralReplayRef.current === null) {
-              structuralReplayRef.current = refs.current.beginStructuralReplay?.() ?? null
+              structuralReplayRef.current = beginStructuralReplay()
             }
-            setReplaying(true)
+            setReplaying(full === true)
             return
           }
 
-          const generation = full ? structuralReplayRef.current : null
+          const replay = full ? structuralReplayRef.current : null
           if (full) structuralReplayRef.current = null
           const completion =
-            generation === null
+            replay === null
               ? undefined
-              : refs.current.finishStructuralReplay?.(generation)
+              : replay.finish?.(replay.generation)
           void Promise.resolve(completion).then(
             () => {
               if (replayRevisionRef.current === revision) setReplaying(false)
@@ -171,7 +188,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
           )
         },
       ),
-    [refs],
+    [beginStructuralReplay, refs],
   )
 
   const updateControl = useCallback(
@@ -227,7 +244,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         if (!resumed) {
           writeRevisionRef.current++
           if (structuralReplayRef.current === null) {
-            structuralReplayRef.current = refs.current.beginStructuralReplay?.() ?? null
+            structuralReplayRef.current = beginStructuralReplay()
           }
           const sourceGeometry = Promise.resolve(refs.current.setGeometry(size.cols, size.rows, true))
           sourceGeometryRef.current = sourceGeometry
@@ -258,10 +275,10 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         sourceGeometryRef.current = null
         gate.cancel(full)
         if (!full) return
-        const generation = structuralReplayRef.current
+        const replay = structuralReplayRef.current
         structuralReplayRef.current = null
-        if (generation !== null) {
-          void Promise.resolve(refs.current.cancelStructuralReplay?.(generation)).catch(() => undefined)
+        if (replay !== null) {
+          void Promise.resolve(replay.cancel?.(replay.generation)).catch(() => undefined)
         }
       },
       onReplayStart: (bytes, full) => {
@@ -295,7 +312,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         const replayRevision = replayRevisionRef.current
         sourceGeometryRef.current = null
         const current = terminalRef.current
-        const generation = structuralReplayRef.current
+        const replay = structuralReplayRef.current
         structuralReplayRef.current = null
         const currentRefusal = () =>
           writeRevisionRef.current === writeRevision &&
@@ -306,9 +323,9 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         void Promise.resolve(reset)
           .catch(() => undefined)
           .then(() =>
-            !currentRefusal() || generation === null
+            !currentRefusal() || replay === null
               ? undefined
-              : refs.current.cancelStructuralReplay?.(generation),
+              : replay.cancel?.(replay.generation),
           )
           .catch(() => undefined)
           .then(() => {
@@ -341,15 +358,32 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     })
     attachmentRef.current = attachment
     if (relaunchPendingRef.current) relaunchPendingRef.current = false
-  }, [active, gate, initialized, run, runID, setTerminal, terminal, updateControl, onControlResult, refs])
+  }, [
+    active,
+    beginStructuralReplay,
+    gate,
+    initialized,
+    run,
+    runID,
+    setTerminal,
+    terminal,
+    updateControl,
+    onControlResult,
+    refs,
+  ])
 
   useEffect(() => {
     return () => {
       attachmentRef.current?.close()
       attachmentRef.current = null
       writeRevisionRef.current++
+      replayRevisionRef.current++
       sourceGeometryRef.current = null
+      const replay = structuralReplayRef.current
       structuralReplayRef.current = null
+      if (replay !== null) {
+        void Promise.resolve(replay.cancel?.(replay.generation)).catch(() => undefined)
+      }
     }
   }, [runID, terminal])
 
