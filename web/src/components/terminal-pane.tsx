@@ -347,8 +347,15 @@ export function TerminalPane({
       </div>
       <div
         ref={controller.hostRef}
-        className={cn('min-h-0 flex-1 overflow-hidden bg-background p-2 text-foreground', className)}
-        style={replaying ? { visibility: 'hidden' } : undefined}
+        className={cn(
+          'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-background p-2 text-foreground',
+          className,
+        )}
+        style={{
+          overflowY: 'hidden',
+          overscrollBehaviorY: 'none',
+          visibility: replaying ? 'hidden' : undefined,
+        }}
       />
       {coarse && writable && <TerminalKeys controller={controller} />}
       {children}

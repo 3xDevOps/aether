@@ -164,7 +164,7 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/` and any other non-API path | the SPA (fallback to `index.html`) |
 | `POST` | `/api/v1/<rpc.method>` | any control-channel method, dispatched through the shared webgate |
 | `GET` | `/api/v1/run/<run_id>/patch` | `run.patch` |
-| `GET` | `/api/runs/<run_id>/terminal-history` | authenticated full raw ANSI terminal-history download |
+| `GET` | `/api/runs/<run_id>/terminal-history` | authenticated retained raw ANSI terminal-history download |
 | `GET` | `/api/v1/disk` | `server.disk` |
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
@@ -186,8 +186,8 @@ separately at 8 MiB. File and configuration exceptions are listed below.
 
 ### `GET /api/runs/<run_id>/terminal-history`
 
-This authenticated download is the complete terminal archive for the run. The
-gateway streams the retained cast incarnations as raw ANSI bytes with
+This authenticated download streams the terminal archive retained for the run.
+The gateway sends the available cast incarnations as raw ANSI bytes with
 `Content-Type: application/octet-stream` and
 `Content-Disposition: attachment; filename="terminal-history-<run_id>.ansi"`.
 It supplies the archive byte count as `Content-Length`; the stream ends at
@@ -1072,9 +1072,10 @@ resize, control, geometry, and acknowledgements.
    cursor, terminal modes, colours, and alternate buffer, not the raw
    transcript. The dashboard's normal xterm keeps bounded live scrollback
    (up to 5,000 rows, then reduced as acknowledged geometry approaches its
-   cell limit). It is the dashboard run default. `screen:false` selects the
-   raw transcript stream; this is what raw CLI clients use when they need
-   complete history. `interactive:true` opts into same-stream acknowledged
+   cell limit), so a compact snapshot may omit older rows. It is the dashboard
+   run default. `screen:false` selects the retained raw transcript stream; this
+   is what raw CLI clients use when they need history beyond the bounded
+   dashboard snapshot. `interactive:true` opts into same-stream acknowledged
    control frames and is the dashboard run default. Shell and CLI attachments
    do not gain this browser control protocol merely by using the attach
    endpoint.
@@ -1095,13 +1096,23 @@ resize, control, geometry, and acknowledgements.
    parsed screen. If the cursor, ring, geometry, or incarnation cannot serve
    that gap, the ack says `"resumed":false` and the server sends a compact
    current-screen bootstrap instead. The dashboard replaces that hidden
-   surface; it does not replay the complete archive. A finished run with
+   surface; it does not replay the retained raw archive. A finished run with
    `screen:true` likewise supplies its compact screen read-only. Use
-   `GET /api/runs/<run_id>/terminal-history` for the complete raw archive.
+   `GET /api/runs/<run_id>/terminal-history` for the retained raw archive.
 
    `follow` remains available for a viewer that must render the session at its
    acknowledged size without imposing local geometry. `cols` and `rows` do
    not override a live or recorded screen's geometry.
+
+   Geometry `follow` is independent of the xterm viewport's follow-bottom
+   state. The browser gives xterm sole ownership of vertical history: a
+   viewport at the bottom follows output, while a user-scrolled viewport stays
+   on the selected history. Before a full structural replay or a column reflow,
+   the browser captures either follow-bottom or the pinned bottom offset. It
+   restores that intent only if the operation is still current, the user has
+   not scrolled in the meantime, and the active normal or alternate buffer has
+   not changed. On a phone, the surrounding pane exposes horizontal panning
+   for an oversized acknowledged grid but no competing vertical scroll.
 
 2. Server answers one **text** ack:
 
@@ -1115,13 +1126,16 @@ resize, control, geometry, and acknowledgements.
 
    A refusal is `{"ok":false,"code":-32001,"error":"..."}` followed by a
    close. `replay` is the exact number of binary bootstrap bytes before live
-   output; with `screen:true` those bytes are the compact snapshot, while
-   `screen:false` uses the complete raw replay. A binary frame may straddle
+   output; with `screen:true` those bytes are the bounded compact snapshot,
+   while `screen:false` uses the retained raw replay. A binary frame may straddle
    that boundary. The ack's geometry is the captured screen's size, not an
    echo of the header. Successful live attaches return a nonempty
    `resume_id`; finished transcript-only snapshots have no live incarnation.
-   The dashboard keeps the surface hidden while it parses framed records,
-   serializes xterm writes, and mutes input and terminal-generated replies.
+   The dashboard keeps the surface hidden while it parses framed records and
+   serializes xterm writes. User input and terminal-generated replies stay
+   muted through the final replay write callback. That callback opens input;
+   the surface remains hidden for two paint turns and until structural viewport
+   restoration settles, and is revealed only afterward.
 
    The backend's ordered terminal stream uses binary records on the SSH
    subsystem: an `o` byte and four-byte big-endian payload length precede each
@@ -1134,8 +1148,8 @@ resize, control, geometry, and acknowledgements.
    record headers.
    Replay counts exclude the backend record headers. The browser never allocates
    a transcript-sized buffer from `replay`; it processes frame-sized records in
-   wire order and reveals the settled screen after the final write. Client frames
-   are capped at 64 KiB; the SPA splits larger input in ordered frames.
+   wire order and follows the visibility, input, and viewport ordering above.
+   Client frames are capped at 64 KiB; the SPA splits larger input in ordered frames.
 
    A write attach requires **steer** permission and otherwise refuses with
    `-32001`; an unknown run is `-32000`. A `queued`, `provisioning`, or
@@ -1192,8 +1206,8 @@ resize, control, geometry, and acknowledgements.
 
    The geometry frame is ordered before output drawn at that size. The PTY is
    the per-dimension minimum over attaches that impose geometry; a follower
-   is excluded. A dashboard phone follows the acknowledged size and does not
-   reflow the agent's screen.
+   is excluded. A dashboard phone follows the acknowledged size, pans an
+   oversized grid horizontally, and does not reflow the agent's screen.
 
 7. The server re-checks authorization periodically. On an interactive attach,
    losing **steer** sends an unsolicited `type:"control"` notification on the
@@ -1215,9 +1229,9 @@ same-incarnation resume when possible, otherwise a compact snapshot.
 
 CLI attachments do not request framing or `interactive`; they retain their raw
 terminal stream and consume the ack-declared replay byte count before treating
-following bytes as live. A CLI `screen:false` attach receives complete raw
-history, while a dashboard `screen:true` attach receives the compact current
-screen. A writable CLI attach still discards input that arrives before its
+following bytes as live. A CLI `screen:false` attach receives the retained raw
+history, while a dashboard `screen:true` attach receives the bounded compact
+current screen. A writable CLI attach still discards input that arrives before its
 announced replay has been written; it does not defer those keystrokes.
 
 #### Run shell tabs
@@ -1256,13 +1270,12 @@ matching `^[a-z0-9-]{1,32}$`.
    The dashboard starts parsing frame-sized replay operations as they arrive,
    serially through public xterm write callbacks while the terminal surface
    stays hidden with CSS visibility. It does not retain replay until the full
-   boundary or allocate a browser-sized buffer from the declared length.
-   Only the slice containing the exact final replay byte is tagged
-   `replay-end`; live output and geometry queue behind xterm backpressure.
-   After the final replay callback, two `requestAnimationFrame` turns let the
-   xterm DOM paint the settled state before reveal. Terminal-generated replies
-   and user input stay muted through that callback. At most six tabs may be
-   active.
+   boundary or allocate a browser-sized buffer from the declared length. Only
+   the slice containing the exact final replay byte is tagged `replay-end`;
+   live output and geometry queue behind xterm backpressure. Terminal-generated
+   replies and user input stay muted through the final replay callback, then
+   input opens. The surface remains hidden for two paint turns and structural
+   viewport restoration before reveal. At most six tabs may be active.
 3. Output is binary. Input and resize are text frames, and the server's
    `geometry` frame arrives here the same way it does on an attach:
 

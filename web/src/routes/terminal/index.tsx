@@ -119,21 +119,9 @@ function TerminalRoute({
       )
     },
   })
-  const [screenSettled, setScreenSettled] = useState(false)
-  const freeze = useCallback(() => {
-    controller.freeze?.()
-  }, [controller.freeze])
-  const thaw = useCallback(() => {
-    setScreenSettled(true)
-    controller.thaw?.()
-  }, [controller.thaw])
   const invalidate = useCallback(() => {
-    // A refusal or identity change makes the old viewport untrustworthy.
-    // Remove any retained clone before CenterView can evict this entry.
-    setScreenSettled(false)
-    controller.thaw?.()
     onTerminalInvalidate?.()
-  }, [controller.thaw, onTerminalInvalidate])
+  }, [onTerminalInvalidate])
   const reportWeight = useCallback(
     (cells: number) => onTerminalWeight?.(cells),
     [onTerminalWeight],
@@ -151,14 +139,15 @@ function TerminalRoute({
     authorityKey,
     onInvalidate: invalidate,
     onWeight: reportWeight,
-    freeze,
-    thaw,
+    beginStructuralReplay: controller.beginStructuralReplay,
+    cancelStructuralReplay: controller.cancelStructuralReplay,
+    finishStructuralReplay: controller.finishStructuralReplay,
   })
   sendRef.current = session.send
   resizeRef.current = session.resize
 
   const { state, replaying, controlMetadata, sessionMissing } = session
-  const replaySpinner = replaying && !screenSettled
+  const replaySpinner = replaying
   const takeControl = (takeover = false) => session.takeControl(takeover)
   const releaseControl = () => session.releaseControl()
   const toggleWrite = () => {
@@ -242,12 +231,11 @@ function TerminalRoute({
     <div className="relative flex h-full min-w-0 flex-col overflow-hidden pr-8">
       {active && <RunHeader run={run} subtitle={run.branch} active="terminal" />}
       <div {...panelProps}>
-        <div className="relative min-h-0 flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <div className="relative min-h-0 flex flex-1 flex-col overflow-hidden">
           <div className="relative min-h-24 flex-1 overflow-hidden bg-background">
             <TerminalPane
               key={runID}
               controller={controller}
-              className="overflow-auto"
               writable={state.write && !starting && !replaying}
               imageTarget={runID}
               toolbarEnd={active ? attachmentControls : undefined}

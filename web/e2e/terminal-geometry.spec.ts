@@ -76,7 +76,22 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await assertGrid(72, 22)
     // The larger viewer must keep proposing its pane, not feed 60x18 back
     // into the minimum and stop the shared terminal ever growing again.
+    const viewport = page.locator('.xterm-viewport:visible')
+    const bottomRows = () =>
+      viewport.evaluate((element) => {
+        const viewport = element as HTMLElement
+        const rowHeight = viewport.clientHeight / 22
+        return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
+      })
+    const pinnedRows = await viewport.evaluate((element) => {
+      const viewport = element as HTMLElement
+      const rowHeight = viewport.clientHeight / 22
+      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight - rowHeight * 3)
+      return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
+    })
+    expect(pinnedRows).toBeGreaterThan(2)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
+    await expect.poll(bottomRows).toBeCloseTo(pinnedRows, 0)
     await assertGrid(72, 22)
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)

@@ -151,8 +151,8 @@ export interface AttachHandlers {
    * lease loss, not a permission denial.
    */
   onControlLost?: () => void
-  /** A geometry update from the session's current imposing client. */
-  onGeometry?: (cols: number, rows: number) => void
+  /** A geometry update from the session; replay draining awaits its reflow. */
+  onGeometry?: (cols: number, rows: number) => AttachDataResult
   /** Whether this client follows the session geometry. */
   follows?: () => boolean
   /** Whether a missing session is worth waiting out. */
@@ -640,7 +640,11 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           if (!valid()) return
           if (operation.type === 'geometry') {
             try {
-              handlers.onGeometry?.(operation.cols, operation.rows)
+              const completion = handlers.onGeometry?.(operation.cols, operation.rows)
+              if (completion && typeof completion.then === 'function') {
+                const settled = await waitForDrain(Promise.resolve(completion), signal)
+                if (!settled || !valid()) return
+              }
             } catch (error) {
               if (valid()) failReplay(error)
               return
