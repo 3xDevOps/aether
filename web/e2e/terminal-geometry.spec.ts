@@ -75,13 +75,18 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     const screen = page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
     const assertGrid = async (cols: number, height: number) => {
       await expect(rows).toHaveCount(height)
-      // The font-size check leaves the viewport on an older row. xterm does not
-      // draw that scroll on the viewport element, so wheel back to the live row
-      // before reading the marker. One notch is enough: xterm scales the delta.
+      const marker = `${' '.repeat(cols - 1)}X`
+      // A font-size pin parks the viewport on older rows. xterm does not put
+      // that scroll on the viewport element, and one wheel notch only moves a
+      // few lines, so keep going until the live marker is the bottom row.
       await screen.hover()
-      await page.mouse.wheel(0, 600)
+      await expect(async () => {
+        const bottom = (await rows.last().innerText()).replace(/\u00a0/g, ' ')
+        if (bottom !== marker) await page.mouse.wheel(0, 2400)
+        expect((await rows.last().innerText()).replace(/\u00a0/g, ' ')).toBe(marker)
+      }).toPass({ timeout: 8_000 })
       writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
-      await expect(rows.nth(height - 1)).toHaveText(`${' '.repeat(cols - 1)}X`)
+      await expect(rows.nth(height - 1)).toHaveText(marker)
     }
     await assertGrid(60, 18)
     writer.send(JSON.stringify({ type: 'resize', cols: 72, rows: 22 }))
