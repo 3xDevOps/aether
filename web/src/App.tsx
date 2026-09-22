@@ -23,7 +23,7 @@ export function App() {
   const epoch = useStore((s) => s.connectionEpoch)
   const resetConnection = useStore((s) => s.resetConnection)
   const drafts = useStore((s) => s.drafts)
-  const importPending = useStore((s) => s.onboardingImportPending)
+  const importPending = useStore((s) => s.configImportPending)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)

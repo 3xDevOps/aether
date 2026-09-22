@@ -1,5 +1,5 @@
-// Part B of the onboarding Agents step: an explicit, one-time import of a
-// configuration directory. The browser reads the chosen directory; the
+// An explicit, repeatable import of a configuration directory, shared by
+// onboarding and Configuration. The browser reads the chosen directory; the
 // server remains responsible for validation and secret scanning. Nothing here
 // watches the local directory or depends on a local gateway capability.
 
@@ -229,12 +229,11 @@ export async function prepareDirectoryImport(
 
 function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: string }) {
   if (entries.length === 0) return null
-  const shown = entries.slice(0, 50)
   return (
     <div className="space-y-2 border-t border-border/70 pt-2">
       <p className="text-sm font-medium">{label}: {entries.length}</p>
       <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
-        {shown.map((entry, index) => (
+        {entries.map((entry, index) => (
           <li key={`${entry.path}-${index}`}>
             <span className="font-mono">{entry.path}</span>
             <span className="text-muted-foreground">
@@ -243,27 +242,30 @@ function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: 
           </li>
         ))}
       </ul>
-      {entries.length > shown.length && (
-        <p className="text-xs text-muted-foreground">
-          {entries.length - shown.length} more exclusions are not shown.
-        </p>
-      )}
     </div>
   )
 }
 
 export function ProfileImport({ client }: { client: Api }) {
+  const identityKey = useStore((state) => state.identityKey)
+  // Keep local file handles and consent scoped to the authenticated owner,
+  // while the store's pending flag outlives this form and its in-flight request.
+  return <ProfileImportForm key={identityKey} client={client} identityKey={identityKey} />
+}
+
+function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: string | null }) {
   const navigate = useStore((state) => state.navigate)
   const [roots, setRoots] = useState<ConfigRoot[] | null>(null)
   const [rootsError, setRootsError] = useState<string | null>(null)
   const [rawFiles, setRawFiles] = useState<File[] | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
+  const [acknowledgedSelection, setAcknowledgedSelection] = useState<Selection | null>(null)
   const [selectedHarness, setSelectedHarness] = useState('')
   const [reading, setReading] = useState(false)
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [result, setResult] = useState<ConfigImportResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
-  const importing = useStore((state) => state.onboardingImportPending)
+  const importing = useStore((state) => state.configImportPending)
   const picker = useRef<HTMLInputElement | null>(null)
   const generation = useRef(0)
 
@@ -316,44 +318,52 @@ export function ProfileImport({ client }: { client: Api }) {
   // current destination's preview.
   useEffect(() => {
     if (!rawFiles || roots === null || !destination || importing || result || importError || importStarted.current) return
-    const version = generation.current
+    const version = ++generation.current
+    let active = true
+    setSelection(null)
+    setAcknowledgedSelection(null)
     setReading(true)
     void prepareDirectoryImport(
       rawFiles,
       destination,
-      () => generation.current === version,
+      () => active && generation.current === version,
     )
       .then((prepared) => {
-        if (generation.current !== version) return
+        if (!active || generation.current !== version) return
         setSelection(prepared)
         if (!prepared) setSelectionError('The selected directory could not be read.')
       })
       .catch((err) => {
-        if (generation.current === version) setSelectionError(message(err))
+        if (active && generation.current === version) setSelectionError(message(err))
       })
       .finally(() => {
-        if (generation.current === version) setReading(false)
+        if (active && generation.current === version) setReading(false)
       })
+    return () => {
+      active = false
+    }
   }, [destination, importError, importing, rawFiles, result, roots])
 
   function chooseDestination(harness: string) {
-    if (importing || result) return
+    if (useStore.getState().configImportPending || result) return
     importStarted.current = false
     generation.current += 1
     setSelectedHarness(harness)
     setSelection(null)
+    setAcknowledgedSelection(null)
     setReading(false)
     setSelectionError(null)
     setImportError(null)
   }
 
   function choose(event: ChangeEvent<HTMLInputElement>) {
-    if (useStore.getState().onboardingImportPending) return
+    if (useStore.getState().configImportPending) return
     importStarted.current = false
     const selected = Array.from(event.currentTarget.files ?? [])
     generation.current += 1
     setRawFiles(null)
     setSelection(null)
+    setAcknowledgedSelection(null)
     setSelectedHarness('')
     setReading(false)
     setSelectionError(null)
@@ -373,19 +383,28 @@ export function ProfileImport({ client }: { client: Api }) {
     }
   }
 
+  const limitExclusions = selection?.excluded.reduce(
+    (count, { reason }) => count + Number(reason === 'too-many' || reason === 'over-budget' || reason === 'too-large'),
+    0,
+  ) ?? 0
+  const needsAcknowledgement = limitExclusions > 0 && acknowledgedSelection !== selection
+
   async function importConfiguration() {
     if (
       !selection ||
+      selection.files.length === 0 ||
+      needsAcknowledgement ||
       !destination ||
       reading ||
       result ||
-      useStore.getState().onboardingImportPending
+      useStore.getState().identityKey !== identityKey ||
+      useStore.getState().configImportPending
     ) return
     const version = generation.current
     const harness = destination.harness
     importStarted.current = true
     const files = selection.files
-    useStore.setState({ onboardingImportPending: true })
+    useStore.setState({ configImportPending: true })
     setImportError(null)
     try {
       const imported = await client.configImport({ harness, files })
@@ -398,7 +417,7 @@ export function ProfileImport({ client }: { client: Api }) {
         )
       }
     } finally {
-      useStore.setState({ onboardingImportPending: false })
+      useStore.setState({ configImportPending: false })
     }
   }
   const rootLabel = basename || 'your agent configuration directory'
@@ -411,7 +430,8 @@ export function ProfileImport({ client }: { client: Api }) {
       <div className="space-y-1">
         <h3 className="text-base font-semibold">Bring your configuration</h3>
         <p className="text-sm leading-6 text-muted-foreground">
-          Choose one agent configuration directory to import once. Supported
+          Choose an agent configuration directory to import. You can return and
+          import another directory or updated files whenever needed. Supported
           roots include <span className="font-mono">~/.claude</span>,{' '}
           <span className="font-mono">~/.codex</span>,{' '}
           <span className="font-mono">~/.pi</span>, and{' '}
@@ -522,10 +542,49 @@ export function ProfileImport({ client }: { client: Api }) {
               <span className="font-mono">{selection.basename}</span>.
             </p>
             <p className="text-[13px] leading-5 text-muted-foreground">
-              Empty files are preserved. Review the omitted paths below before
-              importing.
+              Empty files are preserved. {selection.excluded.length} files left out
+              before upload. Review the accepted and omitted paths before importing.
             </p>
           </div>
+
+          {!result && (
+            <details className="space-y-2 border-t border-border/70 pt-2">
+              <summary className="cursor-pointer text-sm font-medium">
+                Accepted paths: {selection.files.length}
+              </summary>
+              <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+                {selection.files.map(({ path }) => (
+                  <li key={path} className="break-all font-mono">{path}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {limitExclusions > 0 && (
+            <div className="space-y-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
+              <p role="alert" className="text-sm text-state-failed">
+                Incomplete selection: {limitExclusions} files omitted by import
+                limits; only {selection.files.length} files accepted. Settings or
+                dependencies may be absent, so imported configuration may not work.
+              </p>
+              <p className="text-[13px] leading-5">
+                Prepare a smaller copy of this agent directory, preserving paths
+                relative to the agent root, then choose that directory instead.
+                Files over 1 MiB must be reduced or transferred separately.
+              </p>
+              {!result && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={acknowledgedSelection === selection}
+                    disabled={importing}
+                    onChange={(event) => setAcknowledgedSelection(event.target.checked ? selection : null)}
+                  />
+                  I understand this selection is incomplete and want to import only the accepted files.
+                </label>
+              )}
+            </div>
+          )}
 
           <ExclusionList entries={selection.excluded} label="Left out before upload" />
 
@@ -593,11 +652,26 @@ export function ProfileImport({ client }: { client: Api }) {
           ) : (
             <Button
               size="sm"
-              disabled={importing || selection.files.length === 0 || !destination}
+              disabled={importing || reading || selection.files.length === 0 || !destination || needsAcknowledgement}
               onClick={() => void importConfiguration()}
             >
               {importing ? 'Importing...' : 'Import configuration'}
             </Button>
+          )}
+          {result && (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => navigate('files')}>
+                Open remote files
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={importing}
+                onClick={() => picker.current?.click()}
+              >
+                Import another directory
+              </Button>
+            </div>
           )}
         </div>
       )}
