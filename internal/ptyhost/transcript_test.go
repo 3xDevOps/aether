@@ -274,16 +274,16 @@ func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	first.output([]byte("first-life\n"))
-	if err := first.close(); err != nil {
-		t.Fatal(err)
+	if closeErr := first.close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	second, err := newCastWriter(path, 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second.output([]byte("second-life\n"))
-	if err := second.close(); err != nil {
-		t.Fatal(err)
+	if closeErr := second.close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 
 	got, err := readRecentCast(path, 64)
@@ -302,8 +302,8 @@ func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.output(bytes.Repeat([]byte("x"), 1<<20))
-	if err := w.close(); err != nil {
-		t.Fatal(err)
+	if closeErr := w.close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	window, used, err := readCastTailWindow(large, 16, 128)
 	if err != nil {
