@@ -705,7 +705,18 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		"candidate_id": candidate.CandidateID, "candidate_revision": candidate.CandidateRevision,
 		// Verification also proves the canonical staged CLI exists in the
 		// verification image and has no run identity/socket.
-		"argv":            []string{"sh", "-c", "set -eu; /usr/local/bin/aether-internal --help >/tmp/help; /usr/local/bin/aether-internal skill >/tmp/skill; grep -q 'No coordination socket' /tmp/skill; test \"$(ls worker-*.txt | wc -l)\" = 2"},
+		"argv": []string{"sh", "-c", `set -eu
+/usr/local/bin/aether-internal --help >/tmp/help
+/usr/local/bin/aether-internal skill >/tmp/skill
+test ! -e /run/aether/coord3.sock
+status_code=0
+status=$(/usr/local/bin/aether-internal status) || status_code=$?
+test "$status_code" -eq 4
+case "$status" in
+	*'"ok":false'*'"code":-32004'*) ;;
+	*) printf '%s\n' "$status" >&2; exit 1 ;;
+esac
+test "$(ls worker-*.txt | wc -l)" = 2`},
 		"timeout_seconds": 30, "idempotency_key": "docker-verify-passed",
 	})
 	passed = waitMissionVerification(ctx, t, integratorRun, passed)
