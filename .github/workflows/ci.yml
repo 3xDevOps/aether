@@ -55,7 +55,9 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename'); then
+          # previous_filename covers a rename into docs/: the destination
+          # alone would look like a docs-only change and skip the code jobs.
+          if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
