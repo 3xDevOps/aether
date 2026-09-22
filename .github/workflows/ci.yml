@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
@@ -31,9 +32,10 @@ concurrency:
 # distinct.
 jobs:
   # Lists changed files and decides whether the code jobs run. A push to
-  # main always runs them. A pull request runs them unless every changed
-  # path is under docs/ or is a root-level markdown file. A failed file
-  # list fails open and runs them. The checkout carries no credentials.
+  # main and a merge-queue entry always run them. A pull request runs them
+  # unless every changed path is under docs/ or is a root-level markdown
+  # file. A failed file list fails open and runs them. The checkout carries
+  # no credentials.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
