@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // imageUserResolver is the optional runtime capability used to learn the
@@ -224,6 +225,26 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, err
 	}
+	// A reserved identity that already has a run is a replay, not a fresh
+	// launch. Its immutable base was captured on the original handoff; a new
+	// fetch could fail (or observe a different base) without changing that run.
+	if opts.AssignedRunID != "" {
+		existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
+		if getErr == nil {
+			requested := &domain.Run{
+				ID: opts.AssignedRunID, WorkspaceID: workspace,
+				MemberID: member, AccountMemberID: account, Task: task,
+				Harness: harness, Mode: mode,
+			}
+			if !sameReservedRun(existing, requested) || (opts.CachedBase != "" && opts.CachedBase != existing.BaseCommit) {
+				return nil, errors.New("scheduler: reserved run does not match launch request")
+			}
+			return s.freshen(ctx, existing), nil
+		}
+		if !errors.Is(getErr, store.ErrNotFound) {
+			return nil, getErr
+		}
+	}
 	s.mu.Lock()
 	bases := s.cfg.Bases
 	s.mu.Unlock()
@@ -270,7 +291,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if err := createAssignedRun(ctx, s.cfg.Store, run, opts.AssignedRunID); err != nil {
 		if opts.AssignedRunID != "" {
 			existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
-			if getErr == nil && sameReservedRun(existing, run) {
+			if getErr == nil && sameReservedRun(existing, run) && (opts.CachedBase == "" || opts.CachedBase == existing.BaseCommit) {
 				return s.freshen(ctx, existing), nil
 			}
 		}

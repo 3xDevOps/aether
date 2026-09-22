@@ -148,6 +148,56 @@ Prefer these read-only probes and preserve the original state for diagnosis.
 
 ## What happens, per failure
 
+### Worker launch timeouts and mirror failures
+
+A `worker.start` response timing out (`-32004`) does **not** prove that launch
+stopped. Mission launch uses a service-owned context; its durable attempt and
+reserved run ID survive the request. Replay the same start command with the
+**same dispatch key** to retrieve that attempt, then use `worker list` or
+`worker inspect` to observe it. Do not switch keys to work around an unknown
+result: the original attempt can still launch and hold concurrency.
+
+Before creating a run, strict base capture refreshes a configured mirror.
+A failed fetch never silently substitutes the previously accepted commit.
+An `unknown` attempt with a mirror `last_error` is recoverable, not proof of a
+dead worker: mission reconciliation can retry its original reserved run after
+the cause is fixed. Replaying an already-created reserved run returns its
+original pinned base without requiring another upstream fetch.
+
+Inspect and repair the mirror from an administrator's CLI:
+
+```sh
+aether workspace mirror status --workspace <workspace>
+# Fix the reported cause on the server or at the upstream, then:
+aether workspace mirror refresh --workspace <workspace>
+aether workspace mirror status --workspace <workspace>
+```
+
+The diagnostic distinguishes DNS/connectivity failures from authentication,
+TLS/CA configuration, invalid Git URL rewrites, local permissions, and disk
+space failures. In older versions, Git's generic `unable to access` wrapper
+was classified as `offline` even for local or TLS failures; that old label
+alone cannot establish a network outage. Operator-facing errors expose only
+allowlisted diagnostics; raw Git output can contain secrets and remains in the
+internal error cause, not in the public attempt or mirror status.
+
+Check DNS and outbound access **from the server**, not just the worker or your
+laptop. For TLS failures, repair the server Git trust configuration rather than
+disabling certificate verification. For deploy-key failures, verify source
+access, key-file permissions, and the pinned host key. Review repository-local
+Git URL rewrites if the configured source looks correct but fetching fails.
+Refresh again only after addressing the cause. A rewritten or diverged upstream
+requires review and explicit candidate adoption; do not disable mirror
+protection merely to force a launch.
+
+After repair, inspect the original attempt before any retry. If it is still
+launching, running, or unknown and holds concurrency, either let reconciliation
+settle it or use the normal authorized cancel operation and observe the settled
+state before retrying. Cancellation and takeover authority are unchanged.
+Only a launch path that explicitly supports `--cached-base <sha>` may use a
+human-approved, unchanged accepted commit; mission worker recovery does not
+automatically consent to a stale base.
+
 ### Container wait errors
 
 An error from Docker while waiting is inconclusive: it does not prove that

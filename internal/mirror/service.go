@@ -453,7 +453,10 @@ func (s *Service) Capture(ctx context.Context, workspace domain.WorkspaceID, cac
 		if cachedCommit != "" {
 			return CaptureResult{WorkspaceID: workspace, Cached: true}, &gitengine.MirrorError{Kind: gitengine.MirrorErrorInvalidRequest, WorkspaceID: workspace}
 		}
-		branch := s.workspaceBranch(ctx, workspace)
+		branch, branchErr := s.workspaceBranch(ctx, workspace)
+		if branchErr != nil {
+			return CaptureResult{WorkspaceID: workspace}, branchErr
+		}
 		commit, commitErr := s.git.WorkspaceBranchCommit(ctx, workspace, branch)
 		if commitErr != nil {
 			return CaptureResult{WorkspaceID: workspace, Branch: branch}, commitErr
@@ -551,7 +554,7 @@ func (s *Service) persistFailure(ctx context.Context, current domain.WorkspaceMi
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mirrorRollbackTimeout)
 	defer cancel()
 	if err := s.store.SetWorkspaceMirror(persistCtx, &current); err != nil {
-		return Result{}, err
+		return s.result(current, s.publicKey(current.WorkspaceID, current)), errors.Join(failure, fmt.Errorf("mirror: persist failure: %w", err))
 	}
 	return s.result(current, s.publicKey(current.WorkspaceID, current)), failure
 }
@@ -601,15 +604,19 @@ func (s *Service) restoreGitPolicy(ctx context.Context, workspace domain.Workspa
 	return err
 }
 
-func (s *Service) workspaceBranch(ctx context.Context, workspace domain.WorkspaceID) string {
+func (s *Service) workspaceBranch(ctx context.Context, workspace domain.WorkspaceID) (string, error) {
 	if provider, ok := s.store.(interface {
 		GetWorkspace(context.Context, domain.WorkspaceID) (*domain.Workspace, error)
 	}); ok {
-		if w, err := provider.GetWorkspace(ctx, workspace); err == nil && w.BaseBranch != "" {
-			return w.BaseBranch
+		w, err := provider.GetWorkspace(ctx, workspace)
+		if err != nil {
+			return "", err
+		}
+		if w.BaseBranch != "" {
+			return w.BaseBranch, nil
 		}
 	}
-	return domain.DefaultBaseBranch
+	return domain.DefaultBaseBranch, nil
 }
 
 func captureResult(workspace domain.WorkspaceID, commit, branch, source string, checked time.Time, configured, cached bool) CaptureResult {
