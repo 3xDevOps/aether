@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -203,13 +204,15 @@ func missionRPCError(method string, err error) *protocol.Error {
 	}
 	code := protocol.CodeInternal
 	switch {
-	case errors.Is(err, store.ErrMissionStale), errors.Is(err, store.ErrMissionTakeover):
+	case errors.Is(err, store.ErrMissionStale), errors.Is(err, store.ErrMissionTakeover), errors.Is(err, permissions.ErrDenied):
 		code = protocol.CodeDenied
 	case errors.Is(err, store.ErrMissionLimit), errors.Is(err, store.ErrMissionNotReady),
-		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict):
+		errors.Is(err, store.ErrMissionIdempotencyConflict), errors.Is(err, store.ErrIdempotencyConflict), errors.Is(err, store.ErrConflict):
 		code = protocol.CodeConflict
 	case errors.Is(err, store.ErrMissionPhase), errors.Is(err, store.ErrMissionAmendmentRequired):
 		code = protocol.CodeInvalidState
+	case errors.Is(err, store.ErrNotFound):
+		code = protocol.CodeNotFound
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }

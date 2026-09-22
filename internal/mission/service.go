@@ -884,6 +884,11 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 
 func (s *Service) integratorMission(ctx context.Context, run domain.RunID, requested string) (*domain.Mission, error) {
 	m, err := s.cfg.Missions.GetMissionByRun(ctx, run)
+	if errors.Is(err, store.ErrNotFound) {
+		// This index contains integrators, not worker assignments. Absence
+		// denies the operation; other lookup failures remain internal errors.
+		return nil, fmt.Errorf("%w: only the current integrator may perform this operation: %w", permissions.ErrDenied, err)
+	}
 	if err != nil {
 		return nil, err
 	}
