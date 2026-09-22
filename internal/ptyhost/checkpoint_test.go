@@ -21,8 +21,8 @@ func writeClosedCast(t *testing.T, path string, output []byte) castSegment {
 		t.Fatal(err)
 	}
 	writer.output(output)
-	if err := writer.close(); err != nil {
-		t.Fatal(err)
+	if closeErr := writer.close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	segment, err := inspectCastSegment(path)
 	if err != nil {
@@ -54,8 +54,8 @@ func TestCheckpointV2RoundTripsTerminalPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
-		t.Fatal(err)
+	if writeErr := writeCheckpointFile(checkpointPath(path), checkpoint); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 
 	recovered, segments, gotPosition, legacy, err := loadCurrentCheckpoint(path, false)
@@ -293,13 +293,13 @@ func TestSnapshotRepairCannotReplaceNewerCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), newer); err != nil {
-		t.Fatal(err)
+	if writeErr := writeCheckpointFile(checkpointPath(path), newer); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	close(release)
 	waitFor(t, "newer checkpoint retained", func() bool {
-		snapshot, err := h.Snapshot("repair-race")
-		return err == nil && snapshot.Position == newerPosition
+		snapshot, snapshotErr := h.Snapshot("repair-race")
+		return snapshotErr == nil && snapshot.Position == newerPosition
 	})
 	persisted, err := decodeCheckpoint(checkpointPath(path))
 	if err != nil {
@@ -331,8 +331,8 @@ func TestRecentReplayReportsOnlyProvenPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
-		t.Fatal(err)
+	if writeErr := writeCheckpointFile(checkpointPath(path), checkpoint); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	complete, err := h.RecentReplay(run, 128)
 	if err != nil {
@@ -362,8 +362,8 @@ func TestReplayUsesV2CheckpointByteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
-		t.Fatal(err)
+	if writeErr := writeCheckpointFile(checkpointPath(path), checkpoint); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	replay, size, err := h.Replay(run)
 	if err != nil {

@@ -556,7 +556,7 @@ type recordedScreen struct {
 // readCastScreen restores a durable compact checkpoint when it is valid and
 // falls back to a complete cast reconstruction for legacy or corrupt state.
 func readCastScreen(path string) (recordedScreen, error) {
-	if recovered, _, ok, err := recoverCheckpoint(path); ok && err == nil {
+	if recovered, ok, err := recoverCheckpoint(path); ok && err == nil {
 		return recovered, nil
 	}
 	return readCastScreenFull(path)
