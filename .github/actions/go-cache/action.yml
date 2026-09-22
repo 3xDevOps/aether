@@ -1,11 +1,11 @@
 name: Go build cache
 description: >
   Restore Go's module and build caches on every run, and save them only
-  after a push to main. A pull_request_target run's GITHUB_REF is the base
-  branch, so a cache a PR saved would land in main's cache scope and could
-  poison the build main's release binaries compile from; restoring carries
-  no such risk, since a PR run cannot change what main reads later. Used
-  after actions/setup-go with its own cache disabled, once per Go job.
+  after a push to main. One Linux job may save a given key, and a
+  pull-request cache can evict the default-branch cache, so a pull request
+  restores and does not save. The key includes runner.environment so a
+  self-hosted archive is never restored onto a hosted VM. Used after
+  actions/setup-go with its own cache disabled, once per Go job.
 inputs:
   mode:
     description: "restore or save"
@@ -13,8 +13,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # actions/cache stores paths relative to the workspace, and the self-hosted
-    # container and a hosted VM lay `go env`'s defaults out differently, hence
+    # actions/cache stores paths relative to the workspace, and different
+    # runner environments lay `go env`'s defaults out differently, hence
     # runner.environment in the key (same convention as the Playwright cache).
     - name: Resolve Go cache paths
       id: paths

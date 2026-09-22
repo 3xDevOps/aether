@@ -3,131 +3,95 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request_target:
-  # `pull_request_target` keeps this workflow definition on the base branch.
-  # Jobs below explicitly check out the PR head after policy selection.
+  pull_request:
+  merge_group:
+
 permissions:
   contents: read
-# A newer push to a PR cancels that PR's run in flight; pushes to main
-# run to completion so every main commit keeps its own CI verdict and
-# cache write.
+  # Explicit permissions replace the default token scope. The changes job
+  # lists pull request files, which needs this in addition to contents.
+  pull-requests: read
+
+# A newer push to a pull request cancels that pull request's run in flight.
+# Pushes to main run to completion so every main commit keeps its own CI
+# verdict and cache write. The event name is in the group so a pull_request
+# run from this branch does not cancel the base branch's in-flight run of
+# the same workflow under the trigger this file replaces.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# GitHub-hosted runners are ephemeral, so untrusted pull request code does
+# not need an admin gate before checkout. Caches still save only on push to
+# main: one Linux job may save a given key, and a pull-request cache can
+# evict the default-branch cache. runner.environment stays in every cache
+# key so a self-hosted archive is never restored onto a hosted VM. Several
+# Linux jobs share one Go key and one bun key, so only build-and-test saves
+# them.
+# Windows saves its own Go cache: a different runner.os keeps that key
+# distinct.
 jobs:
-  # This job is intentionally hosted and does not check out repository code.
-  # It selects the runner and decides whether the release matrix runs. PRs
-  # require both the event actor and PR author to be admins, so an admin
-  # action or rerun cannot elevate a contributor's PR onto self-hosted. A
-  # push to main is merged, reviewed code, so it is trusted the same way;
-  # that also keeps the caches main saves on the layout admin PRs restore.
-  # Trusted work still falls back to GitHub-hosted runners when no moss
-  # runner is online, so a self-hosted outage delays a run, never strands it.
-  runner-policy:
+  # Lists changed files and decides whether the code jobs run. A push to
+  # main and a merge-queue entry always run them. A pull request runs them
+  # unless every changed path is under docs/ or is a root-level markdown
+  # file. A failed file list fails open and runs them. The checkout carries
+  # no credentials.
+  changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      runner: ${{ steps.select.outputs.runner }}
-      release: ${{ steps.select.outputs.release }}
-    steps:
-      - name: Select runner
-        id: select
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # Listing runners needs administration:read, which github.token
-          # cannot carry (it answers 403), so the pool check uses this one.
-          RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          is_admin() {
-            if ! permission=$(gh api \
-                "repos/${GITHUB_REPOSITORY}/collaborators/${1}/permission" \
-                --jq '.permission' 2>&1); then
-              echo "permission lookup for $1 failed: $permission"
-              return 1
-            fi
-            [ "$permission" = admin ]
-          }
-
-          trusted=false
-          if [ "$GITHUB_EVENT_NAME" = push ] ||
-            { is_admin "$GITHUB_ACTOR" && is_admin "$PR_AUTHOR"; }; then
-            trusted=true
-          fi
-
-          # Only a definite answer that no moss runner is online sends
-          # trusted work to GitHub-hosted runners. A missing token or a
-          # failed lookup says nothing about the pool, so it keeps the
-          # self-hosted choice and prints why.
-          runner='["self-hosted","Linux","X64","moss"]'
-          if [ "$trusted" != true ]; then
-            runner='["ubuntu-latest"]'
-            echo 'untrusted event or a failed permission lookup: GitHub-hosted runners'
-          elif [ -z "$RUNNER_STATUS_TOKEN" ]; then
-            echo 'RUNNER_STATUS_TOKEN is not set, so the self-hosted pool cannot be checked: assuming it is online'
-          elif online=$(GH_TOKEN="$RUNNER_STATUS_TOKEN" gh api \
-              "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" \
-              --jq '[.runners[] | select(.status == "online" and any(.labels[]; .name == "moss"))] | length' 2>&1); then
-            if [ "$online" -gt 0 ]; then
-              echo "self-hosted pool: $online moss runner(s) online"
-            else
-              runner='["ubuntu-latest"]'
-              echo 'self-hosted pool: no moss runner online, falling back to GitHub-hosted runners'
-            fi
-          else
-            echo "runner lookup failed, assuming the self-hosted pool is online: $online"
-          fi
-          echo "runner=$runner" >> "$GITHUB_OUTPUT"
-
-          # A docs-only pull request skips the release matrix; every other
-          # change is a release input, since the server embeds the dashboard
-          # and the Android shell wraps it. A failed lookup deliberately
-          # runs the release matrix.
-          release=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request_target ]; then
-            if changed=$(gh api \
-              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
-              --paginate --jq '.[].filename' 2>/dev/null); then
-              if printf '%s\n' "$changed" | grep -qvE '^docs/|\.md$'; then
-                release=true
-              else
-                release=false
-              fi
-            fi
-          fi
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-
-  build-and-test:
-    needs: runner-policy
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
-    timeout-minutes: 30
+      code: ${{ steps.classify.outputs.code }}
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Classify changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # previous_filename covers a rename into docs/: the destination
+          # alone would look like a docs-only change and skip the code jobs.
+          if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(printf '%s\n' "$files" | sh scripts/ci-classify-changes.sh)
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  # Runs on every pull request, including a docs-only one. This is the
+  # docs-only gate.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Public boundary
+        run: sh scripts/public-audit.sh
+
+  lint:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
-      # `make build` builds the embedded dashboard SPA before Go compiles.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: web/.bun-version
-          no-cache: true
-      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
-        with:
-          mode: restore
-      - name: Public boundary
-        run: sh scripts/public-audit.sh
       - name: Check formatting
         run: make fmt-check
       - name: Vet
@@ -138,6 +102,34 @@ jobs:
           version: v2.10.1
           skip-cache: false
           skip-save-cache: ${{ github.event_name != 'push' }}
+
+  build-and-test:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      # `make build` builds the embedded dashboard SPA before Go compiles.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+          no-cache: true
+      - uses: ./.github/actions/bun-cache
+        with:
+          mode: restore
       # Advisory only: the reachable Moby CVEs have no fixed release and
       # govulncheck cannot suppress individual findings, so a hard gate would
       # keep CI permanently red. Read the step output, do not ignore it.
@@ -160,11 +152,11 @@ jobs:
       # Saved on a red run too: a failed test does not invalidate compiled
       # objects or downloaded modules, and a flaky suite would otherwise leave
       # every following run cold.
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
-      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+      - uses: ./.github/actions/bun-cache
         if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
@@ -173,21 +165,20 @@ jobs:
   # waits for them to build; the sharded `integration` jobs below start at
   # once.
   smoke:
-    needs: runner-policy
-    # The selected runner must provide Docker for these real-runtime tests.
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
-    timeout-minutes: 20
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    # ubuntu-latest provides Docker. 45 minutes covers a cold standard-image build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
       - name: Set up Docker Buildx
@@ -196,9 +187,8 @@ jobs:
       # CLIs are smoke-tested on it and not on some thinner stand-in. It is
       # built here rather than pulled so the test matches this checkout,
       # and cached so only a Dockerfile change pays for it. Only pushes to
-      # main write the cache: a pull_request_target run shares main's cache
-      # namespace, so a PR must not be able to write into it, and writes
-      # from there collide with main's own entries and fail the build.
+      # main write this scope. A pull request restores that cache and does
+      # not write another copy of the image layers into the repository cache.
       - name: Build the standard environment image
         uses: docker/build-push-action@v6
         with:
@@ -230,22 +220,30 @@ jobs:
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
 
-  # Sharded so the two slowest packages do not share one runner's pool. The
-  # last shard is the complement the Makefile computes, so a package that
-  # gains integration tests is gated without a change here. Every test in
-  # these shards pulls the busybox image it needs itself, so none builds one.
+  # Sharded so the slow server scenarios do not share one runner. Four shards
+  # cover internal/server by test name; scheduler is its own package; rest is
+  # every other integration package, so a package that gains integration tests
+  # is gated without a change here. Every test in these shards pulls the
+  # busybox image it needs itself, so none builds one.
   integration:
     name: integration (${{ matrix.shard }})
-    needs: runner-policy
-    # The selected runner must provide Docker for these real-runtime tests.
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
-    timeout-minutes: 30
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    # ubuntu-latest provides Docker for these real-runtime tests.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         include:
-          - shard: server
-            make: INTEGRATION_PKGS=./internal/server
+          - shard: server-chaos
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationChaos
+          - shard: server-coordination
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationCoordination
+          - shard: server-mission
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationMission
+          - shard: server-rest
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission)'
           - shard: scheduler
             make: INTEGRATION_PKGS=./internal/scheduler
           - shard: rest
@@ -253,31 +251,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
-      # The matrix values are literals from this file, which on
-      # pull_request_target is the base branch's copy, so a PR cannot change
-      # what is interpolated here.
+      # The matrix values are literals from this file, passed as make
+      # assignments.
       - name: Integration tests (real Docker, real git)
         run: make test-integration ${{ matrix.make }}
 
   dashboard:
-    needs: runner-policy
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -286,7 +280,7 @@ jobs:
         with:
           bun-version-file: web/.bun-version
           no-cache: true
-      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+      - uses: ./.github/actions/bun-cache
         with:
           mode: restore
       - name: Install dependencies
@@ -304,20 +298,19 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
-    needs: runner-policy
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
       - uses: actions/setup-node@v4
@@ -327,7 +320,7 @@ jobs:
         with:
           bun-version-file: web/.bun-version
           no-cache: true
-      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+      - uses: ./.github/actions/bun-cache
         with:
           mode: restore
       - name: Install dependencies
@@ -335,10 +328,12 @@ jobs:
         working-directory: web
       # The browser download is keyed on the pinned Playwright version, so a
       # run only pays for it when that pin moves. actions/cache stores paths
-      # relative to the workspace, so an archive saved on a self-hosted
-      # runner unpacks somewhere else on a GitHub-hosted one; keying on the
-      # environment keeps the two layouts apart. Restored on every run and
-      # saved only after a push to main, same rule as the Go and bun caches.
+      # relative to the workspace, so an archive from another runner
+      # environment unpacks somewhere else on a GitHub-hosted runner; the key
+      # includes runner.environment so a self-hosted archive is never restored
+      # onto a hosted VM. Restored on every run and saved only after a push
+      # to main, same rule as the Go and bun caches: one job may save a given
+      # key, and a pull-request cache can evict the default-branch cache.
       - name: Resolve the pinned Playwright version
         id: playwright
         run: |
@@ -375,20 +370,19 @@ jobs:
   # The desktop shell is built the way users build it: `aether gui build`
   # unpacks the sources embedded in the CLI and runs electron-builder.
   desktop:
-    needs: runner-policy
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
-    timeout-minutes: 15
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
       - uses: actions/setup-node@v4
@@ -462,16 +456,16 @@ jobs:
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
-  # design and internal/gitengine does not compile for Windows.
+  # design and internal/gitengine does not compile for Windows. Docs-only
+  # pull requests skip this job. changes does not choose the runner.
   windows:
-    needs: runner-policy
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
@@ -480,7 +474,7 @@ jobs:
       # windows-latest defaults to PowerShell, where command substitution and
       # grep are unavailable. Git Bash is preinstalled, which the go-cache
       # action also relies on to resolve `go env` cache paths.
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
       - name: Client packages build and vet
@@ -494,30 +488,28 @@ jobs:
         run: |
           pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
           go test ./cmd/aether $pkgs
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
 
   release-build:
-    needs: runner-policy
-    if: needs.runner-policy.outputs.release == 'true'
-    runs-on: ${{ fromJSON(needs.runner-policy.outputs.runner) }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
     # The Android build runs a Gradle daemon in a container; a wedged one
-    # would otherwise hold a self-hosted runner for GitHub's six-hour default.
+    # would otherwise hold the runner for GitHub's six-hour default.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0 # full history so git describe can version the build
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - uses: 3xDevOps/aether/.github/actions/go-cache@main
+      - uses: ./.github/actions/go-cache
         with:
           mode: restore
       - uses: actions/setup-node@v4
@@ -527,7 +519,7 @@ jobs:
         with:
           bun-version-file: web/.bun-version
           no-cache: true
-      - uses: 3xDevOps/aether/.github/actions/bun-cache@main
+      - uses: ./.github/actions/bun-cache
         with:
           mode: restore
       # `make release` builds the Android shell too, in its pinned SDK
@@ -535,14 +527,11 @@ jobs:
       # carries the SDK; only Gradle's dependency and distribution caches are
       # worth keeping between runs, and actions/cache stores paths relative to
       # the workspace, so the Makefile's default cache directory is moved into
-      # it. A hosted runner and a self-hosted one lay the archive out
-      # differently, hence runner.environment in the key.
-      # Restored on every run; saved only after a push to main. A pull
-      # request runs under pull_request_target, where GITHUB_REF is the
-      # default branch, so a cache a pull request saved would land in main's
-      # cache scope and, with org.gradle.caching on, could feed main's build
-      # compiled task outputs from a fork's checkout. Reading main's cache
-      # from a pull request carries no such risk.
+      # it. The key includes runner.environment so a self-hosted archive is
+      # never restored onto a hosted VM.
+      # Restored on every run and saved only after a push to main. One job
+      # may save a given key, and a pull-request cache can evict the
+      # default-branch cache.
       - uses: actions/cache/restore@v4
         with:
           path: .gradle-cache
@@ -553,11 +542,10 @@ jobs:
       # distribution by sha256; this is what checks the jar itself against
       # Gradle's published checksums before it runs.
       #
-      # Pinned by commit, not by the `v4` tag: this job runs on the
-      # self-hosted runner, where a retargeted tag would execute code nobody
-      # here has read. `v4` also trails its own line - it still points at
-      # v4.4.3, while v4.4.4 is the current v4 release and carries the newer
-      # known-wrapper checksums this step reads.
+      # Pinned by commit, not by the `v4` tag: a retargeted tag would execute
+      # code nobody here has read. `v4` also trails its own line - it still
+      # points at v4.4.3, while v4.4.4 is the current v4 release and carries
+      # the newer known-wrapper checksums this step reads.
       - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
       - name: Cross-compile release matrix
         env:
@@ -566,7 +554,7 @@ jobs:
       # The daemon logs and the compiled-script caches are large and
       # machine-specific; saving them would cost more than it returns.
       - name: Trim the Gradle cache before it is saved
-        if: always()
+        if: ${{ !cancelled() }}
         run: rm -rf .gradle-cache/daemon .gradle-cache/native
       - uses: actions/cache/save@v4
         if: github.event_name == 'push'
@@ -585,9 +573,9 @@ jobs:
   # run. It is signal, not a flake - the response is to submit the binary at
   # https://www.microsoft.com/en-us/wdsi/filesubmission as a developer false
   # positive, and to check what changed in the client's syscalls or embedded
-  # strings. See docs/install.md.
+  # strings. See docs/install.md. Skipped when release-build is skipped.
   windows-defender:
-    needs: [runner-policy, release-build]
+    needs: release-build
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
