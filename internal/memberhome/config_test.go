@@ -89,6 +89,51 @@ func TestConfigImportExcludesSecretsRuntimeAndCredentials(t *testing.T) {
 	}
 }
 
+func TestConfigImportPreservesExistingModes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "homes")
+	manager, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileRoot := filepath.Join(root, "member-a", ".claude")
+	if err = os.MkdirAll(profileRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, mode := range map[string]os.FileMode{"check.sh": 0o755, "private.json": 0o600} {
+		target := filepath.Join(profileRoot, name)
+		if err = os.WriteFile(target, []byte("before"), mode); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.Chmod(target, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := []ConfigFile{
+		{Path: "check.sh", Content: []byte("#!/bin/sh\necho after\n"), Mode: 0o644},
+		{Path: "private.json", Content: []byte("{}"), Mode: 0o644},
+		{Path: "new.json", Content: []byte("{}"), Mode: 0o644},
+		{Path: "default.json", Content: []byte("{}")},
+	}
+	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", files, nil); err != nil {
+		t.Fatal(err)
+	}
+	wantModes := map[string]os.FileMode{"check.sh": 0o755, "private.json": 0o600, "new.json": 0o644, "default.json": 0o644}
+	for _, file := range files {
+		target := filepath.Join(profileRoot, file.Path)
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != wantModes[file.Path] {
+			t.Errorf("%s mode = %04o, want %04o", file.Path, info.Mode().Perm(), wantModes[file.Path])
+		}
+		content, err := os.ReadFile(target)
+		if err != nil || string(content) != string(file.Content) {
+			t.Errorf("%s content = %q, err=%v, want %q", file.Path, content, err, file.Content)
+		}
+	}
+}
+
 func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing.T) {
 	manager, err := New(filepath.Join(t.TempDir(), "homes"))
 	if err != nil {

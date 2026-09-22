@@ -532,10 +532,21 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 			if err = ctx.Err(); err != nil {
 				return importFailure(i, err)
 			}
+			mode := os.FileMode(file.Mode & 0o777)
+			info, statErr := configTargetInfo(profileRoot, file.Path)
+			switch {
+			case errors.Is(statErr, fs.ErrNotExist):
+			case statErr != nil:
+				return importFailure(i, statErr)
+			case !info.Mode().IsRegular():
+				return importFailure(i, ErrConfigDenied)
+			default:
+				mode = info.Mode().Perm()
+			}
 			if err := ensureDirPathOwned(home, profileRoot, path.Dir(file.Path), true); err != nil {
 				return importFailure(i, err)
 			}
-			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, os.FileMode(file.Mode&0o777), "", false); err != nil {
+			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, mode, "", false); err != nil {
 				return importFailure(i, err)
 			}
 			result.Files++
