@@ -83,27 +83,43 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await assertGrid(72, 22)
     // The larger viewer must keep proposing its pane, not feed 60x18 back
     // into the minimum and stop the shared terminal ever growing again.
-    const viewport = rows.nth(0).locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " xterm ")][1]').locator('.xterm-viewport')
-    const rowsBelow = (element: HTMLElement) => {
-      const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
-      const rowHeight = row?.getBoundingClientRect().height ?? 0
-      if (rowHeight <= 0) return 0
-      return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
-    }
-    const bottomRows = () => viewport.evaluate(rowsBelow)
-    let pinnedRows = 0
-    await expect.poll(async () => {
-      pinnedRows = await viewport.evaluate((element) => {
+    // xterm 6 leaves .xterm-viewport empty and scrolls a custom thumb, so a
+    // scrollTop written there never moves. Rows still below the fold are the
+    // thumb's distance from the bottom of its track.
+    const terminal = rows.nth(0).locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " xterm ")][1]')
+    const thumb = terminal.locator('.xterm-scrollable-element > .scrollbar.vertical > .slider')
+    const rowsBelow = () =>
+      thumb.evaluate((element) => {
+        const track = element.parentElement
         const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
         const rowHeight = row?.getBoundingClientRect().height ?? 0
-        if (rowHeight <= 0) return 0
-        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - rowHeight * 3)
-        return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
+        if (!track || rowHeight <= 0) return 0
+        const trackBox = track.getBoundingClientRect()
+        const thumbBox = element.getBoundingClientRect()
+        if (thumbBox.height <= 0 || trackBox.height <= 0) return 0
+        const visibleRows = trackBox.height / rowHeight
+        return ((trackBox.height - (thumbBox.top - trackBox.top) - thumbBox.height) / thumbBox.height) * visibleRows
       })
+    await expect.poll(() =>
+      thumb.evaluate((element) => {
+        const track = element.parentElement?.getBoundingClientRect().height ?? 0
+        const height = element.getBoundingClientRect().height
+        const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')?.getBoundingClientRect().height ?? 0
+        if (row <= 0) return 0
+        return (track - height) / row
+      }),
+    ).toBeGreaterThan(2)
+    await terminal.hover()
+    let pinnedRows = 0
+    await expect.poll(async () => {
+      // One notch is about three rows. Repeat only while the thumb is still
+      // on the bottom, and keep the first position that is actually pinned.
+      if (pinnedRows <= 2) await page.mouse.wheel(0, -1)
+      pinnedRows = await rowsBelow()
       return pinnedRows
     }).toBeGreaterThan(2)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
-    await expect.poll(bottomRows).toBeCloseTo(pinnedRows, 0)
+    await expect.poll(rowsBelow).toBeCloseTo(pinnedRows, 0)
     await assertGrid(72, 22)
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)

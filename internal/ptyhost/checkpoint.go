@@ -694,18 +694,10 @@ func recoverCheckpoint(transcript string) (recordedScreen, bool, error) {
 		if i == index {
 			start = checkpoint.CastOffset
 		}
-		delta, suffixErr := applyCastSuffix(segments[i].path, start, recovered.screen, &recovered.modes)
+		_, suffixErr := applyCastSuffix(segments[i].path, start, recovered.screen, &recovered.modes)
 		if suffixErr != nil {
 			recovered.screen.dispose()
 			return recordedScreen{}, false, suffixErr
-		}
-		if i == index {
-			segments[i].outputBytes += delta
-		} else if delta > 0 {
-			segments[i].outputBytes = delta
-		}
-		if info, statErr := os.Stat(segments[i].path); statErr == nil {
-			segments[i].fileBytes = info.Size()
 		}
 	}
 	return recovered, true, nil

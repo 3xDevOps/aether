@@ -35,7 +35,11 @@ jobs:
   # main and a merge-queue entry always run them. A pull request runs them
   # unless every changed path is under docs/ or is a root-level markdown
   # file. A failed file list fails open and runs them. The checkout carries
-  # no credentials.
+  # no credentials. The classifier is the base revision of
+  # scripts/ci-classify-changes.sh: a pull request can edit its own copy,
+  # and that copy is not what this job runs. A rename is classified by its
+  # old path as well as its new one, so a move into docs/ still runs the
+  # code jobs.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -45,6 +49,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          sparse-checkout: scripts/ci-classify-changes.sh
+          sparse-checkout-cone-mode: false
       - name: Classify changed paths
         id: classify
         env:
