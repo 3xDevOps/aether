@@ -112,7 +112,10 @@ jobs:
       # the glob below covers them.
       # Restored from the cache release-build writes on main. A release
       # event's ref is the tag, so this job does not save the cache.
-      - uses: actions/cache/restore@v4
+      # Pinned by commit. This step runs after the signing keystore is
+      # decoded, and the job can publish, so a retargeted v4 tag must not
+      # be able to change the code that runs here.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .gradle-cache
           key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
