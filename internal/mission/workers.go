@@ -266,7 +266,7 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 		return nil, authorizeErr
 	}
 	if a.State.HoldsConcurrency() {
-		return nil, errors.New("mission: attempt is still active")
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "worker.retry: mission: attempt is still active"}
 	}
 	if a.TakeoverActive {
 		return nil, store.ErrMissionTakeover

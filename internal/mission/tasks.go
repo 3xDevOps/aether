@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -186,7 +187,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 			return nil, parseErr
 		}
 		if attempt != nil {
-			return nil, errors.New("mission: workers cannot accept task revisions")
+			return nil, fmt.Errorf("%w: mission: workers cannot accept task revisions", permissions.ErrDenied)
 		}
 		if strings.TrimSpace(p.TaskID) == "" || p.Revision <= 0 || !validTaskKey(p.IdempotencyKey) || p.ExpectedIntegratorGeneration == 0 {
 			return nil, errors.New("mission: task.accept requires task, revision, expected_integrator_generation, and idempotency_key")
@@ -222,7 +223,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 			return nil, parseErr
 		}
 		if attempt != nil {
-			return nil, errors.New("mission: workers cannot abandon tasks")
+			return nil, fmt.Errorf("%w: mission: workers cannot abandon tasks", permissions.ErrDenied)
 		}
 		if strings.TrimSpace(p.TaskID) == "" || !validTaskKey(p.IdempotencyKey) || p.ExpectedIntegratorGeneration == 0 {
 			return nil, errors.New("mission: task.abandon requires task, expected_integrator_generation, and idempotency_key")
@@ -291,7 +292,7 @@ func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, 
 		return nil, errors.New("mission: task.submission.accept requires submission_id, expected_integrator_generation, and idempotency_key")
 	}
 	if mission == nil || attempt != nil {
-		return nil, errors.New("mission: only the current integrator may accept submissions")
+		return nil, fmt.Errorf("%w: mission: only the current integrator may accept submissions", permissions.ErrDenied)
 	}
 	if p.ExpectedIntegratorGeneration != mission.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)

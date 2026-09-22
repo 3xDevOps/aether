@@ -99,6 +99,36 @@ func TestRefreshFailuresPersistSanitizedTypedState(t *testing.T) {
 	}
 }
 
+func TestCapturePreservesFetchAndPersistenceFailures(t *testing.T) {
+	st := newMirrorTestStore()
+	upstream := errors.New("upstream failure")
+	persistence := errors.New("store write failure")
+	git := &mirrorTestGit{refreshErr: &gitengine.MirrorError{Kind: gitengine.MirrorErrorOffline, Cause: upstream}}
+	svc := newMirrorTestService(t, st, git)
+	if _, err := svc.Configure(t.Context(), "w", ConfigureRequest{SourceURL: "https://example.test/repo", Branch: "main", Auth: domain.MirrorAuthPublic}); err != nil {
+		t.Fatal(err)
+	}
+	st.setErrors = []error{nil, persistence}
+	_, err := svc.Capture(t.Context(), "w", "")
+	if !errors.Is(err, upstream) || !errors.Is(err, persistence) {
+		t.Fatalf("capture lost one failure: %v", err)
+	}
+	var typed *gitengine.MirrorError
+	if !errors.As(err, &typed) || typed.Kind != gitengine.MirrorErrorOffline {
+		t.Fatalf("capture lost typed fetch cause: %v", err)
+	}
+}
+
+func TestCaptureFailsClosedWhenWorkspaceLookupFails(t *testing.T) {
+	st := newMirrorTestStore()
+	st.workspaceErr = errors.New("workspace lookup failed")
+	svc := newMirrorTestService(t, st, &mirrorTestGit{branchCommit: testSHA})
+	capture, err := svc.Capture(t.Context(), "w", "")
+	if !errors.Is(err, st.workspaceErr) || capture.Commit != "" || capture.Branch != "" {
+		t.Fatalf("capture silently used fallback branch: %+v, %v", capture, err)
+	}
+}
+
 func TestCaptureLocalAndCached(t *testing.T) {
 	st := newMirrorTestStore()
 	git := &mirrorTestGit{branchCommit: testSHA}
@@ -659,11 +689,12 @@ func TestRefreshTypedFailureStatuses(t *testing.T) {
 }
 
 type mirrorTestStore struct {
-	mu        sync.Mutex
-	mirrors   map[domain.WorkspaceID]domain.WorkspaceMirror
-	deleteErr error
-	setErrors []error
-	listErr   error
+	mu           sync.Mutex
+	mirrors      map[domain.WorkspaceID]domain.WorkspaceMirror
+	deleteErr    error
+	setErrors    []error
+	listErr      error
+	workspaceErr error
 }
 
 func newMirrorTestStore() *mirrorTestStore {
@@ -726,6 +757,9 @@ func (s *mirrorTestStore) DeleteWorkspaceMirror(ctx context.Context, id domain.W
 	return nil
 }
 func (s *mirrorTestStore) GetWorkspace(_ context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
+	if s.workspaceErr != nil {
+		return nil, s.workspaceErr
+	}
 	return &domain.Workspace{ID: id, BaseBranch: "main"}, nil
 }
 
