@@ -119,6 +119,10 @@ func TestCLIJSONEnvelopeAndStableExit(t *testing.T) {
 	if !env.OK || env.SchemaVersion != SchemaVersion {
 		t.Fatalf("status envelope = %+v", env)
 	}
+	bareCode, bareRaw := runCLI(t, s.path, []string{"status"}, "")
+	if bareCode != code || bareRaw != raw {
+		t.Fatalf("bare status = (%d, %s), --json = (%d, %s)", bareCode, bareRaw, code, raw)
+	}
 	unknown, raw := runCLI(t, s.path, []string{"wat"}, "")
 	if unknown != ExitUsage {
 		t.Fatalf("unknown command exit = %d, want %d", unknown, ExitUsage)
@@ -129,42 +133,49 @@ func TestCLIJSONEnvelopeAndStableExit(t *testing.T) {
 	}
 }
 
-func TestCLISkillPrintsAssignmentAndWorkflow(t *testing.T) {
-	s := newCLISocket(t, func(protocol.Request) protocol.Response {
-		return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-1","workspace_id":"ws-1","member_id":"member-1","task":"ship the release","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":3,"execution_choices":[{"account_member_id":"member-1","harness":"claude","mode":"headless"}],"max_concurrent_attempts":2,"max_total_attempts":5,"active_attempts":1,"total_attempts":2},"peers":[],"unread":0,"capabilities":["coord.report"]}`)}
-	})
-	code, raw := runCLI(t, s.path, []string{"skill"}, "")
-	if code != ExitOK {
-		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
-	}
-	if !strings.Contains(raw, "Approved execution choices: account=member-1 harness=claude mode=headless") ||
-		!strings.Contains(raw, "remaining_concurrent=1") ||
-		!strings.Contains(raw, "remaining_total=3") ||
-		!strings.Contains(raw, "integration request-delivery --params-file") ||
-		!strings.Contains(raw, "human-decision boundary") ||
-		!strings.Contains(raw, "same idempotency_key") ||
-		!strings.Contains(raw, "aether-internal report is one-shot and terminal") ||
-		!strings.Contains(raw, "When blocked on a peer, ask them; do not report.") {
-		t.Fatalf("skill output %q does not include live identity, assignment, integrator allowance, integration recovery workflow, or terminal-report guidance", raw)
-	}
-	if strings.Contains(raw, "No coordination socket") {
-		t.Fatalf("skill treated a reachable socket as unavailable: %q", raw)
-	}
-}
-
-func TestCLISkillPrintsWorkerScope(t *testing.T) {
-	s := newCLISocket(t, func(protocol.Request) protocol.Response {
-		return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-worker","workspace_id":"ws-1","member_id":"member-2","task":"implement the assigned task","assignment":{"mission_id":"mission-1","role":"worker","task_id":"task-1","task_revision":2,"attempt_id":"attempt-1","capabilities":["task.show","task.propose","task.revise","integration.deliver"]},"peers":[],"unread":0,"capabilities":["coord.report","integration.deliver","integration.decide"]}`)}
-	})
-	code, raw := runCLI(t, s.path, []string{"skill"}, "")
-	if code != ExitOK {
-		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
-	}
-	if !strings.Contains(raw, "Worker scope: read and propose changes only for the assigned task; do not spawn workers. Report only after the assigned task is finished or irrecoverable; a report is terminal.") {
-		t.Fatalf("worker skill output = %q", raw)
-	}
-	if strings.Contains(raw, "integration.") || strings.Contains(raw, "human-decision boundary") {
-		t.Fatalf("worker skill granted integrator integration guidance: %q", raw)
+func TestCLISkillRoleBoundaries(t *testing.T) {
+	for _, role := range []string{"ordinary", "worker", "integrator"} {
+		t.Run(role, func(t *testing.T) {
+			status := protocol.CoordStatusResult{
+				RunID:        "run-current",
+				Capabilities: []string{protocol.MethodIntegrationDeliver, protocol.MethodWorkerStart, protocol.MethodMissionPlanSubmit},
+			}
+			if role != "ordinary" {
+				status.Assignment = &protocol.CoordMissionAssignment{
+					Role: role, MissionID: "mission-current", TaskID: "task-current", TaskRevision: 7,
+					AttemptID: "attempt-current", Phase: "active", IntegratorGeneration: 3,
+					Capabilities: status.Capabilities,
+				}
+			}
+			var out bytes.Buffer
+			code, err := writeSkill(&out, &status)
+			if err != nil || code != ExitOK {
+				t.Fatalf("skill = %d, %v", code, err)
+			}
+			raw := out.String()
+			if !strings.Contains(raw, "Role: "+role+"\n") || !strings.Contains(raw, "Run: run-current\n") {
+				t.Fatalf("skill lost live identity: %s", raw)
+			}
+			if role == "worker" {
+				if !strings.Contains(raw, "aether-internal task show --task-id task-current\n") ||
+					!strings.Contains(raw, "Task revision: 7\n") || !strings.Contains(raw, "Attempt ID: attempt-current\n") {
+					t.Fatalf("worker cannot discover its full assignment: %s", raw)
+				}
+			}
+			if role == "integrator" {
+				for _, command := range []string{"task list --mission-id mission-current", "worker list --mission-id mission-current"} {
+					if !strings.Contains(raw, "aether-internal "+command+"\n") {
+						t.Fatalf("integrator missing current mission command %q: %s", command, raw)
+					}
+				}
+			} else {
+				for _, command := range []string{"mission ", "integration ", "worker ", "task accept"} {
+					if strings.Contains(raw, "aether-internal "+command) {
+						t.Fatalf("%s advertised unauthorized command %q: %s", role, command, raw)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -181,15 +192,13 @@ func TestCLIGeneralSkillWithoutSocket(t *testing.T) {
 		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
 	}
 	raw := out.String()
-	if raw == "" {
-		t.Fatal("skill output is empty without a socket")
-	}
-	if strings.Contains(raw, "Run:") || strings.Contains(raw, "Assignment:") {
+	if strings.Contains(raw, "Run:") || strings.Contains(raw, "Mission:") || strings.Contains(raw, "Task ID:") {
 		t.Fatalf("general skill claimed live assignment: %q", raw)
 	}
-	if !strings.Contains(raw, "aether-internal report is one-shot and terminal") ||
-		!strings.Contains(raw, "When blocked on a peer, ask them; do not report.") {
-		t.Fatalf("general skill omitted terminal-report workflow: %q", raw)
+	for _, command := range []string{"mission ", "integration ", "worker ", "task "} {
+		if strings.Contains(raw, "aether-internal "+command) {
+			t.Fatalf("unassigned skill advertised mission command %q: %s", command, raw)
+		}
 	}
 }
 
@@ -451,6 +460,8 @@ func TestCLIFlagParseErrorsAreInvalidParams(t *testing.T) {
 	}{
 		{name: "status unknown", args: []string{"status", "--unknown"}},
 		{name: "status malformed", args: []string{"status", "--json=not-bool"}},
+		{name: "status positional", args: []string{"status", "extra"}},
+		{name: "status json positional", args: []string{"status", "--json", "extra"}},
 		{name: "skill unknown", args: []string{"skill", "--unknown"}},
 		{name: "send unknown", args: []string{"send", "--unknown"}},
 		{name: "inbox unknown", args: []string{"inbox", "--unknown"}},

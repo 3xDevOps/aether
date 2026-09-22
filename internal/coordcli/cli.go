@@ -20,6 +20,8 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 const (
@@ -158,9 +160,10 @@ Run "aether-internal <command> --help" for command options.
 `
 
 var commandUsages = map[string]string{
-	"status": `usage: aether-internal status --json
+	"status": `usage: aether-internal status [--json]
 
-Print this run's identity, assignment, authorized peers, unread count, and capabilities.
+Print this run's identity, assignment, authorized peers, unread count, and capabilities
+in the v3 JSON envelope. --json is optional; output is always JSON.
 `,
 	"skill": `usage: aether-internal skill
 
@@ -233,8 +236,10 @@ input.
 `,
 	"task": `usage: aether-internal task <show|list|propose|revise|accept|accept-submission|abandon> [options]
 
-Task mutations use the assignment and integrator authority on the run socket and require explicit idempotency keys.
-Use --revision-file path or --revision-file - for bounded JSON revisions.
+Task commands use the live assignment. Workers may read and propose within
+their scope; accepting or abandoning tasks is integrator-only. Mutations
+require explicit idempotency keys.
+Use task propose --help or task revise --help for revision JSON and required flags.
 `,
 	"worker": `usage: aether-internal worker <start|list|inspect|cancel|retry> [options]
 
@@ -243,7 +248,9 @@ are explicit identities for retry-safe starts and retries.
 `,
 	"report": `usage: aether-internal report --outcome <success|failure|blocked> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
-Submit one durable outcome. A summary file of "-" reads standard input.
+Submit one durable outcome. Success/failure are terminal worker outcomes;
+blocked is a nonterminal observation, not a way to wait for a peer or human.
+A summary file of "-" reads standard input.
 `,
 	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
 
@@ -283,8 +290,8 @@ an uncertain outcome; do not invent another delivery request.
 `,
 	"task show":              "usage: aether-internal task show --task-id <id>\n",
 	"task list":              "usage: aether-internal task list --mission-id <id>\n",
-	"task propose":           "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
-	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n",
+	"task propose":           "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n" + taskRevisionHelp,
+	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n" + taskRevisionHelp,
 	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
 	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
@@ -294,6 +301,21 @@ an uncertain outcome; do not invent another delivery request.
 	"worker cancel":          "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"worker retry":           "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
 }
+
+// The input fields below are the author-supplied subset of protocol.TaskRevision.
+const taskRevisionHelp = `
+Revision JSON (maximum 32 KiB); title and objective are required non-empty strings:
+  {"title":"Fix checkout","objective":"Reject expired sessions"}
+Declare the intended scope before human approval, for example:
+  {"title":"Fix checkout","objective":"Reject expired sessions","scope":{"expected_paths":["internal/checkout/"],"exclusions":["internal/checkout/generated/"]},"evidence_requirements":[{"kind":"transcript","detail":"Retain test output showing expired sessions are rejected"}]}
+scope.expected_paths and scope.exclusions are arrays of repository-relative paths.
+evidence_requirements is an array of {kind, detail} objects; detail is optional.
+Kinds name retained evidence sources, such as transcript or git, not test types.
+Set "material":true for changed scope, constraints, or success criteria requiring
+a human-approved amendment. IDs, revision numbers, status, and timestamps are
+server-managed; do not copy them from task show. Revise supplies the whole spec,
+not a patch. --revision-file - reads stdin. Store files outside /run/aether.
+`
 
 func writeHelp(out io.Writer, command string) (int, error) {
 	text, ok := commandUsages[command]
@@ -311,12 +333,12 @@ func writeHelp(out io.Writer, command string) (int, error) {
 
 func status(ctx context.Context, socket string, args []string) (protocol.CoordStatusResult, error) {
 	fs := newFlags("status")
-	jsonOut := fs.Bool("json", false, "machine-readable output")
+	fs.Bool("json", false, "machine-readable output (always enabled)")
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordStatusResult{}, err
 	}
-	if !*jsonOut || fs.NArg() != 0 {
-		return protocol.CoordStatusResult{}, usageError("status requires --json")
+	if fs.NArg() != 0 {
+		return protocol.CoordStatusResult{}, usageError("status takes no positional arguments")
 	}
 	var out protocol.CoordStatusResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
@@ -352,101 +374,109 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 	return writeSkill(out, &status)
 }
 
-const skillWorkflow = `Workflow:
-1. Inspect the assignment and acceptance requirements before acting.
-2. Stay within the assigned scope; do not invent identity or authority.
-3. Read the inbox at checkpoints. When blocked on a peer, ask them; do not report.
-4. Keep working until the assigned task is complete. aether-internal report is one-shot and terminal: a successful worker report submits the attempt and the server then stops this worker.
-5. Report success only with required evidence after the work is actually finished. Report failure only when the task cannot be completed. Never report because you are idle, waiting, or the human left. Read the inbox once more before a terminal report, then take no new work.
+const skillBootstrap = `Inspect current state and messages:
+  aether-internal status
+  aether-internal inbox
+  aether-internal --help
+Status is a bounded summary, not the full task. Its capabilities describe
+current authority; help describes syntax, not permission.
 `
-const integratorWorkflow = `Integrator candidate flow:
-Create JSON parameter files outside read-only /run/aether, or use
---params-file - to read JSON from stdin. Each command's --help lists its fields.
-  Prepare: aether-internal integration prepare --params-file /tmp/aether-prepare.json --json
-  Review:  aether-internal integration show --params-file /tmp/aether-show.json --json
-  Verify:  aether-internal integration verify --params-file /tmp/aether-verify.json --json
-  Request: aether-internal integration request-delivery --params-file /tmp/aether-request-delivery.json --json
-The request-delivery result is a human-decision boundary. Do not approve a
-delivery from the agent socket; a human reviews and decides through the
-authenticated review surface. Only after approval:
-  Deliver: aether-internal integration deliver --params-file /tmp/aether-deliver.json --json
-Recovery: if a call reports unavailable after it may have committed, retry the
-same params file with the same idempotency_key; never invent a replacement key.
+
+const skillWorkflow = `Coordination and completion:
+Stay within your assignment. Ask authorized peers when needed:
+  aether-internal ask --help
+Wait without reporting an outcome:
+  aether-internal inbox --wait 30
+Process the batch before acknowledging it: on the next inbox call pass
+--ack with that batch's ack_token. Without acknowledgement it may repeat.
+Read the inbox once more before a terminal report:
+  aether-internal report --help
+Success and failure are terminal worker outcomes: success submits the attempt
+and stops the worker; failure ends it without a task result. Report success
+only after finishing with required evidence, failure only if irrecoverable.
+Blocked is a nonterminal durable observation, not a submission or a way to wait.
+Do not report while idle or waiting on a peer or human. After a terminal
+report, take no new work.
+For an uncertain mutation, retry identical inputs with the same idempotency
+key. Save the generated key printed to stderr if you omitted --idempotency-key.
+Use a new key only for a new operation; receipt means durable storage, not read.
+`
+
+const integratorWorkflow = `When accepted submissions are ready for combined verification:
+  aether-internal integration --help
+  aether-internal integration prepare --help
+Prepare, show, verify, request-delivery, then deliver only after human approval.
+Each subcommand's --help lists its JSON fields; use --params-file with a file
+outside /run/aether or "-" for stdin. The agent cannot approve delivery or
+take over an integrator. A human uses Replace integrator if this run stops.
 `
 
 func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
-	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\n", SchemaVersion); err != nil {
+	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\nCLI build: %s\n", SchemaVersion, version.String()); err != nil {
 		return ExitFailure, fmt.Errorf("write skill header: %w", err)
 	}
 	if status == nil {
-		if _, err := io.WriteString(out, "No coordination socket is mounted; this is the general workflow and carries no run identity or assignment.\n"); err != nil {
+		if _, err := io.WriteString(out, "Role: unassigned (no coordination socket)\nNo live run identity or assignment; no mission authority. State commands need the mounted socket.\n"); err != nil {
 			return ExitFailure, fmt.Errorf("write skill availability: %w", err)
 		}
 	} else {
-		assignment := strings.TrimSpace(status.Task)
-		if assignment == "" {
-			assignment = "(assignment not supplied)"
+		assignment := status.Assignment
+		role := "ordinary"
+		if assignment != nil {
+			role = assignment.Role
 		}
-		if len(assignment) > protocol.CoordMaxStatusTaskBytes {
-			assignment = assignment[:protocol.CoordMaxStatusTaskBytes] + "…"
+		if _, err := fmt.Fprintf(out, "Role: %s\nRun: %s\n", boundedSkillField(role), boundedSkillField(status.RunID)); err != nil {
+			return ExitFailure, fmt.Errorf("write skill identity: %w", err)
 		}
-		if _, err := fmt.Fprintf(out, "Run: %s\nAssignment: %s\n", boundedSkillField(status.RunID), assignment); err != nil {
-			return ExitFailure, fmt.Errorf("write skill assignment: %w", err)
-		}
-		integratorRole := false
-		if assignment := status.Assignment; assignment != nil {
-			if _, err := fmt.Fprintf(out, "Mission: %s\nRole: %s\nTask ID: %s\nTask revision: %d\nAttempt ID: %s\nIntegrator run: %s\nIntegrator generation: %d\n",
-				boundedSkillField(assignment.MissionID),
-				boundedSkillField(assignment.Role),
-				boundedSkillField(assignment.TaskID),
-				assignment.TaskRevision,
-				boundedSkillField(assignment.AttemptID),
-				boundedSkillField(assignment.IntegratorRunID),
-				assignment.IntegratorGeneration); err != nil {
+		if assignment == nil {
+			if _, err := io.WriteString(out, "No mission authority; coordinate only with peers authorized by status.\n"); err != nil {
+				return ExitFailure, fmt.Errorf("write skill ordinary scope: %w", err)
+			}
+		} else {
+			if _, err := fmt.Fprintf(out, "Mission: %s\nIntegrator run: %s\nIntegrator generation: %d\n",
+				boundedSkillField(assignment.MissionID), boundedSkillField(assignment.IntegratorRunID), assignment.IntegratorGeneration); err != nil {
 				return ExitFailure, fmt.Errorf("write skill mission assignment: %w", err)
 			}
-			switch assignment.Role {
+			switch role {
+			case "worker":
+				if _, err := fmt.Fprintf(out, "Task ID: %s\nTask revision: %d\nAttempt ID: %s\nPhase: %s\nRead your full assigned task before acting (use the assigned revision above):\n  aether-internal task show --task-id %s\nWorkers may read and propose only; do not spawn workers, accept tasks, or perform mission/integration operations.\n",
+					boundedSkillField(assignment.TaskID), assignment.TaskRevision, boundedSkillField(assignment.AttemptID), boundedSkillField(assignment.Phase), shellquote.Quote(assignment.TaskID)); err != nil {
+					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
+				}
 			case "integrator":
-				integratorRole = true
+				if err := writeSkillPhase(out, assignment); err != nil {
+					return ExitFailure, err
+				}
+				if _, err := fmt.Fprintf(out, "Inspect this mission and discover command syntax:\n  aether-internal task list --mission-id %s\n  aether-internal worker list --mission-id %s\n  aether-internal task --help\n  aether-internal worker --help\n",
+					shellquote.Quote(assignment.MissionID), shellquote.Quote(assignment.MissionID)); err != nil {
+					return ExitFailure, fmt.Errorf("write skill mission commands: %w", err)
+				}
 				if len(assignment.ExecutionChoices) > 0 {
 					if _, err := fmt.Fprintf(out, "Approved execution choices: %s\n", boundedSkillExecutionChoices(assignment.ExecutionChoices)); err != nil {
 						return ExitFailure, fmt.Errorf("write skill execution choices: %w", err)
 					}
 				}
 				if _, err := fmt.Fprintf(out, "Attempt allowance: active=%d/%d total=%d/%d remaining_concurrent=%d remaining_total=%d\n",
-					assignment.ActiveAttempts,
-					assignment.MaxConcurrentAttempts,
-					assignment.TotalAttempts,
-					assignment.MaxTotalAttempts,
-					assignment.MaxConcurrentAttempts-assignment.ActiveAttempts,
-					assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
+					assignment.ActiveAttempts, assignment.MaxConcurrentAttempts, assignment.TotalAttempts, assignment.MaxTotalAttempts,
+					assignment.MaxConcurrentAttempts-assignment.ActiveAttempts, assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
 					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
 				}
-				if err := writeSkillPhase(out, assignment); err != nil {
-					return ExitFailure, err
-				}
-			case "worker":
-				if _, err := io.WriteString(out, "Worker scope: read and propose changes only for the assigned task; do not spawn workers. Report only after the assigned task is finished or irrecoverable; a report is terminal.\n"); err != nil {
-					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
-				}
-			}
-			capabilities := skillCapabilitiesForRole(assignment.Capabilities, integratorRole)
-			if len(capabilities) > 0 {
-				bounded := boundedSkillCapabilities(capabilities)
-				if _, err := fmt.Fprintf(out, "Assignment capabilities: %s\n", bounded); err != nil {
-					return ExitFailure, fmt.Errorf("write skill assignment capabilities: %w", err)
+				if assignment.Phase == "active" || assignment.Phase == "amendment_review" {
+					if _, err := io.WriteString(out, integratorWorkflow); err != nil {
+						return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
+					}
 				}
 			}
 		}
-		capabilities := skillCapabilitiesForRole(status.Capabilities, integratorRole)
-		if len(capabilities) > 0 {
-			bounded := boundedSkillCapabilities(capabilities)
-			if _, err := fmt.Fprintf(out, "Capabilities: %s\n", bounded); err != nil {
-				return ExitFailure, fmt.Errorf("write skill capabilities: %w", err)
-			}
+		summary := strings.TrimSpace(status.Task)
+		if len(summary) > protocol.CoordMaxStatusTaskBytes {
+			summary = summary[:protocol.CoordMaxStatusTaskBytes] + "…"
+		}
+		if _, err := fmt.Fprintf(out, "Task summary (bounded): %s\n", summary); err != nil {
+			return ExitFailure, fmt.Errorf("write skill task summary: %w", err)
 		}
 	}
-	if _, err := io.WriteString(out, skillWorkflow); err != nil {
+	if _, err := io.WriteString(out, skillBootstrap+skillWorkflow); err != nil {
 		return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
 	}
 	return ExitOK, nil
@@ -457,31 +487,6 @@ func boundedSkillField(value string) string {
 		return value
 	}
 	return value[:256] + "…"
-}
-func skillCapabilitiesForRole(values []string, integrator bool) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.HasPrefix(value, "integration.") {
-			if !integrator || !skillIntegrationCapability(value) {
-				continue
-			}
-		}
-		out = append(out, value)
-	}
-	return out
-}
-
-func skillIntegrationCapability(value string) bool {
-	switch value {
-	case protocol.MethodIntegrationPrepare,
-		protocol.MethodIntegrationShow,
-		protocol.MethodIntegrationVerify,
-		protocol.MethodIntegrationRequestDelivery,
-		protocol.MethodIntegrationDeliver:
-		return true
-	default:
-		return false
-	}
 }
 
 func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) string {
@@ -499,26 +504,6 @@ func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) stri
 		}
 		if separator > 0 {
 			b.WriteString("; ")
-		}
-		b.WriteString(value)
-	}
-	if b.Len() == 2048 {
-		return b.String() + "…"
-	}
-	return b.String()
-}
-
-func boundedSkillCapabilities(values []string) string {
-	var b strings.Builder
-	for _, value := range values {
-		value = boundedSkillField(value)
-		if b.Len() > 0 {
-			if b.Len()+2+len(value) > 2048 {
-				break
-			}
-			b.WriteString(", ")
-		} else if len(value) > 2048 {
-			value = value[:2048]
 		}
 		b.WriteString(value)
 	}

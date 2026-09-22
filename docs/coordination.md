@@ -168,8 +168,8 @@ No skill package, manual identity argument, or credential setup is required.
 Run `skill` before acting so the assignment and capabilities come from current
 server state rather than copied prompt text.
 
-All commands below run inside the container. Every command except `skill`
-writes one JSON object followed by a newline. Successful commands use this
+All commands below run inside the container. Commands other than `skill` and
+help write one JSON object followed by a newline. Successful commands use this
 shape:
 
 ```json
@@ -205,15 +205,37 @@ The stable error codes are:
 ### Inspect the assignment and peers
 
 ```sh
-/usr/local/bin/aether-internal status --json
+/usr/local/bin/aether-internal status
 /usr/local/bin/aether-internal skill
 ```
 
-`status` requires `--json`; `skill` takes no arguments and prints the current
-v3 assignment plus the short coordination workflow. Integrator assignments
-include the server-approved account/harness/mode choices and active/total
-attempt allowance. Worker assignments identify the assigned task and state
-that workers may read and propose only; workers must not spawn other workers.
+`status` always emits the v3 JSON envelope; `--json` remains accepted but is
+optional. Unknown flags and positional arguments are rejected. `skill` takes
+no arguments and prints the CLI build version, live role and identity, then
+the current phase and immediate actions. Its build version comes from the
+mounted binary, which may predate newly published documentation; help describes
+that binary's command syntax.
+
+The task text in status and skill is a bounded summary (at most 512 bytes),
+not the full assignment. A worker's skill prints an executable command with
+its own task ID:
+
+```sh
+/usr/local/bin/aether-internal task show --task-id task-1
+```
+
+Use the actual command from skill, not the example ID above. Read the returned
+task revision, objective, scope, exclusions, and evidence requirements before
+acting. Workers may read and propose; they must not spawn workers, accept tasks,
+or perform mission/integration operations. Ordinary runs have no mission
+authority. Help documents syntax, not permission.
+
+Every role gets `status`, `inbox`, and top-level help bootstrap commands.
+Integrators additionally get task/worker help, list commands using the current
+mission ID, integrator generation, approved account/harness/mode choices, and
+active/total attempt allowance. Integration guidance appears only after
+immediate actions in `active` or `amendment_review`, not during initial planning
+or plan review. Use the full status result for the current capability set.
 
 Top-level and per-command help are available without a coordination socket:
 
@@ -387,14 +409,13 @@ Without `--revision`, the whole task is abandoned. With it, only that pending
 revision is marked abandoned; the task, its current revision, and the accepted
 set version are untouched.
 
-`aether-internal skill` prints the current phase, plan version, open question
-count, and latest feedback for an integrator run, followed by the instructions
-for that phase: the planning flow above in `planning`, the propose-and-submit
-lines in `clarified`, the wait in `plan_review`, the wait plus the candidate
-flow in `amendment_review`, the amendment rules and the candidate flow in
-`active`, and in `rejected` the
-statement that the run is being cancelled and must not report an outcome. Run
-`skill` again after the phase changes.
+`aether-internal skill` prints only the current phase's immediate guidance:
+clarify in `planning`, discover task revision JSON and submit in `clarified`,
+wait in `plan_review`, continue approved work while waiting in
+`amendment_review`, dispatch and review submissions in `active`, and stop
+without reporting in `rejected`. Plan version, open question count, and latest
+feedback accompany integrator phase guidance. Run `skill` again after the
+phase changes. Neither plan approval nor Replace integrator is an agent action.
 
 ### Inspect and manage mission tasks and workers
 
@@ -418,6 +439,52 @@ requires `--expected-accepted-set-version`. If the server's exact submission
 result reports non-empty `ScopeViolations`, the caller must explicitly assess
 those deviations by passing `--scope-disposition '<reason>'`; the client does
 not generate or infer a path list, and an empty reason is not an assessment.
+
+Both `task propose --help` and `task revise --help` describe the author-supplied
+fields of the protocol's `TaskRevision`. The minimal valid revision has
+non-empty `title` and `objective` strings:
+
+```json
+{"title":"Fix checkout","objective":"Reject expired sessions"}
+```
+
+For a useful plan, also declare paths and evidence requirements before approval:
+
+```json
+{
+  "title": "Fix checkout",
+  "objective": "Reject expired sessions",
+  "scope": {
+    "expected_paths": ["internal/checkout/"],
+    "exclusions": ["internal/checkout/generated/"]
+  },
+  "evidence_requirements": [
+    {"kind": "transcript", "detail": "Retain test output showing expired sessions are rejected"}
+  ]
+}
+```
+
+`scope.expected_paths` and `scope.exclusions` are arrays of repository-relative
+paths. Each evidence requirement has a non-empty `kind` and optional `detail`.
+Kinds name retained evidence sources, such as `transcript` or `git`, not test
+types. Describe the required test output in `detail`; do not use `test` as a kind.
+Set `"material": true` for an amendment changing scope, constraints, or success
+criteria. Do not copy server-managed IDs, revision numbers, status, or
+timestamps from a response. A revision supplies the whole spec, not a patch.
+JSON input is capped at 32 KiB; save files outside the read-only `/run/aether`.
+
+For an integrator in `planning`, `clarified`, or `active`, after preparing
+`/tmp/aether-task.json` and replacing the example mission ID:
+
+```sh
+/usr/local/bin/aether-internal task propose \
+  --mission-id mission-1 --revision-file /tmp/aether-task.json \
+  --idempotency-key propose-checkout-1
+```
+
+Use a fresh key for each new operation, retaining it for uncertain retries.
+Workers may propose splits or revisions only under their assigned task scope;
+they cannot accept them or dispatch workers.
 
 Which of these the server accepts depends on the mission phase, as the table
 above states: `propose`, `revise`, and `abandon` in `planning`, `clarified`,
@@ -521,10 +588,13 @@ summary is required. `--evidence-ref` may be repeated, and `--summary-file`
 accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 
-A worker report is one-shot and terminal. Success submits the attempt and the
-server then stops that worker. Failure fails the attempt without treating it as
-a task result. Blocked is a durable observation and does not stop the worker or
-submit the task. Waiting on a peer uses ask/inbox, never report.
+A worker's **success or failure** report is one-shot and terminal. Success
+submits the attempt and the server then stops that worker. Failure fails the
+attempt without treating it as a task result. **Blocked is nonterminal**: it is
+a durable observation and does not stop the worker or submit the task.
+Waiting on a peer uses ask/inbox, never report; waiting on human review uses
+the plan wait command, not an outcome. Read the inbox once more before a
+terminal report and take no new work afterwards.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to

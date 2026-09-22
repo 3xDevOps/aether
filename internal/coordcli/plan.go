@@ -142,143 +142,90 @@ func missionPlanSubmit(ctx context.Context, socket string, args []string, in io.
 	return out, nil
 }
 
-const planningFlow = `Planning flow:
-  1. Decide whether the objective is specified well enough to plan. If not,
-     ask the accountable human; this asks the human, not a peer run:
-       aether-internal mission question ask --body 'question' --idempotency-key <key>
-     Wait for answers; the call returns when something changes and also
-     returns unchanged after the wait elapses. Repeat while open_questions
-     is above zero. Waiting is not being blocked: do not report an outcome.
-       aether-internal mission plan show --wait 30
-  2. When you have what you need (questions are optional), say so:
-       aether-internal mission clarification complete --idempotency-key <key>
-     This is refused while a question you asked is unanswered.
-  3. Check what is already proposed, then propose or revise:
-       aether-internal task list --mission-id <mission-id>
-       aether-internal task propose --mission-id <mission-id> \
-         --idempotency-key <key> --revision-file /tmp/aether-task.json
-     Declare expected_paths for every task: after approval, work outside
-     them needs a human-approved amendment.
-  4. Submit the plan for human review:
-       aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>
-No worker can start until a human approves the plan.
-`
-
-const clarifiedFlow = `Clarification is complete. Propose or revise tasks, then submit the plan:
-  aether-internal task list --mission-id <mission-id>
-  aether-internal task propose --mission-id <mission-id> --idempotency-key <key> --revision-file /tmp/aether-task.json
-  aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>
-Declare expected_paths for every task. No worker can start until a human
-approves the plan.
-`
-
-const planReviewWait = `A human is reviewing the plan. Do not propose, revise, abandon, or accept
-any task, and do not start a worker: the server refuses all of them in this
-phase. Wait for the decision by repeating this call until the phase changes:
+const planningFlow = `Next: clarify the objective before submitting a plan.
+If you need an answer from the accountable human (not a peer):
+  aether-internal mission question ask --help
+Read questions and wait for answers:
   aether-internal mission plan show --wait 30
-Waiting for a human is not being blocked and is not an outcome; do not run
-aether-internal report. When the phase changes, run aether-internal skill
-again and follow the text for the new phase. If this run is stopped while
-waiting, a human relaunches the integrator with Replace integrator.
+Questions are optional. Once the objective is clear and no question is open:
+  aether-internal mission clarification complete --idempotency-key clarify-1
+Then rerun aether-internal skill. Reuse clarify-1 only to replay this operation;
+choose a fresh key for a later clarification round. Do not report while waiting.
+No worker starts until a human approves the plan.
 `
 
-const amendmentReviewWait = `A human is reviewing the amendment. Approved work continues: you may accept
-submissions, inspect, cancel, and retry workers on approved tasks. Do not
-propose, revise, abandon, or accept task revisions; the server refuses them.
-Wait for the decision by repeating this call until the phase changes:
+const clarifiedFlow = `Next: propose or revise tasks, then submit the plan for human review.
+Discover the required flags and a minimal valid revision JSON:
+  aether-internal task propose --help
+  aether-internal task revise --help
+  aether-internal mission plan submit --help
+Declare scope.expected_paths for every task and retain its exclusions.
+Submit only after the drafts are ready; no worker starts before human approval.
+`
+
+const planReviewWait = `Next: wait for the human's plan decision.
   aether-internal mission plan show --wait 30
-Waiting is not being blocked and is not an outcome; do not run
-aether-internal report. When the phase changes, run aether-internal skill
-again.
+Repeat this bounded wait until the phase changes, then rerun aether-internal skill.
+Do not mutate tasks or start workers while the plan is frozen.
+Waiting is not an outcome: do not report. If this run stops, a human uses
+Replace integrator; the agent cannot take over or approve the plan.
 `
 
-const planRejected = `A human rejected the plan and this run is being cancelled. Do not start work,
-do not change tasks, and do not report an outcome: the cancellation is the
-terminal event.
+const amendmentReviewWait = `Next: wait for the human's amendment decision; approved work may continue.
+  aether-internal mission plan show --wait 30
+Repeat until the phase changes, then rerun aether-internal skill.
+You may accept submissions and manage workers on the already-approved set.
+Do not propose, revise, abandon, or accept task revisions while review is open.
+No new work under review may start. Waiting is not an outcome: do not report.
 `
 
-const activeAmendments = `Changing the approved plan:
-  A revision you accept yourself must stay within the approved plan: not
-  marked "material": true, and expected_paths inside the approved paths. The
-  server refuses task accept otherwise.
-  A material change - new scope, new subsystems, more work, a changed
-  constraint or success criterion - is proposed with "material": true, then
-  submitted for human approval:
-    aether-internal mission plan submit --summary 'what changes and why' --idempotency-key <key>
-  Approved work keeps running while the human decides; the new work cannot
-  start before approval. Cancel or wait for a worker on a task before you
-  revise that task. Drop a pending revision with
-    aether-internal task abandon --task-id <task> --revision <n> --expected-integrator-generation <g> --idempotency-key <key>
-  Drop a whole task you proposed this round with the same command and no
-  --revision:
-    aether-internal task abandon --task-id <task> --expected-integrator-generation <g> --idempotency-key <key>
+const planRejected = `The human rejected the plan; this run is being cancelled.
+Do not start work, mutate tasks, or report an outcome. Cancellation is terminal.
 `
 
-// writeSkillPhase prints the plan-gate text for the integrator's own mission
-// phase. An assignment that carries no phase predates the gate, so it gets the
-// candidate flow alone rather than a claimed phase.
+const activeAmendments = `Next: dispatch approved tasks and review their submissions.
+  aether-internal worker start --help
+  aether-internal task accept-submission --help
+Use current task revisions, integrator generation, accepted-set version, and
+approved execution choices from live results; never guess IDs or generations.
+Changes outside approved scope, dropped exclusions, material changes, and new
+tasks require a human-approved amendment. Set "material":true when changing
+scope, constraints, or success criteria; do not accept those revisions yourself.
+Cancel or wait for a worker before revising its task. To discover amendment syntax:
+  aether-internal task revise --help
+  aether-internal mission plan submit --help
+  aether-internal task abandon --help
+Approved work may continue during amendment review, but new work waits for approval.
+`
+
+// writeSkillPhase prints only the immediate instructions for the current phase.
 func writeSkillPhase(out io.Writer, assignment *protocol.CoordMissionAssignment) error {
+	if _, err := fmt.Fprintf(out, "Phase: %s\nPlan version: %d\nOpen questions: %d\n",
+		boundedSkillField(assignment.Phase), assignment.PlanVersion, assignment.OpenQuestions); err != nil {
+		return fmt.Errorf("write skill phase: %w", err)
+	}
+	if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
+		return err
+	}
+	var flow string
 	switch assignment.Phase {
 	case "planning":
-		if _, err := fmt.Fprintf(out, "Phase: planning\nPlan version: %d\nOpen questions: %d\n", assignment.PlanVersion, assignment.OpenQuestions); err != nil {
-			return fmt.Errorf("write skill phase: %w", err)
-		}
-		if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(out, planningFlow); err != nil {
-			return fmt.Errorf("write skill planning flow: %w", err)
-		}
-		return nil
+		flow = planningFlow
 	case "clarified":
-		if _, err := fmt.Fprintf(out, "Phase: clarified\nPlan version: %d\n", assignment.PlanVersion); err != nil {
-			return fmt.Errorf("write skill phase: %w", err)
-		}
-		if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(out, clarifiedFlow); err != nil {
-			return fmt.Errorf("write skill clarified flow: %w", err)
-		}
-		return nil
+		flow = clarifiedFlow
 	case "plan_review":
-		if _, err := fmt.Fprintf(out, "Phase: plan_review\nPlan version: %d\n", assignment.PlanVersion); err != nil {
-			return fmt.Errorf("write skill phase: %w", err)
-		}
-		if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(out, planReviewWait); err != nil {
-			return fmt.Errorf("write skill plan review wait: %w", err)
-		}
-		return nil
-	case "rejected":
-		if _, err := io.WriteString(out, "Phase: rejected\n"+planRejected); err != nil {
-			return fmt.Errorf("write skill phase: %w", err)
-		}
-		return nil
-	case "amendment_review":
-		if _, err := fmt.Fprintf(out, "Phase: amendment_review\nPlan version: %d\n", assignment.PlanVersion); err != nil {
-			return fmt.Errorf("write skill phase: %w", err)
-		}
-		if err := writeSkillFeedback(out, assignment.LatestFeedback); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(out, amendmentReviewWait); err != nil {
-			return fmt.Errorf("write skill amendment review wait: %w", err)
-		}
+		flow = planReviewWait
 	case "active":
-		if _, err := fmt.Fprintf(out, "Phase: active\nPlan version: %d (approved)\n", assignment.PlanVersion); err != nil {
-			return fmt.Errorf("write skill phase: %w", err)
-		}
-		if _, err := io.WriteString(out, activeAmendments); err != nil {
-			return fmt.Errorf("write skill amendment guidance: %w", err)
-		}
+		flow = activeAmendments
+	case "amendment_review":
+		flow = amendmentReviewWait
+	case "rejected":
+		flow = planRejected
+	default:
+		flow = "No recognized plan phase supplied. Refresh aether-internal status before mission actions.\n"
 	}
-	// active and amendment_review both keep dispatching approved work, so both
-	// continue into the candidate flow, as does an assignment with no phase.
-	if _, err := io.WriteString(out, integratorWorkflow); err != nil {
-		return fmt.Errorf("write skill integration workflow: %w", err)
+	if _, err := io.WriteString(out, flow); err != nil {
+		return fmt.Errorf("write skill phase guidance: %w", err)
 	}
 	return nil
 }

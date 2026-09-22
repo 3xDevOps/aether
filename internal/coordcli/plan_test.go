@@ -58,25 +58,6 @@ func TestCLIMissionPlanUsageErrors(t *testing.T) {
 	}
 }
 
-func TestCLIMissionPlanUsageTextNamesRequiredFlags(t *testing.T) {
-	_, raw := runCLI(t, "", []string{"mission", "plan", "submit", "--summary", "build it"}, "")
-	if got := decodeEnvelope(t, raw).Error.Message; got != "mission plan submit requires --summary or --summary-file and --idempotency-key" {
-		t.Fatalf("submit usage message = %q", got)
-	}
-	_, raw = runCLI(t, "", []string{"mission", "question", "ask", "--body", "why?"}, "")
-	if got := decodeEnvelope(t, raw).Error.Message; got != "mission question ask requires --body or --body-file and --idempotency-key" {
-		t.Fatalf("ask usage message = %q", got)
-	}
-	_, raw = runCLI(t, "", []string{"mission", "clarification", "complete"}, "")
-	if got := decodeEnvelope(t, raw).Error.Message; got != "mission clarification complete requires --idempotency-key" {
-		t.Fatalf("clarification usage message = %q", got)
-	}
-	_, raw = runCLI(t, "", []string{"mission", "plan", "show", "--wait", "31"}, "")
-	if got := decodeEnvelope(t, raw).Error.Message; got != "mission plan show: --wait must be between 0 and 30" {
-		t.Fatalf("show usage message = %q", got)
-	}
-}
-
 func TestCLIMissionPlanHelpIsSocketIndependent(t *testing.T) {
 	for _, args := range [][]string{
 		{"mission", "--help"},
@@ -95,20 +76,6 @@ func TestCLIMissionPlanHelpIsSocketIndependent(t *testing.T) {
 				t.Fatalf("help = code %d, output %q", code, out.String())
 			}
 		})
-	}
-	if !strings.Contains(commandUsages["mission"], "asks the accountable human, who answers in the dashboard") ||
-		!strings.Contains(commandUsages["mission"], "separate mailboxes") {
-		t.Fatalf("mission usage does not distinguish the human mailbox from peer ask: %q", commandUsages["mission"])
-	}
-	if !strings.Contains(commandUsages["mission"], "<clarification|question|plan>") {
-		t.Fatalf("mission usage omits the clarification group: %q", commandUsages["mission"])
-	}
-	if !strings.Contains(commandUsages["mission plan submit"], "clarification must be complete") {
-		t.Fatalf("submit usage omits the clarification precondition: %q", commandUsages["mission plan submit"])
-	}
-	if !strings.Contains(commandUsages["task abandon"], "[--revision <n>]") ||
-		!strings.Contains(commandUsages["task abandon"], "drops only that pending revision") {
-		t.Fatalf("task abandon usage omits the per-revision form: %q", commandUsages["task abandon"])
 	}
 }
 
@@ -219,128 +186,41 @@ func TestCLIMissionPlanPhaseRefusalIsDenied(t *testing.T) {
 	}
 }
 
-func TestCLISkillPhaseText(t *testing.T) {
-	tests := []struct {
-		name       string
-		assignment string
-		want       []string
-		absent     []string
-	}{
-		{
-			name:       "planning",
-			assignment: `"phase":"planning","plan_version":0,"open_questions":2`,
-			want: []string{
-				"Phase: planning\nPlan version: 0\nOpen questions: 2\n",
-				"  1. Decide whether the objective is specified well enough to plan. If not,\n     ask the accountable human; this asks the human, not a peer run:\n       aether-internal mission question ask --body 'question' --idempotency-key <key>",
-				"  2. When you have what you need (questions are optional), say so:\n       aether-internal mission clarification complete --idempotency-key <key>\n     This is refused while a question you asked is unanswered.",
-				"     Declare expected_paths for every task: after approval, work outside\n     them needs a human-approved amendment.",
-				"aether-internal mission plan show --wait 30",
-				"aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>",
-				"No worker can start until a human approves the plan.",
-			},
-			absent: []string{"Latest feedback", "human-decision boundary", "at least one question"},
-		},
-		{
-			name:       "planning after revise",
-			assignment: `"phase":"planning","plan_version":1,"open_questions":0,"latest_feedback":"split the migration out"`,
-			want: []string{
-				"Phase: planning\nPlan version: 1\nOpen questions: 0\nLatest feedback: split the migration out\nPlanning flow:",
-			},
-		},
-		{
-			name:       "clarified",
-			assignment: `"phase":"clarified","plan_version":0`,
-			want: []string{
-				"Phase: clarified\nPlan version: 0\nClarification is complete. Propose or revise tasks, then submit the plan:\n",
-				"  aether-internal task list --mission-id <mission-id>\n  aether-internal task propose --mission-id <mission-id> --idempotency-key <key> --revision-file /tmp/aether-task.json\n  aether-internal mission plan submit --summary 'what will be built and why' --idempotency-key <key>\n",
-				"Declare expected_paths for every task. No worker can start until a human\napproves the plan.\n",
-			},
-			absent: []string{"Planning flow:", "Latest feedback", "human-decision boundary"},
-		},
-		{
-			name:       "clarified after revise",
-			assignment: `"phase":"clarified","plan_version":1,"latest_feedback":"split the migration out"`,
-			want:       []string{"Phase: clarified\nPlan version: 1\nLatest feedback: split the migration out\nClarification is complete."},
-		},
-		{
-			name:       "plan review",
-			assignment: `"phase":"plan_review","plan_version":2`,
-			want: []string{
-				"Phase: plan_review\nPlan version: 2\nA human is reviewing the plan.",
-				"Wait for the decision by repeating this call until the phase changes:\n  aether-internal mission plan show --wait 30",
-				"do not run\naether-internal report",
-			},
-			absent: []string{"Planning flow:", "human-decision boundary"},
-		},
-		{
-			name:       "active",
-			assignment: `"phase":"active","plan_version":3`,
-			want: []string{
-				"Phase: active\nPlan version: 3 (approved)\nChanging the approved plan:\n",
-				"  A revision you accept yourself must stay within the approved plan: not\n  marked \"material\": true, and expected_paths inside the approved paths. The\n  server refuses task accept otherwise.",
-				"  A material change - new scope, new subsystems, more work, a changed\n  constraint or success criterion - is proposed with \"material\": true, then\n  submitted for human approval:\n    aether-internal mission plan submit --summary 'what changes and why' --idempotency-key <key>",
-				"  revise that task. Drop a pending revision with\n    aether-internal task abandon --task-id <task> --revision <n> --expected-integrator-generation <g> --idempotency-key <key>\n",
-				"  Drop a whole task you proposed this round with the same command and no\n  --revision:\n    aether-internal task abandon --task-id <task> --expected-integrator-generation <g> --idempotency-key <key>\n",
-				"Integrator candidate flow:",
-				"human-decision boundary",
-			},
-			absent: []string{"Planning flow:", "A human is reviewing the plan."},
-		},
-		{
-			name:       "amendment review",
-			assignment: `"phase":"amendment_review","plan_version":4,"latest_feedback":"narrow the migration"`,
-			want: []string{
-				"Phase: amendment_review\nPlan version: 4\nLatest feedback: narrow the migration\n",
-				"A human is reviewing the amendment. Approved work continues: you may accept\nsubmissions, inspect, cancel, and retry workers on approved tasks. Do not\npropose, revise, abandon, or accept task revisions; the server refuses them.\n",
-				"Wait for the decision by repeating this call until the phase changes:\n  aether-internal mission plan show --wait 30\n",
-				"Waiting is not being blocked and is not an outcome; do not run\naether-internal report. When the phase changes, run aether-internal skill\nagain.\n",
-				"Integrator candidate flow:",
-			},
-			absent: []string{"Planning flow:", "A human is reviewing the plan.", "Changing the approved plan:"},
-		},
-		{
-			name:       "rejected",
-			assignment: `"phase":"rejected","plan_version":1`,
-			want: []string{
-				"Phase: rejected\nA human rejected the plan and this run is being cancelled.",
-				"the cancellation is the\nterminal event.",
-			},
-			absent: []string{"Plan version:", "Planning flow:", "Integrator candidate flow:"},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			s := newCLISocket(t, func(protocol.Request) protocol.Response {
-				return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-1","workspace_id":"ws-1","member_id":"member-1","task":"ship the release","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":1,` + test.assignment + `},"peers":[],"unread":0,"capabilities":[]}`)}
+func TestCLISkillPhaseActionBoundaries(t *testing.T) {
+	for _, phase := range []string{"planning", "clarified", "plan_review", "active", "amendment_review", "rejected"} {
+		t.Run(phase, func(t *testing.T) {
+			var out bytes.Buffer
+			code, err := writeSkill(&out, &protocol.CoordStatusResult{
+				RunID: "run-current",
+				Assignment: &protocol.CoordMissionAssignment{
+					Role: "integrator", MissionID: "mission-current", Phase: phase,
+				},
 			})
-			code, raw := runCLI(t, s.path, []string{"skill"}, "")
-			if code != ExitOK {
-				t.Fatalf("skill exit = %d, want %d", code, ExitOK)
+			if err != nil || code != ExitOK {
+				t.Fatalf("skill = %d, %v", code, err)
 			}
-			for _, want := range test.want {
-				if !strings.Contains(raw, want) {
-					t.Fatalf("skill output for %s omits %q:\n%s", test.name, want, raw)
+			raw := out.String()
+			if !strings.Contains(raw, "Phase: "+phase+"\n") {
+				t.Fatalf("skill lost current phase: %s", raw)
+			}
+			hasIntegration := strings.Contains(raw, "aether-internal integration ")
+			if hasIntegration != (phase == "active" || phase == "amendment_review") {
+				t.Fatalf("integration guidance in phase %s: %s", phase, raw)
+			}
+			if phase == "plan_review" || phase == "amendment_review" {
+				if !strings.Contains(raw, "aether-internal mission plan show --wait 30\n") {
+					t.Fatalf("review phase missing wait command: %s", raw)
+				}
+				for _, mutation := range []string{"task propose", "task revise", "task abandon", "mission plan submit"} {
+					if strings.Contains(raw, "aether-internal "+mutation) {
+						t.Fatalf("frozen phase advertises mutation %s: %s", mutation, raw)
+					}
 				}
 			}
-			for _, absent := range test.absent {
-				if strings.Contains(raw, absent) {
-					t.Fatalf("skill output for %s contains %q:\n%s", test.name, absent, raw)
-				}
+			if phase != "active" && strings.Contains(raw, "aether-internal worker start ") {
+				t.Fatalf("phase %s advertises new dispatch: %s", phase, raw)
 			}
 		})
-	}
-}
-
-func TestCLISkillWorkerHasNoPhaseText(t *testing.T) {
-	s := newCLISocket(t, func(protocol.Request) protocol.Response {
-		return protocol.Response{Result: json.RawMessage(`{"wire_version":"v3","run_id":"run-worker","workspace_id":"ws-1","member_id":"member-2","task":"implement","assignment":{"mission_id":"mission-1","role":"worker","task_id":"task-1","task_revision":2,"attempt_id":"attempt-1","phase":"active","plan_version":3},"peers":[],"unread":0,"capabilities":[]}`)}
-	})
-	code, raw := runCLI(t, s.path, []string{"skill"}, "")
-	if code != ExitOK {
-		t.Fatalf("skill exit = %d, want %d", code, ExitOK)
-	}
-	if strings.Contains(raw, "Phase:") || strings.Contains(raw, "Planning flow:") {
-		t.Fatalf("worker skill printed integrator plan-gate text: %q", raw)
 	}
 }
 
