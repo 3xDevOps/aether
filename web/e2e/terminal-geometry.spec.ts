@@ -120,9 +120,11 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     }).toBeGreaterThan(2)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
     await expect.poll(rowsBelow).toBeCloseTo(pinnedRows, 0)
-    // The pin leaves the live row above the fold. The grid check reads the
-    // rendered bottom row, so return there before asking the shell to repaint.
+    // The pin leaves the live row above the fold, and the font-size click
+    // leaves the pointer on that button. The grid check reads the rendered
+    // bottom row, so aim the return wheel at the terminal.
     await expect.poll(async () => {
+      await terminal.hover()
       const below = await rowsBelow()
       if (below > 0.5) await page.mouse.wheel(0, 1)
       return below
