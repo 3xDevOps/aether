@@ -222,7 +222,16 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 					if repair.err != nil {
 						return repair.err
 					}
-					return errors.Join(ErrSnapshotUnavailable, fmt.Errorf("ptyhost: repaired checkpoint remains invalid: %w", checkpointErr))
+					// The repair can finish before this call waits. The error
+					// above describes the checkpoint that repair replaced.
+					if err = h.reserve(key); err != nil {
+						return err
+					}
+					recovered, segments, recoveredPosition, _, checkpointErr = loadCurrentCheckpoint(path, false)
+					if checkpointErr != nil {
+						h.unreserve(key)
+						return errors.Join(ErrSnapshotUnavailable, fmt.Errorf("ptyhost: repaired checkpoint remains invalid: %w", checkpointErr))
+					}
 				default:
 					return ErrSnapshotPending
 				}
