@@ -91,14 +91,17 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
       return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
     }
     const bottomRows = () => viewport.evaluate(rowsBelow)
-    const pinnedRows = await viewport.evaluate((element) => {
-      const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
-      const rowHeight = row?.getBoundingClientRect().height ?? 0
-      if (rowHeight <= 0) return 0
-      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - rowHeight * 3)
-      return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
-    })
-    expect(pinnedRows).toBeGreaterThan(2)
+    let pinnedRows = 0
+    await expect.poll(async () => {
+      pinnedRows = await viewport.evaluate((element) => {
+        const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
+        const rowHeight = row?.getBoundingClientRect().height ?? 0
+        if (rowHeight <= 0) return 0
+        element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - rowHeight * 3)
+        return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
+      })
+      return pinnedRows
+    }).toBeGreaterThan(2)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
     await expect.poll(bottomRows).toBeCloseTo(pinnedRows, 0)
     await assertGrid(72, 22)
