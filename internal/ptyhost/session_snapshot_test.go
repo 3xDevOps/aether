@@ -188,7 +188,7 @@ func TestScreenCheckpointRecoversSplitUTF8Suffix(t *testing.T) {
 	if err = tr.close(); err != nil {
 		t.Fatal(err)
 	}
-	recovered, _, ok, err := recoverCheckpoint(path)
+	recovered, ok, err := recoverCheckpoint(path)
 	if err != nil || !ok {
 		t.Fatalf("recover checkpoint: ok=%v err=%v", ok, err)
 	}
@@ -234,7 +234,7 @@ func TestCheckpointBoundaryKeepsConcurrentSuffix(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = tr.close()
-	recovered, _, ok, err := recoverCheckpoint(path)
+	recovered, ok, err := recoverCheckpoint(path)
 	if err != nil || !ok {
 		t.Fatalf("recover checkpoint: ok=%v err=%v", ok, err)
 	}

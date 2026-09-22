@@ -21,7 +21,7 @@ func writeClosedCast(t *testing.T, path string, output []byte) castSegment {
 		t.Fatal(err)
 	}
 	writer.output(output)
-	if err := writer.close(); err != nil {
+	if err = writer.close(); err != nil {
 		t.Fatal(err)
 	}
 	segment, err := inspectCastSegment(path)
@@ -54,7 +54,7 @@ func TestCheckpointV2RoundTripsTerminalPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
 		t.Fatal(err)
 	}
 
@@ -293,13 +293,13 @@ func TestSnapshotRepairCannotReplaceNewerCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), newer); err != nil {
+	if err = writeCheckpointFile(checkpointPath(path), newer); err != nil {
 		t.Fatal(err)
 	}
 	close(release)
 	waitFor(t, "newer checkpoint retained", func() bool {
-		snapshot, err := h.Snapshot("repair-race")
-		return err == nil && snapshot.Position == newerPosition
+		snapshot, snapErr := h.Snapshot("repair-race")
+		return snapErr == nil && snapshot.Position == newerPosition
 	})
 	persisted, err := decodeCheckpoint(checkpointPath(path))
 	if err != nil {
@@ -331,7 +331,7 @@ func TestRecentReplayReportsOnlyProvenPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
 		t.Fatal(err)
 	}
 	complete, err := h.RecentReplay(run, 128)
@@ -362,7 +362,7 @@ func TestReplayUsesV2CheckpointByteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
+	if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
 		t.Fatal(err)
 	}
 	replay, size, err := h.Replay(run)

@@ -6,6 +6,13 @@ import { memberID, seedWorkspace } from './harness/setup'
 const painter = `stty -echo
 paint() {
   set -- $(stty size)
+  # The desktop pane is taller than the fitted grid, so the viewport does not
+  # overflow until the clear pushes these lines into scrollback.
+  i=0
+  while [ "$i" -lt 160 ]; do
+    printf 'scrollback %s\\n' "$i"
+    i=$((i + 1))
+  done
   printf '\\033[2J\\033[H'
   printf '\\033[%s;%sHX' "$1" "$2"
 }
@@ -76,18 +83,20 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await assertGrid(72, 22)
     // The larger viewer must keep proposing its pane, not feed 60x18 back
     // into the minimum and stop the shared terminal ever growing again.
-    const viewport = page.locator('.xterm-viewport:visible')
-    const bottomRows = () =>
-      viewport.evaluate((element) => {
-        const viewport = element as HTMLElement
-        const rowHeight = viewport.clientHeight / 22
-        return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
-      })
+    const viewport = rows.nth(0).locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " xterm ")][1]').locator('.xterm-viewport')
+    const rowsBelow = (element: HTMLElement) => {
+      const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
+      const rowHeight = row?.getBoundingClientRect().height ?? 0
+      if (rowHeight <= 0) return 0
+      return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
+    }
+    const bottomRows = () => viewport.evaluate(rowsBelow)
     const pinnedRows = await viewport.evaluate((element) => {
-      const viewport = element as HTMLElement
-      const rowHeight = viewport.clientHeight / 22
-      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight - rowHeight * 3)
-      return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
+      const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
+      const rowHeight = row?.getBoundingClientRect().height ?? 0
+      if (rowHeight <= 0) return 0
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - rowHeight * 3)
+      return (element.scrollHeight - element.clientHeight - element.scrollTop) / rowHeight
     })
     expect(pinnedRows).toBeGreaterThan(2)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
