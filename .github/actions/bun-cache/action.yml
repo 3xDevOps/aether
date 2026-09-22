@@ -2,9 +2,11 @@ name: Bun install cache
 description: >
   Restore bun's global install cache (~/.bun/install/cache) on every run,
   and save it only after a push to main. Separate from setup-bun's own
-  cache, which covers only the downloaded bun binary. Same rule as the Go
-  cache: pull_request_target's GITHUB_REF is the base branch, so only a
-  push can safely add to main's cache scope.
+  cache, which covers only the downloaded bun binary. One Linux job may
+  save a given key, and a pull-request cache can evict the default-branch
+  cache, so a pull request restores and does not save. The key includes
+  runner.environment so a self-hosted archive is never restored onto a
+  hosted VM.
 inputs:
   mode:
     description: "restore or save"

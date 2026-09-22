@@ -15,12 +15,22 @@ Layers, per the design spec's testing strategy:
 - **Integration/E2E tests** are behind the `integration` build tag and run with
   `make test-integration` (real Docker, real git), which covers only the
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
-  to one package and `INTEGRATION_SKIP` leaves some out, as in
-  `make test-integration INTEGRATION_PKGS=./internal/server`. CI runs them on
-  every PR from `.github/workflows/ci.yml`: the `integration` matrix shards
-  them by package, one job each for `internal/server` and `internal/scheduler`
-  and one for the rest, and the `smoke` job runs `internal/harness` on the
-  images it builds. Those jobs are the merge gate the E2E suite owns.
+  to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
+  `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
+  GitHub-hosted runners. The `integration` matrix in `.github/workflows/ci.yml`
+  gives `internal/server` four shards: `server-chaos`
+  (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
+  (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
+  (`INTEGRATION_RUN=^TestIntegrationMission`), and `server-rest`
+  (`INTEGRATION_SKIP_PATTERN=^TestIntegration(Chaos|Coordination|Mission)`).
+  `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
+  `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
+  `./internal/server`. The `smoke` job runs `internal/harness` on the images
+  it builds. A docs-only pull request (only `docs/**` and root `*.md`) runs
+  `audit` and skips every other job, including these, the dashboard jobs, and
+  the release matrix. A markdown file anywhere else, including a dashboard
+  end-to-end fixture, does not. These jobs are the merge gate the E2E suite
+  owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -43,7 +53,7 @@ Layers, per the design spec's testing strategy:
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
   `aether-server`. They own the paths a person walks in the dashboard, which
-  no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
+  no Go test and no jsdom test reaches. CI runs them in one `dashboard-e2e`
   job.
 
 Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
