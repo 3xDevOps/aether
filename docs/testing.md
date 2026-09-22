@@ -29,8 +29,11 @@ Layers, per the design spec's testing strategy:
   it builds. A docs-only pull request (only `docs/**` and root `*.md`) runs
   `audit` and skips every other job, including these, the dashboard jobs, and
   the release matrix. A markdown file anywhere else, including a dashboard
-  end-to-end fixture, does not. These jobs are the merge gate the E2E suite
-  owns.
+  end-to-end fixture, does not. The `changes` job runs
+  `scripts/ci-classify-changes.sh` from the pull request's base revision, so
+  a change to that script cannot make the decision itself, and a rename is
+  classified by both its old path and its new one. These jobs are the merge
+  gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`

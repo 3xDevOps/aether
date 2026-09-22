@@ -612,7 +612,7 @@ func repairColdSnapshot(transcript string) (ScreenSnapshot, error) {
 	if recovered, segments, position, legacy, loadErr := loadCurrentCheckpoint(transcript, true); loadErr == nil && legacy {
 		snapshot := makeScreenSnapshot(recovered.screen, recovered.modes, position)
 		recovered.screen.dispose()
-		if err := persistColdCheckpoint(transcript, snapshot, segments, expected); err != nil {
+		if err = persistColdCheckpoint(transcript, snapshot, segments, expected); err != nil {
 			return ScreenSnapshot{}, err
 		}
 		return snapshot, nil
@@ -668,16 +668,15 @@ func restoreCheckpointScreen(checkpoint screenCheckpoint) (recordedScreen, error
 }
 
 // recoverCheckpoint restores a snapshot and applies only the cast suffix after
-// its durable boundary. The returned segments retain output counts for the
-// next checkpoint, avoiding a historical transcript scan on ordinary restart.
-func recoverCheckpoint(transcript string) (recordedScreen, []castSegment, bool, error) {
+// its durable boundary.
+func recoverCheckpoint(transcript string) (recordedScreen, bool, error) {
 	checkpoint, err := decodeCheckpoint(checkpointPath(transcript))
 	if err != nil {
-		return recordedScreen{}, nil, false, err
+		return recordedScreen{}, false, err
 	}
 	segments, err := validateCheckpointSegments(transcript, checkpoint, false)
 	if err != nil {
-		return recordedScreen{}, nil, false, err
+		return recordedScreen{}, false, err
 	}
 	index := -1
 	for i, segment := range segments {
@@ -688,28 +687,20 @@ func recoverCheckpoint(transcript string) (recordedScreen, []castSegment, bool, 
 	}
 	recovered, err := restoreCheckpointScreen(checkpoint)
 	if err != nil {
-		return recordedScreen{}, nil, false, err
+		return recordedScreen{}, false, err
 	}
 	for i := index; i < len(segments); i++ {
 		start := int64(0)
 		if i == index {
 			start = checkpoint.CastOffset
 		}
-		delta, suffixErr := applyCastSuffix(segments[i].path, start, recovered.screen, &recovered.modes)
+		_, suffixErr := applyCastSuffix(segments[i].path, start, recovered.screen, &recovered.modes)
 		if suffixErr != nil {
 			recovered.screen.dispose()
-			return recordedScreen{}, nil, false, suffixErr
-		}
-		if i == index {
-			segments[i].outputBytes += delta
-		} else if delta > 0 {
-			segments[i].outputBytes = delta
-		}
-		if info, statErr := os.Stat(segments[i].path); statErr == nil {
-			segments[i].fileBytes = info.Size()
+			return recordedScreen{}, false, suffixErr
 		}
 	}
-	return recovered, segments, true, nil
+	return recovered, true, nil
 }
 
 func applyCastSuffix(path string, offset int64, screen *terminalScreen, modes *modeScanner) (int, error) {

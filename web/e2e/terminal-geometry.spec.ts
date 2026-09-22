@@ -6,6 +6,13 @@ import { memberID, seedWorkspace } from './harness/setup'
 const painter = `stty -echo
 paint() {
   set -- $(stty size)
+  # The desktop pane is taller than the fitted grid, so the viewport does not
+  # overflow until the clear pushes these lines into scrollback.
+  i=0
+  while [ "$i" -lt 160 ]; do
+    printf 'scrollback %s\\n' "$i"
+    i=$((i + 1))
+  done
   printf '\\033[2J\\033[H'
   printf '\\033[%s;%sHX' "$1" "$2"
 }
@@ -76,22 +83,53 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await assertGrid(72, 22)
     // The larger viewer must keep proposing its pane, not feed 60x18 back
     // into the minimum and stop the shared terminal ever growing again.
-    const viewport = page.locator('.xterm-viewport:visible')
-    const bottomRows = () =>
-      viewport.evaluate((element) => {
-        const viewport = element as HTMLElement
-        const rowHeight = viewport.clientHeight / 22
-        return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
+    // xterm 6 leaves .xterm-viewport empty and scrolls a custom thumb, so a
+    // scrollTop written there never moves. Rows still below the fold are the
+    // thumb's distance from the bottom of its track.
+    const terminal = rows.nth(0).locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " xterm ")][1]')
+    const thumb = terminal.locator('.xterm-scrollable-element > .scrollbar.vertical > .slider')
+    const rowsBelow = () =>
+      thumb.evaluate((element) => {
+        const track = element.parentElement
+        const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
+        const rowHeight = row?.getBoundingClientRect().height ?? 0
+        if (!track || rowHeight <= 0) return 0
+        const trackBox = track.getBoundingClientRect()
+        const thumbBox = element.getBoundingClientRect()
+        if (thumbBox.height <= 0 || trackBox.height <= 0) return 0
+        const visibleRows = trackBox.height / rowHeight
+        return ((trackBox.height - (thumbBox.top - trackBox.top) - thumbBox.height) / thumbBox.height) * visibleRows
       })
-    const pinnedRows = await viewport.evaluate((element) => {
-      const viewport = element as HTMLElement
-      const rowHeight = viewport.clientHeight / 22
-      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight - rowHeight * 3)
-      return (viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) / rowHeight
-    })
-    expect(pinnedRows).toBeGreaterThan(2)
+    await expect.poll(() =>
+      thumb.evaluate((element) => {
+        const track = element.parentElement?.getBoundingClientRect().height ?? 0
+        const height = element.getBoundingClientRect().height
+        const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')?.getBoundingClientRect().height ?? 0
+        if (row <= 0) return 0
+        return (track - height) / row
+      }),
+    ).toBeGreaterThan(2)
+    await terminal.hover()
+    let pinnedRows = 0
+    await expect.poll(async () => {
+      // One notch is about three rows. Repeat only while the thumb is still
+      // on the bottom, and keep the first position that is actually pinned.
+      if (pinnedRows <= 2) await page.mouse.wheel(0, -1)
+      pinnedRows = await rowsBelow()
+      return pinnedRows
+    }).toBeGreaterThan(2)
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
-    await expect.poll(bottomRows).toBeCloseTo(pinnedRows, 0)
+    await expect.poll(rowsBelow).toBeCloseTo(pinnedRows, 0)
+    // The pin leaves the live row above the fold. A thumb that looks flush
+    // can still be short of xterm's follow point, and the next paint then
+    // stays in scrollback. Wheel until the rendered last row is the cursor
+    // mark that is already on the live screen.
+    await terminal.hover()
+    await expect.poll(async () => {
+      const last = (await rows.nth(21).textContent()) ?? ''
+      if (!last.endsWith('X')) await page.mouse.wheel(0, 400)
+      return last
+    }).toMatch(/X$/)
     await assertGrid(72, 22)
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
