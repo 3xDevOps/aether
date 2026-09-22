@@ -183,7 +183,8 @@ func (s *Service) Rollback(ctx context.Context, member, harnessName string, id d
 	return s.store.SetProfileHead(ctx, domain.MemberID(member), harnessName, id)
 }
 
-// PinRun records snapshot id on the run row.
+// PinRun records snapshot provenance on the run row; it does not isolate the
+// account's shared writable HOME or capture later home edits.
 func (s *Service) PinRun(ctx context.Context, runID domain.RunID, id domain.ProfileSnapshotID) error {
 	if id == "" {
 		return fmt.Errorf("profile: pin: empty snapshot id")
@@ -191,7 +192,9 @@ func (s *Service) PinRun(ctx context.Context, runID domain.RunID, id domain.Prof
 	return s.store.SetRunProfileSnapshot(ctx, runID, id)
 }
 
-// Materialize writes a writable copy of the snapshot into destDir.
+// Materialize overlays snapshot files into destDir, leaving unlisted files
+// untouched. When destDir is in the member's persistent HOME, changes survive
+// run teardown and are visible to every run sharing that account.
 func (s *Service) Materialize(ctx context.Context, id domain.ProfileSnapshotID, destDir string) error {
 	if destDir == "" {
 		return errors.New("profile: materialize: dest dir is required")
@@ -204,8 +207,9 @@ func (s *Service) Materialize(ctx context.Context, id domain.ProfileSnapshotID, 
 	return s.MaterializeRoot(ctx, id, root)
 }
 
-// MaterializeRoot applies a snapshot through an already-open destination
-// descriptor. The descriptor must be rooted at the member's profile root.
+// MaterializeRoot overlays snapshot files through an already-open destination
+// descriptor, leaving unlisted files untouched. The descriptor must be rooted
+// at the harness configuration directory in the member's persistent HOME.
 func (s *Service) MaterializeRoot(ctx context.Context, id domain.ProfileSnapshotID, root *os.Root) error {
 	if root == nil {
 		return errors.New("profile: materialize: destination root is required")
