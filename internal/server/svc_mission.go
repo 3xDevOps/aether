@@ -33,7 +33,7 @@ func init() {
 			Store: d.Store, Missions: ms, Runs: launcher, Cancel: launcher,
 			AuthorizationMu: d.SSH.AuthorizationMu, Cost: d.SSH.Services.Costs,
 			Evidence: d.Evidence, ScopeSnapshot: lazyMissionScope{ssh: d.SSH}.Snapshot,
-			Bus: d.Bus,
+			Bus: d.Bus, PTY: d.PTY,
 			Integration: func() (sshd.IntegrationService, error) {
 				if d.SSH == nil {
 					return nil, errors.New("mission: SSH config is unavailable")

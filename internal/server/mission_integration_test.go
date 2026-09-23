@@ -81,6 +81,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	missionID := created.Mission.ID
 	integratorRun := created.Mission.CurrentIntegratorRunID
 	integratorSocket := waitMissionSocket(t, e.coordDir(integratorRun))
+	integratorTerm := openAttach(t, adaClient, integratorRun)
 
 	// A human retry after a lost response is idempotent and does not launch a
 	// second integrator. The list/show surfaces expose the same server-issued ID.
@@ -221,6 +222,8 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if answered.Question.AnsweredAt == nil || answered.Question.AnsweredByMemberID != string(e.ada.id) {
 		t.Fatalf("answered question = %+v, want an answer attributed to the accountable human", answered.Question)
 	}
+	// An integrator idle after asking is woken in its own terminal.
+	integratorTerm.waitOutput(t, "notice:[aether] The accountable human answered a mission question.")
 	var clarified protocol.MissionClarificationCompleteResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
 		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-1"}, &clarified); err != nil {
@@ -248,6 +251,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if approved.Mission.Phase != string(domain.MissionPhaseActive) {
 		t.Fatalf("mission phase after approval = %q, want active", approved.Mission.Phase)
 	}
+	integratorTerm.waitOutput(t, "notice:[aether] The plan was approved; the mission is active.")
 	// Approval accepted both revisions; the integrator never accepted its own.
 	var readyTasks protocol.TaskListResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &readyTasks); err != nil {

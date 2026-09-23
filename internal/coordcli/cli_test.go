@@ -163,12 +163,18 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 				}
 			}
 			if role == "integrator" {
+				if at := strings.Index(raw, integratorRole); at < 0 || at > strings.Index(raw, "Phase: ") {
+					t.Fatalf("integrator skill lacks its role line before the phase guidance: %s", raw)
+				}
 				for _, command := range []string{"task list --mission-id mission-current", "worker list --mission-id mission-current"} {
 					if !strings.Contains(raw, "aether-internal "+command+"\n") {
 						t.Fatalf("integrator missing current mission command %q: %s", command, raw)
 					}
 				}
 			} else {
+				if strings.Contains(raw, integratorRole) {
+					t.Fatalf("%s skill claimed the integrator role: %s", role, raw)
+				}
 				for _, command := range []string{"mission ", "integration ", "worker ", "task accept"} {
 					if strings.Contains(raw, "aether-internal "+command) {
 						t.Fatalf("%s advertised unauthorized command %q: %s", role, command, raw)
