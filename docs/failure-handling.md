@@ -198,6 +198,30 @@ Only a launch path that explicitly supports `--cached-base <sha>` may use a
 human-approved, unchanged accepted commit; mission worker recovery does not
 automatically consent to a stale base.
 
+### Integrator launch failures
+
+`mission.create` stores the mission in `planning` and reserves its integrator
+run ID before it launches that run. When the launch fails, the mission is
+kept and the create error names it. Which error you get depends on whether
+the scheduler wrote the run row before failing:
+
+```
+mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically: <cause>
+mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Swarms page: <cause>
+```
+
+With no run row, mission reconciliation retries the launch of the reserved
+run on its periodic pass and logs each failure as `mission: recover
+integrator` with the mission ID and the cause. Repeating `mission.create`
+with the same contents and idempotency key also retries the launch, and
+returns the same mission. The Swarms page shows `The integrator run has not
+started.` for that mission.
+
+A run row that failed while provisioning is not retried, and a same-key
+`mission.create` returns the mission without launching again. The Swarms
+page shows that the integrator run has exited. Fix the cause, then use
+**Replace integrator** to launch a new integrator run.
+
 ### Container wait errors
 
 An error from Docker while waiting is inconclusive: it does not prove that

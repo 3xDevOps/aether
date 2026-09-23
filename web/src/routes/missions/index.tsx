@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { message } from '@/lib/format'
-import { api, type Api } from '@/lib/api'
+import { api, ApiError, type Api } from '@/lib/api'
 import { allowed } from '@/lib/permissions'
 import type {
   AccountAccess,
@@ -26,10 +26,12 @@ import type {
 } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability, useSelf } from '@/store/hooks'
+import { useCapability, usePendingApprovalRuns, useSelf } from '@/store/hooks'
 import { registerSlot } from '@/components/slots'
 import type { CardSlotProps } from '@/components/slots'
 import { Chip } from '@/components/ui/heroui'
+import { StatusChip } from '@/components/run-list'
+import { runState } from '@/lib/status'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import {
   AmendmentReviewSection,
@@ -273,6 +275,27 @@ function MissionDetailView({
     return counts
   }, [detail?.tasks])
   const integratorRunID = mission?.current_integrator_run_id
+  const integratorRun = useStore((state) => (integratorRunID ? state.runs[integratorRunID] : undefined))
+  const hydrated = useStore((state) => state.hydrated)
+  const upsertRun = useStore((state) => state.upsertRun)
+  const pending = usePendingApprovalRuns()
+  // A run absent from the hydrated store is not proof it does not exist: a
+  // create's response can outrun the run's first event. Only the server's
+  // not-found marks it missing.
+  const [absentRuns, setAbsentRuns] = useState<Record<string, 'checking' | 'found' | 'missing' | 'unknown'>>({})
+  const integratorAbsence = hydrated && integratorRunID && !integratorRun ? absentRuns[integratorRunID] ?? 'checking' : undefined
+  const integratorPresent = Boolean(integratorRun)
+  useEffect(() => {
+    if (!hydrated || !integratorRunID || integratorPresent || absentRuns[integratorRunID]) return
+    setAbsentRuns((current) => ({ ...current, [integratorRunID]: 'checking' }))
+    client.runGet(integratorRunID).then((run) => {
+      upsertRun(run)
+      setAbsentRuns((current) => ({ ...current, [integratorRunID]: 'found' }))
+    }).catch((err) => {
+      const absence = err instanceof ApiError && err.status === 404 ? 'missing' : 'unknown'
+      setAbsentRuns((current) => ({ ...current, [integratorRunID]: absence }))
+    })
+  }, [absentRuns, client, hydrated, integratorPresent, integratorRunID, upsertRun])
   const acceptedSubmissions = useMemo(
     () => (detail?.submissions ?? []).filter((submission) => submission.state === 'accepted'),
     [detail?.submissions],
@@ -362,7 +385,7 @@ function MissionDetailView({
         {loading && !detail && <p className="text-sm text-muted-foreground">Loading mission…</p>}
         {mission && detail && (
           <>
-            <PhaseBanner mission={mission} canReplace={canReplace} onReplace={() => setReplaceOpen(true)} />
+            <PhaseBanner mission={mission} integratorRun={integratorRun} integratorMissing={integratorAbsence === 'missing'} canReplace={canReplace} onReplace={() => setReplaceOpen(true)} />
             <section className="border bg-card p-3" aria-label="Mission authorization">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -374,13 +397,19 @@ function MissionDetailView({
                     account {mission.integrator.account_member_id} · generation {mission.integrator_generation}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   {canReplace && (
                     <Button size="sm" variant="outline" onClick={() => setReplaceOpen(true)}>
                       Replace integrator
                     </Button>
                   )}
-                  {integratorRunID && (
+                  {integratorRun && (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <StatusChip state={runState(integratorRun.status, pending.has(integratorRun.id) || (integratorRun.unanswered_questions ?? 0) > 0)} />
+                      {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
+                    </span>
+                  )}
+                  {integratorRunID && integratorAbsence !== 'checking' && integratorAbsence !== 'missing' && (
                     <Button size="sm" onClick={() => navigate('terminal', { runId: integratorRunID })}>
                       Open integrator run
                     </Button>
@@ -388,7 +417,7 @@ function MissionDetailView({
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span>{mission.execution_choices.length} worker choices allowed</span>
+                <span>{mission.execution_choices.length} execution choices allowed</span>
                 <span>Max {mission.max_concurrent_attempts} concurrent</span>
                 <span>Max {mission.max_total_attempts} total attempts</span>
                 <span>Accepted set {mission.accepted_set_version}</span>

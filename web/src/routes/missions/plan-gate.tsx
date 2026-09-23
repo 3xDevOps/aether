@@ -28,7 +28,7 @@ import type {
   MissionTaskRevision,
 } from '@/lib/types'
 import { useStore } from '@/store'
-import { isTerminal } from '@/store/runs'
+import { isTerminal, type RunRecord } from '@/store/runs'
 
 export function ErrorNotice({ error }: { error: string }) {
   return <p role="alert" className="mb-3 break-words border-l-2 border-state-failed bg-state-failed/10 px-2 py-1.5 text-xs text-state-failed">{error}</p>
@@ -122,27 +122,36 @@ function phaseSentence(mission: Mission): string {
 
 export function PhaseBanner({
   mission,
+  integratorRun,
+  integratorMissing,
   canReplace,
   onReplace,
 }: {
   mission: Mission
+  integratorRun?: RunRecord
+  /** The server confirmed it holds no run for `current_integrator_run_id`. */
+  integratorMissing: boolean
   canReplace: boolean
   onReplace: () => void
 }) {
   const integratorRunID = mission.current_integrator_run_id
-  const integratorRun = useStore((state) => (integratorRunID ? state.runs[integratorRunID] : undefined))
   // A rejected mission's integrator is cancelled on purpose and
   // mission.replace-integrator is refused in that phase, so the recovery
   // sentence would offer a control the server will not accept.
   const phase = missionPhase(mission)
   const exited = phase !== 'rejected' && Boolean(integratorRun && isTerminal(integratorRun.status))
+  const notStarted = phase !== 'rejected' && integratorMissing
   return (
     <section aria-label="Mission phase" className={`mb-3 border-l-2 px-2 py-1.5 text-xs ${phaseTone[phase]}`}>
       <p className="font-medium">{phaseChipLabel(mission)}</p>
-      <p className="mt-0.5">{phaseSentence(mission)}</p>
-      {exited && (
+      <p className="mt-0.5">
+        {notStarted
+          ? `The integrator run has not started. The server retries the launch periodically and logs each failure as "mission: recover integrator".`
+          : phaseSentence(mission)}
+      </p>
+      {(exited || (notStarted && canReplace)) && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="min-w-0 break-words">The integrator run {integratorRunID} has exited; replace the integrator to continue</span>
+          {exited && <span className="min-w-0 break-words">The integrator run {integratorRunID} has exited; replace the integrator to continue</span>}
           {canReplace && (
             <Button size="sm" variant="outline" onClick={onReplace}>
               Replace integrator

@@ -2565,16 +2565,30 @@ concluding the page is wrong.
 
 The launch dialog keeps **Single agent** as its default. When the gateway
 advertises `mission.create`, it also offers **Swarm**: one concise objective,
-an integrator account/harness/mode, an explicit list of allowed worker
-account/harness/mode choices, and finite concurrent and total-attempt limits.
-Its submit button is **Create swarm**, matching the missions header action,
-and success toasts `Swarm created`; creating a swarm starts the integrator,
-not the workers. The form sends the exact selected values to
-`mission.create`, including a client idempotency key, then navigates to
-`missions/<server-issued-id>`. A failed retry keeps that key;
-client-generated IDs are never used as mission authority. The server bounds
-these finite limits at eight concurrent attempts and 128 total attempts; the
-form rejects values outside those bounds before sending.
+an integrator account/harness/mode, an explicit list of allowed
+account/harness/mode execution choices, and finite concurrent and
+total-attempt limits. `mission.create` refuses an integrator whose exact
+account/harness/mode is not one of `execution_choices`, so the list always
+starts with a checked, disabled **Integrator** row that follows the three
+integrator fields; it is sent first and a ticked worker row with the same
+tuple is not sent twice. The worker rows default to the integrator's account
+and first installed harness in `headless` mode. Its submit button is
+**Create swarm**, matching the missions header action, and success toasts
+`Swarm created`; creating a swarm starts the integrator, not the workers.
+The form sends the exact selected values to `mission.create`, including a
+client idempotency key, then navigates to `missions/<server-issued-id>`.
+
+The key belongs to the submitted contents, not to the dialog: the tab keeps
+one key per distinct set of contents in memory until a create with them
+succeeds. A failed create may already have stored the mission, so resending
+the same contents - after edits and back, or after closing and reopening the
+dialog - sends the same key and the server replays that mission. Changed
+contents get their own key, because the server refuses changed contents
+under a used key as `store: mission idempotency conflict`. After a success
+the same contents start a new swarm. Client-generated IDs are never used as
+mission authority. The server bounds these finite limits at eight concurrent
+attempts and 128 total attempts; the form rejects values outside those
+bounds before sending.
 
 `routes/missions` is registered through `routes/index.ts`, and the
 `MissionsSlice` is composed into the root store. Hydration reads
@@ -2610,6 +2624,20 @@ that exited while waiting for a decision is recovered, not hidden behind a
 friendlier message. A `rejected` mission's integrator is cancelled on
 purpose and `mission.replace-integrator` is refused in that phase, so the
 sentence and the control are not shown there.
+
+When `current_integrator_run_id` names a run the hydrated store does not
+hold, the detail view asks `run.get` once for that run ID; a create's
+response can reach the dashboard before the run's first `run.status` event.
+A returned run is added to the store. While the request is open, and before
+hydration, the banner keeps its phase copy. Only a not-found answer means
+the server holds no run for it: outside `rejected`, the banner then replaces
+the phase sentence with `The integrator run has not started.`, says the
+server retries the launch periodically and logs `mission: recover
+integrator`, and offers **Replace integrator**. The authorization section
+hides **Open integrator run** while the request is open and after a
+not-found answer; when the run exists, the button carries the run's status
+chip - the same state vocabulary as the run list - and its last status
+reason.
 
 In `planning`, **Questions from the integrator** lists every question the
 integrator asked. Questions are optional - the integrator declares
