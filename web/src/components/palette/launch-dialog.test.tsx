@@ -257,8 +257,8 @@ describe('launch dialog', () => {
       const params = vi.mocked(api.missionCreate).mock.calls[0][0]
       expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'tui' })
       expect(params.execution_choices).toEqual([
-        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
         { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
       ])
     })
 
@@ -272,6 +272,34 @@ describe('launch dialog', () => {
       await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
       expect(vi.mocked(api.missionCreate).mock.calls[0][0].execution_choices).toEqual([
         { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      ])
+    })
+
+    it('sends the same choices in the same order, under the same key, after a re-tick', async () => {
+      vi.mocked(api.agentList).mockResolvedValue([agentInfo(), agentInfo({ name: 'codex' })])
+      vi.mocked(api.missionCreate).mockRejectedValueOnce(new Error('integrator launch failed'))
+      await openSwarm()
+      setObjective('coordinate the re-ticked work')
+      fireEvent.click(screen.getByRole('checkbox', { name: /Alice · codex/ }))
+      const create = screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement
+      fireEvent.click(create)
+      await screen.findByRole('alert')
+      await waitFor(() => expect(create.disabled).toBe(false))
+
+      // Unticking and re-ticking appends the worker at a new position.
+      const claude = screen.getByRole('checkbox', { name: /Alice · claude/ })
+      fireEvent.click(claude)
+      fireEvent.click(claude)
+      fireEvent.click(create)
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(2))
+
+      const [first, second] = vi.mocked(api.missionCreate).mock.calls.map(([params]) => params)
+      expect(second.idempotency_key).toBe(first.idempotency_key)
+      expect(second.execution_choices).toEqual(first.execution_choices)
+      expect(first.execution_choices).toEqual([
+        { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+        { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
       ])
     })
 

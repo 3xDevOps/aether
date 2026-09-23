@@ -181,6 +181,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
         loading={missionLoading}
         onBack={() => navigate('missions')}
         onRefresh={() => setRefresh((value) => value + 1)}
+        refreshGeneration={refresh}
         client={client}
       />
     )
@@ -253,6 +254,7 @@ function MissionDetailView({
   loading,
   onBack,
   onRefresh,
+  refreshGeneration,
   client,
 }: {
   detail?: MissionShowResult
@@ -260,6 +262,7 @@ function MissionDetailView({
   loading: boolean
   onBack: () => void
   onRefresh: () => void
+  refreshGeneration: number
   client: Api
 }) {
   const navigate = useStore((state) => state.navigate)
@@ -281,21 +284,25 @@ function MissionDetailView({
   const pending = usePendingApprovalRuns()
   // A run absent from the hydrated store is not proof it does not exist: a
   // create's response can outrun the run's first event. Only the server's
-  // not-found marks it missing.
-  const [absentRuns, setAbsentRuns] = useState<Record<string, 'checking' | 'found' | 'missing' | 'unknown'>>({})
-  const integratorAbsence = hydrated && integratorRunID && !integratorRun ? absentRuns[integratorRunID] ?? 'checking' : undefined
+  // not-found marks it missing. Any other failure is asked again only on the
+  // next Refresh, never in a loop.
+  const [runLookups, setRunLookups] = useState<Record<string, 'checking' | 'found' | 'missing' | { error: string }>>({})
+  const integratorLookup = hydrated && integratorRunID && !integratorRun ? runLookups[integratorRunID] : undefined
   const integratorPresent = Boolean(integratorRun)
   useEffect(() => {
-    if (!hydrated || !integratorRunID || integratorPresent || absentRuns[integratorRunID]) return
-    setAbsentRuns((current) => ({ ...current, [integratorRunID]: 'checking' }))
+    setRunLookups((current) => Object.fromEntries(Object.entries(current).filter(([, lookup]) => typeof lookup === 'string')))
+  }, [refreshGeneration])
+  useEffect(() => {
+    if (!hydrated || !integratorRunID || integratorPresent || runLookups[integratorRunID]) return
+    setRunLookups((current) => ({ ...current, [integratorRunID]: 'checking' }))
     client.runGet(integratorRunID).then((run) => {
       upsertRun(run)
-      setAbsentRuns((current) => ({ ...current, [integratorRunID]: 'found' }))
+      setRunLookups((current) => ({ ...current, [integratorRunID]: 'found' }))
     }).catch((err) => {
-      const absence = err instanceof ApiError && err.status === 404 ? 'missing' : 'unknown'
-      setAbsentRuns((current) => ({ ...current, [integratorRunID]: absence }))
+      const lookup = err instanceof ApiError && err.status === 404 ? 'missing' : { error: message(err) }
+      setRunLookups((current) => ({ ...current, [integratorRunID]: lookup }))
     })
-  }, [absentRuns, client, hydrated, integratorPresent, integratorRunID, upsertRun])
+  }, [client, hydrated, integratorPresent, integratorRunID, runLookups, upsertRun])
   const acceptedSubmissions = useMemo(
     () => (detail?.submissions ?? []).filter((submission) => submission.state === 'accepted'),
     [detail?.submissions],
@@ -382,10 +389,11 @@ function MissionDetailView({
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         {error && <ErrorNotice error={error} />}
         {releaseError && <ErrorNotice error={releaseError} />}
+        {typeof integratorLookup === 'object' && <ErrorNotice error={integratorLookup.error} />}
         {loading && !detail && <p className="text-sm text-muted-foreground">Loading mission…</p>}
         {mission && detail && (
           <>
-            <PhaseBanner mission={mission} integratorRun={integratorRun} integratorMissing={integratorAbsence === 'missing'} canReplace={canReplace} onReplace={() => setReplaceOpen(true)} />
+            <PhaseBanner mission={mission} integratorRun={integratorRun} integratorMissing={integratorLookup === 'missing'} canReplace={canReplace} onReplace={() => setReplaceOpen(true)} />
             <section className="border bg-card p-3" aria-label="Mission authorization">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -404,15 +412,15 @@ function MissionDetailView({
                     </Button>
                   )}
                   {integratorRun && (
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <StatusChip state={runState(integratorRun.status, pending.has(integratorRun.id) || (integratorRun.unanswered_questions ?? 0) > 0)} />
-                      {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
-                    </span>
-                  )}
-                  {integratorRunID && integratorAbsence !== 'checking' && integratorAbsence !== 'missing' && (
-                    <Button size="sm" onClick={() => navigate('terminal', { runId: integratorRunID })}>
-                      Open integrator run
-                    </Button>
+                    <>
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <StatusChip state={runState(integratorRun.status, pending.has(integratorRun.id) || (integratorRun.unanswered_questions ?? 0) > 0)} />
+                        {integratorRun.reason && <span className="break-words">{integratorRun.reason}</span>}
+                      </span>
+                      <Button size="sm" onClick={() => navigate('terminal', { runId: integratorRun.id })}>
+                        Open integrator run
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>

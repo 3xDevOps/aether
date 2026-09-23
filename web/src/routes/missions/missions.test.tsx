@@ -374,6 +374,33 @@ describe('mission integrator run', () => {
     expect(client.runGet).toHaveBeenCalledTimes(1)
   })
 
+  it('hides the run button after a failed lookup and asks again on Refresh', async () => {
+    seed()
+    const client = withRunGet(async () => {
+      throw new ApiError(503, 'run.get: server unavailable')
+    })
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.getByText('run.get: server unavailable')).toBeDefined()
+    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
+    expect(client.runGet).toHaveBeenCalledTimes(1)
+
+    vi.mocked(client.runGet).mockResolvedValue(run({ id: 'run_integrator' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(client.runGet).toHaveBeenCalledTimes(2)
+    expect(useStore.getState().runs.run_integrator).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open integrator run' })).toBeDefined()
+    expect(screen.queryByText('run.get: server unavailable')).toBeNull()
+  })
+
   it('does not ask the server before the runs have hydrated', async () => {
     seed({ hydrated: false })
     const client = withRunGet(async () => run({ id: 'run_integrator' }))

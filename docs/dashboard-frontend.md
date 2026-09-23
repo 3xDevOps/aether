@@ -2570,13 +2570,15 @@ account/harness/mode execution choices, and finite concurrent and
 total-attempt limits. `mission.create` refuses an integrator whose exact
 account/harness/mode is not one of `execution_choices`, so the list always
 starts with a checked, disabled **Integrator** row that follows the three
-integrator fields; it is sent first and a ticked worker row with the same
-tuple is not sent twice. The worker rows default to the integrator's account
-and first installed harness in `headless` mode. Its submit button is
-**Create swarm**, matching the missions header action, and success toasts
-`Swarm created`; creating a swarm starts the integrator, not the workers.
-The form sends the exact selected values to `mission.create`, including a
-client idempotency key, then navigates to `missions/<server-issued-id>`.
+integrator fields. A ticked worker row with the same tuple is not sent
+twice, and the list is sent sorted by account, harness, and mode, so the
+same set is always the same request. The worker rows default to the
+integrator's account and first installed harness in `headless` mode. Its
+submit button is **Create swarm**, matching the missions header action, and
+success toasts `Swarm created`; creating a swarm starts the integrator, not
+the workers. The form sends the exact selected values to `mission.create`,
+including a client idempotency key, then navigates to
+`missions/<server-issued-id>`.
 
 The key belongs to the submitted contents, not to the dialog: the tab keeps
 one key per distinct set of contents in memory until a create with them
@@ -2633,11 +2635,11 @@ hydration, the banner keeps its phase copy. Only a not-found answer means
 the server holds no run for it: outside `rejected`, the banner then replaces
 the phase sentence with `The integrator run has not started.`, says the
 server retries the launch periodically and logs `mission: recover
-integrator`, and offers **Replace integrator**. The authorization section
-hides **Open integrator run** while the request is open and after a
-not-found answer; when the run exists, the button carries the run's status
-chip - the same state vocabulary as the run list - and its last status
-reason.
+integrator`, and offers **Replace integrator**. Any other `run.get` failure
+shows its error above the mission and keeps the phase copy; **Refresh** asks
+again, once. **Open integrator run** appears only once the store holds the
+run, beside the run's status chip - the same state vocabulary as the run
+list - and its last status reason.
 
 In `planning`, **Questions from the integrator** lists every question the
 integrator asked. Questions are optional - the integrator declares

@@ -199,7 +199,11 @@ export function LaunchDialog() {
           objective: trimmed,
           accountable_human_id: accountableHumanID,
           integrator: integratorChoice,
-          execution_choices: [integratorChoice, ...workerChoices.filter((choice) => choice.account_member_id !== account || choice.harness !== harness || choice.mode !== mode)],
+          // Sorted so the same set always serializes, and is sent, identically:
+          // the key follows the serialization and the server's receipt check
+          // compares the encoded list.
+          execution_choices: [integratorChoice, ...workerChoices.filter((choice) => choice.account_member_id !== account || choice.harness !== harness || choice.mode !== mode)]
+            .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode)),
           max_concurrent_attempts: concurrent,
           max_total_attempts: attempts,
         }
