@@ -145,22 +145,22 @@ export async function prepareDirectoryImport(
     const destinationPath = parts.path.startsWith(`${rootPrefix}/`)
       ? parts.path.slice(rootPrefix.length + 1)
       : parts.path
-    if (paths.has(destinationPath)) {
-      throw new Error(`${parts.path}: duplicate destination ${destinationPath} selected. Nothing was uploaded.`)
-    }
-    paths.add(destinationPath)
     if (isCredential(parts.path)) {
       excluded.push(
         exclusion(parts.path, 'credential', 'credential file excluded before upload'),
       )
       continue
     }
-    if (isRuntime(parts.path, root.runtime_ignores)) {
+    if (isRuntime(parts.path, root.runtime_ignores) || isRuntime(destinationPath, root.runtime_ignores)) {
       excluded.push(
         exclusion(parts.path, 'runtime', 'runtime history excluded before upload'),
       )
       continue
     }
+    if (paths.has(destinationPath)) {
+      throw new Error(`${parts.path}: duplicate destination ${destinationPath} selected. Nothing was uploaded.`)
+    }
+    paths.add(destinationPath)
     if (file.size > MAX_IMPORT_FILE_BYTES) {
       throw new Error(`${parts.path}: file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)}. Nothing was uploaded.`)
     }

@@ -709,6 +709,26 @@ describe('agents step', () => {
 })
 
 describe('directory import bounds', () => {
+  it('ignores policy-excluded aliases before detecting destination collisions', async () => {
+    const prepared = await prepareDirectoryImport(
+      [
+        directoryFile('auth.json', ''),
+        directoryFile('.claude/auth.json', ''),
+        directoryFile('debug/session.log', ''),
+        directoryFile('.claude/debug/session.log', ''),
+        directoryFile('settings.json', '{}'),
+      ],
+      policyRoot({ runtime_ignores: ['debug/'] }),
+    )
+    expect(prepared?.files.map(({ path }) => path)).toEqual(['settings.json'])
+    expect(prepared?.excluded.map(({ path, reason }) => ({ path, reason }))).toEqual([
+      { path: 'auth.json', reason: 'credential' },
+      { path: '.claude/auth.json', reason: 'credential' },
+      { path: 'debug/session.log', reason: 'runtime' },
+      { path: '.claude/debug/session.log', reason: 'runtime' },
+    ])
+  })
+
   it('filters credential and destination-specific runtime metadata without reading any bytes', async () => {
     const root = 'renamed-agent-home'
     const policy = policyRoot({
