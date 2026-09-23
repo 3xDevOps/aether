@@ -58,6 +58,13 @@ func historyTexts(lines []HistoryLine) []string {
 	return out
 }
 
+// Keep byte/event-budget tests independent of machine speed. Deadline behavior
+// is exercised separately with historyDeadlineTestContext.
+func historyBudgetTestContext() context.Context {
+	clock := historyClock(func() time.Time { return time.Unix(1000, 0) })
+	return context.WithValue(context.Background(), historyClockContextKey{}, clock)
+}
+
 func historyDeadlineTestContext(expireAfter int) context.Context {
 	base := time.Unix(1000, 0)
 	calls := 0
@@ -179,13 +186,14 @@ func TestHistorySearchUsesBoundedResumableWindows(t *testing.T) {
 		chunks = append(chunks, strings.Repeat("x", 4096)+"\n")
 	}
 	h, _ := historyTestHost(t, run, chunks...)
+	ctx := historyBudgetTestContext()
 
 	before := ""
 	seen := map[string]bool{}
 	pages := 0
 	found := false
 	for ; pages < 64; pages++ {
-		page, err := h.History(context.Background(), run, before, "needle", 10)
+		page, err := h.History(ctx, run, before, "needle", 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,7 +365,8 @@ func castTimeForTest(t *testing.T, path string) (start time.Time) {
 func TestHistoryBoundsHugeLineAndSkipsHugeRawEvent(t *testing.T) {
 	run := domain.RunID("history-bounds")
 	h, path := historyTestHost(t, run, "kept\n", strings.Repeat("x", maxHistoryLineBytes*4)+"\n")
-	page, err := h.History(context.Background(), run, "", "", 2)
+	ctx := historyBudgetTestContext()
+	page, err := h.History(ctx, run, "", "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +384,7 @@ func TestHistoryBoundsHugeLineAndSkipsHugeRawEvent(t *testing.T) {
 	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	page, err = h.History(context.Background(), run, "", "", 1)
+	page, err = h.History(ctx, run, "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,18 +409,19 @@ func TestHistoryOversizedEventReturnsResumableCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := h.History(context.Background(), run, "", "", 1)
+	ctx := historyBudgetTestContext()
+	page, err := h.History(ctx, run, "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Lines) != 0 || !page.HasMore || page.NextCursor == "" {
 		t.Fatalf("first oversized page = %+v", page)
 	}
-	page, err = h.History(context.Background(), run, page.NextCursor, "", 1)
+	page, err = h.History(ctx, run, page.NextCursor, "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(historyTexts(page.Lines), ","); got != "kept" {
+	if got := strings.Join(historyTexts(page.Lines), ","); got != "kept" || page.HasMore || page.NextCursor != "" {
 		t.Fatalf("resumed oversized page = %+v (%q)", page, got)
 	}
 }
@@ -424,8 +434,9 @@ func TestHistoryKeepsBoundedSuffixOfNewlineFreeWindow(t *testing.T) {
 	}
 	chunks[len(chunks)-1] = strings.Repeat("z", 4096)
 	h, _ := historyTestHost(t, run, chunks...)
+	ctx := historyBudgetTestContext()
 
-	page, err := h.History(context.Background(), run, "", "", 1)
+	page, err := h.History(ctx, run, "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +449,7 @@ func TestHistoryKeepsBoundedSuffixOfNewlineFreeWindow(t *testing.T) {
 	if !page.HasMore || page.NextCursor == "" {
 		t.Fatalf("newline-free pagination = %+v", page)
 	}
-	older, err := h.History(context.Background(), run, page.NextCursor, "", 1)
+	older, err := h.History(ctx, run, page.NextCursor, "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +516,7 @@ func TestHistorySearchCompletesLineAcrossRawWindowAndFullFolds(t *testing.T) {
 	controls := strings.Repeat("\x1b[0m", 40000)
 	h, _ := historyTestHost(t, run, "Stra", controls, controls, controls, controls, "ße\n")
 
-	page, err := h.History(context.Background(), run, "", "STRASSE", 10)
+	page, err := h.History(historyBudgetTestContext(), run, "", "STRASSE", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,11 +635,12 @@ func TestHistoryTinyEventsAreBoundedAndResumeWithoutGaps(t *testing.T) {
 		}
 	}
 	h, _ := historyTestHost(t, run, chunks...)
+	ctx := historyBudgetTestContext()
 
 	before := ""
 	got := make(map[string]bool)
 	for pages := 0; pages < 8; pages++ {
-		page, err := h.History(context.Background(), run, before, "needle-", 200)
+		page, err := h.History(ctx, run, before, "needle-", 200)
 		if err != nil {
 			t.Fatal(err)
 		}
