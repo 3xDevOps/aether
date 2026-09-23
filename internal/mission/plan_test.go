@@ -683,3 +683,26 @@ func TestPlanNoticeSkipsAHeadlessIntegrator(t *testing.T) {
 	}
 	f.expectNone(t, "approval to a headless integrator")
 }
+
+// TestPlanNoticeSkipsAReplacedIntegrator: a notice whose integrator was
+// replaced after the human acted is dropped, not redirected.
+func TestPlanNoticeSkipsAReplacedIntegrator(t *testing.T) {
+	ctx := context.Background()
+	f := newPlanGateFixture(t)
+	retired := *f.mission
+	retired.CurrentIntegratorRunID = "retired-integrator"
+	if err := f.db.CreateRunWithID(ctx, &domain.Run{
+		ID: retired.CurrentIntegratorRunID, WorkspaceID: f.workspace.ID, MemberID: f.member.ID, Task: "integrator",
+		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunQueued,
+	}); err != nil {
+		t.Fatalf("create retired integrator run: %v", err)
+	}
+	f.svc.deliverNotice(ctx, &retired, answerNotice)
+	select {
+	case got := <-f.notices.writes:
+		t.Fatalf("a notice for a replaced integrator wrote %+v", got)
+	default:
+	}
+	f.svc.deliverNotice(ctx, f.mission, answerNotice)
+	f.expect(t, "notice for the current integrator", answerNotice, harness.SubmitSequence("claude"))
+}

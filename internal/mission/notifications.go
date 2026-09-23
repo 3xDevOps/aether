@@ -93,6 +93,16 @@ func (s *Service) deliverNotice(ctx context.Context, m *domain.Mission, text str
 	if r.Mode != domain.LaunchTUI {
 		return
 	}
+	current, err := s.cfg.Missions.GetMission(ctx, m.ID)
+	if err != nil {
+		slog.Warn("mission: integrator notice skipped", "mission", m.ID, "run", run, "error", err)
+		return
+	}
+	// A replacement reads the mission through skill when it starts; typing
+	// into it now would land in its harness's first prompt.
+	if current.CurrentIntegratorRunID != run {
+		return
+	}
 	err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", "["+noticeActor+"] "+text, harness.SubmitSequence(r.Harness))
 	switch {
 	case err == nil:
