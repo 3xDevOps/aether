@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestGUIBuildJSONReportsAFailureAsAnErrorLine(t *testing.T) {
 	if got.Phase != localops.PhaseError {
 		t.Fatalf("phase = %q, want %q", got.Phase, localops.PhaseError)
 	}
-	if got.Error != err.Error() || !strings.Contains(got.Error, missing) {
+	if got.Error != err.Error() || !strings.Contains(got.Error, strconv.Quote(missing)) {
 		t.Fatalf("error event = %q, want returned error %q naming %q", got.Error, err, missing)
 	}
 }
