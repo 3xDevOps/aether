@@ -170,7 +170,7 @@ export function clipboardKeys(term: Terminal): (ev: KeyboardEvent) => boolean {
 
 /** Copy the terminal's selection, reporting whether it reached a clipboard. */
 export async function copySelection(term: Terminal): Promise<boolean> {
-  return writeText(term.getSelection())
+  return copyTerminalText(term.getSelection())
 }
 
 /**
@@ -191,10 +191,10 @@ export async function copyScreen(term: Terminal): Promise<boolean> {
     toast.error('Nothing to copy: this screen is empty')
     return false
   }
-  return writeText(text)
+  return copyTerminalText(text)
 }
 
-async function writeText(text: string): Promise<boolean> {
+export async function copyTerminalText(text: string): Promise<boolean> {
   if (!text) return false
   if (navigator.clipboard?.writeText) {
     try {

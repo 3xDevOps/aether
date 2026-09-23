@@ -1,5 +1,5 @@
 import { ApiError } from '@/lib/api'
-import type { Event, Run } from '@/lib/types'
+import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { configKey } from '@/store/files'
@@ -10,6 +10,7 @@ import {
   bob,
   evidencePacket,
   fakeApi,
+  mission,
   otherWorkspace,
   roomMessage,
   run,
@@ -122,6 +123,62 @@ describe('hydrate', () => {
 
     expect(store.getState().terminalWriteIntents).toEqual({ run_1: surviving })
     expect(store.getState().terminalWriteIntents.run_1).toBe(surviving)
+  })
+
+  it('does not publish missions or hydration success after disposal during the mission fetch', async () => {
+    const store = createRootStore()
+    store.getState().setActiveWorkspace(workspace.id)
+    const staleClient = fakeApi()
+    const missions = Promise.withResolvers<MissionListResult>()
+    staleClient.capabilities = vi.fn(async () => ({
+      gateway: 'server',
+      methods: ['mission.list'],
+      ws: ['events'],
+    }))
+    staleClient.missionList = vi.fn(() => missions.promise)
+    const lifecycle = new AbortController()
+    const pending = hydrate(store, staleClient, lifecycle.signal)
+    await vi.waitFor(() => expect(staleClient.missionList).toHaveBeenCalled())
+    lifecycle.abort()
+    await hydrate(store, fakeApi())
+    store.getState().setHydrated(true, 'current connection failure')
+    const current = store.getState()
+
+    missions.resolve({ missions: [mission({ id: 'mission_stale' })], next_cursor: 'stale-page' })
+    expect(await pending).toBe(false)
+
+    expect(store.getState().missions).toEqual(current.missions)
+    expect(store.getState().capabilities).toEqual(current.capabilities)
+    expect(store.getState().hydrationError).toBe('current connection failure')
+  })
+
+  it('does not publish link status or clear current errors after disposal during a local poll', async () => {
+    const store = createRootStore()
+    const staleClient = fakeApi()
+    const link = Promise.withResolvers<LinkStatus>()
+    staleClient.capabilities = vi.fn(async () => ({
+      gateway: 'local',
+      methods: ['*'],
+      ws: ['events'],
+      local: ['link.status'],
+    }))
+    staleClient.localLinkStatus = vi.fn(() => link.promise)
+    const lifecycle = new AbortController()
+    const pending = hydrate(store, staleClient, lifecycle.signal)
+    await vi.waitFor(() => expect(staleClient.localLinkStatus).toHaveBeenCalled())
+    lifecycle.abort()
+    await hydrate(store, fakeApi())
+    store.getState().setHydrated(true, 'current connection failure')
+    store.getState().setUnreachable('server')
+    const current = store.getState()
+
+    link.resolve({ server_configured: true, linked: true, addr: 'old', user: 'old', repo: 'old' })
+    expect(await pending).toBe(false)
+
+    expect(store.getState().linkStatus).toEqual(current.linkStatus)
+    expect(store.getState().onboarded).toBe(current.onboarded)
+    expect(store.getState().hydrationError).toBe('current connection failure')
+    expect(store.getState().unreachable).toBe('server')
   })
 
 
@@ -958,6 +1015,99 @@ describe('connect', () => {
 
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     stop()
+  })
+
+  it.each([
+    { identity: 'a different member', member: bob },
+    { identity: 'the same member with a newer run list', member: alice },
+  ])('ignores a disposed snapshot after reconnecting as $identity', async ({ member }) => {
+    const store = createRootStore()
+    const oldRuns = Promise.withResolvers<Run[]>()
+    const oldClient = fakeApi({ runList: vi.fn(() => oldRuns.promise) })
+    const stopOld = connect(store, oldClient)
+    await subscribe()
+    await vi.waitFor(() => expect(oldClient.runList).toHaveBeenCalled())
+    stopOld()
+
+    const stopCurrent = connect(store, fakeApi({
+      serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })),
+      runList: vi.fn(async () => [run(), run({ id: 'run_new' })]),
+    }))
+    try {
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      const currentIdentity = store.getState().identityKey
+      const currentRuns = store.getState().runs
+
+      vi.useFakeTimers()
+      oldRuns.resolve([run()])
+      // Drain the settled response's entire promise chain before observing
+      // state; an immediate waitFor could pass before the stale write.
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.getState().identityKey).toBe(currentIdentity)
+      expect(store.getState().info?.member.id).toBe(member.id)
+      expect(store.getState().runs).toEqual(currentRuns)
+      expect(store.getState().runs.run_new?.id).toBe('run_new')
+    } finally {
+      stopCurrent()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not publish a disposed hydration failure over a recovered connection', async () => {
+    const store = createRootStore()
+    const oldRuns = Promise.withResolvers<Run[]>()
+    const oldClient = fakeApi({ runList: vi.fn(() => oldRuns.promise) })
+    const stopOld = connect(store, oldClient)
+    await subscribe()
+    await vi.waitFor(() => expect(oldClient.runList).toHaveBeenCalled())
+    stopOld()
+
+    const stopCurrent = connect(store, fakeApi())
+    try {
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+
+      vi.useFakeTimers()
+      oldRuns.reject(new TypeError('old gateway disappeared'))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.getState().hydrated).toBe(true)
+      expect(store.getState().hydrationError).toBeNull()
+      expect(store.getState().unreachable).toBeNull()
+    } finally {
+      stopCurrent()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not publish a disposed capabilities probe over the current gateway', async () => {
+    const store = createRootStore()
+    const oldClient = fakeApi()
+    const probe = Promise.withResolvers<GatewayCapabilities>()
+    oldClient.capabilities = vi.fn(() => probe.promise)
+    const stopOld = connect(store, oldClient)
+    stopOld()
+
+    const stopCurrent = connect(store, fakeApi())
+    try {
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      const currentCapabilities = store.getState().capabilities
+
+      vi.useFakeTimers()
+      probe.resolve({ gateway: 'server', methods: [], ws: [] })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.getState().capabilities).toEqual(currentCapabilities)
+      expect(store.getState().connection).toBe('live')
+    } finally {
+      stopCurrent()
+      vi.useRealTimers()
+    }
   })
   it('shows the gateway refusal instead of an unreachable server', async () => {
     const store = createRootStore()

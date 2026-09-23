@@ -1065,10 +1065,11 @@ trigger in the status bar. `⌘K` lives with the palette in
 `n` is offered, on both surfaces, only to a member who may launch. The
 single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
 stands them down whenever something else has the keyboard: a text field or a
-select, a terminal, an open menu or list box, or an open dialog. A stray `n`
-typed at an agent has to reach the agent, `n` in a menu is that menu's own
-typeahead, and `n` on a select jumps to the option that starts with it - the
-guard finds a select by its `combobox` role, since the control is a button.
+select, a live terminal or its focused history surface, an open menu or list
+box, or an open dialog. A stray `n` typed at an agent has to reach the agent;
+in history it does nothing. In a menu it is that menu's typeahead, and on a
+select it jumps to the option that starts with it. The guard finds a select
+by its `combobox` role, since the control is a button.
 The `g` prefix waits 1.5s for the key that completes it, and any key that goes
 somewhere else ends the wait.
 
@@ -1295,16 +1296,58 @@ both template launches and the onboarding first-run form, the way
 `CenterView` mounts only the active route. A terminal key includes the route,
 the authenticated identity, the terminal data-generation epoch, and the run id,
 so a change of identity or epoch remounts the surface instead of reusing it.
-Leaving the terminal closes its WebSocket. Coming back attaches again at the
-compact current screen; it does not keep a hidden terminal warm and it does
-not replay the retained archive into xterm.
+Leaving the terminal closes its WebSocket and disposes xterm; no hidden live
+terminal stays warm. A pinned view retains only its static presentation and
+history state. Returning attaches again at the compact current screen behind
+the saved reading surface, without replacing its content or position. A run
+left following live output shows that fresh current screen. Neither path
+replays the retained archive into xterm.
 
 The normal run xterm requests up to 5,000 scrollback rows. Once the server
 acknowledges geometry, xterm adapts the combined normal and alternate buffers
 to stay near 1,000,000 cells; wider terminals therefore retain fewer rows.
-That bound is the live surface. Older recorded output is a separate
-**Terminal history** dialog: bounded pages of normalized text, fetched on
-demand, never a full-archive download and never written back into xterm.
+That bound is the live surface. `history.tsx` integrates older recorded output
+into upward scrolling in the same pane: normal-buffer wheel-up, `PageUp`,
+`Home`, scrollbar movement or a downward finger drag freezes the current
+presentation and enters reading mode. Ordinary alternate-screen gestures
+remain app-owned; `Shift+PageUp` explicitly enters recorded output there,
+using a prior captured normal screen if available rather than pretending the
+alternate screen is normal scrollback.
+
+The reading surface virtualizes visible rows plus overscan and prefetches near
+the oldest loaded rows. Its bounded scroll coordinate window shifts around the
+reader for very large archives; it does not discard older pages or impose a
+fixed line-count cutoff. Archived rows have stable negative indices, with
+the newest at `-1`, and retain their opaque server cursors. Frozen normal-screen
+rows have nonnegative indices. An explicit inline boundary separates normalized
+recorded text above from frozen VT presentation below. There is no heuristic
+text deduplication across that boundary and no claim of exact historical VT
+reconstruction.
+
+`history-cache.ts` stores pages, continuation metadata and the frozen HTML view
+in IndexedDB, with an eight-page resident text LRU. The saved anchor is a stable
+row plus its relative pixel offset and horizontal offset, not a distance from
+the ever-changing live bottom. Prepending pages and switching A to B to A
+preserve that anchor and the same cursor-linked row while output continues.
+The frozen rows keep their captured layout through live geometry changes;
+shared font zoom scales their presentation without rewrapping them.
+Storage is scoped by authenticated identity, terminal-data epoch, run id and
+creation time. Identity/epoch changes, authoritative run deletion and stale
+async completions cannot restore another scope's data. Leaving cancels fetching,
+not the saved view. Browser-storage failures are visible; unavailable storage
+allows an in-memory session fallback, not a durable-restore guarantee. Missing
+persisted pages are errors, not silent truncation.
+
+Arrows, `PageUp`/`PageDown`, `Home`, wheel and touch browse the read surface.
+Scrolling downward to its bottom or pressing `End` returns live. Only a new
+reading episode after returning live resets paging to the newest archive
+head; remounting a pinned run keeps its continuation and loaded pages.
+Empty bounded scan windows continue automatically while yielding to input;
+genuine fetch/storage failures appear inline. Existing pane Find searches
+retained loaded pages and frozen rows, not unfetched server history; copy
+selects from the read surface. Typing, paste and image insertion stay muted
+while reading. The hidden native host is inert; input guards block user
+actions without suppressing authorized terminal-generated protocol replies.
 
 A same-incarnation resume, when the current surface is still mounted, supplies
 only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
@@ -1333,25 +1376,26 @@ primitive.
 toolbar and Find over it. During a dashboard run's compact current-screen
 bootstrap it receives `replaying={replaying}`: the xterm host is hidden with
 CSS visibility while each frame-sized operation is parsed through one serial
-xterm write chain. The pane says **Restoring terminal history** throughout the
-parse, paint delay, and saved-viewport restoration; the status clears only when
-the surface is ready to reveal. It describes compact bootstrap restoration,
-not a request for the separately retained raw archive. The run terminal,
+xterm write chain. When no saved reading surface covers it, the pane says
+**Restoring terminal history** throughout the parse, paint delay, and
+saved-viewport restoration; the status clears only when the surface is ready
+to reveal. It describes compact bootstrap restoration, not an archive scan.
+When a pinned view exists it remains visible instead. The run terminal,
 run-shell tabs, and environment dock all use this shared replay gate. User
-input and terminal-generated replies remain muted through the final replay write
-callback. That callback opens input; a full replay remains hidden for two
-paint turns, then its queued viewport restoration settles before visibility
-is restored.
+input and terminal-generated replies remain muted through the final replay
+write callback. That callback restores authorized protocol replies, including
+while reading; user input remains blocked until returning live. A full replay
+remains hidden for two paint turns, then its queued viewport restoration
+settles before visibility is restored.
 
-xterm is the sole vertical scroll owner. The host and every ancestor terminal
-pane suppress vertical overflow rather than creating a competing browser
-scroller. Native xterm behavior follows output while its viewport is at the
-bottom and keeps a user-scrolled viewport pinned above the bottom. Before a
-full structural replay or a column resize that can reflow rows, the controller
-captures that follow state or the pinned bottom offset. It restores the intent
-only for the same operation, with no intervening wheel, touch, scrollbar, or
-scroll-key interaction, and only if the active normal/alternate buffer still
-matches. A stale restoration never overrides a user's newer scroll position.
+There is one vertical scroll owner at a time: xterm while live, the virtual
+read surface while pinned. The host and ancestors suppress competing vertical
+overflow. Live xterm follows output at the bottom. Its controller still
+protects viewport intent across structural replay or column reflow: it restores
+only a current operation, with no intervening viewport interaction and no
+normal/alternate-buffer change. The run's saved static reading surface is
+independent of those live-buffer operations, so a fresh bootstrap cannot
+overwrite it or shift its anchor.
 
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
@@ -1403,8 +1447,9 @@ A following terminal therefore:
   local measurements and resize reports, while `setGeometry()` applies the
   server's grid just as on desktop. The header carries `standardGeometry`
   (80x24) only for a session being created, such as a new shell tab.
-  The terminal pane exposes horizontal overflow only, so a grid wider than the
-  phone can be panned sideways without creating an outer vertical scroller.
+  The live terminal pane exposes horizontal overflow only, so a grid wider
+  than the phone can be panned sideways. The integrated run-history surface
+  owns both axes while reading, without a competing outer vertical scroller.
   While steering, the flag still keeps this viewer out of the shared size
   calculation.
 - does not steer on entry even on the member's own run. `Take control` is the
@@ -1423,9 +1468,12 @@ than spending it on the wrong byte. The two copy actions carry a visible
 word beside them under `coarse:`, because a tooltip is the only other thing
 telling them apart and hover is what opens one.
 
-The phone's outer pane is a horizontal pan area only. Vertical wheel and touch
-gestures remain xterm scrollback operations; neither the pane nor its ancestors
-compete for vertical scrolling.
+The phone's outer pane is a horizontal pan area only. In a run's normal buffer,
+a downward finger drag hands off continuously to integrated history; subsequent
+swipes browse older pages or return live at the bottom. The read surface keeps
+horizontal panning and does not resize the PTY or raise an input keyboard.
+Ordinary alternate-screen gestures still belong to the application. Shell and
+environment terminals retain native xterm scrollback.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
@@ -1499,8 +1547,9 @@ the terminal with the gateway's own error instead.
   and keeps callbacks bound to the current terminal host. The primary run
   header requests `screen:true` and `interactive:true`; shells and CLI
   attachments keep their existing stream modes. `screen:true` bootstraps the
-  compact current screen and bounded scrollback. Older output is the paged
-  `terminal.history` dialog. The dashboard does not download the raw archive.
+  compact current screen and bounded scrollback. Upward scrolling fetches older
+  normalized output through `terminal.history`, independently of the attach.
+  The dashboard does not download the raw archive.
 - **Controller lease and compact bootstrap.** A desktop owner's first attach
   asks for write; the server grants it only when no controller exists. Other
   members enter as mirrors, and a second tab cannot become a second writer.
@@ -1520,9 +1569,11 @@ the terminal with the gateway's own error instead.
   warm screen. If the cursor or ring cannot serve it, `resumed:false` selects
   a compact snapshot fallback. `connectAttach` parses frame-sized operations
   through one serial xterm write chain. Input and terminal-generated replies
-  remain muted through the final write callback; then input opens while the
-  host stays hidden through two animation frames and structural viewport
-  restoration. It never allocates a transcript-sized browser buffer.
+  remain muted through the final write callback; input can then open unless
+  the user is reading history. The host stays hidden through two animation
+  frames and structural viewport restoration, and remains behind a pinned
+  reading surface until return-live. The attach never allocates a
+  transcript-sized browser buffer.
 
   **Control changes stay on this WebSocket.** The client sends
   `{"type":"control","request_id":17,"write":true,"takeover":true,
@@ -1588,22 +1639,26 @@ the terminal with the gateway's own error instead.
   `steer permission withdrawn`. Membership withdrawal also uses **1008**,
   reason `membership withdrawn`, and stops reconnecting. A refusal frame's own
   close is handled only when no prior control response explains it.
-- **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
+- **Live Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
   chains zoom, find, and `clipboardKeys` in that order; the first to claim a
   key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but
   leaves native paste alive. `useTerminalImage` separately registers the
   capture-phase image listener described above, so an image event is claimed
   only when the current terminal has a live image handler and plain text never
   takes that path. `Ctrl+Shift+F` opens the find bar `TerminalPane`
-  (`src/components/terminal-pane.tsx`) draws over the terminal, backed by
-  `@xterm/addon-search`; it reports **No matches** from the addon's own answer
-  rather than tracking a count. `Ctrl+=`, `Ctrl+-` and `Ctrl+0` move
+  (`src/components/terminal-pane.tsx`) draws over the terminal. Live search uses
+  `@xterm/addon-search`; while reading, the same bar delegates to loaded archive
+  pages and frozen rows. **No matches** comes from the active surface's answer
+  rather than a tracked count. The read surface handles the same find, copy
+  and zoom shortcuts without forwarding typing or paste to xterm.
+  `Ctrl+=`, `Ctrl+-` and `Ctrl+0` move
   `UiSlice.terminalFontSize`, clamped to 8-32px by `clampTerminalFontSize` -
   on the way in from a keystroke and again in the store's `merge`, because a
   same-version reload never reaches `migrate` and xterm does not validate
   `fontSize`. The size is one persisted preference behind every terminal,
   applied to the live instance and re-fitted rather than by rebuilding it,
-  which would throw the scrollback away.
+  which would throw the scrollback away. The static reading surface scales
+  with that same preference while preserving its row-relative anchor.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
   glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
   scrolled rows until a forced refresh; the DOM renderer never desyncs. The

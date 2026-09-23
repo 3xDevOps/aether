@@ -1,3 +1,7 @@
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import type { Locator, Page } from '@playwright/test'
+import type { Aether, Member } from './fixtures'
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
@@ -209,63 +213,440 @@ done
   expect(outputSockets).toBe(socketsBeforeControl)
 })
 
-test('terminal history finds early output omitted from the live viewport', async ({
-  page,
-  aether,
-}) => {
+const historyAgent = `stty -echo
+IFS= read -r config
+set -- $config
+label=$1
+count=$2
+printf '\\033[2J\\033[HEARLIEST-%s\\r\\n' "$label"
+i=0
+while [ "$i" -lt "$count" ]; do
+  printf '\\033[2J\\033[H%s-HISTORY-%05d-${'x'.repeat(220)}\\r\\n' "$label" "$i"
+  i=$((i + 1))
+done
+printf '\\033[2J\\033[H%s-CURRENT\\r\\n' "$label"
+while IFS= read -r command; do
+  if [ "$command" = "stream" ]; then
+    (
+      i=0
+      while [ "$i" -lt 1200 ]; do
+        printf '\\033[2J\\033[H%s-GAP-%05d\\r\\n' "$label" "$i"
+        i=$((i + 1))
+        sleep 0.1
+      done
+    ) &
+    stream_pid=$!
+  elif [ "$command" = "query" ]; then
+    i=0
+    while [ "$i" -lt 2400 ]; do
+      printf '%s-NATIVE-%05d\\r\\n' "$label" "$i"
+      i=$((i + 1))
+    done
+    printf '%s-CURRENT\\r\\n' "$label"
+    mode=$(stty -g)
+    stty raw -echo
+    printf '%s-QUERY-READY\\r\\n' "$label"
+    until [ -f "$HOME/.history-$label-query" ]; do sleep 0.05; done
+    printf '\\033[6n'
+    response=''
+    while :; do
+      byte=$(dd bs=1 count=1 2>/dev/null)
+      response="$response$byte"
+      [ "$byte" = R ] && break
+    done
+    stty "$mode"
+    printf '%s-CPR:%s\\r\\n' "$label" "$response"
+  elif [ "$command" = "refresh" ]; then
+    kill "$stream_pid"
+    printf '\\033[2J\\033[H%s-REFRESH-FIRST\\r\\n' "$label"
+    i=0
+    while [ "$i" -lt 7200 ]; do
+      printf '\\033[2J\\033[H%s-REFRESH-%05d-${'y'.repeat(220)}\\r\\n' "$label" "$i"
+      i=$((i + 1))
+    done
+    printf '\\033[2J\\033[H%s-REFRESH-CURRENT\\r\\n' "$label"
+  else
+    printf '%s-INPUT:%s\\r\\n' "$label" "$command"
+  fi
+done
+`
+
+async function launchHistoryRun(
+  alice: Member,
+  workspaceID: string,
+  label: string,
+  count: number,
+) {
+  const task = `scrollable history ${label}`
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaceID,
+    harness: 'claude',
+    task,
+  })
+  const writer = await openWriter(new URL(alice.url), run.id, `history-${label}`)
+  await sendInputUntil(writer, `${label} ${count}\r`, `${label}-CURRENT`)
+  return { id: run.id, task, writer }
+}
+
+async function prepareHistory(aether: Aether) {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
-  const firstOutput = 'EARLY-OUTPUT-ONLY-IN-DOWNLOAD'
-  const currentOutput = 'CURRENT-VIEWPORT-OUTPUT'
-  const redrawFill = 'z'.repeat(96)
-  aether.installAgent(
-    await memberID(alice),
-    'claude',
-    `stty -echo
-IFS= read -r start
-printf '\\033[2J\\033[H${firstOutput}\\r\\n'
-i=0
-while [ "$i" -lt 12000 ]; do
-  printf '\\033[2J\\033[HOLD-%05d-${redrawFill}\\r\\n' "$i"
-  i=$((i + 1))
-done
-printf '\\033[2J\\033[H${currentOutput}\\r\\n'
-sleep 600
-`,
-  )
+  aether.installAgent(await memberID(alice), 'claude', historyAgent)
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
-  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
-    workspace_id: workspaces[0].id,
-    harness: 'claude',
-    task: 'page complete terminal history',
-  })
-  const url = new URL(alice.url)
-  const writer = await openWriter(url, run.id, 'history-writer')
-  await sendInputUntil(writer, 'go\r', currentOutput)
-  await releaseWriter(writer, 1)
-  await closeWriter(writer.socket)
+  return { alice, workspaceID: workspaces[0].id }
+}
 
-  await page.goto(alice.url)
-  await page
-    .getByRole('complementary', { name: 'Runs' })
-    .getByRole('button', { name: /page complete terminal history/ })
-    .click()
-  const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
-  await expect(rows).toContainText(currentOutput, { timeout: 30_000 })
-  await expect(rows).not.toContainText(firstOutput)
-  await page.getByRole('button', { name: 'Open terminal history', exact: true }).click()
-  await page.getByRole('searchbox', { name: 'Search terminal history' }).fill(firstOutput)
-  const history = page.getByLabel('Terminal history output')
-  for (let attempt = 0; attempt < 8; attempt++) {
-    try {
-      await expect(history).toContainText(firstOutput, { timeout: 5_000 })
-      return
-    } catch (error) {
-      const older = page.getByRole('button', { name: 'Load older history', exact: true })
-      if ((await older.count()) === 0) throw error
-      await older.click()
+function visibleHistory(scroller: Locator) {
+  return scroller.evaluate((element) => {
+    const viewport = element.getBoundingClientRect()
+    const visible = Array.from(element.querySelectorAll<HTMLElement>('[data-history-row]'))
+      .filter((row) => {
+        const bounds = row.getBoundingClientRect()
+        return bounds.bottom > viewport.top + element.clientTop && bounds.top < viewport.bottom
+      })
+      .map((row) => ({
+        index: Number(row.dataset.historyRow),
+        cursor: row.dataset.historyCursor ?? null,
+        text: row.textContent,
+        top: row.getBoundingClientRect().top - viewport.top,
+        left: row.getBoundingClientRect().left - viewport.left,
+      }))
+    return { rows: visible, left: element.scrollLeft }
+  })
+}
+
+async function wheelUntil(
+  page: Page,
+  scroller: Locator,
+  delta: number,
+  reached: () => Promise<boolean>,
+) {
+  await scroller.hover()
+  await expect.poll(async () => {
+    if (await reached()) return true
+    await page.mouse.wheel(0, delta)
+    return false
+  }, { timeout: 60_000, intervals: [100, 250] }).toBe(true)
+}
+
+test('scrolling reaches every retained page and prepends without moving visible output', async ({
+  page,
+  aether,
+}, testInfo) => {
+  const { alice, workspaceID } = await prepareHistory(aether)
+  const run = await launchHistoryRun(alice, workspaceID, 'LONG', 12000)
+  let observedOutput = ''
+  run.writer.socket.addEventListener('message', (event) => {
+    if (typeof event.data !== 'string') {
+      observedOutput += new TextDecoder().decode(new Uint8Array(event.data as ArrayBuffer))
     }
+  })
+  // Keep a read-only output observer, never a second terminal parser or writer.
+  await releaseWriter(run.writer, 1)
+  const queryGate = path.join(aether.server.memberHome(await memberID(alice)), '.history-LONG-query')
+  let releaseOlder = () => {}
+  const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve })
+  let delayedOlder = false
+  let deliveredRows = 0
+  let completedPages = 0
+  const rawDownloads: string[] = []
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.endsWith('/terminal-history')) rawDownloads.push(request.url())
+  })
+  await page.route('**/api/v1/terminal.history', async (route) => {
+    const params = route.request().postDataJSON() as { before?: string; query?: string }
+    expect(params.query ?? '').toBe('')
+    const hold = !!params.before && !delayedOlder
+    if (hold) delayedOlder = true
+    const response = await route.fetch()
+    if (hold) await olderGate
+    const result = await response.json() as { lines: unknown[] }
+    deliveredRows += result.lines.length
+    await route.fulfill({ response })
+    completedPages++
+  })
+  try {
+    await page.goto(alice.url)
+    await page.getByRole('complementary', { name: 'Runs' })
+      .getByRole('button', { name: run.task }).click()
+    const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
+    await expect(live).toContainText('LONG-CURRENT', { timeout: 30_000 })
+    await expect(live).not.toContainText('EARLIEST-LONG')
+    await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
+    // Centering the whole mirrored screen makes Playwright scroll its hidden
+    // host. Target a visible cell, as a real pointer does.
+    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+      .click({ position: { x: 10, y: 10 } })
+    await page.keyboard.type('query')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => observedOutput).toContain('LONG-QUERY-READY')
+    // These rows arrive through the attached live PTY, not the initial replay.
+    // Seeing the final marker proves xterm parsed the entire scrollback burst.
+    await expect(live).toContainText('LONG-QUERY-READY', { timeout: 30_000 })
+
+    // Drag xterm's shipped SmoothScrollableElement slider, not scrollTop or
+    // a synthetic scroll event. Hover exposes its auto-hidden vertical bar.
+    // All moves share one held button; activating history must not steal it.
+    const nativeViewport = page.locator(
+      '.xterm-scrollable-element:not([data-aether-frozen-view] *):visible',
+    )
+    await nativeViewport.hover({ position: { x: 10, y: 10 } })
+    const nativeScrollbar = nativeViewport.locator(':scope > .scrollbar.vertical.visible')
+    const nativeSlider = nativeScrollbar.locator(':scope > .slider')
+    await expect(nativeSlider).toBeVisible()
+    const track = await nativeScrollbar.boundingBox()
+    const thumb = await nativeSlider.boundingBox()
+    if (!track || !thumb) throw new Error('Live xterm scrollbar has no bounding box')
+    expect(track.height).toBeGreaterThan(thumb.height * 2)
+    const dragX = thumb.x + thumb.width / 2
+    const dragStartY = thumb.y + thumb.height / 2
+    const dragTravel = thumb.y - track.y
+    expect(dragTravel).toBeGreaterThan(track.height / 2)
+    const nativeRows = () => live.locator(':scope > div').evaluateAll((rows) =>
+      rows.map((row) => row.textContent?.trimEnd() ?? '').filter(Boolean),
+    )
+    await page.mouse.move(dragX, dragStartY)
+    await page.mouse.down()
+    let previousRows = await nativeRows()
+    let finalRows = previousRows
+    let finalOrigin: { top: number; left: number } | null = null
+    try {
+      for (const fraction of [0.15, 0.3, 0.45]) {
+        await page.mouse.move(dragX, dragStartY - dragTravel * fraction, { steps: 4 })
+        await expect.poll(nativeRows).not.toEqual(previousRows)
+        previousRows = await nativeRows()
+      }
+      finalRows = previousRows
+      const box = await live.locator(':scope > div').first().boundingBox()
+      if (!box) throw new Error('Final native row has no visible geometry')
+      finalOrigin = { top: box.y, left: box.x }
+    } finally {
+      await page.mouse.up()
+    }
+    const scroller = page.getByLabel('Terminal scrollback', { exact: true })
+    await expect(scroller).toBeVisible()
+    await expect.poll(async () => (await visibleHistory(scroller)).rows
+      .map((row) => row.text?.trimEnd() ?? '').filter(Boolean).slice(0, 3))
+      .toEqual(finalRows.slice(0, 3))
+    await expect.poll(async () => {
+      const row = (await visibleHistory(scroller)).rows[0]
+      const box = await scroller.boundingBox()
+      return row && box ? { top: box.y + row.top, left: box.x + row.left } : null
+    }).toEqual(finalOrigin)
+
+    const beforeQuery = await visibleHistory(scroller)
+    await scroller.focus()
+    await page.keyboard.type('forbidden-history-input')
+    await page.keyboard.press('Enter')
+    // The PTY is already in raw mode and waiting on a mounted-file handshake,
+    // so any leaked keystrokes precede (and corrupt) its actual CSI 6n reply.
+    writeFileSync(queryGate, 'send cursor query')
+    await expect.poll(() => observedOutput).toMatch(/LONG-CPR:\x1b\[\d+;\d+R/)
+    expect(observedOutput).not.toContain('forbidden-history-input')
+    await expect(scroller).toBeVisible()
+    await expect.poll(() => visibleHistory(scroller)).toEqual(beforeQuery)
+    await wheelUntil(page, scroller, -2400, async () => delayedOlder)
+    await expect.poll(async () => (await visibleHistory(scroller)).rows.length).toBeGreaterThan(0)
+    const beforePrepend = await visibleHistory(scroller)
+    const pagesBeforePrepend = completedPages
+    releaseOlder()
+    await expect.poll(() => completedPages).toBeGreaterThan(pagesBeforePrepend)
+    await expect.poll(() => visibleHistory(scroller)).toEqual(beforePrepend)
+
+    await wheelUntil(page, scroller, -8000, async () =>
+      (await visibleHistory(scroller)).rows.some((row) => row.text?.includes('EARLIEST-LONG')),
+    )
+    expect(deliveredRows).toBeGreaterThan(12000)
+    expect(completedPages).toBeGreaterThan(60)
+    expect(await scroller.locator('[data-history-row]').count()).toBeLessThan(250)
+    await testInfo.attach('earliest retained history', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    })
+    const earliest = await visibleHistory(scroller)
+    expect(earliest.rows[0].index).toBeLessThan(-10000)
+    expect(earliest.rows.find((row) => row.text?.includes('EARLIEST-LONG'))?.cursor).toBeTruthy()
+
+    // Keep the real Clipboard object for observation while making the page's
+    // async clipboard API unavailable. Observe native clipboard contents,
+    // never a mocked write or an invocation of the fallback helper.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+      origin: new URL(alice.url).origin,
+    })
+    const clipboard = await page.evaluateHandle(() => navigator.clipboard)
+    try {
+      await clipboard.evaluate((native) => native.writeText('clipboard-sentinel'))
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+      })
+      const earliestRow = scroller.locator('[data-history-row]').filter({ hasText: 'EARLIEST-LONG' })
+      const rowBox = await earliestRow.boundingBox()
+      expect(rowBox).not.toBeNull()
+      await page.mouse.move(rowBox!.x + 1, rowBox!.y + rowBox!.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(rowBox!.x + 150, rowBox!.y + rowBox!.height / 2, { steps: 5 })
+      await page.mouse.up()
+      const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '')
+      expect(selected).toContain('EARLIEST-LONG')
+      await page.getByRole('button', { name: 'Copy terminal selection', exact: true }).click()
+      await expect.poll(() => clipboard.evaluate((native) => native.readText())).toBe(selected)
+
+      await clipboard.evaluate((native) => native.writeText('clipboard-sentinel'))
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: async () => { throw new DOMException('Clipboard denied', 'NotAllowedError') },
+          },
+        })
+      })
+      const screenText = (await visibleHistory(scroller)).rows.map((row) => row.text ?? '').join('\n')
+      expect(screenText).toContain('EARLIEST-LONG')
+      await page.getByRole('button', { name: 'Copy last screen', exact: true }).click()
+      await expect.poll(() => clipboard.evaluate((native) => native.readText())).toBe(screenText)
+    } finally {
+      await page.evaluate(() => { Reflect.deleteProperty(navigator, 'clipboard') })
+      await clipboard.dispose()
+    }
+
+    await scroller.focus()
+    await page.keyboard.press('PageDown')
+    await expect.poll(async () => (await visibleHistory(scroller)).rows[0]?.index)
+      .toBeGreaterThan(earliest.rows[0].index)
+    const pagesAtOldest = completedPages
+    await wheelUntil(page, scroller, 6000, async () => {
+      const first = (await visibleHistory(scroller)).rows[0]
+      return first !== undefined && first.index > -600
+    })
+    await wheelUntil(page, scroller, 200, async () =>
+      await scroller.getByRole('separator').count() === 1,
+    )
+    await expect(scroller.getByRole('separator')).toHaveCount(1)
+    expect(completedPages).toBe(pagesAtOldest)
+    expect(await scroller.locator('[data-history-row]').count()).toBeLessThan(250)
+    await scroller.focus()
+    await page.keyboard.press('End')
+    await expect(scroller).toBeHidden()
+    await expect(live).toContainText('LONG-CURRENT')
+    // End must hand keyboard focus back as part of leaving the reading surface.
+    // No click/focus call is allowed between End and this real PTY command.
+    await page.keyboard.type('after-history')
+    await page.keyboard.press('Enter')
+    await expect(live).toContainText('LONG-INPUT:after-history')
+    expect(rawDownloads).toEqual([])
+  } finally {
+    releaseOlder()
+    writeFileSync(queryGate, 'release query during teardown')
+    await closeWriter(run.writer.socket)
   }
-  await expect(history).toContainText(firstOutput)
+})
+
+test('switching live runs restores the same recorded rows and pixel offsets without inactive sockets', async ({
+  page,
+  aether,
+}, testInfo) => {
+  const { alice, workspaceID } = await prepareHistory(aether)
+  const runA = await launchHistoryRun(alice, workspaceID, 'RESTORE-A', 7200)
+  const runB = await launchHistoryRun(alice, workspaceID, 'RESTORE-B', 0)
+  const activeSockets = new Map<object, string>()
+  const historyRequests: string[] = []
+  page.on('websocket', (socket) => {
+    const url = new URL(socket.url())
+    if (!url.pathname.startsWith('/ws/attach/') || url.searchParams.has('shell')) return
+    activeSockets.set(socket, url.pathname.split('/').pop()!)
+    socket.on('close', () => activeSockets.delete(socket))
+  })
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname !== '/api/v1/terminal.history') return
+    const params = request.postDataJSON() as { run_id: string; before?: string }
+    if (params.run_id === runA.id) historyRequests.push(params.before ?? '')
+  })
+  try {
+    await page.goto(alice.url)
+    const sidebar = page.getByRole('complementary', { name: 'Runs' })
+    await sidebar.getByRole('button', { name: runA.task }).click()
+    const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
+    await expect(live).toContainText('RESTORE-A-CURRENT', { timeout: 30_000 })
+    await expect.poll(() => [...activeSockets.values()]).toEqual([runA.id])
+    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+      .click({ position: { x: 10, y: 10 } })
+    await page.keyboard.press('Shift+PageUp')
+    const scroller = page.getByLabel('Terminal scrollback', { exact: true })
+    await expect(scroller).toBeVisible()
+    await wheelUntil(page, scroller, -8000, async () =>
+      (await visibleHistory(scroller)).rows.some((row) => row.index < -5200),
+    )
+    // Move away from the paging threshold, then pan a long unwrapped archive
+    // line and leave its first row partially clipped.
+    await scroller.hover()
+    await page.mouse.wheel(137, 413)
+    await expect.poll(async () => (await visibleHistory(scroller)).left).toBeGreaterThan(0)
+    await expect.poll(async () => (await visibleHistory(scroller)).rows[0]?.top).toBeLessThan(0)
+    const saved = await visibleHistory(scroller)
+    expect(saved.rows[0].cursor).toBeTruthy()
+    expect(saved.rows[0].text).toContain('RESTORE-A-HISTORY-')
+
+    await sidebar.getByRole('button', { name: runB.task }).click()
+    await expect(live).toContainText('RESTORE-B-CURRENT')
+    await expect.poll(() => [...activeSockets.values()]).toEqual([runB.id])
+    const requestsBeforeReturn = historyRequests.length
+    await sendInputUntil(runA.writer, 'stream\r', 'RESTORE-A-GAP-00010')
+    await expect(live).not.toContainText('RESTORE-A')
+    expect(historyRequests).toHaveLength(requestsBeforeReturn)
+    await sidebar.getByRole('button', { name: runA.task }).click()
+    await expect(scroller).toBeVisible()
+    await expect.poll(() => visibleHistory(scroller)).toEqual(saved)
+    await expect.poll(() => [...activeSockets.values()]).toEqual([runA.id])
+    expect(historyRequests).toHaveLength(requestsBeforeReturn)
+    expect(await scroller.locator('[data-history-row]').count()).toBeLessThan(250)
+    await testInfo.attach('restored run A while live output continues', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    })
+
+    await wheelUntil(page, scroller, -8000, async () =>
+      (await visibleHistory(scroller)).rows.some((row) => row.text?.includes('EARLIEST-RESTORE-A')),
+    )
+    const oldest = (await visibleHistory(scroller)).rows[0].index
+    await scroller.focus()
+    await page.keyboard.press('PageDown')
+    await expect.poll(async () => (await visibleHistory(scroller)).rows[0]?.index).toBeGreaterThan(oldest)
+    await page.keyboard.press('End')
+    await expect(scroller).toBeHidden()
+    await expect(live).toContainText('RESTORE-A-GAP-')
+    // A new reading episode must start at a fresh archive head, not skip the
+    // output that has already fallen out of xterm's bounded native buffer.
+    await sendInputUntil(runA.writer, 'refresh\r', 'RESTORE-A-REFRESH-CURRENT')
+    await expect(live).toContainText('RESTORE-A-REFRESH-CURRENT')
+    await expect(live).not.toContainText('RESTORE-A-REFRESH-FIRST')
+    const headsBeforeRefresh = historyRequests.filter((cursor) => cursor === '').length
+    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+      .hover({ position: { x: 10, y: 10 } })
+    await page.mouse.wheel(0, -2400)
+    await expect(scroller).toBeVisible()
+    // The refresh filled xterm's 5000-row native buffer. Traverse it before
+    // requiring the new episode to fetch the newest archive page.
+    await wheelUntil(page, scroller, -8000, async () =>
+      historyRequests.filter((cursor) => cursor === '').length > headsBeforeRefresh,
+    )
+    await wheelUntil(page, scroller, -8000, async () =>
+      (await visibleHistory(scroller)).rows.some((row) => row.index < -6900),
+    )
+    await wheelUntil(page, scroller, -200, async () =>
+      (await visibleHistory(scroller)).rows.some((row) =>
+        row.cursor !== null && row.text?.includes('RESTORE-A-REFRESH-FIRST')),
+    )
+    await testInfo.attach('fresh archive head after returning live', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    })
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click()
+    await expect.poll(() => activeSockets.size).toBe(0)
+  } finally {
+    await releaseWriter(runA.writer, 1)
+    await closeWriter(runA.writer.socket)
+    await releaseWriter(runB.writer, 1)
+    await closeWriter(runB.writer.socket)
+  }
 })

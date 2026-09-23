@@ -40,6 +40,8 @@ export interface XtermOptions {
   onResize?: (cols: number, rows: number) => void
   /** Called synchronously before a terminal hyperlink opens. Return true to handle. */
   onLink?: (uri: string) => boolean
+  /** Capture a mounted terminal's presentation before its renderer is disposed. */
+  onBeforeDispose?: (terminal: Terminal) => void
 }
 
 export interface XtermController {
@@ -240,11 +242,13 @@ export function useXterm({
   onData,
   onResize,
   onLink,
+  onBeforeDispose,
 }: XtermOptions = {}): XtermController {
   const [host, setHost] = useState<HTMLDivElement | null>(null)
   const onDataRef = useRef(onData)
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
+  const onBeforeDisposeRef = useRef(onBeforeDispose)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const liveTerminal = useRef<Terminal | null>(null)
   const [search, setSearch] = useState<SearchAddon | null>(null)
@@ -267,6 +271,7 @@ export function useXterm({
   onDataRef.current = onData
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  onBeforeDisposeRef.current = onBeforeDispose
   const noteViewportInteraction = useCallback(() => {
     viewportInteractionRevision.current++
   }, [])
@@ -502,7 +507,8 @@ export function useXterm({
         viewportInteractionRevision.current++
       }
       const noteScrollbarInteraction = (event: PointerEvent) => {
-        if (event.target === host.querySelector('.xterm-viewport')) noteViewportInteraction()
+        if (event.target instanceof Element &&
+          event.target.closest('.xterm-scrollable-element > .scrollbar')) noteViewportInteraction()
       }
       host.addEventListener('wheel', noteViewportInteraction, { passive: true })
       host.addEventListener('touchmove', noteViewportInteraction, { passive: true })
@@ -537,16 +543,20 @@ export function useXterm({
     })
 
     return () => {
-      active = false
-      liveTerminal.current = null
-      if (structuralReplay.current?.terminal === created) structuralReplay.current = null
-      armCtrl(false)
-      cancelFontWait()
-      teardown?.()
-      created.dispose()
-      setTerminal(null)
-      setSearch(null)
-      setFindOpen(false)
+      try {
+        if (liveTerminal.current === created) onBeforeDisposeRef.current?.(created)
+      } finally {
+        active = false
+        liveTerminal.current = null
+        if (structuralReplay.current?.terminal === created) structuralReplay.current = null
+        armCtrl(false)
+        cancelFontWait()
+        teardown?.()
+        created.dispose()
+        setTerminal(null)
+        setSearch(null)
+        setFindOpen(false)
+      }
     }
   }, [armCtrl, enabled, host, scrollback])
 

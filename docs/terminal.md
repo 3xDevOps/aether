@@ -233,12 +233,14 @@ the terminal itself claims them before the shell sees them.
 
 `Cmd`, or the `Super`/`Windows` key, works as well as `Ctrl` for the zoom
 keys. The font size is one preference across every terminal and survives a
-reload; find searches the bounded scrollback of the terminal it was opened in.
-A run terminal also offers **Open terminal history**. That separate view loads
-the newest normalized text page first, fetches older pages only as requested,
-and performs case-insensitive literal searches on the server. It retains at
-most 1,000 lines in the browser and never replays the full recording into
-xterm. Raw full-history compatibility exports are not part of the dashboard.
+reload. Find searches the focused terminal's bounded live scrollback; while
+reading a run's history, it searches the already loaded recorded pages and
+frozen screen rows instead. It does not fetch the entire archive to search it.
+Scroll upward in a run terminal to read older output in the same pane.
+`PageUp` and `Home` also enter reading mode; `Shift+PageUp` explicitly opens
+recorded output even when an alternate-screen application owns ordinary
+scrolling. While reading, arrows, `PageUp`/`PageDown` and `Home` navigate;
+scrolling down to the bottom or pressing `End` returns to live output.
 `Ctrl+Shift+=` is accepted for zoom, but `Ctrl+Shift+-` remains the shell's
 `Ctrl+_` (readline undo or a vim keymap switch), as does a shifted `Ctrl+0`.
 The zoom shortcuts normally cancel the browser's own page zoom; if a browser
@@ -292,8 +294,11 @@ that, and the size is recomputed without you.
 
 On a phone every terminal here - a run's, its shells, and this one - shows
 the session at the size it already is rather than at the phone's own width,
-and provides horizontal panning across an oversized grid. That outer pan never
-becomes a second vertical scroll area: xterm still owns vertical history. The
+and provides horizontal panning across an oversized grid. There is only one
+vertical reading surface: live xterm or the run's integrated history, never
+two nested vertical scrollers. Drag a finger downward to read older normal-
+buffer output, then swipe toward newer output to return live at the bottom.
+Ordinary alternate-screen gestures remain owned by the running application. The
 phone follows the shared size, so when someone with a bigger screen resizes the
 terminal, it redraws at the new one. Nothing a phone does changes that size,
 watching or steering, so an agent's screen is never reflowed by a phone.
@@ -329,11 +334,15 @@ instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
 
-Changing away from a run terminal closes its socket and unmounts that terminal
-surface. You are no longer **Watching**, and the inactive run has no control
-transport or geometry participation. The dashboard does not retain a fixed
-multi-terminal route cache; returning to a run creates a fresh surface and
-bootstraps it from compact current screen state.
+Changing away from a run terminal closes its socket and unmounts its live
+xterm. You are no longer **Watching**, and the inactive run has no control
+transport or geometry participation. A pinned reading position keeps its
+static screen presentation, loaded pages, and row-relative pixel and horizontal
+offsets. Switching from run A to B and back restores A's same recorded row
+and position, even if A kept producing output. The new live attachment
+bootstraps a compact current screen behind that saved presentation; it does
+not replace pinned content or jump the reader to the bottom. A run left
+following live output returns to the fresh current screen.
 
 When an already-mounted dashboard surface deliberately reopens while its
 parsed screen remains valid, it may send the server's nonempty `resume_id` for
@@ -357,37 +366,62 @@ the attach acknowledgement, so opening the terminal does not wait for a
 durable-history scan. The server snapshot keeps at most 200 scrollback rows and
 bounds the screen store to 1,048,576 cells. The browser requests up to 5,000
 live-scrollback rows and reduces that count as needed to keep its normal and
-alternate buffers within a 1,000,000-cell cap. A live, fallback, or finished
-run therefore opens at the current screen rather than showing a historical
-timelapse or scanning the archive. Input and terminal-generated replies stay
-muted through the final hidden snapshot write. Input may resume after that
-write; paint and saved-viewport restoration still settle before the surface is
-revealed.
+alternate buffers within a 1,000,000-cell cap. The live side of a live,
+fallback, or finished run therefore opens at the current screen rather than
+showing a historical timelapse or scanning the archive. A saved pinned
+presentation stays in front of it. User input and terminal-generated replies
+stay muted through the final hidden snapshot write. After that write,
+authorized protocol replies resume even while reading; user input resumes
+only after returning live. Paint and viewport restoration settle before the
+live surface can be revealed.
 
-The snapshot and browser scrollback are bounded, so they may omit older rows
-even while those rows still exist in the retained raw archive. Do not treat
-what can be reached by scrolling in the dashboard as the complete history.
+Live xterm and its bootstrap remain bounded; older retained output is reached
+by continuing upward in the same terminal pane. Reading freezes the current
+VT presentation while new output continues behind it. Older archive pages
+are **normalized recorded text**, not a reconstruction of historical VT
+screens. An inline boundary separates that text from the frozen current
+screen. Some content can appear on both sides: the dashboard does not
+heuristically deduplicate text against VT rows or replay the raw recording
+into xterm.
 
-xterm is the sole owner of vertical terminal scrolling. At the bottom it
-follows new output. After you scroll up it stays on the history being read
-instead of jumping to the newest output. Before a full snapshot replay or a
-column change that reflows rows, the dashboard records whether the viewport
-was following the bottom or its distance above the bottom and restores that
-intent afterward. It does not apply a saved position if you scroll during the
-operation or if the terminal switches between its normal and alternate buffers.
+As you approach the oldest loaded rows, the dashboard prefetches older pages
+and prepends them without moving the row or partial-row pixel offset you are
+reading. Only the visible rows and a small overscan window are rendered.
+Pages are stored in IndexedDB with a small resident text cache, so continuing
+upward can reach all retained pages without a fixed line-count cutoff.
+The saved view and cursor-linked rows belong to the authenticated identity,
+terminal-data epoch, and run creation identity; identity changes, invalidation
+and run deletion fence off stale results. If browser storage is unavailable,
+newly loaded content can remain in memory for this session, but durable restore
+is not guaranteed. Storage and paging failures are reported rather than
+silently treated as the end of the archive.
 
-For older output, open **Terminal history**. The dashboard loads normalized
-text in bounded pages, starting with the newest page, and requests older pages
-only as you move back. Older pages are prepended to the displayed result;
-starting or changing a search replaces that result set. Its literal,
-case-insensitive search runs on the server, so the browser does not load or
-replay the complete retained recording. The view holds at most 1,000 lines at
-once. The server returns at most 200 lines per request and also bounds disk
-reads, decoded events, segment discovery, concurrent readers, and elapsed scan
-time. A page or search can therefore be short or empty while `has_more` still
-says older output remains. **Load older** continues with the authenticated
-opaque cursor returned by the server; the cursor is tied to this run and query
-and must not be constructed or edited by the client.
+The frozen presentation keeps its line layout when the live grid changes.
+The shared font zoom also scales the reading surface while preserving its
+row-relative position. Find searches retained loaded pages and frozen rows,
+including pages outside the rendered window; copy targets the read surface.
+Typing, native paste and toolbar paste remain disabled while reading.
+Unmodified dashboard shortcuts also stay inactive while the reading surface
+has focus: `n` cannot launch a run and `Esc` cannot leave this one.
+Terminal-generated replies continue under the live connection's write
+authority, so reading history does not stall applications awaiting a reply.
+Scroll down to the bottom or press `End` to resume following live output.
+Only starting a new reading episode after returning live refreshes the
+archive from its newest page; remounting a pinned run preserves its existing
+pages and continuation instead.
+
+The [run-switch example](media/terminal-history-restore.webp) shows the same
+deep archive viewport before and after visiting another run while the archive
+grows. Continuing upward reaches the
+[earliest retained output](media/terminal-history-earliest.webp).
+
+The server returns at most 200 lines per request and also bounds disk reads,
+decoded events, segment discovery, concurrent readers, and elapsed scan time.
+A page can therefore be short or empty while `has_more` still says older
+output remains. Paging automatically continues with the authenticated opaque
+cursor returned by the server; it is tied to this run and query and must not
+be constructed or edited by the client. The dashboard's Find does not use
+the protocol's separate server-search option.
 
 The retained raw archive remains separately available to non-dashboard
 compatibility clients through

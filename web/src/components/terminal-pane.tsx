@@ -16,9 +16,8 @@ import {
   Search,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import type { SearchAddon } from '@xterm/addon-search'
 import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/heroui'
@@ -38,6 +37,15 @@ import {
 } from '@/lib/term-font'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+
+export interface TerminalReadSurface {
+  copySelection(): void
+  copyScreen(): void
+  findNext(term: string): boolean | Promise<boolean>
+  findPrevious(term: string): boolean | Promise<boolean>
+  cancelFind(): void
+  focus(): void
+}
 
 /** A terminal toolbar button and the shortcut its tooltip names. */
 function ToolButton({
@@ -79,9 +87,11 @@ function ToolLabel({ children }: { children: React.ReactNode }) {
 function TerminalTools({
   controller,
   image,
+  readingSurface,
 }: {
   controller: XtermController
   image: TerminalImageController
+  readingSurface?: React.RefObject<TerminalReadSurface | null>
 }) {
   const terminal = controller.terminal
   const fontSize = useStore((state) => state.terminalFontSize)
@@ -98,7 +108,7 @@ function TerminalTools({
         variant="ghost"
         size="icon"
         aria-label="Open terminal search"
-        hint="Find in terminal (Ctrl+Shift+F)"
+        hint={readingSurface ? 'Find in loaded recorded output (Ctrl+Shift+F)' : 'Find in terminal (Ctrl+Shift+F)'}
         onClick={() => controller.setFindOpen(true)}
       >
         <Search />
@@ -152,7 +162,8 @@ function TerminalTools({
         hint="Copy terminal selection (Ctrl+Shift+C)"
         disabled={!terminal}
         onClick={() => {
-          if (terminal) void copySelection(terminal)
+          if (readingSurface) readingSurface.current?.copySelection()
+          else if (terminal) void copySelection(terminal)
         }}
       >
         <ClipboardCopy />
@@ -166,7 +177,8 @@ function TerminalTools({
         hint="Copy the rows on screen"
         disabled={!terminal}
         onClick={() => {
-          if (terminal) void copyScreen(terminal)
+          if (readingSurface) readingSurface.current?.copyScreen()
+          else if (terminal) void copyScreen(terminal)
         }}
       >
         <ScanText />
@@ -178,7 +190,7 @@ function TerminalTools({
         size="icon"
         aria-label="Paste into terminal"
         hint="Paste into terminal (Ctrl+Shift+V)"
-        disabled={!terminal}
+        disabled={!terminal || !!readingSurface}
         onClick={() => {
           if (terminal) void image.pasteClipboard()
         }}
@@ -195,25 +207,28 @@ function FindBar({
   onClose,
   onNavigate,
 }: {
-  search: SearchAddon | null
+  search: (Pick<TerminalReadSurface, 'findNext' | 'findPrevious'> & { cancelFind?: () => void }) | null
   onClose: () => void
   onNavigate?: () => void
 }) {
   const [term, setTerm] = useState('')
   const [missing, setMissing] = useState(false)
   const input = useRef<HTMLInputElement>(null)
+  const request = useRef(0)
 
   useEffect(() => {
     input.current?.focus()
     input.current?.select()
   }, [])
 
-  const find = (direction: 'next' | 'previous') => {
+  const find = async (direction: 'next' | 'previous') => {
     if (!search || !term) {
       setMissing(false)
       return
     }
-    const found = direction === 'next' ? search.findNext(term) : search.findPrevious(term)
+    const revision = ++request.current
+    const found = await (direction === 'next' ? search.findNext(term) : search.findPrevious(term))
+    if (revision !== request.current) return
     if (found) onNavigate?.()
     setMissing(!found)
   }
@@ -232,6 +247,8 @@ function FindBar({
         className="h-[26px] min-w-0 flex-1 coarse:h-10 sm:w-40"
         onChange={(event) => {
           setTerm(event.target.value)
+          request.current++
+          search?.cancelFind?.()
           setMissing(false)
         }}
         onKeyDown={(event) => {
@@ -288,6 +305,8 @@ export function TerminalPane({
   imageUploadEnabled,
   writable = true,
   replaying = false,
+  surface,
+  readingSurface,
 }: {
   controller: XtermController
   /** Extra classes for the terminal element itself. */
@@ -306,12 +325,16 @@ export function TerminalPane({
   writable?: boolean
   /** Whether replay is still parsing and the terminal surface must stay hidden. */
   replaying?: boolean
+  /** Run-only overlay; the shared xterm host keeps its measured geometry. */
+  surface?: React.ReactNode
+  /** Redirect tools and mute input while the visible surface is recorded output. */
+  readingSurface?: React.RefObject<TerminalReadSurface | null>
 }) {
   const image = useTerminalImage({
     terminal: controller.terminal,
     imageTarget,
     imageTargetKey,
-    imageUploadEnabled,
+    imageUploadEnabled: readingSurface ? false : imageUploadEnabled,
     focusTerminal: controller.focusTerminal,
   })
   const coarse = useMediaQuery(coarsePointer)
@@ -322,35 +345,57 @@ export function TerminalPane({
   const armCtrl = controller.armCtrl
   const terminal = controller.terminal
   useEffect(() => {
-    if (!writable) armCtrl(false)
-  }, [armCtrl, writable])
-  useEffect(() => {
+    if (!writable || readingSurface) armCtrl(false)
+  }, [armCtrl, readingSurface, writable])
+  useLayoutEffect(() => {
     if (!terminal) return
-    // xterm's hidden textarea is still focusable on a mirror. Disable its
-    // stdin and blur it so a tap cannot raise a keyboard that has nowhere to
-    // send its input.
-    terminal.options.disableStdin = !writable
-    if (!writable) terminal.blur()
-  }, [terminal, writable])
+    // Authority and replay still suppress all input. Reading only blocks DOM
+    // input: the live parser must be able to answer terminal queries.
+    terminal.options.disableStdin = !writable || replaying
+    if (!writable || replaying || readingSurface) terminal.blur()
+    const host = terminal.element?.parentElement
+    if (!readingSurface || !host) return
+    const block = (event: Event) => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    const blur = () => terminal.blur()
+    const events = ['keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'paste', 'compositionstart', 'compositionupdate', 'compositionend']
+    for (const event of events) host.addEventListener(event, block, true)
+    host.addEventListener('focus', blur, true)
+    return () => {
+      for (const event of events) host.removeEventListener(event, block, true)
+      host.removeEventListener('focus', blur, true)
+    }
+  }, [terminal, writable, replaying, readingSurface])
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-2 coarse:min-h-12">
         {!controller.findOpen ? (
-          <TerminalTools controller={controller} image={image} />
+          <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
         ) : (
           <FindBar
-            search={controller.search}
+            search={readingSurface ? {
+              findNext: (term) => readingSurface.current?.findNext(term) ?? false,
+              findPrevious: (term) => readingSurface.current?.findPrevious(term) ?? false,
+              cancelFind: () => readingSurface.current?.cancelFind(),
+            } : controller.search}
             onNavigate={controller.noteViewportInteraction}
             onClose={() => {
-              controller.focusTerminal()
+              if (readingSurface) {
+                readingSurface.current?.cancelFind()
+                readingSurface.current?.focus()
+              } else controller.focusTerminal()
               controller.setFindOpen(false)
             }}
           />
         )}
         {toolbarEnd}
       </div>
+      <div className="relative flex min-h-0 min-w-0 flex-1">
       <div
         ref={controller.hostRef}
+        inert={replaying || !!readingSurface}
         className={cn(
           'min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-background p-2 text-foreground',
           className,
@@ -358,12 +403,14 @@ export function TerminalPane({
         style={{
           overflowY: 'hidden',
           overscrollBehaviorY: 'none',
-          visibility: replaying ? 'hidden' : undefined,
+          visibility: replaying || readingSurface ? 'hidden' : undefined,
         }}
       />
-      {coarse && writable && <TerminalKeys controller={controller} />}
+        {surface}
+      </div>
+      {coarse && writable && !readingSurface && <TerminalKeys controller={controller} />}
       {children}
-      {replaying && (
+      {replaying && !readingSurface && (
         <div
           role="status"
           aria-label="Restoring terminal history"

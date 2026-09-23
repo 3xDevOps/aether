@@ -1,8 +1,9 @@
-import { useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import type { Terminal } from '@xterm/xterm'
 import { toast } from 'sonner'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
-import { TerminalPane, TerminalSpinner } from '@/components/terminal-pane'
+import { TerminalPane, TerminalSpinner, type TerminalReadSurface } from '@/components/terminal-pane'
 import { useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -16,6 +17,7 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { RunDock } from '@/routes/terminal/run-dock'
 import { RunRoom } from '@/routes/terminal/run-room'
 import { TerminalHistory } from '@/routes/terminal/history'
+import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useRunTerminalSession } from '@/routes/terminal/session'
 import { useStore } from '@/store'
@@ -48,7 +50,10 @@ const endedStatuses: readonly RunStatus[] = [
 const startingStatuses: readonly RunStatus[] = ['queued', 'provisioning']
 
 function TerminalView(props: RouteProps) {
-  return <TerminalRoute key={props.params.runId} {...props} />
+  const identityKey = useStore((state) => state.identityKey)
+  const epoch = useStore((state) => state.terminalCacheEpoch)
+  const createdAt = useStore((state) => state.runs[props.params.runId]?.created_at)
+  return <TerminalRoute key={JSON.stringify([identityKey, epoch, props.params.runId, createdAt])} {...props} />
 }
 
 function TerminalRoute({ params }: RouteProps) {
@@ -66,6 +71,15 @@ function TerminalRoute({ params }: RouteProps) {
   const phone = useMediaQuery(phoneScreen)
   const known = run !== undefined
   const starting = run !== undefined && startingStatuses.includes(run.status)
+  const historyCache = useMemo(() => getHistoryCache({
+    identityKey,
+    epoch: terminalCacheEpoch,
+    runID,
+    createdAt: run?.created_at ?? '',
+  }), [identityKey, terminalCacheEpoch, runID, run?.created_at])
+  const beforeDispose = useRef<((terminal: Terminal) => void) | null>(null)
+  const historyTools = useRef<TerminalReadSurface | null>(null)
+  const [readingHistory, setReadingHistory] = useState(true)
 
   const steerable = run?.status === 'running' || run?.status === 'needs-attention'
   const automaticWrite =
@@ -90,6 +104,7 @@ function TerminalRoute({ params }: RouteProps) {
     follow: phone,
     scrollback: 5000,
     onData: (data) => sendRef.current(data),
+    onBeforeDispose: (terminal) => beforeDispose.current?.(terminal),
     onResize: (cols, rows) => resizeRef.current(cols, rows),
     onLink: (uri) => {
       if (!capability.hasLocal('forward.start')) {
@@ -172,7 +187,6 @@ function TerminalRoute({ params }: RouteProps) {
           </span>
         )}
       </Button>
-      <TerminalHistory runID={runID} />
       {state.steerDenied && (
         <span className="min-w-0 flex-[1_1_16rem] break-words text-muted-foreground">
           You cannot steer this run.
@@ -218,6 +232,17 @@ function TerminalRoute({ params }: RouteProps) {
               key={runID}
               controller={controller}
               writable={state.write && !starting && !replaying}
+              readingSurface={readingHistory ? historyTools : undefined}
+              surface={
+                <TerminalHistory
+                  controller={controller}
+                  cache={historyCache}
+                  enabled={!starting && !replaying}
+                  beforeDispose={beforeDispose}
+                  tools={historyTools}
+                  onReadingChange={setReadingHistory}
+                />
+              }
               imageTarget={runID}
               toolbarEnd={attachmentControls}
               imageUploadEnabled={

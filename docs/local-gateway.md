@@ -215,11 +215,30 @@ Line count is not the only bound. Each request also limits raw disk reads,
 decoded bytes and events, elapsed time, cast segments, directory discovery,
 and concurrent readers; searches have their own lower concurrency cap. A page
 or search may therefore return fewer than the requested number of lines,
-including none, with `has_more:true`. Continuing is an explicit older-page
-request with `next_cursor`; the live attach does not do this work. The history
-dialog prepends older pages, replaces the displayed result when a search
-changes, retains at most 1,000 lines in browser memory, and never feeds these
-pages into xterm.
+including none, with `has_more:true`. Continuing uses an older-page request
+with `next_cursor`; the live attach does not do this work. The dashboard's
+integrated upward scroller starts at the newest page and prefetches older
+windows near the loaded edge, automatically continuing empty scan windows.
+It never writes archive pages into xterm. Its existing Find searches retained
+loaded pages and frozen screen rows locally, rather than issuing server-search
+queries. The protocol's `query` option and bounds remain available unchanged.
+
+The browser renders a bounded visible-row window, retaining pages and saved
+view state in IndexedDB with an eight-page resident text LRU rather than
+discarding older lines. Prepending pages preserves the cursor-linked row,
+relative pixel offset and horizontal offset. A frozen VT presentation is
+separated from normalized recorded text by an inline boundary; the two are
+not text-deduplicated, and normalized history is not exact historical VT
+reconstruction. Leaving a run closes its main attach but keeps its static
+read position. A fresh live bootstrap on return does not overwrite that view.
+Scrolling down to the bottom or `End` returns live; only a subsequent new
+reading episode refreshes paging from the newest archive head.
+
+Cache state is fenced by identity, terminal-data epoch and run creation
+identity, and invalidated for deleted runs. Storage failures are reported;
+an in-memory fallback when storage is unavailable is not a persistence
+guarantee. These are browser policies, not changes to the request, cursor or
+authorization contract.
 
 The raw `GET /api/runs/<run_id>/terminal-history` route remains only for
 non-dashboard compatibility consumers that need the complete recording. The
@@ -1204,15 +1223,17 @@ resize, control, geometry, and acknowledgements.
    acknowledged size without imposing local geometry. `cols` and `rows` do
    not override a live or recorded screen's geometry.
 
-   Geometry `follow` is independent of the xterm viewport's follow-bottom
-   state. The browser gives xterm sole ownership of vertical history: a
-   viewport at the bottom follows output, while a user-scrolled viewport stays
-   on the selected history. Before a full structural replay or a column reflow,
-   the browser captures either follow-bottom or the pinned bottom offset. It
-   restores that intent only if the operation is still current, the user has
-   not scrolled in the meantime, and the active normal or alternate buffer has
-   not changed. On a phone, the surrounding pane exposes horizontal panning
-   for an oversized acknowledged grid but no competing vertical scroll.
+   Geometry `follow` is independent of viewport follow-bottom state. Live
+   xterm follows output at the bottom; upward reading in the dashboard run
+   pane switches to a static, virtualized surface with its own row/pixel
+   anchor. Compact bootstrap and live geometry changes do not overwrite that
+   saved presentation. For xterm's own structural replay or column reflow,
+   viewport restoration remains conditional on a current operation, no newer
+   user scroll and the same normal/alternate buffer. On a phone the live pane
+   pans horizontally across the acknowledged grid, while the history surface
+   owns scrolling during reading; neither adds a competing vertical scroller.
+   Ordinary alternate-screen gestures remain application input; `Shift+PageUp`
+   is the dashboard's explicit archive gesture, not a protocol operation.
 
 2. Server answers one **text** ack:
 
