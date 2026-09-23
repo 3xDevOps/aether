@@ -118,7 +118,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long an explicitly closed TUI run's container is retained (0 = 1h, negative = no retention)")
+		"how long an explicitly closed TUI run's container is retained (0 = 168h / 7 days, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"refuse new runs below this many free bytes (0 = 1GiB, negative = no floor)")
 	return o

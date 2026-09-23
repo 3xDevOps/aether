@@ -18,7 +18,7 @@ immediate cleanup.
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
-| `--run-container-ttl` | `1h` | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `1h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
@@ -304,8 +304,9 @@ aether close <run> --outcome abandoned
 Closing a live TUI run pauses its container, commits and publishes the current
 checkout, records the selected outcome, and retains the exact container,
 checkout, run row, member account, and coordination surfaces for
-`--run-container-ttl`. Zero uses the default `1h`; a negative TTL disables
-retention and cleans up immediately. Kill stops and destroys a run immediately.
+`--run-container-ttl`. Zero uses the default `168h` (7 days); negative TTL
+disables retention and cleans up immediately. Kill stops and destroys a run
+immediately.
 Delete stops any live container and removes the checkout, transcript, and
 durable run records; its timeline remains audit history. Its recorded cost
 survives inside its workspace's and its member's spend totals - the numbers

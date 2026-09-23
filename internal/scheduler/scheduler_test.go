@@ -1393,11 +1393,14 @@ func TestTaskLine(t *testing.T) {
 	}
 }
 
-func TestCheckoutTTLDefault(t *testing.T) {
+func TestRetentionTTLDefaults(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	if got := e.sched.cfg.CheckoutTTL; got != 72*time.Hour {
 		t.Fatalf("default CheckoutTTL = %v, want 72h", got)
+	}
+	if got := e.sched.cfg.RunContainerTTL; got != 7*24*time.Hour {
+		t.Fatalf("default RunContainerTTL = %v, want 168h", got)
 	}
 	disabled := newTestEnv(t, func(cfg *Config) { cfg.CheckoutTTL = -1 })
 	if got := disabled.sched.cfg.CheckoutTTL; got >= 0 {

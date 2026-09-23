@@ -125,8 +125,9 @@ aether close <run> --outcome abandoned
 
 Close pauses the container and retains the exact container, checkout, run row,
 member account, and coordination surfaces for `--run-container-ttl`. The
-default is `1h`; `0` uses that default and a negative value disables retention
-and cleans up immediately. Kill and Delete remain immediate cleanup operations.
+default is `168h` (7 days); `0` uses that default. A negative value
+disables retention and cleans up immediately. Kill and Delete remain immediate
+cleanup operations.
 
 Relaunch is available only for an explicitly closed, retained TUI run while
 its retention deadline has not passed:
