@@ -135,8 +135,11 @@ the tailnet.
 
 For the local backend, when a call fails on transport (a server restart or a
 dropped network), it redials once and retries once before surfacing `-32004`
-(unavailable); a failure the server itself answered passes through untouched as
-that `protocol.Error`. Streams get the same treatment with a guard: a channel
+(unavailable). `config.import` is not replayed: a lost response may follow
+committed writes, so the failed attempt surfaces immediately. A subsequent
+request can reconnect without replaying the import. A failure the server itself
+answered passes through untouched as that `protocol.Error`. Streams get the
+same treatment with a guard: a channel
 that fails to open triggers a redial only when a keepalive shows the
 connection is actually gone, because tearing down a healthy connection would
 kill every live stream riding on it.
@@ -450,13 +453,16 @@ handles so it can recompute an import when the destination changes, and
 cannot change destinations during import. After a result, the user can start
 another directory selection or choose **Open remote files** to navigate to the
 existing **Files** editor.
-The preview lists accepted paths and makes all omitted paths available for
-review. Imports allow at most 2,000 files, 1 MiB per file, and 20 MiB decoded in
-aggregate. Omissions for count, aggregate size, or per-file size visibly mark
-the selection incomplete and disable upload until the user explicitly
-acknowledges importing the accepted subset, or chooses a smaller selection.
-The acknowledgement resets for a new directory, destination, or recomputed
-selection. Credential/runtime exclusions alone do not require it.
+The preview lists eligible paths and policy exclusions without reading file
+bytes. Directories have no file-count or decoded-total ceiling. The browser
+reads and encodes only the current batch: at most 2,000 files and a target of
+20 MiB decoded. A larger individual file is sent alone. Each `config.import`
+request permits at most 2,000 files and 64 MiB decoded, with a 64 MiB per-file
+ceiling matching configuration editing. These bounds limit a request, not the
+directory. Oversized files and invalid paths block preparation rather than
+offering to import a truncated subset.
+Preparation checks canonical destination keys across the whole selection, so
+root-prefixed aliases cannot overwrite each other in separate batches.
 Accepted bytes are uploaded and server-scanned, so a secret finding does not
 mean those bytes stayed local. Empty and binary regular files are preserved;
 new browser-imported files use `0644`, while overwrites preserve existing
@@ -491,11 +497,19 @@ dashboard says that some files may remain and directs the user to inspect
 **Files** before retrying. Cancellation can prevent the response from being
 delivered; the protocol does not claim a stronger delivery guarantee.
 
+Across batches the dashboard accumulates confirmed counts, paths, and server
+exclusions. A read failure or server-reported partial failure stops subsequent
+batches. A lost response leaves only that request's outcome unknown; earlier
+confirmed writes remain reported. Navigation retains owner-scoped progress and
+results. Before each request, including after file reads, the importer checks
+the authenticated identity and stops if it changed. An in-flight request may
+still complete for its original owner; the new identity cannot see its result.
+
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` at 30 MiB. The 64 MiB editor file limit remains
-authoritative after JSON decoding. The SSH control-channel line cap is 32 MiB;
-the decoded import limits above remain authoritative.
+and `config.import` at 96 MiB. The 64 MiB file and per-request import limits
+remain authoritative after JSON decoding. The SSH control-channel line cap is
+96 MiB, allowing base64 import requests without unbounded framing.
 
 ### `GET /api/v1/run/<run_id>/patch`
 

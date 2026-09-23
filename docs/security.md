@@ -453,26 +453,30 @@ explicit choice. Credential names in any path component and `*.pem` files are
 always skipped before upload. Runtime/history paths come from the selected
 root's `runtime_ignores` metadata and match exact, root-relative paths or
 component prefixes case-sensitively after trailing slashes are trimmed.
-Changing the destination clears the old preview and re-reads retained browser
-`File` handles; generation guards discard stale reads. The preview lists the
-accepted paths and exposes every omitted path for review. Files omitted for
-the 1 MiB per-file, 20 MiB decoded aggregate, or 2,000-file limits mark the
-selection incomplete. Upload is disabled until the user acknowledges importing
-only the accepted subset; choosing a smaller selection is the alternative.
-A new directory, destination, or recomputed selection clears this
-acknowledgement. Expected credential/runtime exclusions alone do not require
-it. There is no watcher, automatic configuration synchronization, or automatic
-import retry.
+Changing the destination recomputes the preview from retained browser `File`
+handles without reading their bytes. The preview lists eligible paths and
+policy exclusions. No directory-wide count or byte ceiling discards files.
+The browser reads and encodes one bounded batch at a time, targeting 20 MiB
+decoded and at most 2,000 files; a larger individual file travels alone.
+Requests permit 64 MiB decoded and individual files have the existing 64 MiB
+configuration-file ceiling. Invalid or oversized files fail explicitly rather
+than enabling an incomplete-selection override.
+Owner-scoped progress and results survive dashboard navigation. Identity changes
+discard preparation and prevent subsequent batches, including after an awaited
+file read. An already submitted request may finish for its original owner;
+its result is never shown to the new identity. There is no watcher, automatic
+configuration synchronization, or automatic import retry.
 
 The browser reads accepted regular-file bytes and sends them to the server,
 where they are scanned before writing; a secret finding is therefore not proof
 that the content stayed local. Empty files and arbitrary binary regular bytes
-are preserved within those limits.
-The shared HTTP gateway permits a 30 MiB request for `config.import`,
-128 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
-The 64 MiB editor file limit remains authoritative after JSON decoding. These
-are framing limits, not larger decoded import allowances. The SSH control
-channel still caps one JSON line at 32 MiB.
+are preserved. A failed or interrupted batch stops the import and reports
+earlier confirmed writes; a lost response leaves that request's outcome unknown.
+The shared HTTP gateway permits a 96 MiB request for `config.import`,
+385 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
+Decoded file and import-request limits remain authoritative. The authenticated
+SSH control channel caps a JSON line at 96 MiB; the larger framing budget does
+not remove decoded import bounds or filesystem validation.
 
 Browser metadata is intentionally limited. New imported files are `0644`;
 existing modes are preserved even when the server uses a restrictive umask.
