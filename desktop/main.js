@@ -17,11 +17,12 @@ const readline = require('node:readline')
 
 const notify = require('./notify')
 
-// The CLI version that built this shell, stamped into package.json by
-// `aether gui build`. It rides down to the renderer as an argv entry the
-// preload reads, so the dashboard can tell a shell built by an older CLI
-// from one built by the CLI now serving the gateway.
-const shellVersion = require('./package.json').version
+// The full CLI build identity is separate from package.json's npm-valid
+// version: git-describe and dev builds cannot use their identities there.
+// Older shells only carried the package version.
+const manifest = require('./package.json')
+const shellVersion = manifest.aetherCliVersion || manifest.version
+const builtBy = manifest.aetherCliPath
 
 // The exit status `aether gui --json` uses to say it replaced this app on
 // disk: relaunch the shell, do not respawn the sidecar (localgw.ExitRelaunch).
@@ -92,6 +93,19 @@ function main() {
         return '' // an explicit path that does not work is an error, not a fallback
       }
     }
+    // A freshly built shell must launch the executable that supplied its
+    // sources and identity, not an older copy earlier on the desktop PATH.
+    // Keep AETHER_BIN as an intentional override; an unavailable pinned
+    // binary is an error rather than permission to silently run another.
+    if (builtBy) {
+      try {
+        fs.accessSync(builtBy, fs.constants.X_OK)
+        if (fs.statSync(builtBy).isFile()) return builtBy
+      } catch {
+        // The pinned binary no longer exists or cannot be run.
+      }
+      return ''
+    }
     const onPath = findOnPath('aether')
     if (onPath) return onPath
     for (const candidate of installLocations()) {
@@ -117,8 +131,11 @@ function main() {
     if (!bin) {
       fatal(
         'aether CLI not found',
-        'The desktop app needs the aether CLI installed.\n\n' +
-          'Install it (see docs/install.md), or set AETHER_BIN to the binary.',
+        builtBy && !process.env.AETHER_BIN
+          ? `The CLI that built this app is no longer executable at ${builtBy}.\n\n` +
+            'Restore it or set AETHER_BIN to the intended binary.'
+          : 'The desktop app needs the aether CLI installed.\n\n' +
+            'Install it (see docs/install.md), or set AETHER_BIN to the binary.',
       )
       return
     }

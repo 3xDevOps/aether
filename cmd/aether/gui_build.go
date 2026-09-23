@@ -91,19 +91,18 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 	if err != nil {
 		return err
 	}
-	// The app finds the CLI the same way the shell does at launch. Refuse
-	// early rather than install a window that only shows "aether CLI not
-	// found".
+	// Require an installed CLI before building: a transient go-run binary
+	// may disappear from the path stamped into the desktop shell.
 	installDirs := "/usr/local/bin or ~/.local/bin"
 	if runtime.GOOS == "windows" {
 		installDirs = `%LOCALAPPDATA%\Programs\Aether`
 	}
-	found, shellOnly := localops.DesktopFindsCLI(home)
+	found, _ := localops.DesktopFindsCLI(home)
 	if !found {
-		return fmt.Errorf("aether is not installed where the desktop app looks (AETHER_BIN, PATH, or %s); install the CLI there first (see docs/install.md)", installDirs)
-	}
-	if shellOnly != "" {
-		fmt.Fprintf(os.Stderr, "warning: aether was found at %s through this terminal's PATH; the application menu may not share it. If the window reports \"aether CLI not found\", install the CLI into %s, or set AETHER_BIN.\n", shellOnly, installDirs)
+		if explicit := os.Getenv("AETHER_BIN"); explicit != "" {
+			return fmt.Errorf("aether CLI is required to build the desktop app: AETHER_BIN %q is not an installed executable; install the CLI or set AETHER_BIN to its path (see docs/install.md)", explicit)
+		}
+		return fmt.Errorf("aether CLI is required to build the desktop app but was not found (PATH or %s); install the CLI first (see docs/install.md)", installDirs)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

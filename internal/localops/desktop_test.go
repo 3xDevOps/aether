@@ -355,11 +355,9 @@ func TestStampShellVersion(t *testing.T) {
 		version string
 	}{
 		{"release tag", "v1.2.3", "1.2.3"},
-		{"prerelease tag", "v1.2.3-rc1", "1.2.3-rc1"},
-		// A dev build has no version electron-builder would accept, so the
-		// manifest keeps its own 0.1.0. The dashboard then reads a shell
-		// stamped 0.1.0 against whatever CLI serves it, which is what a
-		// shell built by a dev CLI is: stale as soon as a release runs it.
+		{"prerelease tag", "v0.5.1-alpha.2", "0.5.1-alpha.2"},
+		{"git describe", "v1.2.3-4-gabc1234", "1.2.3-4-gabc1234"},
+		{"untagged git describe", "abc1234", "0.1.0"},
 		{"dev build", "dev", "0.1.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -367,12 +365,19 @@ func TestStampShellVersion(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := stampShellVersion(dir, tc.cli); err != nil {
+			bin := filepath.Join(dir, "cli", "aether")
+			if err := stampShellVersion(dir, tc.cli, bin); err != nil {
 				t.Fatalf("stampShellVersion: %v", err)
 			}
 			got := read(t, dir)
 			if got["version"] != tc.version {
 				t.Fatalf("version = %v, want %s", got["version"], tc.version)
+			}
+			if got["aetherCliVersion"] != tc.cli {
+				t.Fatalf("aetherCliVersion = %v, want %s", got["aetherCliVersion"], tc.cli)
+			}
+			if got["aetherCliPath"] != bin {
+				t.Fatalf("aetherCliPath = %v, want %s", got["aetherCliPath"], bin)
 			}
 			if got["main"] != "main.js" {
 				t.Fatalf("main = %v, want main.js (other fields must survive)", got["main"])

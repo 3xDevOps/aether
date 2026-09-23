@@ -525,6 +525,30 @@ describe('the desktop app rebuild notice', () => {
     expect(screen.queryByText(notice)).toBeNull()
   })
 
+  test('uses the full build identity, not the npm package version', async () => {
+    for (const [shellVersion, cliVersion, stale] of [
+      ['dev', 'dev', false],
+      ['abc1234', 'abc1234', false],
+      ['v1.2.3-4-gabc1234', 'v1.2.3-5-gdef5678', true],
+      ['v0.5.1-alpha.2', 'v0.5.1-alpha.2', false],
+      ['v0.5.1-alpha.2', 'v0.4.0', true],
+    ] as const) {
+      shellWindow.aetherDesktop = { platform: 'linux', shellVersion }
+      seed({ capabilities: caps({ version: cliVersion }) })
+      const view = render(<UpdateBanners client={fakeApi()} />)
+      await screen.findByText('Aether v1.3.0 is available.')
+      expect(screen.queryByText(notice) !== null).toBe(stale)
+      view.unmount()
+    }
+  })
+
+  test('does not compare a remote gateway version with the local desktop shell', () => {
+    shellWindow.aetherDesktop = { platform: 'linux', shellVersion: 'v1.2.3' }
+    seed({ capabilities: caps({ gateway: 'server', local: [], version: 'v9.9.9' }) })
+    render(<UpdateBanners client={fakeApi()} />)
+    expect(screen.queryByText(notice)).toBeNull()
+  })
+
   test('dismissing it lasts only until the CLI moves again', async () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed({ dismissedUpdates: { cli: '', server: '', shell: 'v1.2.3' } })
