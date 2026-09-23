@@ -40,7 +40,7 @@ func (st *sessionState) geometry() (cols, rows uint, hasPTY bool) {
 // The context handed to handlers is canceled when the channel closes (the
 // request loop ends), so subsystem handlers observe channel teardown even
 // when they are not blocked on channel I/O.
-func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc ssh.NewChannel) {
+func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc ssh.NewChannel, abortConn func()) {
 	ch, reqs, err := nc.Accept()
 	if err != nil {
 		return
@@ -102,7 +102,7 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 			var handler func()
 			switch p.Name {
 			case protocol.SubsystemControl:
-				handler = func() { s.serveControl(ctx, member, ch) }
+				handler = func() { s.serveControl(ctx, member, ch, abortConn) }
 			case protocol.SubsystemEvents:
 				handler = func() { s.serveEvents(ctx, member, sshConn{ch}) }
 			case protocol.SubsystemAttach:

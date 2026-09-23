@@ -17,7 +17,7 @@ const (
 	stateOSCEsc
 )
 
-// maxLineBytes caps a pending line (mirrors protocol.MaxLineBytes). A
+// maxLineBytes caps a pending harness-output line independently of RPC framing. A
 // harness emitting an endless unterminated line must never grow server
 // memory: past the cap the line's remaining bytes are discarded until the
 // next terminator and the truncated line is dropped as opaque output.

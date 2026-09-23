@@ -2,17 +2,23 @@ package localgw
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // TestRoundTripCancelUnblocks: a control call stuck on a peer that never
@@ -198,6 +204,126 @@ func TestSSHBackendDialFailureIsCoded(t *testing.T) {
 	if !strings.HasPrefix(eperr.Message, "server unreachable: ") {
 		t.Fatalf("Events message = %q, want prefix %q", eperr.Message, "server unreachable: ")
 	}
+}
+
+func TestSSHBackendTransportFailureRetryPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		method    string
+		wantCalls int32
+		wantError bool
+	}{
+		{name: "config_import_no_replay", method: protocol.MethodConfigImport, wantCalls: 1, wantError: true},
+		{name: "server_info_reconnects", method: protocol.MethodServerInfo, wantCalls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, calls, connections := backendWithLostFirstResponse(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			result, perr := b.Call(ctx, tc.method, nil)
+			if tc.wantError {
+				if perr == nil || perr.Code != protocol.CodeUnavailable || result != nil {
+					t.Fatalf("lost response = %s, %v; want unknown outcome without a result", result, perr)
+				}
+			} else if perr != nil {
+				t.Fatalf("safe request did not reconnect: %v", perr)
+			}
+			if got := calls.Load(); got != tc.wantCalls {
+				t.Fatalf("server received %d calls before an explicit retry, want %d", got, tc.wantCalls)
+			}
+			if got := connections.Load(); got != tc.wantCalls {
+				t.Fatalf("server accepted %d connections before an explicit retry, want %d", got, tc.wantCalls)
+			}
+
+			// A new explicit call can recover, even for an import. Ordinary
+			// calls already recovered and should reuse the healthy connection.
+			if _, perr := b.Call(ctx, tc.method, nil); perr != nil {
+				t.Fatalf("next explicit request did not recover: %v", perr)
+			}
+			if got := calls.Load(); got != tc.wantCalls+1 {
+				t.Fatalf("server received %d total calls, want %d", got, tc.wantCalls+1)
+			}
+			if got := connections.Load(); got != 2 {
+				t.Fatalf("server accepted %d total connections, want 2", got)
+			}
+		})
+	}
+}
+
+// backendWithLostFirstResponse accepts real SSH control calls but closes the
+// first request's channel without responding, after the server received it.
+func backendWithLostFirstResponse(t *testing.T) (Backend, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+	home := testhome.Isolate(t)
+	signer, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &ssh.ServerConfig{NoClientAuth: true}
+	cfg.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	var calls, connections atomic.Int32
+	go func() {
+		for {
+			raw, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer func() { _ = raw.Close() }()
+				conn, channels, requests, err := ssh.NewServerConn(raw, cfg)
+				if err != nil {
+					return
+				}
+				connections.Add(1)
+				defer func() { _ = conn.Close() }()
+				go ssh.DiscardRequests(requests)
+				for incoming := range channels {
+					if incoming.ChannelType() != "session" {
+						_ = incoming.Reject(ssh.UnknownChannelType, "expected session")
+						continue
+					}
+					channel, requests, err := incoming.Accept()
+					if err != nil {
+						return
+					}
+					go func() {
+						defer func() { _ = channel.Close() }()
+						for request := range requests {
+							var subsystem struct{ Name string }
+							ok := request.Type == "subsystem" &&
+								ssh.Unmarshal(request.Payload, &subsystem) == nil &&
+								subsystem.Name == protocol.SubsystemControl
+							_ = request.Reply(ok, nil)
+							if !ok {
+								continue
+							}
+							go ssh.DiscardRequests(requests)
+							var rpc protocol.Request
+							if err := json.NewDecoder(channel).Decode(&rpc); err != nil {
+								return
+							}
+							if calls.Add(1) == 1 {
+								return
+							}
+							_ = json.NewEncoder(channel).Encode(protocol.Response{
+								JSONRPC: "2.0", ID: rpc.ID, Result: json.RawMessage(`{}`),
+							})
+							return
+						}
+					}()
+				}
+			}()
+		}
+	}()
+	b := NewSSHBackend(cli.Config{Addr: listener.Addr().String(), KnownHosts: filepath.Join(home, "known_hosts")})
+	t.Cleanup(func() { _ = b.Close() })
+	return b, &calls, &connections
 }
 
 // TestEventsDialFailureFrameIsUnavailable: with a real SSH backend

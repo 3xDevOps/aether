@@ -564,9 +564,8 @@ before upload. Runtime/history exclusions come from the selected root's
 `runtime_ignores` metadata, which matches exact root-relative paths or
 component prefixes case-sensitively after trailing slashes are trimmed. This
 policy applies to renamed directories too. Changing an ambiguous destination
-clears the prior preview and re-reads the local file handles with the newly
-selected policy; a stale read cannot replace the current preview. These local
-exclusions are not overridden by `.aether-profile-ignore` in browser import.
+recomputes the preview from retained file handles without reading file bytes.
+These local exclusions are not overridden by `.aether-profile-ignore` in browser import.
 `agent/skills/`, `agent/extensions/`, and `agent/npm/` remain configuration and
 are imported.
 The accepted bytes are uploaded and scanned by the server; do not assume all
@@ -577,21 +576,20 @@ and the real error, and warns that copied files remain. If the RPC response is
 lost, the outcome is unknown and some files may have been copied; inspect
 **Files** before retrying. There is no watcher or automatic retry: selecting
 the directory and importing again is explicit.
-An import can include empty files and arbitrary binary bytes. It is limited to
-**1 MiB per file**, **20 MiB decoded total**, and **2,000 files**. If any file
-is omitted because of these size or count limits, the preview explicitly warns
-that the selection is incomplete and disables upload until you acknowledge
-importing only the accepted files. Review every omitted path, or choose a
-smaller selection instead. Acknowledgement resets when you choose another
-directory, change the destination, or recompute the selection. Switching
-authenticated members or servers discards the prepared selection and its
-acknowledgement. Expected credential/runtime exclusions alone do not require
-this acknowledgement.
+The directory has no file-count or total-size ceiling. The browser reads and
+uploads bounded batches, showing progress until all eligible files have been
+processed. There is no option to approve a truncated selection. Individual
+files use the same **64 MiB** ceiling as configuration editing; an oversized or
+unreadable file is an error, not a silently omitted file.
+Navigation within the dashboard preserves the operation and its result.
+Changing authenticated members or servers discards the prepared selection and
+stops further batches; an already submitted request may still finish for its
+original owner. Its paths and result are not shown to the new identity.
 Browser imports create new files with mode `0644` and preserve existing remote
 file modes when overwriting. The browser cannot preserve local executable bits
 or symlinks, so a newly imported script may need `chmod` in the remote terminal.
 
-![An incomplete selection requires acknowledgement before upload](media/configuration-incomplete.webp)
+![An interrupted import reports confirmed writes and the failure](media/configuration-incomplete.webp)
 
 The imported files are written into your authenticated member's persistent
 configuration home. That home is mounted read-write in your environment

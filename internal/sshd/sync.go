@@ -38,7 +38,7 @@ func init() {
 const (
 	// maxSyncHeaderBytes bounds the JSON header line. The request is a run
 	// ID and a flag; the shared protocol.MaxLineBytes cap exists for
-	// profile pushes and would let one channel buffer 32 MiB here.
+	// configuration imports and would let one channel buffer 96 MiB here.
 	maxSyncHeaderBytes = 4 << 10
 	// maxSyncInitBytes bounds the endpoint initialization frame. Mutagen's
 	// generic decoder allocates for any length prefix up to 100 MiB before

@@ -27,7 +27,8 @@ type sshBackend struct {
 }
 
 // NewSSHBackend returns a Backend that dials cfg lazily on first use and
-// redials once when the connection has gone away under a call.
+// redials once when the connection has gone away under a call, except for
+// config.import, whose writes cannot safely be replayed.
 func NewSSHBackend(cfg cli.Config) Backend {
 	return &sshBackend{cfg: cfg}
 }
@@ -185,7 +186,8 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 
 // Call performs one control call on its own channel. A server-reported
 // failure comes back as that *protocol.Error; a transport failure
-// triggers one redial and one retry before surfacing as CodeUnavailable.
+// triggers one redial and one retry before surfacing as CodeUnavailable,
+// except for config.import, whose outcome may already include committed files.
 func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	result, err := b.callOnce(ctx, method, params)
 	if err == nil {
@@ -194,6 +196,11 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	var perr *protocol.Error
 	if errors.As(err, &perr) {
 		return nil, perr
+	}
+	if method == protocol.MethodConfigImport {
+		// The response may have been lost after files were written. callOnce
+		// invalidated the connection; reconnect only on the next explicit call.
+		return nil, unreachableError(err)
 	}
 	// Transport failure: the connection was stale (server restart,
 	// network drop) and callOnce already dropped it. Redial once and

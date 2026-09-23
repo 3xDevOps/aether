@@ -350,19 +350,22 @@ The local onboarding Agents step is an optional consumer of the same component.
 
 The browser directory picker grants access to the directory the user selects
 even when the dashboard is server-hosted; it does not grant access to arbitrary
-local paths. The importer previews accepted paths and exposes all omitted
-paths. Exceeding the 1 MiB per-file, 20 MiB decoded aggregate, or 2,000-file
-limits produces an incomplete-selection warning and disables upload until the
-user acknowledges importing only the accepted subset. The user can instead
-choose a smaller selection. A new directory, destination, or recomputed
-selection resets consent; expected credential/runtime exclusions alone do not
-require it. Accepted bytes are uploaded and server-scanned.
+local paths. The importer previews metadata and policy exclusions without
+reading file bytes. It transfers the entire eligible directory through
+sequential bounded requests, not a truncated selection. It retains at most the
+current batch's encoded payload and shows cumulative progress. Files above the
+64 MiB configuration-file ceiling and read failures are explicit errors.
+Server exclusions and exact committed paths accumulate across batches; a
+failure stops subsequent requests, distinguishing known commits from a request
+whose response was lost.
 
 After a result the user can select another directory or use **Open remote
 files**, which navigates to the existing `files` route. There is no automatic
-configuration sync, watcher, or import retry. `configImportPending` is
-nonpersisted state shared by the importer and shell navigation guard, not an
-onboarding completion flag. New browser-imported files use `0644`; existing
+configuration sync, watcher, or import retry. Nonpersisted owner-scoped progress
+and results survive navigation; `configImportPending` serializes operations and
+protects against page unload. Each request rechecks identity after asynchronous
+reads, so a member/server switch prevents further writes and hides the old
+result. New browser-imported files use `0644`; existing
 remote modes are preserved on overwrite. The browser cannot preserve source
 executable bits or symlinks. See
 [Agent configuration](harnesses.md#agent-configuration-import-and-files) for
@@ -2109,14 +2112,13 @@ independently of onboarding or workspaces. `config.roots` supplies destinations
 such as `~/.claude` and their runtime exclusions. A unique basename selects
 the destination automatically; an unknown or ambiguous basename requires a
 choice before file bytes are read. Retained browser `File` handles allow the
-preview to be recomputed after a destination change, with generation guards
-discarding stale reads.
+metadata preview to be recomputed after a destination change.
 
 Credential names in any path component and `*.pem` files are excluded before
 read; destination-specific `runtime_ignores` match exact root-relative paths or
-component prefixes case-sensitively. The shared preview, limits,
-incomplete-selection acknowledgement, repeat-import controls, and server
-scanning rules are identical to the permanent route. A response with `error`
+component prefixes case-sensitively. Metadata previews, bounded complete
+transfers, progress, repeat-import controls, and server scanning are identical
+to the permanent route. A response with `error`
 shows committed counts, exact canonical `imported_paths`, and the real error,
 and warns that copied files remain. A lost RPC response leaves the outcome
 unknown; inspect **Files** before explicitly importing again. Auth/vendor login

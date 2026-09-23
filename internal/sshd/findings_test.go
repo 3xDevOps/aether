@@ -384,6 +384,7 @@ type blockingRuns struct {
 	*fakeRuns
 	entered chan struct{}
 	release chan struct{}
+	ctx     context.Context
 }
 
 func (b *blockingRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
@@ -391,6 +392,7 @@ func (b *blockingRuns) Launch(ctx context.Context, workspace domain.WorkspaceID,
 }
 
 func (b *blockingRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	b.ctx = ctx
 	close(b.entered)
 	<-b.release
 	return b.fakeRuns.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)

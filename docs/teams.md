@@ -710,7 +710,8 @@ review its files, and explicitly import or update the remote configuration.
 The local onboarding Agents step uses the same importer. Known credential
 names and runtime/history defaults are skipped locally; remaining bytes are
 uploaded and server-scanned, so do not assume all secret content stays local.
-Files omitted by import limits require explicit acknowledgement before upload.
+Directory-wide count and byte budgets do not truncate imports; bounded batches
+carry the full eligible selection and report progress or an explicit failure.
 The import writes the authenticated member's persistent home immediately,
 including for active runs using that account. An agent may need to reload its
 configuration.
@@ -728,10 +729,10 @@ admin cannot select another member.
 
 New browser-import files are mode `0644`; existing remote permission bits are
 preserved. Local executable mode and symlinks cannot be represented by the
-browser. Imports preserve empty and arbitrary binary
-regular files under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
-limits. The server rejects unsafe paths, symlink components, hardlinks, and
-nonregular files. A shared account uses the same read-write home rather than
+browser. Imports preserve empty and arbitrary binary regular files up to
+64 MiB each, without a directory-wide file-count or aggregate-size ceiling.
+The server rejects unsafe paths, symlink components, hardlinks, and nonregular
+files. A shared account uses the same read-write home rather than
 an isolated per-run copy. A snapshot pin records launch provenance, not an
 isolated writable home or a promise that home edits wait for later runs.
 Editing does not rebuild the installed-agent image.

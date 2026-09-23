@@ -304,25 +304,25 @@ the vendor's instructions, then complete its login in the environment terminal.
 Return to the dashboard when finished.
 
 The member home persists the executable and vendor login state across
-containers. Configuration can be imported once from the browser and then
-edited in **Files**. See [the environment terminal guide](terminal.md) for tab
-and stop behavior.
+containers. Import configuration from the browser and edit it in **Files**.
+See [the environment terminal guide](terminal.md) for tab and stop behavior.
 
-Your own configuration is separate from vendor login and image setup. In the
-local dashboard's Agents step, choose one directory such as `~/.claude`,
-`~/.codex`, or `~/.pi` with **Choose directory**. Review the preview, select a
+Your own configuration is separate from vendor login and image setup. Open
+**Agents → Configuration** in either dashboard and choose one directory such
+as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`. Review the preview, select a
 destination when the basename is unknown or ambiguous, and click **Import
-configuration**. This is explicit and one-time; there is no local directory
-watcher or AI inventory. The server-hosted dashboard has no local directory
-picker; use `aether gui` for this step.
+configuration**. You can return to import updated files. There is no local
+directory watcher or automatic configuration synchronization.
 
 Known credential names in any path component and runtime/history defaults are
 skipped in the browser before upload. Remaining bytes are uploaded and
 server-scanned, so never assume all secret content stays on your machine.
-Empty files and arbitrary binary regular files are preserved. Imports are
-limited to 1 MiB per file, 20 MiB decoded total, and 2,000 files. Browser
-imports create files with mode `0644`; executable mode and symlinks cannot be
-preserved, so a script may need `chmod` in the remote terminal.
+Empty files and arbitrary binary regular files are preserved. The directory
+has no file-count or total-size ceiling: Aether transfers it in bounded batches
+and reports progress or the real failure. Individual files support up to
+64 MiB. New files use mode `0644`; overwrites retain remote permissions.
+The browser cannot preserve local executable mode or symlinks, so a new script
+may need `chmod` in the remote terminal.
 
 The imported files go into your authenticated member's persistent home, which
 is mounted read-write in the environment terminal and in runs using that

@@ -1,6 +1,8 @@
 import { clampDockHeight } from '@/components/dock'
 import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import type {
+  ConfigExclusion,
+  ConfigImportResult,
   LinkRepoResult,
   RepoFastForwardResult,
   RepoPushResult,
@@ -84,6 +86,16 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 export const minSidebarWidth = 320
 export const maxSidebarWidth = 520
 
+export interface ConfigImportStatus {
+  owner: string | null
+  basename: string
+  totalFiles: number
+  excluded: ConfigExclusion[]
+  phase: 'reading' | 'uploading' | 'complete'
+  result: ConfigImportResult
+  unknownPaths: string[]
+}
+
 export interface UiSlice {
   theme: Theme
   sidebarWidth: number
@@ -117,6 +129,7 @@ export interface UiSlice {
   onboardingWorkspace: string
   onboardingRepo: OnboardingRepo | null
   configImportPending: boolean
+  configImportStatus: ConfigImportStatus | null
   /** What the First run step has typed but not launched. It lives here so a
    * jump to another step and back does not throw the draft away. */
   onboardingFirstRun: OnboardingFirstRun
@@ -177,6 +190,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   onboardingWorkspace: '',
   onboardingRepo: null,
   configImportPending: false,
+  configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
   groupBy: 'status',

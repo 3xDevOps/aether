@@ -1,8 +1,7 @@
-// A browser directory import is explicit and repeatable. The fixture directory
-// includes an empty file and a scanner finding; the empty file is carried and
-// the finding is reported by the server without blocking the rest of import.
+// Exercise a complete directory beyond both request budgets through a real
+// browser, gateway, and SSH server, including a server-side secret exclusion.
 
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -11,7 +10,7 @@ import { OnboardingWizard } from './pages/wizard'
 
 const claudeFixture = fileURLToPath(new URL('./testdata/claude-profile', import.meta.url))
 
-test('a directory import reports server exclusions and writes the remote config', async ({
+test('a directory exceeding request budgets imports completely and reports policy exclusions', async ({
   page,
   aether,
 }) => {
@@ -29,6 +28,13 @@ test('a directory import reports server exclusions and writes the remote config'
     mkdirSync(dirname(filename), { recursive: true })
     writeFileSync(filename, content)
   }
+  const dependencies = join(source, 'extensions', 'dependencies')
+  mkdirSync(dependencies, { recursive: true })
+  for (let index = 0; index < 2001; index += 1) {
+    writeFileSync(join(dependencies, `${index}.js`), 'export {}\n')
+  }
+  const largeAsset = Buffer.alloc(64 * 1024 * 1024, 0x61)
+  writeFileSync(join(source, 'extensions', 'large.bin'), largeAsset)
 
   const wizard = await OnboardingWizard.open(page, alice.url)
   await wizard.link.link(aether.server.addr, { name: 'Alice' })
@@ -60,7 +66,7 @@ test('a directory import reports server exclusions and writes the remote config'
   }
   await configuration.import().click()
 
-  await expect(configuration.section).toContainText('Imported 8 files')
+  await expect(configuration.section).toContainText('Imported 2010 files')
   await expect(configuration.section).toContainText('README.md')
   await expect(configuration.section).toContainText('secret')
   await expect(configuration.import()).toHaveCount(0)
@@ -82,6 +88,16 @@ test('a directory import reports server exclusions and writes the remote config'
   })
   expect(empty.content).toBe('')
   expect(empty.size).toBe(0)
+  const dependency = await alice.api.rpc<{ content: string }>('config.read', {
+    harness: 'claude',
+    path: 'extensions/dependencies/2000.js',
+  })
+  expect(dependency.content).toBe('export {}\n')
+  const { member } = await alice.api.rpc<{ member: { id: string } }>('server.info')
+  const persistedAsset = readFileSync(
+    join(aether.server.memberHome(member.id), '.claude', 'extensions', 'large.bin'),
+  )
+  expect(persistedAsset.equals(largeAsset)).toBe(true)
   const edited = await alice.api.rpc<{ content: string }>('config.write', {
     harness: 'claude',
     path: 'settings.json',

@@ -327,7 +327,7 @@ func decodeConfigImportFiles(raw json.RawMessage) ([]memberhome.ConfigFile, erro
 	}
 	files := make([]memberhome.ConfigFile, 0, min(memberhome.ConfigImportMaxFiles, 16))
 	var decodedTotal int64
-	const maxEncodedFile = ((memberhome.ConfigImportMaxFileBytes + 2) / 3) * 4
+	const maxEncodedFile = ((memberhome.ConfigMaxFileBytes + 2) / 3) * 4
 	for dec.More() {
 		if len(files) >= memberhome.ConfigImportMaxFiles {
 			return nil, fmt.Errorf("import contains too many files")
@@ -343,7 +343,7 @@ func decodeConfigImportFiles(raw json.RawMessage) ([]memberhome.ConfigFile, erro
 		if decodeErr != nil {
 			return nil, errors.New("invalid content_base64")
 		}
-		if len(content) > memberhome.ConfigImportMaxFileBytes {
+		if len(content) > memberhome.ConfigMaxFileBytes {
 			return nil, fmt.Errorf("file exceeds its size limit")
 		}
 		decodedTotal += int64(len(content))

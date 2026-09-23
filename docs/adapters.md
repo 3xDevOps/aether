@@ -49,13 +49,12 @@ Rules that are easy to get wrong:
   are advertised, without a workspace or onboarding prerequisite. Onboarding
   optionally uses the same importer. No daemon watches `LocalRoot` or
   automatically synchronizes configuration.
-- **Import limits require an informed choice.** The browser previews accepted
-  paths and exposes all omitted paths. Files omitted for the 1 MiB per-file,
-  20 MiB aggregate, or 2,000-file limits require acknowledgement of an
-  incomplete selection before upload; choosing a smaller selection is the
-  alternative. A new directory, destination, or recomputed selection clears
-  that acknowledgement. Credential/runtime exclusions alone do not require
-  it. Imports are not automatically retried.
+- **Directory size does not truncate imports.** The browser previews file
+  metadata and transfers the full eligible selection in bounded requests.
+  Request budgets do not exclude settings or dependencies. Individual files
+  share configuration editing's 64 MiB ceiling; an oversized or unreadable
+  file fails explicitly. Interrupted imports report confirmed work and stop,
+  without automatic retries.
 - **Browser file metadata is limited.** New files use `0644`; overwrites retain
   existing remote modes. The browser cannot preserve source executable bits
   or symlinks.

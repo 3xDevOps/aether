@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -17,8 +20,8 @@ const (
 	// maxSubsystemHeaderBytes bounds the single JSON header line the
 	// events, attach, and setup subsystems read before their stream
 	// begins. Those requests are a handful of short fields; the shared
-	// protocol.MaxLineBytes cap is sized for control-channel profile
-	// pushes and would let one channel buffer 32 MiB here.
+	// protocol.MaxLineBytes cap is sized for control-channel configuration
+	// imports and would let one channel buffer 96 MiB here.
 	maxSubsystemHeaderBytes = 4 << 10
 	// maxPendingLineBytes bounds one control-channel request line while
 	// the caller is still pending: server.info, all a pending member may
@@ -29,51 +32,178 @@ const (
 // serveControl runs the NDJSON JSON-RPC loop on an aether-control
 // subsystem channel: requests in, responses out, strictly in order.
 //
-// The 32 MiB line budget belongs to approved members (profile.push sends
-// base64 blobs up to the profile cap). handleRequest can only refuse a
+// The 96 MiB line budget belongs to approved members (config.import sends
+// base64 blobs up to its request cap). handleRequest can only refuse a
 // pending member after the line has been read, so until the store says
 // the caller is approved each line is capped at a request-sized limit.
-// The state is re-read before every line rather than once at channel
-// open, so an approval unblocks the connection the pending member is
-// already holding.
-func (s *Server) serveControl(ctx context.Context, member domain.MemberID, ch ssh.Channel) {
+// Pending state is re-read before each line, so approval unblocks the
+// connection the member already holds.
+func (s *Server) serveControl(ctx context.Context, member domain.MemberID, ch ssh.Channel, abortConn func()) {
 	defer func() {
 		sendExitStatus(ch, 0)
 		_ = ch.Close()
 	}()
-	capped := &capReader{r: ch, left: maxPendingLineBytes}
-	r := bufio.NewReaderSize(capped, 64<<10)
-	for {
-		if capped.left >= 0 {
-			capped.left = maxPendingLineBytes
-			if m, merr := s.memberFor(ctx, member); merr == nil && !m.Pending {
-				capped.left = -1
+	input := &controlFrameReader{
+		server: s, member: member, ctx: ctx, abort: abortConn,
+		capped: capReader{r: ch},
+	}
+	r := bufio.NewReaderSize(input, maxPendingLineBytes)
+	for ctx.Err() == nil {
+		if !s.serveControlFrame(ctx, member, ch, r, input) {
+			return
+		}
+	}
+}
+
+// Each call owns the line, decoded request, handler result and admission.
+// Nothing large is retained by the persistent channel between calls.
+func (s *Server) serveControlFrame(ctx context.Context, member domain.MemberID, ch ssh.Channel, r *bufio.Reader, input *controlFrameReader) bool {
+	input.capped.left = int64(maxPendingLineBytes - r.Buffered())
+	if !input.approved {
+		m, err := s.memberFor(ctx, member)
+		input.approved = err == nil && !m.Pending
+	}
+	input.begin(r.Buffered() > 0)
+	defer input.finish()
+	line, err := protocol.ReadLine(r)
+	if err != nil || ctx.Err() != nil {
+		return false
+	}
+	input.readDone()
+	if len(bytes.TrimSpace(line)) == 0 {
+		return true
+	}
+	slot := &afterResponse{}
+	resp := s.handleRequest(context.WithValue(ctx, afterResponseKey{}, slot), member, line)
+	// Do not answer or restart for an update after channel/server teardown.
+	if ctx.Err() != nil {
+		return false
+	}
+	return respond(ch, resp, slot) == nil
+}
+
+var errControlFrameBusy = errors.New("sshd: too many expanded control frames")
+
+// capReader stops at the small budget even for approved members. Probe one
+// additional byte before admission, so an idle channel (including one parked
+// exactly at the small budget) never reserves a large-frame slot. The probe
+// cannot cause ReadLine to grow its buffer until admission succeeds.
+type controlFrameReader struct {
+	server   *Server
+	member   domain.MemberID
+	ctx      context.Context
+	abort    func()
+	capped   capReader
+	approved bool
+	expanded bool
+
+	mu       sync.Mutex
+	timer    *time.Timer
+	started  time.Time
+	progress time.Time
+	reading  bool
+	active   bool
+}
+
+func (r *controlFrameReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	var n int
+	var err error
+	if r.capped.left == 0 && r.approved {
+		n, err = r.capped.r.Read(p[:1])
+		if n > 0 {
+			r.recordProgress()
+			if !r.server.claimControlFrame(r.member) {
+				return 0, errControlFrameBusy
 			}
+			r.expanded = true
+			r.capped.left = -1
 		}
-		line, err := protocol.ReadLine(r)
-		if err != nil {
-			return
+	} else {
+		n, err = r.capped.Read(p)
+		if n > 0 {
+			r.recordProgress()
 		}
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+	}
+	return n, err
+}
+
+func (s *Server) claimControlFrame(member domain.MemberID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, held := s.controlFrames[member]; held || len(s.controlFrames) >= 2 {
+		return false
+	}
+	s.controlFrames[member] = struct{}{}
+	return true
+}
+
+func (r *controlFrameReader) begin(buffered bool) {
+	r.mu.Lock()
+	r.reading = true
+	r.mu.Unlock()
+	if buffered {
+		r.recordProgress()
+	}
+}
+
+func (r *controlFrameReader) recordProgress() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.progress = time.Now()
+	if !r.active {
+		r.active = true
+		r.started = r.progress
+		r.timer = time.AfterFunc(min(r.server.cfg.controlReadIdleTimeout, r.server.cfg.controlFrameTimeout), r.expire)
+	}
+}
+
+// A single timer checks the latest progress under the mutex rather than
+// racing Reset against a callback on every channel read. Expanded frames keep
+// the absolute timer through dispatch and response, including a blocked peer.
+func (r *controlFrameReader) expire() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.active {
+		return
+	}
+	deadline := r.started.Add(r.server.cfg.controlFrameTimeout)
+	if idle := r.progress.Add(r.server.cfg.controlReadIdleTimeout); r.reading && idle.Before(deadline) {
+		deadline = idle
+	}
+	if remaining := time.Until(deadline); remaining > 0 {
+		r.timer.Reset(remaining)
+		return
+	}
+	r.abort()
+}
+
+func (r *controlFrameReader) readDone() {
+	r.mu.Lock()
+	r.reading = false
+	if !r.expanded {
+		r.active = false
+		if r.timer != nil {
+			r.timer.Stop()
 		}
-		slot := &afterResponse{}
-		resp := s.handleRequest(context.WithValue(ctx, afterResponseKey{}, slot), member, line)
-		// A canceled serve context means the server is shutting down (or
-		// the channel is tearing down): the connection must die, not
-		// answer - a canceled-context store lookup must never surface to
-		// the client as an internal rpc error. Any deferred work is
-		// dropped with it, which is right for the one caller: a
-		// self-update that swapped the binaries has already recorded
-		// that, and re-executing a server somebody just asked to stop
-		// would be the wrong way to honor it. The new binary starts on
-		// the next start.
-		if ctx.Err() != nil {
-			return
-		}
-		if respond(ch, resp, slot) != nil {
-			return
-		}
+	}
+	r.mu.Unlock()
+}
+
+func (r *controlFrameReader) finish() {
+	r.mu.Lock()
+	r.active = false
+	if r.timer != nil {
+		r.timer.Stop()
+	}
+	r.mu.Unlock()
+	if r.expanded {
+		r.server.mu.Lock()
+		delete(r.server.controlFrames, r.member)
+		r.server.mu.Unlock()
+		r.expanded = false
 	}
 }
 

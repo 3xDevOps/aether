@@ -122,6 +122,10 @@ type Config struct {
 	// syncHandshakeTimeout bounds the aether-sync setup handshake; zero
 	// means defaultSyncHandshakeTimeout. Unexported test knob.
 	syncHandshakeTimeout time.Duration
+	// Control frames get a progress deadline and an absolute lifetime.
+	// Unexported test knobs; zero selects the production defaults.
+	controlReadIdleTimeout time.Duration
+	controlFrameTimeout    time.Duration
 	// revalidateInterval is how often a live sync bridge or PTY attach
 	// re-checks its authorization; zero means defaultRevalidateInterval.
 	// Unexported test knob.
@@ -161,9 +165,11 @@ type Server struct {
 	// syncChannels counts each member's live aether-sync channels, for
 	// the per-member concurrency cap (see claimSyncChannel).
 	syncChannels map[domain.MemberID]int
-	closed       bool
-	baseCtx      context.Context
-	baseCancel   context.CancelFunc
+	// Expanded control frames retain their slot through dispatch/response.
+	controlFrames map[domain.MemberID]struct{}
+	closed        bool
+	baseCtx       context.Context
+	baseCancel    context.CancelFunc
 
 	// controlMu lets takeover cancel the displaced transport immediately;
 	// the control service remains the fenced source of truth. Incarnations
@@ -197,6 +203,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.syncHandshakeTimeout <= 0 {
 		cfg.syncHandshakeTimeout = defaultSyncHandshakeTimeout
 	}
+	if cfg.controlReadIdleTimeout <= 0 {
+		cfg.controlReadIdleTimeout = 30 * time.Second
+	}
+	if cfg.controlFrameTimeout <= 0 {
+		cfg.controlFrameTimeout = 15 * time.Minute
+	}
 	if cfg.revalidateInterval <= 0 {
 		cfg.revalidateInterval = defaultRevalidateInterval
 	}
@@ -210,6 +222,7 @@ func New(cfg Config) (*Server, error) {
 		handshakes:      make(chan struct{}, cfg.maxHandshakes),
 		conns:           make(map[net.Conn]struct{}),
 		syncChannels:    make(map[domain.MemberID]int),
+		controlFrames:   make(map[domain.MemberID]struct{}),
 		controlAttaches: make(map[string]map[string]controlAttach),
 		baseCtx:         context.Background(),
 	}
@@ -480,6 +493,14 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 
 	connCtx, cancelConn := context.WithCancel(ctx)
 	defer cancelConn()
+	// Channel.Close only sends SSH_MSG_CHANNEL_CLOSE; a hostile peer can
+	// withhold its acknowledgement and leave channel.Read blocked. Closing
+	// the raw transport unblocks both packet I/O and all channel readers.
+	// Do not change its shared deadlines for a single healthy channel.
+	abortConn := func() {
+		cancelConn()
+		_ = c.Close()
+	}
 	// ssh.Conn has no context or Done channel. Wait observes transport
 	// teardown, including a client that drops the whole SSH connection while
 	// a channel handler is blocked outside SSH I/O.
@@ -533,7 +554,7 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	for nc := range chans {
 		switch nc.ChannelType() {
 		case "session":
-			s.spawn(func() { s.handleSession(connCtx, member, nc) })
+			s.spawn(func() { s.handleSession(connCtx, member, nc, abortConn) })
 		case "direct-tcpip":
 			s.spawn(func() { s.handleDirectTCPIP(connCtx, member, nc) })
 		default:
