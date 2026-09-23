@@ -704,13 +704,14 @@ and any scope deviation must carry an explicit disposition. The resulting
 evidence remains provenance of what Aether captured or a participant reported,
 not independent verification.
 
-Agent configuration is not watched or inventoried automatically. In the local
-dashboard's Agents step, choose one local directory with the browser directory
-picker, preview it, and explicitly import it once. Known credential names and
-runtime/history defaults are skipped locally; remaining bytes are uploaded
-and server-scanned, so do not assume all secret content stays local. The
-server-hosted dashboard has no local directory picker; use `aether gui` for this
-step. The import writes the authenticated member's persistent home immediately,
+Agent configuration is not watched or inventoried automatically. Open
+**Agents → Configuration** in either dashboard to choose a local directory,
+review its files, and explicitly import or update the remote configuration.
+The local onboarding Agents step uses the same importer. Known credential
+names and runtime/history defaults are skipped locally; remaining bytes are
+uploaded and server-scanned, so do not assume all secret content stays local.
+Files omitted by import limits require explicit acknowledgement before upload.
+The import writes the authenticated member's persistent home immediately,
 including for active runs using that account. An agent may need to reload its
 configuration.
 
@@ -725,8 +726,9 @@ refuse overwrite. Every `config.*` method
 requires `Launch` and targets only the authenticated member's own home; an
 admin cannot select another member.
 
-New browser-import files are mode `0644`; executable mode and symlinks cannot
-be represented by the browser. Imports preserve empty and arbitrary binary
+New browser-import files are mode `0644`; existing remote permission bits are
+preserved. Local executable mode and symlinks cannot be represented by the
+browser. Imports preserve empty and arbitrary binary
 regular files under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
 limits. The server rejects unsafe paths, symlink components, hardlinks, and
 nonregular files. A shared account uses the same read-write home rather than
@@ -751,3 +753,7 @@ secret flags are `--skip-secret <file>` and
 aether profile push --agent claude --skip-secret <file>
 aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
+
+Browser imports and **Files** edits do not create profile snapshots. A manual
+push or rollback overlays snapshot files into the same persistent home; it
+does not remove unlisted files or create isolated configuration for a run.

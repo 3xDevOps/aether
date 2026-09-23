@@ -221,7 +221,7 @@ collapse state, `activeWorkspace`, grouping, dismissed update versions,
 terminal zoom) are persisted; `persistedUi` in `store/index.ts` is the list
 that decides. Server data is always re-fetched.
 
-**`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
+**`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
 templates, budget dialogs and the activity feed all act on. Empty means "all",
 which is what the board falls back to before hydration has named one.
@@ -229,6 +229,7 @@ which is what the board falls back to before hydration has named one.
 switcher can never say one workspace while the view beside it acts on another,
 and `navigate('workspace', ...)` makes the workspace it opens the active scope
 for the same reason.
+Member configuration is account-scoped and does not require a workspace.
 
 Derived data (the sidebar's grouped run list, the attention-ordered run list)
 lives in
@@ -337,6 +338,37 @@ way.
 - **A nav entry is named what the view it opens is titled**, including
   `routes/workspaces/` as "Manage workspaces" rather than "Workspaces".
 
+## Configuration view
+
+The permanent `configuration` route renders the shared
+`src/components/profile-import.tsx` importer. It is available whenever
+`config.roots` and `config.import` are advertised, through both the local and
+server-hosted gateways, without a workspace or onboarding prerequisite.
+**Agents** provides a **Configuration** action, and `src/lib/surfaces.ts`
+exposes **Configuration** to both the navigation rail and command palette.
+The local onboarding Agents step is an optional consumer of the same component.
+
+The browser directory picker grants access to the directory the user selects
+even when the dashboard is server-hosted; it does not grant access to arbitrary
+local paths. The importer previews accepted paths and exposes all omitted
+paths. Exceeding the 1 MiB per-file, 20 MiB decoded aggregate, or 2,000-file
+limits produces an incomplete-selection warning and disables upload until the
+user acknowledges importing only the accepted subset. The user can instead
+choose a smaller selection. A new directory, destination, or recomputed
+selection resets consent; expected credential/runtime exclusions alone do not
+require it. Accepted bytes are uploaded and server-scanned.
+
+After a result the user can select another directory or use **Open remote
+files**, which navigates to the existing `files` route. There is no automatic
+configuration sync, watcher, or import retry. `configImportPending` is
+nonpersisted state shared by the importer and shell navigation guard, not an
+onboarding completion flag. New browser-imported files use `0644`; existing
+remote modes are preserved on overwrite. The browser cannot preserve source
+executable bits or symlinks. See
+[Agent configuration](harnesses.md#agent-configuration-import-and-files) for
+the user workflow and [the protocol](local-gateway.md#files-and-member-configuration)
+for import result and failure semantics.
+
 ## Files view
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
@@ -372,9 +404,13 @@ The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
-All of the member's run containers and environment terminal mount one shared
-read-write persistent HOME, so accepted configuration imports and saves are
-visible to already-running processes immediately; a tool may need to reload.
+All runs using the member's account and the environment terminal mount one
+shared read-write persistent HOME, so accepted configuration imports and saves
+are visible to active and future runs; a tool may need to reload. Browser
+imports and Files edits do not create CLI snapshot history. Optional run
+snapshot pins are provenance, not isolated writable copies. Manual profile
+push and rollback overlay snapshot files into that same HOME without removing
+paths absent from the snapshot; rollback is not an exact-tree restore.
 
 ## Title bar
 
@@ -2092,40 +2128,26 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-**Configuration import** is an explicit, one-time directory import in the
-local onboarding flow. `config.roots` supplies destinations such as
-`~/.claude`, together with the destination-specific runtime paths that can be
-left out locally. The browser waits for that response: a known unique basename
-selects its destination automatically, while an unknown or ambiguous basename
-requires a destination choice before previewing or reading any file bytes.
-The raw browser `File` handles stay local so changing the destination clears
-the old preview and re-reads with the new policy; a generation guard prevents
-a slower old read from replacing the current preview. This action is not
-available from the server-hosted dashboard, because that browser cannot read a
-machine-local directory; the server dashboard still exposes Files and
-configuration editing through `config.tree`, `config.read` and `config.write`.
-There is no local discovery scan or directory watcher; the picker is the only
-onboarding import action.
+**Configuration import** in this step renders the same
+`src/components/profile-import.tsx` component as the permanent
+[Configuration view](#configuration-view). It is optional here and remains
+available from Agents, shared navigation, and the palette on either gateway,
+independently of onboarding or workspaces. `config.roots` supplies destinations
+such as `~/.claude` and their runtime exclusions. A unique basename selects
+the destination automatically; an unknown or ambiguous basename requires a
+choice before file bytes are read. Retained browser `File` handles allow the
+preview to be recomputed after a destination change, with generation guards
+discarding stale reads.
 
-Credential names found in any path component and `*.pem` files are always
-left out in the browser. Runtime/history paths come from the selected
-destination's `runtime_ignores` metadata and use exact, root-relative
-case-sensitive component-prefix matching. Every other selected byte is
-uploaded and server-scanned; the result reports accepted file/byte counts and
-server exclusions. A response with `error` is an incomplete import: the UI
-reports the committed counts, exact canonical `imported_paths`, and the real
-error instead of showing success, and warns that copied files remain. If the
-RPC fails without a response, the outcome is unknown (some files may have been
-copied); inspect **Files** before retrying. There is no watcher or automatic
-retry - choosing a directory and importing again is always explicit. The
-import limits are 2,000 files, 1 MiB per file and 20 MiB decoded in aggregate,
-with a 30 MiB HTTP request cap. Empty and binary regular files are preserved,
-but browser imports send mode `0644` and cannot preserve executable mode or
-symlinks.
-
-Accepted files change the calling member's persistent home immediately,
-including for already-running agents that share that home; an agent may need
-to reload. Auth/vendor login is separate.
+Credential names in any path component and `*.pem` files are excluded before
+read; destination-specific `runtime_ignores` match exact root-relative paths or
+component prefixes case-sensitively. The shared preview, limits,
+incomplete-selection acknowledgement, repeat-import controls, and server
+scanning rules are identical to the permanent route. A response with `error`
+shows committed counts, exact canonical `imported_paths`, and the real error,
+and warns that copied files remain. A lost RPC response leaves the outcome
+unknown; inspect **Files** before explicitly importing again. Auth/vendor login
+is separate.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
