@@ -409,7 +409,6 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 	}
 	defer func() { _ = profileRoot.Close() }()
 	info, err := configTargetInfo(profileRoot, rel)
-	exists := err == nil
 	var mode os.FileMode = 0o644
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -436,7 +435,7 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 	if err := ensureDirPathOwned(home, profileRoot, path.Dir(rel), true); err != nil {
 		return ConfigRead{}, err
 	}
-	if err := atomicConfigWrite(home, profileRoot, rel, content, mode, expected, !exists); err != nil {
+	if err := atomicConfigWrite(home, profileRoot, rel, content, mode, expected, info); err != nil {
 		return ConfigRead{}, err
 	}
 	return ConfigRead{Content: append([]byte(nil), content...), Size: int64(len(content)), Revision: revision(content), Writable: true}, nil
@@ -546,7 +545,7 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 			if err := ensureDirPathOwned(home, profileRoot, path.Dir(file.Path), true); err != nil {
 				return importFailure(i, err)
 			}
-			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, mode, "", false); err != nil {
+			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, mode, "", info); err != nil {
 				return importFailure(i, err)
 			}
 			result.Files++
@@ -771,6 +770,14 @@ func configTargetInfo(root *os.Root, name string) (fs.FileInfo, error) {
 	return info, nil
 }
 
+func configTargetMatches(root *os.Root, name string, expected fs.FileInfo) bool {
+	info, err := configTargetInfo(root, name)
+	if expected == nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return err == nil && os.SameFile(expected, info) && expected.Mode().Perm() == info.Mode().Perm()
+}
+
 func openConfigFile(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
 	f, err := rootfs.Open(root, name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -806,7 +813,7 @@ func readConfigBytes(root *os.Root, name string, limit int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode os.FileMode, expected string, requireAbsent bool) error {
+func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode os.FileMode, expected string, expectedTarget fs.FileInfo) error {
 	parentName := path.Dir(name)
 	parent := root
 	var owned *os.Root
@@ -826,7 +833,7 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 	target := path.Base(name)
 	for range 10 {
 		tmp := ".aether-config-" + rand.Text()
-		f, err := parent.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode.Perm())
+		f, err := parent.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
@@ -835,6 +842,10 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 		}
 		if _, err = f.Write(content); err == nil {
 			err = chownFileLikeHome(owner, f)
+		}
+		// Keep staged bytes private until the inherited permissions are validated.
+		if err == nil && !configTargetMatches(parent, target, expectedTarget) {
+			err = ErrConfigConflict
 		}
 		if err == nil {
 			err = f.Chmod(mode.Perm())
@@ -849,18 +860,17 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 			_ = parent.Remove(tmp)
 			return err
 		}
-		switch {
-		case expected != "":
+		if expected != "" {
 			current, checkErr := readConfigBytes(parent, target, ConfigMaxFileBytes)
 			if checkErr != nil || revision(current) != expected {
 				_ = parent.Remove(tmp)
 				return ErrConfigConflict
 			}
-		case requireAbsent:
-			if _, checkErr := configTargetInfo(parent, target); checkErr == nil || !errors.Is(checkErr, fs.ErrNotExist) {
-				_ = parent.Remove(tmp)
-				return ErrConfigConflict
-			}
+		}
+		// This is optimistic: an external writer can still race the stat/rename gap.
+		if !configTargetMatches(parent, target, expectedTarget) {
+			_ = parent.Remove(tmp)
+			return ErrConfigConflict
 		}
 		if err := parent.Rename(tmp, target); err != nil {
 			_ = parent.Remove(tmp)

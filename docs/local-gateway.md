@@ -428,6 +428,15 @@ All runs using the member's account and the environment terminal mount one
 shared read-write persistent HOME. A file edit, configuration import, or
 manual CLI profile operation is therefore visible to active and future runs,
 although a tool may need to reload its configuration.
+Configuration saves and imports bind inherited permissions to the observed
+destination inode and mode. After staging, they recheck that identity and mode
+immediately before atomic rename; an absent destination must still be absent,
+and editor saves also recheck the content revision. A detected change returns
+`config: conflict` without replacing that destination. Staged bytes remain
+private until the destination permissions have been validated.
+These checks are optimistic, not a filesystem compare-and-swap: Aether's root
+lock coordinates its own operations, not arbitrary processes in the shared
+HOME, which can still write between the final check and rename.
 
 The browser uses the selected root's `runtime_ignores` metadata before
 reading or uploading any bytes. `runtime_ignores` contains exact,
