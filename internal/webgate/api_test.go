@@ -312,7 +312,7 @@ func TestConfigImportBodyDeadlines(t *testing.T) {
 		trickle bool
 	}{
 		{name: "idle", idle: 80 * time.Millisecond, total: time.Second},
-		{name: "whole body", idle: time.Second, total: 150 * time.Millisecond, trickle: true},
+		{name: "whole body", idle: 3 * time.Second, total: 500 * time.Millisecond, trickle: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := importTestServer(t, &importTestBackend{}, tc.idle, tc.total)
@@ -326,11 +326,22 @@ func TestConfigImportBodyDeadlines(t *testing.T) {
 				importTestResponse(t, readers[i], http.StatusContinue)
 			}
 			if tc.trickle {
-				for range 8 {
+				// Stop sending before the server closes the timed-out socket:
+				// a later write can reset it and discard the 408 on Windows.
+				for range 4 {
 					for _, conn := range conns {
-						_, _ = io.WriteString(conn, " ")
+						if _, err := io.WriteString(conn, " "); err != nil {
+							t.Fatal(err)
+						}
 					}
-					time.Sleep(25 * time.Millisecond)
+					time.Sleep(50 * time.Millisecond)
+				}
+				// An idle-only implementation must not satisfy this check.
+				deadline := time.Now().Add(2 * time.Second)
+				for _, conn := range conns {
+					if err := conn.SetReadDeadline(deadline); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			for _, reader := range readers {
