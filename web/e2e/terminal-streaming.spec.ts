@@ -374,7 +374,10 @@ test('scrolling reaches every retained page and prepends without moving visible 
     await expect(live).toContainText('LONG-CURRENT', { timeout: 30_000 })
     await expect(live).not.toContainText('EARLIEST-LONG')
     await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
-    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible').click()
+    // Centering the whole mirrored screen makes Playwright scroll its hidden
+    // host. Target a visible cell, as a real pointer does.
+    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+      .click({ position: { x: 10, y: 10 } })
     await page.keyboard.type('query')
     await page.keyboard.press('Enter')
     await expect.poll(() => observedOutput).toContain('LONG-QUERY-READY')
@@ -388,7 +391,7 @@ test('scrolling reaches every retained page and prepends without moving visible 
     const nativeViewport = page.locator(
       '.xterm-scrollable-element:not([data-aether-frozen-view] *):visible',
     )
-    await nativeViewport.hover()
+    await nativeViewport.hover({ position: { x: 10, y: 10 } })
     const nativeScrollbar = nativeViewport.locator(':scope > .scrollbar.vertical.visible')
     const nativeSlider = nativeScrollbar.locator(':scope > .slider')
     await expect(nativeSlider).toBeVisible()
@@ -566,7 +569,8 @@ test('switching live runs restores the same recorded rows and pixel offsets with
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live).toContainText('RESTORE-A-CURRENT', { timeout: 30_000 })
     await expect.poll(() => [...activeSockets.values()]).toEqual([runA.id])
-    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible').click()
+    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+      .click({ position: { x: 10, y: 10 } })
     await page.keyboard.press('Shift+PageUp')
     const scroller = page.getByLabel('Terminal scrollback', { exact: true })
     await expect(scroller).toBeVisible()
@@ -617,7 +621,8 @@ test('switching live runs restores the same recorded rows and pixel offsets with
     await expect(live).toContainText('RESTORE-A-REFRESH-CURRENT')
     await expect(live).not.toContainText('RESTORE-A-REFRESH-FIRST')
     const headsBeforeRefresh = historyRequests.filter((cursor) => cursor === '').length
-    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible').hover()
+    await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
+      .hover({ position: { x: 10, y: 10 } })
     await page.mouse.wheel(0, -2400)
     await expect(scroller).toBeVisible()
     // The refresh filled xterm's 5000-row native buffer. Traverse it before
