@@ -227,7 +227,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   await expect(pane).not.toContainText('agent-ready')
 })
 
-test('four busy screens survive Board switches and resume the warm output gap', async ({
+test('busy screens show the current output again after leaving the board', async ({
   page,
   aether,
 }) => {
@@ -330,9 +330,9 @@ done
   const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
   await expect(rows).toContainText(launched[0].screen, { timeout: 30_000 })
   await board()
-  // Start A's two-lines-per-second stream only after its browser surface is
-  // parked. The writer handshake makes the warm gap independent of Docker
-  // startup latency for the remaining runs.
+  // Start A's stream only after the browser has seen the current screen.
+  // Leaving the route closes that terminal; the gap still has to be on the
+  // live screen when the run is opened again.
   await launched[0].writer.startGap()
   await open(launched[1].task)
   await expect(rows).toContainText(launched[1].screen, { timeout: 30_000 })
@@ -350,16 +350,11 @@ done
   await expect(rows).toContainText(launched[0].screen, { timeout: 30_000 })
   await expect(rows).toContainText(launched[0].gap, { timeout: 30_000 })
   await expect(page.getByRole('status', { name: 'Restoring terminal history' })).toBeHidden()
-  expect(
-    attachHeaders.some(
-      (header) =>
-        header.runID === launched[0].id &&
-        header.resume === true &&
-        typeof header.resume_id === 'string' &&
-        header.resume_id.length > 0 &&
-        (header.cursor ?? 0) > 0,
-    ),
-  ).toBe(true)
+  const returned = attachHeaders.filter((header) => header.runID === launched[0].id)
+  // Leaving the route closes the terminal. Coming back is a new compact
+  // screen, not a resume of a parked buffer. The gap is on that live screen.
+  expect(returned.length).toBeGreaterThanOrEqual(2)
+  expect(returned.at(-1)?.resume).not.toBe(true)
   for (const item of launched) {
     await item.writer.release()
     item.writer.socket.close()

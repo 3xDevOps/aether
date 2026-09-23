@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
-import { useEffect } from 'react'
+import { act, render, screen } from '@testing-library/react'
+import { Component } from 'react'
 import type { ComponentType } from 'react'
 import type { RouteProps } from '@/routes/registry'
 import { toRecord } from '@/store/runs'
@@ -17,33 +17,46 @@ vi.mock('@/routes', () => ({
 import { CenterView } from '@/components/shell/center-view'
 
 const mounts: Record<string, number> = {}
-const weights: Record<string, number> = {}
+const unmounts: Record<string, number> = {}
+const sockets: Record<string, Array<{ close: () => void }>> = {}
+let boardMounts = 0
+let boardUnmounts = 0
+const runIDs = ['run_a', 'run_b', 'run_c', 'run_d', 'run_e', 'run_f']
 
-function StubTerminal(props: RouteProps) {
-  const runID = props.params.runId ?? ''
-  useEffect(() => {
+class StubTerminal extends Component<RouteProps> {
+  private readonly socket = { close: vi.fn() }
+
+  componentDidMount() {
+    const runID = this.props.params.runId ?? ''
     mounts[runID] = (mounts[runID] ?? 0) + 1
-  }, [runID])
-  useEffect(() => {
-    if (props.active === false) props.onTerminalWeight?.(weights[runID] ?? 0)
-  }, [props.active, props.onTerminalWeight, runID])
-  return (
-    <div data-testid={`terminal-${runID}`} data-active={props.active === undefined ? 'default' : String(props.active)}>
-      <button type="button" onClick={() => props.onTerminalInvalidate?.()}>
-        Invalidate {runID}
-      </button>
-      <button type="button" onClick={() => props.onTerminalWeight?.(weights[runID] ?? 0)}>
-        Weight {runID}
-      </button>
-    </div>
-  )
+    ;(sockets[runID] ??= []).push(this.socket)
+  }
+
+  componentWillUnmount() {
+    const runID = this.props.params.runId ?? ''
+    unmounts[runID] = (unmounts[runID] ?? 0) + 1
+    this.socket.close()
+  }
+
+  render() {
+    const runID = this.props.params.runId ?? ''
+    return <div data-testid={`terminal-${runID}`}>terminal {runID}</div>
+  }
 }
 
-function StubBoard() {
-  return <div data-testid="board">board</div>
-}
+class StubBoard extends Component<RouteProps> {
+  componentDidMount() {
+    boardMounts += 1
+  }
 
-const ids = ['run_a', 'run_b', 'run_c', 'run_d', 'run_e']
+  componentWillUnmount() {
+    boardUnmounts += 1
+  }
+
+  render() {
+    return <div data-testid="board">board</div>
+  }
+}
 
 function setRoute(name: string, runID?: string) {
   act(() => {
@@ -55,146 +68,179 @@ function setRoute(name: string, runID?: string) {
 
 function seed() {
   for (const id of Object.keys(mounts)) delete mounts[id]
-  for (const id of Object.keys(weights)) delete weights[id]
+  for (const id of Object.keys(unmounts)) delete unmounts[id]
+  for (const id of Object.keys(sockets)) delete sockets[id]
+  boardMounts = 0
+  boardUnmounts = 0
   routeRegistry.current = { terminal: StubTerminal, board: StubBoard }
   useStore.setState({
     identityKey: 'identity-a',
     terminalCacheEpoch: 0,
-    runs: Object.fromEntries(ids.map((id) => [id, toRecord(run({ id }))])),
+    runs: Object.fromEntries(
+      runIDs.map((id) => [id, toRecord(run({ id }))]),
+    ),
     route: { name: 'board', params: {} },
   })
 }
 
 beforeEach(seed)
 
-describe('CenterView persistent terminal cache', () => {
-  it('keeps a terminal mounted across another route and resumes it on revisit', () => {
+describe('CenterView route mounting', () => {
+  it('renders only the active registered route', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
-    expect(mounts.run_a).toBe(1)
+    expect(screen.getByTestId('board')).toBeDefined()
+    expect(screen.queryByTestId('terminal-run_a')).toBeNull()
 
-    setRoute('board')
+    setRoute('terminal', 'run_a')
+
+    expect(screen.queryByTestId('board')).toBeNull()
     expect(screen.getByTestId('terminal-run_a')).toBeDefined()
-    expect(screen.getByTestId('terminal-run_a').getAttribute('data-active')).toBe('false')
-
-    const inactive = screen.getByTestId('terminal-run_a').parentElement
-    expect(inactive?.style.visibility).toBe('hidden')
-    expect(inactive?.hasAttribute('inert')).toBe(true)
-    expect(inactive?.getAttribute('aria-hidden')).toBe('true')
-    expect(inactive?.className).toContain('absolute')
-  })
-  it('retains four busy surfaces while Board is active and revisits the oldest', () => {
-    render(<CenterView />)
-    for (const id of ids.slice(0, 4)) setRoute('terminal', id)
-    setRoute('board')
-
-    for (const id of ids.slice(0, 4)) {
-      expect(screen.getByTestId(`terminal-${id}`)).toBeDefined()
-    }
-    setRoute('terminal', 'run_a')
-    expect(screen.getByTestId('terminal-run_a').getAttribute('data-active')).toBe('true')
-    expect(mounts.run_a).toBe(1)
   })
 
-
-  it('keeps terminal-to-terminal entries mounted and marks only the current one active', () => {
+  it('unmounts the terminal when switching away', () => {
     render(<CenterView />)
-    setRoute('terminal', 'run_a')
-    setRoute('terminal', 'run_b')
-
-    expect(mounts.run_a).toBe(1)
-    expect(mounts.run_b).toBe(1)
-    expect(screen.getByTestId('terminal-run_a').getAttribute('data-active')).toBe('false')
-    expect(screen.getByTestId('terminal-run_b').getAttribute('data-active')).toBe('true')
-
     setRoute('terminal', 'run_a')
     expect(mounts.run_a).toBe(1)
-    expect(screen.getByTestId('terminal-run_b').getAttribute('data-active')).toBe('false')
-  })
 
-  it('evicts the least-recent terminal after the four-entry limit', () => {
-    render(<CenterView />)
-    for (const id of ids) setRoute('terminal', id)
-
-    expect(screen.queryByTestId('terminal-run_a')).toBeNull()
-    expect(screen.getByTestId('terminal-run_b')).toBeDefined()
-    expect(screen.getByTestId('terminal-run_c')).toBeDefined()
-    expect(screen.getByTestId('terminal-run_d')).toBeDefined()
-    expect(screen.getByTestId('terminal-run_e')).toBeDefined()
-  })
-
-  it('evicts older scrollback when inactive cells would exceed the budget', () => {
-    weights.run_a = 2_500_000
-    weights.run_b = 2_500_000
-    weights.run_c = 1_000_000
-    render(<CenterView />)
-    setRoute('terminal', 'run_a')
-    setRoute('terminal', 'run_b')
-    setRoute('terminal', 'run_c')
     setRoute('board')
 
     expect(screen.queryByTestId('terminal-run_a')).toBeNull()
-    expect(screen.getByTestId('terminal-run_b')).toBeDefined()
-    expect(screen.getByTestId('terminal-run_c')).toBeDefined()
+    expect(unmounts.run_a).toBe(1)
   })
 
-  it('filters deleted runs from retained entries', () => {
+  it('mounts a fresh terminal when revisiting a run', () => {
     render(<CenterView />)
     setRoute('terminal', 'run_a')
     setRoute('board')
+
+    setRoute('terminal', 'run_a')
+
+    expect(mounts.run_a).toBe(2)
+    expect(unmounts.run_a).toBe(1)
+    expect(screen.getByTestId('terminal-run_a')).toBeDefined()
+  })
+
+  it('preserves the terminal instance for the same run, identity, and epoch', () => {
+    const view = render(<CenterView />)
+    setRoute('terminal', 'run_a')
+    const originalSocket = sockets.run_a[0]
+
+    view.rerender(<CenterView />)
     act(() => {
-      useStore.setState((state) => ({
-        runs: Object.fromEntries(
-          Object.entries(state.runs).filter(([id]) => id !== 'run_a'),
-        ),
-      }))
+      useStore.setState({ hydrated: true })
     })
-    expect(screen.queryByTestId('terminal-run_a')).toBeNull()
+    setRoute('terminal', 'run_a')
+
+    expect(mounts.run_a).toBe(1)
+    expect(unmounts.run_a).toBeUndefined()
+    expect(originalSocket.close).not.toHaveBeenCalled()
+    expect(screen.getByTestId('terminal-run_a')).toBeDefined()
   })
 
-  it('resets the cache when identity or terminal event generation changes', () => {
+  it('disposes and remounts the terminal when the run ID changes', () => {
     render(<CenterView />)
     setRoute('terminal', 'run_a')
-    setRoute('board')
-    act(() => useStore.setState({ identityKey: 'identity-b' }))
+    const oldSocket = sockets.run_a[0]
+
+    setRoute('terminal', 'run_b')
+
+    expect(screen.queryByTestId('terminal-run_a')).toBeNull()
+    expect(unmounts.run_a).toBe(1)
+    expect(oldSocket.close).toHaveBeenCalledOnce()
+    expect(mounts.run_b).toBe(1)
+    expect(screen.getByTestId('terminal-run_b')).toBeDefined()
+  })
+
+  it('keeps only the selected terminal mounted across more than the old cache limit', () => {
+    render(<CenterView />)
+
+    for (const id of runIDs) {
+      setRoute('terminal', id)
+      expect(screen.getByTestId(`terminal-${id}`)).toBeDefined()
+      for (const other of runIDs.filter((candidate) => candidate !== id)) {
+        expect(screen.queryByTestId(`terminal-${other}`)).toBeNull()
+      }
+    }
+
+    for (const id of runIDs.slice(0, -1)) {
+      expect(unmounts[id]).toBe(1)
+      expect(sockets[id][0].close).toHaveBeenCalledOnce()
+    }
+    expect(unmounts.run_f).toBeUndefined()
+
     setRoute('terminal', 'run_a')
     expect(mounts.run_a).toBe(2)
-
-    setRoute('board')
-    act(() => useStore.setState({ terminalCacheEpoch: 1 }))
-    setRoute('terminal', 'run_a')
-    expect(mounts.run_a).toBe(3)
+    expect(unmounts.run_f).toBe(1)
+    expect(screen.getByTestId('terminal-run_a')).toBeDefined()
   })
 
-  it('protects the active entry while an oversized weight is reported', () => {
-    weights.run_a = 5_000_000
+  it('disposes and remounts the terminal when the store identity changes', () => {
     render(<CenterView />)
     setRoute('terminal', 'run_a')
-    setRoute('terminal', 'run_b')
-    setRoute('terminal', 'run_c')
-    setRoute('terminal', 'run_d')
-    setRoute('terminal', 'run_a')
-    fireEvent.click(screen.getByRole('button', { name: 'Weight run_a' }))
+    const oldSocket = sockets.run_a[0]
 
+    act(() => {
+      useStore.setState({ identityKey: 'identity-b' })
+    })
+
+    expect(unmounts.run_a).toBe(1)
+    expect(oldSocket.close).toHaveBeenCalledOnce()
+    expect(mounts.run_a).toBe(2)
+    expect(sockets.run_a[1].close).not.toHaveBeenCalled()
     expect(screen.getByTestId('terminal-run_a')).toBeDefined()
-    expect(screen.getByTestId('terminal-run_a').getAttribute('data-active')).toBe('true')
   })
 
-  it('removes an invalidated entry after it becomes inactive', () => {
+  it('disposes and remounts the terminal when the event epoch changes', () => {
     render(<CenterView />)
     setRoute('terminal', 'run_a')
-    fireEvent.click(screen.getByRole('button', { name: 'Invalidate run_a' }))
-    expect(screen.getByTestId('terminal-run_a')).toBeDefined()
+    const oldSocket = sockets.run_a[0]
 
+    act(() => {
+      useStore.setState({ terminalCacheEpoch: 1 })
+    })
+
+    expect(unmounts.run_a).toBe(1)
+    expect(oldSocket.close).toHaveBeenCalledOnce()
+    expect(mounts.run_a).toBe(2)
+    expect(sockets.run_a[1].close).not.toHaveBeenCalled()
+    expect(screen.getByTestId('terminal-run_a')).toBeDefined()
+  })
+
+  it('keeps a non-terminal route mounted across identity and epoch changes', () => {
+    render(<CenterView />)
+
+    act(() => {
+      useStore.setState({ identityKey: 'identity-b', terminalCacheEpoch: 1 })
+    })
+
+    expect(boardMounts).toBe(1)
+    expect(boardUnmounts).toBe(0)
+    expect(screen.getByTestId('board')).toBeDefined()
+  })
+
+  it('shows the fallback for an unknown route', () => {
+    render(<CenterView />)
+
+    setRoute('missing')
+
+    expect(screen.queryByTestId('board')).toBeNull()
+    expect(screen.getByText('No view registered for “missing”.')).toBeDefined()
+  })
+
+  it('does not retain a hidden terminal across store and run changes', () => {
+    render(<CenterView />)
+    setRoute('terminal', 'run_a')
     setRoute('board')
+
+    act(() => {
+      useStore.setState({ identityKey: 'identity-b', runs: {} })
+    })
+
+    expect(screen.getByTestId('board')).toBeDefined()
     expect(screen.queryByTestId('terminal-run_a')).toBeNull()
-  })
+    expect(unmounts.run_a).toBe(1)
 
-  it('renders a missing terminal route normally instead of caching it', () => {
-    useStore.setState({ runs: {} })
-    render(<CenterView />)
-    setRoute('terminal', 'run_missing')
-
-    expect(screen.getByTestId('terminal-run_missing').getAttribute('data-active')).toBe('default')
+    setRoute('terminal', 'run_a')
+    expect(mounts.run_a).toBe(2)
   })
 })

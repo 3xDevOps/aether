@@ -1,8 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { useLayoutEffect, useRef } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import {
   useRunTerminalSession,
   type RunTerminalSessionInput,
+  type RunTerminalSessionResult,
 } from '@/routes/terminal/session'
 import { useStore } from '@/store'
 import { initialTerminal } from '@/store/terminal'
@@ -13,7 +15,6 @@ import { StubSocket } from '@/test/stub-socket'
 function fakeTerminal(): Terminal {
   return {
     cols: 80,
-    buffer: { normal: { length: 1 }, alternate: { length: 0 } },
     write: vi.fn((_chunk: unknown, done?: () => void) => done?.()),
     reset: vi.fn(),
   } as unknown as Terminal
@@ -25,10 +26,23 @@ type SessionViewport = Pick<
   | 'beginStructuralReplay'
   | 'cancelStructuralReplay'
   | 'finishStructuralReplay'
-  | 'onInvalidate'
 >
 
-function mount(active = true, viewport: Partial<SessionViewport> = {}) {
+interface MountProps {
+  currentTerminal?: Terminal | null
+  currentPhone?: boolean
+  currentAutomaticWrite?: boolean
+  currentAuthorityKey?: string
+  currentIdentityKey?: string | null
+  currentCacheEpoch?: number
+  onAuthorityLayout?: (session: RunTerminalSessionResult) => void
+}
+
+function mount(
+  viewport: Partial<SessionViewport> = {},
+  terminalState = initialTerminal,
+  initialProps: MountProps = {},
+) {
   const terminal = fakeTerminal()
   const replay: SessionViewport = {
     setGeometry: vi.fn(async () => {}),
@@ -40,35 +54,49 @@ function mount(active = true, viewport: Partial<SessionViewport> = {}) {
   useStore.setState({
     info: serverInfo,
     runs: { run_1: toRecord(run()) },
-    terminals: { run_1: initialTerminal },
+    terminals: { run_1: terminalState },
   })
   const result = renderHook(
     ({
-      currentActive,
       currentTerminal = terminal,
-    }: {
-      currentActive: boolean
-      currentTerminal?: Terminal
-    }) =>
-      useRunTerminalSession({
+      currentPhone = false,
+      currentAutomaticWrite = false,
+      currentAuthorityKey = 'mem_alice:collaborator:mem_alice:false:',
+      currentIdentityKey = 'identity-a',
+      currentCacheEpoch = 0,
+      onAuthorityLayout,
+    }: MountProps) => {
+      const session = useRunTerminalSession({
         runID: 'run_1',
         run: useStore.getState().runs.run_1,
-        active: currentActive,
-        initialized: true,
         terminal: currentTerminal,
         geometry: () => ({ cols: 80, rows: 24 }),
         ...replay,
-        phone: false,
-        automaticWrite: false,
-        authorityKey: 'mem_alice:collaborator:mem_alice:false:',
-      }),
-    { initialProps: { currentActive: active } as { currentActive: boolean; currentTerminal?: Terminal } },
+        phone: currentPhone,
+        automaticWrite: currentAutomaticWrite,
+        identityKey: currentIdentityKey,
+        terminalCacheEpoch: currentCacheEpoch,
+        authorityKey: currentAuthorityKey,
+      })
+      const previousAuthority = useRef(currentAuthorityKey)
+      useLayoutEffect(() => {
+        if (previousAuthority.current !== currentAuthorityKey) onAuthorityLayout?.(session)
+        previousAuthority.current = currentAuthorityKey
+      }, [currentAuthorityKey, onAuthorityLayout, session])
+      return session
+    },
+    { initialProps },
   )
   return { ...result, terminal, ...replay, viewport: replay }
 }
 
 beforeEach(() => {
   StubSocket.install()
+  useStore.setState({
+    identityKey: 'identity-a',
+    terminalCacheEpoch: 0,
+    terminalWriteIntents: {},
+  })
 })
 
 afterEach(() => {
@@ -76,7 +104,7 @@ afterEach(() => {
 })
 
 describe('useRunTerminalSession', () => {
-  it('uses one interactive screen attach and waits for an acknowledged grant', () => {
+  it('uses one interactive screen attach and waits for replay and an acknowledged grant', async () => {
     const { result } = mount()
     const socket = StubSocket.last()
     act(() => {
@@ -92,6 +120,7 @@ describe('useRunTerminalSession', () => {
         }),
       })
     })
+    await waitFor(() => expect(result.current.replaying).toBe(false))
     expect(socket.frames()[0]).toMatchObject({ screen: true, interactive: true })
     expect(result.current.controlMetadata?.position).toEqual({ epoch: 'epoch', sequence: '7' })
 
@@ -110,13 +139,373 @@ describe('useRunTerminalSession', () => {
     )
     expect(result.current.state.write).toBe(true)
     expect(useStore.getState().terminalControlTaken).toBe(true)
+
+    act(() => {
+      result.current.send('x')
+      result.current.resize(92, 32)
+    })
+    expect(socket.frames().at(-2)).toMatchObject({ type: 'input', data: 'x' })
+    expect(socket.frames().at(-1)).toEqual({
+      type: 'resize',
+      cols: 92,
+      rows: 32,
+      control_generation: 1,
+    })
+  })
+
+  it('uses the fenced cursor when a live viewport change reconnects by resume', async () => {
+    const mounted = mount()
+    const initial = StubSocket.last()
+    act(() => {
+      initial.onopen?.()
+      initial.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          cols: 80,
+          rows: 24,
+          replay: 0,
+          resume_id: 'pty-run-1',
+          cursor: '7',
+        }),
+      })
+    })
+    await waitFor(() => expect(mounted.result.current.replaying).toBe(false))
+    vi.mocked(mounted.beginStructuralReplay!).mockClear()
+    vi.mocked(mounted.setGeometry).mockClear()
+
+    mounted.rerender({ currentPhone: true })
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const resumed = StubSocket.last()
+    act(() => resumed.onopen?.())
+
+    expect(resumed.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-run-1',
+      cursor: '7',
+    })
+
+    act(() => {
+      resumed.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          resumed: true,
+          cols: 80,
+          rows: 24,
+          replay: 3,
+          resume_id: 'pty-run-1',
+          cursor: '10',
+        }),
+      })
+      resumed.onmessage?.({ data: new TextEncoder().encode('new').buffer })
+    })
+
+    expect(mounted.setGeometry).toHaveBeenCalledWith(80, 24, false)
+    expect(mounted.beginStructuralReplay).not.toHaveBeenCalled()
+    expect(mounted.result.current.replaying).toBe(false)
+    mounted.unmount()
+  })
+
+  it('starts from a fresh snapshot after the prior route session is disposed', async () => {
+    const first = mount()
+    const oldSocket = StubSocket.last()
+    act(() => {
+      oldSocket.onopen?.()
+      oldSocket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          resume_id: 'pty-run-1',
+          cursor: '7',
+        }),
+      })
+    })
+    await waitFor(() => expect(first.result.current.replaying).toBe(false))
+    first.unmount()
+    expect(oldSocket.closed).toBe(true)
+    expect(useStore.getState().terminals.run_1).toEqual(initialTerminal)
+
+    const second = mount()
+    const freshSocket = StubSocket.last()
+    act(() => freshSocket.onopen?.())
+
+    expect(freshSocket.frames()[0]).toMatchObject({
+      screen: true,
+      interactive: true,
+    })
+    expect(freshSocket.frames()[0]).not.toHaveProperty('resume')
+    expect(freshSocket.frames()[0]).not.toHaveProperty('resume_id')
+    expect(freshSocket.frames()[0]).not.toHaveProperty('cursor')
+    second.unmount()
+  })
+
+  it('reuses an explicit take intent on the next route attach', () => {
+    const first = mount()
+    act(() => first.result.current.takeControl())
+    first.unmount()
+
+    const second = mount()
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+
+    expect(socket.frames()[0]).toMatchObject({ write: true })
+    second.unmount()
+  })
+
+  it('reuses an explicit release intent instead of automatic write on remount', () => {
+    const first = mount({}, initialTerminal, { currentAutomaticWrite: true })
+    act(() => first.result.current.releaseControl())
+    first.unmount()
+
+    const second = mount({}, initialTerminal, { currentAutomaticWrite: true })
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+
+    expect(socket.frames()[0]).not.toHaveProperty('write')
+    second.unmount()
+  })
+
+  it.each([
+    ['identity', { currentIdentityKey: 'identity-b' }],
+    ['terminal cache epoch', { currentCacheEpoch: 1 }],
+  ] as const)('fences intent when the %s changes', (_name, nextProps) => {
+    const first = mount()
+    act(() => first.result.current.takeControl())
+    first.unmount()
+
+    const second = mount({}, initialTerminal, nextProps)
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+
+    expect(socket.frames()[0]).not.toHaveProperty('write')
+    expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()
+    second.unmount()
+  })
+
+  it('clears intent after steering authorization is denied', () => {
+    const mounted = mount()
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({ ok: true, replay: 0, has_control: false }),
+      })
+      mounted.result.current.takeControl()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: 'control',
+          request_id: 1,
+          ok: false,
+          code: -32001,
+          error: 'permission denied',
+          has_control: false,
+          control_generation: 0,
+        }),
+      })
+    })
+
+    expect(mounted.result.current.state.steerDenied).toBe(true)
+    expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()
+    mounted.unmount()
+  })
+
+  it('clears intent when the requested control lease is lost', () => {
+    const first = mount()
+    act(() => first.result.current.takeControl())
+    first.unmount()
+
+    const second = mount()
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: -32003,
+          error: 'control occupied',
+          has_control: false,
+          control_generation: 1,
+        }),
+      })
+    })
+
+    expect(second.result.current.state.steerDenied).toBe(false)
+    expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()
+    second.unmount()
+  })
+
+  it('reconnects an owner as a mirror after an occupied write lease', () => {
+    vi.useFakeTimers()
+    const mounted = mount({}, initialTerminal, { currentAutomaticWrite: true })
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+    expect(socket.frames()[0]).toMatchObject({ write: true })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: -32003,
+          error: 'control occupied',
+          has_control: false,
+        }),
+      })
+      socket.onclose?.({ code: 1008 })
+    })
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    const retry = StubSocket.last()
+    act(() => retry.onopen?.())
+    expect(retry.frames()[0]).not.toHaveProperty('write')
+    mounted.unmount()
+    vi.useRealTimers()
+  })
+
+  it('clears intent when the run is deleted or its authority changes', () => {
+    const deleted = mount()
+    act(() => deleted.result.current.takeControl())
+    act(() => {
+      useStore.setState({ runs: {} })
+      deleted.rerender({})
+    })
+    expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()
+    deleted.unmount()
+
+    const changed = mount()
+    act(() => changed.result.current.takeControl())
+    changed.rerender({ currentAuthorityKey: 'mem_alice:viewer:mem_alice:false:' })
+    expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()
+    changed.unmount()
+  })
+
+  it('revokes a writable lease before authority-change layout consumers can send', () => {
+    const onAuthorityLayout = vi.fn((session: RunTerminalSessionResult) => {
+      expect(session.state.write).toBe(false)
+      expect(session.controlMetadata).toBeUndefined()
+      expect(useStore.getState().terminals.run_1?.write).toBe(false)
+      session.send('stale input')
+    })
+    const mounted = mount()
+    const socket = StubSocket.last()
+    act(() => {
+      socket.onopen?.()
+    })
+    const header = socket.frames().at(-1) as { control_session_id?: string }
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          control_session_id: header.control_session_id,
+          control_generation: 4,
+          has_control: true,
+        }),
+      })
+    })
+    expect(mounted.result.current.state.write).toBe(true)
+    expect(mounted.result.current.controlMetadata).toMatchObject({
+      control_session_id: header.control_session_id,
+      control_generation: 4,
+      has_control: true,
+    })
+    const frameCount = socket.frames().length
+
+    mounted.rerender({
+      currentAuthorityKey: 'mem_alice:viewer:mem_alice:false:',
+      onAuthorityLayout,
+    })
+
+    expect(onAuthorityLayout).toHaveBeenCalledTimes(1)
+    expect(socket.frames().slice(frameCount)).toEqual([
+      {
+        type: 'control',
+        request_id: 1,
+        write: false,
+        control_generation: 4,
+      },
+    ])
+    mounted.unmount()
+  })
+
+  it('puts a pre-ack control request on the attach header', () => {
+    const mounted = mount()
+    const socket = StubSocket.last()
+    act(() => mounted.result.current.takeControl(true))
+    act(() => socket.onopen?.())
+    expect(socket.frames()[0]).toMatchObject({ write: true, takeover: true })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          control_generation: 0,
+          has_control: false,
+        }),
+      })
+    })
+    expect(
+      socket.frames().filter(
+        (frame) =>
+          typeof frame === 'object' &&
+          frame !== null &&
+          'type' in frame &&
+          frame.type === 'control',
+      ),
+    ).toEqual([])
+    mounted.unmount()
+  })
+
+  it('releases a write grant when authority changes after the header is sent', () => {
+    const mounted = mount({}, initialTerminal, { currentAutomaticWrite: true })
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+    const header = socket.frames()[0] as { write?: boolean; control_session_id?: string }
+    expect(header.write).toBe(true)
+    mounted.rerender({
+      currentAutomaticWrite: false,
+      currentAuthorityKey: 'mem_alice:viewer:mem_alice:false:',
+    })
+    act(() => {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          control_session_id: header.control_session_id,
+          control_generation: 3,
+          has_control: true,
+        }),
+      })
+    })
+    expect(socket.frames().at(-1)).toMatchObject({
+      type: 'control',
+      write: false,
+      control_generation: 3,
+    })
+    mounted.unmount()
+  })
+
+  it('resets displayed state before xterm becomes available', () => {
+    const stale = {
+      connection: 'offline' as const,
+      write: true,
+      steerDenied: true,
+      message: 'old refusal',
+      refused: true,
+    }
+    const mounted = mount({}, stale, { currentTerminal: null })
+
+    expect(mounted.result.current.state).toEqual(initialTerminal)
+    expect(mounted.result.current.controlMetadata).toBeUndefined()
+    expect(mounted.result.current.sessionMissing).toBe(false)
+    expect(mounted.result.current.replaying).toBe(false)
+    expect(StubSocket.opened).toHaveLength(0)
+    mounted.unmount()
   })
 
   it('restores a full replay only after geometry and the final xterm callback', async () => {
     const order: string[] = []
     let geometryDone!: () => void
     let writeDone!: () => void
-    const mounted = mount(true, {
+    const mounted = mount({
       beginStructuralReplay: vi.fn(() => {
         order.push('begin')
         return 7
@@ -190,7 +579,7 @@ describe('useRunTerminalSession', () => {
     const order: string[] = []
     let geometryDone!: () => void
     let finishDone!: () => void
-    const mounted = mount(true, {
+    const mounted = mount({
       beginStructuralReplay: vi.fn(() => {
         order.push('begin')
         return 9
@@ -240,7 +629,7 @@ describe('useRunTerminalSession', () => {
 
     const replacementFinish = vi.fn(async () => {})
     mounted.viewport.finishStructuralReplay = replacementFinish
-    mounted.rerender({ currentActive: true })
+    mounted.rerender({})
 
     act(() => frames.shift()?.(0))
     expect(mounted.result.current.replaying).toBe(true)
@@ -260,12 +649,12 @@ describe('useRunTerminalSession', () => {
     mounted.unmount()
   })
 
-  it('orders refusal reset, replay cancellation, and invalidation', async () => {
+  it('orders refusal reset and replay cancellation', async () => {
     const order: string[] = []
     let resetDone!: () => void
     let cancelDone!: () => void
     let geometryCalls = 0
-    const mounted = mount(true, {
+    const mounted = mount({
       beginStructuralReplay: vi.fn(() => 11),
       setGeometry: vi.fn(() => {
         geometryCalls++
@@ -288,7 +677,6 @@ describe('useRunTerminalSession', () => {
             }
           }),
       ),
-      onInvalidate: () => order.push('invalidate'),
     })
     const socket = StubSocket.last()
     act(() => {
@@ -321,7 +709,6 @@ describe('useRunTerminalSession', () => {
         'reset:done',
         'cancel:start',
         'cancel:done',
-        'invalidate',
       ]),
     )
     mounted.unmount()
@@ -330,7 +717,7 @@ describe('useRunTerminalSession', () => {
   it('cancels structural replay through its original controller on replacement', () => {
     const ownerCancel = vi.fn(async () => {})
     const replacementCancel = vi.fn(async () => {})
-    const mounted = mount(true, {
+    const mounted = mount({
       beginStructuralReplay: vi.fn(() => 13),
       cancelStructuralReplay: ownerCancel,
     })
@@ -343,21 +730,20 @@ describe('useRunTerminalSession', () => {
     })
 
     mounted.viewport.cancelStructuralReplay = replacementCancel
-    mounted.rerender({ currentActive: true, currentTerminal: fakeTerminal() })
+    mounted.rerender({ currentTerminal: fakeTerminal() })
 
     expect(ownerCancel).toHaveBeenCalledWith(13)
     expect(replacementCancel).not.toHaveBeenCalled()
     mounted.unmount()
   })
 
-  it('keeps stale refusal cleanup from revealing or invalidating a replacement replay', async () => {
+  it('keeps stale refusal cleanup from revealing a replacement replay', async () => {
     let resetDone!: () => void
     let cancelDone!: () => void
     let geometryCalls = 0
     let generation = 0
     const replacementCancel = vi.fn(async () => {})
-    const onInvalidate = vi.fn()
-    const mounted = mount(true, {
+    const mounted = mount({
       beginStructuralReplay: vi.fn(() => ++generation),
       setGeometry: vi.fn(() => {
         geometryCalls++
@@ -372,7 +758,6 @@ describe('useRunTerminalSession', () => {
             cancelDone = resolve
           }),
       ),
-      onInvalidate,
     })
     const refused = StubSocket.last()
     act(() => {
@@ -386,7 +771,7 @@ describe('useRunTerminalSession', () => {
     })
 
     mounted.viewport.cancelStructuralReplay = replacementCancel
-    mounted.rerender({ currentActive: true })
+    mounted.rerender({})
 
     await act(async () => {
       resetDone()
@@ -413,62 +798,26 @@ describe('useRunTerminalSession', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(onInvalidate).not.toHaveBeenCalled()
     expect(mounted.result.current.replaying).toBe(true)
     expect(mounted.cancelStructuralReplay).toHaveBeenCalledTimes(1)
     mounted.unmount()
   })
 
-  it('parks the socket and resumes a delta without a structural viewport restore', async () => {
+  it('closes the attachment and cancels structural replay on unmount', () => {
     const mounted = mount()
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
       socket.onmessage?.({
-        data: JSON.stringify({
-          ok: true,
-          replay: 0,
-          cursor: 123,
-          resume_id: 'pty-incarnation-run',
-        }),
+        data: JSON.stringify({ ok: true, cols: 80, rows: 24, replay: 3 }),
       })
     })
-    await waitFor(() => expect(mounted.finishStructuralReplay).toHaveBeenCalled())
-    vi.mocked(mounted.beginStructuralReplay!).mockClear()
-    vi.mocked(mounted.cancelStructuralReplay!).mockClear()
-    vi.mocked(mounted.finishStructuralReplay!).mockClear()
 
-    act(() => mounted.rerender({ currentActive: false }))
-    expect(socket.closed).toBe(true)
-
-    act(() => mounted.rerender({ currentActive: true }))
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
-    const resumed = StubSocket.last()
-    let replayDone!: () => void
-    mounted.terminal.write = vi.fn((_chunk: unknown, done?: () => void) => {
-      replayDone = done ?? (() => {})
-    }) as unknown as Terminal['write']
-    act(() => {
-      resumed.onopen?.()
-      resumed.onmessage?.({
-        data: JSON.stringify({
-          ok: true,
-          resumed: true,
-          replay: 3,
-          cursor: 126,
-          resume_id: 'pty-incarnation-run',
-        }),
-      })
-      resumed.onmessage?.({ data: new TextEncoder().encode('new').buffer })
-    })
-
-    expect(resumed.frames()[0]).toMatchObject({ resume: true })
-    expect(mounted.result.current.replaying).toBe(false)
-    act(() => replayDone())
-    await waitFor(() => expect(mounted.result.current.replaying).toBe(false))
-    expect(mounted.beginStructuralReplay).not.toHaveBeenCalled()
-    expect(mounted.cancelStructuralReplay).not.toHaveBeenCalled()
-    expect(mounted.finishStructuralReplay).not.toHaveBeenCalled()
     mounted.unmount()
+
+    expect(socket.closed).toBe(true)
+    expect(socket.onmessage).toBeNull()
+    expect(socket.onclose).toBeNull()
+    expect(mounted.cancelStructuralReplay).toHaveBeenCalledWith(1)
   })
 })

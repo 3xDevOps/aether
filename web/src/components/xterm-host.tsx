@@ -560,9 +560,13 @@ export function useXterm({
   // size zoom only changes how much of the same grid fits on screen.
   useEffect(() => {
     if (!terminal || appliedFontSize.current === fontSize) return
+    // Font changes the cell size without rebuilding the buffer. Keep the row
+    // the user was reading; xterm otherwise paints the new metrics at the bottom.
+    const intent = captureViewport(terminal, viewportInteractionRevision.current)
     appliedFontSize.current = fontSize
     terminal.options.fontSize = fontSize
     resizeRef.current?.()
+    restoreViewport(terminal, intent, viewportInteractionRevision.current)
   }, [fontSize, terminal])
 
   return {

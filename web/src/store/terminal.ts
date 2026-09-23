@@ -25,6 +25,20 @@ export const initialTerminal: TerminalState = {
   refused: false,
 }
 
+/**
+ * A user's explicit preference for the next attach. This is deliberately
+ * limited to one boolean plus the fences needed to prove it still belongs to
+ * the same authenticated run; transport, replay, and xterm state stay owned
+ * by the mounted route.
+ */
+export interface TerminalWriteIntent {
+  write: boolean
+  identityKey: string
+  terminalCacheEpoch: number
+  authorityKey: string
+  runCreatedAt: string
+}
+
 export interface RunShellDockState {
   tabs: string[]
   activeTab: string | null
@@ -129,8 +143,11 @@ export { emitShellSocketData }
 
 export interface TerminalSlice {
   terminals: Record<string, TerminalState>
+  terminalWriteIntents: Record<string, TerminalWriteIntent>
   shellDocks: Record<string, RunShellDockState>
   setTerminal: (runID: string, patch: Partial<TerminalState>) => void
+  setTerminalWriteIntent: (runID: string, intent: TerminalWriteIntent) => void
+  clearTerminalWriteIntent: (runID: string) => void
   openShellTab: (runID: string) => string | null
   closeShellTab: (runID: string, tab: string) => void
   selectShellTab: (runID: string, tab: string) => void
@@ -144,6 +161,7 @@ const dock = (docks: Record<string, RunShellDockState>, runID: string) =>
 
 export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
   terminals: {},
+  terminalWriteIntents: {},
   shellDocks: {},
   setTerminal: (runID, patch) =>
     set((s) => ({
@@ -152,6 +170,17 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
         [runID]: { ...(s.terminals[runID] ?? initialTerminal), ...patch },
       },
     })),
+  setTerminalWriteIntent: (runID, intent) =>
+    set((s) => ({
+      terminalWriteIntents: { ...s.terminalWriteIntents, [runID]: intent },
+    })),
+  clearTerminalWriteIntent: (runID) =>
+    set((s) => {
+      if (!s.terminalWriteIntents[runID]) return s
+      const terminalWriteIntents = { ...s.terminalWriteIntents }
+      delete terminalWriteIntents[runID]
+      return { terminalWriteIntents }
+    }),
   openShellTab: (runID) => {
     let opened: string | null = null
     set((s) => {

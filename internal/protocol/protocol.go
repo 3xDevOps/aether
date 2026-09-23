@@ -89,6 +89,9 @@ const (
 	MethodGitHubProbe = "github.probe"
 )
 
+// MethodTerminalHistory reads a bounded page of normalized run output.
+const MethodTerminalHistory = "terminal.history"
+
 // Custom agent (harness) onboarding methods.
 const (
 	MethodAgentRegister = "agent.register"

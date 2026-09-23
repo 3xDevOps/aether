@@ -663,16 +663,32 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
-	if s.runs[run] != entry {
-		s.mu.Unlock()
-		return retainedTransitionError()
+	status, workspace := entry.status, entry.workspaceID
+	live := s.runs[run] == entry
+	if !live {
+		// Exit cleanup can release the owner after CloseRun snapshots it.
+		// A finished row is still closable, but a replacement owner or an
+		// active row belongs to another lifecycle and must not be touched.
+		if s.runs[run] != nil || s.pending[run] != nil {
+			s.mu.Unlock()
+			return retainedTransitionError()
+		}
+		fresh, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		if !fresh.Status.Terminal() {
+			s.mu.Unlock()
+			return retainedTransitionError()
+		}
+		status, workspace = fresh.Status, fresh.WorkspaceID
 	}
-	if entry.destroyPending {
+	if live && entry.destroyPending {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run cleanup is pending", ErrInvalidTransition)
 	}
-	if entry.finalizing {
-		status, workspace := entry.status, entry.workspaceID
+	if !live || entry.finalizing {
 		identity := entry.evidenceIdentity
 		if !status.Terminal() {
 			s.mu.Unlock()

@@ -23,27 +23,31 @@ page. The first open starts the environment; the dock says **Starting your
 environment container** until the shell attaches, and shows the server's own
 error if the start fails. Later tabs and tab switches reach a container that is
 already up, so those say **Connecting to your environment**. The dock reconnects
-and replays terminal output when the page or network reconnects. The stream ack
-names the exact replay byte count, including a boundary that falls inside one
-WebSocket frame. As each frame-sized replay operation arrives, the dashboard
-splits only the boundary-crossing frame and starts one serial xterm write chain
-behind the CSS-hidden surface; it does not retain the replay until the full
-boundary arrives or allocate a browser-sized buffer from the declared length.
-Only the slice containing the exact final replay byte is tagged `replay-end`;
-live output and geometry stay in wire order behind xterm's write backpressure.
-Terminal-generated replies and user input stay muted from the ack through the
-final replay write callback. Input may resume after that callback, but the
-surface stays hidden until two paint turns and any saved viewport restoration
-have settled; only then is the terminal revealed.
+and restores terminal output when the page or network reconnects. The stream
+ack names the exact bootstrap byte count in its `replay` field, including a
+boundary that falls inside one WebSocket frame. As each frame-sized bootstrap
+operation arrives, the dashboard splits only the boundary-crossing frame and
+starts one serial xterm write chain behind the CSS-hidden surface; it does not
+retain the bootstrap until the full boundary arrives or allocate a
+browser-sized buffer from the declared length. Only the slice containing the
+exact final bootstrap byte is tagged `replay-end`; live output and geometry
+stay in wire order behind xterm's write backpressure. Terminal-generated
+replies and user input stay muted from the ack through the final bootstrap
+write callback. Input may resume after that callback, but the surface stays
+hidden until two paint turns and any saved viewport restoration have settled;
+only then is the terminal revealed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
-When a persistent dock host is replaced, `rebind` cancels the old replay drain
-with its cancellation signal, drops the old socket, installs the new handlers,
-and starts one fresh full replay after cancellation; the dock does not issue a
-second reopen. If an `online` wake interrupts an incomplete replay, the client
-cancels its parser and drain with the same cancellation signal, drops that
-socket while keeping the terminal hidden, and reconnects for a fresh hidden
-replay rather than revealing a partial history prefix. A final replacement
-refusal settles the replay gate before its server error is shown.
+When a persistent dock host is replaced, `rebind` cancels the old bootstrap
+drain with its cancellation signal, drops the old socket, installs the new
+handlers, and starts one fresh bounded bootstrap after cancellation; the dock
+does not issue a second reopen. If an `online` wake interrupts an incomplete
+bootstrap, the client cancels its parser and drain with the same cancellation
+signal, drops that socket while keeping the terminal hidden, and reconnects
+for a fresh hidden bootstrap rather than revealing a partial prefix. A final
+replacement refusal settles the bootstrap gate before its server error is
+shown. For a run terminal, this bootstrap is compact current-screen state
+captured without scanning the retained archive; the live view never fetches
+that archive.
 
 ## Run control and the Run Room
 
@@ -229,7 +233,12 @@ the terminal itself claims them before the shell sees them.
 
 `Cmd`, or the `Super`/`Windows` key, works as well as `Ctrl` for the zoom
 keys. The font size is one preference across every terminal and survives a
-reload; find searches the scrollback of the terminal it was opened in.
+reload; find searches the bounded scrollback of the terminal it was opened in.
+A run terminal also offers **Open terminal history**. That separate view loads
+the newest normalized text page first, fetches older pages only as requested,
+and performs case-insensitive literal searches on the server. It retains at
+most 1,000 lines in the browser and never replays the full recording into
+xterm. Raw full-history compatibility exports are not part of the dashboard.
 `Ctrl+Shift+=` is accepted for zoom, but `Ctrl+Shift+-` remains the shell's
 `Ctrl+_` (readline undo or a vim keymap switch), as does a shifted `Ctrl+0`.
 The zoom shortcuts normally cancel the browser's own page zoom; if a browser
@@ -320,39 +329,40 @@ instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
 
-Changing away from a run terminal no longer destroys its primary terminal
-immediately. A recently visited terminal remains in browser memory, so returning
-shows its parsed current screen and bounded scrollback at once. While it is
-inactive, its socket closes intentionally: you are no longer **Watching**, and
-it has no active control transport or geometry participation. The retained
-surface is only the TerminalPane/xterm; the RunHeader, run tabs, actions, Run
-Dock, and Run Room unmount while inactive, so their fixed IDs and auxiliary
-resources are unique to the active route. This cache is not persistent across a
-reload or browser tab.
+Changing away from a run terminal closes its socket and unmounts that terminal
+surface. You are no longer **Watching**, and the inactive run has no control
+transport or geometry participation. The dashboard does not retain a fixed
+multi-terminal route cache; returning to a run creates a fresh surface and
+bootstraps it from compact current screen state.
 
-On return, the dashboard reconnects with `resume` only when it retained the
-server's nonempty `resume_id` for that PTY incarnation, and sends that ID with
-the xterm-settled cursor. A valid same-incarnation resume supplies only the
-bounded gap and keeps the current screen. If the ring, geometry, cursor, or
-incarnation fence cannot serve that gap, the server sends a compact current
-screen instead; the dashboard replaces the hidden surface and does not replay
-the archive. Writes that settle while parked refresh the cache's normal and
-alternate buffer weights. A completed entry whose session ended does not
-reconnect unless that same run is relaunched; that transition records a refresh
-while parked and performs a fresh bootstrap once active.
+When an already-mounted dashboard surface deliberately reopens while its
+parsed screen remains valid, it may send the server's nonempty `resume_id` for
+that PTY incarnation with its
+xterm-settled cursor. A valid same-incarnation resume supplies only the bytes
+still available in the bounded in-memory resume ring and keeps the current
+screen; it never scans the transcript for a gap. If the ring, geometry, cursor,
+or incarnation fence cannot serve that gap, the server sends a compact current
+screen instead. Neither path replays the archive. A completed session opens
+from its compact final checkpoint, with a bounded recent-output fallback while
+a missing or invalid checkpoint is repaired, and remains read-only unless that
+run is relaunched.
 
 ### Current screen and retained terminal archive
 
 A dashboard run attach requests `screen:true` and `interactive:true`. Its
 bootstrap is a compact VT snapshot of the current viewport, cursor, modes,
-colours, and alternate buffer, not every recorded byte from the run. The
-browser keeps bounded live scrollback: a normal run requests up to 5,000 rows
-and then adapts the normal and alternate buffers to the acknowledged geometry's
-cell limit. A live, fallback, or finished run therefore opens at the current
-screen rather than showing a historical timelapse. Input and terminal-generated
-replies stay muted through the final hidden snapshot write. Input may resume
-after that write; paint and saved-viewport restoration still settle before the
-surface is revealed.
+colours, and alternate buffer, not every recorded byte from the run. The live
+session serializes that state in memory at the same output boundary named by
+the attach acknowledgement, so opening the terminal does not wait for a
+durable-history scan. The server snapshot keeps at most 200 scrollback rows and
+bounds the screen store to 1,048,576 cells. The browser requests up to 5,000
+live-scrollback rows and reduces that count as needed to keep its normal and
+alternate buffers within a 1,000,000-cell cap. A live, fallback, or finished
+run therefore opens at the current screen rather than showing a historical
+timelapse or scanning the archive. Input and terminal-generated replies stay
+muted through the final hidden snapshot write. Input may resume after that
+write; paint and saved-viewport restoration still settle before the surface is
+revealed.
 
 The snapshot and browser scrollback are bounded, so they may omit older rows
 even while those rows still exist in the retained raw archive. Do not treat
@@ -366,14 +376,31 @@ was following the bottom or its distance above the bottom and restores that
 intent afterward. It does not apply a saved position if you scroll during the
 operation or if the terminal switches between its normal and alternate buffers.
 
-The retained raw archive is a separate operation. Use the dashboard's **Download
-full terminal history** action, which makes an authenticated
-`GET /api/runs/{run}/terminal-history` request and downloads the raw ANSI bytes
-from all retained cast incarnations. It does not control or alter the PTY.
-`aether attach` remains the raw CLI stream: it requests `screen:false`,
-consumes the ack-declared replay byte count, and then treats following bytes as
-live. CLI output is retained raw history, not the dashboard's compact snapshot.
-The CLI's pre-replay input-discard rule remains unchanged.
+For older output, open **Terminal history**. The dashboard loads normalized
+text in bounded pages, starting with the newest page, and requests older pages
+only as you move back. Older pages are prepended to the displayed result;
+starting or changing a search replaces that result set. Its literal,
+case-insensitive search runs on the server, so the browser does not load or
+replay the complete retained recording. The view holds at most 1,000 lines at
+once. The server returns at most 200 lines per request and also bounds disk
+reads, decoded events, segment discovery, concurrent readers, and elapsed scan
+time. A page or search can therefore be short or empty while `has_more` still
+says older output remains. **Load older** continues with the authenticated
+opaque cursor returned by the server; the cursor is tied to this run and query
+and must not be constructed or edited by the client.
+
+The retained raw archive remains separately available to non-dashboard
+compatibility clients through
+`GET /api/runs/<run_id>/terminal-history` and the legacy form `POST` route at
+the same path. They use the gateway's normal authentication and member
+authorization, stream raw ANSI bytes from all retained cast incarnations only
+to the finite archive boundary captured for the request, and do not control or
+alter the PTY. The dashboard calls neither route and exposes no full-history
+download action. `aether attach` likewise remains a raw CLI stream: it requests
+`screen:false`, consumes the ack-declared replay byte count, and then treats
+following bytes as live. CLI output is retained raw history, not the
+dashboard's compact snapshot, and its pre-replay input-discard rule remains
+unchanged.
 
 ### Reattaching after an update
 
@@ -394,9 +421,9 @@ unavailable.
 
 Starting a new PTY incarnation preserves the previous non-empty cast as an
 old, timestamped artifact instead of truncating it. The current-screen
-checkpoint is only a fast bootstrap; it is not the archive. The history
-download and raw CLI replay can still read all retained cast incarnations,
-subject to the run's retained-artifact lifecycle.
+checkpoint is only a fast bootstrap; it is not the archive. The raw
+compatibility exports and CLI replay can still read all retained cast
+incarnations, subject to the run's retained-artifact lifecycle.
 
 ### Control availability
 

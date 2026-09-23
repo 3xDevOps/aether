@@ -164,7 +164,8 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/` and any other non-API path | the SPA (fallback to `index.html`) |
 | `POST` | `/api/v1/<rpc.method>` | any control-channel method, dispatched through the shared webgate |
 | `GET` | `/api/v1/run/<run_id>/patch` | `run.patch` |
-| `GET` | `/api/runs/<run_id>/terminal-history` | authenticated retained raw ANSI terminal-history download |
+| `GET` | `/api/runs/<run_id>/terminal-history` | non-dashboard compatibility stream of the complete retained raw ANSI archive |
+| `POST` | `/api/runs/<run_id>/terminal-history` | legacy form compatibility for that raw archive; not a dashboard action |
 | `GET` | `/api/v1/disk` | `server.disk` |
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
@@ -184,30 +185,62 @@ bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. File and configuration exceptions are listed below.
 
-### `GET /api/runs/<run_id>/terminal-history`
+### Terminal history
 
-This authenticated download streams the terminal archive retained for the run.
-The gateway sends the available cast incarnations as raw ANSI bytes with
-`Content-Type: application/octet-stream` and
+The dashboard browses recorded output through
+`POST /api/v1/terminal.history`. Like every gateway RPC, it uses the local
+bearer token or server-side Tailscale WhoIs identity; the guarded method also
+requires **View** permission for the named run. A member who cannot view the
+run cannot page or search its transcript.
+
+The request names `run_id`, an optional opaque `before` cursor returned as
+`next_cursor` by the previous response, an optional case-insensitive literal
+`query`, and a bounded `limit`. An omitted or zero limit defaults to 100; the
+server caps it at 200. Queries are limited to 256 UTF-8 bytes. A cursor must be
+returned unchanged and used with the same run and query; it is authenticated
+server state, not an offset for clients to construct or edit. Malformed,
+tampered, or mismatched cursors are rejected as invalid parameters.
+
+The first request starts at the newest retained output. Every response orders
+its normalized text lines chronologically and returns `has_more`; when another
+window is available it also returns `next_cursor`, which requests the next
+older window. Search applies the literal query while scanning retained casts
+and returns only matching normalized lines. Escape sequences and terminal
+controls are interpreted into text rather than sent to the browser.
+
+Line count is not the only bound. Each request also limits raw disk reads,
+decoded bytes and events, elapsed time, cast segments, directory discovery,
+and concurrent readers; searches have their own lower concurrency cap. A page
+or search may therefore return fewer than the requested number of lines,
+including none, with `has_more:true`. Continuing is an explicit older-page
+request with `next_cursor`; the live attach does not do this work. The history
+dialog prepends older pages, replaces the displayed result when a search
+changes, retains at most 1,000 lines in browser memory, and never feeds these
+pages into xterm.
+
+The raw `GET /api/runs/<run_id>/terminal-history` route remains only for
+non-dashboard compatibility consumers that need the complete recording. The
+dashboard neither calls it nor exposes a full-history download action. The
+route performs the normal gateway and member authorization, then streams the
+available cast incarnations as raw ANSI bytes with
+`Content-Type: application/octet-stream`, `Cache-Control: no-store`, and
 `Content-Disposition: attachment; filename="terminal-history-<run_id>.ansi"`.
-It supplies the archive byte count as `Content-Length`; the stream ends at
-the archive boundary even if the run is live.
-It does not parse the bytes into a screen snapshot, buffer the archive
-in memory, acquire control, or write to the PTY. The dashboard exposes it as
-**Download full terminal history**. The same-origin rule and the gateway's
+It supplies the archive byte count as `Content-Length`; the stream ends at the
+finite archive boundary captured for the request even if the run is live. It
+does not parse the bytes into a screen snapshot, buffer the archive in memory,
+acquire control, or write to the PTY. The same-origin rule and the gateway's
 normal bearer-token or Tailscale WhoIs authorization apply. If the run has no
 retained transcript, the route returns the gateway's normal not-found or
 unavailable refusal rather than an empty archive.
 
-Browsers without `showSaveFilePicker` use the same path with a native
-`POST /api/runs/<run_id>/terminal-history` form targeted at a new tab. The
-body is `application/x-www-form-urlencoded`, no larger than 8 KiB, and may
-contain only an optional `token` field. When present, the gateway copies that
-token into a cloned `Authorization: Bearer` check; it never accepts the token
-in the URL. The original `Origin` and normal member authorization still apply.
-The response uses the same raw-stream download headers and `Cache-Control:
-no-store`; errors remain JSON in the new tab. This fallback streams directly
-and does not build a Blob or buffer the archive in the browser.
+The `POST /api/runs/<run_id>/terminal-history` form route remains for legacy
+compatibility clients. Its body is `application/x-www-form-urlencoded`, no
+larger than 8 KiB, and may contain only an optional `token` field. When
+present, the gateway copies that token into a cloned `Authorization: Bearer`
+check; it never accepts the token in the URL. The original `Origin` and normal
+member authorization still apply. The response streams directly with the same
+raw-export headers and finite archive boundary as `GET`; errors remain JSON.
+It does not build a Blob or buffer the archive in the browser.
 
 ### `POST /api/v1/<method>`
 
@@ -1033,14 +1066,16 @@ out the rest of a 30-second wait. A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.
-If an attach is still inside its replay boundary when `online` fires, the
+If an attach is still inside its bootstrap boundary when `online` fires, the
 client cancels that parser and drain with an explicit cancellation signal,
 clears the partial operations, and drops the socket while keeping the terminal
-hidden. The replacement attach starts a fresh hidden replay; the incomplete
-prefix is never revealed. If the replacement is finally refused, the client
-settles the replay gate before showing the server's error. An attach the gateway
-refused, one parked on a `session ended` close, and a run still waiting for its
-PTY session are not reopened by either event.
+hidden. The replacement attach starts a fresh hidden bootstrap; the incomplete
+prefix is never revealed. For a dashboard run attach the replacement is a
+compact current-screen snapshot captured without scanning the retained raw
+archive. If the replacement is finally refused, the client settles the
+bootstrap gate before showing the server's error. An attach the gateway
+refused, one parked on a `session ended` close, and a run still waiting for
+its PTY session are not reopened by either event.
 
 Every live socket - `events`, `attach`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
@@ -1096,21 +1131,27 @@ resize, control, geometry, and acknowledgements.
      "cols":120,"rows":40,"control_session_id":"tab-7"
    }
    ```
-
    `screen:true` requests a compact current-screen bootstrap: viewport,
-   cursor, terminal modes, colours, and alternate buffer, not the raw
-   transcript. The dashboard's normal xterm keeps bounded live scrollback
-   (up to 5,000 rows, then reduced as acknowledged geometry approaches its
-   cell limit), so a compact snapshot may omit older rows. It is the dashboard
-   run default. `screen:false` selects the retained raw transcript stream; this
-   is what raw CLI clients use when they need history beyond the bounded
-   dashboard snapshot. `interactive:true` opts into same-stream acknowledged
-   control frames and is the dashboard run default. Shell and CLI attachments
-   do not gain this browser control protocol merely by using the attach
-   endpoint.
+   cursor, terminal modes, colours, alternate buffer, and at most 200
+   scrollback rows, not the raw transcript. A live session serializes this
+   state in memory at the same output boundary returned by the ack; opening the
+   terminal does not scan durable history. Screen dimensions and the server's
+   snapshot store are capped at 4,096 rows, 4,096 columns, and 1,048,576 cells.
+   The dashboard's xterm independently requests up to 5,000 live-scrollback
+   rows and reduces that count as needed to keep its normal and alternate
+   buffers within 1,000,000 cells. A finished run whose compact checkpoint is
+   temporarily unavailable falls back to at most 1 MiB of recent output while
+   checkpoint repair proceeds separately. It never falls through to a complete
+   archive replay. `screen:true` is the dashboard run default.
+   `screen:false` deliberately selects the retained raw transcript stream for
+   compatibility clients such as the CLI; the dashboard does not request it.
+   `interactive:true` opts into same-stream acknowledged control frames and is
+   the dashboard run default. Shell and CLI attachments do not gain this
+   browser control protocol merely by using the attach endpoint.
 
-   A cached dashboard surface reconnects with its settled `cursor` and the
-   nonempty `resume_id` from the same PTY incarnation:
+   An already-mounted dashboard surface deliberately reopening while its
+   parsed screen remains valid may send its settled `cursor` and the nonempty
+   `resume_id` from the same PTY incarnation:
 
    ```json
    {
@@ -1121,13 +1162,16 @@ resize, control, geometry, and acknowledgements.
    }
    ```
 
-   A valid same-incarnation resume sends only the bounded gap and keeps the
-   parsed screen. If the cursor, ring, geometry, or incarnation cannot serve
-   that gap, the ack says `"resumed":false` and the server sends a compact
-   current-screen bootstrap instead. The dashboard replaces that hidden
-   surface; it does not replay the retained raw archive. A finished run with
-   `screen:true` likewise supplies its compact screen read-only. Use
-   `GET /api/runs/<run_id>/terminal-history` for the retained raw archive.
+   A valid same-incarnation resume sends only bytes still present in the
+   bounded in-memory replay ring and keeps the parsed screen; it never reads
+   the transcript to reconstruct a gap. If the cursor, ring, geometry, or
+   incarnation cannot serve that gap, the ack says `"resumed":false` and the
+   server sends a compact current-screen bootstrap instead. The dashboard
+   replaces that hidden surface; it does not replay the retained raw archive.
+   A finished run with `screen:true` likewise supplies bounded current/recent
+   state read-only. Non-dashboard compatibility consumers may request the
+   complete raw archive through `GET` or the legacy form `POST` at
+   `/api/runs/<run_id>/terminal-history` instead.
 
    `follow` remains available for a viewer that must render the session at its
    acknowledged size without imposing local geometry. `cols` and `rows` do
@@ -1249,19 +1293,20 @@ resize, control, geometry, and acknowledgements.
    `membership withdrawn`, and stops reconnecting. A terminal session ending
    closes with **1000**, reason `session ended`; other failures use **1011**.
 
-Closing the socket detaches; the run is unaffected. A cached dashboard primary
-intentionally closes its socket while inactive, removing Watching presence,
-control transport, and geometry participation while retaining the parsed
-current screen in browser memory. This cache is not server persistence and is
-not restored across reloads or browser tabs. Re-activation uses the bounded
-same-incarnation resume when possible, otherwise a compact snapshot.
+Closing the socket detaches; the run is unaffected. Changing away from a
+dashboard run route closes that socket and unmounts its xterm, removing
+Watching presence, control transport, and geometry participation. The browser
+does not keep a fixed cache of recently visited terminal routes. A deliberate
+reopen of the same mounted surface may use a bounded same-incarnation gap;
+returning to an unmounted route starts from a compact snapshot.
 
 CLI attachments do not request framing or `interactive`; they retain their raw
 terminal stream and consume the ack-declared replay byte count before treating
 following bytes as live. A CLI `screen:false` attach receives the retained raw
-history, while a dashboard `screen:true` attach receives the bounded compact
-current screen. A writable CLI attach still discards input that arrives before its
-announced replay has been written; it does not defer those keystrokes.
+history, while a dashboard `screen:true` attach receives compact current-screen
+state and never the archive. A writable CLI attach still discards input that
+arrives before its announced replay has been written; it does not defer those
+keystrokes.
 
 #### Run shell tabs
 
@@ -1289,22 +1334,27 @@ matching `^[a-z0-9-]{1,32}$`.
 1. Client sends one text header with `cols` and `rows`, and `follow` where
    it means the same as it does for an attach. The gateway ensures the
    member's environment container and the requested shell.
-2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}`
-   with the session's live geometry
-   or a JSON error followed by a close. When present, `replay` is the exact
-   number of binary output bytes that follow the ack before live output. A
-   binary frame may straddle that boundary, so the client splits it by the
-   count. That declaration must be a finite, nonnegative safe integer; an
-   invalid value becomes a final visible refusal rather than an allocation.
-   The dashboard starts parsing frame-sized replay operations as they arrive,
-   serially through public xterm write callbacks while the terminal surface
-   stays hidden with CSS visibility. It does not retain replay until the full
-   boundary or allocate a browser-sized buffer from the declared length. Only
-   the slice containing the exact final replay byte is tagged `replay-end`;
-   live output and geometry queue behind xterm backpressure. Terminal-generated
-   replies and user input stay muted through the final replay callback, then
-   input opens. The surface remains hidden for two paint turns and structural
-   viewport restoration before reveal. At most six tabs may be active.
+2. The gateway answers
+   `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}` with
+   the session's live geometry or a JSON error followed by a close. For a
+   framed dashboard terminal, the replay is a compact current-screen snapshot
+   with bounded scrollback, not the shell's full recorded output. Each
+   reconnect requests a fresh snapshot; environment-terminal attaches do not
+   use the run attach's cursor-delta resume protocol.
+   `replay` is the exact number of binary output bytes that follow the ack
+   before live output. A binary frame may straddle that boundary, so the client
+   splits it by the count. That declaration must be a finite, nonnegative safe
+   integer; an invalid value becomes a final visible refusal rather than an
+   allocation. The dashboard starts parsing frame-sized replay operations as
+   they arrive, serially through public xterm write callbacks while the
+   terminal surface stays hidden with CSS visibility. It does not retain replay
+   until the full boundary or allocate a browser-sized buffer from the declared
+   length. Only the slice containing the exact final replay byte is tagged
+   `replay-end`; live output and geometry queue behind xterm backpressure.
+   Terminal-generated replies and user input stay muted through the final
+   replay callback, then input opens. The surface remains hidden for two paint
+   turns and structural viewport restoration before reveal. At most six tabs
+   may be active.
 3. Output is binary. Input and resize are text frames, and the server's
    `geometry` frame arrives here the same way it does on an attach:
 

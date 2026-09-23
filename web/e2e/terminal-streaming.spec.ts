@@ -209,32 +209,10 @@ done
   expect(outputSockets).toBe(socketsBeforeControl)
 })
 
-test('full history download streams early ANSI output omitted from the live viewport', async ({
+test('terminal history finds early output omitted from the live viewport', async ({
   page,
   aether,
 }) => {
-  await page.addInitScript(() => {
-    const captured: number[] = []
-    const win = window as Window & {
-      __terminalHistoryBytes?: number[]
-      __terminalHistoryComplete?: boolean
-    }
-    win.__terminalHistoryBytes = captured
-    Object.defineProperty(window, 'showSaveFilePicker', {
-      configurable: true,
-      value: async () => ({
-        createWritable: async () =>
-          new WritableStream<Uint8Array>({
-            write(chunk) {
-              for (const byte of chunk) captured.push(byte)
-            },
-            close() {
-              win.__terminalHistoryComplete = true
-            },
-          }),
-      }),
-    })
-  })
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -260,7 +238,7 @@ sleep 600
   const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
     workspace_id: workspaces[0].id,
     harness: 'claude',
-    task: 'download complete terminal history',
+    task: 'page complete terminal history',
   })
   const url = new URL(alice.url)
   const writer = await openWriter(url, run.id, 'history-writer')
@@ -271,27 +249,23 @@ sleep 600
   await page.goto(alice.url)
   await page
     .getByRole('complementary', { name: 'Runs' })
-    .getByRole('button', { name: /download complete terminal history/ })
+    .getByRole('button', { name: /page complete terminal history/ })
     .click()
-  await page.getByRole('button', { name: 'Download full terminal history', exact: true }).click()
-  await expect
-    .poll(
-      () => page.evaluate(() =>
-        (window as Window & { __terminalHistoryComplete?: boolean }).__terminalHistoryComplete === true),
-      { timeout: 30_000 },
-    )
-    .toBe(true)
-  const downloaded = await page.evaluate(() =>
-    new TextDecoder().decode(
-      new Uint8Array(
-        (window as Window & { __terminalHistoryBytes?: number[] }).__terminalHistoryBytes ?? [],
-      ),
-    ),
-  )
-  expect(downloaded).toContain(firstOutput)
-  expect(downloaded).toContain(currentOutput)
-  expect(downloaded.indexOf(firstOutput)).toBeLessThan(downloaded.indexOf(currentOutput))
   const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
   await expect(rows).toContainText(currentOutput, { timeout: 30_000 })
   await expect(rows).not.toContainText(firstOutput)
+  await page.getByRole('button', { name: 'Open terminal history', exact: true }).click()
+  await page.getByRole('searchbox', { name: 'Search terminal history' }).fill(firstOutput)
+  const history = page.getByLabel('Terminal history output')
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await expect(history).toContainText(firstOutput, { timeout: 5_000 })
+      return
+    } catch (error) {
+      const older = page.getByRole('button', { name: 'Load older history', exact: true })
+      if ((await older.count()) === 0) throw error
+      await older.click()
+    }
+  }
+  await expect(history).toContainText(firstOutput)
 })

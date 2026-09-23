@@ -7,6 +7,19 @@ import (
 	"io"
 )
 
+const (
+	DefaultTerminalHistoryLimit   = 100
+	MaxTerminalHistoryLimit       = 200
+	MaxTerminalHistoryQueryBytes  = 256
+	MaxTerminalHistoryCursorBytes = 1366
+	MaxTerminalHistoryLineBytes   = 64 << 10
+	MaxTerminalHistoryParamsBytes = 4 << 10
+	// MaxTerminalHistoryResultBytes bounds the raw text and cursors in one
+	// result. JSON may escape one input byte as six output bytes; 5 MiB keeps
+	// that worst case below MaxLineBytes with room for the response envelope.
+	MaxTerminalHistoryResultBytes = 5 << 20
+)
+
 // TerminalRequest carries tab selection and terminal dimensions. Follow
 // means the same as it does in AttachRequest: render at the session's size
 // and impose none.
@@ -30,6 +43,30 @@ type TerminalImageParams struct {
 // target container.
 type TerminalImageResult struct {
 	Path string `json:"path"`
+}
+
+// TerminalHistoryParams selects one bounded page of a run transcript.
+// Before is an opaque cursor returned by an earlier response.
+type TerminalHistoryParams struct {
+	RunID  string `json:"run_id"`
+	Before string `json:"before,omitempty"`
+	Query  string `json:"query,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// TerminalHistoryLine is one normalized, searchable terminal line.
+type TerminalHistoryLine struct {
+	Cursor string `json:"cursor"`
+	Time   int64  `json:"time"`
+	Text   string `json:"text"`
+}
+
+// TerminalHistoryResult is a newest-first page whose lines are ordered
+// chronologically for direct rendering.
+type TerminalHistoryResult struct {
+	Lines      []TerminalHistoryLine `json:"lines"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+	HasMore    bool                  `json:"has_more"`
 }
 
 // TerminalResponse is the result of a terminal control operation.

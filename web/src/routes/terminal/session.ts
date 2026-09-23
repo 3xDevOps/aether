@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { api } from '@/lib/api'
 import type { Run, RunStatus } from '@/lib/types'
@@ -27,16 +35,14 @@ const startingStatuses: readonly RunStatus[] = ['queued', 'provisioning']
 export interface RunTerminalSessionInput {
   runID: string
   run?: Run
-  active: boolean
-  initialized: boolean
   terminal: Terminal | null
   geometry: () => { cols: number; rows: number }
   setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   phone: boolean
   automaticWrite: boolean
+  identityKey: string | null
+  terminalCacheEpoch: number
   authorityKey: string
-  onInvalidate?: () => void
-  onWeight?: (weight: number) => void
   beginStructuralReplay?: () => number
   cancelStructuralReplay?: (generation: number) => void | Promise<void>
   finishStructuralReplay?: (generation: number) => void | Promise<void>
@@ -56,15 +62,12 @@ export interface RunTerminalSessionResult {
 
 interface SessionRefs {
   run?: Run
-  active: boolean
   terminal: Terminal | null
   geometry: () => { cols: number; rows: number }
   setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   phone: boolean
   automaticWrite: boolean
   authorityKey: string
-  onInvalidate?: () => void
-  onWeight?: (weight: number) => void
   beginStructuralReplay?: () => number
   cancelStructuralReplay?: (generation: number) => void | Promise<void>
   finishStructuralReplay?: (generation: number) => void | Promise<void>
@@ -76,9 +79,10 @@ interface StructuralReplayOwner {
   finish?: (generation: number) => void | Promise<void>
 }
 
-function terminalWeight(terminal: Terminal | null): number {
-  if (!terminal) return 0
-  return (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
+interface PendingAuthorityControl {
+  authorityKey: string
+  automaticWrite: boolean
+  resetWriteDenial: boolean
 }
 
 function isEnded(status: RunStatus | undefined): boolean {
@@ -95,25 +99,34 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const {
     runID,
     run,
-    active,
-    initialized,
     terminal,
     phone,
     automaticWrite,
+    identityKey,
+    terminalCacheEpoch,
     authorityKey,
   } = input
   const refs = useLatestRefs(input)
   const state = useStore((store) => store.terminals[runID] ?? initialTerminal)
+  const storedWriteIntent = useStore((store) => store.terminalWriteIntents[runID])
   const setTerminal = useStore((store) => store.setTerminal)
+  const setWriteIntent = useStore((store) => store.setTerminalWriteIntent)
+  const clearWriteIntent = useStore((store) => store.clearTerminalWriteIntent)
   const markControlTaken = useStore((store) => store.markTerminalControlTaken)
   const [replaying, setReplaying] = useState(false)
   const [controlMetadata, setControlMetadata] = useState<ControlMetadata>()
   const [sessionMissing, setSessionMissing] = useState(false)
   const attachmentRef = useRef<Attachment | null>(null)
   const terminalRef = useRef<Terminal | null>(terminal)
-  const activeRef = useRef(active)
-  const latestActiveRef = useRef(active)
-  const explicitWriteRef = useRef<boolean | null>(null)
+  const intentMatches =
+    identityKey !== null &&
+    storedWriteIntent?.identityKey === identityKey &&
+    storedWriteIntent.terminalCacheEpoch === terminalCacheEpoch &&
+    storedWriteIntent.authorityKey === authorityKey &&
+    storedWriteIntent.runCreatedAt === run?.created_at
+  const explicitWriteRef = useRef<boolean | null>(
+    intentMatches ? storedWriteIntent.write : null,
+  )
   const structuralReplayRef = useRef<StructuralReplayOwner | null>(null)
   const replayRevisionRef = useRef(0)
   const acceptedReplayRef = useRef(false)
@@ -121,12 +134,64 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const sourceGeometryRef = useRef<Promise<void> | null>(null)
   const writeRevisionRef = useRef(0)
   const previousAuthorityRef = useRef(authorityKey)
+  const pendingAuthorityControlRef = useRef<PendingAuthorityControl | null>(null)
   const previousAutomaticRef = useRef(automaticWrite)
   const previousPhoneRef = useRef(phone)
   const previousStatusRef = useRef(run?.status)
   const relaunchPendingRef = useRef(false)
   terminalRef.current = terminal
-  latestActiveRef.current = active
+  // Render the new authority as revoked immediately; the layout cleanup below
+  // makes the stored lease match before the browser can paint.
+  const authorityChanged = previousAuthorityRef.current !== authorityKey
+  const committedState =
+    authorityChanged && (state.write || state.steerDenied)
+      ? { ...state, write: false, steerDenied: false }
+      : state
+  const committedControlMetadata = authorityChanged ? undefined : controlMetadata
+
+  // A route session owns all displayed attach state. Reset it before paint so
+  // stale status/control/refusal state cannot remain visible while xterm is
+  // still waiting for its font and `terminal` is null.
+  useLayoutEffect(() => {
+    setControlMetadata(undefined)
+    setSessionMissing(false)
+    setReplaying(false)
+    setTerminal(runID, initialTerminal)
+  }, [runID, setTerminal])
+
+  // Only the boolean preference survives a route change, and only while all
+  // fences still identify the same authenticated run and authority context.
+  useLayoutEffect(() => {
+    if (intentMatches) return
+    explicitWriteRef.current = null
+    if (storedWriteIntent) clearWriteIntent(runID)
+  }, [clearWriteIntent, intentMatches, runID, storedWriteIntent])
+
+  const rememberWriteIntent = useCallback(
+    (write: boolean) => {
+      explicitWriteRef.current = write
+      if (identityKey === null || !run) {
+        clearWriteIntent(runID)
+        return
+      }
+      setWriteIntent(runID, {
+        write,
+        identityKey,
+        terminalCacheEpoch,
+        authorityKey,
+        runCreatedAt: run.created_at,
+      })
+    },
+    [
+      authorityKey,
+      clearWriteIntent,
+      identityKey,
+      run,
+      runID,
+      setWriteIntent,
+      terminalCacheEpoch,
+    ],
+  )
   const beginStructuralReplay = useCallback((): StructuralReplayOwner | null => {
     const owner = refs.current
     const generation = owner.beginStructuralReplay?.()
@@ -153,10 +218,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
               done?.()
               return
             }
-            current.write(chunk, () => {
-              done?.()
-              if (!latestActiveRef.current) refs.current.onWeight?.(terminalWeight(current))
-            })
+            current.write(chunk, done)
           }
           const sourceGeometry = sourceGeometryRef.current
           if (sourceGeometry) void sourceGeometry.then(write, write)
@@ -207,29 +269,28 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         setTerminal(runID, { message: null, refused: false })
         return
       }
+      explicitWriteRef.current = null
+      clearWriteIntent(runID)
       if (result.code === codeDenied) {
-        explicitWriteRef.current = false
         setTerminal(runID, {
           write: false,
           steerDenied: true,
           message: result.error ?? 'control request refused',
         })
       } else {
-        explicitWriteRef.current = false
         setTerminal(runID, {
           write: result.has_control,
           message: result.error ?? 'control request refused',
         })
       }
     },
-    [runID, setTerminal, updateControl],
+    [clearWriteIntent, runID, setTerminal, updateControl],
   )
 
   useEffect(() => {
-    if (!run || !active || !initialized || !terminal || startingStatuses.includes(run.status)) return
+    if (!run || !terminal || startingStatuses.includes(run.status)) return
     if (attachmentRef.current) return
 
-    explicitWriteRef.current = null
     setControlMetadata(undefined)
     setSessionMissing(false)
     setTerminal(runID, { ...initialTerminal, write: false })
@@ -333,17 +394,26 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
           .then(() => {
             if (!currentRefusal()) return
             gate.unmute()
-            refs.current.onInvalidate?.()
           })
         setSessionMissing(code === codeUnavailable)
+        if (code === codeDenied) {
+          explicitWriteRef.current = null
+          clearWriteIntent(runID)
+        }
         setTerminal(runID, { message, refused: true, write: false })
       },
       onWriteDenied: () => {
+        // False, not null: null falls through to automatic write and the
+        // next attach would ask again. A denial stays a mirror.
         explicitWriteRef.current = false
+        clearWriteIntent(runID)
         setTerminal(runID, { steerDenied: true, write: false })
       },
       onControlLost: () => {
+        // An occupied lease must reconnect as a mirror. Leaving the ref null
+        // makes an owner ask for write again and conflict in a loop.
         explicitWriteRef.current = false
+        clearWriteIntent(runID)
         setControlMetadata(undefined)
         setTerminal(runID, { steerDenied: false, write: false })
       },
@@ -361,10 +431,9 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     attachmentRef.current = attachment
     if (relaunchPendingRef.current) relaunchPendingRef.current = false
   }, [
-    active,
     beginStructuralReplay,
+    clearWriteIntent,
     gate,
-    initialized,
     run,
     runID,
     setTerminal,
@@ -377,6 +446,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   useEffect(() => {
     return () => {
       attachmentRef.current?.close()
+      setTerminal(runID, initialTerminal)
       attachmentRef.current = null
       writeRevisionRef.current++
       replayRevisionRef.current++
@@ -387,24 +457,8 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
         void Promise.resolve(replay.cancel?.(replay.generation)).catch(() => undefined)
       }
     }
-  }, [runID, terminal])
+  }, [runID, setTerminal, terminal])
 
-  useEffect(() => {
-    const previous = activeRef.current
-    if (previous && !active) {
-      attachmentRef.current?.suspend()
-    } else if (!previous && active) {
-      const attachment = attachmentRef.current
-      if (relaunchPendingRef.current && attachment) {
-        relaunchPendingRef.current = false
-        attachment.reopen()
-      } else {
-        attachment?.resume()
-      }
-    }
-    activeRef.current = active
-    if (!active && terminal) refs.current.onWeight?.(terminalWeight(terminal))
-  }, [active, refs, terminal])
 
   useEffect(() => {
     const previous = previousStatusRef.current
@@ -412,26 +466,46 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     previousStatusRef.current = current
     if (previous !== undefined && isEnded(previous) && current !== undefined && !isEnded(current)) {
       relaunchPendingRef.current = true
-      if (active && attachmentRef.current?.isEnded()) {
+      if (attachmentRef.current?.isEnded()) {
         relaunchPendingRef.current = false
         previousPhoneRef.current = phone
         attachmentRef.current.reopen()
       }
     }
-  }, [active, phone, run?.status])
+  }, [phone, run?.status])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previousAuthority = previousAuthorityRef.current
     previousAuthorityRef.current = authorityKey
-    if (previousAuthority === authorityKey || !attachmentRef.current) return
-    if (state.steerDenied) {
-      attachmentRef.current.resetWriteDenial()
-      explicitWriteRef.current = null
-      setControlMetadata(undefined)
-      setTerminal(runID, { steerDenied: false, write: false })
-      attachmentRef.current.setControl(automaticWrite)
+    if (previousAuthority === authorityKey) return
+    explicitWriteRef.current = null
+    clearWriteIntent(runID)
+    previousAutomaticRef.current = automaticWrite
+    setControlMetadata(undefined)
+    setTerminal(runID, { steerDenied: false, write: false })
+    pendingAuthorityControlRef.current = {
+      authorityKey,
+      automaticWrite,
+      resetWriteDenial: state.steerDenied,
     }
-  }, [authorityKey, automaticWrite, runID, setTerminal, state.steerDenied])
+  }, [
+    authorityKey,
+    automaticWrite,
+    clearWriteIntent,
+    runID,
+    setTerminal,
+    state.steerDenied,
+  ])
+
+  useEffect(() => {
+    const pending = pendingAuthorityControlRef.current
+    if (!pending || pending.authorityKey !== authorityKey) return
+    pendingAuthorityControlRef.current = null
+    const attachment = attachmentRef.current
+    if (!attachment) return
+    if (pending.resetWriteDenial) attachment.resetWriteDenial()
+    attachment.setControl(pending.automaticWrite)
+  }, [authorityKey])
 
   useEffect(() => {
     const automaticChanged = previousAutomaticRef.current !== automaticWrite
@@ -439,31 +513,31 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     previousAutomaticRef.current = automaticWrite
     previousPhoneRef.current = phone
     const attachment = attachmentRef.current
-    if (!attachment || !active || attachment.isEnded()) return
+    if (!attachment || attachment.isEnded()) return
     if (automaticChanged && explicitWriteRef.current === null) {
       attachment.setControl(automaticWrite)
     }
     if (phoneChanged) attachment.reopen({ resume: true })
-  }, [active, automaticWrite, phone])
+  }, [automaticWrite, phone])
 
   const send = useCallback((data: string) => {
-    if (!latestActiveRef.current || !state.write || gate.muted()) return
+    if (authorityChanged || !state.write || gate.muted()) return
     attachmentRef.current?.send(data)
-  }, [gate, state.write])
+  }, [authorityChanged, gate, state.write])
 
   const resize = useCallback((cols: number, rows: number) => {
     attachmentRef.current?.resize(cols, rows)
   }, [])
 
   const takeControl = useCallback((takeover = false) => {
-    explicitWriteRef.current = true
+    rememberWriteIntent(true)
     attachmentRef.current?.setControl(true, takeover)
-  }, [])
+  }, [rememberWriteIntent])
 
   const releaseControl = useCallback(() => {
-    explicitWriteRef.current = false
+    rememberWriteIntent(false)
     attachmentRef.current?.setControl(false)
-  }, [])
+  }, [rememberWriteIntent])
 
   const retry = useCallback(() => {
     setSessionMissing(false)
@@ -477,9 +551,9 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   }, [runID, setTerminal])
 
   return {
-    state,
+    state: committedState,
     replaying,
-    controlMetadata,
+    controlMetadata: committedControlMetadata,
     sessionMissing,
     send,
     resize,

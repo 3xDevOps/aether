@@ -13,5 +13,9 @@ export default defineConfig({
     setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     maxWorkers: 2,
+    // Stack runs afterEach in reverse registration order: a file restores
+    // timers, testing-library unmounts, then setup drains the focus timer.
+    // The default parallel order lets that timer outlive the document.
+    sequence: { hooks: 'stack' },
   },
 })
