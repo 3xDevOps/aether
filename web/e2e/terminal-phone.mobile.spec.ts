@@ -359,9 +359,11 @@ done`)
     await touch('touchStart', x, top)
     await touch('touchMove', x, top + 60)
     await expect(scroller).toBeVisible()
-    await expect.poll(() => completedPages, { timeout: 15_000 }).toBeGreaterThan(0)
-    await expect.poll(async () => (await viewport()).rows[0]?.cursor).toBeTruthy()
+    // The live redraws are still in native scrollback. Opening the surface
+    // must not depend on fetching an archive page.
+    await expect.poll(async () => (await viewport()).rows[0]?.index).toBeGreaterThan(0)
     const handoff = await viewport()
+    expect(handoff.rows[0].cursor).toBeNull()
     // No second touchStart: the finger that opened history must keep moving it.
     for (let step = 1; step <= 6; step++) {
       await touch('touchMove', x, top + 60 + step * 30)
@@ -370,8 +372,11 @@ done`)
       .toBeLessThan(handoff.rows[0].index - 5)
     await lift()
 
-    // Reach the first older-page request entirely through actual touch drags.
-    for (let swipe = 0; swipe < 24 && !delayedOlder; swipe++) {
+    // Each clear-screen redraw retains its nonempty row in xterm. Budget the
+    // real touch travel from the native row distance, plus the archive swipes.
+    const rowHeight = handoff.rows[1].top - handoff.rows[0].top
+    const nativeSwipes = Math.ceil((handoff.rows[0].index + 1) * rowHeight / (bottom - top))
+    for (let swipe = 0; swipe < nativeSwipes + 24 && !delayedOlder; swipe++) {
       await touch('touchStart', x, top)
       for (let step = 1; step <= 12 && !delayedOlder; step++) {
         await touch('touchMove', x, top + (bottom - top) * step / 12)
@@ -379,6 +384,7 @@ done`)
       if (!delayedOlder) await lift()
     }
     expect(delayedOlder).toBe(true)
+    await expect.poll(() => completedPages, { timeout: 15_000 }).toBeGreaterThan(0)
     // Keep a finger down while releasing the real response, so momentum cannot
     // be mistaken for a prepend jump.
     if (!touching) await touch('touchStart', x, top)

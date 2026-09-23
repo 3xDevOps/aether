@@ -29,12 +29,21 @@ type TerminalHistoryProps = {
   onReadingChange: (reading: boolean) => void
 }
 
+function lineTop(line: number, origin: number, height: number): number {
+  // Scroll positions are pixel-snapped by the browser. Snap both edges of
+  // every row too, so a fractional zoom cannot round the anchor differently.
+  return padding + Math.round((line - origin) * height)
+}
+
 function rowTop(row: number, origin: number, height: number): number {
-  return (row - origin + (row >= 0 ? 1 : 0)) * height
+  return lineTop(row + (row >= 0 ? 1 : 0), origin, height)
 }
 
 function anchorAt(top: number, left: number, origin: number, height: number): HistoryAnchor {
-  const line = origin + Math.floor(top / height)
+  let line = origin + Math.floor((top - padding) / height)
+  if (lineTop(line + 1, origin, height) <= top) line++
+  else if (lineTop(line, origin, height) > top) line--
+  line = Math.max(origin, line)
   const row = line < 0 ? line : Math.max(0, line - 1)
   return { row, offset: top - rowTop(row, origin, height), left }
 }
@@ -544,7 +553,7 @@ export function TerminalHistory({
   const width = Math.max(maxColumns.current * cellWidth + padding * 2,
     anchor.current.left + viewport.width)
   const totalHeight = Math.max(
-    (windowEnd - origin) * cellHeight + padding * 2,
+    lineTop(windowEnd, origin, cellHeight) + padding,
     rowTop(anchor.current.row, origin, cellHeight) + anchor.current.offset + viewport.height,
   )
   return (
@@ -554,7 +563,7 @@ export function TerminalHistory({
       aria-label="Terminal scrollback"
       tabIndex={0}
       className="absolute inset-0 z-10 overflow-auto bg-background text-foreground outline-none"
-      style={{ overflowAnchor: 'none', overscrollBehavior: 'contain', touchAction: 'pan-x pan-y' }}
+      style={{ top: padding, bottom: padding, overflowAnchor: 'none', overscrollBehavior: 'contain', touchAction: 'pan-x pan-y' }}
       onScroll={(event) => {
         const element = event.currentTarget
         const down = element.scrollTop > lastTop.current
@@ -626,12 +635,12 @@ export function TerminalHistory({
         {rows.filter((row) => row.index >= archiveStart && row.index < archiveEnd).map(({ index, line }) => (
           <div key={index} data-history-row={index} data-history-cursor={line.cursor}
             className={match === index ? 'bg-accent' : undefined}
-            style={{ position: 'absolute', top: padding + rowTop(index, origin, cellHeight), left: padding, height: cellHeight, whiteSpace: 'pre' }}>
+            style={{ position: 'absolute', top: rowTop(index, origin, cellHeight), left: padding, height: lineTop(index + 1, origin, cellHeight) - rowTop(index, origin, cellHeight), whiteSpace: 'pre' }}>
             {line.text}
           </div>
         ))}
         {startLine <= 0 && endLine > 0 && (
-          <div role="separator" aria-label="Recorded output and live screen boundary" className="absolute border-t border-border text-muted-foreground" style={{ top: padding - origin * cellHeight, left: padding, right: padding, height: cellHeight, fontSize: Math.min(fontSize, 11), whiteSpace: 'nowrap' }}>
+          <div role="separator" aria-label="Recorded output and live screen boundary" className="absolute border-t border-border text-muted-foreground" style={{ top: lineTop(0, origin, cellHeight), left: padding, right: padding, height: lineTop(1, origin, cellHeight) - lineTop(0, origin, cellHeight), fontSize: Math.min(fontSize, 11), whiteSpace: 'nowrap' }}>
             {frozen.rows.length ? 'Recorded output above · captured terminal screen below' : 'Recorded output above · live terminal below'}
           </div>
         )}
@@ -639,7 +648,7 @@ export function TerminalHistory({
           const index = frozenStart + offset
           return <div key={index} data-history-row={index}
             className={match === index ? 'bg-accent' : undefined}
-            style={{ position: 'absolute', top: padding + rowTop(index, origin, cellHeight), left: padding, height: cellHeight, whiteSpace: 'pre' }}
+            style={{ position: 'absolute', top: rowTop(index, origin, cellHeight), left: padding, height: rowTop(index + 1, origin, cellHeight) - rowTop(index, origin, cellHeight), whiteSpace: 'pre' }}
             dangerouslySetInnerHTML={{ __html: html }} />
         })}
       </div>

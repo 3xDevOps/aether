@@ -37,6 +37,12 @@ function page(from: number, until: number): TerminalHistoryLine[] {
   return Array.from({ length: until - from }, (_, index) => historyLine(`line-${from + index}`))
 }
 
+function firstVisibleRow(element: HTMLElement) {
+  const row = [...element.querySelectorAll<HTMLElement>('[data-history-row]')]
+    .find((candidate) => Number.parseFloat(candidate.style.top) + Number.parseFloat(candidate.style.height) > element.scrollTop)
+  return row ? { text: row.textContent, offset: Number.parseFloat(row.style.top) - element.scrollTop } : null
+}
+
 function cacheFor(client: Pick<Api, 'terminalHistory'>, runID = 'run_1') {
   const state = useStore.getState()
   return getHistoryCache({ identityKey: state.identityKey, epoch: state.terminalCacheEpoch, runID, createdAt: state.runs[runID].created_at }, client)
@@ -177,7 +183,7 @@ test('keeps the latest row, pixel and horizontal anchor when a delayed older pag
     .mockImplementationOnce(() => older.promise) })
   const view = mountHistory(cacheFor(client))
   const output = await beginReading(view)
-  await waitFor(() => expect(output.scrollTop).toBe(2180))
+  await waitFor(() => expect(output.scrollTop).toBe(2188))
   fireEvent.scroll(output, { target: { scrollTop: 103, scrollLeft: 55 } })
   await waitFor(() => expect(client.terminalHistory).toHaveBeenCalledTimes(2))
   fireEvent.scroll(output, { target: { scrollTop: 137, scrollLeft: 71 } })
@@ -189,6 +195,27 @@ test('keeps the latest row, pixel and horizontal anchor when a delayed older pag
   expect(output.scrollLeft).toBe(71)
   expect(output.querySelector(selector)?.textContent).toBe('line-213')
   expect(Number.parseFloat((output.querySelector(selector) as HTMLElement).style.top) - output.scrollTop).toBe(before)
+  view.dispose()
+})
+
+test('keeps the actual partially visible row and exact pixel offset through fractional zoom', async () => {
+  vi.mocked(captureTerminalPresentation).mockReturnValue({
+    ...frozenScreen,
+    cellHeight: 14,
+    rows: Array.from({ length: 400 }, (_, index) => `<span>original screen ${index}</span>`),
+  })
+  const view = mountHistory(cacheFor(fakeApi()))
+  const output = await beginReading(view)
+  fireEvent.scroll(output, { target: { scrollTop: 4682, scrollLeft: 71 } })
+  const pinned = { text: 'original screen 332', offset: -12 }
+  expect(firstVisibleRow(output)).toEqual(pinned)
+
+  for (const terminalFontSize of [13, 14, 12]) {
+    act(() => useStore.setState({ terminalFontSize }))
+    fireEvent.scroll(output)
+    expect(firstVisibleRow(output)).toEqual(pinned)
+    expect(output.scrollLeft).toBe(71)
+  }
   view.dispose()
 })
 
@@ -243,7 +270,7 @@ test('searches retained pages outside the mounted window without discarding the 
   expect(screen.queryByText('line-13')).toBeNull()
   await act(async () => expect(await view.tools.current?.findNext('line-13')).toBe(true))
   expect(await screen.findByText('line-13')).toBeDefined()
-  expect(output.scrollTop).toBe(130)
+  expect(firstVisibleRow(output)).toEqual({ text: 'line-13', offset: 0 })
   await act(async () => expect(await view.tools.current?.findNext('original screen 20')).toBe(true))
   expect(screen.getByText('original screen 20')).toBeDefined()
   view.dispose()
@@ -324,13 +351,13 @@ test('rebases million-row scroll ranges without changing the visible row or exha
   expect(output.scrollHeight).toBeLessThan(5_000_000)
   expect(output.scrollLeft).toBe(57)
   const first = output.querySelector<HTMLElement>('[data-history-row=\"-3000000\"]')!
-  expect(Number.parseFloat(first.style.top) - output.scrollTop).toBe(5)
+  expect(Number.parseFloat(first.style.top) - output.scrollTop).toBe(-3)
 
-  fireEvent.scroll(output, { target: { scrollTop: 23 } })
-  await waitFor(() => expect(output.scrollTop).toBe(2_000_003))
+  fireEvent.scroll(output, { target: { scrollTop: 31 } })
+  await waitFor(() => expect(output.scrollTop).toBe(2_000_011))
   expect(await screen.findByText('recorded row -3199998')).toBeDefined()
   const rebased = output.querySelector<HTMLElement>('[data-history-row=\"-3199998\"]')!
-  expect(Number.parseFloat(rebased.style.top) - output.scrollTop).toBe(5)
+  expect(Number.parseFloat(rebased.style.top) - output.scrollTop).toBe(-3)
   expect(output.scrollLeft).toBe(57)
   expect(output.querySelectorAll('[data-history-row]').length).toBeLessThan(50)
 
@@ -357,7 +384,7 @@ test('keeps a failed saved-view read hidden and retries the same retained episod
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
   expect(await screen.findByText('line-190')).toBeDefined()
-  expect(output.scrollTop).toBe(1903)
+  expect(firstVisibleRow(output)).toEqual({ text: 'line-190', offset: -3 })
   expect(output.scrollLeft).toBe(71)
   expect(client.terminalHistory).toHaveBeenCalledTimes(1)
   expect(screen.queryByRole('alert')).toBeNull()
@@ -381,7 +408,7 @@ test('retries reading the current stored rows after the archive reaches its end'
   readRows.mockRestore()
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   expect(await screen.findByText('line-190')).toBeDefined()
-  expect(output.scrollTop).toBe(1903)
+  expect(firstVisibleRow(output)).toEqual({ text: 'line-190', offset: -3 })
   expect(output.scrollLeft).toBe(71)
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   expect(client.terminalHistory).toHaveBeenCalledTimes(1)
@@ -404,7 +431,7 @@ test('finishes a native scrollbar drag before capturing its final row and horizo
   fireEvent.pointerUp(document, { pointerId: 7 })
 
   const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
-  expect(output.scrollTop).toBe(60)
+  expect(firstVisibleRow(output)).toEqual({ text: 'original screen 5', offset: 0 })
   expect(output.scrollLeft).toBe(37)
   expect(screen.getByText('original screen 5')).toBeDefined()
   view.dispose()
@@ -424,7 +451,7 @@ test('coalesces first-entry scroll intent and waits for the complete rendered sc
   })
   act(() => view.renderTerminal())
   const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
-  expect(output.scrollTop).toBe(160)
+  expect(firstVisibleRow(output)).toEqual({ text: 'committed screen 15', offset: 0 })
   expect(output.scrollLeft).toBe(29)
   expect(screen.getByText('committed screen 16')).toBeDefined()
   expect(screen.queryByText('original screen 16')).toBeNull()
@@ -444,7 +471,7 @@ test('saves pending navigation when disposal precedes paint without accepting a 
   act(() => view.renderTerminal())
   const restored = mountHistory(cache)
   const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
-  expect(output.scrollTop).toBe(173)
+  expect(firstVisibleRow(output)).toEqual({ text: 'original screen 16', offset: -3 })
   expect(output.scrollLeft).toBe(47)
   expect(screen.getByText('original screen 16')).toBeDefined()
   expect(screen.queryByText('late paint')).toBeNull()

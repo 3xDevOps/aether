@@ -407,6 +407,7 @@ test('scrolling reaches every retained page and prepends without moving visible 
     await page.mouse.down()
     let previousRows = await nativeRows()
     let finalRows = previousRows
+    let finalOrigin: { top: number; left: number } | null = null
     try {
       for (const fraction of [0.15, 0.3, 0.45]) {
         await page.mouse.move(dragX, dragStartY - dragTravel * fraction, { steps: 4 })
@@ -414,6 +415,9 @@ test('scrolling reaches every retained page and prepends without moving visible 
         previousRows = await nativeRows()
       }
       finalRows = previousRows
+      const box = await live.locator(':scope > div').first().boundingBox()
+      if (!box) throw new Error('Final native row has no visible geometry')
+      finalOrigin = { top: box.y, left: box.x }
     } finally {
       await page.mouse.up()
     }
@@ -422,6 +426,11 @@ test('scrolling reaches every retained page and prepends without moving visible 
     await expect.poll(async () => (await visibleHistory(scroller)).rows
       .map((row) => row.text?.trimEnd() ?? '').filter(Boolean).slice(0, 3))
       .toEqual(finalRows.slice(0, 3))
+    await expect.poll(async () => {
+      const row = (await visibleHistory(scroller)).rows[0]
+      const box = await scroller.boundingBox()
+      return row && box ? { top: box.y + row.top, left: box.x + row.left } : null
+    }).toEqual(finalOrigin)
 
     const beforeQuery = await visibleHistory(scroller)
     await scroller.focus()
@@ -611,8 +620,11 @@ test('switching live runs restores the same recorded rows and pixel offsets with
     await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible').hover()
     await page.mouse.wheel(0, -2400)
     await expect(scroller).toBeVisible()
-    await expect.poll(() => historyRequests.filter((cursor) => cursor === '').length)
-      .toBeGreaterThan(headsBeforeRefresh)
+    // The refresh filled xterm's 5000-row native buffer. Traverse it before
+    // requiring the new episode to fetch the newest archive page.
+    await wheelUntil(page, scroller, -8000, async () =>
+      historyRequests.filter((cursor) => cursor === '').length > headsBeforeRefresh,
+    )
     await wheelUntil(page, scroller, -8000, async () =>
       (await visibleHistory(scroller)).rows.some((row) => row.index < -6900),
     )
