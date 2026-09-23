@@ -79,8 +79,11 @@ The `coord.*` wire and its six base methods are unchanged. Mission-assigned
 runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
 `integration.prepare`, `integration.show`, `integration.verify`,
-`integration.request_delivery`, and `integration.deliver`. These methods use
-the same run-authenticated socket but are not part of the base `coord.*` set.
+`integration.request_delivery`, `integration.deliver`,
+`mission.question.ask`, `mission.clarification.complete`, `mission.plan.show`,
+and `mission.plan.submit`. These
+methods use the same run-authenticated socket but are not part of the base
+`coord.*` set.
 Every allow-list is derived from the current assignment, not from
 caller-supplied roles or identities. A mission may authorize its integrator
 and active worker runs as peers before any file overlap exists; ordinary runs
@@ -165,8 +168,8 @@ No skill package, manual identity argument, or credential setup is required.
 Run `skill` before acting so the assignment and capabilities come from current
 server state rather than copied prompt text.
 
-All commands below run inside the container. Every command except `skill`
-writes one JSON object followed by a newline. Successful commands use this
+All commands below run inside the container. Commands other than `skill` and
+help write one JSON object followed by a newline. Successful commands use this
 shape:
 
 ```json
@@ -202,15 +205,37 @@ The stable error codes are:
 ### Inspect the assignment and peers
 
 ```sh
-/usr/local/bin/aether-internal status --json
+/usr/local/bin/aether-internal status
 /usr/local/bin/aether-internal skill
 ```
 
-`status` requires `--json`; `skill` takes no arguments and prints the current
-v3 assignment plus the short coordination workflow. Integrator assignments
-include the server-approved account/harness/mode choices and active/total
-attempt allowance. Worker assignments identify the assigned task and state
-that workers may read and propose only; workers must not spawn other workers.
+`status` always emits the v3 JSON envelope; `--json` remains accepted but is
+optional. Unknown flags and positional arguments are rejected. `skill` takes
+no arguments and prints the CLI build version, live role and identity, then
+the current phase and immediate actions. Its build version comes from the
+mounted binary, which may predate newly published documentation; help describes
+that binary's command syntax.
+
+The task text in status and skill is a bounded summary (at most 512 bytes),
+not the full assignment. A worker's skill prints an executable command with
+its own task ID:
+
+```sh
+/usr/local/bin/aether-internal task show --task-id task-1
+```
+
+Use the actual command from skill, not the example ID above. Read the returned
+task revision, objective, scope, exclusions, and evidence requirements before
+acting. Workers may read and propose; they must not spawn workers, accept tasks,
+or perform mission/integration operations. Ordinary runs have no mission
+authority. Help documents syntax, not permission.
+
+Every role gets `status`, `inbox`, and top-level help bootstrap commands.
+Integrators additionally get task/worker help, list commands using the current
+mission ID, integrator generation, approved account/harness/mode choices, and
+active/total attempt allowance. Integration guidance appears only after
+immediate actions in `active` or `amendment_review`, not during initial planning
+or plan review. Use the full status result for the current capability set.
 
 Top-level and per-command help are available without a coordination socket:
 
@@ -251,6 +276,147 @@ when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
 
+### The mission plan gate
+
+A mission is created in the `planning` phase, and no worker starts until a
+human approves the plan. After approval, a change the integrator cannot make
+alone goes back to the human as an amendment. The phase is mission state;
+every method below is refused in the wrong phase with code `-32002`.
+
+| Phase | Worker dispatch | Integrator task mutations |
+| --- | --- | --- |
+| `planning` | refused | `task propose`, `task revise`, `task abandon` allowed; `task accept` and `task accept-submission` refused |
+| `clarified` | refused | same as `planning`; `mission question ask` returns the mission to `planning` |
+| `plan_review` | refused | all refused; the plan is frozen while a human reads it |
+| `active` | allowed | all allowed, within the limits on `task accept` below |
+| `amendment_review` | allowed, for the already-approved set only | `task accept-submission` allowed; `propose`, `revise`, `abandon`, and `accept` refused |
+| `rejected` | refused | all refused |
+
+Transitions are exactly:
+
+```
+planning         --mission clarification complete-->  clarified
+clarified        --mission plan submit------------->  plan_review
+plan_review      --approve------------------------->  active
+plan_review      --request changes----------------->  planning
+plan_review      --reject-------------------------->  rejected
+active           --mission plan submit------------->  amendment_review
+amendment_review --approve------------------------->  active
+amendment_review --request changes----------------->  active
+clarified        --mission question ask------------>  planning
+rejected: terminal
+```
+
+`reject` is refused on an amendment: an amendment is approved or sent back for
+changes, and the integrator drops it by abandoning its tasks or revisions.
+
+Only the current integrator may use these commands, and only for its own
+mission; none of them takes a mission ID:
+
+```sh
+/usr/local/bin/aether-internal mission question ask \
+  --body 'Which checkout flow should this replace?' \
+  --idempotency-key mission-ask-1
+/usr/local/bin/aether-internal mission plan show --wait 30
+/usr/local/bin/aether-internal mission clarification complete \
+  --idempotency-key mission-clarify-1
+/usr/local/bin/aether-internal mission plan submit \
+  --summary 'What will be built and why.' \
+  --idempotency-key mission-submit-1
+```
+
+`ask`, `clarification complete`, and `submit` require an explicit
+`--idempotency-key`; unlike `send` and `ask --to`, the CLI never generates one
+for them. `--body-file` and `--summary-file` accept a path or `-` for standard
+input, and both bodies are capped at 4 KiB. `mission question ask` asks the
+accountable human, who answers in the dashboard; `ask --to <run-id>` asks a
+peer agent run, which answers with `reply`. They are separate mailboxes.
+
+`mission plan show` returns the phase, plan version, integrator generation,
+open question count, and the feedback of the most recent request for changes,
+plus every question and review round. `--wait` asks the server to wait up to 30
+seconds for one of those to change; it returns unchanged when the wait elapses.
+A value outside 0 through 30 is a usage error before any request is sent.
+Waiting for a human is not being blocked: do not report an outcome while
+waiting.
+
+Questions are optional. `mission clarification complete` is how the integrator
+declares that the objective is specified well enough to plan; it is refused
+while a question the integrator asked is unanswered. Asking a further question
+from `clarified` returns the mission to `planning` until that question is
+answered. An initial plan can only be submitted from `clarified`.
+
+While the mission is in `planning` or `clarified`, revising a task replaces the
+draft: the previous revision is superseded and the new one becomes current
+without any human action, so the review always reads the latest draft.
+
+`mission.plan.decide` is the human boundary. It is not an agent command and is
+not reachable from the run socket; the accountable human or an admin approves,
+requests changes, or rejects from the dashboard. Approval accepts exactly the
+revisions the submitted round recorded, in one transaction, and moves the
+mission to `active`.
+
+#### Amendments to an approved plan
+
+In `active`, a submit sends an amendment: the pending set is every
+non-abandoned task's highest proposed revision at or above its current
+revision. Submitting at least one such task or revision is the only
+precondition. The mission moves to `amendment_review`, and while a human reads
+it:
+
+- Already-approved work keeps running. Workers still start, retry, cancel, and
+  their submissions are still accepted.
+- Nothing the amendment introduces can start: a pending revision is `proposed`,
+  and only a task's current accepted revision is ever reserved. `worker start`
+  on a task that has an item in the round under review is refused outright.
+- `task propose`, `task revise`, `task abandon`, and `task accept` are refused.
+
+`approve` returns the mission to `active` with the round's revisions accepted;
+`request changes` also returns it to `active`, with the feedback recorded and
+the proposals still `proposed`, so the integrator can revise and submit again,
+or drop them.
+
+The integrator still accepts small revisions of approved tasks itself with
+`task accept`. The server refuses that accept, with code `-32002`, when any of
+these holds:
+
+- the task has never been approved, so the revision is new work;
+- the revision declares `"material": true`;
+- an `expected_paths` entry is not covered by the approved scope union (the
+  union of `expected_paths` over every accepted current revision of the
+  mission, which includes the task's own);
+- the revision drops an exclusion carried by the task's current accepted
+  revision;
+- belongs to a task whose latest review round was sent back with `request
+  changes`; only a round that approves the task again lifts that hold.
+
+Each of those has to go through `mission plan submit` instead. `material` is
+the proposer's own declaration on the revision JSON, not something the server
+infers: it is an audit fact recorded on the revision, and the sixth reason a
+revision needs a human round. Declare `expected_paths` on every task, because
+after approval anything outside them is a widening that needs an amendment.
+
+Drop a pending revision without touching the task:
+
+```sh
+/usr/local/bin/aether-internal task abandon \
+  --task-id task-1 --revision 3 \
+  --expected-integrator-generation 4 \
+  --idempotency-key abandon-revision-3
+```
+
+Without `--revision`, the whole task is abandoned. With it, only that pending
+revision is marked abandoned; the task, its current revision, and the accepted
+set version are untouched.
+
+`aether-internal skill` prints only the current phase's immediate guidance:
+clarify in `planning`, discover task revision JSON and submit in `clarified`,
+wait in `plan_review`, continue approved work while waiting in
+`amendment_review`, dispatch and review submissions in `active`, and stop
+without reporting in `rejected`. Plan version, open question count, and latest
+feedback accompany integrator phase guidance. Run `skill` again after the
+phase changes. Neither plan approval nor Replace integrator is an agent action.
+
 ### Inspect and manage mission tasks and workers
 
 Task and worker commands use the authority attached to the run's socket. They
@@ -273,6 +439,59 @@ requires `--expected-accepted-set-version`. If the server's exact submission
 result reports non-empty `ScopeViolations`, the caller must explicitly assess
 those deviations by passing `--scope-disposition '<reason>'`; the client does
 not generate or infer a path list, and an empty reason is not an assessment.
+
+Both `task propose --help` and `task revise --help` describe the author-supplied
+fields of the protocol's `TaskRevision`. The minimal valid revision has
+non-empty `title` and `objective` strings:
+
+```json
+{"title":"Fix checkout","objective":"Reject expired sessions"}
+```
+
+For a useful plan, also declare paths and evidence requirements before approval:
+
+```json
+{
+  "title": "Fix checkout",
+  "objective": "Reject expired sessions",
+  "scope": {
+    "expected_paths": ["internal/checkout/"],
+    "exclusions": ["internal/checkout/generated/"]
+  },
+  "evidence_requirements": [
+    {"kind": "transcript", "detail": "Retain test output showing expired sessions are rejected"}
+  ]
+}
+```
+
+`scope.expected_paths` and `scope.exclusions` are arrays of repository-relative
+paths. Each evidence requirement has a non-empty `kind` and optional `detail`.
+Kinds name retained evidence sources, such as `transcript` or `git`, not test
+types. Describe the required test output in `detail`; do not use `test` as a kind.
+Set `"material": true` for an amendment changing scope, constraints, or success
+criteria. Do not copy server-managed IDs, revision numbers, status, or
+timestamps from a response. A revision supplies the whole spec, not a patch.
+JSON input is capped at 32 KiB; save files outside the read-only `/run/aether`.
+
+For an integrator in `planning`, `clarified`, or `active`, after preparing
+`/tmp/aether-task.json` and replacing the example mission ID:
+
+```sh
+/usr/local/bin/aether-internal task propose \
+  --mission-id mission-1 --revision-file /tmp/aether-task.json \
+  --idempotency-key propose-checkout-1
+```
+
+Use a fresh key for each new operation, retaining it for uncertain retries.
+Workers may propose splits or revisions only under their assigned task scope;
+they cannot accept them or dispatch workers.
+
+Which of these the server accepts depends on the mission phase, as the table
+above states: `propose`, `revise`, and `abandon` in `planning`, `clarified`,
+and `active`; `accept` only in `active`, and only within the limits listed
+under amendments; `accept-submission` in `active` and `amendment_review`; and
+nothing at all in `plan_review` or `rejected`. `abandon` takes an optional
+`--revision <n>` that drops one pending revision instead of the task.
 
 Worker starts and retries require explicit `--dispatch-key` values. The
 dispatch key is also the idempotency key for that operation, so replaying the
@@ -369,10 +588,13 @@ summary is required. `--evidence-ref` may be repeated, and `--summary-file`
 accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 
-A worker report is one-shot and terminal. Success submits the attempt and the
-server then stops that worker. Failure fails the attempt without treating it as
-a task result. Blocked is a durable observation and does not stop the worker or
-submit the task. Waiting on a peer uses ask/inbox, never report.
+A worker's **success or failure** report is one-shot and terminal. Success
+submits the attempt and the server then stops that worker. Failure fails the
+attempt without treating it as a task result. **Blocked is nonterminal**: it is
+a durable observation and does not stop the worker or submit the task.
+Waiting on a peer uses ask/inbox, never report; waiting on human review uses
+the plan wait command, not an outcome. Read the inbox once more before a
+terminal report and take no new work afterwards.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to

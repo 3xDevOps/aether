@@ -103,14 +103,14 @@ func Rollback(c *protocol.Client, harness, snapshotID string) (protocol.ProfileS
 	return res.Snapshot, nil
 }
 
-// StatusNotice is printed with profile status so operators know run-local
-// edits never sync back.
-const StatusNotice = "run-local profile edits are writable for the life of the run, discarded at teardown, and never sync back or mutate the pin"
-
 func FormatStatus(res protocol.ProfileStatusResult) string {
+	const notice = "Profile snapshots are optional recorded history and launch provenance, not isolated writable run copies.\n" +
+		"Configuration changes in persistent member HOME survive run teardown and are visible to all runs sharing the account (agents may need to reload).\n" +
+		"Home edits never automatically update snapshot history or sync back to your laptop.\n" +
+		"Browser imports and Files edits do not create profile snapshots."
 	if res.Snapshot == nil {
-		return "no profile snapshot\n" + StatusNotice + "\n"
+		return "no profile snapshot\n" + notice + "\n"
 	}
 	return fmt.Sprintf("snapshot %s\ndigest %s\ncreated_at %s\n%s\n",
-		res.Snapshot.ID, res.Snapshot.Digest, res.Snapshot.CreatedAt, StatusNotice)
+		res.Snapshot.ID, res.Snapshot.Digest, res.Snapshot.CreatedAt, notice)
 }

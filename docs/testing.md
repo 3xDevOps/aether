@@ -15,12 +15,25 @@ Layers, per the design spec's testing strategy:
 - **Integration/E2E tests** are behind the `integration` build tag and run with
   `make test-integration` (real Docker, real git), which covers only the
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
-  to one package and `INTEGRATION_SKIP` leaves some out, as in
-  `make test-integration INTEGRATION_PKGS=./internal/server`. CI runs them on
-  every PR from `.github/workflows/ci.yml`: the `integration` matrix shards
-  them by package, one job each for `internal/server` and `internal/scheduler`
-  and one for the rest, and the `smoke` job runs `internal/harness` on the
-  images it builds. Those jobs are the merge gate the E2E suite owns.
+  to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
+  `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
+  GitHub-hosted runners. The `integration` matrix in `.github/workflows/ci.yml`
+  gives `internal/server` four shards: `server-chaos`
+  (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
+  (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
+  (`INTEGRATION_RUN=^TestIntegrationMission`), and `server-rest`
+  (`INTEGRATION_SKIP_PATTERN=^TestIntegration(Chaos|Coordination|Mission)`).
+  `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
+  `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
+  `./internal/server`. The `smoke` job runs `internal/harness` on the images
+  it builds. A docs-only pull request (only `docs/**` and root `*.md`) runs
+  `audit` and skips every other job, including these, the dashboard jobs, and
+  the release matrix. A markdown file anywhere else, including a dashboard
+  end-to-end fixture, does not. The `changes` job runs
+  `scripts/ci-classify-changes.sh` from the pull request's base revision, so
+  a change to that script cannot make the decision itself, and a rename is
+  classified by both its old path and its new one. These jobs are the merge
+  gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -43,7 +56,7 @@ Layers, per the design spec's testing strategy:
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
   `aether-server`. They own the paths a person walks in the dashboard, which
-  no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
+  no Go test and no jsdom test reaches. CI runs them in one `dashboard-e2e`
   job.
 
 Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
@@ -308,7 +321,7 @@ attaches the server's output to the report.
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
 | `onboarding-github` | The Agents step's Connect GitHub screen against the member's own environment container, in two acts. First with no gh in it: the screen names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: the screen reporting the login command ready - the state, because the command block alone is also what a failed check shows - the stub's own log proving the dock typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
-| `onboarding-configuration` | An explicit one-time browser directory import: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
+| `onboarding-configuration` | An explicit browser directory import: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
 | `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the harness exits, and explicitly closing the run; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
 | `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
@@ -316,7 +329,8 @@ attaches the server's output to the report.
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
 | `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration, the query is gone from the address bar afterwards, and a reload lands back on the board |
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
-| `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: correct shared-grid growth, zoom, observe/steer, and reattach; a long redraw log opens with its complete output searchable in the ordinary terminal scrollback and remains responsive to input |
+| `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: correct shared-grid growth, pinned viewport preservation through zoom, observe/steer, and reattach; a large redraw archive opens at a bounded current screen, omits older output from live scrollback, and remains responsive to input |
+| `terminal-streaming` | Taking and releasing control without replacing the output socket; finding early output omitted from the live viewport through separate, bounded terminal-history pages |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport; the phone behavior is covered by `status-bar.mobile.spec.ts` below |

@@ -221,7 +221,7 @@ collapse state, `activeWorkspace`, grouping, dismissed update versions,
 terminal zoom) are persisted; `persistedUi` in `store/index.ts` is the list
 that decides. Server data is always re-fetched.
 
-**`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
+**`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
 templates, budget dialogs and the activity feed all act on. Empty means "all",
 which is what the board falls back to before hydration has named one.
@@ -229,6 +229,7 @@ which is what the board falls back to before hydration has named one.
 switcher can never say one workspace while the view beside it acts on another,
 and `navigate('workspace', ...)` makes the workspace it opens the active scope
 for the same reason.
+Member configuration is account-scoped and does not require a workspace.
 
 Derived data (the sidebar's grouped run list, the attention-ordered run list)
 lives in
@@ -337,6 +338,37 @@ way.
 - **A nav entry is named what the view it opens is titled**, including
   `routes/workspaces/` as "Manage workspaces" rather than "Workspaces".
 
+## Configuration view
+
+The permanent `configuration` route renders the shared
+`src/components/profile-import.tsx` importer. It is available whenever
+`config.roots` and `config.import` are advertised, through both the local and
+server-hosted gateways, without a workspace or onboarding prerequisite.
+**Agents** provides a **Configuration** action, and `src/lib/surfaces.ts`
+exposes **Configuration** to both the navigation rail and command palette.
+The local onboarding Agents step is an optional consumer of the same component.
+
+The browser directory picker grants access to the directory the user selects
+even when the dashboard is server-hosted; it does not grant access to arbitrary
+local paths. The importer previews accepted paths and exposes all omitted
+paths. Exceeding the 1 MiB per-file, 20 MiB decoded aggregate, or 2,000-file
+limits produces an incomplete-selection warning and disables upload until the
+user acknowledges importing only the accepted subset. The user can instead
+choose a smaller selection. A new directory, destination, or recomputed
+selection resets consent; expected credential/runtime exclusions alone do not
+require it. Accepted bytes are uploaded and server-scanned.
+
+After a result the user can select another directory or use **Open remote
+files**, which navigates to the existing `files` route. There is no automatic
+configuration sync, watcher, or import retry. `configImportPending` is
+nonpersisted state shared by the importer and shell navigation guard, not an
+onboarding completion flag. New browser-imported files use `0644`; existing
+remote modes are preserved on overwrite. The browser cannot preserve source
+executable bits or symlinks. See
+[Agent configuration](harnesses.md#agent-configuration-import-and-files) for
+the user workflow and [the protocol](local-gateway.md#files-and-member-configuration)
+for import result and failure semantics.
+
 ## Files view
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
@@ -372,9 +404,13 @@ The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
-All of the member's run containers and environment terminal mount one shared
-read-write persistent HOME, so accepted configuration imports and saves are
-visible to already-running processes immediately; a tool may need to reload.
+All runs using the member's account and the environment terminal mount one
+shared read-write persistent HOME, so accepted configuration imports and saves
+are visible to active and future runs; a tool may need to reload. Browser
+imports and Files edits do not create CLI snapshot history. Optional run
+snapshot pins are provenance, not isolated writable copies. Manual profile
+push and rollback overlay snapshot files into that same HOME without removing
+paths absent from the snapshot; rollback is not an exact-tree restore.
 
 ## Title bar
 
@@ -2065,40 +2101,26 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-**Configuration import** is an explicit, one-time directory import in the
-local onboarding flow. `config.roots` supplies destinations such as
-`~/.claude`, together with the destination-specific runtime paths that can be
-left out locally. The browser waits for that response: a known unique basename
-selects its destination automatically, while an unknown or ambiguous basename
-requires a destination choice before previewing or reading any file bytes.
-The raw browser `File` handles stay local so changing the destination clears
-the old preview and re-reads with the new policy; a generation guard prevents
-a slower old read from replacing the current preview. This action is not
-available from the server-hosted dashboard, because that browser cannot read a
-machine-local directory; the server dashboard still exposes Files and
-configuration editing through `config.tree`, `config.read` and `config.write`.
-There is no local discovery scan or directory watcher; the picker is the only
-onboarding import action.
+**Configuration import** in this step renders the same
+`src/components/profile-import.tsx` component as the permanent
+[Configuration view](#configuration-view). It is optional here and remains
+available from Agents, shared navigation, and the palette on either gateway,
+independently of onboarding or workspaces. `config.roots` supplies destinations
+such as `~/.claude` and their runtime exclusions. A unique basename selects
+the destination automatically; an unknown or ambiguous basename requires a
+choice before file bytes are read. Retained browser `File` handles allow the
+preview to be recomputed after a destination change, with generation guards
+discarding stale reads.
 
-Credential names found in any path component and `*.pem` files are always
-left out in the browser. Runtime/history paths come from the selected
-destination's `runtime_ignores` metadata and use exact, root-relative
-case-sensitive component-prefix matching. Every other selected byte is
-uploaded and server-scanned; the result reports accepted file/byte counts and
-server exclusions. A response with `error` is an incomplete import: the UI
-reports the committed counts, exact canonical `imported_paths`, and the real
-error instead of showing success, and warns that copied files remain. If the
-RPC fails without a response, the outcome is unknown (some files may have been
-copied); inspect **Files** before retrying. There is no watcher or automatic
-retry - choosing a directory and importing again is always explicit. The
-import limits are 2,000 files, 1 MiB per file and 20 MiB decoded in aggregate,
-with a 30 MiB HTTP request cap. Empty and binary regular files are preserved,
-but browser imports send mode `0644` and cannot preserve executable mode or
-symlinks.
-
-Accepted files change the calling member's persistent home immediately,
-including for already-running agents that share that home; an agent may need
-to reload. Auth/vendor login is separate.
+Credential names in any path component and `*.pem` files are excluded before
+read; destination-specific `runtime_ignores` match exact root-relative paths or
+component prefixes case-sensitively. The shared preview, limits,
+incomplete-selection acknowledgement, repeat-import controls, and server
+scanning rules are identical to the permanent route. A response with `error`
+shows committed counts, exact canonical `imported_paths`, and the real error,
+and warns that copied files remain. A lost RPC response leaves the outcome
+unknown; inspect **Files** before explicitly importing again. Auth/vendor login
+is separate.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
@@ -2482,18 +2504,20 @@ shell falls back to padding for the system bars itself on a WebView older
 than Chromium 140, so check `chrome://version` on the phone before
 concluding the page is wrong.
 
-## Missions and Launch Swarm
+## Missions and swarm creation
 
 The launch dialog keeps **Single agent** as its default. When the gateway
 advertises `mission.create`, it also offers **Swarm**: one concise objective,
 an integrator account/harness/mode, an explicit list of allowed worker
 account/harness/mode choices, and finite concurrent and total-attempt limits.
-The form sends the exact selected values to `mission.create`, including a
-client idempotency key, then navigates to `missions/<server-issued-id>`. A
-failed retry keeps that key; client-generated IDs are never used as mission
-authority. The server bounds these finite limits at eight concurrent attempts
-and 128 total attempts; the form rejects values outside those bounds before
-sending.
+Its submit button is **Create swarm**, matching the missions header action,
+and success toasts `Swarm created`; creating a swarm starts the integrator,
+not the workers. The form sends the exact selected values to
+`mission.create`, including a client idempotency key, then navigates to
+`missions/<server-issued-id>`. A failed retry keeps that key;
+client-generated IDs are never used as mission authority. The server bounds
+these finite limits at eight concurrent attempts and 128 total attempts; the
+form rejects values outside those bounds before sending.
 
 `routes/missions` is registered through `routes/index.ts`, and the
 `MissionsSlice` is composed into the root store. Hydration reads
@@ -2507,6 +2531,99 @@ revision/artifact references visible. A worker success or exit is not enough
 to render Done: the server must accept a submission for the current task
 revision, with the required evidence available and any scope disposition
 explicitly recorded.
+
+### The plan gate
+
+A mission is in one of six phases - `planning`, `clarified`, `plan_review`,
+`active`, `amendment_review`, `rejected`. `active` dispatches workers;
+`amendment_review` keeps dispatching the set a human already approved while
+the human decides an amendment, and no other phase dispatches at all. The
+phase chip replaces the generic `Mission` chip on every mission card:
+`Planning`, `Planning · N questions for you`, `Preparing plan`, `Plan ready
+for review`, `Active`, `Amendment ready for review`, `Rejected`. The detail
+view's status line answers the phase first and falls back to the
+task-derived string only in `active`.
+
+A phase banner sits under the mission header in every phase and says what
+the human must do next. When `current_integrator_run_id` names a run whose
+status in the store is terminal, the banner adds `The integrator run <id>
+has exited; replace the integrator to continue` with the **Replace
+integrator** control inline, in every phase but `rejected` - an integrator
+that exited while waiting for a decision is recovered, not hidden behind a
+friendlier message. A `rejected` mission's integrator is cancelled on
+purpose and `mission.replace-integrator` is refused in that phase, so the
+sentence and the control are not shown there.
+
+In `planning`, **Questions from the integrator** lists every question the
+integrator asked. Questions are optional - the integrator declares
+clarification complete when it has what it needs - so the section can stay
+at `The integrator has not asked anything yet.` for a whole mission. Each
+unanswered question takes a textarea and an **Answer** button sending
+`mission.question.answer` with the deterministic key
+`question-answer-<question_id>`, so a retry replays rather than answering
+twice. Answered questions show the answer and who answered. If a question
+this member is typing into arrives answered - the `mission.changed` refetch
+replaces the whole projection - the textarea stays mounted with the draft
+intact under `Answered by <display name>`, rather than dropping what was
+typed. The feedback from the most recent **Request changes** decision is
+shown above the tasks, which render as a read-only **Draft plan**.
+
+In `clarified` the integrator has declared it has what it needs and the
+server refuses another answer, so **Questions from the integrator** is a
+record rather than a form: it opens with `Clarification complete.` and shows
+every question with its answer, above the same read-only **Draft plan**.
+Asking a follow-up question returns the mission to `planning`, where the
+answer form is offered again.
+
+In `plan_review`, **Plan review** shows the integrator's summary, the plan
+version, the same read-only task list, and **Approve**, **Request changes**
+(feedback required) and **Reject**. Each sends `mission.plan.decide` with the
+observed `expected_plan_version` and the key
+`plan-decide-<mission_id>-<plan_version>-<decision>`: retrying the same
+button replays, while a different button or a refreshed plan version is a
+fresh mutation. A member who is neither the mission's accountable human nor
+an admin still sees the whole plan, above the line `Only the accountable
+human or an admin may decide this plan.` Both gate controls need the
+capability, launch permission, and that identity:
+`cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
+
+In `amendment_review` the integrator has submitted a change to a plan that
+is already approved. **Amendment review** shows the summary, the plan
+version, and one card per item of the round - read from the undecided review
+at the mission's current plan version, never from the last review in the
+list. A `new_task` item is a **New work** card built from the task's current
+revision; any other item is a **Changed task** card showing the approved
+revision beside the proposed one, with the objective, expected paths and
+exclusions of each. A `material` item carries a `Material` chip. The paths
+and dropped exclusions highlighted as widening the approved scope are the
+item's server-computed `widening` list; the dashboard has no path rule of
+its own. Intended-overlap diagnostics for the item's task are listed under
+its card. An item whose task or pending revision is gone from the projection
+renders its title and revision number with `This revision is no longer
+pending.` The controls are **Approve** and **Request changes** only: the
+server refuses to reject an amendment, because the approved work it amends
+keeps running either way. Below the section, the Tasks and candidate
+sections stay visible, attempt chips included - those workers are still
+running.
+
+In `active` and `amendment_review`, a task carrying a `pending_revision`
+shows a `Revision pending` chip, `Material revision pending` when the
+revision is declared material, and names the pending revision number and
+title under the task. A pending revision is never the task's current
+revision, so it cannot be dispatched.
+
+Attempt chips render only where the mission can dispatch, so they are hidden
+outside `active` and `amendment_review`. The `proposal` blocker chip is
+hidden in every phase except `active`: everywhere else the proposal is
+waiting on the human, which the phase banner already says, and repeating it
+as a blocker reads as a fault. The candidate section renders in `active` and
+`amendment_review`. In every phase after `clarified`, the questions and the
+decided review rounds collapse into **Planning history**.
+
+Answer and decision failures live in component state and render through the
+same `ErrorNotice` as a failed release, verbatim. They never go through
+`setMissionError`, which the next `setMissionDetail` or `mission.changed`
+refetch would wipe, and a failed answer leaves the draft intact.
 
 Run links use the existing terminal route. Take control and Release control
 continue to enforce the normal run controller and durable worker hold.

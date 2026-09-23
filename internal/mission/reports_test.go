@@ -64,13 +64,14 @@ func setupReconcileReport(t *testing.T, outcome store.CoordOutcome) (reconcileRe
 	task := &domain.Task{
 		MissionID: mission.ID,
 		Revision: &domain.TaskRevision{
-			Title: "report task", Objective: "report task", Status: domain.TaskRevisionAccepted,
+			Title: "report task", Objective: "report task", Status: domain.TaskRevisionProposed,
 			EvidenceRequirements: []domain.EvidenceRequirement{{Kind: "test"}},
 		},
 	}
 	if err := db.CreateTask(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	mission = regressionApprovePlan(t, db, mission)
 	attempt, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
 		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
 		DispatchKey: "report-dispatch", Harness: "claude", Mode: domain.LaunchHeadless,

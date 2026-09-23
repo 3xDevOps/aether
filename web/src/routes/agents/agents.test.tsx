@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
 import { AgentWizard, splitArgv } from '@/routes/agents/wizard'
+import { ConfigurationRoute } from '@/routes/configuration'
 import { useStore } from '@/store'
 import {
   initialEnvTerminal,
@@ -74,6 +75,58 @@ describe('agents view', () => {
     expect(screen.getByText('Add agent')).toBeDefined()
     view.unmount()
   })
+
+  it.each(['local', 'remote'] as const)(
+    'opens configuration after onboarding without a workspace on a %s gateway',
+    async (gateway) => {
+      useStore.setState({
+        capabilities: {
+          gateway,
+          methods: ['agent.list', 'config.roots', 'config.import', 'config.tree'],
+          ws: [],
+        },
+        onboarded: true,
+        workspaces: {},
+        activeWorkspace: '',
+        route: { name: 'agents', params: {} },
+      })
+      const view = mount()
+      await flush()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Configuration' }))
+      expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
+      view.unmount()
+
+      const configuration = render(<ConfigurationRoute params={{}} client={api} />)
+      await flush()
+      expect(
+        (screen.getByRole('button', { name: 'Choose directory' }) as HTMLButtonElement).disabled,
+      ).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: 'Open remote files' }))
+      expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
+      configuration.unmount()
+    },
+  )
+
+  it.each(['config.roots', 'config.import'])(
+    'does not offer configuration when %s is unavailable',
+    async (missing) => {
+      useStore.setState({
+        capabilities: {
+          gateway: 'remote',
+          methods: ['agent.list', 'config.roots', 'config.import'].filter(
+            (method) => method !== missing,
+          ),
+          ws: [],
+        },
+      })
+      const view = mount()
+      await flush()
+
+      expect(screen.queryByRole('button', { name: 'Configuration' })).toBeNull()
+      view.unmount()
+    },
+  )
 
   it('prefills argv templates and renders the live terminal dock', async () => {
     const view = mount()

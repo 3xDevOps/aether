@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // TestIntegrationMissionOrchestration drives the mission authority through the
@@ -121,7 +123,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 			IdempotencyKey: key,
 		}
 		var result protocol.TaskMutationResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, params, &result); err != nil {
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, params, &result); err != nil {
 			t.Fatalf("task.propose %s: %v", title, err)
 		}
 		if result.Task.ID == "" || result.Task.CurrentRevision != 1 {
@@ -130,14 +132,14 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		// A retry after a lost response reuses the exact JSON and key. It must
 		// replay the same task rather than create a second server row.
 		var replay protocol.TaskMutationResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, params, &replay); err != nil {
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, params, &replay); err != nil {
 			t.Fatalf("task.propose %s replay: %v", title, err)
 		}
 		if replay.Task.ID != result.Task.ID || replay.Task.CurrentRevision != result.Task.CurrentRevision {
 			t.Fatalf("task.propose %s replay changed identity: first=%+v replay=%+v", title, result.Task, replay.Task)
 		}
 		var listedTasks protocol.TaskListResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &listedTasks); err != nil {
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &listedTasks); err != nil {
 			t.Fatalf("task.list after %s replay: %v", title, err)
 		}
 		count := 0
@@ -152,7 +154,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		conflict := params
 		conflict.Revision.Objective = objective + " changed"
 		var conflictResult protocol.TaskMutationResult
-		err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskPropose, conflict, &conflictResult)
+		err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, conflict, &conflictResult)
 		if err == nil || coordtransport.ErrorCode(err) != protocol.CodeConflict {
 			t.Fatalf("task.propose reused key with changed objective error = %v, want CodeConflict", err)
 		}
@@ -160,22 +162,116 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	taskA := propose(workerAObjective, "worker A", "propose-A")
 	taskB := propose(workerBObjective, "worker B", "propose-B")
-	for _, task := range []domain.TaskID{taskA, taskB} {
-		var accepted protocol.TaskMutationResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
-			TaskID: string(task), Revision: 1, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
-			IdempotencyKey: "accept-" + string(task),
-		}, &accepted); err != nil {
-			t.Fatalf("task.accept %s: %v", task, err)
+
+	// The plan gate: no worker runs and no revision is accepted until the
+	// accountable human answers the integrator and approves the plan.
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-before-approval",
+		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id),
+		RunOwnerID: string(e.ada.id), ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("worker.start before plan approval error = %v, want CodeInvalidState", err)
+	}
+	var asked protocol.MissionQuestionResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which checkout flow?", IdempotencyKey: "mission-ask-1",
+	}, &asked); err != nil {
+		t.Fatalf("mission.question.ask: %v", err)
+	}
+	var pending protocol.MissionPlanShowResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, &pending); err != nil {
+		t.Fatalf("mission.plan.show: %v", err)
+	}
+	if pending.Plan.Phase != string(domain.MissionPhasePlanning) || pending.Plan.OpenQuestions != 1 {
+		t.Fatalf("plan state before the answer = %+v, want planning with one open question", pending.Plan)
+	}
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
+		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-early"},
+		nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("mission.clarification.complete with an unanswered question = %v, want CodeInvalidState", err)
+	}
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "submitted too early", IdempotencyKey: "mission-submit-early",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("mission.plan.submit before clarification is complete = %v, want CodeInvalidState", err)
+	}
+	// Every seeded member is an admin, and an admin may answer for the
+	// accountable human; the refusal is for a plain collaborator.
+	_, cyKey := writeClientKey(t)
+	cy := &domain.Member{
+		DisplayName: "Cy", PublicKey: string(ssh.MarshalAuthorizedKey(cyKey.PublicKey())),
+		Color: "#4363d8", Role: domain.RoleCollaborator,
+	}
+	if err := srv.srv.Store().CreateMember(ctx, cy); err != nil {
+		t.Fatalf("seed collaborator: %v", err)
+	}
+	cyCtrl, cyClient := srv.control(t, cyKey)
+	defer cyClient.Close()
+	if err := cyCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
+		QuestionID: asked.Question.ID, Answer: "not mine to answer", IdempotencyKey: "mission-answer-cy",
+	}, nil); controlErrorCode(err) != protocol.CodeDenied {
+		t.Fatalf("mission.question.answer from a non-accountable collaborator = %v, want denied", err)
+	}
+	var answered protocol.MissionQuestionResult
+	if err := adaCtrl.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
+		QuestionID: asked.Question.ID, Answer: "the existing checkout flow", IdempotencyKey: "mission-answer-1",
+	}, &answered); err != nil {
+		t.Fatalf("mission.question.answer: %v", err)
+	}
+	if answered.Question.AnsweredAt == nil || answered.Question.AnsweredByMemberID != string(e.ada.id) {
+		t.Fatalf("answered question = %+v, want an answer attributed to the accountable human", answered.Question)
+	}
+	var clarified protocol.MissionClarificationCompleteResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
+		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-1"}, &clarified); err != nil {
+		t.Fatalf("mission.clarification.complete: %v", err)
+	}
+	if clarified.Plan.Phase != string(domain.MissionPhaseClarified) || clarified.Plan.OpenQuestions != 0 {
+		t.Fatalf("plan state after clarification = %+v, want clarified with no open question", clarified.Plan)
+	}
+	var submitted protocol.MissionPlanSubmitResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "two bounded worker tasks", IdempotencyKey: "mission-submit-1",
+	}, &submitted); err != nil {
+		t.Fatalf("mission.plan.submit: %v", err)
+	}
+	if submitted.Plan.Phase != string(domain.MissionPhasePlanReview) || submitted.Plan.PlanVersion == 0 {
+		t.Fatalf("plan state after submit = %+v, want plan_review at a non-zero version", submitted.Plan)
+	}
+	var approved protocol.MissionPlanDecideResult
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: submitted.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "mission-decide-1",
+	}, &approved); err != nil {
+		t.Fatalf("mission.plan.decide: %v", err)
+	}
+	if approved.Mission.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("mission phase after approval = %q, want active", approved.Mission.Phase)
+	}
+	// Approval accepted both revisions; the integrator never accepted its own.
+	var readyTasks protocol.TaskListResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &readyTasks); err != nil {
+		t.Fatalf("task.list after approval: %v", err)
+	}
+	if len(readyTasks.Tasks) != 2 {
+		t.Fatalf("task.list after approval returned %d tasks, want 2", len(readyTasks.Tasks))
+	}
+	for _, task := range readyTasks.Tasks {
+		if task.Status != string(domain.TaskReady) {
+			t.Fatalf("task %s status after approval = %q, want ready", task.ID, task.Status)
 		}
-		if accepted.Task.Status != string(domain.TaskReady) {
-			t.Fatalf("task %s status after accept = %q, want ready", task, accepted.Task.Status)
-		}
+	}
+	var reaccepted protocol.TaskMutationResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
+		TaskID: string(taskA), Revision: 1, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
+		IdempotencyKey: "reaccept-approved-A",
+	}, &reaccepted); coordtransport.ErrorCode(err) != protocol.CodeConflict {
+		t.Fatalf("task.accept already approved revision = %v, want conflict", err)
 	}
 
 	start := func(task domain.TaskID, key string) protocol.WorkerStartResult {
 		var out protocol.WorkerStartResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
 			MissionID: missionID, TaskID: string(task), TaskRevision: 1, DispatchKey: key,
 			Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id),
 			RunOwnerID: string(e.ada.id), ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
@@ -193,7 +289,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	// Treat the first worker.start response as lost: replaying its dispatch key
 	// returns one attempt and explicitly marks the replay.
 	var replayed protocol.WorkerStartResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
 		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-A",
 		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id),
 		RunOwnerID: string(e.ada.id), ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
@@ -212,27 +308,47 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	attB := openMissionObserver(t, adaClient, attemptB.Attempt.RunID)
 	attA.waitOutput(t, "inbox:worker-B-before-overlap")
 	attB.waitOutput(t, "inbox:worker-A-before-overlap")
+	workerSocket := waitMissionSocket(t, e.coordDir(attemptA.Attempt.RunID))
+	var unauthorizedList protocol.WorkerListResult
+	if err := pacedCall(ctx, workerSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &unauthorizedList); coordtransport.ErrorCode(err) != protocol.CodeDenied {
+		t.Fatalf("worker.list from worker = %v, want denied", err)
+	}
+	if len(unauthorizedList.Attempts) != 0 {
+		t.Fatalf("denied worker.list exposed attempts: %+v", unauthorizedList)
+	}
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerRetry, protocol.WorkerRetryParams{
+		AttemptID: attemptA.Attempt.ID, DispatchKey: "retry-active-A", ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
+	}, nil); coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("worker.retry active attempt = %v, want invalid state", err)
+	}
+	var activeAttempts protocol.WorkerListResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &activeAttempts); err != nil {
+		t.Fatalf("worker.list after refused retry: %v", err)
+	}
+	if len(activeAttempts.Attempts) != 2 {
+		t.Fatalf("refused retry changed attempt count: %+v", activeAttempts)
+	}
 
 	// A real human takeover places a durable hold on worker A. The integrator
 	// cancellation request is denied before it can persist any cancellation
 	// intent; releasing the hold must not later execute that denied request.
 	_, takeoverGeneration := openMissionTakeover(t, boClient, attemptA.Attempt.RunID)
 	var denied protocol.WorkerMutationResult
-	err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerCancel, protocol.WorkerCancelParams{
+	err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerCancel, protocol.WorkerCancelParams{
 		AttemptID: attemptA.Attempt.ID, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "cancel-held-A",
 	}, &denied)
 	if err == nil || coordtransport.ErrorCode(err) != protocol.CodeDenied {
 		t.Fatalf("worker.cancel under human takeover error = %v, want denied", err)
 	}
 	var inspected protocol.WorkerInspectResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
 		t.Fatalf("worker.inspect under takeover: %v", err)
 	}
 	if inspected.Attempt.CancelRequestedAt != nil || !inspected.Attempt.TakeoverActive {
 		t.Fatalf("takeover inspection recorded cancellation or lost hold: %+v", inspected.Attempt)
 	}
 	releaseMissionTakeover(t, boClient, attemptA.Attempt.RunID, "mission-takeover-"+attemptA.Attempt.RunID, takeoverGeneration)
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
 		t.Fatalf("worker.inspect after takeover release: %v", err)
 	}
 	if inspected.Attempt.CancelRequestedAt != nil || inspected.Attempt.State == string(domain.AttemptCancelled) {
@@ -242,22 +358,22 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	// No third active attempt fits the concurrent bound. Cancel A, consume the
 	// one remaining total-attempt slot with retry, then prove the total bound.
 	var tooMany protocol.WorkerStartResult
-	err = coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
 		MissionID: missionID, TaskID: string(taskA), TaskRevision: 1, DispatchKey: "dispatch-C",
 		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id), RunOwnerID: string(e.ada.id),
 	}, &tooMany)
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "limit") {
-		t.Fatalf("worker.start over concurrency bound error = %v, want limit", err)
+	if coordtransport.ErrorCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), store.ErrMissionLimit.Error()) {
+		t.Fatalf("worker.start over concurrency bound error = %v, want mission attempt limit conflict", err)
 	}
 	var cancelled protocol.WorkerMutationResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerCancel, protocol.WorkerCancelParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerCancel, protocol.WorkerCancelParams{
 		AttemptID: attemptA.Attempt.ID, ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "cancel-A",
 	}, &cancelled); err != nil {
 		t.Fatalf("worker.cancel A: %v", err)
 	}
 	cancellationDeadline := time.Now().Add(30 * time.Second)
 	for {
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
+		if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerInspect, protocol.WorkerInspectParams{AttemptID: attemptA.Attempt.ID}, &inspected); err != nil {
 			t.Fatalf("worker.inspect while cancelling A: %v", err)
 		}
 		if inspected.Attempt.State == string(domain.AttemptCancelled) {
@@ -266,10 +382,9 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		if time.Now().After(cancellationDeadline) {
 			t.Fatalf("worker A did not finish cancelling: %+v", inspected.Attempt)
 		}
-		time.Sleep(500 * time.Millisecond)
 	}
 	var retried protocol.WorkerMutationResult
-	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerRetry, protocol.WorkerRetryParams{
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodWorkerRetry, protocol.WorkerRetryParams{
 		AttemptID: attemptA.Attempt.ID, DispatchKey: "dispatch-A-retry", ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
 	}, &retried); err != nil {
 		t.Fatalf("worker.retry A: %v", err)
@@ -278,19 +393,19 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		t.Fatalf("worker.retry A did not reserve a new attempt: %+v", retried)
 	}
 	var overTotal protocol.WorkerStartResult
-	err = coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerStart, protocol.WorkerStartParams{
 		MissionID: missionID, TaskID: string(taskB), TaskRevision: 1, DispatchKey: "dispatch-D",
 		Harness: "fake", Mode: string(domain.LaunchTUI), AccountOwnerID: string(e.ada.id), RunOwnerID: string(e.ada.id),
 	}, &overTotal)
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "limit") {
-		t.Fatalf("worker.start over total bound error = %v, want limit", err)
+	if coordtransport.ErrorCode(err) != protocol.CodeConflict || !strings.Contains(err.Error(), store.ErrMissionLimit.Error()) {
+		t.Fatalf("worker.start over total bound error = %v, want mission attempt limit conflict", err)
 	}
 
 	// A report with no user evidence refs still captures the retained packet and
 	// leaves the task in Review for human admission; it is never auto-accepted.
 	retrySocket := waitMissionSocket(t, e.coordDir(retried.Attempt.RunID))
 	var report protocol.CoordReportResult
-	if err := coordtransport.Call(ctx, retrySocket, protocol.MethodCoordReport, protocol.CoordReportParams{
+	if err := pacedCall(ctx, retrySocket, protocol.MethodCoordReport, protocol.CoordReportParams{
 		Outcome: protocol.CoordOutcomeSuccess, Summary: "fixture completed without required user evidence", IdempotencyKey: "report-retry-A",
 	}, &report); err != nil {
 		t.Fatalf("coord.report missing-evidence fixture: %v", err)
@@ -303,6 +418,67 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	}
 	if !containsTaskStatus(shown.Tasks, string(taskA), string(domain.TaskReview)) {
 		t.Fatalf("task A did not remain Review after missing evidence: %+v", shown.Tasks)
+	}
+
+	// New work after activation goes through the same human gate: the
+	// integrator cannot accept it alone, the amendment freezes plan changes
+	// while it is read, and an amendment is approved or sent back, never
+	// rejected.
+	var amendmentTask protocol.TaskMutationResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+		MissionID:      missionID,
+		Revision:       protocol.TaskRevision{Title: "worker C", Objective: "mission shell worker C", Material: true},
+		IdempotencyKey: "propose-C",
+	}, &amendmentTask); err != nil {
+		t.Fatalf("task.propose during an active mission: %v", err)
+	}
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
+		TaskID: amendmentTask.Task.ID, Revision: amendmentTask.Task.CurrentRevision,
+		ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: "accept-C",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("task.accept of new work = %v, want CodeInvalidState", err)
+	}
+	var amendment protocol.MissionPlanSubmitResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "add worker C", IdempotencyKey: "mission-submit-2",
+	}, &amendment); err != nil {
+		t.Fatalf("mission.plan.submit amendment: %v", err)
+	}
+	if amendment.Plan.Phase != string(domain.MissionPhaseAmendmentReview) || amendment.Plan.PlanVersion != submitted.Plan.PlanVersion+1 {
+		t.Fatalf("plan state after the amendment submit = %+v, want amendment_review at the next version", amendment.Plan)
+	}
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskPropose, protocol.TaskProposeParams{
+		MissionID:      missionID,
+		Revision:       protocol.TaskRevision{Title: "worker D", Objective: "mission shell worker D"},
+		IdempotencyKey: "propose-D",
+	}, nil); err == nil || coordtransport.ErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("task.propose during an amendment = %v, want CodeInvalidState", err)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanReject), IdempotencyKey: "mission-decide-reject-2",
+	}, nil); controlErrorCode(err) != protocol.CodeInvalidState {
+		t.Fatalf("mission.plan.decide reject on an amendment = %v, want CodeInvalidState", err)
+	}
+	var amended protocol.MissionPlanDecideResult
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: amendment.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "mission-decide-2",
+	}, &amended); err != nil {
+		t.Fatalf("mission.plan.decide amendment: %v", err)
+	}
+	if amended.Mission.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("mission phase after approving the amendment = %q, want active", amended.Mission.Phase)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err != nil {
+		t.Fatalf("mission.show after the amendment: %v", err)
+	}
+	if !containsTaskStatus(shown.Tasks, amendmentTask.Task.ID, string(domain.TaskReady)) {
+		t.Fatalf("amended task %s is not ready after approval: %+v", amendmentTask.Task.ID, shown.Tasks)
+	}
+	if len(shown.PlanReviews) != 2 || shown.PlanReviews[1].SubmittedPhase != string(domain.MissionPhaseActive) ||
+		len(shown.PlanReviews[1].Items) != 1 || !shown.PlanReviews[1].Items[0].NewTask {
+		t.Fatalf("plan reviews after the amendment = %+v, want a second round recording one new task", shown.PlanReviews)
 	}
 
 	// Replacing the integrator bumps generation and invalidates the old socket.
@@ -318,7 +494,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 		t.Fatalf("mission.replace-integrator did not advance generation: %+v", replaced)
 	}
 	var stale protocol.WorkerListResult
-	err = coordtransport.Call(ctx, integratorSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &stale)
+	err = pacedCall(ctx, integratorSocket, protocol.MethodWorkerList, protocol.WorkerListParams{MissionID: missionID}, &stale)
 	if err == nil {
 		t.Fatal("old integrator socket worker.list unexpectedly succeeded after integrator replacement")
 	}
@@ -398,15 +574,23 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	}
 	taskA := propose(workerAObjective, "Docker worker A", "worker-a.txt", "docker-propose-a")
 	taskB := propose(workerBObjective, "Docker worker B", "worker-b.txt", "docker-propose-b")
-	for _, taskID := range []string{taskA, taskB} {
-		var out protocol.TaskMutationResult
-		if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
-			TaskID: taskID, Revision: 1,
-			ExpectedIntegratorGeneration: created.Mission.IntegratorGeneration,
-			IdempotencyKey:               "docker-accept-" + taskID,
-		}, &out); err != nil {
-			t.Fatalf("task.accept %s: %v", taskID, err)
-		}
+	// The objective needs no clarification: the integrator says so and
+	// submits, and the accountable human approves both tasks at once.
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
+		protocol.MissionClarificationCompleteParams{IdempotencyKey: "docker-clarify"}, nil); err != nil {
+		t.Fatalf("mission.clarification.complete: %v", err)
+	}
+	var submitted protocol.MissionPlanSubmitResult
+	if err := coordtransport.Call(ctx, integratorSocket, protocol.MethodMissionPlanSubmit, protocol.MissionPlanSubmitParams{
+		Summary: "two Docker workers", IdempotencyKey: "docker-submit",
+	}, &submitted); err != nil {
+		t.Fatalf("mission.plan.submit: %v", err)
+	}
+	if err := adaCtrl.Call(protocol.MethodMissionPlanDecide, protocol.MissionPlanDecideParams{
+		MissionID: missionID, ExpectedPlanVersion: submitted.Plan.PlanVersion,
+		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "docker-decide",
+	}, nil); err != nil {
+		t.Fatalf("mission.plan.decide: %v", err)
 	}
 
 	start := func(taskID, dispatch string) protocol.WorkerStartResult {
@@ -521,7 +705,18 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 		"candidate_id": candidate.CandidateID, "candidate_revision": candidate.CandidateRevision,
 		// Verification also proves the canonical staged CLI exists in the
 		// verification image and has no run identity/socket.
-		"argv":            []string{"sh", "-c", "set -eu; /usr/local/bin/aether-internal --help >/tmp/help; /usr/local/bin/aether-internal skill >/tmp/skill; grep -q 'No coordination socket' /tmp/skill; test \"$(ls worker-*.txt | wc -l)\" = 2"},
+		"argv": []string{"sh", "-c", `set -eu
+/usr/local/bin/aether-internal --help >/tmp/help
+/usr/local/bin/aether-internal skill >/tmp/skill
+test ! -e /run/aether/coord3.sock
+status_code=0
+status=$(/usr/local/bin/aether-internal status) || status_code=$?
+test "$status_code" -eq 4
+case "$status" in
+	*'"ok":false'*'"code":-32004'*) ;;
+	*) printf '%s\n' "$status" >&2; exit 1 ;;
+esac
+test "$(ls worker-*.txt | wc -l)" = 2`},
 		"timeout_seconds": 30, "idempotency_key": "docker-verify-passed",
 	})
 	passed = waitMissionVerification(ctx, t, integratorRun, passed)
@@ -735,7 +930,9 @@ help=$(/usr/local/bin/aether-internal --help)
 case "$help" in *"aether-internal"*) ;; *) echo "cli-help-missing" >&2; exit 1 ;; esac
 skill=$(/usr/local/bin/aether-internal skill)
 case "$skill" in *"Run:"*) ;; *) echo "cli-skill-missing" >&2; exit 1 ;; esac
-	task=$(printf '%s\n' "$skill" | sed -n 's/^Assignment: //p')
+status=$(/usr/local/bin/aether-internal status)
+# Fixture task names are controlled ASCII; match the run's task before nested peers.
+task=$(printf '%s\n' "$status" | sed -nE 's/.*"result":\{[^{}]*"task":"([^"]*)".*/\1/p')
 
 case "$task" in
 	*"integrator"*)
@@ -781,7 +978,10 @@ while [ "$attempt" -lt 20 ]; do
 done
 [ -n "$ack" ] || { echo "fixture-message-not-acked" >&2; exit 1; }
 printf '%s\n' "$body" > "$result"
-/usr/local/bin/aether-internal report --outcome success --summary "mission fixture retained result" --idempotency-key "mission-report-$AETHER_RUN_ID" >/dev/null
+if ! reported=$(/usr/local/bin/aether-internal report --outcome success --summary "mission fixture retained result" --idempotency-key "mission-report-$AETHER_RUN_ID" 2>&1); then
+	echo "fixture-report-failed:$reported"
+	exit 1
+fi
 echo "fixture-reported:$AETHER_RUN_ID"
 `)
 	uid, gid := os.Getuid(), os.Getgid()
@@ -987,5 +1187,31 @@ func releaseMissionTakeover(t *testing.T, client *ssh.Client, runID, sessionID s
 	}
 	if !ack.OK {
 		t.Fatalf("release denied: %+v", ack)
+	}
+}
+
+// controlErrorCode is the wire code of a control-channel error, or 0 for a
+// nil or untyped error.
+func controlErrorCode(err error) int {
+	var rpcErr *protocol.Error
+	if errors.As(err, &rpcErr) {
+		return rpcErr.Code
+	}
+	return 0
+}
+
+// pacedCall spaces this scenario's sequential socket calls by at least the
+// transport's one-second token refill interval, rather than consuming its
+// burst allowance. The integrator fixture itself makes no socket calls.
+// Every response, including a transport rate-limit error, reaches the caller
+// unchanged; this helper never retries a rejected operation.
+func pacedCall(ctx context.Context, socket, method string, params, result any) error {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return coordtransport.Call(ctx, socket, method, params, result)
 	}
 }

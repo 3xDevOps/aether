@@ -74,10 +74,9 @@ const (
 	MirrorErrorFailed         MirrorErrorKind = "error"
 )
 
-// MirrorError is safe to show to an operator: it does not include git's raw
-// stderr, which can contain credential-helper or transport details. Cause is
-// retained for errors.Is/As by server code but is intentionally omitted from
-// Error().
+// MirrorError is safe to show to an operator: fetch failures expose only
+// allowlisted diagnostics, never raw transport output or credential details.
+// Cause retains the original error and output for trusted server diagnostics.
 type MirrorError struct {
 	Kind        MirrorErrorKind
 	WorkspaceID domain.WorkspaceID
@@ -96,10 +95,16 @@ func (e *MirrorError) Error() string {
 	if what == "" {
 		what = string(MirrorErrorFailed)
 	}
+	message := "gitengine: mirror " + what
 	if e.Branch != "" {
-		return fmt.Sprintf("gitengine: mirror %s for branch %q", what, e.Branch)
+		message += fmt.Sprintf(" for branch %q", e.Branch)
 	}
-	return "gitengine: mirror " + what
+	var failure *mirrorFetchFailure
+	if errors.As(e.Cause, &failure) {
+		_, diagnostic := mirrorFetchProblem(failure)
+		message += ": " + diagnostic
+	}
+	return message
 }
 
 func (e *MirrorError) Unwrap() error { return e.Cause }
@@ -586,24 +591,57 @@ type mirrorFetchFailure struct {
 	output string
 }
 
-func (e *mirrorFetchFailure) Error() string { return "mirror fetch failed" }
+func (e *mirrorFetchFailure) Error() string {
+	return fmt.Sprintf("mirror fetch failed: %v: %s", e.err, strings.TrimSpace(e.output))
+}
 func (e *mirrorFetchFailure) Unwrap() error { return e.err }
 
 func classifyFetchError(err error) MirrorErrorKind {
+	kind, _ := mirrorFetchProblem(err)
+	return kind
+}
+
+// Do not classify Git's generic "unable to access" or "permission denied"
+// wrappers: they also describe local filesystem and TLS configuration failures.
+// Only fixed diagnostics cross the operator boundary; remote output may contain
+// secrets even when the configured source URL itself is credential-free.
+func mirrorFetchProblem(err error) (MirrorErrorKind, string) {
 	var failure *mirrorFetchFailure
 	if !errors.As(err, &failure) {
-		return MirrorErrorFailed
+		return MirrorErrorFailed, ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return MirrorErrorOffline, "fetch deadline exceeded; check server connectivity and refresh the mirror"
+	}
+	if errors.Is(err, context.Canceled) {
+		return MirrorErrorFailed, "fetch canceled; refresh the mirror before retrying launch"
 	}
 	msg := strings.ToLower(failure.output)
 	switch {
-	case strings.Contains(msg, "authentication failed"), strings.Contains(msg, "permission denied"), strings.Contains(msg, "could not read username"), strings.Contains(msg, "host key verification failed"):
-		return MirrorErrorAuthFailed
+	case strings.Contains(msg, "host key verification failed"):
+		return MirrorErrorAuthFailed, "host key verification failed; verify the mirror's pinned host key"
+	case strings.Contains(msg, "authentication failed"), strings.Contains(msg, "permission denied (publickey"), strings.Contains(msg, "could not read username"), strings.Contains(msg, "returned error: 401"), strings.Contains(msg, "returned error: 403"):
+		return MirrorErrorAuthFailed, "upstream authentication failed; check source access and the mirror deploy key"
 	case strings.Contains(msg, "couldn't find remote ref"), strings.Contains(msg, "could not find remote ref"), strings.Contains(msg, "no such ref"):
-		return MirrorErrorSourceMissing
-	case strings.Contains(msg, "could not resolve host"), strings.Contains(msg, "no such host"), strings.Contains(msg, "dns lookup failed"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "network is unreachable"), strings.Contains(msg, "failed to connect"), strings.Contains(msg, "unable to access"):
-		return MirrorErrorOffline
+		return MirrorErrorSourceMissing, "upstream branch was not found; verify the configured branch"
+	case strings.Contains(msg, "ssl certificate problem"), strings.Contains(msg, "server certificate verification failed"), strings.Contains(msg, "error setting certificate"):
+		return MirrorErrorFailed, "TLS certificate verification or configuration failed; check server Git CA configuration"
+	case strings.Contains(msg, "url rejected"), strings.Contains(msg, "url using bad/illegal format"):
+		return MirrorErrorFailed, "invalid fetch URL; check server Git URL rewrites and the mirror source"
+	case strings.Contains(msg, "protocol 'file' is not supported"), strings.Contains(msg, "transport 'file' not allowed"):
+		return MirrorErrorFailed, "file transport is prohibited; check server Git URL rewrites and the mirror source"
+	case strings.Contains(msg, "could not resolve host"), strings.Contains(msg, "no such host"), strings.Contains(msg, "dns lookup failed"):
+		return MirrorErrorOffline, "DNS lookup failed; check server DNS and refresh the mirror"
+	case strings.Contains(msg, "connection refused"):
+		return MirrorErrorOffline, "connection refused; check server connectivity and refresh the mirror"
+	case strings.Contains(msg, "network is unreachable"), strings.Contains(msg, "failed to connect"), strings.Contains(msg, "connection timed out"), strings.Contains(msg, "operation timed out"):
+		return MirrorErrorOffline, "upstream connection failed or timed out; check server connectivity and refresh the mirror"
+	case strings.Contains(msg, "permission denied"):
+		return MirrorErrorFailed, "permission denied during fetch; check server repository and key-file permissions"
+	case strings.Contains(msg, "no space left on device"):
+		return MirrorErrorFailed, "no space left on device; free server repository disk space before refreshing"
 	default:
-		return MirrorErrorFailed
+		return MirrorErrorFailed, "fetch failed; check server Git configuration and mirror source before refreshing"
 	}
 }
 func (e *Engine) classifyMirror(ctx context.Context, repo, base, accepted, observed string) (domain.MirrorStatus, string, string) {

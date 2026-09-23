@@ -10,23 +10,21 @@ permissions:
   contents: write
   packages: write
 
-# `make release` writes inside the source tree - cmd/aether/resource_windows_*.syso,
-# which it also removes, and the Android build's android/app/build - and every
-# release job targets the same self-hosted label. Two overlapping releases
-# sharing a working directory would race over both, so they queue instead.
+# Any two releases queue. Publishing different tags at the same time would
+# still race on the GHCR `latest` tag and on /releases/latest.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  runner-policy:
+  publisher-policy:
     permissions:
       contents: read
     runs-on: ubuntu-latest
     outputs:
       allowed: ${{ steps.select.outputs.allowed }}
     steps:
-      - name: Select runner
+      - name: Check the publisher
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,9 +40,9 @@ jobs:
           fi
 
   release:
-    needs: runner-policy
-    if: ${{ needs.runner-policy.outputs.allowed == 'true' }}
-    runs-on: [self-hosted, Linux, X64, moss]
+    needs: publisher-policy
+    if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
+    runs-on: ubuntu-latest
     # The same Gradle-in-a-container build as ci.yml's release-build, plus the
     # image push and its smoke checks. This job also holds the release-*
     # concurrency group, so a wedged one would block the next release for
@@ -112,6 +110,17 @@ jobs:
       # dist/aether-android.aab in its pinned SDK container, and fails the
       # release if either does not verify. They land before the checksums, so
       # the glob below covers them.
+      # Restored from the cache release-build writes on main. A release
+      # event's ref is the tag, so this job does not save the cache.
+      # Pinned by commit. This step runs after the signing keystore is
+      # decoded, and the job can publish, so a retargeted v4 tag must not
+      # be able to change the code that runs here.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .gradle-cache
+          key: gradle-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/gradle/libs.versions.toml', 'android/gradle.properties', 'android/**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-${{ runner.environment }}-
       # VERSION is the release tag itself, not `git describe`: with two tags
       # on one commit describe can pick the other one, and the artifacts would
       # be stamped for a release nobody published. The step above has already
@@ -122,8 +131,10 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
         run: make release VERSION="$GITHUB_REF_NAME"
-      # The runner is self-hosted, so RUNNER_TEMP is not wiped for us.
+      # The keystore is removed so later steps and the uploaded workspace do
+      # not retain it. The hosted VM is discarded at the end either way.
       - name: Remove the signing keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/aether-android.jks"
@@ -161,6 +172,7 @@ jobs:
           push: true
           tags: ${{ steps.standard-meta.outputs.tags }}
           labels: ${{ steps.standard-meta.outputs.labels }}
+          cache-from: type=gha,scope=standard-main
       - name: Verify the published standard image is pullable
         run: docker pull ghcr.io/3xdevops/aether-standard:${{ github.ref_name }}
       # A release whose default environment ships a broken toolchain is

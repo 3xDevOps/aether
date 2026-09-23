@@ -3,6 +3,7 @@ package memberhome
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,149 @@ func TestConfigImportExcludesSecretsRuntimeAndCredentials(t *testing.T) {
 	}
 	if _, err := manager.ConfigRead(context.Background(), "member-a", "claude", ".claude", "history.jsonl", nil); !errors.Is(err, ErrConfigDenied) {
 		t.Fatalf("runtime read = %v, want denied", err)
+	}
+}
+
+func TestConfigImportPreservesExistingModes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "homes")
+	manager, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileRoot := filepath.Join(root, "member-a", ".claude")
+	if err = os.MkdirAll(profileRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, mode := range map[string]os.FileMode{"check.sh": 0o755, "private.json": 0o600} {
+		target := filepath.Join(profileRoot, name)
+		if err = os.WriteFile(target, []byte("before"), mode); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.Chmod(target, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := []ConfigFile{
+		{Path: "check.sh", Content: []byte("#!/bin/sh\necho after\n"), Mode: 0o644},
+		{Path: "private.json", Content: []byte("{}"), Mode: 0o644},
+		{Path: "new.json", Content: []byte("{}"), Mode: 0o644},
+		{Path: "default.json", Content: []byte("{}")},
+	}
+	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", files, nil); err != nil {
+		t.Fatal(err)
+	}
+	wantModes := map[string]os.FileMode{"check.sh": 0o755, "private.json": 0o600, "new.json": 0o644, "default.json": 0o644}
+	for _, file := range files {
+		target := filepath.Join(profileRoot, file.Path)
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != wantModes[file.Path] {
+			t.Errorf("%s mode = %04o, want %04o", file.Path, info.Mode().Perm(), wantModes[file.Path])
+		}
+		content, err := os.ReadFile(target)
+		if err != nil || string(content) != string(file.Content) {
+			t.Errorf("%s content = %q, err=%v, want %q", file.Path, content, err, file.Content)
+		}
+	}
+}
+
+func TestAtomicConfigWriteRejectsChangedTarget(t *testing.T) {
+	tests := []struct {
+		name     string
+		change   string
+		mode     os.FileMode
+		revision string
+	}{
+		{name: "replacement tightens permissions", change: "replace", mode: 0o600},
+		{name: "replacement keeps permissions and revision", change: "replace", mode: 0o755, revision: revision([]byte("before"))},
+		{name: "same inode chmod", change: "chmod", mode: 0o600, revision: revision([]byte("before"))},
+		{name: "absent target appears", change: "appear", mode: 0o600},
+		{name: "same inode content changes", change: "write", mode: 0o755, revision: revision([]byte("before"))},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			target := filepath.Join(dir, "settings.json")
+			if tc.change != "appear" {
+				if err = os.WriteFile(target, []byte("before"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Chmod(target, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot, err := configTargetInfo(root, "settings.json")
+			if tc.change == "appear" {
+				if !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("initial target = %v, want absent", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+
+			// Change the shared HOME independently of Aether's root lock, after
+			// the caller has captured the permissions it intends to preserve.
+			wantContent := "before"
+			switch tc.change {
+			case "replace":
+				replacement := filepath.Join(dir, "replacement")
+				if err = os.WriteFile(replacement, []byte(wantContent), tc.mode); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Chmod(replacement, tc.mode); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Rename(replacement, target); err != nil {
+					t.Fatal(err)
+				}
+			case "chmod":
+				if err = os.Chmod(target, tc.mode); err != nil {
+					t.Fatal(err)
+				}
+			case "appear", "write":
+				wantContent = "external"
+				if err = os.WriteFile(target, []byte(wantContent), tc.mode); err != nil {
+					t.Fatal(err)
+				}
+				if err = os.Chmod(target, tc.mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			beforeInstall, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = atomicConfigWrite(root, root, "settings.json", []byte("imported"), 0o755, tc.revision, snapshot); !errors.Is(err, ErrConfigConflict) {
+				t.Fatalf("stale target write = %v, want conflict", err)
+			}
+			afterInstall, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !os.SameFile(beforeInstall, afterInstall) || afterInstall.Mode().Perm() != tc.mode {
+				t.Errorf("conflict replaced target or changed mode: mode = %04o, want %04o", afterInstall.Mode().Perm(), tc.mode)
+			}
+			content, err := os.ReadFile(target)
+			if err != nil || string(content) != wantContent {
+				t.Errorf("target content = %q, err=%v, want %q", content, err, wantContent)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".aether-config-") {
+					t.Errorf("conflict left staged file %q", entry.Name())
+				}
+			}
+		})
 	}
 }
 

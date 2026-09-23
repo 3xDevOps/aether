@@ -299,7 +299,7 @@ func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 	}
 	att.waitOutput(t, "cli-no-auto-mcp:")
 	att.waitOutput(t, "cli-help:")
-	att.waitOutput(t, "cli-skill-no-socket:")
+	att.waitOutput(t, "cli-status-no-socket:")
 	att.waitOutput(t, "cli-digest:"+fileDigest(t, e.serverBinary))
 	att.waitOutput(t, "cli-disabled-no-socket:")
 	assertNoAgentError(t, att)
@@ -365,9 +365,12 @@ echo "cli-digest:$digest"
 # The disabled server still gives every image the version-matched CLI, but it
 # deliberately gives no run socket or coordination directory.
 if [ ! -e /run/aether/coord3.sock ]; then
-	case "$skill" in
-		*"No coordination socket is mounted"*) echo "cli-skill-no-socket:$AETHER_RUN_ID" ;;
-		*) fail "skill did not report no-socket availability" ;;
+	status_code=0
+	status=$(/usr/local/bin/aether-internal status) || status_code=$?
+	[ "$status_code" -eq 4 ] || fail "no-socket status exit:$status_code:$status"
+	case "$status" in
+		*'"ok":false'*'"code":-32004'*) echo "cli-status-no-socket:$AETHER_RUN_ID" ;;
+		*) fail "no-socket status:$status" ;;
 	esac
 	echo "cli-disabled-no-socket:$AETHER_RUN_ID"
 	sleep 60

@@ -425,6 +425,55 @@ describe('command palette', () => {
     expect(screen.queryByText('Onboarding')).toBeNull()
   })
 
+  it.each(['local', 'remote'] as const)(
+    'finds configuration and remote files with config-only capabilities on a %s gateway',
+    async (gateway) => {
+      useStore.setState({
+        capabilities: {
+          gateway,
+          methods: ['config.roots', 'config.import', 'config.tree', 'config.read'],
+          ws: [],
+        },
+        workspaces: {},
+        activeWorkspace: '',
+        runs: {},
+        onboarded: true,
+      })
+      open()
+
+      const search = await screen.findByRole('combobox')
+      await userEvent.type(search, 'config')
+      fireEvent.click(await screen.findByText('Configuration'))
+      expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
+      expect(useStore.getState().paletteOpen).toBe(false)
+
+      act(() => useStore.setState({ paletteOpen: true }))
+      const reopenedSearch = await screen.findByRole('combobox')
+      await userEvent.clear(reopenedSearch)
+      await userEvent.type(reopenedSearch, 'files')
+      fireEvent.click(await screen.findByText('Files'))
+      expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
+    },
+  )
+
+  it.each(['config.roots', 'config.import'])(
+    'hides configuration when %s is not advertised',
+    async (missing) => {
+      useStore.setState({
+        capabilities: {
+          gateway: 'remote',
+          methods: ['config.roots', 'config.import'].filter(
+            (method) => method !== missing,
+          ),
+          ws: [],
+        },
+      })
+      open()
+      await screen.findByRole('combobox')
+      expect(screen.queryByText('Configuration')).toBeNull()
+    },
+  )
+
   it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
     // capabilities stays null (the beforeEach default): the endpoint 404ed,
     // so only the pre-capabilities allowlist may render. member.list is on

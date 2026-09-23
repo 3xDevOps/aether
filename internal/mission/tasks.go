@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -94,6 +95,9 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 	}
 	if mission == nil {
 		return nil, fmt.Errorf("%w: run has no mission assignment", store.ErrMissionStale)
+	}
+	if phaseErr := taskMutationPhase(mission, method); phaseErr != nil {
+		return nil, phaseErr
 	}
 	switch method {
 	case protocol.MethodTaskAcceptSubmission:
@@ -183,7 +187,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 			return nil, parseErr
 		}
 		if attempt != nil {
-			return nil, errors.New("mission: workers cannot accept task revisions")
+			return nil, fmt.Errorf("%w: mission: workers cannot accept task revisions", permissions.ErrDenied)
 		}
 		if strings.TrimSpace(p.TaskID) == "" || p.Revision <= 0 || !validTaskKey(p.IdempotencyKey) || p.ExpectedIntegratorGeneration == 0 {
 			return nil, errors.New("mission: task.accept requires task, revision, expected_integrator_generation, and idempotency_key")
@@ -201,7 +205,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if authorizeErr := s.authorizeMissionTaskActor(ctx, mission, nil); authorizeErr != nil {
 			return nil, authorizeErr
 		}
-		if acceptErr := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); acceptErr != nil {
+		if acceptErr := s.cfg.Missions.AcceptTaskRevision(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, run, p.IdempotencyKey); acceptErr != nil {
 			return nil, acceptErr
 		}
 		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
@@ -219,7 +223,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 			return nil, parseErr
 		}
 		if attempt != nil {
-			return nil, errors.New("mission: workers cannot abandon tasks")
+			return nil, fmt.Errorf("%w: mission: workers cannot abandon tasks", permissions.ErrDenied)
 		}
 		if strings.TrimSpace(p.TaskID) == "" || !validTaskKey(p.IdempotencyKey) || p.ExpectedIntegratorGeneration == 0 {
 			return nil, errors.New("mission: task.abandon requires task, expected_integrator_generation, and idempotency_key")
@@ -237,7 +241,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		if p.ExpectedIntegratorGeneration != mission.IntegratorGeneration {
 			return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)
 		}
-		if abandonErr := s.cfg.Missions.AbandonTask(ctx, task.ID, p.ExpectedIntegratorGeneration, p.IdempotencyKey); abandonErr != nil {
+		if abandonErr := s.cfg.Missions.AbandonTask(ctx, task.ID, p.Revision, p.ExpectedIntegratorGeneration, p.IdempotencyKey); abandonErr != nil {
 			return nil, abandonErr
 		}
 		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
@@ -253,6 +257,32 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 	}
 }
 
+// taskMutationPhase repeats the store's gate before any work: the draft plan
+// may be shaped while it is being written, but accepting a revision is a
+// post-approval act, and a review phase freezes the plan the human is reading.
+func taskMutationPhase(mission *domain.Mission, method string) error {
+	switch method {
+	case protocol.MethodTaskAccept:
+		if mission.Phase != domain.MissionPhaseActive {
+			return missionPhaseRefusal(mission, method)
+		}
+	case protocol.MethodTaskAcceptSubmission:
+		// Finishing work the human already approved is not a plan change, so
+		// it continues through an amendment round. AcceptSubmission has no
+		// store phase gate; this check is the only thing enforcing it.
+		if mission.Phase != domain.MissionPhaseActive && mission.Phase != domain.MissionPhaseAmendmentReview {
+			return missionPhaseRefusal(mission, method)
+		}
+	default:
+		switch mission.Phase {
+		case domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhaseActive:
+		default:
+			return missionPhaseRefusal(mission, method)
+		}
+	}
+	return nil
+}
+
 func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, raw json.RawMessage, mission *domain.Mission, attempt *domain.Attempt) (any, error) {
 	var p protocol.TaskAcceptSubmissionParams
 	if parseErr := json.Unmarshal(raw, &p); parseErr != nil {
@@ -262,7 +292,7 @@ func (s *Service) acceptSubmissionLocked(ctx context.Context, run domain.RunID, 
 		return nil, errors.New("mission: task.submission.accept requires submission_id, expected_integrator_generation, and idempotency_key")
 	}
 	if mission == nil || attempt != nil {
-		return nil, errors.New("mission: only the current integrator may accept submissions")
+		return nil, fmt.Errorf("%w: mission: only the current integrator may accept submissions", permissions.ErrDenied)
 	}
 	if p.ExpectedIntegratorGeneration != mission.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)
@@ -398,6 +428,7 @@ func revisionFromWire(in protocol.TaskRevision, run domain.RunID) *domain.TaskRe
 	r := &domain.TaskRevision{
 		TaskID: domain.TaskID(in.TaskID), Revision: in.Revision, Title: in.Title,
 		Objective: in.Objective, Scope: scopeFromWire(in.Scope),
+		Material:           in.Material,
 		SupersedesRevision: in.SupersedesRevision, ProposedByRunID: run,
 		Status: domain.TaskRevisionProposed,
 	}
@@ -435,6 +466,10 @@ func taskWire(t *domain.Task) protocol.Task {
 		r := revisionWire(t.Revision)
 		out.Revision = &r
 	}
+	if t.PendingRevision != nil {
+		r := revisionWire(t.PendingRevision)
+		out.PendingRevision = &r
+	}
 	if len(t.Dependencies) > 0 {
 		out.Dependencies = make([]protocol.TaskDependency, len(t.Dependencies))
 		for i, d := range t.Dependencies {
@@ -451,7 +486,7 @@ func taskWire(t *domain.Task) protocol.Task {
 }
 
 func revisionWire(r *domain.TaskRevision) protocol.TaskRevision {
-	out := protocol.TaskRevision{TaskID: string(r.TaskID), Revision: r.Revision, Title: r.Title, Objective: r.Objective, Scope: scopeWire(r.Scope), Status: string(r.Status), ProposedByRunID: string(r.ProposedByRunID), SupersedesRevision: r.SupersedesRevision, CreatedAt: rfc3339Task(r.CreatedAt)}
+	out := protocol.TaskRevision{TaskID: string(r.TaskID), Revision: r.Revision, Title: r.Title, Objective: r.Objective, Scope: scopeWire(r.Scope), Material: r.Material, Status: string(r.Status), ProposedByRunID: string(r.ProposedByRunID), SupersedesRevision: r.SupersedesRevision, AcceptedByMemberID: string(r.AcceptedByMemberID), AcceptedByRunID: string(r.AcceptedByRunID), CreatedAt: rfc3339Task(r.CreatedAt)}
 	if len(r.EvidenceRequirements) > 0 {
 		out.EvidenceRequirements = make([]protocol.EvidenceRequirement, len(r.EvidenceRequirements))
 		for i, e := range r.EvidenceRequirements {

@@ -200,7 +200,7 @@ export function LaunchDialog() {
         rememberHarness(account || ownAccountID, harness)
         close()
         navigate('missions', { missionId: result.mission.id })
-        toast.success('Swarm launched')
+        toast.success('Swarm created')
       }
     } catch (err) {
       setLaunching(false)
@@ -216,7 +216,7 @@ export function LaunchDialog() {
           <DialogTitle>{kind === 'swarm' ? 'Launch a swarm' : 'Launch a run'}</DialogTitle>
           <DialogDescription>
             {kind === 'swarm'
-              ? 'Authorize one integrator and bounded worker execution choices for this objective.'
+              ? 'Authorize one integrator and bounded worker execution choices. The integrator asks you clarifying questions and submits a plan; no worker starts until you approve it.'
               : 'Start an agent in a container on the workspace\'s base branch. Interactive runs open a terminal; headless runs need a task.'}
           </DialogDescription>
         </DialogHeader>
@@ -233,7 +233,7 @@ export function LaunchDialog() {
           <Label className="block space-y-1.5">
             <span>{kind === 'swarm' ? 'Objective (required)' : mode === 'headless' ? 'Task (required)' : 'Task (optional)'}</span>
             <Textarea autoFocus required={kind === 'swarm' || mode === 'headless'} rows={3} placeholder={kind === 'swarm' ? 'What outcome should the integrator coordinate?' : 'What should the agent do?'} value={task} onChange={(event) => setTask(event.target.value)} />
-            <span className="block text-xs leading-4 font-normal text-muted-foreground">{kind === 'swarm' ? 'The integrator decomposes this objective into durable tasks.' : mode === 'headless' ? 'Headless runs start with this task and have no terminal.' : 'Leave blank to open an interactive terminal without a seeded task.'}</span>
+            <span className="block text-xs leading-4 font-normal text-muted-foreground">{kind === 'swarm' ? 'The integrator turns this objective into a plan you approve before any worker runs.' : mode === 'headless' ? 'Headless runs start with this task and have no terminal.' : 'Leave blank to open an interactive terminal without a seeded task.'}</span>
           </Label>
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="min-w-0 space-y-1.5 text-sm"><Label htmlFor="launch-account">{kind === 'swarm' ? 'Integrator account' : 'Account'}</Label><Select value={account} onValueChange={setAccount}><SelectTrigger id="launch-account"><SelectValue placeholder="Choose an account" /></SelectTrigger><SelectContent>{accounts.map((member) => <SelectItem key={member.id} value={member.id}>{member.display_name}{member.id === ownAccountID ? ' (you)' : ' (shared)'}</SelectItem>)}</SelectContent></Select></div>
@@ -247,7 +247,7 @@ export function LaunchDialog() {
           <div className="flex flex-wrap items-center justify-between gap-2"><Button type="button" size="sm" variant="outline" disabled={harnessLoading || launching} onClick={() => setAgentRefresh((current) => current + 1)}>Refresh agents</Button>{account && account !== ownAccountID && <p className="max-w-[34ch] text-right text-xs leading-4 text-muted-foreground">Uses the selected member&apos;s environment, agent login, profile, and vendor quota. You remain its owner and actor.</p>}</div>
           {needsTask && <p id="launch-needs-task" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs text-muted-foreground">A headless run has no terminal to type into, so it needs a task.</p>}
         </form>
-        <DialogFooter className="border-t px-3 py-3 sm:px-4"><Button variant="outline" onClick={close}>Cancel</Button><Button type="submit" form="launch-run" aria-describedby={needsTask ? 'launch-needs-task' : undefined} disabled={launching || !workspaceID || !account || !harness || needsTask}>{kind === 'swarm' ? 'Launch Swarm' : 'Launch'}</Button></DialogFooter>
+        <DialogFooter className="border-t px-3 py-3 sm:px-4"><Button variant="outline" onClick={close}>Cancel</Button><Button type="submit" form="launch-run" aria-describedby={needsTask ? 'launch-needs-task' : undefined} disabled={launching || !workspaceID || !account || !harness || needsTask}>{kind === 'swarm' ? 'Create swarm' : 'Launch'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   )

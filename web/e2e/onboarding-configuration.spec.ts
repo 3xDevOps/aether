@@ -1,4 +1,4 @@
-// A browser directory import is explicit and one-time. The fixture directory
+// A browser directory import is explicit and repeatable. The fixture directory
 // includes an empty file and a scanner finding; the empty file is carried and
 // the finding is reported by the server without blocking the rest of import.
 
@@ -54,8 +54,9 @@ test('a directory import reports server exclusions and writes the remote config'
   }
   await configuration.destination().selectOption('claude')
   await expect(configuration.preview()).toBeVisible()
+  await configuration.section.getByText(/^Accepted paths:/).click()
   for (const path of Object.keys(destinationSpecificFiles)) {
-    await expect(configuration.section.getByText(path, { exact: true })).toHaveCount(0)
+    await expect(configuration.section.getByText(path, { exact: true })).toBeVisible()
   }
   await configuration.import().click()
 

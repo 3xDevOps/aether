@@ -11,10 +11,12 @@ import { useDelayed } from '@/lib/hooks'
 import type { AgentInfo } from '@/lib/types'
 import { registerRoute } from '@/routes/registry'
 import { AgentWizard } from '@/routes/agents/wizard'
+import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
 function AgentsView() {
   const caps = useCapability()
+  const navigate = useStore((s) => s.navigate)
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -37,7 +39,17 @@ function AgentsView() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <ViewHeader title="Agents" subtitle="the agents this server can launch" />
+      <ViewHeader
+        title="Agents"
+        subtitle="the agents this server can launch"
+        actions={
+          caps.hasMethod('config.roots') && caps.hasMethod('config.import') && (
+            <Button size="sm" variant="outline" onClick={() => navigate('configuration')}>
+              Configuration
+            </Button>
+          )
+        }
+      />
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-4 p-4 sm:p-6">
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b bg-sidebar px-3 py-2">

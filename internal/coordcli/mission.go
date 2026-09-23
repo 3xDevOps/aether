@@ -197,6 +197,7 @@ func taskAcceptSubmission(ctx context.Context, socket string, args []string) (pr
 func taskAbandon(ctx context.Context, socket string, args []string) (protocol.TaskMutationResult, error) {
 	fs := newFlags("task abandon")
 	taskID := fs.String("task-id", "", "task ID")
+	revision := fs.Int("revision", 0, "drop only this pending revision instead of the whole task")
 	generation := fs.String("expected-integrator-generation", "", "integrator generation observed by the caller")
 	idempotencyKey := fs.String("idempotency-key", "", "stable key used to replay this mutation")
 	if err := parseFlags(fs, args); err != nil {
@@ -206,11 +207,11 @@ func taskAbandon(ctx context.Context, socket string, args []string) (protocol.Ta
 	if err != nil {
 		return protocol.TaskMutationResult{}, err
 	}
-	if *taskID == "" || *idempotencyKey == "" || fs.NArg() != 0 {
+	if *taskID == "" || *revision < 0 || *idempotencyKey == "" || fs.NArg() != 0 {
 		return protocol.TaskMutationResult{}, usageError("task abandon requires --task-id, --expected-integrator-generation, and --idempotency-key")
 	}
 	var out protocol.TaskMutationResult
-	if err := coordtransport.Call(ctx, socket, protocol.MethodTaskAbandon, protocol.TaskAbandonParams{TaskID: *taskID, ExpectedIntegratorGeneration: gen, IdempotencyKey: *idempotencyKey}, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodTaskAbandon, protocol.TaskAbandonParams{TaskID: *taskID, Revision: *revision, ExpectedIntegratorGeneration: gen, IdempotencyKey: *idempotencyKey}, &out); err != nil {
 		return out, err
 	}
 	return out, nil

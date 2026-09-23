@@ -129,10 +129,14 @@ test:
 	go test -race ./...
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
-# carry them - the unit tests are `make test`'s job. CI shards it: set
-# INTEGRATION_PKGS to run one package, INTEGRATION_SKIP to run all but some.
+# carry them - the unit tests are `make test`'s job. CI shards it with
+# INTEGRATION_PKGS, INTEGRATION_SKIP, INTEGRATION_RUN, and
+# INTEGRATION_SKIP_PATTERN. The run and skip patterns are optional; they are
+# quoted so the shell does not interpret their metacharacters.
 test-integration:
-	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS)
+	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS) \
+		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
+		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on
@@ -151,6 +155,7 @@ test-scripts:
 	sh scripts/publish-release-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
+	sh scripts/ci-classify-changes-test.sh
 
 vet:
 	go vet ./...

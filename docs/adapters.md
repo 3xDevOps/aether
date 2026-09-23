@@ -23,7 +23,7 @@ one entry to the `profiles` map:
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
 | `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
 | `CredentialPaths` | Home-relative directories holding native login state. Persisted with the member account and mounted read-write into every run using that account. Directories, not files. |
-| `LocalRoot` | Home-relative configuration root exposed to the browser's one-time import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
+| `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Configuration** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
 | `DenyNames` | Basenames the browser import skips before upload and the manual profile path excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
@@ -41,9 +41,29 @@ Rules that are easy to get wrong:
   ordinary remaining bytes to the server for scanning. Known credential names
   are skipped locally, but scanner findings are a server-side boundary, not a
   promise that all secret content stays local.
-- **Configuration has two explicit paths.** The browser directory picker imports
-  once into the authenticated member's persistent home; the Files editor then
-  reads and writes that home. A local daemon never watches `LocalRoot`.
+- **Configuration changes the shared member HOME.** The repeatable browser
+  directory picker on **Configuration** and the **Files** editor write the
+  authenticated member's persistent home, visible to active and future runs
+  using that account. Configuration is available from Agents and shared
+  navigation/palette on both gateways when `config.roots` and `config.import`
+  are advertised, without a workspace or onboarding prerequisite. Onboarding
+  optionally uses the same importer. No daemon watches `LocalRoot` or
+  automatically synchronizes configuration.
+- **Import limits require an informed choice.** The browser previews accepted
+  paths and exposes all omitted paths. Files omitted for the 1 MiB per-file,
+  20 MiB aggregate, or 2,000-file limits require acknowledgement of an
+  incomplete selection before upload; choosing a smaller selection is the
+  alternative. A new directory, destination, or recomputed selection clears
+  that acknowledgement. Credential/runtime exclusions alone do not require
+  it. Imports are not automatically retried.
+- **Browser file metadata is limited.** New files use `0644`; overwrites retain
+  existing remote modes. The browser cannot preserve source executable bits
+  or symlinks.
+- **Profile snapshots are optional history, not the HOME.** Browser imports
+  and Files edits do not create CLI snapshots. A run's snapshot pin records
+  provenance, not an isolated writable copy. Manual profile push and rollback
+  overlay snapshot files into the same shared HOME; absent paths are not
+  deleted, so rollback is not an exact-tree restore.
 - **Taskless discovery is runtime-scoped.** Use the vendor's documented startup
   instruction mechanism and keep the hint short; `aether-internal skill`
   fetches the assignment-specific details from the run socket.

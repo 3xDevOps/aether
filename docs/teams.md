@@ -628,6 +628,75 @@ authority, or foreign holder is refused without clearing it; an integrator or
 worker cannot release the hold through its assignment socket. Releasing a
 hold changes control state, not account sharing.
 
+A mission starts in the `planning` phase and dispatches no worker until a human
+approves its plan. The integrator may ask clarifying questions, then declares
+clarification complete (`clarified`) and submits the plan for review
+(`plan_review`). After approval the mission is `active`; a further plan
+submitted from `active` is an **amendment** and puts the mission in
+`amendment_review` until the same human decides it.
+
+Two control-channel methods carry that decision. Both need
+the `run.launch` permission (collaborator or admin) and are refused unless the
+authenticated member is the mission's accountable human or holds the `admin`
+role, so an accountable human demoted to viewer can no longer answer or decide
+and an admin must take over:
+
+- `mission.question.answer` answers one clarifying question the integrator
+  asked. The answering member is the session, never a request field.
+- `mission.plan.decide` approves, requests changes to, or rejects one plan
+  version. Approval re-resolves the mission's own launch admission first, so an
+  accountable human who lost `run.launch` or the integrator's account share
+  cannot carry the mission past the gate. Requesting changes and rejecting do
+  not, so a plan whose accountable human lost that admission can still be
+  closed out by an admin. Rejecting an amendment is refused: the approved plan
+  stands either way, so an amendment is approved or sent back for changes and
+  the integrator abandons its tasks or revisions to drop it.
+
+Reading the gate is not deciding it. `mission.show` stays a View read: every
+member sees the questions, the answers, the plan summaries, and the feedback
+attached to each review round.
+
+Rejecting a plan cancels the mission's integrator run. That cancellation needs
+no per-run Kill check: the run is the mission's own reserved integrator and the
+decider is already the accountable human or an admin. Cancellation is the
+reconcile loop's job and is retried every pass until the run is terminal, so a
+rejection survives a server restart.
+
+`mission.replace-integrator` is the recovery when an integrator run exits, in
+`planning`, `clarified`, `plan_review`, `active`, and `amendment_review` alike.
+It changes neither the phase nor the plan version and leaves an undecided
+review round decidable. A rejected mission refuses it.
+
+An amendment does not stop the approved plan. While a mission is in
+`amendment_review` the integrator still starts, retries, cancels, and inspects
+workers on approved tasks and still accepts their submissions; it cannot
+propose, revise, abandon, or accept task revisions, and it cannot dispatch a
+task whose revision is in the round under review.
+
+After approval the integrator accepts later revisions of already-approved tasks
+itself, but only within what the human approved. The server refuses
+`task.accept` and directs the revision through `mission.plan.submit` when the
+revision:
+
+- belongs to a task that was never approved (new work);
+- is declared `material` by its proposer;
+- widens the approved scope - an `expected_paths` entry outside the union of
+  the approved tasks' expected paths;
+- drops an exclusion the task's approved revision carried;
+- belongs to a task whose latest review round a human sent back for changes;
+  only a round that approves the task again lifts that hold.
+
+`material` is the proposer's own declaration, not a server inference. It is
+recorded on the revision and is the sixth reason a revision needs a human
+round.
+
+Every approved round is auditable without reading history: the plan review row
+records who submitted it, from which phase, who decided it and when, and one
+plan item per task in the round with that task's revision, whether it was new
+work, whether it was material, and which paths or exclusions widened the
+approved scope. Each revision records its proposer, and, once accepted, the
+member or integrator run that accepted it.
+
 Mission progress has the same evidence boundary as the dashboard: a worker
 report or process success does not make a task **Done**. The current task
 revision must have an accepted submission with required evidence available,
@@ -635,13 +704,14 @@ and any scope deviation must carry an explicit disposition. The resulting
 evidence remains provenance of what Aether captured or a participant reported,
 not independent verification.
 
-Agent configuration is not watched or inventoried automatically. In the local
-dashboard's Agents step, choose one local directory with the browser directory
-picker, preview it, and explicitly import it once. Known credential names and
-runtime/history defaults are skipped locally; remaining bytes are uploaded
-and server-scanned, so do not assume all secret content stays local. The
-server-hosted dashboard has no local directory picker; use `aether gui` for this
-step. The import writes the authenticated member's persistent home immediately,
+Agent configuration is not watched or inventoried automatically. Open
+**Agents → Configuration** in either dashboard to choose a local directory,
+review its files, and explicitly import or update the remote configuration.
+The local onboarding Agents step uses the same importer. Known credential
+names and runtime/history defaults are skipped locally; remaining bytes are
+uploaded and server-scanned, so do not assume all secret content stays local.
+Files omitted by import limits require explicit acknowledgement before upload.
+The import writes the authenticated member's persistent home immediately,
 including for active runs using that account. An agent may need to reload its
 configuration.
 
@@ -656,8 +726,9 @@ refuse overwrite. Every `config.*` method
 requires `Launch` and targets only the authenticated member's own home; an
 admin cannot select another member.
 
-New browser-import files are mode `0644`; executable mode and symlinks cannot
-be represented by the browser. Imports preserve empty and arbitrary binary
+New browser-import files are mode `0644`; existing remote permission bits are
+preserved. Local executable mode and symlinks cannot be represented by the
+browser. Imports preserve empty and arbitrary binary
 regular files under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
 limits. The server rejects unsafe paths, symlink components, hardlinks, and
 nonregular files. A shared account uses the same read-write home rather than
@@ -682,3 +753,7 @@ secret flags are `--skip-secret <file>` and
 aether profile push --agent claude --skip-secret <file>
 aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
+
+Browser imports and **Files** edits do not create profile snapshots. A manual
+push or rollback overlays snapshot files into the same persistent home; it
+does not remove unlisted files or create isolated configuration for a run.

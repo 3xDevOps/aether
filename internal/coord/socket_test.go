@@ -9,12 +9,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -570,6 +572,37 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 			cause:    fmt.Errorf("wrapped: %w", store.ErrIdempotencyConflict),
 			wantCode: protocol.CodeConflict,
 		},
+		"accepted-revision": {
+			cause:    fmt.Errorf("task revision: %w", store.ErrConflict),
+			wantCode: protocol.CodeConflict,
+		},
+		"unauthorized-integrator": {
+			cause:    fmt.Errorf("%w: integrator lookup: %w", permissions.ErrDenied, store.ErrNotFound),
+			wantCode: protocol.CodeDenied,
+		},
+		"stale-integrator": {
+			cause:    fmt.Errorf("assignment: %w", store.ErrMissionStale),
+			wantCode: protocol.CodeDenied,
+		},
+		"missing-attempt": {
+			cause:    fmt.Errorf("attempt lookup: %w", store.ErrNotFound),
+			wantCode: protocol.CodeNotFound,
+		},
+		"active-retry": {
+			cause:    &protocol.Error{Code: protocol.CodeInvalidState, Message: "worker.retry: attempt remains active"},
+			wantCode: protocol.CodeInvalidState,
+		},
+		"phase": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionPhase),
+			wantCode: protocol.CodeInvalidState,
+		},
+		// A revision the integrator may not accept alone is the same class of
+		// answer as a phase refusal: the call is well-formed, the state says
+		// no until a human decides.
+		"amendment-required": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionAmendmentRequired),
+			wantCode: protocol.CodeInvalidState,
+		},
 		"real-error": {
 			cause:    errors.New("database unavailable"),
 			wantCode: protocol.CodeInternal,
@@ -595,9 +628,44 @@ func TestMissionTransportMapsMissionErrors(t *testing.T) {
 			if rpcErr.Code != wantCode {
 				t.Fatalf("task.propose code = %d, want %d", rpcErr.Code, wantCode)
 			}
-			if want := protocol.MethodTaskPropose + ": " + cause.Error(); rpcErr.Message != want {
-				t.Fatalf("task.propose message = %q, want %q", rpcErr.Message, want)
+			wantCause := cause.Error()
+			var causeRPC *protocol.Error
+			if errors.As(cause, &causeRPC) {
+				wantCause = causeRPC.Message
+			}
+			if !strings.Contains(rpcErr.Message, wantCause) {
+				t.Fatalf("mission error lost its cause: message %q, want cause %q", rpcErr.Message, wantCause)
 			}
 		})
+	}
+}
+
+// TestMissionMethodWhitelistPlanGate: the allow-list, not the capability
+// advertisement, is what makes a method reachable from a run. The two human
+// decisions are control-channel-only and must stay unreachable from any agent.
+func TestMissionMethodWhitelistPlanGate(t *testing.T) {
+	for _, method := range []string{
+		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionClarificationComplete,
+		protocol.MethodMissionPlanShow,
+		protocol.MethodMissionPlanSubmit,
+	} {
+		if !isMissionMethod(method) {
+			t.Errorf("plan gate method %q is not admitted to mission dispatch", method)
+		}
+	}
+	h := newHarness(t, 1)
+	for _, method := range []string{
+		protocol.MethodMissionQuestionAnswer,
+		protocol.MethodMissionPlanDecide,
+	} {
+		if isMissionMethod(method) {
+			t.Errorf("human decision method %q is admitted to mission dispatch", method)
+		}
+		line := []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`)
+		resp := h.svc.handle(context.Background(), h.runs[0].ID, line)
+		if resp.Error == nil || resp.Error.Code != protocol.CodeMethodNotFound {
+			t.Errorf("%s over the agent socket = %+v, want CodeMethodNotFound", method, resp.Error)
+		}
 	}
 }

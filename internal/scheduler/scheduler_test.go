@@ -918,6 +918,50 @@ func TestLaunchCachedBaseOptionRejectsFaultyCapture(t *testing.T) {
 	}
 }
 
+func TestReservedLaunchReplayDoesNotRequireUpstream(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "reserved replay")
+	e.base.mu.Lock()
+	e.base.err = &gitengine.MirrorError{Kind: gitengine.MirrorErrorOffline}
+	e.base.mu.Unlock()
+	replayed, err := e.sched.LaunchWithOptions(t.Context(), run.WorkspaceID, run.MemberID, run.AccountMember(),
+		run.Task, run.Harness, run.Mode, domain.LaunchOptions{AssignedRunID: run.ID})
+	if err != nil {
+		t.Fatalf("replay attempted fresh capture: %v", err)
+	}
+	if replayed.ID != run.ID || replayed.BaseCommit != run.BaseCommit || replayed.BaseCheckedAt != run.BaseCheckedAt {
+		t.Fatalf("replay replaced immutable run identity or base: %+v", replayed)
+	}
+	runs, err := e.db.ListRunsByWorkspace(t.Context(), e.ws.ID)
+	if err != nil || len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("replay duplicated run: %+v, %v", runs, err)
+	}
+	e.rt.mu.Lock()
+	defer e.rt.mu.Unlock()
+	if e.rt.seq != 1 {
+		t.Fatalf("replay provisioned another container: %d creates", e.rt.seq)
+	}
+}
+
+func TestReservedLaunchReplayRejectsChangedIdentityOrBase(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "reserved identity")
+	for _, tc := range []struct {
+		name, task, cached string
+	}{
+		{"task", "different task", ""},
+		{"base", run.Task, strings.Repeat("f", 40)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := e.sched.LaunchWithOptions(t.Context(), run.WorkspaceID, run.MemberID, run.AccountMember(),
+				tc.task, run.Harness, run.Mode, domain.LaunchOptions{AssignedRunID: run.ID, CachedBase: tc.cached})
+			if err == nil || got != nil {
+				t.Fatalf("replay accepted changed %s: %+v, %v", tc.name, got, err)
+			}
+		})
+	}
+}
+
 func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
