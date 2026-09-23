@@ -1,8 +1,10 @@
 package memberhome
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -422,6 +424,69 @@ func TestConfigImportPreflightsCandidateCollisions(t *testing.T) {
 	got, readErr := os.ReadFile(filepath.Join(manager.Root(), "member-a", ".claude", "keep.txt"))
 	if readErr != nil || string(got) != "old" {
 		t.Fatalf("existing file after collision = %q, err=%v", got, readErr)
+	}
+}
+
+func TestConfigImportAcceptsFileAboveOneMiB(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := bytes.Repeat([]byte("# ordinary configuration\n"), (1<<20)/25+1)
+	result, err := manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{
+		{Path: "instructions.md", Content: content, Mode: 0o644},
+	}, nil)
+	if err != nil {
+		t.Fatalf("import above 1 MiB: %v", err)
+	}
+	if result.Files != 1 || result.Bytes != int64(len(content)) || len(result.Excluded) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	got, err := os.ReadFile(filepath.Join(manager.Root(), "member-a", ".claude", "instructions.md"))
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("imported content differs: bytes=%d, err=%v", len(got), err)
+	}
+}
+
+func TestConfigImportRequestBounds(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// Reuse one backing allocation. Credential exclusions still count toward
+	// request bounds but avoid scanning/copying a giant fixture to disk.
+	content := make([]byte, ConfigMaxFileBytes+1)
+	atLimit := []ConfigFile{{Path: "auth.json", Content: content[:ConfigMaxFileBytes]}}
+	result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", atLimit, nil)
+	if err != nil || result.Files != 0 || len(result.Excluded) != 1 || result.Excluded[0].Reason != "credential" {
+		t.Fatalf("exact file/request byte limit: result=%+v, err=%v", result, err)
+	}
+	countLimit := make([]ConfigFile, ConfigImportMaxFiles)
+	for i := range countLimit {
+		countLimit[i].Path = fmt.Sprintf("dir-%d/auth.json", i)
+	}
+	result, err = manager.ConfigImport(ctx, "member-a", "claude", ".claude", countLimit, nil)
+	if err != nil || result.Files != 0 || len(result.Excluded) != ConfigImportMaxFiles {
+		t.Fatalf("exact request count limit: excluded=%d, err=%v", len(result.Excluded), err)
+	}
+	for _, tc := range []struct {
+		name  string
+		files []ConfigFile
+	}{
+		{"file", []ConfigFile{{Path: "new.txt"}, {Path: "auth.json", Content: content}}},
+		{"aggregate", []ConfigFile{{Path: "new.txt"}, atLimit[0], {Path: "extra/auth.json", Content: content[:1]}}},
+		{"count", append(countLimit, ConfigFile{Path: "new.txt"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", tc.files, nil)
+			if !errors.Is(err, ErrConfigTooLarge) || result.Files != 0 || result.Bytes != 0 {
+				t.Fatalf("over-limit import: result=%+v, err=%v", result, err)
+			}
+			if _, err := os.Stat(filepath.Join(manager.Root(), "member-a", ".claude", "new.txt")); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("rejected request mutated destination: %v", err)
+			}
+		})
 	}
 }
 

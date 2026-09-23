@@ -360,7 +360,7 @@ func TestControlFramingErrors(t *testing.T) {
 	}
 }
 
-// The 32 MiB line cap exists for an approved member's profile.push. A
+// The 96 MiB line cap exists for an approved member's config.import. A
 // member who is merely pending must not be able to make the server buffer
 // lines that size before the per-method pending gate ever runs; approval
 // must lift the cap on the connection the pending member already holds.

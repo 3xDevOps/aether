@@ -2,6 +2,7 @@ package webgate
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -97,6 +99,58 @@ func TestFileWriteAPIAcceptsLargeEditorBodies(t *testing.T) {
 	if len(backend.calls) != 1 || backend.calls[0] != protocol.MethodConfigWrite {
 		t.Fatalf("large config.write calls = %+v", backend.calls)
 	}
+}
+
+func TestConfigImportAPIBoundsEncodedRequest(t *testing.T) {
+	backend := &stubBackend{}
+	g, err := New(Config{Authorize: admitAll(backend)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.Close() }()
+
+	send := func(body io.Reader) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/config.import", body)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		g.ServeHTTP(rec, req)
+		return rec
+	}
+	// Generate the base64 form of one maximum-size file. Keeping a giant
+	// source string as well as the handler's body buffer is unnecessary.
+	encodedBytes := base64.StdEncoding.EncodedLen(memberhome.ConfigMaxFileBytes)
+	body := io.MultiReader(
+		strings.NewReader(`{"harness":"claude","files":[{"path":"plugin.bin","content_base64":"`),
+		io.LimitReader(importBodyBytes{}, int64(encodedBytes-2)),
+		strings.NewReader(`==","mode":420}]}`),
+	)
+	if rec := send(body); rec.Code != http.StatusOK {
+		t.Fatalf("maximum decoded import body = %d: %s", rec.Code, rec.Body)
+	}
+	if len(backend.calls) != 1 || backend.calls[0] != protocol.MethodConfigImport {
+		t.Fatalf("maximum decoded import calls = %v", backend.calls)
+	}
+	overLimit := io.MultiReader(
+		strings.NewReader(`{"padding":"`),
+		io.LimitReader(importBodyBytes{}, maxConfigImportRequestBody),
+		strings.NewReader(`"}`),
+	)
+	if rec := send(overLimit); rec.Code != http.StatusBadRequest {
+		t.Fatalf("over-limit import body = %d: %s", rec.Code, rec.Body)
+	}
+	if len(backend.calls) != 1 {
+		t.Fatalf("over-limit import reached backend: %v", backend.calls)
+	}
+}
+
+type importBodyBytes struct{}
+
+func (importBodyBytes) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'A'
+	}
+	return len(p), nil
 }
 
 func TestCapabilitiesFillTheSharedFields(t *testing.T) {

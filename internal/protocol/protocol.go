@@ -40,8 +40,8 @@ const (
 )
 
 // MaxLineBytes is the maximum length of one NDJSON line, framing included.
-// 32 MiB covers the base64 form of the valid 20 MiB aggregate profile cap.
-const MaxLineBytes = 32 << 20
+// 96 MiB covers base64 encoding and framing for a 64 MiB config import request.
+const MaxLineBytes = 96 << 20
 
 // Control-channel method names.
 const (

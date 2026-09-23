@@ -59,8 +59,8 @@ const (
 )
 
 // maxRequestBytes bounds one coordination request line. The largest legal
-// request is a 4 KiB body plus JSON escaping; the control channel's 32 MiB
-// budget belongs to profile pushes and has no business here.
+// request is a 4 KiB body plus JSON escaping; the control channel's 96 MiB
+// budget belongs to configuration imports and has no business here.
 const maxRequestBytes = 64 << 10
 
 // The agent behind the socket is only semi-trusted, so its connections are

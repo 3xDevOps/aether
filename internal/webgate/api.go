@@ -16,9 +16,9 @@ const MaxRequestBody = 1 << 20
 
 const (
 	maxTerminalImageRequestBody = 12 << 20
-	// Config import carries up to 20 MiB of decoded files in base64 JSON;
-	// leave room for the encoding and request framing.
-	maxConfigImportRequestBody = 30 << 20
+	// Each config import request carries up to 64 MiB decoded in base64 JSON;
+	// leave room for encoding and framing without limiting directory size.
+	maxConfigImportRequestBody = 96 << 20
 	// JSON escaping can expand a supported 64 MiB editor document sixfold;
 	// leave room for the remaining request fields while bounding memory.
 	maxEditorWriteRequestBody = 6*(64<<20) + MaxRequestBody

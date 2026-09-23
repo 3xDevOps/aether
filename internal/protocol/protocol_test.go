@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -335,8 +336,11 @@ func TestErrorImplementsError(t *testing.T) {
 }
 
 func TestReadLineEnforcesMaxLine(t *testing.T) {
-	long := strings.Repeat("a", MaxLineBytes+2)
-	r := bufio.NewReader(strings.NewReader(long))
+	// Generate the oversized input instead of retaining a second giant buffer.
+	r := bufio.NewReader(io.MultiReader(
+		io.LimitReader(repeatedLineByte{}, MaxLineBytes+2),
+		strings.NewReader("\n"),
+	))
 	if _, err := ReadLine(r); err == nil {
 		t.Error("expected error for an oversized line")
 	}
@@ -349,6 +353,15 @@ func TestReadLineEnforcesMaxLine(t *testing.T) {
 	if string(line) != `{"x":1}` {
 		t.Errorf("line = %q", line)
 	}
+}
+
+type repeatedLineByte struct{}
+
+func (repeatedLineByte) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
 }
 
 func TestResponseLineLimitBoundsBlobMethods(t *testing.T) {

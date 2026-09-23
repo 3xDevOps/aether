@@ -25,12 +25,11 @@ import (
 )
 
 const (
-	// ConfigMaxFileBytes is the maximum UTF-8 file an editor can read or save.
+	// ConfigMaxFileBytes bounds individual files read, saved, or imported.
 	ConfigMaxFileBytes = 64 << 20
-	// ConfigImportMaxFileBytes is the per-file import limit.
-	ConfigImportMaxFileBytes = 1 << 20
-	// ConfigImportMaxBytes is the decoded aggregate import limit.
-	ConfigImportMaxBytes = 20 << 20
+	// ConfigImportMaxBytes and ConfigImportMaxFiles bound one import request,
+	// not the directory, which clients may transfer in sequential batches.
+	ConfigImportMaxBytes = ConfigMaxFileBytes
 	ConfigImportMaxFiles = 2000
 )
 
@@ -444,7 +443,7 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 // ConfigImport validates every browser file and every existing destination
 // before the first mutation. Credentials, runtime/history defaults, and
 // scanner findings are reported as exclusions; arbitrary regular bytes are
-// preserved under the import size caps.
+// preserved under the per-request import bounds.
 func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harnessName, localRoot string, files []ConfigFile, deny []string) (ConfigImportResult, error) {
 	if len(files) > ConfigImportMaxFiles {
 		return ConfigImportResult{}, fmt.Errorf("%w: import contains too many files", ErrConfigTooLarge)
@@ -477,7 +476,7 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 		if err = validateConfigMode(file.Mode); err != nil {
 			return ConfigImportResult{}, err
 		}
-		if len(file.Content) > ConfigImportMaxFileBytes {
+		if len(file.Content) > ConfigMaxFileBytes {
 			return ConfigImportResult{}, ErrConfigTooLarge
 		}
 		total += int64(len(file.Content))

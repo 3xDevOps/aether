@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -308,4 +309,49 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestDecodeConfigImportFilesAcceptsFileAboveOneMiB(t *testing.T) {
+	content := bytes.Repeat([]byte("x"), (1<<20)+1)
+	raw, err := json.Marshal([]protocol.ConfigImportFile{{
+		Path: "instructions.md", ContentBase64: base64.StdEncoding.EncodeToString(content), Mode: 0o644,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := decodeConfigImportFiles(raw)
+	if err != nil {
+		t.Fatalf("decode above 1 MiB: %v", err)
+	}
+	if len(files) != 1 || !bytes.Equal(files[0].Content, content) {
+		t.Fatalf("decoded content differs: files=%d", len(files))
+	}
+}
+
+func TestDecodeConfigImportFilesRequestCountBound(t *testing.T) {
+	files := make([]protocol.ConfigImportFile, memberhome.ConfigImportMaxFiles+1)
+	for i := range files {
+		files[i] = protocol.ConfigImportFile{Path: "settings.json", ContentBase64: "eA=="}
+	}
+	for _, count := range []int{memberhome.ConfigImportMaxFiles, memberhome.ConfigImportMaxFiles + 1} {
+		raw, err := json.Marshal(files[:count])
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := decodeConfigImportFiles(raw)
+		if count > memberhome.ConfigImportMaxFiles {
+			if err == nil || decoded != nil {
+				t.Fatalf("over-count request returned %d files, err=%v", len(decoded), err)
+			}
+		} else if err != nil || len(decoded) != count || string(decoded[count-1].Content) != "x" {
+			t.Fatalf("at-count request returned %d files, err=%v", len(decoded), err)
+		}
+	}
+}
+
+func TestDecodeConfigImportFilesRejectsInvalidContent(t *testing.T) {
+	files, err := decodeConfigImportFiles(json.RawMessage(`[{"path":"settings.json","content_base64":"%%%"}]`))
+	if err == nil || files != nil {
+		t.Fatalf("invalid base64 returned files=%v, err=%v", files, err)
+	}
 }

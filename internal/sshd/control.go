@@ -17,8 +17,8 @@ const (
 	// maxSubsystemHeaderBytes bounds the single JSON header line the
 	// events, attach, and setup subsystems read before their stream
 	// begins. Those requests are a handful of short fields; the shared
-	// protocol.MaxLineBytes cap is sized for control-channel profile
-	// pushes and would let one channel buffer 32 MiB here.
+	// protocol.MaxLineBytes cap is sized for control-channel configuration
+	// imports and would let one channel buffer 96 MiB here.
 	maxSubsystemHeaderBytes = 4 << 10
 	// maxPendingLineBytes bounds one control-channel request line while
 	// the caller is still pending: server.info, all a pending member may
@@ -29,8 +29,8 @@ const (
 // serveControl runs the NDJSON JSON-RPC loop on an aether-control
 // subsystem channel: requests in, responses out, strictly in order.
 //
-// The 32 MiB line budget belongs to approved members (profile.push sends
-// base64 blobs up to the profile cap). handleRequest can only refuse a
+// The 96 MiB line budget belongs to approved members (config.import sends
+// base64 blobs up to its request cap). handleRequest can only refuse a
 // pending member after the line has been read, so until the store says
 // the caller is approved each line is capped at a request-sized limit.
 // The state is re-read before every line rather than once at channel
