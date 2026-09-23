@@ -96,7 +96,7 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
-	RunContainerTTL      time.Duration // default 1h; negative destroys on close
+	RunContainerTTL      time.Duration // default 168h; negative destroys on close
 	// ExitProbeTimeout bounds the short non-destructive Wait recovery uses
 	// on startup to learn whether a container already exited before
 	// attach. Defaults to defaultExitProbeTimeout.
@@ -126,7 +126,7 @@ type Config struct {
 	ServerBinary string
 }
 
-const DefaultRunContainerTTL = time.Hour
+const DefaultRunContainerTTL = 7 * 24 * time.Hour
 
 // DefaultServerBinary is the running server binary, /proc/self/exe rather
 // than os.Args[0].

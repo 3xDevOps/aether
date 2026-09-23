@@ -319,8 +319,8 @@ boot. Once expiry destroys the retained container, the call returns `-32002`
 (invalid state, retained container unavailable), and the run cannot be
 relaunched. An expired or otherwise unavailable retained run cannot be
 relaunched; a row removed by `run.delete` instead returns not found. The
-default `--run-container-ttl` is `1h`; negative values disable retention, so a
-closed TUI run is unavailable to `run.relaunch` immediately.
+default `--run-container-ttl` is `168h` (7 days); negative values disable
+retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 
 ### `GET /api/v1/capabilities`
 

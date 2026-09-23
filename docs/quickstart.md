@@ -520,7 +520,7 @@ aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
 
 Closing retains the exact TUI container, checkout, run row, member account and
-coordination surfaces for `--run-container-ttl` (default `1h`). Before that
+coordination surfaces for `--run-container-ttl` (default `7 days`). Before that
 retention expires, reopen the same run with:
 
 ```sh
