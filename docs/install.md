@@ -63,9 +63,10 @@ machine never runs and make the dashboard ask for a
 
 If the install directory is not on your `PATH`, the script prints the one line
 that adds it for your shell - bash, zsh, or fish, and a plain `export` when it
-cannot tell - and never edits a profile for you. The desktop app looks in
-`~/.local/bin` itself, so it starts either way; a terminal needs the line. If
-an older `aether` is still in `/usr/local/bin`, the script names it and prints
+cannot tell - and never edits a profile for you. The desktop build records
+the installed CLI's path, so the app starts without that directory on the
+desktop session's `PATH`; a terminal still needs the line. An older
+`aether` in `/usr/local/bin` is named by the script, which prints
 the `sudo rm -f` that removes it, because that copy comes first on most
 `PATH`s and would shadow the new one.
 
@@ -152,8 +153,8 @@ directory; existing applications keep their old environment. Sign out and
 back in if another terminal still cannot find the CLI. An older CLI,
 alias, or function can still shadow `aether`: `Get-Command aether -All`
 shows which command runs. The installer never deletes a shadowing copy.
-The desktop also checks the default CLI directory, so a Start Menu process
-with an older `PATH` can find a default installation.
+The desktop built by the installer records the CLI it just installed, so an
+older Start Menu `PATH` does not change which CLI the app starts.
 
 Close Aether before rerunning the installer to upgrade. Downloads and
 checksum failures leave the installed binary alone; a locked binary reports
@@ -651,15 +652,16 @@ A failure ends with `{"phase":"error","error":"..."}` carrying the build's own
 message, and the command still exits non-zero.
 
 The app requires the `aether` CLI installed first; it does not bundle the
-binary and `aether gui build` refuses to run if the shell would not find it.
-It looks for `aether` in `AETHER_BIN`, then `PATH`, then the installer
-defaults: `%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
-`~/.local/bin` on Linux and macOS. The application menu can have an older or
-different `PATH` than your terminal, so a CLI outside those defaults may work
-in the terminal and still fail from the menu; `aether gui build` warns when
-it finds `aether` that way. If launch fails with "aether CLI not found",
-install the CLI into the default directory or set `AETHER_BIN` to its full
-path. That lookup is
+binary. As a build-time check, `aether gui build` requires an installed CLI
+discoverable through `AETHER_BIN`, then `PATH`, then the installer defaults:
+`%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
+`~/.local/bin` on Linux and macOS. The new shell records the path of the CLI
+that built it. At launch, `AETHER_BIN` overrides that path; otherwise the
+shell starts the recorded executable, not another copy on the desktop
+session's `PATH`. If that executable is gone or cannot run, the error names
+its exact path: restore it, set `AETHER_BIN` to a working CLI, or rerun that
+installed CLI's `gui build` command. Older shells without a recorded path
+still search `PATH` and the installer defaults. This CLI selection is
 the launcher's job alone: once the app is running, the dashboard's harness
 detection and scans widen `PATH` from your login shell each time they look,
 so coding agents installed through a shell profile are found from the
@@ -684,8 +686,10 @@ reinstalled - not when the desktop app is rebuilt:
 make build && sudo install -m 0755 dist/aether /usr/local/bin/aether
 ```
 
-If the window renders an older dashboard than your checkout, an older `aether`
-is on your `PATH`; `aether version` prints the commit it was built from.
+If the window renders an older dashboard than your checkout, check the
+version of the CLI recorded by the shell (or the `AETHER_BIN` override):
+`<path-to-aether> version` prints the commit it was built from. A newer
+`aether` on your terminal's `PATH` does not change the shell's CLI.
 Building installers (`.dmg`, `.exe`, AppImage) from a checkout and code signing
 are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
