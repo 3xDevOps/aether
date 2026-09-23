@@ -24,6 +24,12 @@ export const codeUnavailable = -32004
  */
 const unavailableRetries = 4
 
+/**
+ * The server's reconnect window (internal/control/lease.go): how long a
+ * disconnected session's lease is held for that same session to reclaim.
+ */
+const reclaimWindowMs = 15_000
+
 /** WebSocket policy violation: the gateway's authorization watch fired. */
 const policyClose = 1008
 
@@ -421,9 +427,10 @@ export function connectAttach(
   const controlSessionID = seededSessionID ?? crypto.randomUUID()
   let controlGeneration = 0
   let hasControl = false
-  // A seeded first attach can race the server's teardown of this session's
-  // previous transport, which still reads as connected and so as occupied.
-  let reclaimRetry = seededSessionID !== undefined
+  // A seeded attach can race the server's teardown of this session's
+  // previous transport, which reads as occupied until it lands. Until the
+  // first successful ack, keep asking for as long as the lease is held.
+  let reclaimUntil = seededSessionID === undefined ? 0 : Date.now() + reclaimWindowMs
   let controlRequestID = 0
   let controlRevision = 0
   let controlPosition: TerminalPosition | null = null
@@ -1005,7 +1012,7 @@ export function connectAttach(
         replayPositionTarget = replayBytes > 0 ? highWater : null
         if (replayBytes === 0) parsedPosition = highWater
         attached = true
-        reclaimRetry = false
+        reclaimUntil = 0
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
@@ -1050,11 +1057,10 @@ export function connectAttach(
       if (ack.code === codeConflict && askedWrite) {
         pendingControl = null
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
-        if (reclaimRetry) {
-          reclaimRetry = false
-          // Ask again, unfenced, one backoff step later (0.5-1 s) so the old
-          // transport's disconnect can land first.
-          attempt = 1
+        if (Date.now() < reclaimUntil) {
+          // Retry unfenced on a growing backoff, starting one step up so
+          // the old transport's disconnect has time to land.
+          attempt = Math.max(attempt, 1)
           return
         }
         handlers.onControlLost?.()

@@ -1670,9 +1670,8 @@ describe('connectAttach', () => {
     expect(minted.control_session_id).not.toBe('tab-session')
   })
 
-  it('asks a seeded attach for write once more after a conflict, then mirrors', () => {
-    write = true
-    attach('/ws/attach/run_1', 'tab-session')
+  describe('a seeded attach meeting its own occupied lease', () => {
+    const plainWrite = { cols: 120, rows: 40, control_session_id: 'tab-session', write: true }
     const occupied = () => {
       StubSocket.last().onmessage?.({
         data: JSON.stringify({
@@ -1684,29 +1683,73 @@ describe('connectAttach', () => {
       })
       StubSocket.last().onclose?.({ code: 1008 })
     }
-    StubSocket.last().onopen?.()
-    occupied()
-    expect(controlLost).toBe(false)
-    // One backoff step, not an immediate retry: the old transport's
-    // disconnect has to reach the server first.
-    vi.advanceTimersByTime(499)
-    expect(StubSocket.opened).toHaveLength(1)
-    vi.advanceTimersByTime(501)
-    expect(StubSocket.opened).toHaveLength(2)
-    StubSocket.last().onopen?.()
-    expect(StubSocket.last().frames()[0]).toEqual({
-      cols: 120,
-      rows: 40,
-      control_session_id: 'tab-session',
-      write: true,
+    /** Wait out the scheduled reconnect and open it; returns the wait. */
+    const nextAttach = (): number => {
+      const before = StubSocket.opened.length
+      let waited = 0
+      while (StubSocket.opened.length === before && waited < 60_000) {
+        vi.advanceTimersByTime(100)
+        waited += 100
+      }
+      StubSocket.last().onopen?.()
+      return waited
+    }
+
+    it('keeps asking on a growing backoff through the reconnect window, then mirrors', () => {
+      write = true
+      const seeded = Date.now()
+      attach('/ws/attach/run_1', 'tab-session')
+      StubSocket.last().onopen?.()
+      const waits: number[] = []
+      for (let tries = 0; tries < 20; tries++) {
+        occupied()
+        if (controlLost) break
+        waits.push(nextAttach())
+        expect(StubSocket.last().frames()[0]).toEqual(plainWrite)
+      }
+
+      expect(controlLost).toBe(true)
+      expect(Date.now() - seeded).toBeGreaterThanOrEqual(15_000)
+      // Backoff, not one attach per tick: 0.5-1 s, then 1-2 s, 2-4 s, ...
+      expect(StubSocket.opened.length).toBeGreaterThanOrEqual(4)
+      expect(StubSocket.opened.length).toBeLessThanOrEqual(7)
+      expect(waits[2]).toBeGreaterThan(waits[0])
+
+      controlLost = false
+      nextAttach()
+      expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+      ack({ has_control: false })
+      vi.advanceTimersByTime(60_000)
+      expect(controlLost).toBe(false)
+      expect(refusal).toBeNull()
     })
 
-    occupied()
-    expect(controlLost).toBe(true)
-    vi.advanceTimersByTime(1000)
-    StubSocket.last().onopen?.()
-    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
-    expect(refusal).toBeNull()
+    it('steers when a retry inside the window is granted', () => {
+      write = true
+      attach('/ws/attach/run_1', 'tab-session')
+      StubSocket.last().onopen?.()
+      occupied()
+      nextAttach()
+      occupied()
+      nextAttach()
+      expect(StubSocket.opened).toHaveLength(3)
+      expect(StubSocket.last().frames()[0]).toEqual(plainWrite)
+      ack({ has_control: true, control_generation: 3, control_session_id: 'tab-session' })
+
+      expect(controlLost).toBe(false)
+      expect(receivedControl).toMatchObject({ has_control: true, control_generation: 3 })
+    })
+
+    it('mirrors at once when a conflict follows a successful attach', () => {
+      write = true
+      attach('/ws/attach/run_1', 'tab-session')
+      StubSocket.last().onopen?.()
+      ack({ has_control: true, control_generation: 3, control_session_id: 'tab-session' })
+      StubSocket.last().onclose?.({ code: 1006 })
+      nextAttach()
+      occupied()
+      expect(controlLost).toBe(true)
+    })
   })
 
   it('backs off after a dropped socket and resends the geometry', () => {

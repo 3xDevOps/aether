@@ -139,12 +139,26 @@ function occupyAndReconnect(): StubSocket {
     })
     StubSocket.last().onclose?.({ code: 1008 })
   })
-  act(() => {
-    vi.advanceTimersByTime(1000)
-  })
+  const before = StubSocket.opened.length
+  for (let waited = 0; StubSocket.opened.length === before && waited < 60_000; waited += 100) {
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+  }
   const next = StubSocket.last()
   act(() => next.onopen?.())
   return next
+}
+
+/** Keep refusing as occupied until the attach gives up and mirrors. */
+function occupyUntilMirror(): StubSocket {
+  for (let tries = 0; tries < 20; tries++) {
+    const next = occupyAndReconnect()
+    expect(next.frames()[0]).not.toHaveProperty('control_generation')
+    expect(next.frames()[0]).not.toHaveProperty('takeover')
+    if (!(next.frames()[0] as { write?: boolean }).write) return next
+  }
+  throw new Error('the attach never became a mirror')
 }
 
 describe('useRunTerminalSession', () => {
@@ -322,15 +336,16 @@ describe('useRunTerminalSession', () => {
     second.unmount()
   })
 
-  it('asks once more when its own old transport still holds the lease', () => {
+  it('keeps asking while its own old transport still holds the lease', () => {
     vi.useFakeTimers()
     const sessionID = steerThenLeave()
     const second = mount({}, initialTerminal, owner)
     act(() => StubSocket.last().onopen?.())
 
+    occupyAndReconnect()
     const retry = occupyAndReconnect()
 
-    expect(StubSocket.opened).toHaveLength(3)
+    expect(StubSocket.opened).toHaveLength(4)
     const header = retry.frames()[0]
     expect(header).toMatchObject({ control_session_id: sessionID, write: true })
     expect(header).not.toHaveProperty('control_generation')
@@ -352,21 +367,23 @@ describe('useRunTerminalSession', () => {
     vi.useRealTimers()
   })
 
-  it('mirrors when the lease stays occupied after that one retry', () => {
+  it('mirrors when the lease stays occupied through the reconnect window', () => {
     vi.useFakeTimers()
     steerThenLeave()
     const second = mount({}, initialTerminal, owner)
+    const seeded = Date.now()
     act(() => StubSocket.last().onopen?.())
 
-    occupyAndReconnect()
-    const mirror = occupyAndReconnect()
+    const mirror = occupyUntilMirror()
 
-    expect(mirror.frames()[0]).not.toHaveProperty('write')
+    expect(Date.now() - seeded).toBeGreaterThanOrEqual(15_000)
+    const opened = StubSocket.opened.length
+    expect(opened).toBeLessThanOrEqual(9)
     act(() => {
       mirror.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: false }) })
       vi.advanceTimersByTime(60_000)
     })
-    expect(StubSocket.opened).toHaveLength(4)
+    expect(StubSocket.opened).toHaveLength(opened)
     expect(second.result.current.state.write).toBe(false)
     second.unmount()
     vi.useRealTimers()
@@ -439,13 +456,13 @@ describe('useRunTerminalSession', () => {
     act(() => first.result.current.takeControl())
     first.unmount()
 
-    // The remount reattaches as the same session, so its first conflict may
-    // be its own old transport and is retried with the intent intact.
+    // The remount reattaches as the same session, so a conflict may be its
+    // own old transport and is retried with the intent intact.
     const second = mount()
     act(() => StubSocket.last().onopen?.())
     occupyAndReconnect()
     expect(useStore.getState().terminalWriteIntents.run_1).toMatchObject({ write: true })
-    occupyAndReconnect()
+    occupyUntilMirror()
 
     expect(second.result.current.state.steerDenied).toBe(false)
     expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()

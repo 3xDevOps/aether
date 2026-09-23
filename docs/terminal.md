@@ -82,8 +82,11 @@ until the signed-in identity, the server's event log (a fresh data directory
 restarts it), your authority over the run (role, run owner, protection, or
 steering policy), or the run's `created_at` changes. Returning to a run
 terminal in the same tab therefore attaches as the session that held the lease,
-and the server hands a disconnected lease back to it without a takeover. After
-the window, the return acquires control only if the run is still unoccupied.
+and the server hands a disconnected lease back to it without a takeover. Until
+the old connection's disconnect reaches the server, that lease still reads as
+occupied, so the tab keeps asking for it through the reconnect window before it
+becomes a mirror. After the window, the return acquires control only if the run
+is still unoccupied.
 **Control changes are acknowledged on the existing attach WebSocket.** A
 dashboard terminal sends a text frame such as
 `{"type":"control","request_id":17,"write":true}`. It may include
