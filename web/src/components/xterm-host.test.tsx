@@ -336,7 +336,7 @@ describe('xterm viewport ownership', () => {
     mounted.unmount()
   })
 
-  it('leaves viewport intent made during replay newer than the captured intent', async () => {
+  it.each(['wheel', 'scrollbar'] as const)('keeps newer %s viewport intent during replay', async (gesture) => {
     const mounted = await mountSizedController()
     const terminal = mounted.controller.terminal!
     await mounted.controller.setGeometry(20, 4)
@@ -347,7 +347,12 @@ describe('xterm viewport ownership', () => {
     await mounted.controller.setGeometry(20, 4, true)
     await writeTerminal(terminal, transcript('after', 18))
     terminal.scrollLines(-1)
-    terminal.element!.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
+    if (gesture === 'wheel') {
+      terminal.element!.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
+    } else {
+      terminal.element!.querySelector('.xterm-scrollable-element > .scrollbar.vertical > .slider')!
+        .dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    }
     expect(bottomOffset(terminal)).toBe(1)
 
     await mounted.controller.finishStructuralReplay!(generation)

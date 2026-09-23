@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
+import * as presentation from '@/components/terminal-presentation'
 import type * as apiModule from '@/lib/api'
 import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
@@ -407,6 +408,61 @@ describe('terminal view', () => {
     expect(pane?.isConnected).toBe(false)
   })
 
+  it('blocks historical DOM input while answering live terminal queries and refocuses at the live end', async () => {
+    vi.spyOn(presentation, 'captureTerminalPresentation').mockReturnValue({
+      rows: ['<span>pinned output</span>', '<span>second row</span>'],
+      cols: 80, viewportY: 0, baseY: 0, cellWidth: 8, cellHeight: 16,
+      fontFamily: 'monospace', fontSize: 12, letterSpacing: 0,
+    })
+    const opened = vi.spyOn(Terminal.prototype, 'open')
+    const view = mount()
+    const terminal = opened.mock.contexts[0] as Terminal
+    attached()
+    const socket = StubSocket.last()
+    const host = terminal.element!.parentElement!
+    const input = terminal.textarea!
+    // Saved-view hydration can finish before the attach's ordered geometry,
+    // empty replay write and reveal frames have enabled DOM input.
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull()
+      expect(host.hasAttribute('inert')).toBe(false)
+      expect(input.readOnly).toBe(false)
+    })
+    fireEvent.paste(input, { clipboardData: { getData: () => 'live input' } })
+    expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: 'live input' }))
+
+    fireEvent.wheel(host, { deltaY: -80 })
+    const history = await screen.findByRole('region', { name: 'Terminal scrollback' })
+    expect(screen.getByText('pinned output')).toBeDefined()
+    expect(host.hasAttribute('inert')).toBe(true)
+    expect(host.style.visibility).toBe('hidden')
+    const sent = socket.sent.length
+    fireEvent.keyDown(history, { key: 'x', code: 'KeyX', keyCode: 88 })
+    fireEvent.paste(history, { clipboardData: { getData: () => 'historical input' } })
+    fireEvent.keyDown(input, { key: 'x', code: 'KeyX', keyCode: 88 })
+    fireEvent.paste(input, { clipboardData: { getData: () => 'hidden input' } })
+    fireEvent.keyDown(history, { key: 'PageUp', code: 'PageUp' })
+    expect(socket.sent).toHaveLength(sent)
+    // These replies originate in the parser, not terminal.input()/paste().
+    act(() => socket.onmessage?.({ data: new TextEncoder().encode('new live output\x1b[6n\x1b[c').buffer }))
+    await waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString()).toContain('new live output'))
+    await waitFor(() => {
+      expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: expect.stringMatching(/^\x1b\[\d+;\d+R$/) }))
+      expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: expect.stringMatching(/^\x1b\[\?[\d;]+c$/) }))
+    })
+    expect(screen.getByText('pinned output')).toBeDefined()
+    expect(socket.closed).toBe(false)
+
+    fireEvent.keyDown(history, { key: 'End', code: 'End' })
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    expect(host.hasAttribute('inert')).toBe(false)
+    expect(host.style.visibility).toBe('')
+    fireEvent.paste(input, { clipboardData: { getData: () => 'resumed input' } })
+    expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: 'resumed input' }))
+    view.unmount()
+    expect(socket.closed).toBe(true)
+  })
+
   it('unmounts a live run and remounts a fresh screen snapshot', async () => {
     let view = mount()
     attached({ cols: 20, rows: 4 })
@@ -645,6 +701,7 @@ describe('terminal view', () => {
       return originalWrite.call(this, chunk, done)
     })
     const view = mount({}, { status: 'completed' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -662,7 +719,7 @@ describe('terminal view', () => {
     })
 
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.xterm')!.parentElement!
     expect(host.style.visibility).toBe('hidden')
 
     act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
@@ -726,6 +783,7 @@ describe('terminal view', () => {
   })
   it('reveals a completed session when an offline close aborts before replay ends', async () => {
     const view = mount({}, { status: 'completed' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -742,7 +800,7 @@ describe('terminal view', () => {
       })
     })
 
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.xterm')!.parentElement!
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     expect(host.style.visibility).toBe('hidden')
 
@@ -761,6 +819,7 @@ describe('terminal view', () => {
   })
   it('settles the hidden replay overlay when wake replacement is refused', async () => {
     const view = mount({}, { status: 'completed' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -782,7 +841,7 @@ describe('terminal view', () => {
     const replacement = StubSocket.last()
     expect(replacement).not.toBe(socket)
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.xterm')!.parentElement!
     expect(host.style.visibility).toBe('hidden')
     act(() => {
       replacement.onopen?.()

@@ -75,17 +75,15 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible > div')
     const screen = page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
     const assertGrid = async (cols: number, height: number) => {
+      const scrollback = page.getByLabel('Terminal scrollback', { exact: true })
+      if (await scrollback.isVisible()) {
+        await scrollback.focus()
+        await page.keyboard.press('End')
+      }
       await expect(rows).toHaveCount(height)
       const marker = `${' '.repeat(cols - 1)}X`
-      // A font-size pin parks the viewport on older rows. xterm does not put
-      // that scroll on the viewport element, and one wheel notch only moves a
-      // few lines, so keep going until the live marker is the bottom row.
-      await screen.hover()
-      await expect(async () => {
-        const bottom = (await rows.last().innerText()).replace(/\u00a0/g, ' ')
-        if (bottom !== marker) await page.mouse.wheel(0, 2400)
-        expect((await rows.last().innerText()).replace(/\u00a0/g, ' ')).toBe(marker)
-      }).toPass({ timeout: 8_000 })
+      await expect.poll(async () => (await rows.last().innerText()).replace(/\u00a0/g, ' '))
+        .toBe(marker)
     }
     // Admission can precede the initial resize; use the rendered shared grid
     // as the barrier for the first paint, just as for the later resize.
@@ -98,55 +96,29 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     // at the new corner. Request that paint before waiting for the new marker.
     writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
     await assertGrid(72, 22)
-    // The larger viewer must keep proposing its pane, not feed 60x18 back
-    // into the minimum and stop the shared terminal ever growing again.
-    // xterm 6 leaves .xterm-viewport empty and scrolls a custom thumb, so a
-    // scrollTop written there never moves. Rows still below the fold are the
-    // thumb's distance from the bottom of its track.
-    const terminal = rows.nth(0).locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " xterm ")][1]')
-    const thumb = terminal.locator('.xterm-scrollable-element > .scrollbar.vertical > .slider')
-    const rowsBelow = () =>
-      thumb.evaluate((element) => {
-        const track = element.parentElement
-        const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')
-        const rowHeight = row?.getBoundingClientRect().height ?? 0
-        if (!track || rowHeight <= 0) return 0
-        const trackBox = track.getBoundingClientRect()
-        const thumbBox = element.getBoundingClientRect()
-        if (thumbBox.height <= 0 || trackBox.height <= 0) return 0
-        const visibleRows = trackBox.height / rowHeight
-        return ((trackBox.height - (thumbBox.top - trackBox.top) - thumbBox.height) / thumbBox.height) * visibleRows
-      })
-    await expect.poll(() =>
-      thumb.evaluate((element) => {
-        const track = element.parentElement?.getBoundingClientRect().height ?? 0
-        const height = element.getBoundingClientRect().height
-        const row = element.closest('.xterm')?.querySelector('.xterm-rows > div')?.getBoundingClientRect().height ?? 0
-        if (row <= 0) return 0
-        return (track - height) / row
-      }),
-    ).toBeGreaterThan(2)
-    await terminal.hover()
-    let pinnedRows = 0
-    await expect.poll(async () => {
-      // One notch is about three rows. Repeat only while the thumb is still
-      // on the bottom, and keep the first position that is actually pinned.
-      if (pinnedRows <= 2) await page.mouse.wheel(0, -1)
-      pinnedRows = await rowsBelow()
-      return pinnedRows
-    }).toBeGreaterThan(2)
+    // Upward wheel now pins a serialized surface rather than leaving xterm's
+    // own scrollbar parked. Zoom must retain that same visible logical row.
+    await screen.hover()
+    await page.mouse.wheel(0, -60)
+    const scrollback = page.getByLabel('Terminal scrollback', { exact: true })
+    await expect(scrollback).toBeVisible()
+    const firstVisible = () => scrollback.evaluate((element) => {
+      const top = element.getBoundingClientRect().top + element.clientTop
+      const row = Array.from(element.querySelectorAll<HTMLElement>('[data-history-row]'))
+        .find((candidate) => candidate.getBoundingClientRect().bottom > top)
+      return row ? {
+        index: row.dataset.historyRow,
+        text: row.textContent,
+        offset: row.getBoundingClientRect().top - top,
+      } : null
+    })
+    await expect.poll(firstVisible).not.toBeNull()
+    const pinnedRow = await firstVisible()
     await page.getByRole('button', { name: 'Increase terminal text size' }).click()
-    await expect.poll(rowsBelow).toBeCloseTo(pinnedRows, 0)
-    // The pin leaves the live row above the fold. A thumb that looks flush
-    // can still be short of xterm's follow point, and the next paint then
-    // stays in scrollback. Wheel until the rendered last row is the cursor
-    // mark that is already on the live screen.
-    await terminal.hover()
-    await expect.poll(async () => {
-      const last = (await rows.nth(21).textContent()) ?? ''
-      if (!last.endsWith('X')) await page.mouse.wheel(0, 400)
-      return last
-    }).toMatch(/X$/)
+    await expect.poll(firstVisible).toEqual(pinnedRow)
+    await scrollback.focus()
+    await page.keyboard.press('End')
+    await expect(scrollback).toBeHidden()
     await assertGrid(72, 22)
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
