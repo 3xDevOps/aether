@@ -251,7 +251,7 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if approved.Mission.Phase != string(domain.MissionPhaseActive) {
 		t.Fatalf("mission phase after approval = %q, want active", approved.Mission.Phase)
 	}
-	integratorTerm.waitOutput(t, "notice:[aether] The plan was approved; the mission is active.")
+	integratorTerm.waitOutput(t, "notice:[aether] The plan was approved and the mission is active.")
 	// Approval accepted both revisions; the integrator never accepted its own.
 	var readyTasks protocol.TaskListResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &readyTasks); err != nil {

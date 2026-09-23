@@ -235,9 +235,10 @@ An integrator's skill states its role before its phase guidance: turn the
 objective into tasks for workers and coordinate them, not implement the
 objective itself. Integrators additionally get task/worker help, list
 commands using the current mission ID, integrator generation, approved
-account/harness/mode choices, and active/total attempt allowance. Integration guidance appears only after
-immediate actions in `active` or `amendment_review`, not during initial planning
-or plan review. Use the full status result for the current capability set.
+account/harness/mode choices, and active/total attempt allowance.
+Integration guidance appears only after immediate actions in `active` or
+`amendment_review`, not during initial planning or plan review. Use the full
+status result for the current capability set.
 
 Top-level and per-command help are available without a coordination socket:
 

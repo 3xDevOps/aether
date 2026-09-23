@@ -114,8 +114,12 @@ type injectedLine struct {
 	actor, color, text, end string
 }
 
-func (r *recordingInjector) Inject(_ context.Context, key ptyhost.SessionKey, actor, color, text, submit string) error {
-	r.writes <- injectedLine{key: key, actor: actor, color: color, text: text, end: submit}
+func (r *recordingInjector) Inject(ctx context.Context, key ptyhost.SessionKey, actor, color, text, submit string) error {
+	select {
+	case r.writes <- injectedLine{key: key, actor: actor, color: color, text: text, end: submit}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.err

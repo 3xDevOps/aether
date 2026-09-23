@@ -29,11 +29,11 @@ const answerNotice = "The accountable human answered a mission question. " +
 func planDecisionNotice(d domain.MissionPlanDecision) string {
 	switch d {
 	case domain.MissionPlanApprove:
-		return "The plan was approved; the mission is active. Run /usr/local/bin/aether-internal skill for the next steps."
+		return "The plan was approved and the mission is active. Run /usr/local/bin/aether-internal skill for the next steps."
 	case domain.MissionPlanRevise:
 		return "The plan was sent back with feedback. Run /usr/local/bin/aether-internal skill to read the feedback and revise the plan."
 	default:
-		return "The plan was rejected; the mission is over. Run /usr/local/bin/aether-internal skill."
+		return "The plan was rejected and the mission is over. Run /usr/local/bin/aether-internal skill."
 	}
 }
 
@@ -74,7 +74,7 @@ func (s *Service) noticeIntegrator(ctx context.Context, m *domain.Mission, text 
 	if s.cfg.PTY == nil || m.CurrentIntegratorRunID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), noticeTimeout)
+	ctx, cancel := context.WithTimeout(s.operationContext(ctx), noticeTimeout)
 	go func() {
 		defer cancel()
 		s.deliverNotice(ctx, m, text)

@@ -466,7 +466,7 @@ func Lookup(name string) (Profile, bool) {
 // harness: its profile's SteerSuffix, or a single Enter for a harness with
 // no shipped profile.
 func SubmitSequence(name string) string {
-	if p, ok := profiles[name]; ok {
+	if p, ok := Lookup(name); ok {
 		return p.SteerSuffix()
 	}
 	return "\r"
