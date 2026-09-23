@@ -55,6 +55,12 @@ type Gateway struct {
 	cfg Config
 	srv *http.Server
 
+	// Imports retain their wire body while the backend decodes and applies
+	// it. Admission covers that entire lifetime, including the response.
+	configImports        chan struct{}
+	configImportIdle     time.Duration
+	configImportDuration time.Duration
+
 	// ctx bounds every WebSocket handler, which http.Server.Shutdown
 	// cannot reach once the connection is hijacked; Close cancels it and
 	// waits on wg for those handlers to return.
@@ -94,12 +100,15 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{
-		ServeMux: http.NewServeMux(),
-		cfg:      cfg,
-		ctx:      ctx,
-		cancel:   cancel,
-		conns:    make(map[*websocket.Conn]struct{}),
-		done:     make(chan struct{}),
+		ServeMux:             http.NewServeMux(),
+		cfg:                  cfg,
+		ctx:                  ctx,
+		cancel:               cancel,
+		conns:                make(map[*websocket.Conn]struct{}),
+		done:                 make(chan struct{}),
+		configImports:        make(chan struct{}, 2),
+		configImportIdle:     30 * time.Second,
+		configImportDuration: 15 * time.Minute,
 	}
 	g.HandleFunc("POST /api/v1/{method}", g.handleAPI)
 	g.HandleFunc("GET /api/v1/run/{run}/patch", g.handlePatch)

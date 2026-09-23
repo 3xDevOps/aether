@@ -379,7 +379,7 @@ func TestPendingMemberOversizedLineRefused(t *testing.T) {
 	oversized := `{"jsonrpc":"2.0","id":1,"method":"server.info","params":{"pad":"` +
 		strings.Repeat("A", 1<<20) + `"}}` + "\n"
 	_, werr := pipe.Write([]byte(oversized))
-	rerr := readLineWithin(t, r, 5*time.Second)
+	rerr := readLineWithin(t, r)
 	if werr == nil && rerr == nil {
 		t.Fatal("pending member's oversized line was answered instead of refused")
 	}
@@ -423,7 +423,7 @@ func TestPendingConnectionUnblockedByApproval(t *testing.T) {
 	}
 }
 
-func readLineWithin(t *testing.T, r *bufio.Reader, d time.Duration) error {
+func readLineWithin(t *testing.T, r *bufio.Reader) error {
 	t.Helper()
 	ch := make(chan error, 1)
 	go func() {
@@ -433,7 +433,7 @@ func readLineWithin(t *testing.T, r *bufio.Reader, d time.Duration) error {
 	select {
 	case err := <-ch:
 		return err
-	case <-time.After(d):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for a line")
 		return nil
 	}

@@ -33,7 +33,7 @@ test('a directory exceeding request budgets imports completely and reports polic
   for (let index = 0; index < 2001; index += 1) {
     writeFileSync(join(dependencies, `${index}.js`), 'export {}\n')
   }
-  const largeAsset = Buffer.alloc(25 * 1024 * 1024, 0x61)
+  const largeAsset = Buffer.alloc(64 * 1024 * 1024, 0x61)
   writeFileSync(join(source, 'extensions', 'large.bin'), largeAsset)
 
   const wizard = await OnboardingWizard.open(page, alice.url)

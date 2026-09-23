@@ -477,6 +477,18 @@ The shared HTTP gateway permits a 96 MiB request for `config.import`,
 Decoded file and import-request limits remain authoritative. The authenticated
 SSH control channel caps a JSON line at 96 MiB; the larger framing budget does
 not remove decoded import bounds or filesystem validation.
+Before reading an import body, each HTTP gateway admits at most two imports;
+admission lasts through backend processing and the response. Excess requests
+receive HTTP 503 without their bodies being read. Body reads expire after
+30 seconds without progress or 15 minutes total and return HTTP 408.
+SSH control frames that grow beyond 64 KiB require admission: at most two
+globally and one per member, held through dispatch and the response. Small
+control requests do not consume those slots. Partial-frame reads have a
+30-second idle timeout and a 15-minute total timeout. Expanded frames retain
+the total timeout through dispatch and response; complete small requests do not.
+Expiry closes the offending SSH connection, including its other channels, so
+a peer cannot retain the large buffer by ignoring channel closure. Idle
+channels between frames do not start a frame timer.
 
 Browser metadata is intentionally limited. New imported files are `0644`;
 existing modes are preserved even when the server uses a restrictive umask.

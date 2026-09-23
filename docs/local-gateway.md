@@ -510,6 +510,19 @@ The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 and `config.import` at 96 MiB. The 64 MiB file and per-request import limits
 remain authoritative after JSON decoding. The SSH control-channel line cap is
 96 MiB, allowing base64 import requests without unbounded framing.
+The HTTP gateway admits at most two imports at once, before reading their
+bodies, and retains admission through backend processing and the response.
+Excess requests receive HTTP 503 (`configuration import capacity is busy;
+retry later`) without being read. An import body must make progress within
+30 seconds and finish within 15 minutes; expired reads return HTTP 408.
+These are transfer protections, not limits on the selected directory.
+SSH frames exceeding 64 KiB require a separate server admission: two globally
+and one per member, retained through the response. Small control requests
+remain available. Partial-frame reads have a 30-second idle timeout and a
+15-minute total timeout. Expanded frames retain that total timeout through
+dispatch and response; complete small requests do not. Expiry closes the
+offending SSH connection, including its other channels. Idle channels between
+requests do not start these timers.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
