@@ -96,7 +96,9 @@ function policyRoot(overrides: Partial<ConfigRoot> = {}): ConfigRoot {
 
 async function choose(files: File[]) {
   const input = screen.getByLabelText('Choose configuration directory')
-  fireEvent.change(input, { target: { files } })
+  await act(async () => {
+    fireEvent.change(input, { target: { files } })
+  })
   await waitFor(() => {
     expect(
       screen.queryByText('Preview') ||
