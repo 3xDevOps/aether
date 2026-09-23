@@ -28,7 +28,10 @@ let receivedControl: ControlMetadata | null = null
 let attachments: Attachment[] = []
 let refusal: string | null = null
 
-function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
+function attach(
+  url: string | (() => string) = '/ws/attach/run_1',
+  seededSessionID?: string,
+): Attachment {
   output = []
   outputKinds = []
   states = []
@@ -68,7 +71,7 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
     sessionPending: () => sessionPending,
     geometry: () => ({ cols: 120, rows: 40 }),
     wantsWrite: () => write,
-  })
+  }, seededSessionID)
   attachments.push(attachment)
   return attachment
 }
@@ -1647,6 +1650,63 @@ describe('connectAttach', () => {
     StubSocket.last().onopen?.()
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     a.close()
+  })
+
+  it('seeds only the control session ID, never a fence or takeover', () => {
+    write = true
+    attach('/ws/attach/run_1', 'tab-session')
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: 'tab-session',
+      write: true,
+    })
+
+    attach()
+    StubSocket.last().onopen?.()
+    const minted = StubSocket.last().frames()[0] as { control_session_id: string }
+    expect(minted).toEqual({ cols: 120, rows: 40, control_session_id: expect.any(String), write: true })
+    expect(minted.control_session_id).not.toBe('tab-session')
+  })
+
+  it('asks a seeded attach for write once more after a conflict, then mirrors', () => {
+    write = true
+    attach('/ws/attach/run_1', 'tab-session')
+    const occupied = () => {
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: codeConflict,
+          error: 'run control is held by another session',
+          control_generation: 3,
+        }),
+      })
+      StubSocket.last().onclose?.({ code: 1008 })
+    }
+    StubSocket.last().onopen?.()
+    occupied()
+    expect(controlLost).toBe(false)
+    // One backoff step, not an immediate retry: the old transport's
+    // disconnect has to reach the server first.
+    vi.advanceTimersByTime(499)
+    expect(StubSocket.opened).toHaveLength(1)
+    vi.advanceTimersByTime(501)
+    expect(StubSocket.opened).toHaveLength(2)
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: 'tab-session',
+      write: true,
+    })
+
+    occupied()
+    expect(controlLost).toBe(true)
+    vi.advanceTimersByTime(1000)
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(refusal).toBeNull()
   })
 
   it('backs off after a dropped socket and resends the geometry', () => {

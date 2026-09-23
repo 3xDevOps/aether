@@ -345,7 +345,11 @@ export function replayGate(
 }
 
 /** Connect to a terminal socket, re-reading its URL before every reconnect. */
-export function connectAttach(socketURL: () => string, h: AttachHandlers): Attachment {
+export function connectAttach(
+  socketURL: () => string,
+  h: AttachHandlers,
+  seededSessionID?: string,
+): Attachment {
   // A socket can outlive the component that currently displays it (a dock
   // collapse or route change keeps the server-side shell alive). Rebinding
   // keeps callbacks pointed at the current terminal instead of a disposed
@@ -409,11 +413,17 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let reopenGeneration = 0
   let deliveryGeneration = 0
   let liveOverflowed = false
-  // Stable for this logical browser tab and intentionally distinct from
-  // another tab by the same member. Reconnects reuse it to resume control.
-  const controlSessionID = crypto.randomUUID()
+  // Stable for this attachment's reconnects, and for a later attachment in
+  // the same browser tab that seeds it, so either reclaims the disconnected
+  // lease this session held. Another tab by the same member never shares it.
+  // A seed carries no generation: generations restart with the server, so a
+  // remembered one could fence a takeover of someone else's lease.
+  const controlSessionID = seededSessionID ?? crypto.randomUUID()
   let controlGeneration = 0
   let hasControl = false
+  // A seeded first attach can race the server's teardown of this session's
+  // previous transport, which still reads as connected and so as occupied.
+  let reclaimRetry = seededSessionID !== undefined
   let controlRequestID = 0
   let controlRevision = 0
   let controlPosition: TerminalPosition | null = null
@@ -995,6 +1005,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         replayPositionTarget = replayBytes > 0 ? highWater : null
         if (replayBytes === 0) parsedPosition = highWater
         attached = true
+        reclaimRetry = false
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
@@ -1039,6 +1050,13 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (ack.code === codeConflict && askedWrite) {
         pendingControl = null
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
+        if (reclaimRetry) {
+          reclaimRetry = false
+          // Ask again, unfenced, one backoff step later (0.5-1 s) so the old
+          // transport's disconnect can land first.
+          attempt = 1
+          return
+        }
         handlers.onControlLost?.()
         attempt = 0
         return

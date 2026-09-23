@@ -19,7 +19,7 @@ import {
   type ControlMetadata,
   type ControlResult,
 } from '@/routes/terminal/attach'
-import { initialTerminal, type TerminalState } from '@/store/terminal'
+import { initialTerminal, type TerminalRunFence, type TerminalState } from '@/store/terminal'
 import { useStore } from '@/store'
 
 const endedStatuses: readonly RunStatus[] = [
@@ -67,6 +67,8 @@ interface SessionRefs {
   setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   phone: boolean
   automaticWrite: boolean
+  identityKey: string | null
+  terminalCacheEpoch: number
   authorityKey: string
   beginStructuralReplay?: () => number
   cancelStructuralReplay?: (generation: number) => void | Promise<void>
@@ -87,6 +89,34 @@ interface PendingAuthorityControl {
 
 function isEnded(status: RunStatus | undefined): boolean {
   return status !== undefined && endedStatuses.includes(status)
+}
+
+type FenceInput = Pick<
+  RunTerminalSessionInput,
+  'run' | 'identityKey' | 'terminalCacheEpoch' | 'authorityKey'
+>
+
+function fenceMatches<T extends TerminalRunFence>(
+  fence: T | undefined,
+  input: FenceInput,
+): fence is T {
+  return (
+    input.identityKey !== null &&
+    fence?.identityKey === input.identityKey &&
+    fence.terminalCacheEpoch === input.terminalCacheEpoch &&
+    fence.authorityKey === input.authorityKey &&
+    fence.runCreatedAt === input.run?.created_at
+  )
+}
+
+function currentFence(input: FenceInput): TerminalRunFence | null {
+  if (input.identityKey === null || !input.run) return null
+  return {
+    identityKey: input.identityKey,
+    terminalCacheEpoch: input.terminalCacheEpoch,
+    authorityKey: input.authorityKey,
+    runCreatedAt: input.run.created_at,
+  }
 }
 
 function useLatestRefs(input: RunTerminalSessionInput): MutableRefObject<SessionRefs> {
@@ -113,17 +143,14 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const setWriteIntent = useStore((store) => store.setTerminalWriteIntent)
   const clearWriteIntent = useStore((store) => store.clearTerminalWriteIntent)
   const markControlTaken = useStore((store) => store.markTerminalControlTaken)
+  const setControlSession = useStore((store) => store.setTerminalControlSession)
+  const clearControlSession = useStore((store) => store.clearTerminalControlSession)
   const [replaying, setReplaying] = useState(false)
   const [controlMetadata, setControlMetadata] = useState<ControlMetadata>()
   const [sessionMissing, setSessionMissing] = useState(false)
   const attachmentRef = useRef<Attachment | null>(null)
   const terminalRef = useRef<Terminal | null>(terminal)
-  const intentMatches =
-    identityKey !== null &&
-    storedWriteIntent?.identityKey === identityKey &&
-    storedWriteIntent.terminalCacheEpoch === terminalCacheEpoch &&
-    storedWriteIntent.authorityKey === authorityKey &&
-    storedWriteIntent.runCreatedAt === run?.created_at
+  const intentMatches = fenceMatches(storedWriteIntent, input)
   const explicitWriteRef = useRef<boolean | null>(
     intentMatches ? storedWriteIntent.write : null,
   )
@@ -159,7 +186,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     setTerminal(runID, initialTerminal)
   }, [runID, setTerminal])
 
-  // Only the boolean preference survives a route change, and only while all
+  // The write preference survives a route change only while all
   // fences still identify the same authenticated run and authority context.
   useLayoutEffect(() => {
     if (intentMatches) return
@@ -170,17 +197,12 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const rememberWriteIntent = useCallback(
     (write: boolean) => {
       explicitWriteRef.current = write
-      if (identityKey === null || !run) {
+      const fence = currentFence({ run, identityKey, terminalCacheEpoch, authorityKey })
+      if (fence === null) {
         clearWriteIntent(runID)
         return
       }
-      setWriteIntent(runID, {
-        write,
-        identityKey,
-        terminalCacheEpoch,
-        authorityKey,
-        runCreatedAt: run.created_at,
-      })
+      setWriteIntent(runID, { ...fence, write })
     },
     [
       authorityKey,
@@ -253,13 +275,25 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     [beginStructuralReplay, refs],
   )
 
+  // Stamped with the fences current at each control change, because the
+  // authority can change while the attachment stays mounted.
+  const rememberControlSession = useCallback(
+    (controlSessionID: string) => {
+      const fence = currentFence(refs.current)
+      if (fence === null) clearControlSession(runID)
+      else setControlSession(runID, { ...fence, controlSessionID })
+    },
+    [clearControlSession, refs, runID, setControlSession],
+  )
+
   const updateControl = useCallback(
     (metadata: ControlMetadata) => {
       setControlMetadata(metadata)
       setTerminal(runID, { write: metadata.has_control })
       if (metadata.has_control && explicitWriteRef.current === true) markControlTaken()
+      rememberControlSession(metadata.control_session_id)
     },
-    [markControlTaken, runID, setTerminal],
+    [markControlTaken, rememberControlSession, runID, setTerminal],
   )
 
   const onControlResult = useCallback(
@@ -295,6 +329,10 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     setSessionMissing(false)
     setTerminal(runID, { ...initialTerminal, write: false })
     gate.unmute()
+
+    const stored = useStore.getState().terminalControlSessions[runID]
+    const reclaim = fenceMatches(stored, refs.current) ? stored : undefined
+    if (stored && !reclaim) clearControlSession(runID)
 
     let attachment!: Attachment
     attachment = connectAttach(() => api.attachSocket(runID), {
@@ -427,11 +465,16 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
       follows: () => refs.current.phone,
       screen: () => true,
       interactive: () => true,
-    })
+    }, reclaim?.controlSessionID)
+    // Before any ack: the server may grant the lease to an attach this route
+    // leaves before hearing the answer.
+    const controlSessionID = attachment.controlMetadata?.().control_session_id
+    if (controlSessionID) rememberControlSession(controlSessionID)
     attachmentRef.current = attachment
     if (relaunchPendingRef.current) relaunchPendingRef.current = false
   }, [
     beginStructuralReplay,
+    clearControlSession,
     clearWriteIntent,
     gate,
     run,
@@ -441,6 +484,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     updateControl,
     onControlResult,
     refs,
+    rememberControlSession,
   ])
 
   useEffect(() => {
