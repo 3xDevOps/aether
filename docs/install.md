@@ -171,10 +171,10 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 ## Upgrading
 
-`aether update` replaces the running CLI with the latest release (or
-`--version <tag>`), verifying it against the release's `checksums.txt`. On a
-Linux host with `aether-server` installed next to the CLI it updates both and
-reminds you to `sudo systemctl restart aether-server`. The command never asks
+`aether update` replaces the running CLI with the latest release only if it
+is newer (or installs `--version <tag>`), verifying it against the release's
+`checksums.txt`. On Linux, an `aether-server` beside the CLI is updated too;
+restart it with `sudo systemctl restart aether-server`. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -247,6 +247,12 @@ output streams to your terminal. Skip it with `--no-app`:
 aether update --no-app
 ```
 
+The rebuilt app starts that CLI path rather than whichever older copy happens
+to come first on the desktop session's `PATH`. `AETHER_BIN` still overrides it
+when you deliberately choose another binary. If the recorded CLI is moved or
+deleted, set `AETHER_BIN` or rebuild the app with the installed CLI instead of
+silently falling back to a different copy.
+
 A machine with no app installed builds nothing and downloads nothing, so a
 server box never sees this step. If the app is running when the rebuild
 finishes, the command says to restart it. A rebuild that fails prints the
@@ -276,9 +282,11 @@ dashboard banner all answer `disabled` without touching the network.
 A binary built from a checkout reports what `git describe` produced
 (`v1.2.3-4-gabc123`, plus `-dirty` for uncommitted changes). The comparison
 reads that as the tag it descends from *plus* commits on top, so such a build
-is never told to downgrade to that tag, and is still told about a genuinely
-newer release. A checkout with no tags in reach reports a bare commit, which
-cannot be ordered against anything and never reports an update.
+is never told to downgrade to that tag, and `aether update` without
+`--version` does not replace it with that older release. It is still told
+about a genuinely newer release. A checkout with no tags in reach reports a
+bare commit, which cannot be ordered against anything and never updates
+automatically; `--version <tag>` explicitly selects a release instead.
 
 **In the dashboard.** `aether gui` runs the same check in the background and
 prints one line to stderr when a newer release exists. The dashboard shows a
@@ -373,11 +381,12 @@ sudo systemctl restart aether-server
 **The desktop app is separate.** The dashboard ships inside the CLI, so
 updating the CLI updates the dashboard. The Electron shell around it - window
 chrome, notifications, `aether://` deep links - is whatever `aether gui build`
-last produced, and records which CLI built it. Both `aether update` and the
-dashboard's **Update now** rebuild it for you; the banner below is what is
-left when that rebuild was skipped (`--no-app`) or failed. It is not tied to a
-release being available, because the usual way to get there is to have just
-updated.
+last produced, and records the full version and executable path of the CLI
+that built it. Both `aether update` and the dashboard's **Update now** rebuild
+it for you; the banner below is what is left when that rebuild was skipped
+(`--no-app`) or failed, or the shell deliberately uses another CLI through
+`AETHER_BIN`. It is not tied to a release being available, because the usual
+way to get there is to have just updated.
 
 ## Manual install
 

@@ -56,13 +56,16 @@ func runUpdate(args []string) error {
 	}
 	base := "https://github.com/" + selfupdate.Repo
 	if *tag == "" {
-		latest, err := selfupdate.LatestTag(ctx, base+"/releases/latest")
+		got, err := selfupdate.DefaultChecker().CheckFresh(ctx)
 		if err != nil {
 			return err
 		}
-		*tag = latest
-	}
-	if version.Version == *tag {
+		if !got.UpdateAvailable {
+			printCheck(got)
+			return nil
+		}
+		*tag = got.Latest
+	} else if version.Version == *tag {
 		fmt.Printf("already on %s\n", *tag)
 		return nil
 	}
@@ -101,6 +104,11 @@ func reportCheck(ctx context.Context, asJSON bool) error {
 		fmt.Println(string(line))
 		return nil
 	}
+	printCheck(got)
+	return nil
+}
+
+func printCheck(got selfupdate.Check) {
 	switch {
 	case got.Disabled:
 		fmt.Printf("release checks are off: %s is set (running %s)\n", selfupdate.OptOutEnv, version.String())
@@ -116,5 +124,4 @@ func reportCheck(ctx context.Context, asJSON bool) error {
 		// cases, so both tags are printed and the reader decides.
 		fmt.Printf("running %s; the latest release is %s\n", version.String(), got.Latest)
 	}
-	return nil
 }

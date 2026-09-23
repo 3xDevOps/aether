@@ -2281,16 +2281,16 @@ about itself and appears wherever the member is an admin.
   the way back to a banner someone dismissed by reflex.
 - **The desktop shell has a banner of its own.** The SPA ships inside the CLI,
   but the Electron shell around it is whatever `aether gui build` last
-  produced. `aether gui build` stamps the CLI version into the shell's
-  `package.json`, `desktop/main.js` hands it to the renderer, and
-  `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`. When
-  it differs from the `version` the capabilities descriptor carries, a third
-  banner says the app is out of date and gives `aether gui build`. It is
-  deliberately not nested in the CLI banner and not keyed on
-  `update_available`: the way a shell goes stale is that the CLI *was* just
-  updated, which is the moment no update is available any more, so gating it
-  on one would hide it in the only flow it exists for. It renders on the shell
-  stamp alone, so a browser tab never sees it.
+  produced. That build records the complete CLI version and its executable
+  path alongside the shell's npm-valid `package.json` version. `desktop/main.js`
+  starts the recorded binary ahead of `PATH` (unless `AETHER_BIN` explicitly
+  overrides it) and hands the build version to the renderer; `desktop/preload.js`
+  exposes it as `window.aetherDesktop.shellVersion`. On a local gateway, a
+  different capabilities version raises the app-out-of-date banner with
+  `aether gui build`. A browser tab and a server-hosted dashboard do not
+  have a local shell to compare. The banner is independent of
+  `update_available`: the CLI is usually current *after* an update that
+  left the shell old.
 
 ## Styleguide
 
