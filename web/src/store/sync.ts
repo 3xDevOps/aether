@@ -53,8 +53,16 @@ function refusalKind(err: ApiError, store: RootStore): UnreachableKind | null {
   return classifyUnreachable(err, store)
 }
 
-/** Fills the store from the server. False means the server was unreachable. */
-export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
+/**
+ * Fills the store from the server. False means the fetch failed or its owner
+ * was disposed. Direct callers may omit the signal; connect owns its lifetime.
+ */
+export async function hydrate(
+  store: RootStore,
+  client: Api = api,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) return false
   const s = store.getState()
   try {
     const [info, workspaces, members, runs, overlaps, capabilities] =
@@ -71,6 +79,7 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
         // client on its built-in assumptions.
         client.capabilities().catch(() => null),
       ])
+    if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
     const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
     const previousIdentity = store.getState().identityKey
@@ -109,9 +118,12 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     ) {
       await client
         .missionList({ workspace_id: active, limit: 50 })
-        .then((result) => s.setMissions(result.missions, result.next_cursor))
+        .then((result) => {
+          if (!signal?.aborted) s.setMissions(result.missions, result.next_cursor)
+        })
         .catch(ignore)
     }
+    if (signal?.aborted) return false
     s.setCapabilities(capabilities)
     // A deep link (`aether://run/<id>` from either shell) arrives as
     // `?run=<id>` and can only be acted on now that the runs are here. A
@@ -131,12 +143,14 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     if (store.getState().capabilities?.local?.includes('link.status')) {
       try {
         const linkStatus = await client.localLinkStatus()
+        if (signal?.aborted) return false
         s.setLinkStatus(linkStatus)
         if (linkStatus.linked === true) s.setOnboarded(true)
       } catch {
         ignore()
       }
     }
+    if (signal?.aborted) return false
     s.setHydrated(true)
     if (
       !store.getState().onboarded &&
@@ -147,6 +161,7 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     s.setUnreachable(null)
     return true
   } catch (err) {
+    if (signal?.aborted) return false
     // A failed re-hydration keeps the data we already have; only the error
     // is new. Once the token is known dead, the recorded recovery hint is
     // more useful than this raw failure, so it stays.
@@ -524,7 +539,11 @@ type Probe =
  * only an HTTP body carries, so it is recorded before the stream's own
  * failure can only say "unreachable".
  */
-async function probeGateway(store: RootStore, client: Api): Promise<Probe | null> {
+async function probeGateway(
+  store: RootStore,
+  client: Api,
+  signal: AbortSignal,
+): Promise<Probe | null> {
   let capabilities: GatewayCapabilities
   try {
     capabilities = await client.capabilities()
@@ -533,6 +552,7 @@ async function probeGateway(store: RootStore, client: Api): Promise<Probe | null
     if (err instanceof ApiError && (err.status === 403 || err.status === 503)) return { refused: err }
     return null
   }
+  if (signal.aborted) return null
   // Hydration writes the same descriptor, but a hydration that never
   // succeeds writes nothing - and classifying its failure needs to know
   // which gateway serves the page.
@@ -566,7 +586,8 @@ async function probeGateway(store: RootStore, client: Api): Promise<Probe | null
  * instead of subscribing live and missing the outage.
  */
 export function connect(store: RootStore, client: Api = api): () => void {
-  let disposed = false
+  const lifecycle = new AbortController()
+  const { signal } = lifecycle
   let hydrating = false
   let attempts = 0
   let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -576,7 +597,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   let stopStream: () => void = () => {}
 
   const drain = async () => {
-    while (!disposed && !hydrating && queue.length > 0) {
+    while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
       if (await applyEvent(store, ev, client)) continue
       // The event named something we could not fetch. A fresh snapshot is the
@@ -591,12 +612,12 @@ export function connect(store: RootStore, client: Api = api): () => void {
   }
 
   const load = async () => {
-    if (disposed || hydrating || store.getState().streamDead) return
+    if (signal.aborted || hydrating || store.getState().streamDead) return
     hydrating = true
     await chain // let an event that is mid-flight finish first
-    const ok = await hydrate(store, client)
+    const ok = await hydrate(store, client, signal)
     hydrating = false
-    if (disposed) return
+    if (signal.aborted) return
     if (!ok) {
       retryTimer = setTimeout(() => {
         retryTimer = null
@@ -663,15 +684,15 @@ export function connect(store: RootStore, client: Api = api): () => void {
   // data for the rest of a wait that also caps at 30 seconds. A wake with no
   // retry pending re-fetches nothing.
   const stopWake = onWake(() => {
-    if (disposed || !retryTimer) return
+    if (signal.aborted || !retryTimer) return
     clearTimeout(retryTimer)
     retryTimer = null
     attempts = 0
     void load()
   })
 
-  void probeGateway(store, client).then((probe) => {
-    if (disposed) return
+  void probeGateway(store, client, signal).then((probe) => {
+    if (signal.aborted) return
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
       // stream is never opened. The flag is what makes the panes and the
@@ -706,7 +727,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   })
 
   return () => {
-    disposed = true
+    lifecycle.abort()
     stopWake()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
