@@ -402,6 +402,9 @@ class RunHistoryCache implements HistoryCache {
       // An unread archive is not an empty archive, including during disposal.
       return
     }
+    // Reset reports its own failure. Capture the header only after it settles,
+    // so a concurrent view write cannot restore the pre-reset archive header.
+    await this.resetting?.catch(() => undefined)
     if (!this.current()) return
     // Keep the new view until its transaction commits, including route disposal.
     this.memoryView = view
@@ -453,26 +456,27 @@ class RunHistoryCache implements HistoryCache {
       await this.ensureInitialized()
       if (!this.current()) return
       this.cancel()
-      this.clearArchive()
-      this.patch({ count: 0, hasMore: true, error: null, revision: this.state.revision + 1 })
-      const header = this.header()
+      const header: Header = { key: this.key, scope: this.scope, count: 0, hasMore: true }
       await queueStorage(async () => {
-        if (!this.current() || this.memoryOnly) return
+        if (!this.current()) return
         try {
-          const db = await database()
-          if (!db) {
-            this.memoryOnly = true
-            return
+          if (!this.memoryOnly) {
+            const db = await database()
+            if (!db) throw new Error('Previously saved terminal history is unavailable because IndexedDB is unavailable.')
+            if (!this.current()) return
+            await writeTransaction(db, ['histories', 'ranges', 'pages'], (transaction) => {
+              transaction.objectStore('histories').put(header)
+              transaction.objectStore('ranges').delete(pageKeys(this.key))
+              transaction.objectStore('pages').delete(pageKeys(this.key))
+            })
           }
           if (!this.current()) return
-          await writeTransaction(db, ['histories', 'ranges', 'pages'], (transaction) => {
-            transaction.objectStore('histories').put(header)
-            transaction.objectStore('ranges').delete(pageKeys(this.key))
-            transaction.objectStore('pages').delete(pageKeys(this.key))
-          })
+          this.clearArchive()
+          this.clearStorageError('reset')
+          this.patch({ count: 0, hasMore: true, error: this.storageErrorMessage() ?? null, revision: this.state.revision + 1 })
         } catch (cause) {
-          this.memoryOnly = true
-          this.storageError(cause)
+          this.storageError(cause, 'reset')
+          throw cause
         }
       })
     } finally {

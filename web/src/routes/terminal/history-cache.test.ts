@@ -190,6 +190,43 @@ describe('retained terminal history', () => {
     expect(await cache.readRows(-202, -201)).toEqual([{ index: -202, line: client.lines[0] }])
   })
 
+  it('retries an aborted archive reset without reviving dismissed history after reload', async () => {
+    const client = archive(401)
+    const cache = getHistoryCache(scope, client)
+    await cache.loadOlder()
+    const view = savedView()
+    await cache.saveView(view)
+    const remove = IDBObjectStore.prototype.delete
+    let unavailable = true
+    vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore, key) {
+      if (this.name === 'ranges' && unavailable) throw new DOMException('archive reset temporarily locked', 'UnknownError')
+      return remove.call(this, key)
+    })
+
+    await expect(cache.resetArchive()).rejects.toThrow('archive reset temporarily locked')
+    expect(cache.snapshot()).toMatchObject({ count: 200, hasMore: true })
+    expect(cache.snapshot().error).toContain('archive reset temporarily locked')
+    expect(await cache.readRows(-1, 0)).toEqual([{ index: -1, line: client.lines[400] }])
+    expect(await cache.readView()).toEqual(view)
+
+    unavailable = false
+    const newest = { cursor: 'after-failed-reset', time: 9999, text: 'output after returning live' }
+    client.lines.push(newest)
+    await Promise.all([cache.resetArchive(), cache.saveView(null)])
+    expect(cache.snapshot().error).toBeNull()
+    // A static import would reuse the cache instead of exercising a reload.
+
+    vi.resetModules()
+    const { useStore: restoredStore } = await import('@/store')
+    restoredStore.setState({ identityKey: scope.identityKey, terminalCacheEpoch: scope.epoch, runs: {}, hydrated: false })
+    const { getHistoryCache: restoreCache } = await import('@/routes/terminal/history-cache')
+    const restored = restoreCache(scope, client)
+    expect(await restored.readView()).toBeNull()
+    expect(await restored.readRows(-1, 0)).toEqual([])
+    await restored.loadOlder()
+    expect(await restored.readRows(-1, 0)).toEqual([{ index: -1, line: newest }])
+  })
+
   it('keeps equal text with different cursors and follows short or empty progressing pages', async () => {
     const a = { cursor: 'a', time: 1, text: 'same text' }
     const b = { cursor: 'b', time: 2, text: 'same text' }
