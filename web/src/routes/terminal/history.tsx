@@ -176,16 +176,12 @@ export function TerminalHistory({
     return () => { active = false }
   }, [cache, restoreAttempt])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     pendingCapture.current = null
     // Keep the cheap intent until beforeDispose has had a chance to save it;
     // disposing the listener prevents any late callback from entering history.
     return () => { pendingCapture.current?.dispose() }
   }, [cache, enabled, frozen, restoring, terminal])
-
-  useLayoutEffect(() => {
-    onReadingChange(restoring || frozen !== null)
-  }, [frozen, restoring, onReadingChange])
 
   useEffect(() => {
     const intent = liveFocus.current
@@ -307,7 +303,7 @@ export function TerminalHistory({
     terminal.refresh(0, terminal.rows - 1)
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = terminal?.element?.parentElement
     if (!terminal || !host || !enabled || restoring || frozen) return
     const normal = () => terminal.buffer.active === terminal.buffer.normal
@@ -372,6 +368,10 @@ export function TerminalHistory({
       host.removeEventListener('touchmove', touchMove, true)
     }
   })
+
+  useLayoutEffect(() => {
+    onReadingChange(restoring || frozen !== null)
+  }, [frozen, restoring, onReadingChange])
 
   useEffect(() => {
     const move = (event: TouchEvent) => {

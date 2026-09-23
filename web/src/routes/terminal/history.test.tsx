@@ -48,7 +48,12 @@ function cacheFor(client: Pick<Api, 'terminalHistory'>, runID = 'run_1') {
   return getHistoryCache({ identityKey: state.identityKey, epoch: state.terminalCacheEpoch, runID, createdAt: state.runs[runID].created_at }, client)
 }
 
-function mountHistory(cache: HistoryCache, alternate = false, autoRender = true) {
+function mountHistory(
+  cache: HistoryCache,
+  alternate = false,
+  autoRender = true,
+  onReadingChange: (reading: boolean) => void = vi.fn(),
+) {
   const host = document.createElement('div')
   const element = document.createElement('div')
   const terminalScreen = document.createElement('div')
@@ -103,7 +108,6 @@ function mountHistory(cache: HistoryCache, alternate = false, autoRender = true)
   } as unknown as XtermController
   const beforeDispose = { current: null as ((terminal: Terminal) => void) | null }
   const tools = { current: null as TerminalReadSurface | null }
-  const onReadingChange = vi.fn()
   const view = render(<TerminalHistory controller={controller} cache={cache} enabled beforeDispose={beforeDispose} tools={tools} onReadingChange={onReadingChange} />)
   return {
     ...view,
@@ -173,6 +177,14 @@ test('enters by scrolling without a history button and escapes archive HTML', as
   fireEvent.keyDown(output, { key: 'End' })
   expect(screen.queryByRole('region', { name: 'Terminal scrollback' })).toBeNull()
   expect(view.terminal.scrollToBottom).toHaveBeenCalled()
+  view.dispose()
+})
+
+test('accepts the first upward gesture as soon as the restored live surface is announced', async () => {
+  const view = mountHistory(cacheFor(fakeApi()), false, true, (reading) => {
+    if (!reading) view.host.dispatchEvent(new WheelEvent('wheel', { deltaY: -30, bubbles: true, cancelable: true }))
+  })
+  expect(await screen.findByRole('region', { name: 'Terminal scrollback' })).toBeDefined()
   view.dispose()
 })
 
