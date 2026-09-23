@@ -3,6 +3,8 @@ import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
 // Cursor-addressed output exposes a wrong grid where plain echo does not.
+// Request each paint only after its shared grid has settled. The server nudges
+// rows-1 before the final resize, so a SIGWINCH trap can paint that interim size.
 const painter = `stty -echo
 paint() {
   set -- $(stty size)
@@ -16,8 +18,6 @@ paint() {
   printf '\\033[2J\\033[H'
   printf '\\033[%s;%sHX' "$1" "$2"
 }
-trap paint WINCH
-paint
 while :; do
   if IFS= read -r line; then paint; fi
 done
@@ -86,11 +86,17 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
         if (bottom !== marker) await page.mouse.wheel(0, 2400)
         expect((await rows.last().innerText()).replace(/\u00a0/g, ' ')).toBe(marker)
       }).toPass({ timeout: 8_000 })
-      writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
-      await expect(rows.nth(height - 1)).toHaveText(marker)
     }
+    // Admission can precede the initial resize; use the rendered shared grid
+    // as the barrier for the first paint, just as for the later resize.
+    await expect(rows).toHaveCount(18)
+    writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
     await assertGrid(60, 18)
     writer.send(JSON.stringify({ type: 'resize', cols: 72, rows: 22 }))
+    await expect(rows).toHaveCount(22)
+    // Resizing reflows existing cells; it does not repaint the fixture's marker
+    // at the new corner. Request that paint before waiting for the new marker.
+    writer.send(JSON.stringify({ type: 'input', data: '\r', control_generation: writerGeneration }))
     await assertGrid(72, 22)
     // The larger viewer must keep proposing its pane, not feed 60x18 back
     // into the minimum and stop the shared terminal ever growing again.
