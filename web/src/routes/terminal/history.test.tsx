@@ -1,14 +1,16 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import type { Terminal } from '@xterm/xterm'
 import type { XtermController } from '@/components/xterm-host'
 import type { TerminalReadSurface } from '@/components/terminal-pane'
 import { captureTerminalPresentation, type FrozenTerminal } from '@/components/terminal-presentation'
+import { useNavShortcuts } from '@/components/shell/nav-shortcuts'
 import { api, type Api } from '@/lib/api'
 import type { TerminalHistoryLine, TerminalHistoryResult } from '@/lib/types'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { getHistoryCache, type HistoryCache } from '@/routes/terminal/history-cache'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
+import { hydrate } from '@/store/sync'
 import { fakeApi, run } from '@/test/fixtures'
 
 vi.mock('@/components/terminal-presentation', () => ({ captureTerminalPresentation: vi.fn() }))
@@ -185,6 +187,21 @@ test('accepts the first upward gesture as soon as the restored live surface is a
     if (!reading) view.host.dispatchEvent(new WheelEvent('wheel', { deltaY: -30, bubbles: true, cancelable: true }))
   })
   expect(await screen.findByRole('region', { name: 'Terminal scrollback' })).toBeDefined()
+  view.dispose()
+})
+
+test('keeps typing in the reading surface from launching a run or navigating away', async () => {
+  await hydrate(useStore, fakeApi())
+  useStore.setState({ paletteDialog: null, route: { name: 'terminal', params: { runId: 'run_1' } } })
+  renderHook(useNavShortcuts)
+  fireEvent.keyDown(window, { key: 'n' })
+  expect(useStore.getState().paletteDialog).toBe('launch')
+  act(() => useStore.setState({ paletteDialog: null }))
+  const view = mountHistory(cacheFor(fakeApi()))
+  const output = await beginReading(view)
+  for (const key of ['n', 'g', 'l', 'Escape']) fireEvent.keyDown(output, { key })
+  expect(useStore.getState().paletteDialog).toBeNull()
+  expect(useStore.getState().route.name).toBe('terminal')
   view.dispose()
 })
 

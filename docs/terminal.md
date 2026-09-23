@@ -401,6 +401,8 @@ The shared font zoom also scales the reading surface while preserving its
 row-relative position. Find searches retained loaded pages and frozen rows,
 including pages outside the rendered window; copy targets the read surface.
 Typing, native paste and toolbar paste remain disabled while reading.
+Unmodified dashboard shortcuts also stay inactive while the reading surface
+has focus: `n` cannot launch a run and `Esc` cannot leave this one.
 Terminal-generated replies continue under the live connection's write
 authority, so reading history does not stall applications awaiting a reply.
 Scroll down to the bottom or press `End` to resume following live output.

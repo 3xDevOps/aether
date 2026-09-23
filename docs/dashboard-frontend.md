@@ -1065,10 +1065,11 @@ trigger in the status bar. `⌘K` lives with the palette in
 `n` is offered, on both surfaces, only to a member who may launch. The
 single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
 stands them down whenever something else has the keyboard: a text field or a
-select, a terminal, an open menu or list box, or an open dialog. A stray `n`
-typed at an agent has to reach the agent, `n` in a menu is that menu's own
-typeahead, and `n` on a select jumps to the option that starts with it - the
-guard finds a select by its `combobox` role, since the control is a button.
+select, a live terminal or its focused history surface, an open menu or list
+box, or an open dialog. A stray `n` typed at an agent has to reach the agent;
+in history it does nothing. In a menu it is that menu's typeahead, and on a
+select it jumps to the option that starts with it. The guard finds a select
+by its `combobox` role, since the control is a button.
 The `g` prefix waits 1.5s for the key that completes it, and any key that goes
 somewhere else ends the wait.
 

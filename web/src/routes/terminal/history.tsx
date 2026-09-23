@@ -561,6 +561,7 @@ export function TerminalHistory({
       ref={scroller}
       role="region"
       aria-label="Terminal scrollback"
+      data-terminal-history=""
       tabIndex={0}
       className="absolute inset-0 z-10 overflow-auto bg-background text-foreground outline-none"
       style={{ top: padding, bottom: padding, overflowAnchor: 'none', overscrollBehavior: 'contain', touchAction: 'pan-x pan-y' }}
