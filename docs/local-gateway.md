@@ -416,12 +416,27 @@ arbitrary live-agent filesystem writers.
 `config.import` always address the authenticated member's own persistent home.
 They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
-rules as `files.write`, while `config.import` installs a one-time directory
-selection into that home.
-All of the member's run containers and environment terminal mount one shared
-read-write persistent HOME. A file edit, configuration import, or manual CLI
-profile operation is therefore visible to already-running processes
-immediately, although a tool may need to reload its configuration.
+rules as `files.write`, while `config.import` installs an explicitly selected
+directory into that home and may be used repeatedly.
+The permanent **Configuration** route appears in shared navigation and the
+command palette, and as an action on **Agents**, whenever `config.roots` and
+`config.import` are advertised. It works through both gateways without a
+workspace or onboarding prerequisite; local onboarding is another optional
+entrypoint to the same importer. A server-hosted page can read local files
+explicitly selected in the browser directory picker.
+All runs using the member's account and the environment terminal mount one
+shared read-write persistent HOME. A file edit, configuration import, or
+manual CLI profile operation is therefore visible to active and future runs,
+although a tool may need to reload its configuration.
+Configuration saves and imports bind inherited permissions to the observed
+destination inode and mode. After staging, they recheck that identity and mode
+immediately before atomic rename; an absent destination must still be absent,
+and editor saves also recheck the content revision. A detected change returns
+`config: conflict` without replacing that destination. Staged bytes remain
+private until the destination permissions have been validated.
+These checks are optimistic, not a filesystem compare-and-swap: Aether's root
+lock coordinates its own operations, not arbitrary processes in the shared
+HOME, which can still write between the final check and rename.
 
 The browser uses the selected root's `runtime_ignores` metadata before
 reading or uploading any bytes. `runtime_ignores` contains exact,
@@ -432,19 +447,33 @@ custom harness. Known credential names wherever they occur in a path, and
 every basename ending in `.pem`, remain filtered by the existing
 destination-independent credential policy. The browser keeps raw local file
 handles so it can recompute an import when the destination changes, and
-cannot change destinations during import or after a result exists.
-All remaining bytes are uploaded and server-scanned. Imports allow at most
-2,000 files, 1 MiB per file, and 20 MiB decoded in aggregate. Empty and binary
-regular files are preserved; a browser import sends mode `0644` and cannot
-preserve executable mode or symlinks. Existing remote modes are preserved.
+cannot change destinations during import. After a result, the user can start
+another directory selection or choose **Open remote files** to navigate to the
+existing **Files** editor.
+The preview lists accepted paths and makes all omitted paths available for
+review. Imports allow at most 2,000 files, 1 MiB per file, and 20 MiB decoded in
+aggregate. Omissions for count, aggregate size, or per-file size visibly mark
+the selection incomplete and disable upload until the user explicitly
+acknowledges importing the accepted subset, or chooses a smaller selection.
+The acknowledgement resets for a new directory, destination, or recomputed
+selection. Credential/runtime exclusions alone do not require it.
+Accepted bytes are uploaded and server-scanned, so a secret finding does not
+mean those bytes stayed local. Empty and binary regular files are preserved;
+new browser-imported files use `0644`, while overwrites preserve existing
+remote modes. The browser cannot preserve source executable bits or symlinks.
 The server rejects unsafe paths, symlink components, hardlinks, and
 non-regular destinations.
 
 The result's `files` and `bytes` count
 accepted files only; `excluded` reports server-side credential, ignore,
 secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
-`rollback` remain separate manual operations; the dashboard does not invoke
-profile synchronization or watch a local directory.
+`rollback` remain separate manual operations; neither browser imports nor
+**Files** edits create CLI snapshot history. The persistent HOME does not
+depend on snapshots. Snapshot pins record optional launch provenance, not
+isolated writable run copies. Manual push and rollback overlay snapshot files
+into the same HOME without deleting files absent from the snapshot; rollback
+is not an exact-tree restore. There is no directory watcher, automatic
+configuration synchronization, or automatic import retry.
 
 If an import fails after writing one or more files, the response is still a
 `config.import` result rather than a JSON-RPC failure. Its `files` and `bytes`

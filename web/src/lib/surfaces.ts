@@ -10,6 +10,7 @@ import {
   ListTodo,
   Settings,
   ShieldQuestion,
+  SlidersHorizontal,
   Users,
   type LucideIcon,
 } from 'lucide-react'
@@ -42,7 +43,12 @@ export function surfaces(cap: Capability): Surface[] {
     list.push({ name: 'templates', label: 'Templates', Icon: FileText })
   if (cap.hasMethod('agent.list'))
     list.push({ name: 'agents', label: 'Agents', Icon: Bot })
-  if (cap.hasMethod('files.tree'))
+  if (cap.hasMethod('config.roots') && cap.hasMethod('config.import'))
+    list.push({ name: 'configuration', label: 'Configuration', Icon: SlidersHorizontal })
+  if (
+    cap.hasMethod('files.tree') ||
+    (cap.hasMethod('config.roots') && cap.hasMethod('config.tree'))
+  )
     list.push({ name: 'files', label: 'Files', Icon: FolderTree })
   if (cap.hasLocal('link.status'))
     list.push({ name: 'onboarding', label: 'Onboarding', Icon: Compass })

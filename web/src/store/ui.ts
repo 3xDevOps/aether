@@ -116,7 +116,7 @@ export interface UiSlice {
   onboardingFurthest: OnboardingStep
   onboardingWorkspace: string
   onboardingRepo: OnboardingRepo | null
-  onboardingImportPending: boolean
+  configImportPending: boolean
   /** What the First run step has typed but not launched. It lives here so a
    * jump to another step and back does not throw the draft away. */
   onboardingFirstRun: OnboardingFirstRun
@@ -176,7 +176,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   onboardingFurthest: 'Link',
   onboardingWorkspace: '',
   onboardingRepo: null,
-  onboardingImportPending: false,
+  configImportPending: false,
   onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
   groupBy: 'status',

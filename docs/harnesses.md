@@ -245,7 +245,7 @@ Four things turn the reporter off:
   with no reporter.
 
 The asset files are server-written, read-only, and live in `/run/aether`,
-never in the worktree or the member's synced profile. Each applies for that
+never in the worktree or the member's persistent configuration. Each applies for that
 launch alone and merges over what the member already has: `--settings`
 layers one settings document over Claude Code's own, `-e` loads one more pi
 extension beside the ones you already have, `-c` overrides your
@@ -451,7 +451,7 @@ oh-my-pi is a fork of pi with its own executable and its own home. Install
 it with the vendor's command, `curl -fsSL https://omp.sh/install | sh`,
 which puts `omp` in `~/.local/bin`. Inside `aether terminal`, start the CLI
 and log in through its own flow; credentials land in the agent database
-under `~/.omp/agent/`, which is excluded from profile sync. `ANTHROPIC_API_KEY`
+under `~/.omp/agent/`, which is excluded from configuration uploads. `ANTHROPIC_API_KEY`
 or `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 `omp` is a shipped name, and a shipped name always wins over a member's own
@@ -534,22 +534,30 @@ deny-name policies are safe. An invalid administrator definition rejects
 server startup; an invalid member registration is refused at the RPC.
 Agent installation, login state, configuration import, and launch definitions
 remain separate concerns: installation and login state live in the member home,
-the one-time browser import writes selected configuration there, and the
+the explicit browser import writes selected configuration there, and the
 definition resolves argv for that member. The terminal is the only setup
 transport for installation and login.
 
 ## Agent configuration: import and Files
 
-The local dashboard (`aether gui`) does not watch a laptop directory or run an
-AI inventory. During the Agents step, choose one directory such as
-`~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp` with the browser directory picker.
-The browser waits for `config.roots` and a known destination before it reads
-any file bytes. A unique basename selects its destination automatically; an
-unknown or ambiguous basename must be assigned explicitly. The preview then
-shows the files that will be sent and the paths left out before upload. Import
-is explicit and one-time: after it succeeds, the import control is gone. The
-server-hosted dashboard has no onboarding picker; use local `aether gui` for
-this step.
+Open **Configuration** from the Agents page, the shared navigation rail, or
+the command palette in either the local dashboard (`aether gui`) or the
+server-hosted dashboard. This permanent route is available whenever the
+gateway advertises `config.roots` and `config.import`; it needs no workspace
+or onboarding progress. The local onboarding Agents step offers the same
+importer as an optional entrypoint.
+
+Choose one directory such as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`
+with the browser directory picker. A hosted page can read a directory you
+explicitly select, not arbitrary local paths. The browser waits for
+`config.roots` and a known destination before it reads any file bytes. A
+unique basename selects its destination automatically; an unknown or ambiguous
+basename must be assigned explicitly. Review the accepted paths and the full
+list of omitted paths before upload. Import is explicit and repeatable:
+after a result, you can select a directory for another import or choose
+**Open remote files** to visit the existing **Files** editor.
+
+![Configuration import outside onboarding](media/configuration-import.webp)
 
 Credential names in any path component and `*.pem` files are always skipped
 before upload. Runtime/history exclusions come from the selected root's
@@ -561,7 +569,7 @@ selected policy; a stale read cannot replace the current preview. These local
 exclusions are not overridden by `.aether-profile-ignore` in browser import.
 `agent/skills/`, `agent/extensions/`, and `agent/npm/` remain configuration and
 are imported.
-Remaining bytes are uploaded and scanned by the server; do not assume all
+The accepted bytes are uploaded and scanned by the server; do not assume all
 secret-looking content stays on the laptop. A complete response reports
 accepted counts and server exclusions. If the server stops after writing files,
 the dashboard reports an incomplete result with exact committed paths, counts
@@ -570,10 +578,20 @@ lost, the outcome is unknown and some files may have been copied; inspect
 **Files** before retrying. There is no watcher or automatic retry: selecting
 the directory and importing again is explicit.
 An import can include empty files and arbitrary binary bytes. It is limited to
-**1 MiB per file**, **20 MiB decoded total**, and **2,000 files**. Browser
-imports create new files with mode `0644`; the browser cannot preserve
-executable mode or symlinks, so a script may need `chmod` in the remote
-terminal.
+**1 MiB per file**, **20 MiB decoded total**, and **2,000 files**. If any file
+is omitted because of these size or count limits, the preview explicitly warns
+that the selection is incomplete and disables upload until you acknowledge
+importing only the accepted files. Review every omitted path, or choose a
+smaller selection instead. Acknowledgement resets when you choose another
+directory, change the destination, or recompute the selection. Switching
+authenticated members or servers discards the prepared selection and its
+acknowledgement. Expected credential/runtime exclusions alone do not require
+this acknowledgement.
+Browser imports create new files with mode `0644` and preserve existing remote
+file modes when overwriting. The browser cannot preserve local executable bits
+or symlinks, so a newly imported script may need `chmod` in the remote terminal.
+
+![An incomplete selection requires acknowledgement before upload](media/configuration-incomplete.webp)
 
 The imported files are written into your authenticated member's persistent
 configuration home. That home is mounted read-write in your environment
@@ -625,10 +643,18 @@ aether profile push --agent claude --skip-secret <file>
 aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
 
-These commands read the local harness root named by the selected agent. They
-are separate from browser directory import and from editing the persistent
-member home in **Files**. Use the member-home editor when a change should be
-visible immediately to the shared home.
+`profile push` reads the selected agent's local harness root and records a
+content-addressed snapshot; `status` reports recorded snapshot metadata, not a
+live inventory of the home. Browser imports and **Files** edits do not create
+or update this CLI snapshot history. Configuration persists in the member HOME
+even when no snapshot exists.
+
+Manual `push` and `rollback` overlay the snapshot's files into that same shared
+HOME, making those writes visible to active and future runs using the account.
+They do not create isolated per-run copies. Rollback is not an exact-tree
+restore: files absent from the chosen snapshot are not deleted. A run's snapshot
+pin is optional launch provenance, not a guarantee that its current home still
+matches those bytes. No path automatically synchronizes later local changes.
 
 ## Adding a harness
 

@@ -398,16 +398,16 @@ identify its callers.
 
 ### Browser configuration imports
 
-The local onboarding importer reads a directory only after `config.roots`
-returns and a destination is known. Credential names and `*.pem` files are
-filtered before any browser read, while runtime/history paths use the selected
-root's `runtime_ignores`; the server remains authoritative and scans all bytes
-that survive those local exclusions. Unknown or ambiguous directory basenames
-must be assigned explicitly, and changing the destination re-reads the retained
-browser `File` handles. Generation guards discard stale reads and prevent a
-preview prepared for one destination from being submitted to another. The
-server-hosted dashboard cannot read a directory on the user's machine, so this
-surface exists only in `aether gui`.
+The shared Configuration importer reads a user-selected directory only after
+`config.roots` returns and a destination is known. Credential names and `*.pem`
+files are filtered before any browser read, while runtime/history paths use
+the selected root's `runtime_ignores`; the server remains authoritative and
+scans the accepted bytes that are uploaded. Unknown or ambiguous directory
+basenames must be assigned explicitly, and changing the destination re-reads
+the retained browser `File` handles. Generation guards discard stale reads and
+prevent a preview prepared for one destination from being submitted to another.
+Both local and server-hosted dashboards can read a directory explicitly chosen
+through the browser picker; neither can read arbitrary local paths.
 
 ### Terminal image uploads
 
@@ -440,9 +440,13 @@ shared account's home.
 
 ## Browser configuration and Files
 
-The local dashboard's onboarding directory picker is an explicit, one-time
-browser import. A server-hosted dashboard has no laptop directory picker; use
-`aether gui` for this step. The browser waits for `config.roots` and a known
+The permanent **Configuration** route provides explicit, repeatable browser
+directory import on both local and server-hosted dashboards when `config.roots`
+and `config.import` are advertised. Agents, the shared navigation rail, and the
+command palette expose it; no workspace or onboarding progress is required.
+Local onboarding is an optional entrypoint to the same importer. After a result,
+the user can select another directory or choose **Open remote files** to visit
+the existing **Files** editor. The browser waits for `config.roots` and a known
 destination before previewing or reading bytes. A known unique basename selects
 its destination automatically; an unknown or ambiguous basename requires an
 explicit choice. Credential names in any path component and `*.pem` files are
@@ -450,12 +454,21 @@ always skipped before upload. Runtime/history paths come from the selected
 root's `runtime_ignores` metadata and match exact, root-relative paths or
 component prefixes case-sensitively after trailing slashes are trimmed.
 Changing the destination clears the old preview and re-reads retained browser
-`File` handles; generation guards discard stale reads. It reads remaining
-selected regular-file bytes and sends them to the server, where they are
-scanned before writing; a secret finding is therefore not proof that the
-content stayed local. Empty files and arbitrary binary regular bytes are
-preserved under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
-limits. The shared HTTP gateway permits a 30 MiB request for `config.import`,
+`File` handles; generation guards discard stale reads. The preview lists the
+accepted paths and exposes every omitted path for review. Files omitted for
+the 1 MiB per-file, 20 MiB decoded aggregate, or 2,000-file limits mark the
+selection incomplete. Upload is disabled until the user acknowledges importing
+only the accepted subset; choosing a smaller selection is the alternative.
+A new directory, destination, or recomputed selection clears this
+acknowledgement. Expected credential/runtime exclusions alone do not require
+it. There is no watcher, automatic configuration synchronization, or automatic
+import retry.
+
+The browser reads accepted regular-file bytes and sends them to the server,
+where they are scanned before writing; a secret finding is therefore not proof
+that the content stayed local. Empty files and arbitrary binary regular bytes
+are preserved within those limits.
+The shared HTTP gateway permits a 30 MiB request for `config.import`,
 128 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
 The 64 MiB editor file limit remains authoritative after JSON decoding. These
 are framing limits, not larger decoded import allowances. The SSH control
@@ -470,10 +483,14 @@ requires the `Launch` capability and targets only the authenticated member's
 own home; an admin cannot select another member or account.
 
 The imported and edited files are in the member's shared read-write home,
-mounted into that member's environment terminal and runs, including active
-runs. An account share grants another member's run that same home; it is not a
-per-run isolated configuration copy. A snapshot pin records launch provenance,
-not an isolation boundary or a promise that home edits wait for later runs.
+mounted into that member's environment terminal and active and future runs
+using that account. An account share grants another member's run that same
+home; it is not a per-run isolated configuration copy. A snapshot pin records
+optional launch provenance, not an isolation boundary or a promise that home
+edits wait for later runs. Browser imports and Files edits do not create or
+update CLI snapshot history; the HOME persists independently. Manual profile
+push and rollback overlay snapshot files into that same HOME and leave paths
+absent from the snapshot untouched. Rollback is not an exact-tree restore.
 Files edits do not rebuild the installed-agent image.
 
 The Files editor accepts complete UTF-8 text without NUL bytes up to 64 MiB.
