@@ -10,14 +10,14 @@ import { friendly, formatBytes, message } from '@/lib/format'
 import type {
   ConfigExclusion,
   ConfigFile,
-  ConfigImportResult,
   ConfigRoot,
 } from '@/lib/types'
 import { useStore } from '@/store'
+import type { ConfigImportStatus } from '@/store/ui'
 
-export const MAX_IMPORT_FILES = 2000
-export const MAX_IMPORT_FILE_BYTES = 1024 * 1024
-export const MAX_IMPORT_TOTAL_BYTES = 20 * 1024 * 1024
+export const IMPORT_BATCH_FILES = 2000
+export const IMPORT_BATCH_BYTES = 20 * 1024 * 1024
+export const MAX_IMPORT_FILE_BYTES = 64 * 1024 * 1024
 
 const credentialNames: Record<string, true> = {
   '.credentials.json': true,
@@ -46,7 +46,7 @@ interface LocalExclusion extends ConfigExclusion {
 
 interface Selection {
   basename: string
-  files: ConfigFile[]
+  files: Array<{ path: string; destinationPath: string; file: File }>
   bytes: number
   excluded: LocalExclusion[]
 }
@@ -113,12 +113,7 @@ function exclusion(path: string, reason: string, detail: string): LocalExclusion
   return { path, reason, detail }
 }
 
-/**
- * Reads only files that fit the import limits and builds the byte-preserving
- * payload sent to config.import. It deliberately does not decode text: an
- * empty file stays empty and arbitrary bytes stay arbitrary bytes. Callers
- * should discard the result when their selection generation is stale.
- */
+/** Prepare paths and metadata without reading file contents. */
 export async function prepareDirectoryImport(
   selected: File[] | FileList,
   root: ConfigRoot,
@@ -127,11 +122,12 @@ export async function prepareDirectoryImport(
   const files = Array.from(selected)
   if (files.length === 0) return null
   const first = relativePath(files[0])
-  if (!first.valid) return null
+  if (!first.valid) throw new Error('Choose a directory, not an individual file.')
   const basename = first.root
   const excluded: LocalExclusion[] = []
-  const payload: ConfigFile[] = []
+  const payload: Selection['files'] = []
   const paths = new Set<string>()
+  const rootPrefix = root.path.substring(2)
   let bytes = 0
 
   for (const file of files) {
@@ -139,20 +135,20 @@ export async function prepareDirectoryImport(
     const parts = relativePath(file)
     const displayPath = parts.valid ? parts.path : file.name
     if (!parts.valid || parts.root !== basename) {
-      excluded.push(
-        exclusion(
-          displayPath,
-          'invalid-path',
-          'path is not a file below the selected directory',
-        ),
-      )
-      continue
+      throw new Error(`${displayPath}: path is not a file below the selected directory. Nothing was uploaded.`)
     }
-    if (paths.has(parts.path)) {
-      excluded.push(exclusion(parts.path, 'duplicate', 'duplicate path selected'))
-      continue
+    // Match configPath's single prefix removal, but retain the original request
+    // path so the server does not strip a second prefix from nested directories.
+    if (parts.path === rootPrefix) {
+      throw new Error(`${parts.path}: path names the destination root, not a file. Nothing was uploaded.`)
     }
-    paths.add(parts.path)
+    const destinationPath = parts.path.startsWith(`${rootPrefix}/`)
+      ? parts.path.slice(rootPrefix.length + 1)
+      : parts.path
+    if (paths.has(destinationPath)) {
+      throw new Error(`${parts.path}: duplicate destination ${destinationPath} selected. Nothing was uploaded.`)
+    }
+    paths.add(destinationPath)
     if (isCredential(parts.path)) {
       excluded.push(
         exclusion(parts.path, 'credential', 'credential file excluded before upload'),
@@ -166,65 +162,116 @@ export async function prepareDirectoryImport(
       continue
     }
     if (file.size > MAX_IMPORT_FILE_BYTES) {
-      excluded.push(
-        exclusion(
-          parts.path,
-          'too-large',
-          `file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)} and was not read`,
-        ),
-      )
-      continue
+      throw new Error(`${parts.path}: file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)}. Nothing was uploaded.`)
     }
-    if (payload.length >= MAX_IMPORT_FILES) {
-      excluded.push(
-        exclusion(
-          parts.path,
-          'too-many',
-          `the import is limited to ${MAX_IMPORT_FILES} files`,
-        ),
-      )
-      continue
-    }
-    if (bytes + file.size > MAX_IMPORT_TOTAL_BYTES) {
-      excluded.push(
-        exclusion(
-          parts.path,
-          'over-budget',
-          `the import is limited to ${formatBytes(MAX_IMPORT_TOTAL_BYTES)}`,
-        ),
-      )
-      continue
-    }
-
-    const content = await readBytes(file)
-    if (!generationIsCurrent()) return null
-    // A file can change while the chooser is open. Do not retain a read that
-    // crossed either bound even if its File.size was small when selected.
-    if (content.byteLength > MAX_IMPORT_FILE_BYTES) {
-      excluded.push(
-        exclusion(
-          parts.path,
-          'too-large',
-          `file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)} and was not uploaded`,
-        ),
-      )
-      continue
-    }
-    if (bytes + content.byteLength > MAX_IMPORT_TOTAL_BYTES) {
-      excluded.push(
-        exclusion(
-          parts.path,
-          'over-budget',
-          `the import is limited to ${formatBytes(MAX_IMPORT_TOTAL_BYTES)}`,
-        ),
-      )
-      continue
-    }
-    payload.push({ path: parts.path, content_base64: base64(content), mode: 0o644 })
-    bytes += content.byteLength
+    payload.push({ path: parts.path, destinationPath, file })
+    bytes += file.size
   }
 
   return { basename, files: payload, bytes, excluded }
+}
+
+// The operation belongs to the authenticated owner, not the mounted route.
+async function uploadDirectory(
+  client: Api,
+  owner: string | null,
+  harness: string,
+  selection: Selection,
+) {
+  let status: ConfigImportStatus = {
+    owner,
+    basename: selection.basename,
+    totalFiles: selection.files.length,
+    excluded: selection.excluded,
+    phase: 'reading',
+    result: { harness, files: 0, bytes: 0, excluded: [], imported_paths: [] },
+    unknownPaths: [],
+  }
+  let identityChanged = false
+  const unsubscribe = useStore.subscribe((state) => {
+    if (state.identityKey !== owner) identityChanged = true
+  })
+  const checkIdentity = () => {
+    if (identityChanged || useStore.getState().identityKey !== owner) {
+      throw new Error('Authenticated member or server changed. No further batches were sent.')
+    }
+  }
+  useStore.setState({ configImportPending: true, configImportStatus: status })
+  let inFlightPaths: string[] = []
+  try {
+    for (let offset = 0; offset < selection.files.length;) {
+      checkIdentity()
+      status = { ...status, phase: 'reading' }
+      useStore.setState({ configImportStatus: status })
+      const files: ConfigFile[] = []
+      const destinationPaths: string[] = []
+      let bytes = 0
+      while (offset < selection.files.length && files.length < IMPORT_BATCH_FILES) {
+        const { path, destinationPath, file } = selection.files[offset]
+        if (files.length > 0 && bytes + file.size > IMPORT_BATCH_BYTES) break
+        let content: ArrayBuffer
+        try {
+          content = await readBytes(file)
+        } catch (err) {
+          throw new Error(`${path}: ${message(err)}`)
+        }
+        checkIdentity()
+        if (content.byteLength > MAX_IMPORT_FILE_BYTES) {
+          throw new Error(`${path}: file is larger than ${formatBytes(MAX_IMPORT_FILE_BYTES)} and was not uploaded.`)
+        }
+        if (content.byteLength !== file.size) {
+          throw new Error(`${path}: file size changed after selection. This batch was not uploaded.`)
+        }
+        files.push({ path, content_base64: base64(content), mode: 0o644 })
+        destinationPaths.push(destinationPath)
+        bytes += content.byteLength
+        offset += 1
+        if (bytes >= IMPORT_BATCH_BYTES) break
+      }
+      checkIdentity()
+      status = { ...status, phase: 'uploading' }
+      useStore.setState({ configImportStatus: status })
+      checkIdentity()
+      inFlightPaths = destinationPaths
+      const imported = await client.configImport({ harness, files })
+      inFlightPaths = []
+      const excludedPaths = new Set(imported.excluded.map(({ path }) => path))
+      const importedPaths = imported.error
+        ? (imported.imported_paths ?? [])
+        : destinationPaths.filter((path) => !excludedPaths.has(path))
+      status = {
+        ...status,
+        result: {
+          harness,
+          files: status.result.files + imported.files,
+          bytes: status.result.bytes + imported.bytes,
+          excluded: status.result.excluded.concat(imported.excluded),
+          imported_paths: (status.result.imported_paths ?? []).concat(importedPaths),
+          ...(imported.error ? { error: imported.error } : {}),
+        },
+      }
+      if (imported.error) break
+      checkIdentity()
+    }
+  } catch (err) {
+    const detail = message(err)
+    status = {
+      ...status,
+      result: {
+        ...status.result,
+        error: inFlightPaths.length > 0
+          ? `Import outcome is unknown for the current batch: ${detail}. Some files in this batch may have been copied.`
+          : detail,
+      },
+      unknownPaths: inFlightPaths,
+    }
+  } finally {
+    unsubscribe()
+    useStore.setState({
+      configImportPending: false,
+      configImportStatus: { ...status, phase: 'complete' },
+    })
+  }
 }
 
 function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: string }) {
@@ -248,8 +295,7 @@ function ExclusionList({ entries, label }: { entries: ConfigExclusion[]; label: 
 
 export function ProfileImport({ client }: { client: Api }) {
   const identityKey = useStore((state) => state.identityKey)
-  // Keep local file handles and consent scoped to the authenticated owner,
-  // while the store's pending flag outlives this form and its in-flight request.
+  // File handles reset with identity; an in-flight operation outlives the form.
   return <ProfileImportForm key={identityKey} client={client} identityKey={identityKey} />
 }
 
@@ -259,12 +305,13 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
   const [rootsError, setRootsError] = useState<string | null>(null)
   const [rawFiles, setRawFiles] = useState<File[] | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
-  const [acknowledgedSelection, setAcknowledgedSelection] = useState<Selection | null>(null)
   const [selectedHarness, setSelectedHarness] = useState('')
   const [reading, setReading] = useState(false)
   const [selectionError, setSelectionError] = useState<string | null>(null)
-  const [result, setResult] = useState<ConfigImportResult | null>(null)
-  const [importError, setImportError] = useState<string | null>(null)
+  const status = useStore((state) =>
+    state.configImportStatus?.owner === identityKey ? state.configImportStatus : null,
+  )
+  const result = status?.phase === 'complete' ? status.result : null
   const importing = useStore((state) => state.configImportPending)
   const picker = useRef<HTMLInputElement | null>(null)
   const generation = useRef(0)
@@ -313,15 +360,12 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     })
   }, [basename, rawFiles, roots])
 
-  // Both initial auto-selection and an explicit destination change reach this
-  // effect. The generation guard prevents an old File read from replacing the
-  // current destination's preview.
+  // Recompute metadata when the destination's exclusion policy changes.
   useEffect(() => {
-    if (!rawFiles || roots === null || !destination || importing || result || importError || importStarted.current) return
+    if (!rawFiles || roots === null || !destination || importing || status || importStarted.current) return
     const version = ++generation.current
     let active = true
     setSelection(null)
-    setAcknowledgedSelection(null)
     setReading(true)
     void prepareDirectoryImport(
       rawFiles,
@@ -342,7 +386,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     return () => {
       active = false
     }
-  }, [destination, importError, importing, rawFiles, result, roots])
+  }, [destination, importing, rawFiles, status, roots])
 
   function chooseDestination(harness: string) {
     if (useStore.getState().configImportPending || result) return
@@ -350,10 +394,8 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     generation.current += 1
     setSelectedHarness(harness)
     setSelection(null)
-    setAcknowledgedSelection(null)
     setReading(false)
     setSelectionError(null)
-    setImportError(null)
   }
 
   function choose(event: ChangeEvent<HTMLInputElement>) {
@@ -363,12 +405,10 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     generation.current += 1
     setRawFiles(null)
     setSelection(null)
-    setAcknowledgedSelection(null)
     setSelectedHarness('')
     setReading(false)
     setSelectionError(null)
-    setImportError(null)
-    setResult(null)
+    useStore.setState({ configImportStatus: null })
     event.currentTarget.value = ''
     if (selected.length === 0) return
     const first = relativePath(selected[0])
@@ -383,42 +423,18 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
     }
   }
 
-  const limitExclusions = selection?.excluded.reduce(
-    (count, { reason }) => count + Number(reason === 'too-many' || reason === 'over-budget' || reason === 'too-large'),
-    0,
-  ) ?? 0
-  const needsAcknowledgement = limitExclusions > 0 && acknowledgedSelection !== selection
-
   async function importConfiguration() {
     if (
       !selection ||
       selection.files.length === 0 ||
-      needsAcknowledgement ||
       !destination ||
       reading ||
       result ||
       useStore.getState().identityKey !== identityKey ||
       useStore.getState().configImportPending
     ) return
-    const version = generation.current
-    const harness = destination.harness
     importStarted.current = true
-    const files = selection.files
-    useStore.setState({ configImportPending: true })
-    setImportError(null)
-    try {
-      const imported = await client.configImport({ harness, files })
-      if (generation.current === version) setResult(imported)
-    } catch (err) {
-      if (generation.current === version) {
-        const detail = message(err)
-        setImportError(
-          `Import outcome is unknown: ${detail}. Some files may have been copied; inspect Files before retrying.`,
-        )
-      }
-    } finally {
-      useStore.setState({ configImportPending: false })
-    }
+    await uploadDirectory(client, identityKey, destination.harness, selection)
   }
   const rootLabel = basename || 'your agent configuration directory'
 
@@ -438,8 +454,8 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
           <span className="font-mono">~/.omp</span>.
         </p>
       </div>
-      {importing && !selection && (
-        <p role="status" className="text-sm text-muted-foreground">Importing configuration…</p>
+      {importing && !status && (
+        <p role="status" className="text-sm text-muted-foreground">Waiting for the previous import to settle…</p>
       )}
 
       {roots === null && !rootsError && !importing && (
@@ -490,8 +506,8 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
         <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
           Known credential files and the selected agent's runtime files are
           left out before reading. Other files are sent to the server for
-          checking when you confirm. Limits: 1 MiB each, 20 MiB total, and{' '}
-          {MAX_IMPORT_FILES} files.
+          checking when you confirm. The whole directory is transferred in batches,
+          without a file-count or total-size limit. Each file may be up to 64 MiB.
         </p>
       </div>
 
@@ -525,7 +541,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
 
       {reading && (
         <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-sm" role="status">
-          Reading {rootLabel}; files over the limits and this destination's runtime files are left out...
+          Preparing {rootLabel}; file contents will be read only when you import.
         </p>
       )}
       {selectionError && (
@@ -533,7 +549,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
           {selectionError}
         </p>
       )}
-      {selection && !reading && (
+      {selection && !reading && !status && (
         <div className="min-w-0 space-y-3 border-y border-border/70 bg-card px-3 py-3">
           <div className="space-y-1">
             <h4 className="text-sm font-semibold">Preview</h4>
@@ -547,7 +563,6 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
             </p>
           </div>
 
-          {!result && (
             <details className="space-y-2 border-t border-border/70 pt-2">
               <summary className="cursor-pointer text-sm font-medium">
                 Accepted paths: {selection.files.length}
@@ -558,34 +573,6 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
                 ))}
               </ul>
             </details>
-          )}
-
-          {limitExclusions > 0 && (
-            <div className="space-y-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
-              <p role="alert" className="text-sm text-state-failed">
-                Incomplete selection: {limitExclusions} files omitted by import
-                limits; only {selection.files.length} files accepted. Settings or
-                dependencies may be absent, so imported configuration may not work.
-              </p>
-              <p className="text-[13px] leading-5">
-                Prepare a smaller copy of this agent directory, preserving paths
-                relative to the agent root, then choose that directory instead.
-                Files over 1 MiB must be reduced or transferred separately.
-              </p>
-              {!result && (
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={acknowledgedSelection === selection}
-                    disabled={importing}
-                    onChange={(event) => setAcknowledgedSelection(event.target.checked ? selection : null)}
-                  />
-                  I understand this selection is incomplete and want to import only the accepted files.
-                </label>
-              )}
-            </div>
-          )}
-
           <ExclusionList entries={selection.excluded} label="Left out before upload" />
 
           <p className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-[13px] leading-5">
@@ -593,86 +580,82 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
             overwritten, accepted files change your persistent remote home
             immediately, and this local directory will not be watched.
           </p>
-          {importError && (
-            <div className="flex min-w-0 flex-wrap items-center gap-3 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2">
-              <p className="text-sm text-state-failed" role="alert">
-                {importError}
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => navigate('files')}
-              >
-                Inspect Files
-              </Button>
-            </div>
+          <Button
+            size="sm"
+            disabled={importing || reading || selection.files.length === 0 || !destination}
+            onClick={() => void importConfiguration()}
+          >
+            Import configuration
+          </Button>
+        </div>
+      )}
+      {status && (
+        <div className="min-w-0 space-y-3 border-y border-border/70 bg-card px-3 py-3">
+          <p className="text-sm">
+            Directory: <span className="break-all font-mono">{status.basename}</span>
+          </p>
+          {!result && (
+            <p role="status" className="border-l-2 border-state-working/60 bg-state-working/5 px-3 py-2 text-sm">
+              Importing configuration: {status.phase === 'reading' ? 'reading' : 'uploading'} the next batch.
+              {' '}{status.result.files} files ({formatBytes(status.result.bytes)}) confirmed imported;
+              {' '}{status.result.excluded.length} server exclusions from {status.totalFiles} selected files.
+              You can navigate away and return to this result. Keep this browser window open.
+            </p>
           )}
-          {result ? (
-            result.error ? (
-              <>
-                <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
-                  <p>
-                    Import incomplete: {result.files} files ({formatBytes(result.bytes)}) imported into{' '}
-                    {friendly[result.harness] ?? result.harness}.
-                  </p>
-                  <p>{result.error}</p>
-                  <p>
-                    Copied files remain. Inspect Files before choosing the
-                    directory again to retry.
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => navigate('files')}
-                  >
-                    Inspect Files
-                  </Button>
-                </div>
-                {result.imported_paths && (
+          {result && (
+            <>
+              {result.error ? (
+                <>
+                  <div className="space-y-2 border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed" role="alert">
+                    <p>
+                      Import incomplete: {result.files} files ({formatBytes(result.bytes)}) imported into{' '}
+                      {friendly[result.harness] ?? result.harness}.
+                    </p>
+                    <p>{result.error}</p>
+                    <p>Copied files remain. Inspect Files before choosing the directory again to retry.</p>
+                    <Button size="sm" variant="outline" onClick={() => navigate('files')}>
+                      Inspect Files
+                    </Button>
+                  </div>
                   <div className="space-y-2 border-t border-border/70 pt-2">
-                    <p className="text-sm font-medium">Imported paths: {result.imported_paths.length}</p>
+                    <p className="text-sm font-medium">Imported paths: {result.imported_paths?.length ?? 0}</p>
                     <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
-                      {result.imported_paths.map((path) => (
-                        <li key={path} className="font-mono">{path}</li>
+                      {result.imported_paths?.map((path) => (
+                        <li key={path} className="break-all font-mono">{path}</li>
                       ))}
                     </ul>
                   </div>
-                )}
-                <ExclusionList entries={result.excluded} label="Server left out" />
-              </>
-            ) : (
-              <>
+                  {status.unknownPaths.length > 0 && (
+                    <details className="space-y-2 border-t border-border/70 pt-2">
+                      <summary className="cursor-pointer text-sm font-medium">
+                        Paths with unknown outcome: {status.unknownPaths.length}
+                      </summary>
+                      <ul className="max-h-52 min-w-0 space-y-1 overflow-y-auto text-xs">
+                        {status.unknownPaths.map((path) => (
+                          <li key={path} className="break-all font-mono">{path}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
+              ) : (
                 <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm text-state-done">
                   Imported {result.files} files ({formatBytes(result.bytes)}) into{' '}
                   {friendly[result.harness] ?? result.harness}.
                 </p>
-                <ExclusionList entries={result.excluded} label="Server left out" />
-              </>
-            )
-          ) : (
-            <Button
-              size="sm"
-              disabled={importing || reading || selection.files.length === 0 || !destination || needsAcknowledgement}
-              onClick={() => void importConfiguration()}
-            >
-              {importing ? 'Importing...' : 'Import configuration'}
-            </Button>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => navigate('files')}>
+                  Open remote files
+                </Button>
+                <Button size="sm" variant="outline" disabled={importing} onClick={() => picker.current?.click()}>
+                  Import another directory
+                </Button>
+              </div>
+            </>
           )}
-          {result && (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => navigate('files')}>
-                Open remote files
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={importing}
-                onClick={() => picker.current?.click()}
-              >
-                Import another directory
-              </Button>
-            </div>
-          )}
+          <ExclusionList entries={status.excluded} label="Left out before upload" />
+          <ExclusionList entries={status.result.excluded} label="Server left out" />
         </div>
       )}
     </section>
