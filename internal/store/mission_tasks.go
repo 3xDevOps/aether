@@ -727,9 +727,6 @@ func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, lockErr := tx.ExecContext(ctx, `UPDATE mission_tasks SET updated_at = updated_at WHERE id = ?`, id); lockErr != nil {
-		return lockErr
-	}
 	var missionID domain.MissionID
 	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
 		return ErrNotFound

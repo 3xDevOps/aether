@@ -501,10 +501,6 @@ func enqueueMissionControlChange(ctx context.Context, tx *sql.Tx, missionID doma
 // a caller that decides on phase, generation, or plan version cannot be
 // overtaken between the read and its own write. idExpr locates the mission
 // from arg, which may be the mission id or a subquery over a child row.
-//
-// The write has to be the transaction's first statement. A read before it
-// takes a shared lock that SQLite refuses to upgrade while another writer
-// holds the database, and the busy handler does not cover that upgrade.
 func lockMissionRowBy(ctx context.Context, tx *sql.Tx, idExpr string, arg any, subject string) (*domain.Mission, error) {
 	if _, err := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = `+idExpr, arg); err != nil {
 		return nil, fmt.Errorf("store: lock %s: %w", subject, err)

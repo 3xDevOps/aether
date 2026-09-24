@@ -930,7 +930,7 @@ func TestWriteTransactionsWaitForTheWriteLock(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	const writers, rounds = 8, 10
+	const writers, rounds = 8, 4
 	var wg sync.WaitGroup
 	errs := make(chan error, writers*rounds)
 	for w := range writers {

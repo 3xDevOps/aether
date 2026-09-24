@@ -609,9 +609,6 @@ func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by
 		return nil, fmt.Errorf("store: cancel queued steer requests: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, lockErr := tx.ExecContext(ctx, `UPDATE room_messages SET updated_at = updated_at WHERE run_id = ? AND kind = ? AND state = ?`, run, RoomMessageSteerRequest, RoomMessageQueued); lockErr != nil {
-		return nil, fmt.Errorf("store: cancel queued steer requests: lock: %w", lockErr)
-	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, id`, run, RoomMessageSteerRequest, RoomMessageQueued)
 	if err != nil {
 		return nil, fmt.Errorf("store: cancel queued steer requests: select: %w", err)
@@ -656,8 +653,8 @@ func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by
 
 // SetRunProtectedAndCancelQueuedSteerRequests changes protection and, when
 // enabling it, settles every still-deliverable steer in the same transaction.
-// The run update acquires SQLite's writer lock before candidate selection, so
-// no claimant can commit between the protection decision and cancellation.
+// The transaction holds SQLite's write lock from its start, so no claimant
+// can commit between the protection decision and cancellation.
 func (d *DB) SetRunProtectedAndCancelQueuedSteerRequests(ctx context.Context, run domain.RunID, protected bool, by domain.MemberID, decidedAt time.Time) ([]*RoomMessage, error) {
 	if run == "" {
 		return nil, errors.New("store: protect run: run is required")
