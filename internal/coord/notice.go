@@ -139,13 +139,16 @@ func (s *Service) noticeText(ctx context.Context, peer events.OverlapPeer) (stri
 	if m, merr := s.cfg.Store.GetMember(ctx, r.MemberID); merr == nil {
 		// The display name is chosen at invite-join and unsanitized; %q keeps
 		// its control characters out of the terminal and the agent's stdin.
-		who = fmt.Sprintf("%s (%q - %q)", r.ID, m.DisplayName, r.Task)
+		who = fmt.Sprintf("%s, member %q, task %q,", r.ID, m.DisplayName, r.Task)
 	}
+	// The banner can land in the login shell a finished harness leaves
+	// behind, so the fixed text carries no quote, semicolon, redirection, or
+	// subshell character that shell would act on.
 	return fmt.Sprintf(
-		"%s: Overlap: run %s is also editing %s. Use /usr/local/bin/aether-internal status --json to inspect the assignment and peers; "+
-			"use /usr/local/bin/aether-internal send --to <run-id> --body <message> --idempotency-key <key> to coordinate, and "+
-			"/usr/local/bin/aether-internal inbox --wait 30 to read messages. Advisory only - keep working; if the other agent "+
-			"doesn't reply, proceed and note the overlap in your commit.",
+		"%s: Overlap: run %s is also editing %s. Use /usr/local/bin/aether-internal status --json to inspect the assignment and peers. "+
+			"Use /usr/local/bin/aether-internal send --to RUN-ID --body MESSAGE --idempotency-key KEY to coordinate, and "+
+			"/usr/local/bin/aether-internal inbox --wait 30 to read messages. Advisory only - keep working. If the other agent "+
+			"does not reply, proceed and note the overlap in your commit.",
 		noticeActor, who, fileList(peer.Files)), nil
 }
 

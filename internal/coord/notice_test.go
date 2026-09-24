@@ -97,6 +97,9 @@ func TestOverlapNoticeFiresOncePerPairAndReArms(t *testing.T) {
 			t.Fatalf("notice %q does not mention %q", notice, want)
 		}
 	}
+	if i := strings.IndexAny(notice, "';<>()"); i >= 0 {
+		t.Fatalf("notice %q carries shell syntax %q at %d", notice, notice[i], i)
+	}
 	for _, obsolete := range []string{"MCP", "aether_status", "aether_send", "aether_inbox"} {
 		if strings.Contains(notice, obsolete) {
 			t.Fatalf("notice retained obsolete MCP guidance %q: %s", obsolete, notice)
