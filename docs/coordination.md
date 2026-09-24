@@ -370,7 +370,11 @@ the integrator's terminal as one `aether:` line naming the command to run
 next. The integrator is always interactive (TUI): `mission.create` and
 `mission.replace-integrator` refuse any other mode with `-32602` and
 `integrator mode must be tui: a headless integrator exits after one turn and
-cannot be asked or told`. Workers may still run headless. If the integrator's
+cannot be asked or told`. `mission.create` needs the integrator's exact
+account, harness, and `tui` mode among the execution choices;
+`mission.replace-integrator` accepts any listed account and harness in `tui`,
+so a swarm whose choices are all headless can still get an interactive
+integrator. Workers may still run headless. If the integrator's
 harness has already exited, the line lands in the shell left on its terminal
 and is read as a command line there.
 

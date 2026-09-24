@@ -790,7 +790,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if actor != m.AccountableHumanID && requesting.Role != domain.RoleAdmin {
 		return protocol.MissionReplaceIntegratorResult{}, fmt.Errorf("%w: only the accountable human or an admin may replace the integrator", permissions.ErrDenied)
 	}
-	choice, err := executionChoice(p.Integrator, choicesFromMission(m))
+	choice, err := executionChoice(p.Integrator, replacementChoices(m))
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
@@ -833,10 +833,14 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
 }
 
-func choicesFromMission(m *domain.Mission) []protocol.MissionExecutionChoice {
+// replacementChoices offers every execution choice's account and harness as
+// an interactive integrator, whatever the choice's own mode: a mission created
+// before integrators had to be interactive may list only headless choices,
+// and its integrator must still be replaceable.
+func replacementChoices(m *domain.Mission) []protocol.MissionExecutionChoice {
 	out := make([]protocol.MissionExecutionChoice, 0, len(m.ExecutionChoices))
 	for _, c := range m.ExecutionChoices {
-		out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode)})
+		out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(domain.LaunchTUI)})
 	}
 	return out
 }

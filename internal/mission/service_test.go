@@ -271,3 +271,44 @@ func TestHeadlessIntegratorIsRefused(t *testing.T) {
 		t.Fatalf("integrator generation after a refused replace = %d, want %d", got, f.mission.IntegratorGeneration)
 	}
 }
+
+// TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI: a mission created before
+// integrators had to be interactive may list only headless choices, and its
+// integrator is replaced by the same account and harness in tui. Create
+// keeps the exact tuple; see TestCreateNamesIntegratorChoiceMissingFromExecutionChoices.
+func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
+	ctx := context.Background()
+	db := openMissionRegressionDB(t)
+	workspace := regressionWorkspace(t, db)
+	member := regressionMember(t, db, "accountable")
+	legacy := &domain.Mission{
+		WorkspaceID: workspace.ID, Objective: "legacy swarm", AccountableHumanID: member.ID,
+		Integrator:            domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
+		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless}},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "legacy",
+	}
+	if err := db.CreateMission(ctx, legacy); err != nil {
+		t.Fatalf("create legacy mission: %v", err)
+	}
+	svc, err := New(Config{Store: db, Runs: &recordingLauncher{db: db}, RequireCoordination: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(mode domain.LaunchMode, key string) (protocol.MissionReplaceIntegratorResult, error) {
+		return svc.ReplaceIntegrator(ctx, member.ID, protocol.MissionReplaceIntegratorParams{
+			MissionID: string(legacy.ID), ExpectedGeneration: legacy.IntegratorGeneration, IdempotencyKey: key,
+			Integrator: protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: string(mode)},
+		})
+	}
+	var rpcErr *protocol.Error
+	if _, headlessErr := replace(domain.LaunchHeadless, "replace-headless"); !errors.As(headlessErr, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("headless replacement = %v, want invalid params", headlessErr)
+	}
+	out, err := replace(domain.LaunchTUI, "replace-tui")
+	if err != nil {
+		t.Fatalf("tui replacement: %v", err)
+	}
+	if out.Mission.Integrator.Mode != string(domain.LaunchTUI) || out.Mission.IntegratorGeneration != legacy.IntegratorGeneration+1 {
+		t.Fatalf("replaced integrator = %+v at generation %d, want tui at %d", out.Mission.Integrator, out.Mission.IntegratorGeneration, legacy.IntegratorGeneration+1)
+	}
+}
