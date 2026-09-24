@@ -1256,8 +1256,9 @@ CREATE INDEX idx_mission_mutation_receipts_key
 ALTER TABLE missions ADD COLUMN integrator_launch_error TEXT NOT NULL DEFAULT '';
 ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
 `,
-	// A current integrator whose row already exists was launched; without
-	// the backfill an upgrade would relaunch every deleted one.
+	// A current integrator whose row exists at upgrade was launched, so it is
+	// never relaunched after a later delete. One deleted before the upgrade
+	// has no row to find and is relaunched once.
 	`
 ALTER TABLE missions ADD COLUMN integrator_run_launched INTEGER NOT NULL DEFAULT 0;
 UPDATE missions SET integrator_run_launched = 1
