@@ -459,3 +459,72 @@ func TestReconcileMarksAFailedRowLaunched(t *testing.T) {
 			m.IntegratorLaunchError, m.IntegratorLaunchErrorAt, m.IntegratorRunLaunched)
 	}
 }
+
+// validatingLauncher is a launcher with no interactive command for the
+// "legacy" harness.
+type validatingLauncher struct {
+	*recordingLauncher
+	calls int
+}
+
+func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, _ domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+	l.calls++
+	if harnessName == "legacy" && mode == domain.LaunchTUI {
+		return errors.New(`scheduler: harness "legacy" has no command for mode "tui"`)
+	}
+	return nil
+}
+
+// TestIntegratorTheSchedulerCannotLaunchIsRefused: an integrator the
+// scheduler could never start is refused before anything is persisted, and
+// worker dispatch never asks.
+func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
+	ctx := context.Background()
+	const want = `integrator harness legacy cannot launch in tui mode: scheduler: harness "legacy" has no command for mode "tui"`
+	f := newPlanGateFixture(t)
+	launcher := &validatingLauncher{recordingLauncher: f.launcher}
+	f.svc.cfg.Runs = launcher
+	legacy := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "legacy", Mode: string(domain.LaunchTUI)}
+	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-legacy",
+		Integrator:            protocol.MissionIntegrator(legacy),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{legacy},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	var rpcErr *protocol.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
+		t.Fatalf("create with a legacy integrator = %v, want invalid params %q", err, want)
+	}
+	if missions, listErr := f.db.ListMissions(ctx, f.workspace.ID); listErr != nil || len(missions) != 1 {
+		t.Fatalf("missions after a refused create = %d (err %v), want only the fixture's", len(missions), listErr)
+	}
+
+	legacyMission := &domain.Mission{
+		WorkspaceID: f.workspace.ID, Objective: "legacy swarm", AccountableHumanID: f.member.ID,
+		Integrator:            domain.MissionIntegrator{AccountMemberID: f.member.ID, Harness: "legacy", Mode: domain.LaunchHeadless},
+		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: f.member.ID, Harness: "legacy", Mode: domain.LaunchHeadless}},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "legacy-mission",
+	}
+	if createErr := f.db.CreateMission(ctx, legacyMission); createErr != nil {
+		t.Fatalf("create legacy mission: %v", createErr)
+	}
+	_, err = f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+		MissionID: string(legacyMission.ID), ExpectedGeneration: legacyMission.IntegratorGeneration, IdempotencyKey: "replace-legacy",
+		Integrator: protocol.MissionIntegrator(legacy),
+	})
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
+		t.Fatalf("replace with a legacy integrator = %v, want invalid params %q", err, want)
+	}
+	if got, getErr := f.db.GetMission(ctx, legacyMission.ID); getErr != nil || got.IntegratorGeneration != legacyMission.IntegratorGeneration {
+		t.Fatalf("legacy mission after a refused replace = %+v, %v; want generation %d", got, getErr, legacyMission.IntegratorGeneration)
+	}
+
+	calls := launcher.calls
+	tasks := f.activate(t, taskSpec{key: "propose-a", title: "task a", paths: []string{"internal/a"}})
+	if startErr := f.startWorker(t, tasks[0], "dispatch-a"); startErr != nil {
+		t.Fatalf("worker start: %v", startErr)
+	}
+	if launcher.calls != calls {
+		t.Fatalf("worker dispatch asked the validator %d times, want none", launcher.calls-calls)
+	}
+}

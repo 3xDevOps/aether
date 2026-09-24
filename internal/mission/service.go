@@ -31,6 +31,13 @@ type Injector interface {
 	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 }
 
+// launchValidator is the optional seam that refuses, before anything is
+// persisted, an integrator the scheduler has no command for: a harness whose
+// definition the account no longer has, or one without an interactive command.
+type launchValidator interface {
+	ValidateMissionLaunch(ctx context.Context, account domain.MemberID, harness string, mode domain.LaunchMode) error
+}
+
 type Canceller interface {
 	CancelMission(context.Context, domain.RunID) error
 }
@@ -727,6 +734,9 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MissionCreateResult{}, err
 	}
+	if validateErr := s.validateIntegratorLaunch(ctx, admission.Account.ID, choice); validateErr != nil {
+		return protocol.MissionCreateResult{}, validateErr
+	}
 	choices := make([]domain.MissionExecutionChoice, 0, len(p.ExecutionChoices))
 	for _, c := range p.ExecutionChoices {
 		mode := domain.LaunchMode(c.Mode)
@@ -825,6 +835,9 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
+	if validateErr := s.validateIntegratorLaunch(ctx, admission.Account.ID, choice); validateErr != nil {
+		return protocol.MissionReplaceIntegratorResult{}, validateErr
+	}
 	if s.cfg.Cost != nil {
 		if admitErr := s.cfg.Cost.Admit(ctx, m.WorkspaceID, actor); admitErr != nil {
 			return protocol.MissionReplaceIntegratorResult{}, admitErr
@@ -859,6 +872,19 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 			fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", replaced.ID, launched.ID, recordErr)
 	}
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
+}
+
+// validateIntegratorLaunch resolves the integrator's command for the account
+// the launch runs under, when the launcher can.
+func (s *Service) validateIntegratorLaunch(ctx context.Context, account domain.MemberID, choice domain.MissionIntegrator) error {
+	v, ok := s.cfg.Runs.(launchValidator)
+	if !ok {
+		return nil
+	}
+	if err := v.ValidateMissionLaunch(ctx, account, choice.Harness, choice.Mode); err != nil {
+		return invalidMissionParams(fmt.Sprintf("integrator harness %s cannot launch in %s mode: %v", choice.Harness, choice.Mode, err))
+	}
+	return nil
 }
 
 // replacementChoices offers every execution choice's account and harness as

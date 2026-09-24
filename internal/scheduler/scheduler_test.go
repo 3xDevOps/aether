@@ -1493,6 +1493,22 @@ func TestCustomHarnessDefinition(t *testing.T) {
 		t.Fatalf("profile = %+v", prof)
 	}
 }
+
+// TestValidateMissionLaunchResolvesTheHarnessForTheAccount: validation is the
+// launch's own command resolution, so a harness the account has no definition
+// for fails before a mission records it, and a shipped one passes.
+func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, "legacy", domain.LaunchTUI)
+	if want := `scheduler: unknown harness "legacy"; register it with: aether agent add legacy`; err == nil || err.Error() != want {
+		t.Fatalf("validate an unknown harness = %v, want %q", err, want)
+	}
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, "claude", domain.LaunchTUI); err != nil {
+		t.Fatalf("validate claude tui: %v", err)
+	}
+}
+
 func TestCustomHarnessRequiresDefinition(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

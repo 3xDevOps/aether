@@ -376,7 +376,10 @@ cannot be asked or told`. `mission.create` needs the integrator's exact
 account, harness, and `tui` mode among the execution choices;
 `mission.replace-integrator` accepts any listed account and harness in `tui`,
 so a swarm whose choices are all headless can still get an interactive
-integrator. Workers may still run headless. If the integrator's
+integrator. Both refuse, with `-32602` and `integrator harness <name> cannot
+launch in tui mode: <cause>`, a harness the integrator's account cannot start
+in `tui`, such as one whose definition that account no longer has. Workers may
+still run headless. If the integrator's
 harness has already exited, the line lands in the shell left on its terminal
 and is read as a command line there.
 

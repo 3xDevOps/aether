@@ -172,6 +172,14 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{CachedBase: spec.CachedBase, AssignedRunID: spec.RunID})
 }
 
+// ValidateMissionLaunch reports whether account's harness has a command for
+// mode, resolving it exactly as a launch would, so a mission never records an
+// integrator the scheduler cannot start.
+func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, account domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+	_, _, err := s.command(ctx, account, harnessName, mode, "task")
+	return err
+}
+
 func (s *Scheduler) launchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	return s.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 }
