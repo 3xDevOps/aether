@@ -17,7 +17,7 @@ import (
 // byte of the hook payload through the call. It sits under the timeout the
 // harness gives the hook, because the hook runs on the agent's own turn
 // boundaries: being late is worse than being wrong.
-const reportBudget = 4 * time.Second
+var reportBudget = 4 * time.Second
 
 // maxHookPayload bounds the hook body read from stdin. A payload is not
 // only metadata: Claude Code's tool events carry the tool's own input and

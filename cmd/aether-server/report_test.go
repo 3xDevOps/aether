@@ -134,9 +134,7 @@ func TestReportClaudeIgnoresUnmappedEvents(t *testing.T) {
 	sock := newFakeCoordSocket(t)
 	withStdin(t, `{"hook_event_name":"SessionStart","source":"startup"}`, true)
 	report([]string{"claude", "--socket", sock.path})
-	if req, ok := sock.next(t); ok {
-		t.Fatalf("the reporter dialled for an unmapped event: %+v", req)
-	}
+	wantNoReport(t, sock)
 }
 
 // TestReportSurvivesAMissingSocket: coordination may be off, or the server
@@ -159,6 +157,9 @@ func TestReportSurvivesAMissingSocket(t *testing.T) {
 // the call. A harness that writes the payload and leaves the pipe open must
 // not leave the reporter sitting between the agent and its next turn.
 func TestReportGivesUpOnAnUnclosedStdin(t *testing.T) {
+	budget := reportBudget
+	reportBudget = 200 * time.Millisecond
+	t.Cleanup(func() { reportBudget = budget })
 	sock := newFakeCoordSocket(t)
 	withStdin(t, `{"hook_event_name":"Stop"}`, false)
 	done := make(chan struct{})
@@ -189,9 +190,7 @@ func TestReportRefusesAnOversizedPayload(t *testing.T) {
 	if msg := stderr(); !strings.Contains(msg, "larger than") {
 		t.Fatalf("stderr = %q, want it to name the size cap", msg)
 	}
-	if req, ok := sock.next(t); ok {
-		t.Fatalf("the reporter dialled with a payload it could not read: %+v", req)
-	}
+	wantNoReport(t, sock)
 }
 
 // wantReport reads the one request the reporter made and checks what it
