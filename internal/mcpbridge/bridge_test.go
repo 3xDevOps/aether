@@ -79,7 +79,9 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 	success, errorResponses := golden(t, "success.ndjson"), golden(t, "errors.ndjson")
 	requests := goldenRequests(t)
 
+	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
 	var mu sync.Mutex
+	var retired, queued bool
 	coord := newFakeCoord(t, func(req protocol.Request) protocol.Response {
 		mu.Lock()
 		defer mu.Unlock()
@@ -104,7 +106,14 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 			if err := json.Unmarshal(req.Params, &p); err != nil {
 				t.Errorf("decode inbox params: %v", err)
 			}
-			if p.AckToken != "" {
+			// Like the real mailbox, a token retires its batch once and
+			// replaying it is a no-op: the bridge promotes a token only
+			// after the client has already read the response, so the read
+			// after the acknowledgement may still carry the old token.
+			if p.AckToken == ack {
+				retired = true
+			}
+			if retired && !queued {
 				return protocol.Response{Result: json.RawMessage(`{"messages":[]}`)}
 			}
 			return success[4]
@@ -183,7 +192,6 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 		t.Fatalf("send to a non-peer: code = %d, want %d", code, protocol.CodeDenied)
 	}
 
-	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
 	var inbox inboxOutput
 	callTool(t, cs, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" || inbox.AckToken != ack {
@@ -200,6 +208,9 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 	if acking.AckToken != ack {
 		t.Fatalf("acknowledging inbox params = %+v, want token %q", acking, ack)
 	}
+	mu.Lock()
+	queued = true
+	mu.Unlock()
 	callTool(t, cs, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" {
 		t.Fatalf("inbox after acknowledging the first batch = %+v, want the later queued question to remain", inbox)
