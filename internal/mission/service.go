@@ -768,26 +768,32 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		AccountOwner: admission.Account.ID, Task: m.Objective, Harness: choice.Harness, Mode: choice.Mode,
 	})
 	if err != nil {
-		// Reconciliation relaunches only a reserved run with no row; a row the
-		// scheduler wrote before provisioning failed stays failed.
-		_, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID)
-		if recordErr := s.recordIntegratorLaunch(ctx, m, err.Error(), getErr == nil); recordErr != nil {
-			err = errors.Join(err, recordErr)
-		}
-		created := protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}
-		switch {
-		case getErr == nil:
-			return created, fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace the integrator from the Swarms page: %w", m.ID, m.CurrentIntegratorRunID, err)
-		case errors.Is(getErr, store.ErrNotFound):
-			return created, fmt.Errorf("mission %s exists but its integrator run %s did not launch; the server retries the launch periodically: %w", m.ID, m.CurrentIntegratorRunID, err)
-		default:
-			return created, fmt.Errorf("mission %s exists but its integrator run %s did not launch: %w; read the run: %w", m.ID, m.CurrentIntegratorRunID, err, getErr)
-		}
+		failure := s.integratorLaunchFailure(ctx, m, err)
+		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, failure
 	}
 	if recordErr := s.recordIntegratorLaunch(ctx, m, "", true); recordErr != nil {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", m.ID, m.CurrentIntegratorRunID, recordErr)
 	}
 	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
+}
+
+// integratorLaunchFailure records why m's current integrator did not launch
+// and says what happens next. Reconciliation relaunches only a reserved run
+// with no row; a row the scheduler wrote before provisioning failed stays
+// failed.
+func (s *Service) integratorLaunchFailure(ctx context.Context, m *domain.Mission, err error) error {
+	_, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID)
+	if recordErr := s.recordIntegratorLaunch(ctx, m, err.Error(), getErr == nil); recordErr != nil {
+		err = errors.Join(err, recordErr)
+	}
+	switch {
+	case getErr == nil:
+		return fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace the integrator from the Swarms page: %w", m.ID, m.CurrentIntegratorRunID, err)
+	case errors.Is(getErr, store.ErrNotFound):
+		return fmt.Errorf("mission %s exists but its integrator run %s did not launch; the server retries the launch periodically: %w", m.ID, m.CurrentIntegratorRunID, err)
+	default:
+		return fmt.Errorf("mission %s exists but its integrator run %s did not launch: %w; read the run: %w", m.ID, m.CurrentIntegratorRunID, err, getErr)
+	}
 }
 
 func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, p protocol.MissionReplaceIntegratorParams) (protocol.MissionReplaceIntegratorResult, error) {
@@ -841,7 +847,8 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		AccountOwner: admission.Account.ID, Task: replaced.Objective, Harness: choice.Harness, Mode: choice.Mode,
 	})
 	if err != nil {
-		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, err
+		failure := s.integratorLaunchFailure(ctx, replaced, err)
+		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, failure
 	}
 	if recordErr := s.recordIntegratorLaunch(ctx, replaced, "", true); recordErr != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)},

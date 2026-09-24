@@ -386,3 +386,39 @@ func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
 		})
 	}
 }
+
+// TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch: a replacement starts
+// with no launch error, so a failed launch must record its own.
+func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
+	for name, tc := range map[string]struct {
+		writesRow bool
+		next      string
+	}{
+		"no run row":     {next: "did not launch; the server retries the launch periodically"},
+		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Swarms page"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newPlanGateFixture(t)
+			cause := errors.New("harness image missing")
+			launcher := failingMissionLauncher{err: cause}
+			if tc.writesRow {
+				launcher.db = f.db
+			}
+			f.svc.cfg.Runs = launcher
+			out, err := f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+				MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration, IdempotencyKey: "replace-1",
+				Integrator: protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)},
+			})
+			want := "mission " + out.Mission.ID + " exists but its integrator run " + out.Mission.CurrentIntegratorRunID + " " + tc.next + ": " + cause.Error()
+			if err == nil || err.Error() != want {
+				t.Fatalf("replace error = %v, want %q", err, want)
+			}
+			m := f.reloadMission(t)
+			if m.IntegratorLaunchError != cause.Error() || m.IntegratorLaunchErrorAt == nil || m.IntegratorRunLaunched != tc.writesRow {
+				t.Fatalf("after a failed replacement: error %q at %v, launched %v; want %q with a time and launched %v",
+					m.IntegratorLaunchError, m.IntegratorLaunchErrorAt, m.IntegratorRunLaunched, cause, tc.writesRow)
+			}
+		})
+	}
+}
