@@ -2641,6 +2641,12 @@ again, once. **Open integrator run** appears only once the store holds the
 run, beside the run's status chip - the same state vocabulary as the run
 list - and its last status reason.
 
+While the mission carries `integrator_launch_error`, the server's reason the
+integrator run last failed to launch, both the not-started and the exited
+banner add `Last launch failure <time ago>: <error>`, and the mission card
+in the list adds `Integrator did not launch: <error>`. The server clears the
+field once an integrator run launches.
+
 In `planning`, **Questions from the integrator** lists every question the
 integrator asked. Questions are optional - the integrator declares
 clarification complete when it has what it needs - so the section can stay

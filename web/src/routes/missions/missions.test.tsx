@@ -8,6 +8,7 @@ import type {
   MissionTask,
 } from '@/lib/types'
 import { MissionRoute } from '@/routes/missions'
+import { toRecord } from '@/store/runs'
 import { useStore, type RootState } from '@/store'
 import {
   alice,
@@ -406,6 +407,51 @@ describe('mission integrator run', () => {
     expect(banner.queryByText(/may ask you clarifying questions/)).toBeNull()
     expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
+  })
+
+  const launchFailure = {
+    integrator_launch_error: 'run.launch: harness "claude" is not installed for account alice',
+    integrator_launch_error_at: '2026-08-14T10:05:00Z',
+  }
+
+  it('says why the integrator has not started', async () => {
+    seed()
+    const client = {
+      ...showing({ phase: 'planning', plan_version: 0, ...launchFailure }),
+      runGet: vi.fn(async () => {
+        throw new ApiError(404, 'run.get: run not found')
+      }),
+    }
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(/^The integrator run has not started\./)).toBeDefined()
+    const failure = banner.getByText(/^Last launch failure/)
+    expect(failure.textContent).toContain(': run.launch: harness "claude" is not installed for account alice')
+    expect(failure.querySelector('time')?.getAttribute('dateTime')).toBe('2026-08-14T10:05:00Z')
+  })
+
+  it('says why the replacement did not launch once the integrator has exited', async () => {
+    seed({ runs: { run_integrator: toRecord(run({ id: 'run_integrator', status: 'failed' })) } })
+    await mount(showing({ phase: 'plan_review', plan_version: 2, ...launchFailure }, [], [missionPlanReview({ plan_version: 2 })]))
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(/has exited; replace the integrator to continue/)).toBeDefined()
+    expect(banner.getByText(/^Last launch failure/).textContent).toContain('is not installed for account alice')
+  })
+
+  it('names the launch failure on the swarm card', async () => {
+    seed({ route: { name: 'missions', params: {} } })
+    render(
+      <MissionRoute
+        params={{}}
+        client={fakeApi({ missionList: vi.fn(async () => ({ missions: [mission(launchFailure)] })) })}
+      />,
+    )
+    expect(
+      await screen.findByText('Integrator did not launch: run.launch: harness "claude" is not installed for account alice'),
+    ).toBeDefined()
   })
 
   it('keeps the planning copy and no run button while the server is asked', async () => {

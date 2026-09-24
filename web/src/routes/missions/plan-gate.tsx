@@ -14,7 +14,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { message, timeAgo } from '@/lib/format'
 import type {
   Member,
   Mission,
@@ -149,6 +149,20 @@ export function PhaseBanner({
           ? `The integrator run has not started. The server retries the launch periodically and logs each failure as "mission: recover integrator".`
           : phaseSentence(mission)}
       </p>
+      {(exited || notStarted) && mission.integrator_launch_error && (
+        <p className="mt-1 break-words text-state-failed">
+          Last launch failure
+          {mission.integrator_launch_error_at && (
+            <>
+              {' '}
+              <time dateTime={mission.integrator_launch_error_at} title={mission.integrator_launch_error_at}>
+                {timeAgo(mission.integrator_launch_error_at)}
+              </time>
+            </>
+          )}
+          : {mission.integrator_launch_error}
+        </p>
+      )}
       {(exited || (notStarted && canReplace)) && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {exited && <span className="min-w-0 break-words">The integrator run {integratorRunID} has exited; replace the integrator to continue</span>}

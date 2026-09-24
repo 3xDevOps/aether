@@ -243,6 +243,11 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
                   <span>{mission.max_total_attempts} attempts total</span>
                   <span>Generation {mission.integrator_generation}</span>
                 </div>
+                {mission.integrator_launch_error && (
+                  <p className="mt-1 break-words text-xs text-state-failed">
+                    Integrator did not launch: {mission.integrator_launch_error}
+                  </p>
+                )}
               </button>
             ))}
         </div>

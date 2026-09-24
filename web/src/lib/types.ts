@@ -103,6 +103,9 @@ export interface Mission {
   plan_version: number
   /** Unanswered questions; only mission.show and mission.list compute it. */
   open_questions: number
+  /** Why the integrator run last failed to launch; cleared once it launched. */
+  integrator_launch_error?: string
+  integrator_launch_error_at?: string
   created_at: string
   updated_at: string
 }
