@@ -64,6 +64,8 @@ type MissionStore interface {
 	DecideMissionPlan(context.Context, domain.MissionID, uint64, domain.MissionPlanDecision, string, domain.MemberID, string) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
 	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
+	MissionCreateRecorded(context.Context, domain.WorkspaceID, string) (bool, error)
+	IntegratorReplacementRecorded(context.Context, domain.MissionID, string) (bool, error)
 	ListMissionPlanReviews(context.Context, domain.MissionID) ([]*domain.MissionPlanReview, error)
 }
 type MissionControlStore interface {
@@ -364,6 +366,34 @@ func (d *DB) ListMissionsPage(ctx context.Context, workspaceID domain.WorkspaceI
 		return nil, "", err
 	}
 	return out, next, nil
+}
+
+// MissionCreateRecorded reports whether mission.create already succeeded
+// under key in workspace, so a retry replays it rather than being judged anew.
+func (d *DB) MissionCreateRecorded(ctx context.Context, workspace domain.WorkspaceID, key string) (bool, error) {
+	var found int
+	err := d.db.QueryRowContext(ctx, `SELECT 1 FROM mission_create_receipts WHERE workspace_id=? AND idempotency_key=?`, workspace, key).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: read mission create receipt: %w", err)
+	}
+	return true, nil
+}
+
+// IntegratorReplacementRecorded reports whether mission.replace-integrator
+// already succeeded under key for mission.
+func (d *DB) IntegratorReplacementRecorded(ctx context.Context, mission domain.MissionID, key string) (bool, error) {
+	var found int
+	err := d.db.QueryRowContext(ctx, `SELECT 1 FROM mission_integrator_replacements WHERE mission_id=? AND idempotency_key=?`, mission, key).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: read integrator replacement receipt: %w", err)
+	}
+	return true, nil
 }
 
 func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expected uint64, choice domain.MissionIntegrator, authorizingHumanID, runOwnerID domain.MemberID, key string) (*domain.Mission, error) {

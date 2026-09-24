@@ -735,7 +735,15 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		return protocol.MissionCreateResult{}, err
 	}
 	if validateErr := s.validateIntegratorLaunch(ctx, admission.Account.ID, choice); validateErr != nil {
-		return protocol.MissionCreateResult{}, validateErr
+		// A retry of a create that already succeeded replays its result, even
+		// if the harness has since become unlaunchable.
+		replay, receiptErr := s.cfg.Missions.MissionCreateRecorded(ctx, domain.WorkspaceID(p.WorkspaceID), p.IdempotencyKey)
+		if receiptErr != nil {
+			return protocol.MissionCreateResult{}, receiptErr
+		}
+		if !replay {
+			return protocol.MissionCreateResult{}, validateErr
+		}
 	}
 	choices := make([]domain.MissionExecutionChoice, 0, len(p.ExecutionChoices))
 	for _, c := range p.ExecutionChoices {
@@ -836,7 +844,13 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
 	if validateErr := s.validateIntegratorLaunch(ctx, admission.Account.ID, choice); validateErr != nil {
-		return protocol.MissionReplaceIntegratorResult{}, validateErr
+		replay, receiptErr := s.cfg.Missions.IntegratorReplacementRecorded(ctx, m.ID, p.IdempotencyKey)
+		if receiptErr != nil {
+			return protocol.MissionReplaceIntegratorResult{}, receiptErr
+		}
+		if !replay {
+			return protocol.MissionReplaceIntegratorResult{}, validateErr
+		}
 	}
 	if s.cfg.Cost != nil {
 		if admitErr := s.cfg.Cost.Admit(ctx, m.WorkspaceID, actor); admitErr != nil {
@@ -858,6 +872,12 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	}
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	// A replay of a replacement whose run already has a row returns that run
+	// instead of launching it again.
+	if existing, getErr := s.cfg.Store.GetRun(ctx, replaced.CurrentIntegratorRunID); getErr == nil {
+		err = s.recordIntegratorLaunch(ctx, replaced, launchErrorForRow(replaced, existing), true)
+		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(existing.ID)}, err
+	}
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: replaced.WorkspaceID, RunID: replaced.CurrentIntegratorRunID,
 		ActorRunID: replaced.CurrentIntegratorRunID, RunOwnerID: replaced.IntegratorRunOwnerID,

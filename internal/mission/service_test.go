@@ -464,12 +464,21 @@ func TestReconcileMarksAFailedRowLaunched(t *testing.T) {
 // "legacy" harness.
 type validatingLauncher struct {
 	*recordingLauncher
-	calls int
+	calls    int
+	launches int
+	// refuseAll stands for a harness definition removed after a request
+	// already succeeded.
+	refuseAll bool
+}
+
+func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunchRequest) (*domain.Run, error) {
+	l.launches++
+	return l.recordingLauncher.LaunchMission(ctx, req)
 }
 
 func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, _ domain.MemberID, harnessName string, mode domain.LaunchMode) error {
 	l.calls++
-	if harnessName == "legacy" && mode == domain.LaunchTUI {
+	if l.refuseAll || (harnessName == "legacy" && mode == domain.LaunchTUI) {
 		return errors.New(`scheduler: harness "legacy" has no command for mode "tui"`)
 	}
 	return nil
@@ -526,5 +535,62 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 	}
 	if launcher.calls != calls {
 		t.Fatalf("worker dispatch asked the validator %d times, want none", launcher.calls-calls)
+	}
+}
+
+// TestLaunchValidationDoesNotRefuseAReplay: a create or a replacement whose
+// response was lost is retried with the same key, and the retry returns the
+// stored result even though the harness can no longer launch. A new key is
+// still refused.
+func TestLaunchValidationDoesNotRefuseAReplay(t *testing.T) {
+	ctx := context.Background()
+	f := newPlanGateFixture(t)
+	launcher := &validatingLauncher{recordingLauncher: f.launcher}
+	f.svc.cfg.Runs = launcher
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}
+	create := func(key string) (protocol.MissionCreateResult, error) {
+		return f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+			WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: key,
+			Integrator:            protocol.MissionIntegrator(integrator),
+			ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+			MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+		})
+	}
+	created, err := create("create-lost")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	replace := func(key string) (protocol.MissionReplaceIntegratorResult, error) {
+		return f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+			MissionID: created.Mission.ID, ExpectedGeneration: created.Mission.IntegratorGeneration, IdempotencyKey: key,
+			Integrator: protocol.MissionIntegrator(integrator),
+		})
+	}
+	replaced, err := replace("replace-lost")
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	launcher.refuseAll = true
+	launches := launcher.launches
+	recreated, err := create("create-lost")
+	if err != nil || recreated.Mission.ID != created.Mission.ID {
+		t.Fatalf("create retry = %+v, %v; want mission %s", recreated.Mission, err, created.Mission.ID)
+	}
+	rereplaced, err := replace("replace-lost")
+	if err != nil || rereplaced.RunID != replaced.RunID || rereplaced.Mission.IntegratorGeneration != replaced.Mission.IntegratorGeneration {
+		t.Fatalf("replace retry = run %s generation %d, %v; want run %s generation %d",
+			rereplaced.RunID, rereplaced.Mission.IntegratorGeneration, err, replaced.RunID, replaced.Mission.IntegratorGeneration)
+	}
+	if launcher.launches != launches {
+		t.Fatalf("retries launched %d runs, want none", launcher.launches-launches)
+	}
+
+	var rpcErr *protocol.Error
+	if _, createErr := create("create-new"); !errors.As(createErr, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("first-time create = %v, want invalid params", createErr)
+	}
+	if _, replaceErr := replace("replace-new"); !errors.As(replaceErr, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("first-time replace = %v, want invalid params", replaceErr)
 	}
 }
