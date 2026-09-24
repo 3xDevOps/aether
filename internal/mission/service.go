@@ -424,7 +424,11 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			if !errors.Is(launchErr, store.ErrMissionStale) {
 				text, launched := "", true
 				if launchErr != nil {
-					text, launched = launchErr.Error(), false
+					// The scheduler may have written the row before
+					// provisioning failed; that run exists and is not
+					// relaunched.
+					_, rowErr := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
+					text, launched = launchErr.Error(), rowErr == nil
 				}
 				if recordErr := s.recordIntegratorLaunch(ctx, mission, text, launched); recordErr != nil {
 					return recordErr

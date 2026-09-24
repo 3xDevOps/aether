@@ -422,3 +422,40 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 		})
 	}
 }
+
+// TestReconcileMarksAFailedRowLaunched: a relaunch whose provisioning failed
+// after the scheduler wrote the row leaves a run that exists, so the same
+// pass marks it launched and keeps the cause.
+func TestReconcileMarksAFailedRowLaunched(t *testing.T) {
+	ctx := context.Background()
+	db := openMissionRegressionDB(t)
+	workspace := regressionWorkspace(t, db)
+	member := regressionMember(t, db, "accountable")
+	svc, err := New(Config{Store: db, Runs: failingMissionLauncher{err: errors.New("harness image missing")}, RequireCoordination: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
+	out, _ := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	m, err := db.GetMission(ctx, domain.MissionID(out.Mission.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.cfg.Runs = failingMissionLauncher{db: db, err: errors.New("provisioning failed")}
+	if reconcileErr := svc.reconcileMission(ctx, m); reconcileErr != nil {
+		t.Fatalf("reconcile: %v", reconcileErr)
+	}
+	m, err = db.GetMission(ctx, m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.IntegratorLaunchError != "provisioning failed" || m.IntegratorLaunchErrorAt == nil || !m.IntegratorRunLaunched {
+		t.Fatalf("after a relaunch that wrote a failed row: error %q at %v, launched %v; want the cause and launched",
+			m.IntegratorLaunchError, m.IntegratorLaunchErrorAt, m.IntegratorRunLaunched)
+	}
+}
