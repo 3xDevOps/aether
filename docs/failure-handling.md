@@ -216,6 +216,10 @@ integrator` with the mission ID and the cause. Repeating `mission.create`
 with the same contents and idempotency key also retries the launch, and
 returns the same mission. The Swarms page shows `The integrator run has not
 started.` for that mission.
+`mission.show` and `mission.list` carry the last launch error in
+`integrator_launch_error` and the time it was first seen in
+`integrator_launch_error_at`; both clear once the run has a row or the
+integrator is replaced.
 
 A run row that failed while provisioning is not retried, and a same-key
 `mission.create` returns the mission without launching again. The Swarms

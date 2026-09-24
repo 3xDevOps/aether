@@ -176,10 +176,15 @@ type Mission struct {
 	// OpenQuestions is populated only by store.GetMission and
 	// store.ListMissionsPage. Transaction-local mission reads leave it zero
 	// and no store decision may consult it.
-	OpenQuestions  int
-	IdempotencyKey string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	OpenQuestions int
+	// IntegratorLaunchError is why the current integrator run last failed
+	// to launch, and IntegratorLaunchErrorAt when that error was first seen;
+	// both are empty once the run launches.
+	IntegratorLaunchError   string
+	IntegratorLaunchErrorAt *time.Time
+	IdempotencyKey          string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 const (

@@ -63,6 +63,7 @@ type MissionStore interface {
 	SubmitMissionPlan(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionPlanReview, error)
 	DecideMissionPlan(context.Context, domain.MissionID, uint64, domain.MissionPlanDecision, string, domain.MemberID, string) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
+	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, time.Time) (bool, error)
 	ListMissionPlanReviews(context.Context, domain.MissionID) ([]*domain.MissionPlanReview, error)
 }
 type MissionControlStore interface {
@@ -155,20 +156,26 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	execution_choices, max_concurrent_attempts, max_total_attempts,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase, plan_version,
-	idempotency_key, created_at, updated_at`
+	idempotency_key, created_at, updated_at,
+	integrator_launch_error, integrator_launch_error_at`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
 	var choices string
 	var runID, authorizingHumanID, runOwnerID sql.NullString
 	var created, updated int64
+	var launchErrorAt sql.NullInt64
 	var mode, phase string
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Objective, &m.AccountableHumanID,
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&m.MaxConcurrentAttempts, &m.MaxTotalAttempts, &runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase, &m.PlanVersion,
-		&m.IdempotencyKey, &created, &updated); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt); err != nil {
 		return nil, err
+	}
+	if launchErrorAt.Valid {
+		at := decodeTime(launchErrorAt.Int64)
+		m.IntegratorLaunchErrorAt = &at
 	}
 	m.Integrator.Mode, m.Phase = domain.LaunchMode(mode), domain.MissionPhase(phase)
 	if runID.Valid {
@@ -252,7 +259,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	// A new mission starts behind the human plan gate; plan_version 0 means no
 	// plan has been submitted yet.
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, m.MaxConcurrentAttempts, m.MaxTotalAttempts, runID,
@@ -399,7 +406,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	generation := m.IntegratorGeneration + 1
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
+	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, integrator_launch_error = '', integrator_launch_error_at = NULL, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
 		return nil, fmt.Errorf("store: replace integrator: %w", execErr)
 	}
 	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, generation, newRun, authorizingHumanID, runOwnerID, n); execErr != nil {
@@ -414,6 +421,46 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	}
 	return m, nil
 }
+
+// RecordIntegratorLaunch stores launchErr as the reason run, the mission's
+// current integrator, did not launch, or clears it when launchErr is empty.
+// Repeating the stored error keeps its first time. It reports whether the
+// mission changed; a run that is no longer the current integrator changes
+// nothing.
+func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, at time.Time) (bool, error) {
+	if id == "" || run == "" {
+		return false, errors.New("store: record integrator launch requires mission_id and run_id")
+	}
+	n, err := encodeTime(missionNow(at))
+	if err != nil {
+		return false, err
+	}
+	var errorAt any
+	if launchErr != "" {
+		errorAt = n
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("store: record integrator launch: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE missions SET integrator_launch_error=?, integrator_launch_error_at=?, updated_at=?
+		WHERE id=? AND current_integrator_run_id=? AND integrator_launch_error<>?`, launchErr, errorAt, n, id, run, launchErr)
+	if err != nil {
+		return false, fmt.Errorf("store: record integrator launch of mission %s: %w", id, err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return false, nil
+	}
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, id); enqueueErr != nil {
+		return false, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return false, fmt.Errorf("store: record integrator launch: commit: %w", commitErr)
+	}
+	return true, nil
+}
+
 func (d *DB) GetMissionWorkerAssignment(ctx context.Context, workerRun domain.RunID) (*domain.MissionWorkerAssignment, error) {
 	if workerRun == "" {
 		return nil, ErrNotFound

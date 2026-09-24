@@ -127,6 +127,63 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 			if err.Error() != want {
 				t.Fatalf("create error = %q, want %q", err, want)
 			}
+			if persisted.IntegratorLaunchError != cause.Error() || persisted.IntegratorLaunchErrorAt == nil ||
+				out.Mission.IntegratorLaunchError != cause.Error() || out.Mission.IntegratorLaunchErrorAt == "" {
+				t.Fatalf("launch error = %q at %v, result %q at %q; want %q with a time",
+					persisted.IntegratorLaunchError, persisted.IntegratorLaunchErrorAt,
+					out.Mission.IntegratorLaunchError, out.Mission.IntegratorLaunchErrorAt, cause)
+			}
 		})
+	}
+}
+
+// TestReconcileRecordsAndClearsTheIntegratorLaunchError: each failed relaunch
+// of a reserved integrator replaces the recorded error, and the first launch
+// that succeeds clears it.
+func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
+	ctx := context.Background()
+	db := openMissionRegressionDB(t)
+	workspace := regressionWorkspace(t, db)
+	member := regressionMember(t, db, "accountable")
+	svc, err := New(Config{Store: db, Runs: failingMissionLauncher{err: errors.New("harness image missing")}, RequireCoordination: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
+	out, _ := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	id := domain.MissionID(out.Mission.ID)
+	reconcile := func() *domain.Mission {
+		t.Helper()
+		m, getErr := db.GetMission(ctx, id)
+		if getErr != nil {
+			t.Fatalf("get mission: %v", getErr)
+		}
+		if reconcileErr := svc.reconcileMission(ctx, m); reconcileErr != nil {
+			t.Fatalf("reconcile: %v", reconcileErr)
+		}
+		m, getErr = db.GetMission(ctx, id)
+		if getErr != nil {
+			t.Fatalf("get mission: %v", getErr)
+		}
+		return m
+	}
+
+	svc.cfg.Runs = failingMissionLauncher{err: errors.New("docker daemon unreachable")}
+	if m := reconcile(); m.IntegratorLaunchError != "docker daemon unreachable" || m.IntegratorLaunchErrorAt == nil {
+		t.Fatalf("launch error after a failed relaunch = %q at %v, want the new cause", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
+	}
+
+	svc.cfg.Runs = &recordingLauncher{db: db}
+	m := reconcile()
+	if m.IntegratorLaunchError != "" || m.IntegratorLaunchErrorAt != nil {
+		t.Fatalf("launch error after a successful relaunch = %q at %v, want none", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
+	}
+	if _, runErr := db.GetRun(ctx, m.CurrentIntegratorRunID); runErr != nil {
+		t.Fatalf("relaunched integrator run: %v", runErr)
 	}
 }

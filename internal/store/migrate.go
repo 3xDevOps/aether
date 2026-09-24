@@ -1252,6 +1252,10 @@ CREATE TABLE mission_plan_items (
 CREATE INDEX idx_mission_mutation_receipts_key
 	ON mission_mutation_receipts(operation, idempotency_key);
 `,
+	`
+ALTER TABLE missions ADD COLUMN integrator_launch_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:
