@@ -23,11 +23,12 @@ Layers, per the design spec's testing strategy:
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
   GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
   job log. The `integration` matrix in `.github/workflows/ci.yml`
-  gives `internal/server` four shards: `server-chaos`
+  gives `internal/server` five shards: `server-chaos`
   (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
   (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
-  (`INTEGRATION_RUN=^TestIntegrationMission`), and `server-rest`
-  (`INTEGRATION_SKIP_PATTERN=^TestIntegration(Chaos|Coordination|Mission)`).
+  (`INTEGRATION_RUN=^TestIntegrationMission`), `server-heavy`
+  (`INTEGRATION_RUN=^TestIntegration(EndToEnd|MultiMember|ServerUpdate)`),
+  and `server-rest` (`INTEGRATION_SKIP_PATTERN` of the other four shards' tests).
   `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
   `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
   `./internal/server`. The `smoke` job runs `internal/harness` on the images

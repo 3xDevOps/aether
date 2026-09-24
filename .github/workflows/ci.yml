@@ -270,8 +270,8 @@ jobs:
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
 
-  # Sharded so the slow server scenarios do not share one runner. Four shards
-  # cover internal/server by test name; scheduler is its own package; rest is
+  # Sharded so the slow server scenarios do not share one runner. Five shards
+  # cover internal/server by test name, balanced by the durations -v prints; scheduler is its own package; rest is
   # every other integration package, so a package that gains integration tests
   # is gated without a change here. Every test in these shards pulls the
   # busybox image it needs itself, so none builds one.
@@ -292,8 +292,10 @@ jobs:
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationCoordination
           - shard: server-mission
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationMission
+          - shard: server-heavy
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'
           - shard: server-rest
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission)'
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
           - shard: scheduler
             make: INTEGRATION_PKGS=./internal/scheduler
           - shard: rest
