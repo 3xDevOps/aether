@@ -77,41 +77,46 @@ func (s *Service) noticeIntegrator(ctx context.Context, m *domain.Mission, text 
 	ctx, cancel := context.WithTimeout(s.operationContext(ctx), noticeTimeout)
 	go func() {
 		defer cancel()
-		s.deliverNotice(ctx, m, text)
+		if err := s.deliverNotice(ctx, m, text); err != nil {
+			slog.Warn("mission: integrator notice not delivered", "mission", m.ID, "run", m.CurrentIntegratorRunID, "error", err)
+		}
 	}()
 }
 
-func (s *Service) deliverNotice(ctx context.Context, m *domain.Mission, text string) {
+// deliverNotice returns nil when the line reached the terminal and when
+// there was deliberately nothing to deliver; the detached caller reports
+// anything else.
+func (s *Service) deliverNotice(ctx context.Context, m *domain.Mission, text string) error {
 	run := m.CurrentIntegratorRunID
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
-		slog.Warn("mission: integrator notice skipped", "mission", m.ID, "run", run, "error", err)
-		return
+		return fmt.Errorf("mission: resolve integrator run %s: %w", run, err)
 	}
 	// Every run has a terminal, but a headless harness never reads it: the
 	// line would sit unread while the timeline claimed delivery.
 	if r.Mode != domain.LaunchTUI {
-		return
+		return nil
 	}
 	current, err := s.cfg.Missions.GetMission(ctx, m.ID)
 	if err != nil {
-		slog.Warn("mission: integrator notice skipped", "mission", m.ID, "run", run, "error", err)
-		return
+		return fmt.Errorf("mission: re-read mission %s before notice: %w", m.ID, err)
 	}
 	// A replacement reads the mission through skill when it starts; typing
 	// into it now would land in its harness's first prompt.
 	if current.CurrentIntegratorRunID != run {
-		return
+		return nil
 	}
 	err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", "["+noticeActor+"] "+text, harness.SubmitSequence(r.Harness))
 	switch {
 	case err == nil:
 		s.stampNotice(ctx, m, text)
+		return nil
 	case errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
 		// The run's terminal is gone; the integrator learns of the change
 		// through mission.plan.show when it next runs.
+		return nil
 	default:
-		slog.Warn("mission: integrator notice failed", "mission", m.ID, "run", run, "error", err)
+		return fmt.Errorf("mission: inject integrator notice into run %s: %w", run, err)
 	}
 }
 

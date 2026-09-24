@@ -697,12 +697,16 @@ func TestPlanNoticeSkipsAReplacedIntegrator(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create retired integrator run: %v", err)
 	}
-	f.svc.deliverNotice(ctx, &retired, answerNotice)
+	if err := f.svc.deliverNotice(ctx, &retired, answerNotice); err != nil {
+		t.Fatalf("deliverNotice for a replaced integrator: %v", err)
+	}
 	select {
 	case got := <-f.notices.writes:
 		t.Fatalf("a notice for a replaced integrator wrote %+v", got)
 	default:
 	}
-	f.svc.deliverNotice(ctx, f.mission, answerNotice)
+	if err := f.svc.deliverNotice(ctx, f.mission, answerNotice); err != nil {
+		t.Fatalf("deliverNotice for the current integrator: %v", err)
+	}
 	f.expect(t, "notice for the current integrator", answerNotice, harness.SubmitSequence("claude"))
 }
