@@ -332,7 +332,21 @@ export async function applyEvent(
       } else {
         await client
           .missionList({ workspace_id: ev.workspace_id, limit: 50 })
-          .then((result) => store.getState().setMissions(result.missions, result.next_cursor))
+          .then((result) => {
+            const state = store.getState()
+            // Merged, not replaced, so older pages the reader loaded stay.
+            // Everything newer than the stored cursor is still held, so it
+            // still marks the next older page; only a workspace with nothing
+            // loaded takes the fetched one.
+            const loaded = Object.values(state.missions).some(
+              (mission) => mission.workspace_id === ev.workspace_id,
+            )
+            state.setMissions(
+              result.missions,
+              loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
+              true,
+            )
+          })
           .catch(ignore)
       }
     }

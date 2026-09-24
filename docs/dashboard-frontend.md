@@ -2599,8 +2599,10 @@ bounds before sending.
 `routes/missions` is registered through `routes/index.ts`, and the
 `MissionsSlice` is composed into the root store. Hydration reads
 `mission.list` for the active workspace; mission events refetch either the
-open `mission.show` projection or the current list, so reloads and event
+open `mission.show` projection or the first list page, so reloads and event
 reconnects recover server state rather than retaining a demo snapshot. The
+refetched page is merged into the list, so older pages loaded with **Load
+older missions** stay, along with the cursor for the next one. The
 progress view renders the authoritative task statuses Ready, Working, Review,
 Done, Proposed and Abandoned. It keeps blockers, exact task revision/scope,
 attempt IDs, evidence availability, and accepted submission

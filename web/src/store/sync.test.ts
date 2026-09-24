@@ -933,6 +933,32 @@ describe('applyEvent', () => {
     expect(store.getState().workspaces[workspace.id]).toBeDefined()
   })
 
+  it('keeps the older mission pages the reader loaded on a mission change', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      missionList: vi.fn(async () => ({ missions: [mission({ id: 'mission_new' })], next_cursor: 'page-2' })),
+    }))
+    store.getState().setMissions([mission({ id: 'mission_old' })], 'page-3', true)
+
+    const client = fakeApi({
+      missionList: vi.fn(async () => ({
+        missions: [mission({ id: 'mission_newest' }), mission({ id: 'mission_new', phase: 'rejected' })],
+        next_cursor: 'page-2-shifted',
+      })),
+    })
+    await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_new' },
+    }), client)
+
+    const s = store.getState()
+    expect(client.missionList).toHaveBeenCalledWith({ workspace_id: workspace.id, limit: 50 })
+    expect(Object.keys(s.missions).sort()).toEqual(['mission_new', 'mission_newest', 'mission_old'])
+    expect(s.missions.mission_new.phase).toBe('rejected')
+    expect(s.missionNextCursor).toBe('page-3')
+  })
+
   it('follows a server update and never moves it backwards', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
