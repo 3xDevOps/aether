@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
@@ -262,16 +262,30 @@ describe('launch dialog', () => {
       ])
     })
 
+    it('keeps the integrator interactive and offers no integrator mode', async () => {
+      await openSwarm()
+      expect(screen.queryByLabelText('Integrator mode')).toBeNull()
+      expect(screen.queryByLabelText('Mode')).toBeNull()
+      // The worker row keeps its own mode.
+      const worker = screen.getByRole('checkbox', { name: /Alice · claude/ }).closest('label') as HTMLElement
+      expect(within(worker).getByRole('combobox').textContent).toBe('headless')
+
+      await pickOption(screen.getByLabelText('Launch type'), 'Single agent')
+      expect(screen.getByLabelText('Mode')).toBeDefined()
+    })
+
     it('sends a worker choice equal to the integrator choice once', async () => {
       await openSwarm()
-      await pickOption(screen.getByLabelText('Integrator mode'), 'Headless')
-      expect(screen.getByText('Integrator · Alice · claude · headless')).toBeDefined()
+      const worker = screen.getByRole('checkbox', { name: /Alice · claude/ }).closest('label') as HTMLElement
+      await pickOption(within(worker).getByRole('combobox'), 'tui')
       setObjective('coordinate checkout work')
       fireEvent.click(screen.getByRole('button', { name: 'Create swarm' }))
 
       await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
-      expect(vi.mocked(api.missionCreate).mock.calls[0][0].execution_choices).toEqual([
-        { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+      expect(params.integrator.mode).toBe('tui')
+      expect(params.execution_choices).toEqual([
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
       ])
     })
 

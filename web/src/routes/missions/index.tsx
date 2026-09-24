@@ -714,7 +714,6 @@ function IntegratorReplacement({
   const [account, setAccount] = useState(mission.integrator.account_member_id)
   const [harnesses, setHarnesses] = useState<string[]>([])
   const [harness, setHarness] = useState(mission.integrator.harness)
-  const [mode, setMode] = useState(mission.integrator.mode)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const key = useRef(newIdempotencyKey())
@@ -751,7 +750,8 @@ function IntegratorReplacement({
       await client.missionReplaceIntegrator({
         mission_id: mission.id,
         expected_generation: mission.integrator_generation,
-        integrator: { account_member_id: account, harness, mode },
+        // mission.replace-integrator refuses a headless integrator.
+        integrator: { account_member_id: account, harness, mode: 'tui' },
         idempotency_key: key.current,
       })
       toast.success('Integrator replaced')
@@ -766,12 +766,11 @@ function IntegratorReplacement({
     <div className="fixed inset-0 z-40 grid place-items-center bg-scrim p-4">
       <div role="dialog" aria-modal="true" aria-label="Replace integrator" className="w-full max-w-md border bg-popover p-4 shadow-overlay">
         <h2 className="text-base font-semibold">Replace integrator</h2>
-        <p className="mt-1 text-xs text-muted-foreground">The current generation is pinned. Retry keeps the same idempotency key.</p>
+        <p className="mt-1 text-xs text-muted-foreground">The replacement runs interactive (tui). The current generation is pinned. Retry keeps the same idempotency key.</p>
         <div className="mt-3 grid gap-3">
 
           <div className="space-y-1.5"><Label>Account</Label><Select value={account} onValueChange={setAccount}><SelectTrigger><SelectValue placeholder="Choose an account" /></SelectTrigger><SelectContent>{accounts.map((member) => <SelectItem key={member.id} value={member.id}>{member.display_name}</SelectItem>)}</SelectContent></Select></div>
           <div className="space-y-1.5"><Label>Harness</Label><Select value={harness} onValueChange={setHarness}><SelectTrigger disabled={!harnesses.length}><SelectValue placeholder="Choose a harness" /></SelectTrigger><SelectContent>{harnesses.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div>
-          <div className="space-y-1.5"><Label>Mode</Label><Select value={mode} onValueChange={setMode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="tui">Interactive (tui)</SelectItem><SelectItem value="headless">Headless</SelectItem></SelectContent></Select></div>
         </div>
         {error && <ErrorNotice error={error} />}
         <div className="mt-4 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={() => void submit()} disabled={saving || !account || !harness}>Replace</Button></div>

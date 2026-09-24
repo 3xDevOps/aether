@@ -454,6 +454,29 @@ describe('mission integrator run', () => {
     ).toBeDefined()
   })
 
+  it('replaces a headless integrator with an interactive one', async () => {
+    seed()
+    const client = {
+      ...showing({ phase: 'active', integrator: { account_member_id: alice.id, harness: 'claude', mode: 'headless' } }),
+      runGet: vi.fn(async () => run({ id: 'run_integrator', status: 'failed' })),
+    }
+    await mount(client)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Mission authorization' })).getByRole('button', { name: 'Replace integrator' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Replace integrator' }))
+    expect(dialog.queryByText('Mode')).toBeNull()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Replace' }))
+    })
+    expect(vi.mocked(client.missionReplaceIntegrator).mock.calls[0][0].integrator).toEqual({
+      account_member_id: alice.id,
+      harness: 'claude',
+      mode: 'tui',
+    })
+  })
+
   it('keeps the planning copy and no run button while the server is asked', async () => {
     seed()
     await mount(withRunGet(() => new Promise(() => {})))

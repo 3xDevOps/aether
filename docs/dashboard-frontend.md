@@ -2565,12 +2565,16 @@ concluding the page is wrong.
 
 The launch dialog keeps **Single agent** as its default. When the gateway
 advertises `mission.create`, it also offers **Swarm**: one concise objective,
-an integrator account/harness/mode, an explicit list of allowed
+an integrator account and harness, an explicit list of allowed
 account/harness/mode execution choices, and finite concurrent and
-total-attempt limits. `mission.create` refuses an integrator whose exact
-account/harness/mode is not one of `execution_choices`, so the list always
-starts with a checked, disabled **Integrator** row that follows the three
-integrator fields. A ticked worker row with the same tuple is not sent
+total-attempt limits. The integrator always runs in `tui` mode, because
+`mission.create` and `mission.replace-integrator` refuse a headless
+integrator, so the swarm form has no integrator mode field and **Replace
+integrator** has no mode field either; worker rows keep their own mode.
+`mission.create` refuses an integrator whose exact account/harness/mode is
+not one of `execution_choices`, so the list always starts with a checked,
+disabled **Integrator** row that follows the integrator fields and reads
+`tui`. A ticked worker row with the same tuple is not sent
 twice, and the list is sent sorted by account, harness, and mode, so the
 same set is always the same request. The worker rows default to the
 integrator's account and first installed harness in `headless` mode. Its

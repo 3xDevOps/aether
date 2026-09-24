@@ -54,8 +54,9 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   const launch = page.getByRole('dialog', { name: 'Launch a swarm' })
   await expect(launch).toBeVisible()
   await launch.getByPlaceholder('What outcome should the integrator coordinate?').fill(missionObjective)
-  await launch.getByLabel('Integrator mode', { exact: true }).click()
-  await page.getByRole('option', { name: 'Headless', exact: true }).click()
+  // The integrator is always interactive; the worker the fixture starts
+  // below needs its own headless choice.
+  await expect(launch.getByText(/^Integrator · .* · claude · tui$/)).toBeVisible()
   const workerChoice = launch.locator('label').filter({ hasText: '· claude' })
   await workerChoice.getByRole('checkbox').check()
   await workerChoice.getByRole('combobox').click()
