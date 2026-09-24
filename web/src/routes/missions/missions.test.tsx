@@ -513,10 +513,13 @@ describe('mission integrator run', () => {
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['claude', 'codex'])
   })
 
-  it('says the integrator run was deleted once it had launched', async () => {
+  it.each([
+    ['active', 'The integrator run was deleted; replace the integrator.'],
+    ['planning', 'The integrator run was deleted; replace the integrator or cancel the swarm.'],
+  ] as const)('says the integrator run was deleted once it had launched, in %s', async (phase, sentence) => {
     seed()
     const client = {
-      ...showing({ phase: 'active', integrator_run_launched: true }),
+      ...showing({ phase, plan_version: 1, integrator_run_launched: true }),
       runGet: vi.fn(async () => {
         throw new ApiError(404, 'run.get: run not found')
       }),
@@ -526,7 +529,7 @@ describe('mission integrator run', () => {
       await Promise.resolve()
     })
     const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
-    expect(banner.getByText('The integrator run was deleted; replace the integrator or cancel the swarm.')).toBeDefined()
+    expect(banner.getByText(sentence)).toBeDefined()
     expect(banner.queryByText(/has not started/)).toBeNull()
     expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
   })

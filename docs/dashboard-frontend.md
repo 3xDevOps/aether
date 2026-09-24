@@ -2661,8 +2661,9 @@ the phase sentence with `The integrator run has not started.`, says the
 server retries the launch periodically and logs `mission: recover
 integrator`, and offers **Replace integrator**. When the mission's
 `integrator_run_launched` is true the run existed and is gone, so the
-banner says `The integrator run was deleted; replace the integrator or
-cancel the swarm.` instead. Any other `run.get` failure
+banner says `The integrator run was deleted; replace the integrator.`
+instead, with ` or cancel the swarm` before the period in `planning`,
+`clarified` and `plan_review`, where **Cancel swarm** is offered. Any other `run.get` failure
 shows its error above the mission and keeps the phase copy; **Refresh** asks
 again, once. **Open integrator run** appears only once the store holds the
 run, beside the run's status chip - the same state vocabulary as the run

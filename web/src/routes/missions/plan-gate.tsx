@@ -148,7 +148,7 @@ export function PhaseBanner({
         {!notStarted
           ? phaseSentence(mission)
           : mission.integrator_run_launched
-            ? 'The integrator run was deleted; replace the integrator or cancel the swarm.'
+            ? `The integrator run was deleted; replace the integrator${phase === 'planning' || phase === 'clarified' || phase === 'plan_review' ? ' or cancel the swarm' : ''}.`
             : `The integrator run has not started. The server retries the launch periodically and logs each failure as "mission: recover integrator".`}
       </p>
       {(exited || notStarted) && mission.integrator_launch_error && (
