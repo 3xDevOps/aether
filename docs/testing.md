@@ -17,7 +17,8 @@ Layers, per the design spec's testing strategy:
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
   to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
-  GitHub-hosted runners. The `integration` matrix in `.github/workflows/ci.yml`
+  GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
+  job log. The `integration` matrix in `.github/workflows/ci.yml`
   gives `internal/server` four shards: `server-chaos`
   (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
   (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`

@@ -267,8 +267,11 @@ jobs:
         with:
           mode: restore
       # The matrix values are literals from this file, passed as make
-      # assignments.
+      # assignments. -v prints each test's duration, which is what the
+      # shards are balanced by.
       - name: Integration tests (real Docker, real git)
+        env:
+          GOFLAGS: -v
         run: make test-integration ${{ matrix.make }}
 
   dashboard:
