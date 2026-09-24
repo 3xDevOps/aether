@@ -326,3 +326,63 @@ func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
 		t.Fatalf("replaced integrator = %+v at generation %d, want tui at %d", out.Mission.Integrator, out.Mission.IntegratorGeneration, legacy.IntegratorGeneration+1)
 	}
 }
+
+// TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator: repeating
+// mission.create with the same key retries a launch that never happened, and
+// nothing else.
+func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
+	for name, tc := range map[string]struct {
+		first  Launcher
+		settle func(*testing.T, *store.DB, protocol.Mission, domain.MemberID)
+	}{
+		"deleted run": {
+			first: nil,
+			settle: func(t *testing.T, db *store.DB, m protocol.Mission, _ domain.MemberID) {
+				if err := db.DeleteRun(context.Background(), domain.RunID(m.CurrentIntegratorRunID)); err != nil {
+					t.Fatalf("delete integrator run: %v", err)
+				}
+			},
+		},
+		"cancelled before launch": {
+			first: failingMissionLauncher{err: errors.New("harness image missing")},
+			settle: func(t *testing.T, db *store.DB, m protocol.Mission, member domain.MemberID) {
+				if _, err := db.CancelMission(context.Background(), domain.MissionID(m.ID), member, "cancel-1"); err != nil {
+					t.Fatalf("cancel mission: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openMissionRegressionDB(t)
+			workspace := regressionWorkspace(t, db)
+			member := regressionMember(t, db, "accountable")
+			first := tc.first
+			if first == nil {
+				first = &recordingLauncher{db: db}
+			}
+			svc, err := New(Config{Store: db, Runs: first, RequireCoordination: func() error { return nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
+			params := protocol.MissionCreateParams{
+				WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
+				Integrator:            protocol.MissionIntegrator(integrator),
+				ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+				MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+			}
+			created, _ := svc.Create(ctx, member.ID, params)
+			tc.settle(t, db, created.Mission, member.ID)
+
+			svc.cfg.Runs = emptyMissionLauncher{}
+			replayed, err := svc.Create(ctx, member.ID, params)
+			if err != nil || replayed.Mission.ID != created.Mission.ID {
+				t.Fatalf("same-key create = %+v, %v; want mission %s and no error", replayed.Mission, err, created.Mission.ID)
+			}
+			if _, runErr := db.GetRun(ctx, domain.RunID(created.Mission.CurrentIntegratorRunID)); !errors.Is(runErr, store.ErrNotFound) {
+				t.Fatalf("integrator run after the replay = %v, want ErrNotFound", runErr)
+			}
+		})
+	}
+}

@@ -757,6 +757,11 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		err = s.recordIntegratorLaunch(ctx, m, launchErrorForRow(m, existing), true)
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
 	}
+	// A same-key replay must not bring back an integrator run a human
+	// deleted, nor start one for a swarm that has ended.
+	if m.IntegratorRunLaunched || m.Phase == domain.MissionPhaseRejected {
+		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
+	}
 	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: m.CurrentIntegratorRunID,
 		ActorRunID: m.CurrentIntegratorRunID, RunOwnerID: m.IntegratorRunOwnerID,
