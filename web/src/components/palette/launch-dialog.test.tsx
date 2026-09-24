@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
@@ -315,6 +315,38 @@ describe('launch dialog', () => {
         { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
         { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
       ])
+    })
+
+    it('opens on Single agent when swarm launch is unavailable', async () => {
+      useStore.setState({ capabilities: null })
+      await open()
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeDefined()
+      expect(screen.queryByLabelText('Launch type')).toBeNull()
+    })
+
+    it('stays on Swarm and says why when the capabilities drop while open', async () => {
+      await openSwarm()
+      setObjective('coordinate checkout work')
+      act(() => useStore.setState({ capabilities: null }))
+
+      expect(screen.getByRole('status').textContent).toBe(
+        'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.',
+      )
+      const create = screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement
+      expect(create.disabled).toBe(true)
+      fireEvent.click(create)
+      expect(api.missionCreate).not.toHaveBeenCalled()
+
+      await pickOption(screen.getByLabelText('Launch type'), 'Single agent')
+      expect(screen.queryByRole('status')).toBeNull()
+      expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('says a role that cannot launch is why swarm launch is unavailable', async () => {
+      await openSwarm()
+      act(() => useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } } }))
+      expect(screen.getByRole('status').textContent).toBe('Swarm launch is unavailable: your role cannot launch.')
+      expect((screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement).disabled).toBe(true)
     })
 
     it('keeps one key per swarm contents until a create succeeds', async () => {

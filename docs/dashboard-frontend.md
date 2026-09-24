@@ -2584,6 +2584,16 @@ the workers. The form sends the exact selected values to `mission.create`,
 including a client idempotency key, then navigates to
 `missions/<server-issued-id>`.
 
+Swarm is offered only while `cap.hasMethod('mission.create')` and the
+member's role may launch. The dialog opens on Swarm from the Missions route
+when both hold, and on Single agent otherwise. If either stops holding while
+the dialog is open on Swarm - a re-hydration that could not read the
+capabilities, or a role change - the dialog stays on Swarm with **Create
+swarm** disabled and says why: `Swarm launch is unavailable: the server did
+not report its capabilities.`, `... your role cannot launch.`, or `... the
+gateway does not offer mission.create.` The **Launch type** select stays so
+the member can switch to Single agent.
+
 The key belongs to the submitted contents, not to the dialog: the tab keeps
 one key per distinct set of contents in memory until a create with them
 succeeds. A failed create may already have stored the mission, so resending

@@ -52,8 +52,10 @@ export function LaunchDialog() {
   const lastHarnessByAccount = useStore((s) => s.lastHarnessByAccount)
   const runs = useStore((s) => s.runs)
   const self = useStore((s) => s.info?.member)
+  const capabilities = useStore((s) => s.capabilities)
   const cap = useCapability()
   const identity = useSelf()
+  const swarmAvailable = cap.hasMethod('mission.create') && allowed('launch', identity)
   const ownAccountID = identity?.id ?? self?.id ?? ''
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
@@ -69,7 +71,7 @@ export function LaunchDialog() {
   const [maxAttempts, setMaxAttempts] = useState('8')
   const [swarmError, setSwarmError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
-  const [kind, setKind] = useState<LaunchKind>(() => useStore.getState().route.name === 'missions' ? 'swarm' : 'single')
+  const [kind, setKind] = useState<LaunchKind>(() => swarmAvailable && useStore.getState().route.name === 'missions' ? 'swarm' : 'single')
   const lastUsedHarness = useMemo(() => {
     const accountID = account || ownAccountID
     const remembered = accountID ? lastHarnessByAccount[accountID] : undefined
@@ -85,11 +87,16 @@ export function LaunchDialog() {
   const installedAgents = agents?.filter((agent) => agent.installed === true) ?? []
   const harnessLoading = agents === null
   const noAgents = !harnessLoading && installedAgents.length === 0
-  const swarmAvailable = cap.hasMethod('mission.create') && allowed('launch', identity)
-
-  useEffect(() => {
-    if (!swarmAvailable) setKind('single')
-  }, [swarmAvailable])
+  // Availability can drop while the dialog is open: a re-hydration that
+  // could not read the capabilities, or a role change. The form stays on
+  // Swarm and says why, rather than switching under the reader.
+  const swarmUnavailable = kind !== 'swarm' || swarmAvailable
+    ? null
+    : capabilities === null
+      ? 'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.'
+      : !allowed('launch', identity)
+        ? 'Swarm launch is unavailable: your role cannot launch.'
+        : 'Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Single agent to launch a run.'
 
   useEffect(() => {
     let live = true
@@ -243,9 +250,10 @@ export function LaunchDialog() {
               {workspace ? <><span className="font-medium">{workspace.name}</span>{' '}<span className="font-mono text-xs text-muted-foreground">{workspace.base_branch}</span></> : <span className="text-muted-foreground">Pick a workspace in the sidebar first.</span>}
             </p>
           </div>
-          {swarmAvailable && (
+          {(swarmAvailable || kind === 'swarm') && (
             <Label className="block space-y-1.5"><span>Launch type</span><Select value={kind} onValueChange={(value) => setKind(value as LaunchKind)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="single">Single agent</SelectItem><SelectItem value="swarm">Swarm</SelectItem></SelectContent></Select></Label>
           )}
+          {swarmUnavailable && <p id="launch-swarm-unavailable" role="status" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs">{swarmUnavailable}</p>}
           <Label className="block space-y-1.5">
             <span>{kind === 'swarm' ? 'Objective (required)' : mode === 'headless' ? 'Task (required)' : 'Task (optional)'}</span>
             <Textarea autoFocus required={kind === 'swarm' || mode === 'headless'} rows={3} placeholder={kind === 'swarm' ? 'What outcome should the integrator coordinate?' : 'What should the agent do?'} value={task} onChange={(event) => setTask(event.target.value)} />
@@ -263,7 +271,7 @@ export function LaunchDialog() {
           <div className="flex flex-wrap items-center justify-between gap-2"><Button type="button" size="sm" variant="outline" disabled={harnessLoading || launching} onClick={() => setAgentRefresh((current) => current + 1)}>Refresh agents</Button>{account && account !== ownAccountID && <p className="max-w-[34ch] text-right text-xs leading-4 text-muted-foreground">Uses the selected member&apos;s environment, agent login, profile, and vendor quota. You remain its owner and actor.</p>}</div>
           {needsTask && <p id="launch-needs-task" className="border-l-2 border-state-needs-attention bg-state-needs-attention/10 px-2 py-1.5 text-xs text-muted-foreground">A headless run has no terminal to type into, so it needs a task.</p>}
         </form>
-        <DialogFooter className="border-t px-3 py-3 sm:px-4"><Button variant="outline" onClick={close}>Cancel</Button><Button type="submit" form="launch-run" aria-describedby={needsTask ? 'launch-needs-task' : undefined} disabled={launching || !workspaceID || !account || !harness || needsTask}>{kind === 'swarm' ? 'Create swarm' : 'Launch'}</Button></DialogFooter>
+        <DialogFooter className="border-t px-3 py-3 sm:px-4"><Button variant="outline" onClick={close}>Cancel</Button><Button type="submit" form="launch-run" aria-describedby={needsTask ? 'launch-needs-task' : swarmUnavailable ? 'launch-swarm-unavailable' : undefined} disabled={launching || !workspaceID || !account || !harness || needsTask || swarmUnavailable !== null}>{kind === 'swarm' ? 'Create swarm' : 'Launch'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   )
