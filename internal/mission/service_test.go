@@ -387,6 +387,49 @@ func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
 	}
 }
 
+// TestReplaceReplayLaunchesNothingForADeletedRun: a replacement's run that a
+// human deleted stays deleted when the replacement is replayed.
+func TestReplaceReplayLaunchesNothingForADeletedRun(t *testing.T) {
+	ctx := context.Background()
+	db := openMissionRegressionDB(t)
+	workspace := regressionWorkspace(t, db)
+	member := regressionMember(t, db, "accountable")
+	svc, err := New(Config{Store: db, Runs: &recordingLauncher{db: db}, RequireCoordination: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
+	created, err := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	params := protocol.MissionReplaceIntegratorParams{
+		MissionID: created.Mission.ID, ExpectedGeneration: created.Mission.IntegratorGeneration,
+		Integrator: protocol.MissionIntegrator(integrator), IdempotencyKey: "replace-1",
+	}
+	replaced, err := svc.ReplaceIntegrator(ctx, member.ID, params)
+	if err != nil || replaced.RunID == "" {
+		t.Fatalf("replace = %+v, %v; want a launched run", replaced, err)
+	}
+	if err := db.DeleteRun(ctx, domain.RunID(replaced.RunID)); err != nil {
+		t.Fatalf("delete replacement run: %v", err)
+	}
+
+	svc.cfg.Runs = emptyMissionLauncher{}
+	replayed, err := svc.ReplaceIntegrator(ctx, member.ID, params)
+	if err != nil || replayed.RunID != replaced.RunID || replayed.Mission.IntegratorGeneration != replaced.Mission.IntegratorGeneration {
+		t.Fatalf("same-key replace = %+v, %v; want run %s at generation %d and no error", replayed, err, replaced.RunID, replaced.Mission.IntegratorGeneration)
+	}
+	if _, runErr := db.GetRun(ctx, domain.RunID(replaced.RunID)); !errors.Is(runErr, store.ErrNotFound) {
+		t.Fatalf("replacement run after the replay = %v, want ErrNotFound", runErr)
+	}
+}
+
 // TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch: a replacement starts
 // with no launch error, so a failed launch must record its own.
 func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {

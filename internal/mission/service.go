@@ -878,6 +878,11 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		err = s.recordIntegratorLaunch(ctx, replaced, launchErrorForRow(replaced, existing), true)
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(existing.ID)}, err
 	}
+	// The run existed and a human deleted it, or the swarm ended: a replay
+	// returns the stored result and launches nothing, as create does.
+	if replaced.IntegratorRunLaunched || replaced.Phase == domain.MissionPhaseRejected {
+		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(replaced.CurrentIntegratorRunID)}, nil
+	}
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: replaced.WorkspaceID, RunID: replaced.CurrentIntegratorRunID,
 		ActorRunID: replaced.CurrentIntegratorRunID, RunOwnerID: replaced.IntegratorRunOwnerID,
