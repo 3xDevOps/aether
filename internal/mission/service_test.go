@@ -416,8 +416,8 @@ func TestReplaceReplayLaunchesNothingForADeletedRun(t *testing.T) {
 	if err != nil || replaced.RunID == "" {
 		t.Fatalf("replace = %+v, %v; want a launched run", replaced, err)
 	}
-	if err := db.DeleteRun(ctx, domain.RunID(replaced.RunID)); err != nil {
-		t.Fatalf("delete replacement run: %v", err)
+	if deleteErr := db.DeleteRun(ctx, domain.RunID(replaced.RunID)); deleteErr != nil {
+		t.Fatalf("delete replacement run: %v", deleteErr)
 	}
 
 	svc.cfg.Runs = emptyMissionLauncher{}
