@@ -366,7 +366,7 @@ Rejecting and cancelling both move the mission to `rejected`, and the server
 then cancels the integrator run.
 
 An answer to a mission question and every plan decision are also typed into
-the integrator's terminal as one `[aether]` line naming the command to run
+the integrator's terminal as one `aether:` line naming the command to run
 next. The integrator is always interactive (TUI): `mission.create` and
 `mission.replace-integrator` refuse any other mode with `-32602` and
 `integrator mode must be tui: a headless integrator exits after one turn and

@@ -77,7 +77,7 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 	// fixtures then manually invoke MCP; the taskless fixture only observes.
 	for _, att := range []*attachConn{attA, attB, attC} {
 		att.waitOutput(t, "aether injects")
-		att.waitOutput(t, "notice:[aether] Overlap: run ")
+		att.waitOutput(t, "notice:aether: Overlap: run ")
 	}
 	attA.waitOutput(t, "assets:manual-mcp")
 	attB.waitOutput(t, "assets:manual-mcp")
@@ -159,8 +159,8 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	e.assertRegistered(t, runC)
 	e.assertNoCoordination(t, runA)
 	e.assertNoCoordination(t, runB)
-	attA2.waitOutput(t, "notice:[aether] Overlap: run ")
-	attC.waitOutput(t, "notice:[aether] Overlap: run ")
+	attA2.waitOutput(t, "notice:aether: Overlap: run ")
+	attC.waitOutput(t, "notice:aether: Overlap: run ")
 
 	// On -> off. Run C's already-created container retains its read-only
 	// mounts, but the service unlinks the socket on recovery.

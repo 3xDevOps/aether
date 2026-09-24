@@ -140,7 +140,7 @@ func (f *planGateFixture) expect(t *testing.T, step, text, submit string) {
 	t.Helper()
 	want := injectedLine{
 		key: ptyhost.RunSession(f.mission.CurrentIntegratorRunID), actor: "aether",
-		text: "[aether] " + text, end: submit,
+		text: "aether: " + text, end: submit,
 	}
 	select {
 	case got := <-f.notices.writes:
@@ -597,7 +597,7 @@ func TestPlanRejectStaysAvailableAfterAccountableHumanLosesLaunch(t *testing.T) 
 
 // TestPlanHumanActionsNoticeTheIntegratorTerminal covers the wake-up an idle
 // interactive integrator depends on: each answer and each plan decision types
-// exactly one [aether] line into its terminal, and a replay types none.
+// exactly one aether: line into its terminal, and a replay types none.
 func TestPlanHumanActionsNoticeTheIntegratorTerminal(t *testing.T) {
 	ctx := context.Background()
 	f := newPlanGateFixture(t)
