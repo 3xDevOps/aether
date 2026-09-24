@@ -16,7 +16,7 @@ export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
   return (
     <>
-      {dialog === 'launch' && <LaunchDialog />}
+      {(dialog === 'launch' || dialog === 'swarm') && <LaunchDialog />}
       {dialog === 'inject' && <InjectDialog />}
       {dialog === 'forward' && <ForwardDialog />}
       {dialog === 'close' && <CloseDialog />}

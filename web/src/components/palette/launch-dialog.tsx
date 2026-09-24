@@ -71,7 +71,10 @@ export function LaunchDialog() {
   const [maxAttempts, setMaxAttempts] = useState('8')
   const [swarmError, setSwarmError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
-  const [kind, setKind] = useState<LaunchKind>(() => swarmAvailable && useStore.getState().route.name === 'missions' ? 'swarm' : 'single')
+  const [kind, setKind] = useState<LaunchKind>(() => {
+    const { paletteDialog, route } = useStore.getState()
+    return swarmAvailable && (paletteDialog === 'swarm' || route.name === 'missions') ? 'swarm' : 'single'
+  })
   const lastUsedHarness = useMemo(() => {
     const accountID = account || ownAccountID
     const remembered = accountID ? lastHarnessByAccount[accountID] : undefined

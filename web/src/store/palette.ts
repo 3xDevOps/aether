@@ -4,14 +4,14 @@ import type { SliceCreator } from '@/store/slice'
 /** The palette's forms, each needing input the palette cannot take. */
 /** Every form the shell hosts, so a caller sweeping all of them cannot keep
  * its own list and let it drift. */
-export const paletteDialogs = ['launch', 'inject', 'forward', 'close', 'clear-done'] as const
+export const paletteDialogs = ['launch', 'swarm', 'inject', 'forward', 'close', 'clear-done'] as const
 
 export type PaletteDialog = (typeof paletteDialogs)[number]
 
 export interface PaletteSlice {
   paletteOpen: boolean
   paletteDialog: PaletteDialog | null
-  /** The run a form acts on; the launch and clear-done forms have none. */
+  /** The run a form acts on; the launch, swarm and clear-done forms have none. */
   paletteRunID: string | null
   paletteForwardTarget: string | null
   /** The plan the clear-done form confirms, snapshotted when it opened. */

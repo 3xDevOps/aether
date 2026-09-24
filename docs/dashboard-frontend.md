@@ -2586,7 +2586,9 @@ including a client idempotency key, then navigates to
 
 Swarm is offered only while `cap.hasMethod('mission.create')` and the
 member's role may launch. The dialog opens on Swarm from the Missions route
-when both hold, and on Single agent otherwise. If either stops holding while
+or the palette's **Create swarm...** entry (`openPaletteDialog('swarm')`,
+listed under the same two conditions) when both hold, and on Single agent
+otherwise. If either stops holding while
 the dialog is open on Swarm - a re-hydration that could not read the
 capabilities, or a role change - the dialog stays on Swarm with **Create
 swarm** disabled and says why: `Swarm launch is unavailable: the server did
