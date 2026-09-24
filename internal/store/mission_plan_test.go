@@ -1045,9 +1045,9 @@ func TestMissionPreGateDatabaseMigratesToActive(t *testing.T) {
 	}
 }
 
-// TestMissionLaunchedMarkerBackfillsExistingIntegrators pins the upgrade: a
-// current integrator whose row exists was launched, and one whose row is
-// missing was not, so only the second is ever relaunched.
+// TestMissionLaunchedMarkerBackfillsExistingIntegrators pins the upgrade: every
+// existing integrator counts as launched, whether or not its row survives, so
+// an upgrade relaunches nothing a human deleted.
 func TestMissionLaunchedMarkerBackfillsExistingIntegrators(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, len(migrations)-1)
@@ -1060,7 +1060,8 @@ func TestMissionLaunchedMarkerBackfillsExistingIntegrators(t *testing.T) {
 			VALUES ('r1', 'w1', 'm1', 'a', 'claude', 'tui', 'running', 'b', 'w', 1);
 		INSERT INTO missions (id, workspace_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, execution_choices, max_concurrent_attempts, max_total_attempts, current_integrator_run_id, integrator_generation, accepted_set_version, idempotency_key, created_at, updated_at)
 			VALUES ('mi1', 'w1', 'launched', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 'r1', 1, 0, 'key-1', 1, 1),
-			       ('mi2', 'w1', 'reserved', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 'r2', 1, 0, 'key-2', 1, 1);
+			       ('mi2', 'w1', 'deleted', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 'r2', 1, 0, 'key-2', 1, 1),
+			       ('mi3', 'w1', 'no integrator', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, NULL, 1, 0, 'key-3', 1, 1);
 	`, testKey(t, "ada@laptop")); err != nil {
 		t.Fatalf("seed rows: %v", err)
 	}
@@ -1076,7 +1077,7 @@ func TestMissionLaunchedMarkerBackfillsExistingIntegrators(t *testing.T) {
 			t.Errorf("Close: %v", closeErr)
 		}
 	})
-	for id, want := range map[domain.MissionID]bool{"mi1": true, "mi2": false} {
+	for id, want := range map[domain.MissionID]bool{"mi1": true, "mi2": true, "mi3": false} {
 		m, getErr := db.GetMission(context.Background(), id)
 		if getErr != nil {
 			t.Fatalf("GetMission %s: %v", id, getErr)

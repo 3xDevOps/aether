@@ -235,6 +235,12 @@ and deleting that run does not bring it back, not even through a same-key
 a cancelled swarm. Use **Replace integrator** to start a new one, or, before
 the plan is approved, cancel the swarm.
 
+Upgrading to the server version that added `integrator_run_launched` marks
+every existing swarm's integrator as launched, so the upgrade relaunches
+nothing, including an integrator run deleted before the upgrade. An older
+swarm whose integrator never launched therefore stays unlaunched; use
+**Replace integrator** to start it.
+
 ### Container wait errors
 
 An error from Docker while waiting is inconclusive: it does not prove that

@@ -1256,13 +1256,13 @@ CREATE INDEX idx_mission_mutation_receipts_key
 ALTER TABLE missions ADD COLUMN integrator_launch_error TEXT NOT NULL DEFAULT '';
 ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
 `,
-	// A current integrator whose row exists at upgrade was launched, so it is
-	// never relaunched after a later delete. One deleted before the upgrade
-	// has no row to find and is relaunched once.
+	// Every existing integrator counts as launched, so an upgrade relaunches
+	// nothing: a missing row cannot tell a run a human deleted before the
+	// upgrade from one that never launched. The rare pre-upgrade integrator
+	// that truly never launched needs Replace integrator.
 	`
 ALTER TABLE missions ADD COLUMN integrator_run_launched INTEGER NOT NULL DEFAULT 0;
-UPDATE missions SET integrator_run_launched = 1
-	WHERE EXISTS (SELECT 1 FROM runs WHERE runs.id = missions.current_integrator_run_id);
+UPDATE missions SET integrator_run_launched = 1 WHERE current_integrator_run_id <> '';
 `,
 }
 
