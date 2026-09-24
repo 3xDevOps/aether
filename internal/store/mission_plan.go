@@ -613,6 +613,10 @@ func (d *DB) DecideMissionPlan(ctx context.Context, missionID domain.MissionID, 
 	return m, nil
 }
 
+// missionCancelledFeedback is the feedback on a plan round that mission.cancel
+// closed rather than a human decision.
+const missionCancelledFeedback = "swarm cancelled"
+
 // CancelMission ends a mission before its plan is approved by moving it to
 // rejected, the terminal phase whose integrator the reconcile loop stops. A
 // key names one cancellation of one mission.
@@ -656,6 +660,14 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 	n, err := encodeTime(now)
 	if err != nil {
 		return nil, err
+	}
+	// A round under review is closed as rejected, so no reader takes the
+	// cancelled mission's plan for one still awaiting a decision.
+	if m.Phase == domain.MissionPhasePlanReview {
+		if _, reviewErr := tx.ExecContext(ctx, `UPDATE mission_plan_reviews SET decision=?, feedback=?, decided_by_member_id=?, decided_at=? WHERE mission_id=? AND plan_version=? AND decision=''`,
+			domain.MissionPlanReject, missionCancelledFeedback, cancelledBy, n, missionID, m.PlanVersion); reviewErr != nil {
+			return nil, fmt.Errorf("store: close plan version %d of cancelled mission %s: %w", m.PlanVersion, missionID, reviewErr)
+		}
 	}
 	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseRejected, n, missionID); updateErr != nil {
 		return nil, fmt.Errorf("store: move mission %s to rejected: %w", missionID, updateErr)

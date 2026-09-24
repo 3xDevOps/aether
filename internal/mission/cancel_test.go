@@ -47,6 +47,18 @@ func TestCancelEndsAMissionInEveryPhaseBeforeApproval(t *testing.T) {
 			if len(f.canceller.runs) != 1 || f.canceller.runs[0] != f.mission.CurrentIntegratorRunID {
 				t.Fatalf("cancelled runs = %v, want the integrator run %s", f.canceller.runs, f.mission.CurrentIntegratorRunID)
 			}
+			reviews, err := f.db.ListMissionPlanReviews(ctx, f.mission.ID)
+			if err != nil {
+				t.Fatalf("list plan reviews: %v", err)
+			}
+			for _, review := range reviews {
+				if review.Decision != domain.MissionPlanReject || review.Feedback != "swarm cancelled" || review.DecidedByMemberID != f.member.ID || review.DecidedAt == nil {
+					t.Fatalf("plan round after cancel = %+v, want rejected as swarm cancelled by %s", review, f.member.ID)
+				}
+			}
+			if phase == domain.MissionPhasePlanReview && len(reviews) != 1 {
+				t.Fatalf("plan rounds after cancel in plan_review = %d, want 1", len(reviews))
+			}
 		})
 	}
 }

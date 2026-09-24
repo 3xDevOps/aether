@@ -652,8 +652,10 @@ or cancel, and an admin must take over:
   stands either way, so an amendment is approved or sent back for changes and
   the integrator abandons its tasks or revisions to drop it.
 - `mission.cancel` ends a mission in `planning`, `clarified`, or `plan_review`
-  by moving it to `rejected`, whether or not a plan was ever submitted. It is
-  refused once a plan is approved and on a mission that already ended.
+  by moving it to `rejected`, whether or not a plan was ever submitted. A round
+  under review is recorded as a `reject` decision with the feedback
+  `swarm cancelled`. It is refused once a plan is approved and on a mission
+  that already ended.
 
 Reading the gate is not deciding it. `mission.show` stays a View read: every
 member sees the questions, the answers, the plan summaries, and the feedback
