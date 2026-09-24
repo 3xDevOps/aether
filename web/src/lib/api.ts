@@ -29,6 +29,7 @@ import type {
   LinkRepoResult,
   LinkStatus,
   Member,
+  MissionCancelResult,
   MissionCreateResult,
   MissionListResult,
   MissionPlanDecideResult,
@@ -385,6 +386,8 @@ export const api = {
     feedback?: string
     idempotency_key: string
   }) => call<MissionPlanDecideResult>('mission.plan.decide', params),
+  missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
+    call<MissionCancelResult>('mission.cancel', params),
   missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
     call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),

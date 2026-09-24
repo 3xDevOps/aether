@@ -326,6 +326,66 @@ describe('mission plan gate', () => {
   })
 })
 
+describe('mission cancel', () => {
+  it.each(['planning', 'clarified', 'plan_review'] as const)('offers Cancel swarm in %s', async (phase) => {
+    seed()
+    await mount(showing({ phase, plan_version: phase === 'plan_review' ? 2 : 0 }))
+    expect(screen.getByRole('button', { name: 'Cancel swarm' })).toBeDefined()
+  })
+
+  it('hides Cancel swarm once the plan is approved', async () => {
+    seed()
+    await mount(showing({ phase: 'active' }))
+    expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
+  })
+
+  it('hides Cancel swarm from a member who is neither accountable nor admin', async () => {
+    seed({ info: { ...serverInfo, member: bob } })
+    await mount(showing({ phase: 'planning', plan_version: 0 }))
+    expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
+  })
+
+  it('cancels the mission after confirmation and refreshes the detail', async () => {
+    seed()
+    const client = showing({ phase: 'planning', plan_version: 0 })
+    await mount(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel swarm' }))
+    const dialog = within(screen.getByRole('alertdialog', { name: 'Cancel this swarm?' }))
+    expect(client.missionCancel).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
+    })
+    expect(vi.mocked(client.missionCancel).mock.calls[0][0]).toEqual({
+      mission_id: 'mission_1',
+      idempotency_key: expect.any(String),
+    })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(client.missionShow).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the refusal and retries under the same key', async () => {
+    seed()
+    const client = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
+    vi.mocked(client.missionCancel).mockRejectedValueOnce(
+      new Error('mission.cancel: mission mission_1 is active; only a mission awaiting plan approval can be cancelled'),
+    )
+    await mount(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel swarm' }))
+    const dialog = within(screen.getByRole('alertdialog', { name: 'Cancel this swarm?' }))
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
+    })
+    expect(dialog.getByRole('alert').textContent).toBe(
+      'mission.cancel: mission mission_1 is active; only a mission awaiting plan approval can be cancelled',
+    )
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
+    })
+    const [first, second] = vi.mocked(client.missionCancel).mock.calls.map(([params]) => params)
+    expect(second.idempotency_key).toBe(first.idempotency_key)
+  })
+})
+
 describe('mission integrator run', () => {
   function withRunGet(runGet: Api['runGet']): Api {
     return { ...showing({ phase: 'planning', plan_version: 0 }), runGet: vi.fn(runGet) }

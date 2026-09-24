@@ -318,6 +318,10 @@ export interface MissionPlanDecideResult {
   mission: Mission
 }
 
+export interface MissionCancelResult {
+  mission: Mission
+}
+
 export interface MissionListResult {
   missions: Mission[]
   next_cursor?: string

@@ -368,6 +368,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: undefined })),
     missionQuestionAnswer: vi.fn(async () => ({ question: missionQuestion({ answer: 'the guest flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }) })),
     missionPlanDecide: vi.fn(async () => ({ mission: mission() })),
+    missionCancel: vi.fn(async () => ({ mission: mission({ phase: 'rejected' }) })),
     missionWorkerRelease: vi.fn(async () => ({ run_id: 'run_worker', takeover_active: false, takeover_generation: 2 })),
     missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),

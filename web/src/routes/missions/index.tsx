@@ -2,6 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { ViewHeader } from '@/components/view-header'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -269,6 +279,7 @@ function MissionDetailView({
   const self = useSelf()
   const cap = useCapability()
   const [replaceOpen, setReplaceOpen] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
   const [releaseError, setReleaseError] = useState<string | null>(null)
   const [releasingAttemptID, setReleasingAttemptID] = useState<string | null>(null)
   const mission = detail?.mission
@@ -330,6 +341,10 @@ function MissionDetailView({
   // `amendment_review` keeps dispatching the approved set, so its attempts are
   // real; only the pending revisions in the round are frozen.
   const readOnly = phase !== 'active' && phase !== 'amendment_review'
+  const canCancel =
+    cap.hasMethod('mission.cancel') &&
+    gateAuthority &&
+    (phase === 'planning' || phase === 'clarified' || phase === 'plan_review')
   const releaseTakeover = async (attempt: MissionAttempt) => {
     if (!attempt.takeover_active || attempt.takeover_generation == null || !attempt.run_id || releasingAttemptID) return
     setReleaseError(null)
@@ -383,6 +398,11 @@ function MissionDetailView({
               <RefreshCw className="size-3.5" aria-hidden />
               Refresh
             </Button>
+            {canCancel && (
+              <Button size="sm" variant="outline" onClick={() => setCancelOpen(true)}>
+                Cancel swarm
+              </Button>
+            )}
           </>
         }
       />
@@ -519,6 +539,17 @@ function MissionDetailView({
           onClose={() => setReplaceOpen(false)}
           onReplaced={() => {
             setReplaceOpen(false)
+            onRefresh()
+          }}
+        />
+      )}
+      {cancelOpen && mission && (
+        <MissionCancel
+          mission={mission}
+          client={client}
+          onClose={() => setCancelOpen(false)}
+          onCancelled={() => {
+            setCancelOpen(false)
             onRefresh()
           }}
         />
@@ -743,6 +774,63 @@ function IntegratorReplacement({
     </div>
   )
 }
+/** One key per confirmation: a retry after a failure inside the same dialog
+ * replays the cancel instead of issuing another. */
+function MissionCancel({
+  mission,
+  client,
+  onClose,
+  onCancelled,
+}: {
+  mission: Mission
+  client: Api
+  onClose: () => void
+  onCancelled: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const key = useRef(newIdempotencyKey())
+
+  const cancel = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await client.missionCancel({ mission_id: mission.id, idempotency_key: key.current })
+      toast.success('Swarm cancelled')
+      onCancelled()
+    } catch (err) {
+      setBusy(false)
+      setError(message(err))
+    }
+  }
+
+  return (
+    <AlertDialog open onOpenChange={() => { if (!busy) onClose() }}>
+      <AlertDialogContent className="max-h-[calc(100dvh-1rem)] sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancel this swarm?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The mission moves to rejected, its integrator run is cancelled, and no worker starts. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {error && <ErrorNotice error={error} />}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Keep swarm</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault()
+              void cancel()
+            }}
+          >
+            Cancel swarm
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 function MissionConflictDiagnostics({ run }: CardSlotProps) {
   const detailRecords = useStore((state) => state.missionDetails)
   const details = useMemo(() => Object.values(detailRecords), [detailRecords])

@@ -2674,6 +2674,14 @@ human or an admin may decide this plan.` Both gate controls need the
 capability, launch permission, and that identity:
 `cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
 
+Until a plan is approved - in `planning`, `clarified` and `plan_review` -
+the header also offers **Cancel swarm** to the same identity, gated on
+`mission.cancel`. It opens a confirmation; confirming sends `mission.cancel`
+with a key minted when the confirmation opened, so a retry after a failure
+replays rather than cancelling twice. The mission moves to `rejected`. A
+refusal - the phase moved on while the dialog was open, for example - shows
+the server's error inside the dialog.
+
 In `amendment_review` the integrator has submitted a change to a plan that
 is already approved. **Amendment review** shows the summary, the plan
 version, and one card per item of the round - read from the undecided review
