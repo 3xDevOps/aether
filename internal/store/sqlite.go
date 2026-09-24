@@ -31,6 +31,10 @@ var _ Store = (*DB)(nil)
 // created at 0600 before SQLite sees it, because SQLite copies the main
 // database file's mode onto the -wal and -shm sidecars it creates while
 // applying the journal_mode pragma.
+//
+// Write transactions begin IMMEDIATE: a deferred transaction that reads
+// and then writes fails its lock upgrade with SQLITE_BUSY without waiting
+// on busy_timeout whenever another connection writes in between.
 func Open(path string) (*DB, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -40,7 +44,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("store: create %s: %w", path, closeErr)
 	}
 	dsn := "file:" + url.PathEscape(path) +
-		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)

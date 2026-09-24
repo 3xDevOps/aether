@@ -911,6 +911,64 @@ func TestConcurrentOpen(t *testing.T) {
 	}
 }
 
+// TestWriteTransactionsWaitForTheWriteLock pins BEGIN IMMEDIATE. Store
+// transactions read before they write; a deferred one fails its lock
+// upgrade with SQLITE_BUSY, without consulting busy_timeout, whenever
+// another connection writes in between - and the event log writes to
+// aether.db through its own pool on every published event.
+func TestWriteTransactionsWaitForTheWriteLock(t *testing.T) {
+	t.Parallel()
+	path := templateDBPath(t)
+	var dbs [2]*DB
+	for i := range dbs {
+		db, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open %d: %v", i, err)
+		}
+		defer func() { _ = db.Close() }()
+		dbs[i] = db
+	}
+
+	ctx := context.Background()
+	const writers, rounds = 8, 10
+	var wg sync.WaitGroup
+	errs := make(chan error, writers*rounds)
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			db := dbs[w%len(dbs)]
+			for r := range rounds {
+				errs <- func() error {
+					tx, err := db.db.BeginTx(ctx, nil)
+					if err != nil {
+						return err
+					}
+					defer func() { _ = tx.Rollback() }()
+					var n int
+					if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&n); err != nil {
+						return err
+					}
+					if _, err := tx.ExecContext(ctx,
+						`INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
+						 VALUES (?, ?, ?, '{}', 'main', '', '')`,
+						fmt.Sprintf("w%d-%d", w, r), "contended", n); err != nil {
+						return err
+					}
+					return tx.Commit()
+				}()
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent read-then-write transaction: %v", err)
+		}
+	}
+}
+
 func TestUpdateRunStatus(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
