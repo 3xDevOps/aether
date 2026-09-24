@@ -216,11 +216,30 @@ integrator` with the mission ID and the cause. Repeating `mission.create`
 with the same contents and idempotency key also retries the launch, and
 returns the same mission. The Swarms page shows `The integrator run has not
 started.` for that mission.
+`mission.show` and `mission.list` carry the last launch error in
+`integrator_launch_error` and the time it was first seen in
+`integrator_launch_error_at`; both clear once the run is live (a row that
+failed while provisioning keeps them) or the integrator is replaced.
+`mission.replace-integrator` reports a failed launch of the new run with the
+same two errors and records it the same way.
 
 A run row that failed while provisioning is not retried, and a same-key
 `mission.create` returns the mission without launching again. The Swarms
 page shows that the integrator run has exited. Fix the cause, then use
 **Replace integrator** to launch a new integrator run.
+
+Reconciliation only relaunches an integrator run whose row never existed.
+Once the row exists, `mission.show` reports `integrator_run_launched: true`,
+and deleting that run does not bring it back, not even through a same-key
+`mission.create`, which then returns the mission unchanged, as it does for
+a cancelled swarm. Use **Replace integrator** to start a new one, or, before
+the plan is approved, cancel the swarm.
+
+Upgrading to the server version that added `integrator_run_launched` marks
+every existing swarm's integrator as launched, so the upgrade relaunches
+nothing, including an integrator run deleted before the upgrade. An older
+swarm whose integrator never launched therefore stays unlaunched; use
+**Replace integrator** to start it.
 
 ### Container wait errors
 

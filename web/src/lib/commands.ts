@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   List,
   MessageSquarePlus,
+  Network,
   Pause,
   Play,
   RefreshCw,
@@ -455,6 +456,14 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       label: 'Launch a run...',
       Icon: Rocket,
       perform: (d) => d.openDialog('launch'),
+    })
+  }
+  if (ctx.cap.hasMethod('mission.create') && allowed('launch', { id: null, role })) {
+    list.push({
+      id: 'swarm',
+      label: 'Create swarm...',
+      Icon: Network,
+      perform: (d) => d.openDialog('swarm'),
     })
   }
   if (ctx.cap.hasMethod('template.launch') && allowed('launch', { id: null, role })) {

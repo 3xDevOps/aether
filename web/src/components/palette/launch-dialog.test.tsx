@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
@@ -262,16 +262,30 @@ describe('launch dialog', () => {
       ])
     })
 
+    it('keeps the integrator interactive and offers no integrator mode', async () => {
+      await openSwarm()
+      expect(screen.queryByLabelText('Integrator mode')).toBeNull()
+      expect(screen.queryByLabelText('Mode')).toBeNull()
+      // The worker row keeps its own mode.
+      const worker = screen.getByRole('checkbox', { name: /Alice · claude/ }).closest('label') as HTMLElement
+      expect(within(worker).getByRole('combobox').textContent).toBe('headless')
+
+      await pickOption(screen.getByLabelText('Launch type'), 'Single agent')
+      expect(screen.getByLabelText('Mode')).toBeDefined()
+    })
+
     it('sends a worker choice equal to the integrator choice once', async () => {
       await openSwarm()
-      await pickOption(screen.getByLabelText('Integrator mode'), 'Headless')
-      expect(screen.getByText('Integrator · Alice · claude · headless')).toBeDefined()
+      const worker = screen.getByRole('checkbox', { name: /Alice · claude/ }).closest('label') as HTMLElement
+      await pickOption(within(worker).getByRole('combobox'), 'tui')
       setObjective('coordinate checkout work')
       fireEvent.click(screen.getByRole('button', { name: 'Create swarm' }))
 
       await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
-      expect(vi.mocked(api.missionCreate).mock.calls[0][0].execution_choices).toEqual([
-        { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+      expect(params.integrator.mode).toBe('tui')
+      expect(params.execution_choices).toEqual([
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
       ])
     })
 
@@ -301,6 +315,49 @@ describe('launch dialog', () => {
         { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
         { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
       ])
+    })
+
+    it('opens on Single agent when swarm launch is unavailable', async () => {
+      useStore.setState({ capabilities: null })
+      await open()
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeDefined()
+      expect(screen.queryByLabelText('Launch type')).toBeNull()
+    })
+
+    it('stays on Swarm and says why when the capabilities drop while open', async () => {
+      await openSwarm()
+      setObjective('coordinate checkout work')
+      act(() => useStore.setState({ capabilities: null }))
+
+      expect(screen.getByRole('status').textContent).toBe(
+        'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.',
+      )
+      const create = screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement
+      expect(create.disabled).toBe(true)
+      fireEvent.click(create)
+      expect(api.missionCreate).not.toHaveBeenCalled()
+
+      await pickOption(screen.getByLabelText('Launch type'), 'Single agent')
+      expect(screen.queryByRole('status')).toBeNull()
+      expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('names missing capabilities before the role', async () => {
+      await openSwarm()
+      act(() => useStore.setState({
+        capabilities: null,
+        info: { ...serverInfo, member: { ...alice, role: 'viewer' } },
+      }))
+      expect(screen.getByRole('status').textContent).toBe(
+        'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.',
+      )
+    })
+
+    it('says a role that cannot launch is why swarm launch is unavailable', async () => {
+      await openSwarm()
+      act(() => useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } } }))
+      expect(screen.getByRole('status').textContent).toBe('Swarm launch is unavailable: your role cannot launch.')
+      expect((screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement).disabled).toBe(true)
     })
 
     it('keeps one key per swarm contents until a create succeeds', async () => {

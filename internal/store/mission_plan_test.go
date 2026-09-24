@@ -1044,3 +1044,46 @@ func TestMissionPreGateDatabaseMigratesToActive(t *testing.T) {
 		t.Fatalf("mission_plan_items = %d rows, want none", reviews)
 	}
 }
+
+// TestMissionLaunchedMarkerBackfillsExistingIntegrators pins the upgrade: every
+// existing integrator counts as launched, whether or not its row survives, so
+// an upgrade relaunches nothing a human deleted.
+func TestMissionLaunchedMarkerBackfillsExistingIntegrators(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, len(migrations)-1)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, color, role, created_at)
+			VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
+		INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
+			VALUES ('w1', 'proj', 1, '{}', 'main', '', '');
+		INSERT INTO runs (id, workspace_id, member_id, task, harness, mode, status, branch, worktree, created_at)
+			VALUES ('r1', 'w1', 'm1', 'a', 'claude', 'tui', 'running', 'b', 'w', 1);
+		INSERT INTO missions (id, workspace_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, execution_choices, max_concurrent_attempts, max_total_attempts, current_integrator_run_id, integrator_generation, accepted_set_version, idempotency_key, created_at, updated_at)
+			VALUES ('mi1', 'w1', 'launched', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 'r1', 1, 0, 'key-1', 1, 1),
+			       ('mi2', 'w1', 'deleted', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, 'r2', 1, 0, 'key-2', 1, 1),
+			       ('mi3', 'w1', 'no integrator', 'm1', 'm1', 'claude', 'tui', '[]', 1, 2, NULL, 1, 0, 'key-3', 1, 1);
+	`, testKey(t, "ada@laptop")); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("Close: %v", closeErr)
+		}
+	})
+	for id, want := range map[domain.MissionID]bool{"mi1": true, "mi2": true, "mi3": false} {
+		m, getErr := db.GetMission(context.Background(), id)
+		if getErr != nil {
+			t.Fatalf("GetMission %s: %v", id, getErr)
+		}
+		if m.IntegratorRunLaunched != want {
+			t.Fatalf("mission %s integrator_run_launched = %v, want %v", id, m.IntegratorRunLaunched, want)
+		}
+	}
+}

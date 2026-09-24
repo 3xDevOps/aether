@@ -5,7 +5,7 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { agentInfo, alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
 import { openSelect, pickOption } from '@/test/select'
 
@@ -313,6 +313,34 @@ describe('command palette', () => {
     )
     // A launch drops the user straight into the agent terminal.
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
+  })
+
+  it('opens the launch dialog on Swarm from Create swarm', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    open()
+
+    fireEvent.click(await screen.findByText('Create swarm...'))
+    expect(await screen.findByRole('dialog', { name: 'Launch a swarm' })).toBeDefined()
+    expect(screen.getByLabelText(/^Objective/)).toBeDefined()
+  })
+
+  it('offers Create swarm only where the gateway carries mission.create', async () => {
+    open()
+    await screen.findByText('Launch a run...')
+    expect(screen.queryByText('Create swarm...')).toBeNull()
+  })
+
+  it('hides Create swarm from a role that cannot launch', async () => {
+    useStore.setState({
+      capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+      info: { ...serverInfo, member: vera },
+    })
+    onTestFinished(() => {
+      useStore.setState({ info: null })
+    })
+    open()
+    await screen.findByText('Open the board')
+    expect(screen.queryByText('Create swarm...')).toBeNull()
   })
 
   it('offers member-registered agents in the launch harness dropdown', async () => {

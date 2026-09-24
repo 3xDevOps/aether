@@ -2565,20 +2565,38 @@ concluding the page is wrong.
 
 The launch dialog keeps **Single agent** as its default. When the gateway
 advertises `mission.create`, it also offers **Swarm**: one concise objective,
-an integrator account/harness/mode, an explicit list of allowed
+an integrator account and harness, an explicit list of allowed
 account/harness/mode execution choices, and finite concurrent and
-total-attempt limits. `mission.create` refuses an integrator whose exact
+total-attempt limits. The integrator always runs in `tui` mode, because
+`mission.create` and `mission.replace-integrator` refuse a headless
+integrator, so the swarm form has no integrator mode field; worker rows keep
+their own mode. `mission.create` refuses an integrator whose exact
 account/harness/mode is not one of `execution_choices`, so the list always
-starts with a checked, disabled **Integrator** row that follows the three
-integrator fields. A ticked worker row with the same tuple is not sent
-twice, and the list is sent sorted by account, harness, and mode, so the
-same set is always the same request. The worker rows default to the
+starts with a checked, disabled **Integrator** row that follows the
+integrator fields and reads `tui`. A ticked worker row with the same tuple
+is not sent twice, and the list is sent sorted by account, harness, and
+mode, so the same set is always the same request. The worker rows default to the
 integrator's account and first installed harness in `headless` mode. Its
 submit button is **Create swarm**, matching the missions header action, and
 success toasts `Swarm created`; creating a swarm starts the integrator, not
 the workers. The form sends the exact selected values to `mission.create`,
 including a client idempotency key, then navigates to
 `missions/<server-issued-id>`.
+
+Swarm is offered only while `cap.hasMethod('mission.create')` and the
+member's role may launch. The dialog opens on Swarm from the Missions route
+or the palette's **Create swarm...** entry (`openPaletteDialog('swarm')`,
+listed under the same two conditions) when both hold, and on Single agent
+otherwise. If either stops holding while the dialog is open on Swarm - a
+re-hydration that could not read the capabilities, or a role change - the
+dialog stays on Swarm with **Create swarm** disabled and says why, naming
+missing capabilities before the role:
+
+- `Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.`
+- `Swarm launch is unavailable: your role cannot launch.`
+- `Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Single agent to launch a run.`
+
+The **Launch type** select stays so the member can switch to Single agent.
 
 The key belongs to the submitted contents, not to the dialog: the tab keeps
 one key per distinct set of contents in memory until a create with them
@@ -2595,8 +2613,14 @@ bounds before sending.
 `routes/missions` is registered through `routes/index.ts`, and the
 `MissionsSlice` is composed into the root store. Hydration reads
 `mission.list` for the active workspace; mission events refetch either the
-open `mission.show` projection or the current list, so reloads and event
+open `mission.show` projection or the first list page, so reloads and event
 reconnects recover server state rather than retaining a demo snapshot. The
+refetched page is merged into the list, so older pages loaded with **Load
+older missions** stay, along with the cursor for the next one. The slice
+records which workspace the list and cursor were read for
+(`missionListWorkspace`): a cursor read for another workspace is replaced by
+the fetched one, and **Load older missions** only follows a cursor read for
+the active workspace. The
 progress view renders the authoritative task statuses Ready, Working, Review,
 Done, Proposed and Abandoned. It keeps blockers, exact task revision/scope,
 attempt IDs, evidence availability, and accepted submission
@@ -2635,11 +2659,27 @@ hydration, the banner keeps its phase copy. Only a not-found answer means
 the server holds no run for it: outside `rejected`, the banner then replaces
 the phase sentence with `The integrator run has not started.`, says the
 server retries the launch periodically and logs `mission: recover
-integrator`, and offers **Replace integrator**. Any other `run.get` failure
+integrator`, and offers **Replace integrator**. When the mission's
+`integrator_run_launched` is true the run existed and is gone, so the
+banner says `The integrator run was deleted; replace the integrator.`
+instead, with ` or cancel the swarm` before the period in `planning`,
+`clarified` and `plan_review`, where **Cancel swarm** is offered. Any other `run.get` failure
 shows its error above the mission and keeps the phase copy; **Refresh** asks
 again, once. **Open integrator run** appears only once the store holds the
 run, beside the run's status chip - the same state vocabulary as the run
 list - and its last status reason.
+
+While the mission carries `integrator_launch_error`, the server's reason the
+integrator run last failed to launch, both the not-started and the exited
+banner add `Last launch failure <time ago>: <error>`, and the mission card
+in the list adds `Integrator did not launch: <error>` outside `rejected`,
+where the integrator is cancelled on purpose. The server clears the field
+once an integrator run launches.
+
+**Replace integrator** offers each distinct account and harness in the
+mission's `execution_choices`, of any mode, and always sends mode `tui`:
+the server accepts a replacement only from those choices and runs it
+interactive.
 
 In `planning`, **Questions from the integrator** lists every question the
 integrator asked. Questions are optional - the integrator declares
@@ -2673,6 +2713,14 @@ an admin still sees the whole plan, above the line `Only the accountable
 human or an admin may decide this plan.` Both gate controls need the
 capability, launch permission, and that identity:
 `cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
+
+Until a plan is approved - in `planning`, `clarified` and `plan_review` -
+the header also offers **Cancel swarm** to the same identity, gated on
+`mission.cancel`. It opens a confirmation; confirming sends `mission.cancel`
+with a key minted when the confirmation opened, so a retry after a failure
+replays rather than cancelling twice. The mission moves to `rejected`. A
+refusal - the phase moved on while the dialog was open, for example - shows
+the server's error inside the dialog.
 
 In `amendment_review` the integrator has submitted a change to a plan that
 is already approved. **Amendment review** shows the summary, the plan

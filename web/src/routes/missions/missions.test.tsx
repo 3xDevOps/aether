@@ -8,6 +8,8 @@ import type {
   MissionTask,
 } from '@/lib/types'
 import { MissionRoute } from '@/routes/missions'
+import { toRecord } from '@/store/runs'
+import { openSelect } from '@/test/select'
 import { useStore, type RootState } from '@/store'
 import {
   alice,
@@ -326,6 +328,72 @@ describe('mission plan gate', () => {
   })
 })
 
+describe('mission cancel', () => {
+  it.each(['planning', 'clarified', 'plan_review'] as const)('offers Cancel swarm in %s', async (phase) => {
+    seed()
+    await mount(showing({ phase, plan_version: phase === 'plan_review' ? 2 : 0 }))
+    expect(screen.getByRole('button', { name: 'Cancel swarm' })).toBeDefined()
+  })
+
+  it('hides Cancel swarm once the plan is approved', async () => {
+    seed()
+    await mount(showing({ phase: 'active' }))
+    expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
+  })
+
+  it('hides Cancel swarm from a member who is neither accountable nor admin', async () => {
+    seed({ info: { ...serverInfo, member: bob } })
+    await mount(showing({ phase: 'planning', plan_version: 0 }))
+    expect(screen.queryByRole('button', { name: 'Cancel swarm' })).toBeNull()
+  })
+
+  it('offers Cancel swarm to an admin who is not the accountable human', async () => {
+    seed()
+    await mount(showing({ phase: 'planning', plan_version: 0, accountable_human_id: bob.id }))
+    expect(screen.getByRole('button', { name: 'Cancel swarm' })).toBeDefined()
+  })
+
+  it('cancels the mission after confirmation and refreshes the detail', async () => {
+    seed()
+    const client = showing({ phase: 'planning', plan_version: 0 })
+    await mount(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel swarm' }))
+    const dialog = within(screen.getByRole('alertdialog', { name: 'Cancel this swarm?' }))
+    expect(client.missionCancel).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
+    })
+    expect(vi.mocked(client.missionCancel).mock.calls[0][0]).toEqual({
+      mission_id: 'mission_1',
+      idempotency_key: expect.any(String),
+    })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(client.missionShow).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the refusal and retries under the same key', async () => {
+    seed()
+    const client = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
+    vi.mocked(client.missionCancel).mockRejectedValueOnce(
+      new Error('mission.cancel: mission is in phase active; the plan has already been approved'),
+    )
+    await mount(client)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel swarm' }))
+    const dialog = within(screen.getByRole('alertdialog', { name: 'Cancel this swarm?' }))
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
+    })
+    expect(dialog.getByRole('alert').textContent).toBe(
+      'mission.cancel: mission is in phase active; the plan has already been approved',
+    )
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Cancel swarm' }))
+    })
+    const [first, second] = vi.mocked(client.missionCancel).mock.calls.map(([params]) => params)
+    expect(second.idempotency_key).toBe(first.idempotency_key)
+  })
+})
+
 describe('mission integrator run', () => {
   function withRunGet(runGet: Api['runGet']): Api {
     return { ...showing({ phase: 'planning', plan_version: 0 }), runGet: vi.fn(runGet) }
@@ -346,6 +414,124 @@ describe('mission integrator run', () => {
     expect(banner.queryByText(/may ask you clarifying questions/)).toBeNull()
     expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
+  })
+
+  const launchFailure = {
+    integrator_launch_error: 'run.launch: harness "claude" is not installed for account alice',
+    integrator_launch_error_at: '2026-08-14T10:05:00Z',
+  }
+
+  it('says why the integrator has not started', async () => {
+    seed()
+    const client = {
+      ...showing({ phase: 'planning', plan_version: 0, ...launchFailure }),
+      runGet: vi.fn(async () => {
+        throw new ApiError(404, 'run.get: run not found')
+      }),
+    }
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(/^The integrator run has not started\./)).toBeDefined()
+    const failure = banner.getByText(/^Last launch failure/)
+    expect(failure.textContent).toContain(': run.launch: harness "claude" is not installed for account alice')
+    expect(failure.querySelector('time')?.getAttribute('dateTime')).toBe('2026-08-14T10:05:00Z')
+  })
+
+  it('says why the replacement did not launch once the integrator has exited', async () => {
+    seed({ runs: { run_integrator: toRecord(run({ id: 'run_integrator', status: 'failed' })) } })
+    await mount(showing({ phase: 'plan_review', plan_version: 2, ...launchFailure }, [], [missionPlanReview({ plan_version: 2 })]))
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(/has exited; replace the integrator to continue/)).toBeDefined()
+    expect(banner.getByText(/^Last launch failure/).textContent).toContain('is not installed for account alice')
+  })
+
+  it('names no launch failure on a rejected swarm card', async () => {
+    seed({ route: { name: 'missions', params: {} } })
+    render(
+      <MissionRoute
+        params={{}}
+        client={fakeApi({ missionList: vi.fn(async () => ({ missions: [mission({ ...launchFailure, phase: 'rejected' })] })) })}
+      />,
+    )
+    expect(await screen.findByText('Rejected')).toBeDefined()
+    expect(screen.queryByText(/Integrator did not launch/)).toBeNull()
+  })
+
+  it('names the launch failure on the swarm card', async () => {
+    seed({ route: { name: 'missions', params: {} } })
+    render(
+      <MissionRoute
+        params={{}}
+        client={fakeApi({ missionList: vi.fn(async () => ({ missions: [mission(launchFailure)] })) })}
+      />,
+    )
+    expect(
+      await screen.findByText('Integrator did not launch: run.launch: harness "claude" is not installed for account alice'),
+    ).toBeDefined()
+  })
+
+  async function openReplacement(over: Partial<Mission>) {
+    seed()
+    const client = {
+      ...showing({ phase: 'active', ...over }),
+      runGet: vi.fn(async () => run({ id: 'run_integrator', status: 'failed' })),
+    }
+    await mount(client)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Mission authorization' })).getByRole('button', { name: 'Replace integrator' }))
+    return { client, dialog: within(screen.getByRole('dialog', { name: 'Replace integrator' })) }
+  }
+
+  it('replaces a headless integrator as tui from its execution choices', async () => {
+    // A swarm created before headless integrators were refused.
+    const { client, dialog } = await openReplacement({
+      integrator: { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      execution_choices: [{ account_member_id: alice.id, harness: 'claude', mode: 'headless' }],
+    })
+    expect(dialog.queryByText('Mode')).toBeNull()
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Replace' }))
+    })
+    expect(vi.mocked(client.missionReplaceIntegrator).mock.calls[0][0].integrator).toEqual({
+      account_member_id: alice.id,
+      harness: 'claude',
+      mode: 'tui',
+    })
+  })
+
+  it('offers each execution choice account and harness once, and nothing else', async () => {
+    const { dialog } = await openReplacement({
+      execution_choices: [
+        { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+        { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
+      ],
+    })
+    await openSelect(dialog.getAllByRole('combobox')[1])
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['claude', 'codex'])
+  })
+
+  it.each([
+    ['active', 'The integrator run was deleted; replace the integrator.'],
+    ['planning', 'The integrator run was deleted; replace the integrator or cancel the swarm.'],
+  ] as const)('says the integrator run was deleted once it had launched, in %s', async (phase, sentence) => {
+    seed()
+    const client = {
+      ...showing({ phase, plan_version: 1, integrator_run_launched: true }),
+      runGet: vi.fn(async () => {
+        throw new ApiError(404, 'run.get: run not found')
+      }),
+    }
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(sentence)).toBeDefined()
+    expect(banner.queryByText(/has not started/)).toBeNull()
+    expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
   })
 
   it('keeps the planning copy and no run button while the server is asked', async () => {

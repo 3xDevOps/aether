@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/mission"
@@ -63,6 +64,9 @@ func init() {
 					return errors.New("mission: scheduler unavailable")
 				}
 				_, err := d.Runs.RequireCoordination()
+				if err != nil && d.Config.CoordinationDisabled {
+					return fmt.Errorf("swarms need conflict coordination; the server was started with --conflict-coordination=false: %w", err)
+				}
 				return err
 			},
 		}
@@ -111,6 +115,13 @@ func (l schedulerLauncher) LaunchMission(ctx context.Context, req mission.Missio
 		Harness:      req.Harness,
 		Mode:         req.Mode,
 	})
+}
+
+func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, account domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+	if l.runs == nil {
+		return errors.New("mission: scheduler unavailable")
+	}
+	return l.runs.ValidateMissionLaunch(ctx, account, harnessName, mode)
 }
 
 func (l schedulerLauncher) CancelMission(ctx context.Context, run domain.RunID) error {

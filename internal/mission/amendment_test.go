@@ -435,7 +435,7 @@ func TestReplacedIntegratorLosesThePlanGateMethods(t *testing.T) {
 	retired := f.mission.CurrentIntegratorRunID
 
 	replaced, err := f.db.ReplaceIntegrator(ctx, f.mission.ID, f.mission.IntegratorGeneration,
-		domain.MissionIntegrator{AccountMemberID: f.member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
+		domain.MissionIntegrator{AccountMemberID: f.member.ID, Harness: "claude", Mode: domain.LaunchTUI},
 		f.member.ID, f.member.ID, "replace-during-active")
 	if err != nil {
 		t.Fatalf("replace integrator: %v", err)

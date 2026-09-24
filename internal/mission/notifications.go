@@ -106,7 +106,7 @@ func (s *Service) deliverNotice(ctx context.Context, m *domain.Mission, text str
 	if current.CurrentIntegratorRunID != run {
 		return nil
 	}
-	err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", "["+noticeActor+"] "+text, harness.SubmitSequence(r.Harness))
+	err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", noticeActor+": "+text, harness.SubmitSequence(r.Harness))
 	switch {
 	case err == nil:
 		s.stampNotice(ctx, m, text)

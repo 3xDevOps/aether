@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -304,6 +306,83 @@ func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 	att.waitOutput(t, "cli-disabled-no-socket:")
 	assertNoAgentError(t, att)
 	e.assertDisabledCLIOnly(ctx, t, newDockerCLI(t), run.ID, user)
+}
+
+// TestIntegrationCoordinationMissionIntegratorInContainer proves a mission's
+// integrator container learns its role from the staged CLI alone: status
+// carries the live assignment and skill leads with the integrator role
+// before any phase guidance.
+func TestIntegrationCoordinationMissionIntegratorInContainer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	requireBinary(t, "docker")
+	if !dockerReachable(t) {
+		t.Skip("the mission integrator scenario needs a reachable Docker daemon")
+	}
+	// The fake harness stays idle so the test drives the CLI itself.
+	t.Setenv("AETHER_FAKE_AGENT", "sleep 300")
+	image, _ := buildCoordAgentImage(t)
+	docker, _, ok := dockerRuntime(t)
+	if !ok {
+		t.Fatal("the Docker daemon went away after the image was built")
+	}
+	e := &coordEnv{
+		rt: docker, image: image, serverBinary: buildServerBinary(t),
+		dataDir: filepath.Join(shortTempDir(t), "data"),
+	}
+	srv := e.seed(ctx, t, false)
+	ctrl, _ := srv.control(t, e.ada.key)
+
+	integrator := protocol.MissionIntegrator{
+		AccountMemberID: string(e.ada.id), Harness: "fake", Mode: string(domain.LaunchTUI),
+	}
+	var created protocol.MissionCreateResult
+	if err := ctrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
+		WorkspaceID: string(e.ws.ID), Objective: "container integrator fixture",
+		AccountableHumanID: string(e.ada.id), Integrator: integrator,
+		ExecutionChoices: []protocol.MissionExecutionChoice{{
+			AccountMemberID: integrator.AccountMemberID, Harness: integrator.Harness, Mode: integrator.Mode,
+		}},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1, IdempotencyKey: "container-integrator",
+	}, &created); err != nil {
+		t.Fatalf("mission.create: %v", err)
+	}
+	missionID, run := created.Mission.ID, created.Mission.CurrentIntegratorRunID
+	if missionID == "" || run == "" {
+		t.Fatalf("mission.create returned incomplete mission: %+v", created.Mission)
+	}
+	waitMissionSocket(t, e.coordDir(run))
+
+	internalCLI := func(args ...string) string {
+		t.Helper()
+		argv := append([]string{"exec", containerName(run), coordtransport.CLIPath}, args...)
+		out, err := exec.CommandContext(ctx, "docker", argv...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("aether-internal %s in run %s: %v (%s)", strings.Join(args, " "), run, err, out)
+		}
+		return string(out)
+	}
+
+	statusOut := internalCLI("status")
+	var envelope missionCLIEnvelope
+	if err := json.Unmarshal([]byte(statusOut), &envelope); err != nil || !envelope.OK {
+		t.Fatalf("aether-internal status = %q (decode error %v)", statusOut, err)
+	}
+	var status protocol.CoordStatusResult
+	if err := json.Unmarshal(envelope.Result, &status); err != nil {
+		t.Fatalf("decode status result %s: %v", envelope.Result, err)
+	}
+	if a := status.Assignment; a == nil || a.Role != "integrator" || a.MissionID != missionID ||
+		a.Phase != string(domain.MissionPhasePlanning) {
+		t.Fatalf("integrator status assignment = %+v, want role integrator, mission %s, phase planning", a, missionID)
+	}
+
+	skill := internalCLI("skill")
+	role := strings.Index(skill, "You are this mission's integrator")
+	phase := strings.Index(skill, "Phase: ")
+	if role < 0 || phase < 0 || role > phase {
+		t.Fatalf("aether-internal skill must print the integrator role before the phase:\n%s", skill)
+	}
 }
 
 // buildCoordAgentImage builds the run image this scenario launches:

@@ -307,11 +307,17 @@ active           --mission plan submit------------->  amendment_review
 amendment_review --approve------------------------->  active
 amendment_review --request changes----------------->  active
 clarified        --mission question ask------------>  planning
+planning         --cancel-------------------------->  rejected
+clarified        --cancel-------------------------->  rejected
+plan_review      --cancel-------------------------->  rejected
 rejected: terminal
 ```
 
 `reject` is refused on an amendment: an amendment is approved or sent back for
 changes, and the integrator drops it by abandoning its tasks or revisions.
+`mission.cancel` is how a human ends a mission before any plan is approved,
+including one whose integrator never submitted a plan. It is refused in
+`active`, `amendment_review`, and `rejected`.
 
 Only the current integrator may use these commands, and only for its own
 mission; none of them takes a mission ID:
@@ -357,14 +363,25 @@ without any human action, so the review always reads the latest draft.
 not reachable from the run socket; the accountable human or an admin approves,
 requests changes, or rejects from the dashboard. Approval accepts exactly the
 revisions the submitted round recorded, in one transaction, and moves the
-mission to `active`.
+mission to `active`. `mission.cancel` is the same kind of human-only method.
+Rejecting and cancelling both move the mission to `rejected`, and the server
+then cancels the integrator run.
 
 An answer to a mission question and every plan decision are also typed into
-an interactive (TUI) integrator's terminal as one `[aether]` line naming the
-command to run next. A headless integrator gets no such line and must keep
-polling `mission plan show --wait 30`. If an interactive integrator's harness
-has already exited, the line lands in the shell left on its terminal and is
-read as a command line there.
+the integrator's terminal as one `aether:` line naming the command to run
+next. The integrator is always interactive (TUI): `mission.create` and
+`mission.replace-integrator` refuse any other mode with `-32602` and
+`integrator mode must be tui: a headless integrator exits after one turn and
+cannot be asked or told`. `mission.create` needs the integrator's exact
+account, harness, and `tui` mode among the execution choices;
+`mission.replace-integrator` accepts any listed account and harness in `tui`,
+so a swarm whose choices are all headless can still get an interactive
+integrator. Both refuse, with `-32602` and `integrator harness <name> cannot
+launch in tui mode: <cause>`, a harness the integrator's account cannot start
+in `tui`, such as one whose definition that account no longer has. Workers may
+still run headless. If the integrator's
+harness has already exited, the line lands in the shell left on its terminal
+and is read as a command line there.
 
 #### Amendments to an approved plan
 

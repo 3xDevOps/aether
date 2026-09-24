@@ -28,7 +28,7 @@ func mustCreatePlanningMission(t *testing.T, db *DB, workspace domain.WorkspaceI
 	t.Helper()
 	m := &domain.Mission{
 		WorkspaceID: workspace, Objective: "ship the bounded change", AccountableHumanID: member,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: member, Harness: "claude", Mode: domain.LaunchHeadless},
+		Integrator:            domain.MissionIntegrator{AccountMemberID: member, Harness: "claude", Mode: domain.LaunchTUI},
 		MaxConcurrentAttempts: concurrent, MaxTotalAttempts: total, IdempotencyKey: key,
 	}
 	if err := db.CreateMission(context.Background(), m); err != nil {

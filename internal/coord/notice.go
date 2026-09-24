@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -137,22 +138,38 @@ func (s *Service) noticeText(ctx context.Context, peer events.OverlapPeer) (stri
 	}
 	who := string(r.ID)
 	if m, merr := s.cfg.Store.GetMember(ctx, r.MemberID); merr == nil {
-		// The display name is chosen at invite-join and unsanitized; %q keeps
-		// its control characters out of the terminal and the agent's stdin.
-		who = fmt.Sprintf("%s (%q - %q)", r.ID, m.DisplayName, r.Task)
+		who = fmt.Sprintf("%s, member %s, task %s,", r.ID, shellLiteral(m.DisplayName), shellLiteral(r.Task))
 	}
+	// The banner can land in the login shell a finished harness leaves
+	// behind, so the fixed text carries no quote, semicolon, redirection, or
+	// subshell character that shell would act on, and every peer-controlled
+	// field goes through shellLiteral.
 	return fmt.Sprintf(
-		"[%s] Overlap: run %s is also editing %s. Use /usr/local/bin/aether-internal status --json to inspect the assignment and peers; "+
-			"use /usr/local/bin/aether-internal send --to <run-id> --body <message> --idempotency-key <key> to coordinate, and "+
-			"/usr/local/bin/aether-internal inbox --wait 30 to read messages. Advisory only - keep working; if the other agent "+
-			"doesn't reply, proceed and note the overlap in your commit.",
+		"%s: Overlap: run %s is also editing %s. Use /usr/local/bin/aether-internal status --json to inspect the assignment and peers. "+
+			"Use /usr/local/bin/aether-internal send --to RUN-ID --body MESSAGE --idempotency-key KEY to coordinate, and "+
+			"/usr/local/bin/aether-internal inbox --wait 30 to read messages. Advisory only - keep working. If the other agent "+
+			"does not reply, proceed and note the overlap in your commit.",
 		noticeActor, who, fileList(peer.Files)), nil
 }
 
+// shellLiteral renders a peer-controlled field - a display name chosen at
+// invite-join, a task, a path git lets carry any byte but NUL and '/' - as
+// one single-quoted shell word. Control characters become spaces first, so
+// the field can neither submit the line early nor carry a terminal escape;
+// inside single quotes a shell expands nothing, and each ' is closed,
+// escaped, and reopened.
+func shellLiteral(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // fileList renders the shared paths, naming the first few and counting
-// the rest so one banner stays one banner. Git allows any byte but NUL
-// and '/' in a path, so each is quoted like the display name: %q keeps a
-// crafted filename's control characters out of the terminal.
+// the rest so one banner stays one banner.
 func fileList(files []string) string {
 	if len(files) == 0 {
 		return "the same files"
@@ -160,7 +177,7 @@ func fileList(files []string) string {
 	named := min(len(files), noticeFiles)
 	quoted := make([]string, named)
 	for i, f := range files[:named] {
-		quoted[i] = fmt.Sprintf("%q", f)
+		quoted[i] = shellLiteral(f)
 	}
 	if len(files) <= noticeFiles {
 		return strings.Join(quoted, ", ")

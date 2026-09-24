@@ -46,7 +46,14 @@ func (p *planGateMissionService) DecidePlan(_ context.Context, actor domain.Memb
 	return protocol.MissionPlanDecideResult{Mission: protocol.Mission{ID: params.MissionID, Phase: string(domain.MissionPhaseActive)}}, nil
 }
 
-// TestMissionPlanGateControlMethods: both human decisions are Launch-guarded
+func (p *planGateMissionService) Cancel(_ context.Context, actor domain.MemberID, params protocol.MissionCancelParams) (protocol.MissionCancelResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.actor = actor
+	return protocol.MissionCancelResult{Mission: protocol.Mission{ID: params.MissionID, Phase: string(domain.MissionPhaseRejected)}}, nil
+}
+
+// TestMissionPlanGateControlMethods: the human plan gate methods are Launch-guarded
 // control-channel methods whose handlers are thin - they carry the
 // authenticated member into the service and never take the authorization
 // mutex the service itself holds.
@@ -81,6 +88,16 @@ func TestMissionPlanGateControlMethods(t *testing.T) {
 		t.Fatalf("decision reached the service as %+v by %q, want mission-1 by %q", decided.Mission, svc.actor, e.member.ID)
 	}
 
+	var cancelled protocol.MissionCancelResult
+	if err := adminC.Call(protocol.MethodMissionCancel, protocol.MissionCancelParams{
+		MissionID: "mission-1", IdempotencyKey: "cancel-1",
+	}, &cancelled); err != nil {
+		t.Fatalf("mission.cancel: %v", err)
+	}
+	if cancelled.Mission.Phase != string(domain.MissionPhaseRejected) || svc.actor != e.member.ID {
+		t.Fatalf("cancel reached the service as %+v by %q, want rejected mission-1 by %q", cancelled.Mission, svc.actor, e.member.ID)
+	}
+
 	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
 	viewerC := controlAs(t, e, viewer)
 	wantDenied(t, viewerC.Call(protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{
@@ -90,4 +107,7 @@ func TestMissionPlanGateControlMethods(t *testing.T) {
 		MissionID: "mission-1", ExpectedPlanVersion: 1, Decision: string(domain.MissionPlanApprove),
 		IdempotencyKey: "decide-viewer",
 	}, nil), "viewer mission.plan.decide")
+	wantDenied(t, viewerC.Call(protocol.MethodMissionCancel, protocol.MissionCancelParams{
+		MissionID: "mission-1", IdempotencyKey: "cancel-viewer",
+	}, nil), "viewer mission.cancel")
 }

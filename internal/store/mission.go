@@ -62,6 +62,10 @@ type MissionStore interface {
 	ListMissionQuestions(context.Context, domain.MissionID) ([]*domain.MissionQuestion, error)
 	SubmitMissionPlan(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionPlanReview, error)
 	DecideMissionPlan(context.Context, domain.MissionID, uint64, domain.MissionPlanDecision, string, domain.MemberID, string) (*domain.Mission, error)
+	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
+	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
+	MissionCreateRecorded(context.Context, domain.WorkspaceID, string) (bool, error)
+	IntegratorReplacementRecorded(context.Context, domain.MissionID, string) (bool, error)
 	ListMissionPlanReviews(context.Context, domain.MissionID) ([]*domain.MissionPlanReview, error)
 }
 type MissionControlStore interface {
@@ -154,20 +158,26 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	execution_choices, max_concurrent_attempts, max_total_attempts,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase, plan_version,
-	idempotency_key, created_at, updated_at`
+	idempotency_key, created_at, updated_at,
+	integrator_launch_error, integrator_launch_error_at, integrator_run_launched`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
 	var choices string
 	var runID, authorizingHumanID, runOwnerID sql.NullString
 	var created, updated int64
+	var launchErrorAt sql.NullInt64
 	var mode, phase string
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.Objective, &m.AccountableHumanID,
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&m.MaxConcurrentAttempts, &m.MaxTotalAttempts, &runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase, &m.PlanVersion,
-		&m.IdempotencyKey, &created, &updated); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched); err != nil {
 		return nil, err
+	}
+	if launchErrorAt.Valid {
+		at := decodeTime(launchErrorAt.Int64)
+		m.IntegratorLaunchErrorAt = &at
 	}
 	m.Integrator.Mode, m.Phase = domain.LaunchMode(mode), domain.MissionPhase(phase)
 	if runID.Valid {
@@ -251,7 +261,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	// A new mission starts behind the human plan gate; plan_version 0 means no
 	// plan has been submitted yet.
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, m.MaxConcurrentAttempts, m.MaxTotalAttempts, runID,
@@ -358,6 +368,34 @@ func (d *DB) ListMissionsPage(ctx context.Context, workspaceID domain.WorkspaceI
 	return out, next, nil
 }
 
+// MissionCreateRecorded reports whether mission.create already succeeded
+// under key in workspace, so a retry replays it rather than being judged anew.
+func (d *DB) MissionCreateRecorded(ctx context.Context, workspace domain.WorkspaceID, key string) (bool, error) {
+	var found int
+	err := d.db.QueryRowContext(ctx, `SELECT 1 FROM mission_create_receipts WHERE workspace_id=? AND idempotency_key=?`, workspace, key).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: read mission create receipt: %w", err)
+	}
+	return true, nil
+}
+
+// IntegratorReplacementRecorded reports whether mission.replace-integrator
+// already succeeded under key for mission.
+func (d *DB) IntegratorReplacementRecorded(ctx context.Context, mission domain.MissionID, key string) (bool, error) {
+	var found int
+	err := d.db.QueryRowContext(ctx, `SELECT 1 FROM mission_integrator_replacements WHERE mission_id=? AND idempotency_key=?`, mission, key).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: read integrator replacement receipt: %w", err)
+	}
+	return true, nil
+}
+
 func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expected uint64, choice domain.MissionIntegrator, authorizingHumanID, runOwnerID domain.MemberID, key string) (*domain.Mission, error) {
 	if id == "" || choice.AccountMemberID == "" || choice.Harness == "" || !choice.Mode.Valid() || key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 || expected == 0 {
 		return nil, errors.New("store: replace integrator: invalid request")
@@ -398,7 +436,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	generation := m.IntegratorGeneration + 1
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
+	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, integrator_launch_error = '', integrator_launch_error_at = NULL, integrator_run_launched = 0, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
 		return nil, fmt.Errorf("store: replace integrator: %w", execErr)
 	}
 	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, generation, newRun, authorizingHumanID, runOwnerID, n); execErr != nil {
@@ -413,6 +451,55 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	}
 	return m, nil
 }
+
+// RecordIntegratorLaunch stores launchErr as the reason run, the mission's
+// current integrator, did not launch. An empty launchErr means the run's row
+// exists: it clears the error and marks the run launched, after which
+// reconciliation never relaunches it. Repeating the stored error keeps its
+// first time. It reports whether the mission changed; a run that is no
+// longer the current integrator changes nothing.
+func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, launched bool, at time.Time) (bool, error) {
+	if id == "" || run == "" {
+		return false, errors.New("store: record integrator launch requires mission_id and run_id")
+	}
+	n, err := encodeTime(missionNow(at))
+	if err != nil {
+		return false, err
+	}
+	var errorAt any
+	if launchErr != "" {
+		errorAt = n
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("store: record integrator launch: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	launchedFlag := 0
+	if launched {
+		launchedFlag = 1
+	}
+	// An unchanged error keeps its first-seen time.
+	res, err := tx.ExecContext(ctx, `UPDATE missions SET
+		integrator_launch_error_at=CASE WHEN integrator_launch_error=? THEN integrator_launch_error_at ELSE ? END,
+		integrator_launch_error=?, integrator_run_launched=MAX(integrator_run_launched, ?), updated_at=?
+		WHERE id=? AND current_integrator_run_id=? AND (integrator_launch_error<>? OR integrator_run_launched<?)`,
+		launchErr, errorAt, launchErr, launchedFlag, n, id, run, launchErr, launchedFlag)
+	if err != nil {
+		return false, fmt.Errorf("store: record integrator launch of mission %s: %w", id, err)
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return false, nil
+	}
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, id); enqueueErr != nil {
+		return false, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return false, fmt.Errorf("store: record integrator launch: commit: %w", commitErr)
+	}
+	return true, nil
+}
+
 func (d *DB) GetMissionWorkerAssignment(ctx context.Context, workerRun domain.RunID) (*domain.MissionWorkerAssignment, error) {
 	if workerRun == "" {
 		return nil, ErrNotFound
@@ -444,10 +531,6 @@ func enqueueMissionControlChange(ctx context.Context, tx *sql.Tx, missionID doma
 // a caller that decides on phase, generation, or plan version cannot be
 // overtaken between the read and its own write. idExpr locates the mission
 // from arg, which may be the mission id or a subquery over a child row.
-//
-// The write has to be the transaction's first statement. A read before it
-// takes a shared lock that SQLite refuses to upgrade while another writer
-// holds the database, and the busy handler does not cover that upgrade.
 func lockMissionRowBy(ctx context.Context, tx *sql.Tx, idExpr string, arg any, subject string) (*domain.Mission, error) {
 	if _, err := tx.ExecContext(ctx, `UPDATE missions SET updated_at = updated_at WHERE id = `+idExpr, arg); err != nil {
 		return nil, fmt.Errorf("store: lock %s: %w", subject, err)
@@ -499,7 +582,7 @@ func missionPhaseReason(phase domain.MissionPhase) string {
 	case domain.MissionPhaseAmendmentReview:
 		return "the amendment is frozen while a human reviews it"
 	case domain.MissionPhaseRejected:
-		return "a human rejected the plan"
+		return "a human rejected the plan or cancelled the mission"
 	default:
 		return "the plan has already been approved"
 	}

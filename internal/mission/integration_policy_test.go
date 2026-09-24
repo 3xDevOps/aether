@@ -80,7 +80,7 @@ func TestHandleAgentIntegrationPrepareDeniesStaleIntegrator(t *testing.T) {
 	choice := domain.MissionIntegrator{
 		AccountMemberID: replacement.ID,
 		Harness:         "claude",
-		Mode:            domain.LaunchHeadless,
+		Mode:            domain.LaunchTUI,
 	}
 	replaced, err := db.ReplaceIntegrator(ctx, mission.ID, mission.IntegratorGeneration, choice, replacement.ID, replacement.ID, "integration-agent-stale")
 	if err != nil {
@@ -244,7 +244,7 @@ func TestIntegrationAdmissionAllowsReplacementWithUnchangedAcceptedSet(t *testin
 	svc, mission, _, accepted := acceptedIntegrationPolicyFixture(t)
 	db := svc.cfg.Store.(*store.DB)
 	replacement := regressionMember(t, db, "replacement")
-	choice := domain.MissionIntegrator{AccountMemberID: replacement.ID, Harness: "claude", Mode: domain.LaunchHeadless}
+	choice := domain.MissionIntegrator{AccountMemberID: replacement.ID, Harness: "claude", Mode: domain.LaunchTUI}
 	replaced, err := db.ReplaceIntegrator(ctx, mission.ID, mission.IntegratorGeneration, choice, replacement.ID, replacement.ID, "integration-policy-replace")
 	if err != nil {
 		t.Fatalf("replace integrator: %v", err)

@@ -868,6 +868,14 @@ uses the default; negative values have the semantics in the table.
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
 | `--harness-definitions` | none | Path to a custom harness registry file; see [harnesses.md](harnesses.md). |
 
+Swarms run over conflict coordination, so `--conflict-coordination=false` also
+turns them off. The dashboard still offers **Swarm**, but `mission.create`
+fails with:
+
+```
+swarms need conflict coordination; the server was started with --conflict-coordination=false: scheduler: coordination is unavailable
+```
+
 Three things happen on the first start and never need attention again:
 
 1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`.

@@ -36,6 +36,7 @@ type MissionIntegrator struct {
 //	active           --mission.plan.submit----------->    amendment_review
 //	amendment_review --decide approve--------------->     active
 //	amendment_review --decide revise---------------->     active
+//	planning|clarified|plan_review --mission.cancel--> rejected
 type MissionPhase string
 
 const (
@@ -175,10 +176,19 @@ type Mission struct {
 	// OpenQuestions is populated only by store.GetMission and
 	// store.ListMissionsPage. Transaction-local mission reads leave it zero
 	// and no store decision may consult it.
-	OpenQuestions  int
-	IdempotencyKey string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	OpenQuestions int
+	// IntegratorLaunchError is why the current integrator run last failed
+	// to launch, and IntegratorLaunchErrorAt when that error was first seen;
+	// both are empty once the run launches.
+	IntegratorLaunchError   string
+	IntegratorLaunchErrorAt *time.Time
+	// IntegratorRunLaunched is set once the current integrator run's row is
+	// known to exist. Reconciliation relaunches a missing row only while it
+	// is unset, so a deleted integrator run stays deleted.
+	IntegratorRunLaunched bool
+	IdempotencyKey        string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 const (

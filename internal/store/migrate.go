@@ -1246,6 +1246,24 @@ CREATE TABLE mission_plan_items (
 	CHECK (json_valid(widening))
 );
 `,
+	// mission.cancel refuses a key already used on another mission, which
+	// looks a receipt up without its mission_id.
+	`
+CREATE INDEX idx_mission_mutation_receipts_key
+	ON mission_mutation_receipts(operation, idempotency_key);
+`,
+	`
+ALTER TABLE missions ADD COLUMN integrator_launch_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
+`,
+	// Every existing integrator counts as launched, so an upgrade relaunches
+	// nothing: a missing row cannot tell a run a human deleted before the
+	// upgrade from one that never launched. The rare pre-upgrade integrator
+	// that truly never launched needs Replace integrator.
+	`
+ALTER TABLE missions ADD COLUMN integrator_run_launched INTEGER NOT NULL DEFAULT 0;
+UPDATE missions SET integrator_run_launched = 1 WHERE current_integrator_run_id <> '';
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:
