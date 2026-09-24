@@ -25,7 +25,6 @@ import { message } from '@/lib/format'
 import { api, ApiError, type Api } from '@/lib/api'
 import { allowed } from '@/lib/permissions'
 import type {
-  AccountAccess,
   Mission,
   MissionAttempt,
   MissionShowResult,
@@ -123,7 +122,9 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
   const setMissionError = useStore((state) => state.setMissionError)
   const missionLoading = useStore((state) => state.missionLoading)
   const missionError = useStore((state) => state.missionError)
-  const missionNextCursor = useStore((state) => state.missionNextCursor)
+  const missionNextCursor = useStore((state) =>
+    state.missionListWorkspace === state.activeWorkspace ? state.missionNextCursor : null,
+  )
   const workspaceID = useStore((state) => state.activeWorkspace)
   const cap = useCapability()
   const self = useSelf()
@@ -139,7 +140,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
       try {
         if (!missionID) {
           const result = await client.missionList({ workspace_id: workspaceID, limit: 50 })
-          if (live) setMissions(result.missions, result.next_cursor)
+          if (live) setMissions(workspaceID, result.missions, result.next_cursor)
         } else {
           const result = await client.missionShow(missionID)
           if (live) {
@@ -174,7 +175,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
         limit: 50,
         before: missionNextCursor,
       })
-      setMissions(result.missions, result.next_cursor, true)
+      setMissions(workspaceID, result.missions, result.next_cursor, true)
     } catch (error) {
       setMissionError(message(error))
     } finally {
@@ -243,7 +244,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
                   <span>{mission.max_total_attempts} attempts total</span>
                   <span>Generation {mission.integrator_generation}</span>
                 </div>
-                {mission.integrator_launch_error && (
+                {mission.integrator_launch_error && missionPhase(mission) !== 'rejected' && (
                   <p className="mt-1 break-words text-xs text-state-failed">
                     Integrator did not launch: {mission.integrator_launch_error}
                   </p>
@@ -709,39 +710,34 @@ function IntegratorReplacement({
   onClose: () => void
   onReplaced: () => void
 }) {
-  const self = useStore((state) => state.info?.member)
-  const [access, setAccess] = useState<AccountAccess | null>(null)
-  const [account, setAccount] = useState(mission.integrator.account_member_id)
-  const [harnesses, setHarnesses] = useState<string[]>([])
-  const [harness, setHarness] = useState(mission.integrator.harness)
+  const members = useStore((state) => state.members)
+  // mission.replace-integrator accepts only an account and harness from the
+  // mission's execution choices, of any mode, and runs it as tui.
+  const choices = mission.execution_choices.filter(
+    (choice, index, all) =>
+      all.findIndex((other) => other.account_member_id === choice.account_member_id && other.harness === choice.harness) === index,
+  )
+  const accountIDs = [...new Set(choices.map((choice) => choice.account_member_id))]
+  const current = choices.find(
+    (choice) =>
+      choice.account_member_id === mission.integrator.account_member_id &&
+      choice.harness === mission.integrator.harness,
+  ) ?? choices[0]
+  const [account, setAccount] = useState(current?.account_member_id ?? '')
+  const harnesses = choices.filter((choice) => choice.account_member_id === account).map((choice) => choice.harness)
+  const [harness, setHarness] = useState(current?.harness ?? '')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const key = useRef(newIdempotencyKey())
-  const accounts = access?.accounts ?? (self ? [self] : [])
 
-  useEffect(() => {
-    let live = true
-    client.accountList().then((result) => {
-      if (live) setAccess(result)
-    }).catch((err) => {
-      if (live) setError(message(err))
-    })
-    return () => { live = false }
-  }, [client])
-
-  useEffect(() => {
-    let live = true
-    setHarnesses([])
-    client.agentList(account && account !== self?.id ? account : undefined).then((agents) => {
-      if (!live) return
-      const installed = agents.filter((agent) => agent.installed === true).map((agent) => agent.name)
-      setHarnesses(installed)
-      setHarness((current) => installed.includes(current) ? current : installed[0] ?? '')
-    }).catch((err) => {
-      if (live) setError(message(err))
-    })
-    return () => { live = false }
-  }, [account, client, self?.id])
+  const chooseAccount = (next: string) => {
+    setAccount(next)
+    setHarness((value) =>
+      choices.some((choice) => choice.account_member_id === next && choice.harness === value)
+        ? value
+        : choices.find((choice) => choice.account_member_id === next)?.harness ?? '',
+    )
+  }
 
   const submit = async () => {
     setSaving(true)
@@ -750,7 +746,6 @@ function IntegratorReplacement({
       await client.missionReplaceIntegrator({
         mission_id: mission.id,
         expected_generation: mission.integrator_generation,
-        // mission.replace-integrator refuses a headless integrator.
         integrator: { account_member_id: account, harness, mode: 'tui' },
         idempotency_key: key.current,
       })
@@ -766,10 +761,9 @@ function IntegratorReplacement({
     <div className="fixed inset-0 z-40 grid place-items-center bg-scrim p-4">
       <div role="dialog" aria-modal="true" aria-label="Replace integrator" className="w-full max-w-md border bg-popover p-4 shadow-overlay">
         <h2 className="text-base font-semibold">Replace integrator</h2>
-        <p className="mt-1 text-xs text-muted-foreground">The replacement runs interactive (tui). The current generation is pinned. Retry keeps the same idempotency key.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Pick an account and harness from this swarm&apos;s execution choices; the replacement runs interactive (tui). The current generation is pinned. Retry keeps the same idempotency key.</p>
         <div className="mt-3 grid gap-3">
-
-          <div className="space-y-1.5"><Label>Account</Label><Select value={account} onValueChange={setAccount}><SelectTrigger><SelectValue placeholder="Choose an account" /></SelectTrigger><SelectContent>{accounts.map((member) => <SelectItem key={member.id} value={member.id}>{member.display_name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Account</Label><Select value={account} onValueChange={chooseAccount}><SelectTrigger><SelectValue placeholder="Choose an account" /></SelectTrigger><SelectContent>{accountIDs.map((id) => <SelectItem key={id} value={id}>{members[id]?.display_name ?? id}</SelectItem>)}</SelectContent></Select></div>
           <div className="space-y-1.5"><Label>Harness</Label><Select value={harness} onValueChange={setHarness}><SelectTrigger disabled={!harnesses.length}><SelectValue placeholder="Choose a harness" /></SelectTrigger><SelectContent>{harnesses.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></div>
         </div>
         {error && <ErrorNotice error={error} />}
@@ -778,6 +772,7 @@ function IntegratorReplacement({
     </div>
   )
 }
+
 /** One key per confirmation: a retry after a failure inside the same dialog
  * replays the cancel instead of issuing another. */
 function MissionCancel({

@@ -119,7 +119,7 @@ export async function hydrate(
       await client
         .missionList({ workspace_id: active, limit: 50 })
         .then((result) => {
-          if (!signal?.aborted) s.setMissions(result.missions, result.next_cursor)
+          if (!signal?.aborted) s.setMissions(active, result.missions, result.next_cursor)
         })
         .catch(ignore)
     }
@@ -336,12 +336,11 @@ export async function applyEvent(
             const state = store.getState()
             // Merged, not replaced, so older pages the reader loaded stay.
             // Everything newer than the stored cursor is still held, so it
-            // still marks the next older page; only a workspace with nothing
-            // loaded takes the fetched one.
-            const loaded = Object.values(state.missions).some(
-              (mission) => mission.workspace_id === ev.workspace_id,
-            )
+            // still marks the next older page; a cursor read for another
+            // workspace, or none, gives way to the fetched one.
+            const loaded = state.missionListWorkspace === ev.workspace_id
             state.setMissions(
+              ev.workspace_id,
               result.missions,
               loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
               true,

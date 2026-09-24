@@ -145,9 +145,11 @@ export function PhaseBanner({
     <section aria-label="Mission phase" className={`mb-3 border-l-2 px-2 py-1.5 text-xs ${phaseTone[phase]}`}>
       <p className="font-medium">{phaseChipLabel(mission)}</p>
       <p className="mt-0.5">
-        {notStarted
-          ? `The integrator run has not started. The server retries the launch periodically and logs each failure as "mission: recover integrator".`
-          : phaseSentence(mission)}
+        {!notStarted
+          ? phaseSentence(mission)
+          : mission.integrator_run_launched
+            ? 'The integrator run was deleted; replace the integrator or cancel the swarm.'
+            : `The integrator run has not started. The server retries the launch periodically and logs each failure as "mission: recover integrator".`}
       </p>
       {(exited || notStarted) && mission.integrator_launch_error && (
         <p className="mt-1 break-words text-state-failed">

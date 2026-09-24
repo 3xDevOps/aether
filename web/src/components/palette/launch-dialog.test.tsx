@@ -342,6 +342,17 @@ describe('launch dialog', () => {
       expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false)
     })
 
+    it('names missing capabilities before the role', async () => {
+      await openSwarm()
+      act(() => useStore.setState({
+        capabilities: null,
+        info: { ...serverInfo, member: { ...alice, role: 'viewer' } },
+      }))
+      expect(screen.getByRole('status').textContent).toBe(
+        'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.',
+      )
+    })
+
     it('says a role that cannot launch is why swarm launch is unavailable', async () => {
       await openSwarm()
       act(() => useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } } }))

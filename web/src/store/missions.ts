@@ -22,9 +22,11 @@ export interface MissionsSlice {
   missions: Record<string, Mission>
   missionDetails: Record<string, MissionDetail>
   missionNextCursor: string | null
+  /** The workspace the list pages and `missionNextCursor` were read for. */
+  missionListWorkspace: string | null
   missionLoading: boolean
   missionError: string | null
-  setMissions: (missions: Mission[], nextCursor?: string, append?: boolean) => void
+  setMissions: (workspaceID: string, missions: Mission[], nextCursor?: string, append?: boolean) => void
   upsertMission: (mission: Mission) => void
   setMissionDetail: (detail: MissionDetail) => void
   setMissionLoading: (loading: boolean) => void
@@ -35,14 +37,16 @@ export const createMissionsSlice: SliceCreator<MissionsSlice> = (set) => ({
   missions: {},
   missionDetails: {},
   missionNextCursor: null,
+  missionListWorkspace: null,
   missionLoading: false,
   missionError: null,
-  setMissions: (missions, nextCursor, append = false) =>
+  setMissions: (workspaceID, missions, nextCursor, append = false) =>
     set((state) => ({
       missions: append
         ? { ...state.missions, ...Object.fromEntries(missions.map((mission) => [mission.id, mission])) }
         : Object.fromEntries(missions.map((mission) => [mission.id, mission])),
       missionNextCursor: nextCursor ?? null,
+      missionListWorkspace: workspaceID,
       missionError: null,
       // The show projection is independently authoritative and must survive
       // list refreshes, including a page that does not contain its mission.

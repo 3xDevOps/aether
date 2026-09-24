@@ -106,6 +106,8 @@ export interface Mission {
   /** Why the integrator run last failed to launch; cleared once it launched. */
   integrator_launch_error?: string
   integrator_launch_error_at?: string
+  /** True once the current integrator's run row has existed. */
+  integrator_run_launched?: boolean
   created_at: string
   updated_at: string
 }

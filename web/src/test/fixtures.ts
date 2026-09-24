@@ -80,8 +80,11 @@ export function mission(over: Partial<Mission> = {}): Mission {
     workspace_id: workspace.id,
     objective: 'coordinate checkout work',
     accountable_human_id: alice.id,
-    integrator: { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
-    execution_choices: [{ account_member_id: alice.id, harness: 'claude', mode: 'headless' }],
+    integrator: { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    execution_choices: [
+      { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    ],
     max_concurrent_attempts: 2,
     max_total_attempts: 8,
     current_integrator_run_id: 'run_integrator',
