@@ -406,6 +406,8 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 	} else if mission.CurrentIntegratorRunID != "" {
 		_, runErr := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
 		switch {
+		case errors.Is(runErr, store.ErrNotFound) && mission.IntegratorRunLaunched:
+			// A human deleted the run; replacing or cancelling is theirs.
 		case errors.Is(runErr, store.ErrNotFound):
 			choice := mission.Integrator
 			launchErr := s.launchRecovered(ctx, MissionLaunchRequest{
@@ -524,13 +526,14 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 }
 
 // recordIntegratorLaunch keeps m's launch error in step with launchErr, the
-// outcome of the last launch of its current integrator; nil clears it.
+// outcome of the last launch of its current integrator. nil means the run's
+// row exists: it clears the error and marks the run launched.
 func (s *Service) recordIntegratorLaunch(ctx context.Context, m *domain.Mission, launchErr error) error {
 	text := ""
 	if launchErr != nil {
 		text = launchErr.Error()
 	}
-	if text == m.IntegratorLaunchError {
+	if text == m.IntegratorLaunchError && (text != "" || m.IntegratorRunLaunched) {
 		return nil
 	}
 	at := s.cfg.Now().UTC()
@@ -541,6 +544,8 @@ func (s *Service) recordIntegratorLaunch(ctx context.Context, m *domain.Mission,
 	m.IntegratorLaunchError, m.IntegratorLaunchErrorAt = text, nil
 	if text != "" {
 		m.IntegratorLaunchErrorAt = &at
+	} else {
+		m.IntegratorRunLaunched = true
 	}
 	return s.publishMissionChanged(ctx, m.ID)
 }
@@ -737,7 +742,8 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	if existing, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID); getErr == nil && existing != nil {
-		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
+		err = s.recordIntegratorLaunch(ctx, m, nil)
+		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
 	}
 	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: m.CurrentIntegratorRunID,
@@ -762,7 +768,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		}
 	}
 	if recordErr := s.recordIntegratorLaunch(ctx, m, nil); recordErr != nil {
-		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, fmt.Errorf("mission %s: integrator run %s launched, but clearing its last launch error failed: %w", m.ID, m.CurrentIntegratorRunID, recordErr)
+		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", m.ID, m.CurrentIntegratorRunID, recordErr)
 	}
 	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 }
@@ -819,6 +825,10 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	})
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, err
+	}
+	if recordErr := s.recordIntegratorLaunch(ctx, replaced, nil); recordErr != nil {
+		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)},
+			fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", replaced.ID, launched.ID, recordErr)
 	}
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
 }

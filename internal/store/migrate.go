@@ -1256,6 +1256,13 @@ CREATE INDEX idx_mission_mutation_receipts_key
 ALTER TABLE missions ADD COLUMN integrator_launch_error TEXT NOT NULL DEFAULT '';
 ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
 `,
+	// A current integrator whose row already exists was launched; without
+	// the backfill an upgrade would relaunch every deleted one.
+	`
+ALTER TABLE missions ADD COLUMN integrator_run_launched INTEGER NOT NULL DEFAULT 0;
+UPDATE missions SET integrator_run_launched = 1
+	WHERE EXISTS (SELECT 1 FROM runs WHERE runs.id = missions.current_integrator_run_id);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

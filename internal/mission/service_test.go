@@ -174,17 +174,66 @@ func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 	}
 
 	svc.cfg.Runs = failingMissionLauncher{err: errors.New("docker daemon unreachable")}
-	if m := reconcile(); m.IntegratorLaunchError != "docker daemon unreachable" || m.IntegratorLaunchErrorAt == nil {
-		t.Fatalf("launch error after a failed relaunch = %q at %v, want the new cause", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
+	if m := reconcile(); m.IntegratorLaunchError != "docker daemon unreachable" || m.IntegratorLaunchErrorAt == nil || m.IntegratorRunLaunched {
+		t.Fatalf("after a failed relaunch: error %q at %v, launched %v; want the new cause and not launched",
+			m.IntegratorLaunchError, m.IntegratorLaunchErrorAt, m.IntegratorRunLaunched)
 	}
 
 	svc.cfg.Runs = &recordingLauncher{db: db}
 	m := reconcile()
-	if m.IntegratorLaunchError != "" || m.IntegratorLaunchErrorAt != nil {
-		t.Fatalf("launch error after a successful relaunch = %q at %v, want none", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
+	if m.IntegratorLaunchError != "" || m.IntegratorLaunchErrorAt != nil || !m.IntegratorRunLaunched {
+		t.Fatalf("after a successful relaunch: error %q at %v, launched %v; want none and launched",
+			m.IntegratorLaunchError, m.IntegratorLaunchErrorAt, m.IntegratorRunLaunched)
 	}
 	if _, runErr := db.GetRun(ctx, m.CurrentIntegratorRunID); runErr != nil {
 		t.Fatalf("relaunched integrator run: %v", runErr)
+	}
+}
+
+// TestReconcileLeavesADeletedIntegratorRunDeleted: once the current
+// integrator's row existed, a missing row means a human deleted the run, and
+// only replacing the integrator starts another.
+func TestReconcileLeavesADeletedIntegratorRunDeleted(t *testing.T) {
+	ctx := context.Background()
+	db := openMissionRegressionDB(t)
+	workspace := regressionWorkspace(t, db)
+	member := regressionMember(t, db, "accountable")
+	svc, err := New(Config{Store: db, Runs: &recordingLauncher{db: db}, RequireCoordination: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
+	out, err := svc.Create(ctx, member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	if err != nil || !out.Mission.IntegratorRunLaunched {
+		t.Fatalf("create = %+v, %v; want a launched integrator", out.Mission, err)
+	}
+	if deleteErr := db.DeleteRun(ctx, domain.RunID(out.Mission.CurrentIntegratorRunID)); deleteErr != nil {
+		t.Fatalf("delete integrator run: %v", deleteErr)
+	}
+	svc.cfg.Runs = emptyMissionLauncher{}
+	m, err := db.GetMission(ctx, domain.MissionID(out.Mission.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconcileErr := svc.reconcileMission(ctx, m); reconcileErr != nil {
+		t.Fatalf("reconcile: %v", reconcileErr)
+	}
+	if _, runErr := db.GetRun(ctx, m.CurrentIntegratorRunID); !errors.Is(runErr, store.ErrNotFound) {
+		t.Fatalf("deleted integrator run after reconcile = %v, want ErrNotFound", runErr)
+	}
+
+	svc.cfg.Runs = &recordingLauncher{db: db}
+	replaced, err := svc.ReplaceIntegrator(ctx, member.ID, protocol.MissionReplaceIntegratorParams{
+		MissionID: out.Mission.ID, ExpectedGeneration: m.IntegratorGeneration,
+		Integrator: protocol.MissionIntegrator(integrator), IdempotencyKey: "replace-1",
+	})
+	if err != nil || !replaced.Mission.IntegratorRunLaunched || replaced.Mission.CurrentIntegratorRunID == out.Mission.CurrentIntegratorRunID {
+		t.Fatalf("replace = %+v, %v; want a new launched integrator run", replaced.Mission, err)
 	}
 }
 

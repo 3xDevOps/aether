@@ -157,7 +157,7 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase, plan_version,
 	idempotency_key, created_at, updated_at,
-	integrator_launch_error, integrator_launch_error_at`
+	integrator_launch_error, integrator_launch_error_at, integrator_run_launched`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
@@ -170,7 +170,7 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&m.MaxConcurrentAttempts, &m.MaxTotalAttempts, &runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase, &m.PlanVersion,
-		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched); err != nil {
 		return nil, err
 	}
 	if launchErrorAt.Valid {
@@ -259,7 +259,7 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	// A new mission starts behind the human plan gate; plan_version 0 means no
 	// plan has been submitted yet.
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, m.MaxConcurrentAttempts, m.MaxTotalAttempts, runID,
@@ -406,7 +406,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	generation := m.IntegratorGeneration + 1
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, integrator_launch_error = '', integrator_launch_error_at = NULL, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
+	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, integrator_launch_error = '', integrator_launch_error_at = NULL, integrator_run_launched = 0, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
 		return nil, fmt.Errorf("store: replace integrator: %w", execErr)
 	}
 	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, generation, newRun, authorizingHumanID, runOwnerID, n); execErr != nil {
@@ -423,10 +423,11 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 }
 
 // RecordIntegratorLaunch stores launchErr as the reason run, the mission's
-// current integrator, did not launch, or clears it when launchErr is empty.
-// Repeating the stored error keeps its first time. It reports whether the
-// mission changed; a run that is no longer the current integrator changes
-// nothing.
+// current integrator, did not launch. An empty launchErr means the run's row
+// exists: it clears the error and marks the run launched, after which
+// reconciliation never relaunches it. Repeating the stored error keeps its
+// first time. It reports whether the mission changed; a run that is no
+// longer the current integrator changes nothing.
 func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, at time.Time) (bool, error) {
 	if id == "" || run == "" {
 		return false, errors.New("store: record integrator launch requires mission_id and run_id")
@@ -444,8 +445,14 @@ func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, ru
 		return false, fmt.Errorf("store: record integrator launch: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `UPDATE missions SET integrator_launch_error=?, integrator_launch_error_at=?, updated_at=?
-		WHERE id=? AND current_integrator_run_id=? AND integrator_launch_error<>?`, launchErr, errorAt, n, id, run, launchErr)
+	launched := 0
+	if launchErr == "" {
+		launched = 1
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE missions SET integrator_launch_error=?, integrator_launch_error_at=?,
+		integrator_run_launched=MAX(integrator_run_launched, ?), updated_at=?
+		WHERE id=? AND current_integrator_run_id=? AND (integrator_launch_error<>? OR integrator_run_launched<?)`,
+		launchErr, errorAt, launched, n, id, run, launchErr, launched)
 	if err != nil {
 		return false, fmt.Errorf("store: record integrator launch of mission %s: %w", id, err)
 	}

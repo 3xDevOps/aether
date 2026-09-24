@@ -182,9 +182,13 @@ type Mission struct {
 	// both are empty once the run launches.
 	IntegratorLaunchError   string
 	IntegratorLaunchErrorAt *time.Time
-	IdempotencyKey          string
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	// IntegratorRunLaunched is set once the current integrator run's row is
+	// known to exist. Reconciliation relaunches a missing row only while it
+	// is unset, so a deleted integrator run stays deleted.
+	IntegratorRunLaunched bool
+	IdempotencyKey        string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 const (

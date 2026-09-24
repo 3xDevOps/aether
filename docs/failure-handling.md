@@ -226,6 +226,11 @@ A run row that failed while provisioning is not retried, and a same-key
 page shows that the integrator run has exited. Fix the cause, then use
 **Replace integrator** to launch a new integrator run.
 
+Reconciliation only relaunches an integrator run whose row never existed.
+Once the row exists, `mission.show` reports `integrator_run_launched: true`,
+and deleting that run does not bring it back: use **Replace integrator** to
+start a new one, or, before the plan is approved, cancel the swarm.
+
 ### Container wait errors
 
 An error from Docker while waiting is inconclusive: it does not prove that
