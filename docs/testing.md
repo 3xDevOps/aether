@@ -3,7 +3,11 @@
 Layers, per the design spec's testing strategy:
 
 - **Unit tests** live beside their packages and run with `make test`
-  (race detector on). Permission matrices, budget math, configuration import
+  (race detector on). `TEST_PKGS` narrows it to some packages and
+  `TEST_SKIP` leaves some out. CI's `unit` matrix gives `internal/sshd`,
+  `internal/scheduler`, and `internal/coord` with `internal/mission` a runner
+  each, the packages listed in `UNIT_SHARDED` in
+  `.github/workflows/ci.yml`; `build-and-test` runs the rest. Permission matrices, budget math, configuration import
   and file revision rules, tailnet auth edge cases, scheduler transitions, and
   the local gateway's own behaviors are proven there, once, and the E2E suite
   does not restate them.

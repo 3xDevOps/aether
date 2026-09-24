@@ -30,6 +30,12 @@ concurrency:
 # them.
 # Windows saves its own Go cache: a different runner.os keeps that key
 # distinct.
+# The unit-test packages the `unit` matrix runs on runners of their own.
+# build-and-test runs every other package. Keep this list and the matrix in
+# step.
+env:
+  UNIT_SHARDED: ./internal/sshd ./internal/scheduler ./internal/coord ./internal/mission
+
 jobs:
   # Lists changed files and decides whether the code jobs run. A push to
   # main and a merge-queue entry always run them. A pull request runs them
@@ -144,7 +150,11 @@ jobs:
         run: make vulncheck
         continue-on-error: true
       - name: Unit tests
-        run: make test
+        run: make test TEST_SKIP="$UNIT_SHARDED"
+      # The `unit` jobs never save the Go cache, so this is what puts their
+      # race-built test binaries into the one this job saves.
+      - name: Compile the sharded unit tests
+        run: go test -race -run '^$' $UNIT_SHARDED
       - name: Shell script tests
         run: make test-scripts
       - name: Build binaries
@@ -167,6 +177,39 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'push' }}
         with:
           mode: save
+
+  # The unit-test packages that take minutes under -race, each on its own
+  # runner so they do not compete for its CPUs. Their tests wait on real
+  # timers, so a starved runner makes them slower still.
+  unit:
+    name: unit (${{ matrix.shard }})
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: sshd
+            pkgs: ./internal/sshd
+          - shard: scheduler
+            pkgs: ./internal/scheduler
+          - shard: coord-mission
+            pkgs: ./internal/coord ./internal/mission
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - name: Unit tests
+        run: make test TEST_PKGS="${{ matrix.pkgs }}"
 
   # Only internal/harness needs the agent images, so it is the only job that
   # waits for them to build; the sharded `integration` jobs below start at
