@@ -663,9 +663,9 @@ attached to each review round.
 
 Rejecting a plan or cancelling the mission cancels its integrator run. That
 cancellation needs no per-run Kill check: the run is the mission's own reserved
-integrator and the decider is already the accountable human or an admin. Cancellation is the
-reconcile loop's job and is retried every pass until the run is terminal, so a
-rejection survives a server restart.
+integrator and the decider is already the accountable human or an admin.
+Cancellation is the reconcile loop's job and is retried every pass until the
+run is terminal, so a rejection survives a server restart.
 
 `mission.replace-integrator` is the recovery when an integrator run exits, in
 `planning`, `clarified`, `plan_review`, `active`, and `amendment_review` alike.

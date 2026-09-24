@@ -307,7 +307,9 @@ active           --mission plan submit------------->  amendment_review
 amendment_review --approve------------------------->  active
 amendment_review --request changes----------------->  active
 clarified        --mission question ask------------>  planning
-planning|clarified|plan_review --mission.cancel--> rejected
+planning         --cancel-------------------------->  rejected
+clarified        --cancel-------------------------->  rejected
+plan_review      --cancel-------------------------->  rejected
 rejected: terminal
 ```
 
