@@ -444,6 +444,9 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
 				}
 			case "integrator":
+				if _, err := io.WriteString(out, integratorRole); err != nil {
+					return ExitFailure, fmt.Errorf("write skill integrator role: %w", err)
+				}
 				if err := writeSkillPhase(out, assignment); err != nil {
 					return ExitFailure, err
 				}

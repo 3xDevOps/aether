@@ -462,6 +462,16 @@ func Lookup(name string) (Profile, bool) {
 	return p, ok
 }
 
+// SubmitSequence returns the bytes that end terminal input for the named
+// harness: its profile's SteerSuffix, or a single Enter for a harness with
+// no shipped profile.
+func SubmitSequence(name string) string {
+	if p, ok := Lookup(name); ok {
+		return p.SteerSuffix()
+	}
+	return "\r"
+}
+
 // Profiles lists the shipped profiles sorted by name.
 func Profiles() []Profile {
 	out := make([]Profile, 0, len(profiles))

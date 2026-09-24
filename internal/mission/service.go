@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -22,6 +23,12 @@ import (
 // honor the supplied run ID; a lost response must never create a second run.
 type Launcher interface {
 	LaunchMission(context.Context, MissionLaunchRequest) (*domain.Run, error)
+}
+
+// Injector writes an attributed line into a run's terminal, ending it with
+// the run harness's submit sequence; satisfied by *ptyhost.Host.
+type Injector interface {
+	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 }
 
 type Canceller interface {
@@ -94,6 +101,9 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
+	// PTY announces a human answer or plan decision in the integrator's
+	// terminal; nil sends no notices.
+	PTY Injector
 	// Integration resolves the underlying candidate engine lazily. Mission
 	// policy owns the adapter while the engine remains the implementation.
 	Integration func() (sshd.IntegrationService, error)

@@ -231,11 +231,14 @@ or perform mission/integration operations. Ordinary runs have no mission
 authority. Help documents syntax, not permission.
 
 Every role gets `status`, `inbox`, and top-level help bootstrap commands.
-Integrators additionally get task/worker help, list commands using the current
-mission ID, integrator generation, approved account/harness/mode choices, and
-active/total attempt allowance. Integration guidance appears only after
-immediate actions in `active` or `amendment_review`, not during initial planning
-or plan review. Use the full status result for the current capability set.
+An integrator's skill states its role before its phase guidance: turn the
+objective into tasks for workers and coordinate them, not implement the
+objective itself. Integrators additionally get task/worker help, list
+commands using the current mission ID, integrator generation, approved
+account/harness/mode choices, and active/total attempt allowance.
+Integration guidance appears only after immediate actions in `active` or
+`amendment_review`, not during initial planning or plan review. Use the full
+status result for the current capability set.
 
 Top-level and per-command help are available without a coordination socket:
 
@@ -355,6 +358,13 @@ not reachable from the run socket; the accountable human or an admin approves,
 requests changes, or rejects from the dashboard. Approval accepts exactly the
 revisions the submitted round recorded, in one transaction, and moves the
 mission to `active`.
+
+An answer to a mission question and every plan decision are also typed into
+an interactive (TUI) integrator's terminal as one `[aether]` line naming the
+command to run next. A headless integrator gets no such line and must keep
+polling `mission plan show --wait 30`. If an interactive integrator's harness
+has already exited, the line lands in the shell left on its terminal and is
+read as a command line there.
 
 #### Amendments to an approved plan
 

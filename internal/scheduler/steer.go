@@ -550,11 +550,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return err
 	}
-	submit := "\r"
-	if p, ok := harness.Lookup(r.Harness); ok {
-		submit = p.SteerSuffix()
-	}
-	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, submit); err != nil {
+	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, harness.SubmitSequence(r.Harness)); err != nil {
 		return err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)

@@ -275,7 +275,7 @@ func (s *Service) AnswerQuestion(ctx context.Context, actor domain.MemberID, p p
 	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()
-	m, err := s.missionForQuestion(ctx, domain.MissionQuestionID(p.QuestionID))
+	asked, m, err := s.missionForQuestion(ctx, domain.MissionQuestionID(p.QuestionID))
 	if err != nil {
 		return protocol.MissionQuestionResult{}, err
 	}
@@ -285,6 +285,12 @@ func (s *Service) AnswerQuestion(ctx context.Context, actor domain.MemberID, p p
 	question, err := s.cfg.Missions.AnswerMissionQuestion(ctx, domain.MissionQuestionID(p.QuestionID), actor, p.Answer, p.IdempotencyKey)
 	if err != nil {
 		return protocol.MissionQuestionResult{}, err
+	}
+	// An answer can only be recorded once, so a question answered before
+	// this call was answered by an idempotent replay the integrator was
+	// already told about.
+	if asked.AnsweredAt == nil {
+		s.noticeIntegrator(ctx, m, answerNotice)
 	}
 	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
 		return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, publishErr
@@ -331,6 +337,12 @@ func (s *Service) DecidePlan(ctx context.Context, actor domain.MemberID, p proto
 	if err != nil {
 		return protocol.MissionPlanDecideResult{}, err
 	}
+	// A fresh decision always moves the mission out of review of the version
+	// it names; a mission read outside that state was decided by an
+	// idempotent replay, whose notice was already sent.
+	if (m.Phase == domain.MissionPhasePlanReview || m.Phase == domain.MissionPhaseAmendmentReview) && m.PlanVersion == p.ExpectedPlanVersion {
+		s.noticeIntegrator(ctx, decided, planDecisionNotice(decision))
+	}
 	if publishErr := s.publishMissionChanged(ctx, decided.ID); publishErr != nil {
 		return protocol.MissionPlanDecideResult{Mission: protocol.MissionFromDomain(decided)}, publishErr
 	}
@@ -360,13 +372,14 @@ func (s *Service) authorizeMissionHuman(ctx context.Context, actor domain.Member
 	return nil
 }
 
-// missionForQuestion resolves the mission a question belongs to, which is what
-// the accountable-human rule is checked against. The wire carries no
+// missionForQuestion resolves a question and the mission it belongs to, which
+// is what the accountable-human rule is checked against. The wire carries no
 // mission_id: a question id names its mission on its own.
-func (s *Service) missionForQuestion(ctx context.Context, id domain.MissionQuestionID) (*domain.Mission, error) {
+func (s *Service) missionForQuestion(ctx context.Context, id domain.MissionQuestionID) (*domain.MissionQuestion, *domain.Mission, error) {
 	question, err := s.cfg.Missions.GetMissionQuestion(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return s.cfg.Missions.GetMission(ctx, question.MissionID)
+	m, err := s.cfg.Missions.GetMission(ctx, question.MissionID)
+	return question, m, err
 }
