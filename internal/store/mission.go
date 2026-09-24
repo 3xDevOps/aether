@@ -63,7 +63,7 @@ type MissionStore interface {
 	SubmitMissionPlan(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionPlanReview, error)
 	DecideMissionPlan(context.Context, domain.MissionID, uint64, domain.MissionPlanDecision, string, domain.MemberID, string) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
-	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, time.Time) (bool, error)
+	RecordIntegratorLaunch(context.Context, domain.MissionID, domain.RunID, string, bool, time.Time) (bool, error)
 	ListMissionPlanReviews(context.Context, domain.MissionID) ([]*domain.MissionPlanReview, error)
 }
 type MissionControlStore interface {
@@ -428,7 +428,7 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 // reconciliation never relaunches it. Repeating the stored error keeps its
 // first time. It reports whether the mission changed; a run that is no
 // longer the current integrator changes nothing.
-func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, at time.Time) (bool, error) {
+func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, launched bool, at time.Time) (bool, error) {
 	if id == "" || run == "" {
 		return false, errors.New("store: record integrator launch requires mission_id and run_id")
 	}
@@ -445,14 +445,16 @@ func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, ru
 		return false, fmt.Errorf("store: record integrator launch: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	launched := 0
-	if launchErr == "" {
-		launched = 1
+	launchedFlag := 0
+	if launched {
+		launchedFlag = 1
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE missions SET integrator_launch_error=?, integrator_launch_error_at=?,
-		integrator_run_launched=MAX(integrator_run_launched, ?), updated_at=?
+	// An unchanged error keeps its first-seen time.
+	res, err := tx.ExecContext(ctx, `UPDATE missions SET
+		integrator_launch_error_at=CASE WHEN integrator_launch_error=? THEN integrator_launch_error_at ELSE ? END,
+		integrator_launch_error=?, integrator_run_launched=MAX(integrator_run_launched, ?), updated_at=?
 		WHERE id=? AND current_integrator_run_id=? AND (integrator_launch_error<>? OR integrator_run_launched<?)`,
-		launchErr, errorAt, launched, n, id, run, launchErr, launched)
+		launchErr, errorAt, launchErr, launchedFlag, n, id, run, launchErr, launchedFlag)
 	if err != nil {
 		return false, fmt.Errorf("store: record integrator launch of mission %s: %w", id, err)
 	}

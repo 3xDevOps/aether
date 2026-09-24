@@ -404,7 +404,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			slog.Warn("mission: cancel rejected integrator", "mission", mission.ID, "error", cancelErr)
 		}
 	} else if mission.CurrentIntegratorRunID != "" {
-		_, runErr := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
+		run, runErr := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
 		switch {
 		case errors.Is(runErr, store.ErrNotFound) && mission.IntegratorRunLaunched:
 			// A human deleted the run; replacing or cancelling is theirs.
@@ -422,14 +422,18 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			}
 			// A stale assignment was superseded, not a launch that failed.
 			if !errors.Is(launchErr, store.ErrMissionStale) {
-				if recordErr := s.recordIntegratorLaunch(ctx, mission, launchErr); recordErr != nil {
+				text, launched := "", true
+				if launchErr != nil {
+					text, launched = launchErr.Error(), false
+				}
+				if recordErr := s.recordIntegratorLaunch(ctx, mission, text, launched); recordErr != nil {
 					return recordErr
 				}
 			}
 		case runErr != nil:
 			return runErr
 		default:
-			if recordErr := s.recordIntegratorLaunch(ctx, mission, nil); recordErr != nil {
+			if recordErr := s.recordIntegratorLaunch(ctx, mission, launchErrorForRow(mission, run), true); recordErr != nil {
 				return recordErr
 			}
 		}
@@ -528,26 +532,34 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 // recordIntegratorLaunch keeps m's launch error in step with launchErr, the
 // outcome of the last launch of its current integrator. nil means the run's
 // row exists: it clears the error and marks the run launched.
-func (s *Service) recordIntegratorLaunch(ctx context.Context, m *domain.Mission, launchErr error) error {
-	text := ""
-	if launchErr != nil {
-		text = launchErr.Error()
-	}
-	if text == m.IntegratorLaunchError && (text != "" || m.IntegratorRunLaunched) {
+func (s *Service) recordIntegratorLaunch(ctx context.Context, m *domain.Mission, text string, launched bool) error {
+	if text == m.IntegratorLaunchError && (m.IntegratorRunLaunched || !launched) {
 		return nil
 	}
 	at := s.cfg.Now().UTC()
-	changed, err := s.cfg.Missions.RecordIntegratorLaunch(ctx, m.ID, m.CurrentIntegratorRunID, text, at)
+	changed, err := s.cfg.Missions.RecordIntegratorLaunch(ctx, m.ID, m.CurrentIntegratorRunID, text, launched, at)
 	if err != nil || !changed {
 		return err
 	}
-	m.IntegratorLaunchError, m.IntegratorLaunchErrorAt = text, nil
-	if text != "" {
-		m.IntegratorLaunchErrorAt = &at
-	} else {
+	if text != m.IntegratorLaunchError {
+		m.IntegratorLaunchError, m.IntegratorLaunchErrorAt = text, nil
+		if text != "" {
+			m.IntegratorLaunchErrorAt = &at
+		}
+	}
+	if launched {
 		m.IntegratorRunLaunched = true
 	}
 	return s.publishMissionChanged(ctx, m.ID)
+}
+
+// launchErrorForRow keeps the recorded cause while the integrator's run row
+// is terminal: only a live integrator proves the launch went through.
+func launchErrorForRow(m *domain.Mission, run *domain.Run) string {
+	if run.Status.Terminal() {
+		return m.IntegratorLaunchError
+	}
+	return ""
 }
 
 // cancelRejectedIntegrator stops the integrator run of a mission whose plan a
@@ -742,7 +754,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	if existing, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID); getErr == nil && existing != nil {
-		err = s.recordIntegratorLaunch(ctx, m, nil)
+		err = s.recordIntegratorLaunch(ctx, m, launchErrorForRow(m, existing), true)
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
 	}
 	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
@@ -751,13 +763,13 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		AccountOwner: admission.Account.ID, Task: m.Objective, Harness: choice.Harness, Mode: choice.Mode,
 	})
 	if err != nil {
-		if recordErr := s.recordIntegratorLaunch(ctx, m, err); recordErr != nil {
-			err = errors.Join(err, recordErr)
-		}
-		created := protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}
 		// Reconciliation relaunches only a reserved run with no row; a row the
 		// scheduler wrote before provisioning failed stays failed.
 		_, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID)
+		if recordErr := s.recordIntegratorLaunch(ctx, m, err.Error(), getErr == nil); recordErr != nil {
+			err = errors.Join(err, recordErr)
+		}
+		created := protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}
 		switch {
 		case getErr == nil:
 			return created, fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace the integrator from the Swarms page: %w", m.ID, m.CurrentIntegratorRunID, err)
@@ -767,7 +779,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 			return created, fmt.Errorf("mission %s exists but its integrator run %s did not launch: %w; read the run: %w", m.ID, m.CurrentIntegratorRunID, err, getErr)
 		}
 	}
-	if recordErr := s.recordIntegratorLaunch(ctx, m, nil); recordErr != nil {
+	if recordErr := s.recordIntegratorLaunch(ctx, m, "", true); recordErr != nil {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", m.ID, m.CurrentIntegratorRunID, recordErr)
 	}
 	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
@@ -826,7 +838,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, err
 	}
-	if recordErr := s.recordIntegratorLaunch(ctx, replaced, nil); recordErr != nil {
+	if recordErr := s.recordIntegratorLaunch(ctx, replaced, "", true); recordErr != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)},
 			fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", replaced.ID, launched.ID, recordErr)
 	}
