@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import type { Api } from '@/lib/api'
+import { ApiError, type Api } from '@/lib/api'
 import type {
   Mission,
   MissionAttempt,
@@ -20,6 +20,7 @@ import {
   missionQuestion,
   missionTask,
   missionTaskRevision,
+  run,
   serverInfo,
   workspace,
 } from '@/test/fixtures'
@@ -322,5 +323,89 @@ describe('mission plan gate', () => {
     const review = showing({ phase: 'plan_review', plan_version: 2 }, [], [missionPlanReview({ plan_version: 2 })])
     await mount(review)
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+  })
+})
+
+describe('mission integrator run', () => {
+  function withRunGet(runGet: Api['runGet']): Api {
+    return { ...showing({ phase: 'planning', plan_version: 0 }), runGet: vi.fn(runGet) }
+  }
+
+  it('says the integrator run has not started once the server has no run for it', async () => {
+    seed()
+    const client = withRunGet(async () => {
+      throw new ApiError(404, 'run.get: run not found')
+    })
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(client.runGet).toHaveBeenCalledWith('run_integrator')
+    const banner = within(screen.getByRole('region', { name: 'Mission phase' }))
+    expect(banner.getByText(/^The integrator run has not started\./)).toBeDefined()
+    expect(banner.queryByText(/may ask you clarifying questions/)).toBeNull()
+    expect(banner.getByRole('button', { name: 'Replace integrator' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
+  })
+
+  it('keeps the planning copy and no run button while the server is asked', async () => {
+    seed()
+    await mount(withRunGet(() => new Promise(() => {})))
+    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
+    expect(screen.queryByText(/has not started/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
+  })
+
+  it('stores a run the event stream has not delivered yet and shows its status', async () => {
+    seed()
+    const client = withRunGet(async () =>
+      run({ id: 'run_integrator', status: 'needs-attention', reason: 'waiting for approval' }),
+    )
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(useStore.getState().runs.run_integrator?.status).toBe('needs-attention')
+    const authorization = within(screen.getByRole('region', { name: 'Mission authorization' }))
+    expect(authorization.getByText('Needs you')).toBeDefined()
+    expect(authorization.getByText('waiting for approval')).toBeDefined()
+    expect(authorization.getByRole('button', { name: 'Open integrator run' })).toBeDefined()
+    expect(screen.queryByText(/has not started/)).toBeNull()
+    expect(client.runGet).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the run button after a failed lookup and asks again on Refresh', async () => {
+    seed()
+    const client = withRunGet(async () => {
+      throw new ApiError(503, 'run.get: server unavailable')
+    })
+    await mount(client)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.getByText('run.get: server unavailable')).toBeDefined()
+    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Open integrator run' })).toBeNull()
+    expect(client.runGet).toHaveBeenCalledTimes(1)
+
+    vi.mocked(client.runGet).mockResolvedValue(run({ id: 'run_integrator' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(client.runGet).toHaveBeenCalledTimes(2)
+    expect(useStore.getState().runs.run_integrator).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Open integrator run' })).toBeDefined()
+    expect(screen.queryByText('run.get: server unavailable')).toBeNull()
+  })
+
+  it('does not ask the server before the runs have hydrated', async () => {
+    seed({ hydrated: false })
+    const client = withRunGet(async () => run({ id: 'run_integrator' }))
+    await mount(client)
+    expect(client.runGet).not.toHaveBeenCalled()
+    expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
   })
 })

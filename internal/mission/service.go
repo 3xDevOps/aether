@@ -702,7 +702,18 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		AccountOwner: admission.Account.ID, Task: m.Objective, Harness: choice.Harness, Mode: choice.Mode,
 	})
 	if err != nil {
-		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
+		created := protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}
+		// Reconciliation relaunches only a reserved run with no row; a row the
+		// scheduler wrote before provisioning failed stays failed.
+		_, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID)
+		switch {
+		case getErr == nil:
+			return created, fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace the integrator from the Swarms page: %w", m.ID, m.CurrentIntegratorRunID, err)
+		case errors.Is(getErr, store.ErrNotFound):
+			return created, fmt.Errorf("mission %s exists but its integrator run %s did not launch; the server retries the launch periodically: %w", m.ID, m.CurrentIntegratorRunID, err)
+		default:
+			return created, fmt.Errorf("mission %s exists but its integrator run %s did not launch: %w; read the run: %w", m.ID, m.CurrentIntegratorRunID, err, getErr)
+		}
 	}
 	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 }
@@ -781,7 +792,7 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 			return domain.MissionIntegrator{AccountMemberID: domain.MemberID(in.AccountMemberID), Harness: in.Harness, Mode: mode}, nil
 		}
 	}
-	return domain.MissionIntegrator{}, errors.New("integrator choice must be one of execution_choices")
+	return domain.MissionIntegrator{}, fmt.Errorf("integrator choice account=%s harness=%s mode=%s must be one of execution_choices", in.AccountMemberID, in.Harness, in.Mode)
 }
 
 func (s *Service) List(ctx context.Context, p protocol.MissionListParams) (protocol.MissionListResult, error) {
