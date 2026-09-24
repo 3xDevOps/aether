@@ -187,3 +187,38 @@ func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 		t.Fatalf("relaunched integrator run: %v", runErr)
 	}
 }
+
+// TestHeadlessIntegratorIsRefused: a headless harness exits after one turn,
+// so it could never be asked a question or told of a decision. Workers keep
+// both modes.
+func TestHeadlessIntegratorIsRefused(t *testing.T) {
+	ctx := context.Background()
+	const want = "integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told"
+	f := newPlanGateFixture(t)
+	headless := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchHeadless)}
+	_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: "create-headless",
+		Integrator:            protocol.MissionIntegrator(headless),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{headless},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	})
+	var rpcErr *protocol.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
+		t.Fatalf("create with a headless integrator = %v, want invalid params %q", err, want)
+	}
+	missions, err := f.db.ListMissions(ctx, f.workspace.ID)
+	if err != nil || len(missions) != 1 {
+		t.Fatalf("missions after a refused create = %d (err %v), want only the fixture's", len(missions), err)
+	}
+
+	_, err = f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+		MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration,
+		Integrator: protocol.MissionIntegrator(headless), IdempotencyKey: "replace-headless",
+	})
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
+		t.Fatalf("replace with a headless integrator = %v, want invalid params %q", err, want)
+	}
+	if got := f.reloadMission(t).IntegratorGeneration; got != f.mission.IntegratorGeneration {
+		t.Fatalf("integrator generation after a refused replace = %d, want %d", got, f.mission.IntegratorGeneration)
+	}
+}

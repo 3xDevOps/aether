@@ -366,11 +366,13 @@ Rejecting and cancelling both move the mission to `rejected`, and the server
 then cancels the integrator run.
 
 An answer to a mission question and every plan decision are also typed into
-an interactive (TUI) integrator's terminal as one `[aether]` line naming the
-command to run next. A headless integrator gets no such line and must keep
-polling `mission plan show --wait 30`. If an interactive integrator's harness
-has already exited, the line lands in the shell left on its terminal and is
-read as a command line there.
+the integrator's terminal as one `[aether]` line naming the command to run
+next. The integrator is always interactive (TUI): `mission.create` and
+`mission.replace-integrator` refuse any other mode with `-32602` and
+`integrator mode must be tui: a headless integrator exits after one turn and
+cannot be asked or told`. Workers may still run headless. If the integrator's
+harness has already exited, the line lands in the shell left on its terminal
+and is read as a command line there.
 
 #### Amendments to an approved plan
 

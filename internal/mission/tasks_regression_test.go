@@ -78,7 +78,7 @@ func regressionMission(t *testing.T, db *store.DB, workspace domain.WorkspaceID,
 	t.Helper()
 	m := &domain.Mission{
 		WorkspaceID: workspace, Objective: "regression mission", AccountableHumanID: accountable,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchHeadless},
+		Integrator:            domain.MissionIntegrator{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchTUI},
 		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: accountable, Harness: "claude", Mode: domain.LaunchHeadless}},
 		MaxConcurrentAttempts: 1, MaxTotalAttempts: 2, IdempotencyKey: "regression-mission",
 	}
@@ -134,7 +134,7 @@ func TestTaskMutationUsesReplacementIntegratorAuthorizerAfterOriginalRevocation(
 	replacement := regressionMember(t, db, "replacement")
 	mission := regressionMission(t, db, workspace.ID, original.ID)
 
-	choice := domain.MissionIntegrator{AccountMemberID: replacement.ID, Harness: "claude", Mode: domain.LaunchHeadless}
+	choice := domain.MissionIntegrator{AccountMemberID: replacement.ID, Harness: "claude", Mode: domain.LaunchTUI}
 	mission, err := db.ReplaceIntegrator(ctx, mission.ID, mission.IntegratorGeneration, choice, replacement.ID, replacement.ID, "replacement-1")
 	if err != nil {
 		t.Fatalf("replace integrator: %v", err)

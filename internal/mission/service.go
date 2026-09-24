@@ -836,6 +836,9 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 	if in.AccountMemberID == "" || in.Harness == "" || !mode.Valid() {
 		return domain.MissionIntegrator{}, errors.New("integrator account_member_id, harness, and valid mode are required")
 	}
+	if mode != domain.LaunchTUI {
+		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui: a headless integrator exits after one turn and cannot be asked or told")
+	}
 	for _, c := range choices {
 		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode {
 			return domain.MissionIntegrator{AccountMemberID: domain.MemberID(in.AccountMemberID), Harness: in.Harness, Mode: mode}, nil

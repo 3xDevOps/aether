@@ -64,8 +64,11 @@ func newPlanGateFixtureFor(t *testing.T, harnessName string, mode domain.LaunchM
 	member := regressionMember(t, db, "accountable")
 	m := &domain.Mission{
 		WorkspaceID: workspace.ID, Objective: "plan gate mission", AccountableHumanID: member.ID,
-		Integrator:            domain.MissionIntegrator{AccountMemberID: member.ID, Harness: harnessName, Mode: mode},
-		ExecutionChoices:      []domain.MissionExecutionChoice{{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless}},
+		Integrator: domain.MissionIntegrator{AccountMemberID: member.ID, Harness: harnessName, Mode: mode},
+		ExecutionChoices: []domain.MissionExecutionChoice{
+			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
+			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI},
+		},
 		MaxConcurrentAttempts: 2, MaxTotalAttempts: 4, IdempotencyKey: "plan-gate-mission",
 		IntegratorAuthorizingHumanID: member.ID, IntegratorRunOwnerID: member.ID,
 	}
@@ -399,7 +402,7 @@ func TestPlanRejectCancelsIntegratorAndBlocksRelaunch(t *testing.T) {
 	// rejected mission refuses it too.
 	if _, replaceErr := f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
 		MissionID: string(rejected.ID), ExpectedGeneration: rejected.IntegratorGeneration,
-		Integrator:     protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchHeadless)},
+		Integrator:     protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)},
 		IdempotencyKey: "replace-after-reject",
 	}); !errors.Is(replaceErr, store.ErrMissionPhase) {
 		t.Fatalf("replace integrator after reject = %v, want ErrMissionPhase", replaceErr)
@@ -489,7 +492,7 @@ func TestPlanShowWaitReturnsOnAnswerAndRefusesAReplacedIntegrator(t *testing.T) 
 
 	replacement := regressionMember(t, f.db, "replacement")
 	replaced, err := f.db.ReplaceIntegrator(ctx, f.mission.ID, f.mission.IntegratorGeneration,
-		domain.MissionIntegrator{AccountMemberID: replacement.ID, Harness: "claude", Mode: domain.LaunchHeadless},
+		domain.MissionIntegrator{AccountMemberID: replacement.ID, Harness: "claude", Mode: domain.LaunchTUI},
 		replacement.ID, replacement.ID, "replace-during-planning")
 	if err != nil {
 		t.Fatalf("replace integrator: %v", err)
