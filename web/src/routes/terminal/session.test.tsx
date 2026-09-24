@@ -42,6 +42,7 @@ function mount(
   viewport: Partial<SessionViewport> = {},
   terminalState = initialTerminal,
   initialProps: MountProps = {},
+  record = run(),
 ) {
   const terminal = fakeTerminal()
   const replay: SessionViewport = {
@@ -53,7 +54,7 @@ function mount(
   }
   useStore.setState({
     info: serverInfo,
-    runs: { run_1: toRecord(run()) },
+    runs: { run_1: toRecord(record) },
     terminals: { run_1: terminalState },
   })
   const result = renderHook(
@@ -96,12 +97,69 @@ beforeEach(() => {
     identityKey: 'identity-a',
     terminalCacheEpoch: 0,
     terminalWriteIntents: {},
+    terminalControlSessions: {},
   })
 })
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
+const owner = { currentAutomaticWrite: true }
+
+/** Mount an owner whose attach is granted the lease; returns its session ID. */
+function steerThenLeave(): string {
+  const first = mount({}, initialTerminal, owner)
+  const socket = StubSocket.last()
+  act(() => socket.onopen?.())
+  const { control_session_id } = socket.frames()[0] as { control_session_id: string }
+  act(() =>
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        replay: 0,
+        control_session_id,
+        control_generation: 5,
+        has_control: true,
+      }),
+    }),
+  )
+  expect(first.result.current.state.write).toBe(true)
+  first.unmount()
+  return control_session_id
+}
+
+/** Refuse the open attach as occupied and open the reconnect it schedules. */
+function occupyAndReconnect(): StubSocket {
+  act(() => {
+    StubSocket.last().onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: -32003,
+        error: 'run control is held by another session',
+        has_control: false,
+        control_generation: 5,
+      }),
+    })
+    StubSocket.last().onclose?.({ code: 1008 })
+  })
+  const before = StubSocket.opened.length
+  for (let waited = 0; StubSocket.opened.length === before && waited < 60_000; waited += 100) {
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+  }
+  const next = StubSocket.last()
+  act(() => next.onopen?.())
+  return next
+}
+
+/** Keep refusing as occupied until the attach gives up and mirrors. */
+function occupyUntilMirror(): StubSocket {
+  for (let tries = 0; tries < 20; tries++) {
+    const next = occupyAndReconnect()
+    expect(next.frames()[0]).not.toHaveProperty('control_generation')
+    expect(next.frames()[0]).not.toHaveProperty('takeover')
+    if (!(next.frames()[0] as { write?: boolean }).write) return next
+  }
+  throw new Error('the attach never became a mirror')
+}
 
 describe('useRunTerminalSession', () => {
   it('uses one interactive screen attach and waits for replay and an acknowledged grant', async () => {
@@ -264,6 +322,90 @@ describe('useRunTerminalSession', () => {
     second.unmount()
   })
 
+  it('reattaches as the same control session when the route remounts', () => {
+    const sessionID = steerThenLeave()
+
+    const second = mount({}, initialTerminal, owner)
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+
+    const header = socket.frames()[0]
+    expect(header).toMatchObject({ control_session_id: sessionID, write: true })
+    expect(header).not.toHaveProperty('takeover')
+    expect(header).not.toHaveProperty('control_generation')
+    second.unmount()
+  })
+
+  it('keeps asking while its own old transport still holds the lease', () => {
+    vi.useFakeTimers()
+    const sessionID = steerThenLeave()
+    const second = mount({}, initialTerminal, owner)
+    act(() => StubSocket.last().onopen?.())
+
+    occupyAndReconnect()
+    const retry = occupyAndReconnect()
+
+    expect(StubSocket.opened).toHaveLength(4)
+    const header = retry.frames()[0]
+    expect(header).toMatchObject({ control_session_id: sessionID, write: true })
+    expect(header).not.toHaveProperty('control_generation')
+    expect(header).not.toHaveProperty('takeover')
+    act(() =>
+      retry.onmessage?.({
+        data: JSON.stringify({
+          ok: true,
+          replay: 0,
+          control_session_id: sessionID,
+          control_generation: 5,
+          has_control: true,
+        }),
+      }),
+    )
+    expect(second.result.current.state.write).toBe(true)
+    expect(second.result.current.state.message).toBeNull()
+    second.unmount()
+    vi.useRealTimers()
+  })
+
+  it('mirrors when the lease stays occupied through the reconnect window', () => {
+    vi.useFakeTimers()
+    steerThenLeave()
+    const second = mount({}, initialTerminal, owner)
+    const seeded = Date.now()
+    act(() => StubSocket.last().onopen?.())
+
+    const mirror = occupyUntilMirror()
+
+    expect(Date.now() - seeded).toBeGreaterThanOrEqual(15_000)
+    const opened = StubSocket.opened.length
+    expect(opened).toBeLessThanOrEqual(9)
+    act(() => {
+      mirror.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: false }) })
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(second.result.current.state.write).toBe(false)
+    second.unmount()
+    vi.useRealTimers()
+  })
+
+  it.each([
+    ['identity', { currentIdentityKey: 'identity-b' }, run()],
+    ['terminal cache epoch', { currentCacheEpoch: 1 }, run()],
+    ['authority', { currentAuthorityKey: 'mem_alice:owner:mem_alice:true:' }, run()],
+    ['run creation time', {}, run({ created_at: '2030-01-01T00:00:00Z' })],
+  ] as const)('starts a fresh control session when the %s changes', (_name, nextProps, record) => {
+    const sessionID = steerThenLeave()
+
+    const second = mount({}, initialTerminal, { ...owner, ...nextProps }, record)
+    const socket = StubSocket.last()
+    act(() => socket.onopen?.())
+
+    const header = socket.frames()[0] as { control_session_id: string }
+    expect(header.control_session_id).not.toBe(sessionID)
+    second.unmount()
+  })
+
   it.each([
     ['identity', { currentIdentityKey: 'identity-b' }],
     ['terminal cache epoch', { currentCacheEpoch: 1 }],
@@ -309,28 +451,23 @@ describe('useRunTerminalSession', () => {
   })
 
   it('clears intent when the requested control lease is lost', () => {
+    vi.useFakeTimers()
     const first = mount()
     act(() => first.result.current.takeControl())
     first.unmount()
 
+    // The remount reattaches as the same session, so a conflict may be its
+    // own old transport and is retried with the intent intact.
     const second = mount()
-    const socket = StubSocket.last()
-    act(() => {
-      socket.onopen?.()
-      socket.onmessage?.({
-        data: JSON.stringify({
-          ok: false,
-          code: -32003,
-          error: 'control occupied',
-          has_control: false,
-          control_generation: 1,
-        }),
-      })
-    })
+    act(() => StubSocket.last().onopen?.())
+    occupyAndReconnect()
+    expect(useStore.getState().terminalWriteIntents.run_1).toMatchObject({ write: true })
+    occupyUntilMirror()
 
     expect(second.result.current.state.steerDenied).toBe(false)
     expect(useStore.getState().terminalWriteIntents.run_1).toBeUndefined()
     second.unmount()
+    vi.useRealTimers()
   })
 
   it('reconnects an owner as a mirror after an occupied write lease', () => {

@@ -24,6 +24,12 @@ export const codeUnavailable = -32004
  */
 const unavailableRetries = 4
 
+/**
+ * The server's reconnect window (internal/control/lease.go): how long a
+ * disconnected session's lease is held for that same session to reclaim.
+ */
+const reclaimWindowMs = 15_000
+
 /** WebSocket policy violation: the gateway's authorization watch fired. */
 const policyClose = 1008
 
@@ -345,7 +351,11 @@ export function replayGate(
 }
 
 /** Connect to a terminal socket, re-reading its URL before every reconnect. */
-export function connectAttach(socketURL: () => string, h: AttachHandlers): Attachment {
+export function connectAttach(
+  socketURL: () => string,
+  h: AttachHandlers,
+  seededSessionID?: string,
+): Attachment {
   // A socket can outlive the component that currently displays it (a dock
   // collapse or route change keeps the server-side shell alive). Rebinding
   // keeps callbacks pointed at the current terminal instead of a disposed
@@ -409,11 +419,18 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   let reopenGeneration = 0
   let deliveryGeneration = 0
   let liveOverflowed = false
-  // Stable for this logical browser tab and intentionally distinct from
-  // another tab by the same member. Reconnects reuse it to resume control.
-  const controlSessionID = crypto.randomUUID()
+  // Stable for this attachment's reconnects, and for a later attachment in
+  // the same browser tab that seeds it, so either reclaims the disconnected
+  // lease this session held. Another tab by the same member never shares it.
+  // A seed carries no generation: generations restart with the server, so a
+  // remembered one could fence a takeover of someone else's lease.
+  const controlSessionID = seededSessionID ?? crypto.randomUUID()
   let controlGeneration = 0
   let hasControl = false
+  // A seeded attach can race the server's teardown of this session's
+  // previous transport, which reads as occupied until it lands. Until the
+  // first successful ack, keep asking for as long as the lease is held.
+  let reclaimUntil = seededSessionID === undefined ? 0 : Date.now() + reclaimWindowMs
   let controlRequestID = 0
   let controlRevision = 0
   let controlPosition: TerminalPosition | null = null
@@ -995,6 +1012,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         replayPositionTarget = replayBytes > 0 ? highWater : null
         if (replayBytes === 0) parsedPosition = highWater
         attached = true
+        reclaimUntil = 0
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
@@ -1039,6 +1057,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       if (ack.code === codeConflict && askedWrite) {
         pendingControl = null
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
+        if (Date.now() < reclaimUntil) {
+          // Retry unfenced on a growing backoff, starting one step up so
+          // the old transport's disconnect has time to land.
+          attempt = Math.max(attempt, 1)
+          return
+        }
         handlers.onControlLost?.()
         attempt = 0
         return

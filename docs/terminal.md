@@ -77,6 +77,16 @@ the server holds its lease for a **15-second reconnect window**. The same tab or
 connection session can reclaim the lease during that window. The disconnected
 session cannot write while it is away. A different tab cannot inherit it without
 an explicit takeover, and after the window expires a normal acquisition can win.
+A dashboard tab keeps one control session per run until the tab reloads, or
+until the signed-in identity, the server's event log (a fresh data directory
+restarts it), your authority over the run (role, run owner, protection, or
+steering policy), or the run's `created_at` changes. Returning to a run
+terminal in the same tab therefore attaches as the session that held the lease,
+and the server hands a disconnected lease back to it without a takeover. Until
+the old connection's disconnect reaches the server, that lease still reads as
+occupied, so the tab keeps asking for it through the reconnect window before it
+becomes a mirror. After the window, the return acquires control only if the run
+is still unoccupied.
 **Control changes are acknowledged on the existing attach WebSocket.** A
 dashboard terminal sends a text frame such as
 `{"type":"control","request_id":17,"write":true}`. It may include
@@ -336,12 +346,14 @@ Enter. Review or edit it, then press Enter yourself when it is ready.
 
 Changing away from a run terminal closes its socket and unmounts its live
 xterm. You are no longer **Watching**, and the inactive run has no control
-transport or geometry participation. A pinned reading position keeps its
-static screen presentation, loaded pages, and row-relative pixel and horizontal
-offsets. Switching from run A to B and back restores A's same recorded row
-and position, even if A kept producing output. The new live attachment
-bootstraps a compact current screen behind that saved presentation; it does
-not replace pinned content or jump the reader to the bottom. A run left
+transport or geometry participation. A controller's lease waits out the
+reconnect window: returning in the same tab within 15 seconds is still
+**Steering**, while another tab still needs **Take control**. A pinned reading
+position keeps its static screen presentation, loaded pages, and row-relative
+pixel and horizontal offsets. Switching from run A to B and back restores A's
+same recorded row and position, even if A kept producing output. The new live
+attachment bootstraps a compact current screen behind that saved presentation;
+it does not replace pinned content or jump the reader to the bottom. A run left
 following live output returns to the fresh current screen.
 
 When an already-mounted dashboard surface deliberately reopens while its

@@ -101,7 +101,7 @@ describe('hydrate', () => {
 
     expect(store.getState().runs.run_1.unanswered_questions).toBe(2)
   })
-  it('prunes write intents absent from the run snapshot and preserves surviving intents', async () => {
+  it('prunes write intents and control sessions absent from the run snapshot', async () => {
     const store = createRootStore()
     const surviving = {
       write: true,
@@ -115,6 +115,9 @@ describe('hydrate', () => {
       ...surviving,
       authorityKey: 'authority:run_deleted',
     })
+    const { write: _write, ...fence } = surviving
+    store.getState().setTerminalControlSession('run_1', { ...fence, controlSessionID: 'tab-1' })
+    store.getState().setTerminalControlSession('run_deleted', { ...fence, controlSessionID: 'tab-2' })
 
     await hydrate(
       store,
@@ -123,6 +126,7 @@ describe('hydrate', () => {
 
     expect(store.getState().terminalWriteIntents).toEqual({ run_1: surviving })
     expect(store.getState().terminalWriteIntents.run_1).toBe(surviving)
+    expect(Object.keys(store.getState().terminalControlSessions)).toEqual(['run_1'])
   })
 
   it('does not publish missions or hydration success after disposal during the mission fetch', async () => {
@@ -615,6 +619,13 @@ describe('applyEvent', () => {
       authorityKey: 'authority:run_1',
       runCreatedAt: store.getState().runs.run_1.created_at,
     })
+    store.getState().setTerminalControlSession('run_1', {
+      identityKey: 'member:alice',
+      terminalCacheEpoch: 1,
+      authorityKey: 'authority:run_1',
+      runCreatedAt: store.getState().runs.run_1.created_at,
+      controlSessionID: 'tab-1',
+    })
 
     expect(await applyEvent(
       store,
@@ -623,6 +634,7 @@ describe('applyEvent', () => {
     )).toBe(true)
 
     expect(store.getState().terminalWriteIntents.run_1).toBeUndefined()
+    expect(store.getState().terminalControlSessions.run_1).toBeUndefined()
     expect(store.getState().runs.run_1).toBeUndefined()
     expect(store.getState().lastSeq).toBe(7)
   })
