@@ -613,6 +613,66 @@ func (d *DB) DecideMissionPlan(ctx context.Context, missionID domain.MissionID, 
 	return m, nil
 }
 
+// CancelMission ends a mission before its plan is approved by moving it to
+// rejected, the terminal phase whose integrator the reconcile loop stops. A
+// key names one cancellation of one mission.
+func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, cancelledBy domain.MemberID, key string) (*domain.Mission, error) {
+	if missionID == "" || cancelledBy == "" || !validMutationKey(key) {
+		return nil, errors.New("store: mission cancel requires mission_id, cancelling member, and idempotency_key")
+	}
+	payload, err := mutationPayload(struct{ CancelledBy domain.MemberID }{cancelledBy})
+	if err != nil {
+		return nil, err
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: cancel mission: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	m, err := lockMissionRow(ctx, tx, missionID)
+	if err != nil {
+		return nil, err
+	}
+	var other domain.MissionID
+	if otherErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_mutation_receipts WHERE operation=? AND idempotency_key=? AND mission_id<>? LIMIT 1`, "mission.cancel", key, missionID).Scan(&other); otherErr == nil {
+		return nil, fmt.Errorf("%w: idempotency_key already cancelled mission %s", ErrMissionIdempotencyConflict, other)
+	} else if !errors.Is(otherErr, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: cancel mission: read receipts: %w", otherErr)
+	}
+	_, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.cancel", key, payload)
+	if err != nil {
+		return nil, err
+	}
+	if replayed {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, commitErr
+		}
+		return m, nil
+	}
+	if phaseErr := requireMissionPhase(m, "mission.cancel", domain.MissionPhasePlanning, domain.MissionPhaseClarified, domain.MissionPhasePlanReview); phaseErr != nil {
+		return nil, phaseErr
+	}
+	now := missionNow(time.Time{})
+	n, err := encodeTime(now)
+	if err != nil {
+		return nil, err
+	}
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseRejected, n, missionID); updateErr != nil {
+		return nil, fmt.Errorf("store: move mission %s to rejected: %w", missionID, updateErr)
+	}
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.cancel", key, payload, string(missionID), 0, n); receiptErr != nil {
+		return nil, receiptErr
+	}
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
+		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, fmt.Errorf("store: cancel mission: commit: %w", commitErr)
+	}
+	m.Phase, m.UpdatedAt = domain.MissionPhaseRejected, now
+	return m, nil
+}
+
 // acceptPlanTaskRevisions accepts exactly the revisions this round recorded as
 // its items, and reports how many times accepted_set_version was bumped: once
 // per task whose superseded revision held an acceptance, because that output

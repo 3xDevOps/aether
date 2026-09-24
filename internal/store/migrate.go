@@ -1246,6 +1246,12 @@ CREATE TABLE mission_plan_items (
 	CHECK (json_valid(widening))
 );
 `,
+	// mission.cancel refuses a key already used on another mission, which
+	// looks a receipt up without its mission_id.
+	`
+CREATE INDEX idx_mission_mutation_receipts_key
+	ON mission_mutation_receipts(operation, idempotency_key);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

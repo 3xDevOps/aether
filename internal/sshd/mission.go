@@ -31,6 +31,7 @@ type MissionService interface {
 	ReplaceIntegrator(context.Context, domain.MemberID, protocol.MissionReplaceIntegratorParams) (protocol.MissionReplaceIntegratorResult, error)
 	AnswerQuestion(context.Context, domain.MemberID, protocol.MissionQuestionAnswerParams) (protocol.MissionQuestionResult, error)
 	DecidePlan(context.Context, domain.MemberID, protocol.MissionPlanDecideParams) (protocol.MissionPlanDecideResult, error)
+	Cancel(context.Context, domain.MemberID, protocol.MissionCancelParams) (protocol.MissionCancelResult, error)
 }
 
 // AuthorizeLaunch resolves and checks every mutable fact required before a
@@ -115,6 +116,7 @@ func init() {
 	// mutex these handlers must not take.
 	registerGuarded(protocol.MethodMissionQuestionAnswer, permissions.Launch, nil, (*Server).missionQuestionAnswer)
 	registerGuarded(protocol.MethodMissionPlanDecide, permissions.Launch, nil, (*Server).missionPlanDecide)
+	registerGuarded(protocol.MethodMissionCancel, permissions.Launch, nil, (*Server).missionCancel)
 }
 
 func (s *Server) missions() (MissionService, *protocol.Error) {
@@ -301,6 +303,22 @@ func (s *Server) missionPlanDecide(ctx context.Context, member domain.MemberID, 
 		return nil, perr
 	}
 	out, callErr := svc.DecidePlan(ctx, member, p)
+	if callErr != nil {
+		return nil, rpcError(callErr)
+	}
+	return out, nil
+}
+
+func (s *Server) missionCancel(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc, err := s.missions()
+	if err != nil {
+		return nil, err
+	}
+	p, perr := decodeParams[protocol.MissionCancelParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	out, callErr := svc.Cancel(ctx, member, p)
 	if callErr != nil {
 		return nil, rpcError(callErr)
 	}

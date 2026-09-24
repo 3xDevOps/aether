@@ -15,6 +15,7 @@ const (
 	MethodMissionPlanShow              = "mission.plan.show"
 	MethodMissionPlanSubmit            = "mission.plan.submit"
 	MethodMissionPlanDecide            = "mission.plan.decide"
+	MethodMissionCancel                = "mission.cancel"
 
 	MethodTaskShow             = "task.show"
 	MethodTaskList             = "task.list"
@@ -361,6 +362,17 @@ type MissionPlanDecideParams struct {
 }
 
 type MissionPlanDecideResult struct {
+	Mission Mission `json:"mission"`
+}
+
+// MissionCancelParams are the params of mission.cancel, which ends a mission
+// before its plan is approved. The cancelling member is the session.
+type MissionCancelParams struct {
+	MissionID      string `json:"mission_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type MissionCancelResult struct {
 	Mission Mission `json:"mission"`
 }
 

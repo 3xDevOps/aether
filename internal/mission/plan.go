@@ -355,6 +355,35 @@ func (s *Service) DecidePlan(ctx context.Context, actor domain.MemberID, p proto
 	return protocol.MissionPlanDecideResult{Mission: protocol.MissionFromDomain(current)}, nil
 }
 
+// Cancel ends a mission before its plan is approved. It only records the
+// rejected phase; the reconcile loop stops the integrator run, exactly as it
+// does after a rejected plan.
+func (s *Service) Cancel(ctx context.Context, actor domain.MemberID, p protocol.MissionCancelParams) (protocol.MissionCancelResult, error) {
+	if p.MissionID == "" || !validTaskKey(p.IdempotencyKey) {
+		return protocol.MissionCancelResult{}, invalidMissionParams("mission_id and idempotency_key are required")
+	}
+	s.cfg.AuthorizationMu.Lock()
+	defer s.cfg.AuthorizationMu.Unlock()
+	m, err := s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
+	if err != nil {
+		return protocol.MissionCancelResult{}, err
+	}
+	if authErr := s.authorizeMissionHuman(ctx, actor, m, "cancel this mission"); authErr != nil {
+		return protocol.MissionCancelResult{}, authErr
+	}
+	if _, cancelErr := s.cfg.Missions.CancelMission(ctx, m.ID, actor, p.IdempotencyKey); cancelErr != nil {
+		return protocol.MissionCancelResult{}, cancelErr
+	}
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return protocol.MissionCancelResult{}, publishErr
+	}
+	current, err := s.cfg.Missions.GetMission(ctx, m.ID)
+	if err != nil {
+		return protocol.MissionCancelResult{}, err
+	}
+	return protocol.MissionCancelResult{Mission: protocol.MissionFromDomain(current)}, nil
+}
+
 // invalidMissionParams is a caller mistake on the control channel. It is
 // typed so sshd reports it as invalid params rather than an internal fault.
 func invalidMissionParams(message string) error {

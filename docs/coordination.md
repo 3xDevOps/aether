@@ -307,11 +307,15 @@ active           --mission plan submit------------->  amendment_review
 amendment_review --approve------------------------->  active
 amendment_review --request changes----------------->  active
 clarified        --mission question ask------------>  planning
+planning|clarified|plan_review --mission.cancel--> rejected
 rejected: terminal
 ```
 
 `reject` is refused on an amendment: an amendment is approved or sent back for
 changes, and the integrator drops it by abandoning its tasks or revisions.
+`mission.cancel` is how a human ends a mission before any plan is approved,
+including one whose integrator never submitted a plan. It is refused in
+`active`, `amendment_review`, and `rejected`.
 
 Only the current integrator may use these commands, and only for its own
 mission; none of them takes a mission ID:
@@ -357,7 +361,9 @@ without any human action, so the review always reads the latest draft.
 not reachable from the run socket; the accountable human or an admin approves,
 requests changes, or rejects from the dashboard. Approval accepts exactly the
 revisions the submitted round recorded, in one transaction, and moves the
-mission to `active`.
+mission to `active`. `mission.cancel` is the same kind of human-only method.
+Rejecting and cancelling both move the mission to `rejected`, and the server
+then cancels the integrator run.
 
 An answer to a mission question and every plan decision are also typed into
 an interactive (TUI) integrator's terminal as one `[aether]` line naming the

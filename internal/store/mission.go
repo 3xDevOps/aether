@@ -62,6 +62,7 @@ type MissionStore interface {
 	ListMissionQuestions(context.Context, domain.MissionID) ([]*domain.MissionQuestion, error)
 	SubmitMissionPlan(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionPlanReview, error)
 	DecideMissionPlan(context.Context, domain.MissionID, uint64, domain.MissionPlanDecision, string, domain.MemberID, string) (*domain.Mission, error)
+	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
 	ListMissionPlanReviews(context.Context, domain.MissionID) ([]*domain.MissionPlanReview, error)
 }
 type MissionControlStore interface {
@@ -499,7 +500,7 @@ func missionPhaseReason(phase domain.MissionPhase) string {
 	case domain.MissionPhaseAmendmentReview:
 		return "the amendment is frozen while a human reviews it"
 	case domain.MissionPhaseRejected:
-		return "a human rejected the plan"
+		return "a human rejected the plan or cancelled the mission"
 	default:
 		return "the plan has already been approved"
 	}

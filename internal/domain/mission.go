@@ -36,6 +36,7 @@ type MissionIntegrator struct {
 //	active           --mission.plan.submit----------->    amendment_review
 //	amendment_review --decide approve--------------->     active
 //	amendment_review --decide revise---------------->     active
+//	planning|clarified|plan_review --mission.cancel--> rejected
 type MissionPhase string
 
 const (

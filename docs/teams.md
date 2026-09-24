@@ -635,11 +635,11 @@ clarification complete (`clarified`) and submits the plan for review
 submitted from `active` is an **amendment** and puts the mission in
 `amendment_review` until the same human decides it.
 
-Two control-channel methods carry that decision. Both need
-the `run.launch` permission (collaborator or admin) and are refused unless the
+Three control-channel methods carry that decision. Each needs
+the `run.launch` permission (collaborator or admin) and is refused unless the
 authenticated member is the mission's accountable human or holds the `admin`
-role, so an accountable human demoted to viewer can no longer answer or decide
-and an admin must take over:
+role, so an accountable human demoted to viewer can no longer answer, decide,
+or cancel, and an admin must take over:
 
 - `mission.question.answer` answers one clarifying question the integrator
   asked. The answering member is the session, never a request field.
@@ -651,14 +651,17 @@ and an admin must take over:
   closed out by an admin. Rejecting an amendment is refused: the approved plan
   stands either way, so an amendment is approved or sent back for changes and
   the integrator abandons its tasks or revisions to drop it.
+- `mission.cancel` ends a mission in `planning`, `clarified`, or `plan_review`
+  by moving it to `rejected`, whether or not a plan was ever submitted. It is
+  refused once a plan is approved and on a mission that already ended.
 
 Reading the gate is not deciding it. `mission.show` stays a View read: every
 member sees the questions, the answers, the plan summaries, and the feedback
 attached to each review round.
 
-Rejecting a plan cancels the mission's integrator run. That cancellation needs
-no per-run Kill check: the run is the mission's own reserved integrator and the
-decider is already the accountable human or an admin. Cancellation is the
+Rejecting a plan or cancelling the mission cancels its integrator run. That
+cancellation needs no per-run Kill check: the run is the mission's own reserved
+integrator and the decider is already the accountable human or an admin. Cancellation is the
 reconcile loop's job and is retried every pass until the run is terminal, so a
 rejection survives a server restart.
 
