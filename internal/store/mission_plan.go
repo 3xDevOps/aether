@@ -635,7 +635,7 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 	}
 	var other domain.MissionID
 	if otherErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_mutation_receipts WHERE operation=? AND idempotency_key=? AND mission_id<>? LIMIT 1`, "mission.cancel", key, missionID).Scan(&other); otherErr == nil {
-		return nil, fmt.Errorf("%w: idempotency_key already cancelled mission %s", ErrMissionIdempotencyConflict, other)
+		return nil, fmt.Errorf("%w: idempotency_key was already used to cancel another mission", ErrMissionIdempotencyConflict)
 	} else if !errors.Is(otherErr, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: cancel mission: read receipts: %w", otherErr)
 	}
