@@ -283,14 +283,6 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
-	// Force the SQLite writer lock before any idempotency or peer reads.
-	// Otherwise two deferred transactions can both read a snapshot and then
-	// fail upgrading it with SQLITE_BUSY_SNAPSHOT instead of converging.
-	if _, lerr := tx.ExecContext(ctx,
-		`UPDATE run_messages SET id = id WHERE 0`,
-	); lerr != nil {
-		return false, fmt.Errorf("store: append run message: lock: %w", lerr)
-	}
 	// Read the idempotency row in the same write transaction as the eventual
 	// insert. A key is shared across kinds so its reuse cannot change the
 	// typed operation a retry appears to have performed.
@@ -494,8 +486,6 @@ func (d *DB) DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken s
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
-	// Take the write lock before reading. The event log shares this database
-	// and can otherwise make SQLite reject a read-to-write lock upgrade.
 	if _, aerr := tx.ExecContext(ctx,
 		`UPDATE run_messages SET acked_at = ?
 		 WHERE to_run = ? AND delivery_token <> '' AND delivery_token = ? AND acked_at IS NULL`,
