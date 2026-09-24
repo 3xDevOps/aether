@@ -220,6 +220,8 @@ started.` for that mission.
 `integrator_launch_error` and the time it was first seen in
 `integrator_launch_error_at`; both clear once the run is live (a row that
 failed while provisioning keeps them) or the integrator is replaced.
+`mission.replace-integrator` reports a failed launch of the new run with the
+same two errors and records it the same way.
 
 A run row that failed while provisioning is not retried, and a same-key
 `mission.create` returns the mission without launching again. The Swarms
@@ -228,8 +230,10 @@ page shows that the integrator run has exited. Fix the cause, then use
 
 Reconciliation only relaunches an integrator run whose row never existed.
 Once the row exists, `mission.show` reports `integrator_run_launched: true`,
-and deleting that run does not bring it back: use **Replace integrator** to
-start a new one, or, before the plan is approved, cancel the swarm.
+and deleting that run does not bring it back, not even through a same-key
+`mission.create`, which then returns the mission unchanged, as it does for
+a cancelled swarm. Use **Replace integrator** to start a new one, or, before
+the plan is approved, cancel the swarm.
 
 ### Container wait errors
 
