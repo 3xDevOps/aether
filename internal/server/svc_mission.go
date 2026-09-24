@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/mission"
@@ -63,6 +64,9 @@ func init() {
 					return errors.New("mission: scheduler unavailable")
 				}
 				_, err := d.Runs.RequireCoordination()
+				if err != nil && d.Config.CoordinationDisabled {
+					return fmt.Errorf("swarms need conflict coordination; the server was started with --conflict-coordination=false: %w", err)
+				}
 				return err
 			},
 		}

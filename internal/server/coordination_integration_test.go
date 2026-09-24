@@ -144,6 +144,19 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID)
 	drain(sub, &seen)
 	assertNoCoordNote(t, seen)
+	// A swarm's integrator and workers talk over the same mailbox, so
+	// mission.create names the switch that took it away.
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "claude", Mode: string(domain.LaunchTUI)}
+	createErr := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
+		WorkspaceID: string(e.ws.ID), Objective: "swarm with coordination off", IdempotencyKey: "kill-switch-swarm",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	}, nil)
+	const wantCreate = "swarms need conflict coordination; the server was started with --conflict-coordination=false: scheduler: coordination is unavailable"
+	if createErr == nil || !strings.Contains(createErr.Error(), wantCreate) {
+		t.Errorf("mission.create with coordination off = %v, want %q", createErr, wantCreate)
+	}
 
 	// Off -> on. Only a new run gains the bridge; the two containers that
 	// predate the switch keep exactly what they were given.
