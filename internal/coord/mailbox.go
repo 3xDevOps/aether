@@ -1090,10 +1090,8 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 				slog.Warn("coord: audit outbox lookup failed", "message_id", msg.ID, "error", aerr)
 			}
 		}
-		// The terminal is told before a pending inbox wait is released, so
-		// that read re-arms the notice only once this one has been claimed.
-		s.notifyMessage(ctx, msg)
 		s.wakeInbox(msg.ToRun)
+		s.notifyMessage(target, msg)
 	}
 	return msg, nil
 }

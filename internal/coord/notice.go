@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -39,18 +40,24 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 	if s.cfg.PTY == nil {
 		return
 	}
-	for _, peer := range s.pendingNotices(run, with) {
+	pending := s.pendingNotices(run, with)
+	if len(pending) == 0 {
+		return
+	}
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		slog.Warn("coord: overlap notice skipped", "run", run, "error", err)
+		return
+	}
+	// Every run has a terminal, but a headless harness never reads it, so
+	// the peer stays unannounced rather than counted as told.
+	if r.Mode != domain.LaunchTUI {
+		return
+	}
+	for _, peer := range pending {
 		text, err := s.noticeText(ctx, peer)
 		if err != nil {
 			slog.Warn("coord: overlap notice skipped", "run", run, "peer", peer.RunID, "error", err)
-			continue
-		}
-		r, err := s.cfg.Store.GetRun(ctx, run)
-		if err != nil {
-			slog.Warn("coord: overlap notice skipped", "run", run, "peer", peer.RunID, "error", err)
-			continue
-		}
-		if r.Mode != domain.LaunchTUI {
 			continue
 		}
 		err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", text, harness.SubmitSequence(r.Harness))
@@ -86,57 +93,53 @@ func (s *Service) stampNotice(ctx context.Context, r *domain.Run, message string
 	}
 }
 
+// messageNoticeTimeout bounds one message notice. It runs detached from
+// the sender's request, so it needs a deadline of its own.
+const messageNoticeTimeout = 5 * time.Second
+
 // notifyMessage tells the recipient of a newly stored message, question, or
 // reply that its inbox has something, so an interactive agent does not have
 // to block on an inbox wait to find out. One line covers a whole burst: the
 // run is told once and re-armed by its next inbox read (rearmMessageNotice).
-// The inbox remains the source of truth; a lost line loses nothing durable.
-func (s *Service) notifyMessage(ctx context.Context, msg *store.RunMessage) {
-	if s.cfg.PTY == nil {
+// The write runs detached, so a stalled recipient terminal never holds the
+// sender's request or the recipient's inbox wake. The inbox remains the
+// source of truth; a lost line loses nothing durable.
+func (s *Service) notifyMessage(target *domain.Run, msg *store.RunMessage) {
+	// Every run has a terminal, but a headless harness never reads it: the
+	// line would sit unread while the timeline claimed delivery.
+	if s.cfg.PTY == nil || target.Mode != domain.LaunchTUI {
 		return
 	}
 	// Sends are concurrent RPCs, so the run is claimed before the write and
 	// released if the write fails; marking only on success would let two
-	// simultaneous sends both reach the terminal.
-	if !s.claimMessageNotice(msg.ToRun) {
-		return
-	}
-	r, err := s.cfg.Store.GetRun(ctx, msg.ToRun)
-	if err != nil {
-		s.rearmMessageNotice(msg.ToRun)
-		slog.Warn("coord: message notice skipped", "run", msg.ToRun, "message_id", msg.ID, "error", err)
-		return
-	}
-	// Every run has a terminal, but a headless harness never reads it: the
-	// line would sit unread while the timeline claimed delivery.
-	if r.Mode != domain.LaunchTUI {
-		s.rearmMessageNotice(msg.ToRun)
-		return
-	}
-	err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(r.ID), noticeActor, "", messageNoticeText(msg.FromRun), harness.SubmitSequence(r.Harness))
-	switch {
-	case err == nil:
-		s.stampNotice(ctx, r, fmt.Sprintf("coordination notice: message from run %s", msg.FromRun))
-	case errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
-		// No live terminal yet, as right after a restart: the message is
-		// safe in the inbox, and the next one tries the terminal again.
-		s.rearmMessageNotice(msg.ToRun)
-	default:
-		s.rearmMessageNotice(msg.ToRun)
-		slog.Warn("coord: message notice failed", "run", msg.ToRun, "message_id", msg.ID, "error", err)
-	}
-}
-
-// claimMessageNotice reports whether run is owed a message notice, taking
-// the claim when it is.
-func (s *Service) claimMessageNotice(run domain.RunID) bool {
+	// simultaneous sends both reach the terminal. The claim and the
+	// goroutine registration share one critical section with Close, which
+	// waits for every registered write before returning.
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.messageNoticed[run] {
-		return false
+	if s.closed || s.messageNoticed[target.ID] {
+		s.mu.Unlock()
+		return
 	}
-	s.messageNoticed[run] = true
-	return true
+	s.messageNoticed[target.ID] = true
+	s.wg.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		ctx, cancel := context.WithTimeout(s.serveCtx, messageNoticeTimeout)
+		defer cancel()
+		err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(target.ID), noticeActor, "", messageNoticeText(msg.FromRun), harness.SubmitSequence(target.Harness))
+		switch {
+		case err == nil:
+			s.stampNotice(ctx, target, "coordination notice: message from run "+string(msg.FromRun))
+		case errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
+			// No live terminal yet, for example right after a restart: the
+			// message is safe in the inbox, and the next one tries again.
+			s.rearmMessageNotice(target.ID)
+		default:
+			s.rearmMessageNotice(target.ID)
+			slog.Warn("coord: message notice failed", "run", target.ID, "message_id", msg.ID, "error", err)
+		}
+	}()
 }
 
 // rearmMessageNotice lets the next message reach run's terminal again.

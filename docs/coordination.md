@@ -160,7 +160,7 @@ aether: New coordination message from run <sender run ID>. Run /usr/local/bin/ae
 The line is a hint, not delivery: it fires once per burst, so further
 messages stay silent until the run next reads its inbox, and it is never
 sent to a headless run, whose harness does not read its terminal. A run
-whose terminal is not attached yet, as right after a server restart, gets no
+whose terminal is not attached yet, for example right after a server restart, gets no
 line and nothing is lost; the inbox remains the authoritative source. The
 same rule applies to the conflict radar's overlap banner: only a `tui` run
 receives it, and a headless run is not counted as told.
@@ -248,10 +248,6 @@ or perform mission/integration operations. A worker's skill also tells it to
 check the inbox after reading the task, before each commit, and before
 reporting, and that `status` lists its sibling workers. Ordinary runs have no
 mission authority. Help documents syntax, not permission.
-
-Every role's skill explains that a terminal line starting with `aether:`
-means a message or event is waiting and names the command that reads it, and
-that peers listed by `status` are reached with `send`, `ask`, and `reply`.
 
 Every role gets `status`, `inbox`, and top-level help bootstrap commands.
 An integrator's skill states its role before its phase guidance: turn the

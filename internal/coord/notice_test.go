@@ -303,6 +303,7 @@ func TestMessageNoticeFiresOncePerBurstAndReArms(t *testing.T) {
 			t.Fatalf("Send %q: %v", body, err)
 		}
 	}
+	h.waitForInjections(t, 1)
 	got := h.pty.forRun(b)
 	if len(got) != 1 {
 		t.Fatalf("injections for %s after two sends = %+v, want one", b, got)
@@ -319,16 +320,10 @@ func TestMessageNoticeFiresOncePerBurstAndReArms(t *testing.T) {
 	if i := strings.IndexAny(notice, ";<>()'\"`$"); i >= 0 {
 		t.Fatalf("notice %q carries shell syntax %q at %d", notice, notice[i], i)
 	}
-	// One delivery stamp follows the first send's own; the second send
-	// leaves only its own.
-	if _, note := next(); !strings.HasPrefix(note, "coordination message to run "+string(b)) {
-		t.Fatalf("first note = %q, want the send stamp", note)
-	}
-	if run, note := next(); run != b || note != "coordination notice: message from run "+string(a) {
-		t.Fatalf("second note = %q on run %s, want the delivery stamp on %s", note, run, b)
-	}
-	if _, note := next(); !strings.HasPrefix(note, "coordination message to run "+string(b)) {
-		t.Fatalf("third note = %q, want the second send stamp and no repeated notice", note)
+	// Two send stamps and exactly one delivery stamp on the recipient; the
+	// delivery runs detached, so its place among the sends is not pinned.
+	if got := h.nextNotes(t, next, 3); got.sends != 2 || got.deliveries[b] != 1 {
+		t.Fatalf("notes after two sends = %+v, want two send stamps and one delivery stamp on %s", got, b)
 	}
 
 	if _, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{}); err != nil {
@@ -337,6 +332,7 @@ func TestMessageNoticeFiresOncePerBurstAndReArms(t *testing.T) {
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "one more")); err != nil {
 		t.Fatalf("Send after the inbox read: %v", err)
 	}
+	h.waitForInjections(t, 2)
 	if got = h.pty.forRun(b); len(got) != 2 {
 		t.Fatalf("injections for %s after its inbox read = %d, want 2", b, len(got))
 	}
@@ -376,23 +372,79 @@ func TestMessageNoticeSkipsAHeadlessRun(t *testing.T) {
 	if _, err := h.svc.Send(ctx, a, sendParams(c, "hold off on auth.go")); err != nil {
 		t.Fatalf("Send to the interactive run: %v", err)
 	}
-	if got := h.pty.forRun(b); len(got) != 0 || h.pty.attemptsFor(b) != 0 {
-		t.Fatalf("headless run %s was written to: %+v", b, got)
-	}
+	h.waitForInjections(t, 1)
 	if got := h.pty.forRun(c); len(got) != 1 {
 		t.Fatalf("injections for the interactive run %s = %+v, want one", c, got)
 	}
-	// The headless send leaves only its own stamp; the interactive
-	// sibling's send is followed by its delivery stamp.
-	if run, note := next(); run != a || !strings.HasPrefix(note, "coordination message to run "+string(b)) {
-		t.Fatalf("first note = %q on run %s, want only the send stamp", note, run)
+	if got := h.pty.forRun(b); len(got) != 0 || h.pty.attemptsFor(b) != 0 {
+		t.Fatalf("headless run %s was written to: %+v", b, got)
 	}
-	if _, note := next(); !strings.HasPrefix(note, "coordination message to run "+string(c)) {
-		t.Fatalf("second note = %q, want the interactive sibling's send stamp", note)
+	// Two send stamps, one delivery stamp on the interactive sibling, and
+	// none on the headless run.
+	if got := h.nextNotes(t, next, 3); got.sends != 2 || got.deliveries[c] != 1 || got.deliveries[b] != 0 {
+		t.Fatalf("notes = %+v, want two send stamps and one delivery stamp on %s only", got, c)
 	}
-	if run, note := next(); run != c || note != "coordination notice: message from run "+string(a) {
-		t.Fatalf("third note = %q on run %s, want the delivery stamp on %s", note, run, c)
+}
+
+// TestMessageNoticeRetriesOnceTheTerminalExists: a message stored before the
+// recipient's terminal is attached, as right after a restart, is not told,
+// but the claim is released so the next message tries the terminal again.
+func TestMessageNoticeRetriesOnceTheTerminalExists(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
+	h.advance(radarRefreshInterval)
+
+	h.pty.setErr(ptyhost.ErrNoSession)
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "hold off on auth.go")); err != nil {
+		t.Fatalf("Send while the terminal is gone: %v", err)
 	}
+	deadline := time.Now().Add(2 * time.Second)
+	for h.pty.attemptsFor(b) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no injection was attempted while the terminal was gone")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := h.pty.all(); len(got) != 0 {
+		t.Fatalf("injections while the terminal was gone = %+v, want none", got)
+	}
+
+	h.pty.setErr(nil)
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "still on it")); err != nil {
+		t.Fatalf("Send once the terminal exists: %v", err)
+	}
+	got := h.waitForInjections(t, 1)
+	if got[0].run != b || !strings.Contains(got[0].message, string(a)) {
+		t.Fatalf("retried notice = %+v, want run %s told about %s", got[0], b, a)
+	}
+}
+
+// noteTally is what a fixed number of timeline notes amount to: how many
+// were send stamps and how many delivery stamps landed on each run.
+type noteTally struct {
+	sends      int
+	deliveries map[domain.RunID]int
+}
+
+// nextNotes reads n timeline notes and tallies them, so a test can pin what
+// was stamped without pinning an order the detached notice does not promise.
+func (h *coordHarness) nextNotes(t *testing.T, next func() (domain.RunID, string), n int) noteTally {
+	t.Helper()
+	tally := noteTally{deliveries: make(map[domain.RunID]int)}
+	for range n {
+		run, note := next()
+		switch {
+		case strings.HasPrefix(note, "coordination message to run "):
+			tally.sends++
+		case strings.HasPrefix(note, "coordination notice: message from run "):
+			tally.deliveries[run]++
+		default:
+			t.Fatalf("unexpected timeline note %q on run %s", note, run)
+		}
+	}
+	return tally
 }
 
 // TestOverlapNoticeSkipsAHeadlessRun: the banner too is only for a run that
