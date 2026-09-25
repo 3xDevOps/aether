@@ -116,11 +116,13 @@ func (s *Service) notifyMessage(target *domain.Run, msg *store.RunMessage) {
 	// goroutine registration share one critical section with Close, which
 	// waits for every registered write before returning.
 	s.mu.Lock()
-	if s.closed || s.messageNoticed[target.ID] {
+	if s.closed || s.messageNoticed[target.ID] != 0 {
 		s.mu.Unlock()
 		return
 	}
-	s.messageNoticed[target.ID] = true
+	s.messageNoticeSeq++
+	claim := s.messageNoticeSeq
+	s.messageNoticed[target.ID] = claim
 	s.wg.Add(1)
 	s.mu.Unlock()
 	go func() {
@@ -130,16 +132,29 @@ func (s *Service) notifyMessage(target *domain.Run, msg *store.RunMessage) {
 		err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(target.ID), noticeActor, "", messageNoticeText(msg.FromRun), harness.SubmitSequence(target.Harness))
 		switch {
 		case err == nil:
-			s.stampNotice(ctx, target, "coordination notice: message from run "+string(msg.FromRun))
+			// The write may have used up its deadline; the stamp gets its own.
+			stampCtx, stampCancel := context.WithTimeout(s.serveCtx, messageNoticeTimeout)
+			defer stampCancel()
+			s.stampNotice(stampCtx, target, "coordination notice: message from run "+string(msg.FromRun))
 		case errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
 			// No live terminal yet, for example right after a restart: the
 			// message is safe in the inbox, and the next one tries again.
-			s.rearmMessageNotice(target.ID)
+			s.releaseMessageNotice(target.ID, claim)
 		default:
-			s.rearmMessageNotice(target.ID)
+			s.releaseMessageNotice(target.ID, claim)
 			slog.Warn("coord: message notice failed", "run", target.ID, "message_id", msg.ID, "error", err)
 		}
 	}()
+}
+
+// releaseMessageNotice gives back a failed write's claim, unless an inbox
+// read already re-armed the run and a newer write holds it.
+func (s *Service) releaseMessageNotice(run domain.RunID, claim uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.messageNoticed[run] == claim {
+		delete(s.messageNoticed, run)
+	}
 }
 
 // rearmMessageNotice lets the next message reach run's terminal again.

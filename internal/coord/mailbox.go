@@ -1090,8 +1090,10 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 				slog.Warn("coord: audit outbox lookup failed", "message_id", msg.ID, "error", aerr)
 			}
 		}
-		s.wakeInbox(msg.ToRun)
+		// The claim is taken before the waiter wakes, so a read that races
+		// the notice re-arms it rather than being suppressed by a late claim.
 		s.notifyMessage(target, msg)
+		s.wakeInbox(msg.ToRun)
 	}
 	return msg, nil
 }
