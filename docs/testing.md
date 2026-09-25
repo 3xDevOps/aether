@@ -3,7 +3,11 @@
 Layers, per the design spec's testing strategy:
 
 - **Unit tests** live beside their packages and run with `make test`
-  (race detector on). Permission matrices, budget math, configuration import
+  (race detector on). `TEST_PKGS` narrows it to some packages and
+  `TEST_SKIP` leaves some out. CI's `unit` matrix gives `internal/sshd`,
+  `internal/scheduler`, and `internal/coord` with `internal/mission` a runner
+  each, the packages listed in `UNIT_SHARDED` in
+  `.github/workflows/ci.yml`; `build-and-test` runs the rest. Permission matrices, budget math, configuration import
   and file revision rules, tailnet auth edge cases, scheduler transitions, and
   the local gateway's own behaviors are proven there, once, and the E2E suite
   does not restate them.
@@ -17,12 +21,14 @@ Layers, per the design spec's testing strategy:
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
   to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
-  GitHub-hosted runners. The `integration` matrix in `.github/workflows/ci.yml`
-  gives `internal/server` four shards: `server-chaos`
+  GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
+  job log. The `integration` matrix in `.github/workflows/ci.yml`
+  gives `internal/server` five shards: `server-chaos`
   (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
   (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
-  (`INTEGRATION_RUN=^TestIntegrationMission`), and `server-rest`
-  (`INTEGRATION_SKIP_PATTERN=^TestIntegration(Chaos|Coordination|Mission)`).
+  (`INTEGRATION_RUN=^TestIntegrationMission`), `server-heavy`
+  (`INTEGRATION_RUN=^TestIntegration(EndToEnd|MultiMember|ServerUpdate)`),
+  and `server-rest` (`INTEGRATION_SKIP_PATTERN` of the other four shards' tests).
   `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
   `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
   `./internal/server`. The `smoke` job runs `internal/harness` on the images

@@ -124,6 +124,8 @@ type Config struct {
 	// terminal container for the coordination CLI. Coordinated runs also use
 	// it for lifecycle callbacks; empty means DefaultServerBinary.
 	ServerBinary string
+	// turnTail overrides defaultTurnTail; only tests set it.
+	turnTail time.Duration
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -446,6 +448,9 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	if cfg.ExitProbeTimeout <= 0 {
 		cfg.ExitProbeTimeout = defaultExitProbeTimeout
+	}
+	if cfg.turnTail <= 0 {
+		cfg.turnTail = defaultTurnTail
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

@@ -39,6 +39,10 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
   grep -rl --include='*_test.go' -E '^//go:build .*integration' . \
   | xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u))
 
+# Every package, minus TEST_SKIP. Assigned lazily - only `test` reads it. CI
+# shards the unit tests by setting TEST_PKGS or TEST_SKIP.
+TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
+
 # Release matrix. The server is Linux-only by design (see the v1 cut-line);
 # the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
@@ -126,7 +130,7 @@ build: dashboard
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(DIST)/ ./cmd/aether-server ./cmd/aether
 
 test:
-	go test -race ./...
+	go test -race $(TEST_PKGS)
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with

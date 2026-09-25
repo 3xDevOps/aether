@@ -30,6 +30,12 @@ concurrency:
 # them.
 # Windows saves its own Go cache: a different runner.os keeps that key
 # distinct.
+# The unit-test packages the `unit` matrix runs on runners of their own.
+# build-and-test runs every other package. Keep this list and the matrix in
+# step.
+env:
+  UNIT_SHARDED: ./internal/sshd ./internal/scheduler ./internal/coord ./internal/mission
+
 jobs:
   # Lists changed files and decides whether the code jobs run. A push to
   # main and a merge-queue entry always run them. A pull request runs them
@@ -92,7 +98,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -119,7 +125,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -144,7 +150,11 @@ jobs:
         run: make vulncheck
         continue-on-error: true
       - name: Unit tests
-        run: make test
+        run: make test TEST_SKIP="$UNIT_SHARDED"
+      # The `unit` jobs never save the Go cache, so this is what puts their
+      # race-built test binaries into the one this job saves.
+      - name: Compile the sharded unit tests
+        run: go test -race -run '^$' $UNIT_SHARDED
       - name: Shell script tests
         run: make test-scripts
       - name: Build binaries
@@ -168,6 +178,39 @@ jobs:
         with:
           mode: save
 
+  # The unit-test packages that take minutes under -race, each on its own
+  # runner so they do not compete for its CPUs. Their tests wait on real
+  # timers, so a starved runner makes them slower still.
+  unit:
+    name: unit (${{ matrix.shard }})
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: sshd
+            pkgs: ./internal/sshd
+          - shard: scheduler
+            pkgs: ./internal/scheduler
+          - shard: coord-mission
+            pkgs: ./internal/coord ./internal/mission
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - name: Unit tests
+        run: make test TEST_PKGS="${{ matrix.pkgs }}"
+
   # Only internal/harness needs the agent images, so it is the only job that
   # waits for them to build; the sharded `integration` jobs below start at
   # once.
@@ -181,7 +224,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -227,8 +270,8 @@ jobs:
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
 
-  # Sharded so the slow server scenarios do not share one runner. Four shards
-  # cover internal/server by test name; scheduler is its own package; rest is
+  # Sharded so the slow server scenarios do not share one runner. Five shards
+  # cover internal/server by test name, balanced by the durations -v prints; scheduler is its own package; rest is
   # every other integration package, so a package that gains integration tests
   # is gated without a change here. Every test in these shards pulls the
   # busybox image it needs itself, so none builds one.
@@ -249,8 +292,10 @@ jobs:
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationCoordination
           - shard: server-mission
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationMission
+          - shard: server-heavy
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'
           - shard: server-rest
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission)'
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'
           - shard: scheduler
             make: INTEGRATION_PKGS=./internal/scheduler
           - shard: rest
@@ -259,7 +304,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -267,8 +312,11 @@ jobs:
         with:
           mode: restore
       # The matrix values are literals from this file, passed as make
-      # assignments.
+      # assignments. -v prints each test's duration, which is what the
+      # shards are balanced by.
       - name: Integration tests (real Docker, real git)
+        env:
+          GOFLAGS: -v
         run: make test-integration ${{ matrix.make }}
 
   dashboard:
@@ -313,7 +361,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -385,7 +433,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -474,7 +522,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -512,7 +560,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # full history so git describe can version the build
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false

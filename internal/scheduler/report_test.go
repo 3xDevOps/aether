@@ -157,6 +157,7 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 	e := newReportingEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 500 * time.Millisecond
 		cfg.PollInterval = 20 * time.Millisecond
+		cfg.turnTail = 100 * time.Millisecond
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)

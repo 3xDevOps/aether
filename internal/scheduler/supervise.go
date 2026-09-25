@@ -494,7 +494,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			released := e.status == domain.RunNeedsAttention && observed &&
 				idle <= s.cfg.StallThreshold && !heldForTheMember
 			if released && e.agentReport.State == agentstatus.Waiting {
-				released = e.unparks(activity)
+				released = e.unparks(activity, s.cfg.turnTail)
 			}
 			var err error
 			switch {
@@ -521,11 +521,11 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	}
 }
 
-// turnTail is how long after a waiting report the terminal is still taken
+// defaultTurnTail is how long after a waiting report the terminal is still taken
 // to be painting the turn that ended: the answer it wrote, the prompt
 // being restored, a spinner winding down. It is a bound on a TUI's own
 // trailing frames, not a measured vendor number, so it is generous.
-const turnTail = 3 * time.Second
+const defaultTurnTail = 3 * time.Second
 
 // unparks reports whether terminal activity on a run the agent parked
 // itself is the next turn rather than the tail of the one that ended.
@@ -542,8 +542,8 @@ const turnTail = 3 * time.Second
 // single late frame is not a turn either.
 //
 // Caller must hold s.mu.
-func (e *supervised) unparks(activity time.Time) bool {
-	if !activity.After(e.parkedAt.Add(turnTail)) {
+func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
+	if !activity.After(e.parkedAt.Add(tail)) {
 		return false
 	}
 	if e.postParkActivity.IsZero() {
