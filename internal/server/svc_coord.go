@@ -13,11 +13,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// Conflict coordination (): the run-to-run mailbox and the per-run
-// coordination socket under <data>/coord. The service is built even when
-// the kill switch is off, because turning coordination off still has host
-// work to do - the sockets a previous process left behind are unlinked so
-// the mounts already inside live containers go inert.
+// The per-run authenticated transport remains available independently of the
+// conflict-coordination policy. Disabled coordination still blocks peer/radar,
+// mission, and lifecycle-report actions without removing run identity.
 func init() {
 	registerService("coord", func(d Deps) (Service, error) {
 		mail, ok := d.Store.(store.MessageStore)
@@ -46,9 +44,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		// Binary staging is independent from the conflict-coordination
-		// kill switch. Every new container receives the verified CLI; only
-		// enabled runs receive a socket and lifecycle assets.
+		// Every new container receives the verified CLI; runs receive identity
+		// transport even when conflict coordination is disabled. The policy flag
+		// still gates mission admission and harness lifecycle reporting.
 		d.Runs.UseCoordination(
 			svc,
 			filepath.Join(d.DataDir, "runtime", "bin"),

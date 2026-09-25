@@ -123,11 +123,11 @@ var mirrorSharedCGNAT = &net.IPNet{
 	Mask: net.CIDRMask(10, 32),
 }
 
-// ConfigureWorkspaceMirror installs the protected-base policy and records the
-// exact mirrored ref and generation. It intentionally does not fetch refs;
-// persistence and key lifecycle belong to the service layer. The generation
-// high-water mark is never lowered, including when a prior configuration is
-// rolled back.
+// ConfigureWorkspaceMirror initializes the bare workspace repository when
+// needed, installs the protected-base policy, and records the exact mirrored
+// ref and generation. It intentionally does not fetch refs; persistence and
+// key lifecycle belong to the service layer. The generation high-water mark
+// is never lowered, including when a prior configuration is rolled back.
 func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, req MirrorRequest) (MirrorResult, error) {
 	e.fileWriteMu.Lock()
 	result := MirrorResult{WorkspaceID: ws, SourceURL: req.SourceURL, Branch: req.Branch, Generation: req.Generation, CheckedAt: time.Now().UTC()}
@@ -135,7 +135,7 @@ func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.Workspa
 	if err := validateMirrorRequest(req, e.cfg.MirrorFetch != nil); err != nil {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, req, "", "", err)
 	}
-	repo, err := e.existingRepoPath(ws)
+	repo, err := e.InitWorkspaceRepo(ctx, ws)
 	if err != nil {
 		return result, err
 	}
@@ -150,9 +150,6 @@ func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.Workspa
 	// The active generation may be restored after a persistence failure, but
 	// the durable high-water mark is never lowered. Service allocates the
 	// next value for every new configuration.
-	if err := e.configureWorkspaceRepo(ctx, repo); err != nil {
-		return result, err
-	}
 	base := mirrorBaseRef(req.Branch)
 	if req.Generation > durable {
 		if _, err := e.git(ctx, repo, "config", mirrorGenerationConfig, strconv.FormatInt(req.Generation, 10)); err != nil {
@@ -182,10 +179,14 @@ func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.Workspa
 }
 
 // MirrorGeneration returns the durable generation high-water mark for the
-// workspace. It remains after Disable removes the active policy, so a later
-// configuration can allocate the next value.
+// workspace, or zero when the repository has not been initialized yet. It
+// remains after Disable removes the active policy, so a later configuration
+// can allocate the next value without a prior client push.
 func (e *Engine) MirrorGeneration(ctx context.Context, ws domain.WorkspaceID) (int64, error) {
 	repo, err := e.existingRepoPath(ws)
+	if errors.Is(err, ErrRepoNotFound) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -91,6 +91,13 @@ type session struct {
 	checkpointErr      error
 	finishDone         chan struct{}
 	onTitle            func(string)
+	revision           uint64
+	geometryRevision   uint64
+	changed            chan struct{}
+	development        bool
+	protocolPending    []byte
+	protocolWake       chan struct{}
+	protocolErr        error
 
 	// pendingEcho is the echo the terminal still owes for input the server
 	// wrote to the agent - an injected line, or a member's keystrokes. The
@@ -242,6 +249,7 @@ func (s *session) commitOutputLocked(p []byte) {
 	if s.tr != nil {
 		s.tr.output(p)
 	}
+	s.changedLocked()
 	for c := range s.clients {
 		c.enqueue(p)
 	}
@@ -258,6 +266,7 @@ func (s *session) commitPendingOutputLocked(p []byte) {
 		s.screen.write(p)
 	}
 	s.modes.scan(p)
+	s.changedLocked()
 	if len(s.pendingEvents) == 0 {
 		if s.ring != nil {
 			s.ring.write(p)
@@ -316,9 +325,12 @@ func (s *session) end() {
 		return
 	}
 	s.ended = true
+	s.changedLocked()
 	s.finishDone = make(chan struct{})
 	capture, tr := s.finishLocked()
-	s.ring = nil // no further attaches: release the replay buffer
+	if !s.development {
+		s.ring = nil // development output remains readable after process exit
+	}
 	if s.done != nil {
 		close(s.done)
 	}
@@ -353,8 +365,10 @@ func (s *session) finishLocked() (*checkpointCapture, *castWriter) {
 		} else {
 			s.finalSnapshot = s.screenSnapshotLocked()
 		}
-		s.screen.dispose()
-		s.screen = nil
+		if !s.development || s.stopped {
+			s.screen.dispose()
+			s.screen = nil
+		}
 	}
 	tr := s.tr
 	s.tr = nil
@@ -389,6 +403,7 @@ func (s *session) stop() error {
 			continue
 		}
 		s.stopped = true
+		s.changedLocked()
 		s.finishDone = make(chan struct{})
 		capture, tr := s.finishLocked()
 		// The sessions map keeps a lightweight stopped entry so StopSession
@@ -397,6 +412,7 @@ func (s *session) stop() error {
 		att := s.att
 		clients := s.clients
 		s.ring = nil
+		s.protocolPending = nil
 		s.clients = nil
 		s.att = nil
 		s.stdin = nil
@@ -503,13 +519,13 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		// non-empty gap crossing one must rebuild the screen.
 		if c.resume && c.position.Epoch != "" {
 			if missed, ok := s.ring.since(c.position); ok &&
-				(!c.snapshot || c.position.Sequence >= s.lastResizeSequence) {
+				((!c.snapshot && !s.development) || c.position.Sequence >= s.lastResizeSequence) {
 				c.setReplay(missed)
 				c.resumed = true
 			}
 		}
 		if !c.resumed {
-			if c.screen {
+			if c.screen || s.development {
 				c.setReplay(s.screenSnapshotLocked().Data)
 			} else if _, isRun := s.run.Run(); isRun {
 				replay, replayBytes, err := s.tr.snapshot(s.history)
@@ -539,7 +555,7 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 		// Any join can change who imposes, not just this client: the mirror
 		// that was alone here a moment ago no longer is. Raw replay needs
 		// a redraw; snapshots and successful resumes already hold the screen.
-		s.reconcileLocked(!c.snapshot && !c.resumed && c.cols != 0 && c.rows != 0)
+		s.reconcileLocked((!s.development || !c.readOnly) && !c.snapshot && !c.resumed && c.cols != 0 && c.rows != 0)
 		s.mu.Unlock()
 		return nil
 	}
@@ -673,6 +689,10 @@ func (s *session) reconcileLocked(force bool) {
 // flight, but screen, ring, and cast publication wait for the accepted
 // geometry. Each RPC is bounded by resizeTimeout.
 func (s *session) applyResize() {
+	_ = s.applyResizeContext(context.Background())
+}
+
+func (s *session) applyResizeContext(parent context.Context) error {
 	s.resizeMu.Lock()
 	s.mu.Lock()
 	if s.geoApplied == s.geoGen || s.ended || s.stopped || s.att == nil {
@@ -684,7 +704,7 @@ func (s *session) applyResize() {
 		}
 		s.mu.Unlock()
 		s.resizeMu.Unlock()
-		return
+		return ErrSessionEnded
 	}
 	gen := s.geoGen
 	s.geoApplied = gen
@@ -705,11 +725,12 @@ func (s *session) applyResize() {
 	}
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), resizeTimeout)
+	ctx, cancel := context.WithTimeout(parent, resizeTimeout)
 	if rows > 1 {
 		_ = att.Resize(ctx, cols, rows-1)
 	}
-	rpcOK := att.Resize(ctx, cols, rows) == nil
+	rpcErr := att.Resize(ctx, cols, rows)
+	rpcOK := rpcErr == nil
 	cancel()
 
 	s.mu.Lock()
@@ -720,6 +741,10 @@ func (s *session) applyResize() {
 		s.acceptedCols, s.acceptedRows = cols, rows
 		if s.screen != nil {
 			_ = s.screen.resize(cols, rows)
+		}
+		if changed {
+			s.geometryRevision++
+			s.changedLocked()
 		}
 		// Keep the cast's resize event before every output emitted while the
 		// RPC was pending. This is the same order used by the emulator.
@@ -775,6 +800,7 @@ func (s *session) applyResize() {
 	if next {
 		go s.applyResize()
 	}
+	return rpcErr
 }
 
 // stdinWriteTimeout is an upper bound supplied to context-aware runtime
@@ -794,6 +820,9 @@ func (s *session) writeStdinContext(ctx context.Context, p []byte) error {
 func (s *session) writeStdinContextLocked(ctx context.Context, p []byte) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	if s.stopped || s.stdin == nil {

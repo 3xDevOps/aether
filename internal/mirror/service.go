@@ -183,6 +183,10 @@ func (s *Service) finishDisabling(ctx context.Context, row domain.WorkspaceMirro
 	return nil
 }
 
+// Configure prepares a server-owned source without requiring a seeded workspace
+// repository. It leaves the source pending. For an empty workspace, callers
+// must refresh to observe its first candidate, then explicitly adopt it.
+// Checkout Origin is independent and is never read or changed by this service.
 func (s *Service) Configure(ctx context.Context, workspace domain.WorkspaceID, req ConfigureRequest) (Result, error) {
 	unlock := s.workspaceLock(workspace)
 	defer unlock()
@@ -343,7 +347,7 @@ func (s *Service) Refresh(ctx context.Context, workspace domain.WorkspaceID) (Re
 	m.LastError = ""
 	m.LastSuccessAt = now
 	if err := s.store.SetWorkspaceMirror(ctx, m); err != nil {
-		return Result{}, err
+		return s.result(*m, s.publicKey(workspace, *m)), fmt.Errorf("mirror: persist fetched Git state: %w", err)
 	}
 	return s.result(*m, s.publicKey(workspace, *m)), nil
 }
@@ -381,7 +385,7 @@ func (s *Service) Adopt(ctx context.Context, workspace domain.WorkspaceID, gener
 	m.LastError = ""
 	m.LastAttemptAt, m.LastSuccessAt = now, now
 	if err := s.store.SetWorkspaceMirror(ctx, m); err != nil {
-		return Result{}, err
+		return s.result(*m, s.publicKey(workspace, *m)), fmt.Errorf("mirror: persist adopted Git state: %w", err)
 	}
 	return s.result(*m, s.publicKey(workspace, *m)), nil
 }
@@ -540,7 +544,7 @@ func (s *Service) refreshLocked(ctx context.Context, workspace domain.WorkspaceI
 	}
 	current.LastError, current.LastSuccessAt = "", now
 	if err := s.store.SetWorkspaceMirror(ctx, &current); err != nil {
-		return Result{}, err
+		return s.result(current, s.publicKey(workspace, current)), fmt.Errorf("mirror: persist fetched Git state: %w", err)
 	}
 	return s.result(current, s.publicKey(workspace, current)), nil
 }

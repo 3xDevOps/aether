@@ -37,9 +37,10 @@ const coordinationInstruction = harness.DiscoveryInstruction
 // co-author rule to a task prompt. A taskless launch remains taskless: its
 // profile receives the discovery hint through the coordination directory's
 // ephemeral launch mechanism instead of gaining a seeded user prompt. A run
-// without coordination has no mounted directory to read the files from.
+// without a run transport has no mounted directory to read the files from.
 func (s *Scheduler) withCoAuthorInstruction(task string) string {
-	if task == "" || s.coordinationSeam() == nil {
+	c := s.coordinationSeam()
+	if task == "" || c == nil || c.svc == nil {
 		return task
 	}
 	return task + "\n\n" + coordinationInstruction + "\n\n" + coAuthorInstruction

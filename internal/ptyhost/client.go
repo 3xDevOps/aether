@@ -151,6 +151,9 @@ func (s *session) imposesNow(c *client) bool {
 	if !c.readOnly {
 		return true
 	}
+	if s.development {
+		return false
+	}
 	for other := range s.clients {
 		if other != c && other.sizes() {
 			return false

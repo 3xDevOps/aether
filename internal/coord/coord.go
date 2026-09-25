@@ -40,9 +40,6 @@ import (
 const DefaultGrace = 10 * time.Minute
 
 var (
-	// ErrDisabled is returned by the host-side lifecycle calls when the
-	// conflict-coordination kill switch is off.
-	ErrDisabled = errors.New("coord: conflict coordination is disabled")
 	// ErrClosed is returned once the service has been closed.
 	ErrClosed = errors.New("coord: service closed")
 	// ErrNoReportSink is returned when run.report arrives with no sink
@@ -90,6 +87,14 @@ type MissionService interface {
 	ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
 }
 
+// DevelopmentService supplies only implemented run-scoped development methods.
+// The transport binds identity, applies its explicit allowlist, and owns request
+// cancellation. Capabilities must describe current availability for this run.
+type DevelopmentService interface {
+	Capabilities(context.Context, domain.RunID) ([]string, error)
+	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
+}
+
 // Peers is the conflict radar's read side. Mission authorization, when
 // configured, is evaluated by MissionService before radar fallback.
 type Peers interface {
@@ -125,6 +130,9 @@ type Config struct {
 	// authorization and owns mission task/worker methods and report
 	// validation/reconciliation; nil preserves ordinary coordination.
 	Mission MissionService
+	// Development is independent of conflict and mission policy. Nil advertises
+	// no development methods and leaves their dispatch unavailable.
+	Development DevelopmentService
 	// PTY injects the overlap notice into a run's terminal.
 	PTY Injector
 	// Reports is where run.report lands: the scheduler. Leaving it unset
@@ -136,9 +144,8 @@ type Config struct {
 	Evidence EvidenceCapture
 	// EvidencePackets loads retained packets for pending publication replay.
 	EvidencePackets EvidencePacketLookup
-	// Disabled is the conflict-coordination kill switch. When set, no
-	// notice, listener, directory, mailbox write, or timeline entry
-	// happens, and every coord.* call fails CodeUnavailable.
+	// Disabled blocks conflict notices, peer/mailbox operations, mission actions,
+	// and lifecycle reporting, but not run identity or development transport.
 	Disabled bool
 	// Grace overrides DefaultGrace.
 	Grace time.Duration
@@ -395,8 +402,8 @@ func (s *Service) reportLock(run domain.RunID) *sync.Mutex {
 	return lock
 }
 
-// unavailable is the kill switch's answer: every coord.* method fails
-// before it touches the mailbox, the radar, or the timeline.
+// unavailable denies conflict/mission/report actions before they touch the
+// mailbox, radar, or timeline. coord.status remains the identity bootstrap.
 func unavailable(method string) *protocol.Error {
 	return &protocol.Error{
 		Code:    protocol.CodeUnavailable,

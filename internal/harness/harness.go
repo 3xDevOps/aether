@@ -29,16 +29,14 @@ import (
 // TaskPlaceholder is replaced by the run's task prompt in argv templates.
 const TaskPlaceholder = "{task}"
 
-// DiscoveryInstruction is the one short launch hint that tells an agent how
-// to load its assignment-specific, runtime-scoped coordination guidance.
-// The staged CLI fetches the actual assignment from the run socket; this text
-// carries no authority, identity, or task details.
+// DiscoveryInstruction points to live run identity, available capabilities, and
+// any assignment. It carries no authority, identity, or task details.
 const (
-	DiscoveryInstruction = "Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished."
+	DiscoveryInstruction = "Use `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. Use only available capabilities and report only what you verified."
 	DiscoveryFileName    = "discovery.md"
 	// developer_instructions is the Codex config key for additional
 	// instructions; model_instructions_file would replace built-ins.
-	codexDiscoverySetting = "developer_instructions=\"Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished.\""
+	codexDiscoverySetting = "developer_instructions=\"" + DiscoveryInstruction + "\""
 )
 
 // CoordPlaceholder is replaced by the container path of the run's

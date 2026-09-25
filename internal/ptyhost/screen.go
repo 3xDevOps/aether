@@ -52,6 +52,7 @@ type terminalScreen struct {
 	addon *xterm.SerializeAddon
 	cols  uint
 	rows  uint
+	palette *terminalPalette
 
 	// xterm-go deliberately keeps parser and UTF-8 decoder state private to
 	// Terminal. This mirror tracks only the bytes that have not reached a
@@ -533,6 +534,9 @@ func makeScreenSnapshot(screen *terminalScreen, modes modeScanner, position Term
 	preamble := modes.preamble()
 	data := make([]byte, 0, 2+len(serialized)+len(preamble)+len(screen.continuation)+screen.utf8PendingLen+160)
 	data = append(data, '\x1b', 'c')
+	if screen.palette != nil {
+		data = screen.palette.appendSnapshot(data)
+	}
 	data = append(data, serialized...)
 	data = screen.appendSnapshotCursor(data)
 	// Mode restoration must be complete before an unfinished sequence is

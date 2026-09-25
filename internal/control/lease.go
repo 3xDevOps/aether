@@ -66,6 +66,8 @@ type lease struct {
 
 type runState struct {
 	mu         sync.Mutex
+	// surfaceGate linearizes run-wide revocation against surface admission.
+	surfaceGate sync.RWMutex
 	generation uint64
 	current    *lease
 }
@@ -80,6 +82,7 @@ type Service struct {
 	reconnectWindow time.Duration
 	maxSessionBytes int
 	runs            map[domain.RunID]*runState
+	surfaces        map[surfaceKey]*surfaceState
 }
 
 // New creates an in-memory controller lease service.
@@ -98,6 +101,7 @@ func New(cfg Config) *Service {
 		reconnectWindow: cfg.ReconnectWindow,
 		maxSessionBytes: cfg.MaxSessionIDBytes,
 		runs:            make(map[domain.RunID]*runState),
+		surfaces:        make(map[surfaceKey]*surfaceState),
 	}
 }
 
@@ -273,11 +277,14 @@ func (s *Service) AdmitRevoke(run string, fn func() error) (*Snapshot, error) {
 		return nil, ErrInvalid
 	}
 	state := s.stateFor(domain.RunID(run), true)
+	state.surfaceGate.Lock()
+	defer state.surfaceGate.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if err := fn(); err != nil {
 		return nil, err
 	}
+	s.fenceSurfacesLocked(domain.RunID(run))
 	return s.fenceLocked(domain.RunID(run), state), nil
 }
 
@@ -424,8 +431,11 @@ func (s *Service) Fence(run string) *Snapshot {
 	if state == nil {
 		return nil
 	}
+	state.surfaceGate.Lock()
+	defer state.surfaceGate.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	s.fenceSurfacesLocked(domain.RunID(run))
 	return s.fenceLocked(domain.RunID(run), state)
 }
 

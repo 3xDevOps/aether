@@ -274,6 +274,20 @@ func (h *Host) Close() error {
 // The session survives zero attachments; when the agent exits (stdout EOF)
 // it enters the ended state and stays queryable until StopSession.
 func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
+	return h.startSession(ctx, key, att, false)
+}
+
+// StartDevelopmentSession opts a run shell into server-owned terminal query
+// replies and retained post-exit observation. Primary harnesses keep their
+// existing client responder and cannot be started through this entry point.
+func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
+	if !strings.HasPrefix(string(key), "run-shell:") {
+		return errors.New("ptyhost: development session must be a run shell")
+	}
+	return h.startSession(ctx, key, att, true)
+}
+
+func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool) error {
 	// Reserve the key before touching the transcript file so a losing
 	// duplicate StartSession can never truncate the winner's transcript.
 	if err := h.reserve(key); err != nil {
@@ -399,6 +413,12 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		done:         make(chan struct{}),
 		modes:        modes,
 		screen:       screen,
+		revision:     1,
+		geometryRevision: 1,
+		development:  development,
+	}
+	if development {
+		s.enableProtocolResponder()
 	}
 	if len(seed) > 0 {
 		if isRun {
@@ -441,6 +461,9 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	delete(h.snapshots, key)
 	h.mu.Unlock()
 
+	if development {
+		go s.respond()
+	}
 	go s.pump()
 	if isRun {
 		go s.checkpointLoop()
@@ -900,6 +923,9 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	}
 	if a.OnAttached != nil {
 		a.OnAttached()
+	}
+	if writer, ok := conn.(TerminalResponderWriter); ok {
+		writer.SetTerminalResponder(s.development)
 	}
 	defer s.removeClient(c)
 	// The size the session is, not the size this client asked for: the ack

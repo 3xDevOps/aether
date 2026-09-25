@@ -23,6 +23,11 @@ import (
 )
 
 func main() {
+	// The lifecycle helper must precede the aether-internal basename dispatch:
+	// every run receives that read-only, version-matched staged binary.
+	if len(os.Args) > 1 && os.Args[1] == "dev-exec" {
+		os.Exit(devExec(os.Args[2:]))
+	}
 	if filepath.Base(os.Args[0]) == "aether-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))
 	}

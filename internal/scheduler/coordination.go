@@ -23,8 +23,7 @@ import (
 )
 
 // Coordination assets are server-constructed, read-only bind mounts. Every
-// container gets the verified CLI, while coordinated runs additionally get
-// the run socket and lifecycle hook assets.
+// container gets the verified CLI; runs additionally get their identity socket.
 const (
 	bridgePrefix                   = "aether-server-"
 	legacyBridgePrefix             = "aether-bridge-"
@@ -33,19 +32,16 @@ const (
 
 var bridgePrefixes = []string{bridgePrefix, legacyBridgePrefix}
 
-// Coordinator is the scheduler's view of the conflict-coordination service
-// (*coord.Service): it owns each run's socket directory, which the scheduler
-// bind-mounts into coordinated containers and releases once the container is
-// gone.
+// Coordinator owns each run's authenticated socket directory, which the
+// scheduler bind-mounts into run containers and releases after container removal.
 type Coordinator interface {
 	Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error)
 	WriteCoAuthors(run domain.RunID, trailers []string) error
 	Release(run domain.RunID) error
 }
 
-// coordination is the attached service plus where staged bridge binaries
-// live. Staging remains available when the coordinator is disabled so every
-// container gets the version-matched CLI; enabled controls run identity.
+// coordination attaches the run transport and staged binaries. enabled controls
+// conflict/mission admission and lifecycle hooks, not run identity or discovery.
 type coordination struct {
 	svc     Coordinator
 	binDir  string
@@ -71,9 +67,9 @@ func (c *coordination) currentDigest() string {
 	return c.staged
 }
 
-// UseCoordination attaches the coordinator and staged-binary directory. The
-// optional enabled argument is false for the conflict-coordination kill
-// switch; binary staging remains active either way.
+// UseCoordination attaches the run transport and staged-binary directory. The
+// optional enabled argument controls conflict policy and lifecycle reporting;
+// run socket provisioning and discovery remain available either way.
 func (s *Scheduler) UseCoordination(svc Coordinator, binDir string, enabled ...bool) {
 	active := true
 	if len(enabled) > 0 {
@@ -308,14 +304,14 @@ func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey 
 	return nil
 }
 
-// coordinationMounts stages the CLI for every configured container. A run
-// gets the socket and lifecycle assets only when coordination is enabled.
+// coordinationMounts stages the CLI for every configured container and provisions
+// authenticated transport for runs independently of conflict policy.
 func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string, map[string]string, error) {
 	c := s.coordinationSeam()
 	if c == nil {
 		return nil, nil, nil, nil
 	}
-	if c.enabled && c.svc == nil {
+	if c.svc == nil {
 		return nil, nil, nil, errors.New("coordination service is unavailable")
 	}
 	digest, bin, err := c.stage()
@@ -323,22 +319,10 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 		return nil, nil, nil, fmt.Errorf("stage coordination CLI: %w", err)
 	}
 	cliMount := runtime.Mount{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true}
-	if run == nil || !c.enabled {
+	if run == nil {
 		mounts := []runtime.Mount{cliMount}
 		if err := checkCoordinationMounts(mounts); err != nil {
 			return nil, nil, nil, err
-		}
-		if run != nil && entry != nil {
-			s.mu.Lock()
-			entry.bridgeDigest, entry.bridgePath = digest, bin
-			sc := entry.sidecar()
-			s.mu.Unlock()
-			if err := s.writeSidecar(sc); err != nil {
-				return nil, nil, nil, err
-			}
-			if err := fsyncDir(s.cfg.StateDir); err != nil {
-				return nil, nil, nil, err
-			}
 		}
 		return mounts, nil, nil, nil
 	}
@@ -347,11 +331,10 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 
 func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
 	files := make(map[string][]byte)
-	// Lifecycle status and taskless discovery assets are server-owned and
-	// remain available only to coordinated interactive runs. User-supplied
-	// MCP configuration is never rewritten by provisioning.
+	// Lifecycle reporting follows conflict policy; taskless discovery only needs
+	// the run transport. User-supplied MCP configuration is never rewritten.
 	reporter := harness.ReporterNone
-	if run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone {
+	if c.enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone {
 		maps.Copy(files, profile.StatusFiles)
 		launchArgs = append(launchArgs, profile.StatusLaunchArgs(coordtransport.MountDir)...)
 		launchEnv = profile.StatusLaunchEnv(coordtransport.MountDir)

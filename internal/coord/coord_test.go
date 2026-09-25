@@ -280,28 +280,32 @@ func (h *coordHarness) start() {
 	}
 }
 
-// TestKillSwitchRejectsEveryMethodEarly proves the switch is checked
-// before anything is touched: no mailbox row, no radar read, no listener.
-func TestKillSwitchRejectsEveryMethodEarly(t *testing.T) {
+// Disabled conflict policy must block peer actions without removing identity.
+func TestKillSwitchPreservesIdentityButRejectsPeerMethods(t *testing.T) {
 	h := newHarness(t, 2, func(c *Config) { c.Disabled = true })
 	h.peers.err = errors.New("the radar must not be consulted")
 	ctx := context.Background()
 	h.start()
 
-	if _, err := h.svc.Status(ctx, h.run(0)); err == nil || err.Code != protocol.CodeUnavailable {
-		t.Fatalf("Status = %v, want CodeUnavailable", err)
+	status, rpcErr := h.svc.Status(ctx, h.run(0))
+	if rpcErr != nil || status.RunID != string(h.run(0)) || len(status.Peers) != 0 ||
+		len(status.Capabilities) != 1 || status.Capabilities[0] != protocol.MethodCoordStatus {
+		t.Fatalf("disabled identity status = %+v, %v", status, rpcErr)
 	}
 	if _, err := h.svc.Send(ctx, h.run(0), sendParams(h.run(1), "hi")); err == nil ||
-		err.Code != protocol.CodeUnavailable || err.Message != "coord.send: conflict coordination is disabled" {
-		t.Fatalf("Send = %v, want the pinned CodeUnavailable", err)
+		err.Code != protocol.CodeUnavailable {
+		t.Fatalf("Send = %v, want CodeUnavailable", err)
 	}
 	if _, err := h.svc.Inbox(ctx, h.run(1), protocol.CoordInboxParams{}); err == nil || err.Code != protocol.CodeUnavailable {
 		t.Fatalf("Inbox = %v, want CodeUnavailable", err)
 	}
-	if _, err := h.svc.Provision(ctx, h.run(0), nil); !errors.Is(err, ErrDisabled) {
-		t.Fatalf("Provision = %v, want ErrDisabled", err)
+	if _, err := h.svc.Provision(ctx, h.run(0), nil); err != nil {
+		t.Fatalf("Provision with conflict policy disabled: %v", err)
 	}
 	if n, err := h.db.CountUnackedRunMessages(ctx, h.run(1)); err != nil || n != 0 {
 		t.Fatalf("stored messages = %d (err %v), want none", n, err)
+	}
+	if h.peers.readCount() != 0 {
+		t.Fatal("disabled identity bootstrap consulted the radar")
 	}
 }

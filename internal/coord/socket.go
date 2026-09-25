@@ -84,9 +84,6 @@ const (
 // needs.
 func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error) {
 	_ = ctx
-	if s.cfg.Disabled {
-		return "", ErrDisabled
-	}
 	dir, err := s.runDir(run)
 	if err != nil {
 		return "", err
@@ -141,9 +138,6 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 // is a rename over the old name: a reader either gets the whole previous
 // list or the whole new one, never a missing path.
 func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
-	if s.cfg.Disabled {
-		return ErrDisabled
-	}
 	dir, err := s.runDir(run)
 	if err != nil {
 		return err
@@ -227,17 +221,9 @@ func (s *Service) Release(run domain.RunID) error {
 	return nil
 }
 
-// recoverListeners rebuilds the host side after a restart. A run's
-// directory is the record that it was provisioned, and the socket names in
-// it are the wire versions its container references: while coordination is
-// enabled, every one of them is rebound for a run that is still active or
-// whose terminal container is still retained, and the directory of every
-// other run is garbage collected. The rebind creates a new inode, so a
-// bridge holding the old one redials.
-//
-// With the kill switch off, old sockets are unlinked and nothing is
-// recreated: the directory and config still mounted in a live container
-// become inert.
+// recoverListeners rebuilds the authenticated run transport after a restart,
+// independently of conflict policy. Active runs and retained terminal containers
+// keep their sockets; every other run's directory is garbage collected.
 func (s *Service) recoverListeners(ctx context.Context) error {
 	entries, err := os.ReadDir(s.cfg.Dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -248,26 +234,21 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 	}
 	active := make(map[domain.RunID]bool)
 	retained := make(map[domain.RunID]bool)
-	if !s.cfg.Disabled {
-		runs, lerr := s.cfg.Store.ListActiveRuns(ctx)
-		if lerr != nil {
-			return fmt.Errorf("coord: list active runs: %w", lerr)
-		}
-		for _, r := range runs {
-			active[r.ID] = true
-		}
-		if s.cfg.RetainsContainer != nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				run := domain.RunID(e.Name())
-				if active[run] {
-					continue
-				}
-				if s.cfg.RetainsContainer(ctx, run) {
-					retained[run] = true
-				}
+	runs, lerr := s.cfg.Store.ListActiveRuns(ctx)
+	if lerr != nil {
+		return fmt.Errorf("coord: list active runs: %w", lerr)
+	}
+	for _, r := range runs {
+		active[r.ID] = true
+	}
+	if s.cfg.RetainsContainer != nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			run := domain.RunID(e.Name())
+			if !active[run] && s.cfg.RetainsContainer(ctx, run) {
+				retained[run] = true
 			}
 		}
 	}
@@ -278,12 +259,6 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 		run := domain.RunID(e.Name())
 		dir := filepath.Join(s.cfg.Dir, e.Name())
 		switch {
-		case s.cfg.Disabled:
-			for _, name := range slices.Concat(wireSocketNames, retiredSocketNames) {
-				if err := removeFile(filepath.Join(dir, name)); err != nil {
-					return fmt.Errorf("coord: unlink %s: %w", filepath.Join(dir, name), err)
-				}
-			}
 		case active[run] || retained[run]:
 			// A retired version's socket goes first: leaving it bound
 			// would answer an old bridge in a shape it cannot read.
@@ -309,9 +284,8 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 	return nil
 }
 
-// survivingSockets lists the wire-version sockets present in a run's
-// directory. A provisioned run whose sockets were unlinked - by a kill
-// switch cycle - is brought back on the current version.
+// survivingSockets lists the wire-version sockets present in a run's directory.
+// A provisioned directory without a socket recovers on the current version.
 func survivingSockets(dir string) []string {
 	var names []string
 	for _, name := range wireSocketNames {
@@ -494,10 +468,8 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 	}
 }
 
-// handle decodes one request and dispatches it. The method set is closed:
-// anything outside the coordination methods, run.report, and the explicit
-// task/worker/integrator mission methods is method-not-found, so no control
-// verb is reachable from inside a container.
+// handle dispatches only explicitly allowlisted run methods. Human control
+// methods and caller-selected run identities are never reachable here.
 func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
 	req, resp, valid := protocol.ParseRequest(line)
 	if !valid {
@@ -555,7 +527,9 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 		}
 		result, rpcErr = s.Report(ctx, run, p)
 	default:
-		if isMissionMethod(req.Method) {
+		if isDevelopmentMethod(req.Method) {
+			result, rpcErr = s.handleDevelopment(ctx, run, req.Method, req.Params)
+		} else if isMissionMethod(req.Method) {
 			if s.cfg.Disabled {
 				resp.Error = unavailable(req.Method)
 				return resp
@@ -581,13 +555,76 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 		resp.Error = missionRPCError(req.Method, rpcErr)
 		return resp
 	}
-	raw, err := json.Marshal(result)
+	var raw json.RawMessage
+	var err error
+	if isDevelopmentMethod(req.Method) {
+		raw, err = protocol.MarshalDevResult(result)
+	} else {
+		raw, err = json.Marshal(result)
+	}
 	if err != nil {
 		resp.Error = &protocol.Error{Code: protocol.CodeInternal, Message: "marshal result: " + err.Error()}
 		return resp
 	}
 	resp.Result = raw
 	return resp
+}
+
+func (s *Service) handleDevelopment(ctx context.Context, run domain.RunID, method string, params json.RawMessage) (any, *protocol.Error) {
+	if s.cfg.Development == nil {
+		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + method}
+	}
+	if !s.enterRun(run) {
+		return nil, runClosing(method)
+	}
+	defer s.leaveRun(run)
+	if err := ctx.Err(); err != nil {
+		return nil, internalError(method, err)
+	}
+	self, rpcErr := s.resolveRun(ctx, method, run)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if self.Status.Terminal() {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run has finished"}
+	}
+	if len(params) > protocol.MaxDevParamsBytes {
+		return nil, invalidParams(method, "development request is too large")
+	}
+	// The backend decodes typed parameters strictly. Guard identity here as well:
+	// no spelling accepted by encoding/json may override the socket-bound run.
+	var fields map[string]json.RawMessage
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &fields); err != nil {
+			return nil, invalidParams(method, "expected an object")
+		}
+	}
+	for field := range fields {
+		if strings.EqualFold(field, "run_id") {
+			return nil, invalidParams(method, "run identity comes from the socket")
+		}
+	}
+	result, err := s.cfg.Development.HandleAgent(ctx, run, method, params)
+	return result, missionRPCError(method, err)
+}
+
+func isDevelopmentMethod(method string) bool {
+	switch method {
+	case protocol.MethodDevTerminalList, protocol.MethodDevTerminalStart,
+		protocol.MethodDevTerminalOutput, protocol.MethodDevTerminalScreen,
+		protocol.MethodDevTerminalScreenshot, protocol.MethodDevTerminalInput,
+		protocol.MethodDevTerminalResize, protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop,
+		protocol.MethodDevBrowserStatus, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserPages,
+		protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserAction,
+		protocol.MethodDevBrowserScreenshot, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserWait,
+		protocol.MethodDevBrowserConsole, protocol.MethodDevBrowserNetwork, protocol.MethodDevBrowserReset,
+		protocol.MethodDevBrowserClose, protocol.MethodDevControlStatus, protocol.MethodDevControlAcquire,
+		protocol.MethodDevControlRelease, protocol.MethodDevArtifactList, protocol.MethodDevArtifactGet,
+		protocol.MethodDevArtifactDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 func isMissionMethod(method string) bool {

@@ -60,9 +60,6 @@ var coordinationCapabilities = []string{
 // radar's active/grace behavior.
 func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
 	const method = protocol.MethodCoordStatus
-	if s.cfg.Disabled {
-		return protocol.CoordStatusResult{}, unavailable(method)
-	}
 	if !s.enterRun(run) {
 		return protocol.CoordStatusResult{}, runClosing(method)
 	}
@@ -70,6 +67,27 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	self, rpcErr := s.resolveRun(ctx, method, run)
 	if rpcErr != nil {
 		return protocol.CoordStatusResult{}, rpcErr
+	}
+	capabilities := []string{protocol.MethodCoordStatus}
+	if !self.Status.Terminal() && s.cfg.Development != nil {
+		available, err := s.cfg.Development.Capabilities(ctx, run)
+		if err != nil {
+			return protocol.CoordStatusResult{}, missionRPCError(method, err)
+		}
+		for _, capability := range available {
+			if isDevelopmentMethod(capability) {
+				capabilities = appendCapability(capabilities, capability)
+			}
+		}
+	}
+	if s.cfg.Disabled {
+		task, taskBytes, taskTruncated := boundStatusText(self.Task)
+		return protocol.CoordStatusResult{
+			WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
+			WorkspaceID: string(self.WorkspaceID), MemberID: string(self.MemberID),
+			Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
+			Peers: []protocol.CoordPeer{}, Capabilities: capabilities,
+		}, nil
 	}
 
 	var assignment *protocol.CoordMissionAssignment
@@ -156,12 +174,18 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
 	task, taskBytes, taskTruncated := boundStatusText(self.Task)
-	capabilities := coordinationCapabilities
+	policyCapabilities := coordinationCapabilities
 	total, truncated := radarTotal, radarTruncated
 	if assignment != nil {
-		capabilities = assignment.Capabilities
+		policyCapabilities = assignment.Capabilities
 		total = missionTotal
 		truncated = missionTotal > protocol.CoordMaxStatusPeers
+	}
+	for _, capability := range policyCapabilities {
+		// Mission authority cannot advertise development methods independently.
+		if !isDevelopmentMethod(capability) {
+			capabilities = appendCapability(capabilities, capability)
+		}
 	}
 	return protocol.CoordStatusResult{
 		WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
@@ -169,8 +193,17 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
 		Assignment: assignment, Peers: peers, PeerTotal: total,
 		PeersTruncated: truncated, Unread: unread,
-		Capabilities: append([]string(nil), capabilities...),
+		Capabilities: capabilities,
 	}, nil
+}
+
+func appendCapability(capabilities []string, capability string) []string {
+	for _, existing := range capabilities {
+		if existing == capability {
+			return capabilities
+		}
+	}
+	return append(capabilities, capability)
 }
 
 func (s *Service) decoratePeer(ctx context.Context, peer protocol.CoordPeer) protocol.CoordPeer {

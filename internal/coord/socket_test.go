@@ -349,12 +349,19 @@ func TestRestartRecovery(t *testing.T) {
 		}
 
 		h.restart(t, true)
-		socket := filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName)
-		if _, err := os.Lstat(socket); !errors.Is(err, fs.ErrNotExist) {
-			t.Fatalf("socket after an off recovery = %v, want it unlinked", err)
+		var status protocol.CoordStatusResult
+		client := h.dial(t, run)
+		if err := client.Call(protocol.MethodCoordStatus, nil, &status); err != nil || status.RunID != string(run) {
+			t.Fatalf("identity after disabled recovery = %+v, %v", status, err)
 		}
-		// The mount itself stays: the container holds it open, and its
-		// read-only assets are simply inert.
+		for _, method := range []string{protocol.MethodCoordInbox, protocol.MethodTaskList, protocol.MethodRunReport} {
+			err := client.Call(method, nil, nil)
+			var rpcErr *protocol.Error
+			if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable {
+				t.Fatalf("%s after disabled recovery = %v, want unavailable", method, err)
+			}
+		}
+		// The mounted assets and socket remain owned by this run.
 		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), "fixture.json")); err != nil {
 			t.Fatalf("the mounted config must stay in place: %v", err)
 		}
