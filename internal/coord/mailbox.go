@@ -91,11 +91,6 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	if radarErr != nil {
 		return protocol.CoordStatusResult{}, internalError(method, radarErr)
 	}
-	radarByRun := make(map[domain.RunID]authorizedPeer, len(radarPeers))
-	for _, p := range radarPeers {
-		radarByRun[p.run] = p
-	}
-
 	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
 	seen := make(map[domain.RunID]int, len(missionPeers)+len(radarPeers))
 	appendPeer := func(peer protocol.CoordPeer) {
@@ -122,7 +117,13 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		}
 		missionTotal++
 		peer.State = protocol.CoordPeerMission
-		if p, ok := radarByRun[domain.RunID(peer.RunID)]; ok {
+		// The bounded radar view may omit this peer; the full set says
+		// whether the two overlap.
+		p, radarErr := s.radar.authorized(ctx, run, domain.RunID(peer.RunID))
+		if radarErr != nil {
+			return protocol.CoordStatusResult{}, internalError(method, radarErr)
+		}
+		if p.state != "" {
 			shared++
 			peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(p.files)
 		}
