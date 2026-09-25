@@ -505,7 +505,10 @@ dependency has no accepted submission yet, so the dependent waits again until
 one is; the `depends_on_revision` a projected dependency reports is the
 dependency's revision when the row was written, not the one readiness checks.
 A `depends_on` entry that names an unknown, abandoned, or self ID, or that
-would form a cycle, is refused and the revision is not written.
+would form a cycle, is refused and the revision is not written. The cycle
+check counts every task's current revision and its latest pending draft, so
+reversing a dependency takes two steps: get the revision that drops the old
+edge accepted, then propose the reversed one.
 Set `"material": true` for an amendment changing scope, constraints, or success
 criteria. Do not copy server-managed IDs, revision numbers, status, or
 timestamps from a response. A revision supplies the whole spec, not a patch:
