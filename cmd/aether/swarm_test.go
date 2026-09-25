@@ -148,7 +148,7 @@ func TestRenderSwarm(t *testing.T) {
 			{PlanVersion: 2, Summary: "three tasks", SubmittedPhase: "clarified", SubmittedAt: "2026-09-25T07:30:00Z"},
 		},
 		Tasks: []protocol.Task{
-			{ID: "t1", Status: "working", Revision: &protocol.TaskRevision{Title: "Add the command"}},
+			{ID: "t1", Status: "working", Revision: &protocol.TaskRevision{Title: "Add the command"}, PendingRevision: &protocol.TaskRevision{Revision: 2, Title: "Add the\tswarm command"}},
 			{ID: "t2", Status: "proposed", PendingRevision: &protocol.TaskRevision{Title: "Write the docs"},
 				Blockers: []protocol.TaskBlocker{{Kind: "proposal", TaskID: "t2"}, {Kind: "dependency", TaskID: "t1"}}},
 		},
@@ -179,9 +179,9 @@ plan reviews:
     summary: three tasks
 
 tasks:
-ID  TITLE            STATUS    BLOCKERS
-t1  Add the command  working   
-t2  Write the docs   proposed  proposal t2, dependency t1
+ID  TITLE                                                   STATUS    BLOCKERS
+t1  Add the command (pending rev 2: Add the swarm command)  working   
+t2  Write the docs                                          proposed  proposal t2, dependency t1
 
 attempts:
 ID  TASK  STATE    RUN

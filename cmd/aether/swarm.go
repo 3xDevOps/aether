@@ -178,7 +178,9 @@ func createSwarm(c *protocol.Client, w io.Writer, params protocol.MissionCreateP
 	if err := c.Call(protocol.MethodMissionCreate, params, &res); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "swarm %s %s\nintegrator run %s\n", res.Mission.ID, res.Mission.Phase, res.Mission.CurrentIntegratorRunID)
+	if _, err := fmt.Fprintf(w, "swarm %s %s\nintegrator run %s\n", res.Mission.ID, res.Mission.Phase, res.Mission.CurrentIntegratorRunID); err != nil {
+		return fmt.Errorf("write swarm result: %w", err)
+	}
 	return nil
 }
 
@@ -188,17 +190,38 @@ func swarmList(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: aether swarm list [--workspace]: unexpected argument %q", fs.Arg(0))
+	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)
 		if err != nil {
 			return err
 		}
-		var res protocol.MissionListResult
-		if err := c.Call(protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: wsID}, &res); err != nil {
+		missions, err := listSwarms(c, wsID)
+		if err != nil {
 			return err
 		}
-		return renderSwarms(os.Stdout, res.Missions)
+		return renderSwarms(os.Stdout, missions)
 	})
+}
+
+// listSwarms follows the list cursor until the server has no older page, so
+// a workspace with more missions than one page holds is listed whole.
+func listSwarms(c *protocol.Client, wsID string) ([]protocol.Mission, error) {
+	var out []protocol.Mission
+	cursor := ""
+	for {
+		var res protocol.MissionListResult
+		if err := c.Call(protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: wsID, Before: cursor}, &res); err != nil {
+			return nil, err
+		}
+		out = append(out, res.Missions...)
+		if res.NextCursor == "" || len(res.Missions) == 0 {
+			return out, nil
+		}
+		cursor = res.NextCursor
+	}
 }
 
 // objectiveColumnWidth keeps the list readable in a terminal; the full
@@ -211,7 +234,7 @@ func renderSwarms(w io.Writer, missions []protocol.Mission) error {
 		return err
 	}
 	for _, m := range missions {
-		objective := []rune(firstLine(m.Objective))
+		objective := []rune(cell(m.Objective))
 		if len(objective) > objectiveColumnWidth {
 			objective = append(objective[:objectiveColumnWidth-3], []rune("...")...)
 		}
@@ -221,6 +244,12 @@ func renderSwarms(w io.Writer, missions []protocol.Mission) error {
 		}
 	}
 	return tw.Flush()
+}
+
+// cell renders free text as one table cell: its first line, with tabs
+// turned into spaces so the value cannot shift the columns.
+func cell(s string) string {
+	return strings.ReplaceAll(firstLine(s), "\t", " ")
 }
 
 func swarmShow(args []string) error {
@@ -279,15 +308,20 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "\ntasks:")
-	_, _ = fmt.Fprintln(tw, "ID\tTITLE\tSTATUS\tBLOCKERS")
+	if _, err := fmt.Fprintln(tw, "\ntasks:\nID\tTITLE\tSTATUS\tBLOCKERS"); err != nil {
+		return err
+	}
 	for _, t := range res.Tasks {
 		title := ""
 		switch {
+		case t.Revision != nil && t.PendingRevision != nil:
+			// A proposed revision awaiting review may carry a new title; a
+			// reader of the swarm sees both, not only the one in force.
+			title = fmt.Sprintf("%s (pending rev %d: %s)", cell(t.Revision.Title), t.PendingRevision.Revision, cell(t.PendingRevision.Title))
 		case t.Revision != nil:
-			title = t.Revision.Title
+			title = cell(t.Revision.Title)
 		case t.PendingRevision != nil:
-			title = t.PendingRevision.Title
+			title = cell(t.PendingRevision.Title)
 		}
 		blockers := make([]string, 0, len(t.Blockers))
 		for _, bl := range t.Blockers {
@@ -297,12 +331,17 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 			}
 			blockers = append(blockers, strings.TrimSpace(bl.Kind+" "+ref))
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.ID, firstLine(title), t.Status, strings.Join(blockers, ", "))
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.ID, title, t.Status, strings.Join(blockers, ", ")); err != nil {
+			return err
+		}
 	}
-	_, _ = fmt.Fprintln(tw, "\nattempts:")
-	_, _ = fmt.Fprintln(tw, "ID\tTASK\tSTATE\tRUN")
+	if _, err := fmt.Fprintln(tw, "\nattempts:\nID\tTASK\tSTATE\tRUN"); err != nil {
+		return err
+	}
 	for _, a := range res.Attempts {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.ID, a.TaskID, a.State, a.RunID)
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.ID, a.TaskID, a.State, a.RunID); err != nil {
+			return err
+		}
 	}
 	return tw.Flush()
 }
