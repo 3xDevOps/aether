@@ -591,6 +591,32 @@ success cache only within a 10-second request floor; failures wait at least
 same-credential successful window, reports its error and stale status, and is
 not presented as current after a reset has passed without a fresh measurement.
 
+### Launching a swarm
+
+Create a swarm with an objective, a TUI integrator harness, and optional
+worker harness choices:
+
+```sh
+aether swarm create "Add structured logging to the API" \
+  --integrator claude \
+  --worker claude:headless \
+  --max-concurrent-attempts 2 \
+  --max-total-attempts 8
+aether swarm list
+aether swarm show <mission-id>
+```
+
+`--account <member-id>` selects an account shared with you; without it, the
+CLI uses your account. Repeat `--worker <harness[:tui|headless]>` to add worker
+choices. If none is supplied, the integrator harness is allowed in headless
+mode. The limits default to two concurrent attempts and eight attempts total;
+the server permits at most eight concurrent and 128 total.
+
+Creation starts the integrator in `planning`. It does not start workers until
+a human approves the plan. Answering integrator questions and approving,
+revising, or rejecting a plan remain dashboard actions; the CLI can create,
+list, and inspect missions.
+
 ### Mission identity and current authority
 
 Mission work does not introduce a second identity or credential boundary.
