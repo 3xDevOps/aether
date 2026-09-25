@@ -89,19 +89,6 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 }
 
-func TestSwarmCreateReportsSavedMissionWhenIntegratorFails(t *testing.T) {
-	rpcErr := &protocol.Error{Code: protocol.CodeInternal, Message: "mission 01MISSION exists but its integrator run 01RUN failed to start; replace the integrator from the Missions page, or read it with aether swarm show 01MISSION: image missing"}
-	c, _ := fakeControl(t, protocol.MethodMissionCreate, nil, rpcErr)
-	err := createSwarm(c, &bytes.Buffer{}, protocol.MissionCreateParams{})
-	if err == nil {
-		t.Fatal("createSwarm succeeded, want the launch error")
-	}
-	want := rpcErr.Message + "\nfollow the swarm with:\n  aether swarm show 01MISSION"
-	if err.Error() != want {
-		t.Errorf("error = %q, want %q", err.Error(), want)
-	}
-}
-
 func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string

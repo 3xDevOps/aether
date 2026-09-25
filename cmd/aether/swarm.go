@@ -22,7 +22,7 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\" --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--max-concurrent N] [--max-attempts N] [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--max-concurrent N] [--max-attempts N] [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <mission-id>"
 
@@ -176,30 +176,10 @@ func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key stri
 func createSwarm(c *protocol.Client, w io.Writer, params protocol.MissionCreateParams) error {
 	var res protocol.MissionCreateResult
 	if err := c.Call(protocol.MethodMissionCreate, params, &res); err != nil {
-		return savedSwarmError(err)
+		return err
 	}
 	_, _ = fmt.Fprintf(w, "swarm %s %s\nintegrator run %s\n", res.Mission.ID, res.Mission.Phase, res.Mission.CurrentIntegratorRunID)
 	return nil
-}
-
-// savedSwarmError recognizes a create that stored the mission but could not
-// launch its integrator. The server names the mission in the message and no
-// result reaches the client, so the ID is read from there and the error is
-// printed verbatim with the command that follows the mission.
-func savedSwarmError(err error) error {
-	var rpcErr *protocol.Error
-	if !errors.As(err, &rpcErr) {
-		return err
-	}
-	rest, ok := strings.CutPrefix(rpcErr.Message, "mission ")
-	if !ok {
-		return err
-	}
-	id, _, ok := strings.Cut(rest, " exists but ")
-	if !ok || id == "" {
-		return err
-	}
-	return fmt.Errorf("%s\nfollow the swarm with:\n  aether swarm show %s", rpcErr.Message, id)
 }
 
 func swarmList(args []string) error {

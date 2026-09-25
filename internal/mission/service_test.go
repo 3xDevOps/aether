@@ -93,7 +93,7 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 		writesRow bool
 		next      string
 	}{
-		"no run row":     {next: "did not launch; the server retries the launch periodically"},
+		"no run row":     {next: "did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>"},
 		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -438,7 +438,7 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 		writesRow bool
 		next      string
 	}{
-		"no run row":     {next: "did not launch; the server retries the launch periodically"},
+		"no run row":     {next: "did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>"},
 		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>"},
 	} {
 		t.Run(name, func(t *testing.T) {

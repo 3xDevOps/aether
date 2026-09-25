@@ -206,7 +206,7 @@ kept and the create error names it. Which error you get depends on whether
 the scheduler wrote the run row before failing:
 
 ```
-mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically: <cause>
+mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>: <cause>
 mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>: <cause>
 ```
 
