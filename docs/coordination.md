@@ -85,9 +85,9 @@ and `mission.plan.submit`. These
 methods use the same run-authenticated socket but are not part of the base
 `coord.*` set.
 Every allow-list is derived from the current assignment, not from
-caller-supplied roles or identities. A mission may authorize its integrator
-and active worker runs as peers before any file overlap exists; ordinary runs
-retain the radar active/grace authorization described below.
+caller-supplied roles or identities. A mission authorizes its integrator
+and active worker runs as peers before any file overlap exists, on top of
+the radar active/grace authorization described below.
 
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
 IDs, the recorded task, each currently authorized peer, and the six base
@@ -95,8 +95,12 @@ coordination capabilities (or the assignment-scoped capability set for a
 mission run). The sender is never a parameter. An ordinary run can message
 only a peer in the same workspace that the radar currently marks as
 overlapping, or a peer in its ten-minute overlap grace period. A mission run
-can also message its current assignment peers, which are shown with
-`state: "mission"` even when no file overlap exists. A question reply is the
+can message those same radar peers plus its current assignment peers, so a
+worker that overlaps a run outside its mission can still answer the overlap
+notice. Status lists the assignment peers first with `state: "mission"` even
+when no file overlap exists, carrying the overlapping files when the radar
+also reports one; radar peers outside the mission follow with `state:
+"active"` or `"grace"`. Any other run is refused. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
 grace expires. It cannot be used to send an unrelated message or cross a

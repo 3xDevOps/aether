@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -535,16 +536,29 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 	t.Fatal("the server never dropped a connection that stopped reading responses")
 }
 
+// missionTransportStub is the mission authority: every run in mission is
+// assigned to one mission and is a peer of the others; every other run is
+// ordinary. HandleAgent fails with err.
 type missionTransportStub struct {
-	err error
+	err     error
+	mission []domain.RunID
 }
 
-func (m missionTransportStub) Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error) {
-	return protocol.CoordMissionAssignment{}, nil
+func (m missionTransportStub) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
+	if !slices.Contains(m.mission, run) {
+		return protocol.CoordMissionAssignment{}, nil
+	}
+	return protocol.CoordMissionAssignment{MissionID: "mission-1", Capabilities: coordinationCapabilities}, nil
 }
 
-func (m missionTransportStub) Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error) {
-	return nil, nil
+func (m missionTransportStub) Peers(_ context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
+	peers := make([]protocol.CoordPeer, 0, len(m.mission))
+	for _, id := range m.mission {
+		if id != run {
+			peers = append(peers, protocol.CoordPeer{RunID: string(id)})
+		}
+	}
+	return peers, nil
 }
 
 func (m missionTransportStub) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
