@@ -810,7 +810,7 @@ func (s *Service) integratorLaunchFailure(ctx context.Context, m *domain.Mission
 	}
 	switch {
 	case getErr == nil:
-		return fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace the integrator from the Swarms page: %w", m.ID, m.CurrentIntegratorRunID, err)
+		return fmt.Errorf("mission %s exists but its integrator run %s failed to start; replace the integrator from the Missions page, or read it with aether swarm show %s: %w", m.ID, m.CurrentIntegratorRunID, m.ID, err)
 	case errors.Is(getErr, store.ErrNotFound):
 		return fmt.Errorf("mission %s exists but its integrator run %s did not launch; the server retries the launch periodically: %w", m.ID, m.CurrentIntegratorRunID, err)
 	default:

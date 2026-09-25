@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +94,7 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 		next      string
 	}{
 		"no run row":     {next: "did not launch; the server retries the launch periodically"},
-		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Swarms page"},
+		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -123,7 +124,7 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 			if getErr != nil || persisted.Phase != domain.MissionPhasePlanning {
 				t.Fatalf("persisted mission = %+v, %v; want planning", persisted, getErr)
 			}
-			want := "mission " + string(persisted.ID) + " exists but its integrator run " + string(persisted.CurrentIntegratorRunID) + " " + tc.next + ": " + cause.Error()
+			want := "mission " + string(persisted.ID) + " exists but its integrator run " + string(persisted.CurrentIntegratorRunID) + " " + strings.ReplaceAll(tc.next, "<mission-id>", string(persisted.ID)) + ": " + cause.Error()
 			if err.Error() != want {
 				t.Fatalf("create error = %q, want %q", err, want)
 			}
@@ -438,7 +439,7 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 		next      string
 	}{
 		"no run row":     {next: "did not launch; the server retries the launch periodically"},
-		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Swarms page"},
+		"failed run row": {writesRow: true, next: "failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -453,7 +454,7 @@ func TestReplaceIntegratorRecordsWhyTheNewRunDidNotLaunch(t *testing.T) {
 				MissionID: string(f.mission.ID), ExpectedGeneration: f.mission.IntegratorGeneration, IdempotencyKey: "replace-1",
 				Integrator: protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)},
 			})
-			want := "mission " + out.Mission.ID + " exists but its integrator run " + out.Mission.CurrentIntegratorRunID + " " + tc.next + ": " + cause.Error()
+			want := "mission " + out.Mission.ID + " exists but its integrator run " + out.Mission.CurrentIntegratorRunID + " " + strings.ReplaceAll(tc.next, "<mission-id>", out.Mission.ID) + ": " + cause.Error()
 			if err == nil || err.Error() != want {
 				t.Fatalf("replace error = %v, want %q", err, want)
 			}

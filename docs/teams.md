@@ -591,6 +591,80 @@ success cache only within a 10-second request floor; failures wait at least
 same-credential successful window, reports its error and stale status, and is
 not presented as current after a reset has passed without a fresh measurement.
 
+### Launching a swarm
+
+A **swarm** is a mission: one objective handed to an interactive integrator
+run that asks you clarifying questions, submits a plan, waits for your
+approval, then dispatches worker runs within the attempt limits you set.
+The dashboard's launch dialog creates one under **Swarm**; the CLI does the
+same with `aether swarm create`. The integrator runs on your account (or the
+shared account named by `--account`) with the `--agent` harness in `tui`
+mode. Each `--worker` allows workers on a harness, in `tui` unless the value
+ends in `:headless`; workers may use the integrator's harness. `-` in place
+of the objective reads it from stdin.
+
+```sh
+aether swarm create "add a health check endpoint and document it" \
+  --agent claude --worker claude:headless --worker codex:headless \
+  --max-concurrent 2 --max-attempts 8
+```
+
+```
+swarm 01m3bnfkwbqx7y9m98m351mxq2 planning
+integrator run 01m3bnfkwbfdna6tbtq2vw5e62
+```
+
+`--max-concurrent` bounds worker attempts running at once (1 to 8) and
+`--max-attempts` bounds them over the whole swarm (1 to 128, at least the
+concurrent limit). The command refuses values outside those bounds before
+calling the server. If the server stored the mission but could not start the
+integrator, the command prints the server's error verbatim and the
+`aether swarm show` command to follow it; see
+[failure-handling.md](failure-handling.md#integrator-launch-failures).
+
+```sh
+aether swarm list
+```
+
+```
+ID                          PHASE   OBJECTIVE                                    INTEGRATOR                  UPDATED
+01m3bnfkwbqx7y9m98m351mxq2  active  add a health check endpoint and document it  01m3bnfkwbfdna6tbtq2vw5e62  2026-09-25T07:28:57Z
+```
+
+```sh
+aether swarm show 01m3bnfkwbqx7y9m98m351mxq2
+```
+
+```
+swarm 01m3bnfkwbqx7y9m98m351mxq2 active
+objective: add a health check endpoint and document it
+accountable human: 01m3bkxq4d8bz9m7ngkn0w2hce
+integrator: run 01m3bnfkwbfdna6tbtq2vw5e62 generation 1 (claude tui, account 01m3bkxq4d8bz9m7ngkn0w2hce)
+plan version: 1
+
+questions (0 open):
+  01m3bnh2v6xk7g8p1q4r9s0t2u Which HTTP framework does the service use?
+    answer: net/http, no framework
+
+plan reviews:
+  v1 submitted from clarified at 2026-09-25T07:20:11Z: approve
+    summary: one task adds the endpoint, one documents it
+
+tasks:
+ID                          TITLE                  STATUS   BLOCKERS
+01m3bnyj66wskq3w2yn3s0e1rf  Add /healthz           working
+01m3bnyj67c4d5e6f7g8h9j0k1  Document the endpoint  ready    dependency 01m3bnyj66wskq3w2yn3s0e1rf
+
+attempts:
+ID                          TASK                        STATE    RUN
+01m3bqfh97ken3kkt49y6pmgkc  01m3bnyj66wskq3w2yn3s0e1rf  running  01m3bqfh97bptec3krrbzc2b6t
+```
+
+`show` prints the launch error, when there is one, after the integrator line.
+Answering questions, approving or sending back the plan, and cancelling the
+swarm are done in the dashboard's Missions page until the CLI gains those
+commands.
+
 ### Mission identity and current authority
 
 Mission work does not introduce a second identity or credential boundary.

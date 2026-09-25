@@ -207,15 +207,16 @@ the scheduler wrote the run row before failing:
 
 ```
 mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically: <cause>
-mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Swarms page: <cause>
+mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>: <cause>
 ```
 
 With no run row, mission reconciliation retries the launch of the reserved
 run on its periodic pass and logs each failure as `mission: recover
 integrator` with the mission ID and the cause. Repeating `mission.create`
 with the same contents and idempotency key also retries the launch, and
-returns the same mission. The Swarms page shows `The integrator run has not
-started.` for that mission.
+returns the same mission. The Missions page shows `The integrator run has not
+started.` for that mission, and `aether swarm show <mission-id>` prints the
+error as `launch error:`.
 `mission.show` and `mission.list` carry the last launch error in
 `integrator_launch_error` and the time it was first seen in
 `integrator_launch_error_at`; both clear once the run is live (a row that
@@ -224,7 +225,7 @@ failed while provisioning keeps them) or the integrator is replaced.
 same two errors and records it the same way.
 
 A run row that failed while provisioning is not retried, and a same-key
-`mission.create` returns the mission without launching again. The Swarms
+`mission.create` returns the mission without launching again. The Missions
 page shows that the integrator run has exited. Fix the cause, then use
 **Replace integrator** to launch a new integrator run.
 

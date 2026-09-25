@@ -65,7 +65,8 @@ func dispatch(args []string) error {
 }
 func parseLeadingArg(fs *flag.FlagSet, args []string) (string, error) {
 	var leading string
-	if len(args) > 0 && args[0] != "--" && !strings.HasPrefix(args[0], "-") {
+	// A lone "-" is a positional argument (stdin), not a flag.
+	if len(args) > 0 && (args[0] == "-" || !strings.HasPrefix(args[0], "-")) {
 		leading, args = args[0], args[1:]
 	}
 	if err := fs.Parse(args); err != nil {
