@@ -2641,8 +2641,15 @@ for review`, `Active`, `Amendment ready for review`, `Rejected`. The detail
 view's status line answers the phase first and falls back to the
 task-derived string only in `active`.
 
-A phase banner sits under the mission header in every phase and says what
-the human must do next. When `current_integrator_run_id` names a run whose
+The detail header shows the objective's first line, cut to 80 characters
+with an ellipsis, and carries the full objective in its `title` attribute.
+The full objective opens the scrollable detail, clamped to three lines with
+a **Show more** toggle when it overflows; a long objective never pushes the
+plan review below the viewport. Mission cards clamp the objective the same
+way.
+
+A phase banner sits under the objective in every phase and says what the
+human must do next. When `current_integrator_run_id` names a run whose
 status in the store is terminal, the banner adds `The integrator run <id>
 has exited; replace the integrator to continue` with the **Replace
 integrator** control inline, in every phase but `rejected` - an integrator

@@ -595,3 +595,51 @@ describe('mission integrator run', () => {
     expect(screen.getByText(/may ask you clarifying questions/)).toBeDefined()
   })
 })
+
+describe('mission objective', () => {
+  const firstLine = 'Rework the checkout flow so that expired sessions are rejected before payment and the cart survives a login'
+  const objective = `${firstLine}\nAlso audit the coupon path.\nAlso cover the guest checkout.`
+
+  // jsdom lays nothing out, so a clamped paragraph never reports overflow on
+  // its own; this stands in for three clamped lines hiding a fourth.
+  function clip() {
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(80)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('keeps the header to one short line and the full objective in the scroll area', async () => {
+    seed()
+    clip()
+    await mount(showing({ phase: 'plan_review', plan_version: 2, objective }, [], [missionPlanReview({ plan_version: 2 })]))
+    const heading = screen.getByRole('heading', { level: 1 })
+    expect(heading.textContent).toBe(`${firstLine.slice(0, 80).trimEnd()}…`)
+    expect(heading.getAttribute('title')).toBe(objective)
+    const section = within(screen.getByRole('region', { name: 'Mission objective' }))
+    const full = section.getByText((_, node) => node?.tagName === 'P' && node.textContent === objective)
+    expect(full.className).toContain('line-clamp-3')
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Request changes' })).toBeDefined()
+    fireEvent.click(section.getByRole('button', { name: 'Show more' }))
+    expect(full.className).not.toContain('line-clamp-3')
+    fireEvent.click(section.getByRole('button', { name: 'Show less' }))
+    expect(full.className).toContain('line-clamp-3')
+  })
+
+  it('offers no toggle when the objective fits', async () => {
+    seed()
+    await mount(showing({ phase: 'active', objective: 'coordinate checkout work' }))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('coordinate checkout work')
+    expect(within(screen.getByRole('region', { name: 'Mission objective' })).queryByRole('button')).toBeNull()
+  })
+
+  it('clamps each objective on the missions list', async () => {
+    seed({ route: { name: 'missions', params: {} } })
+    render(<MissionRoute params={{}} client={fakeApi({ missionList: vi.fn(async () => ({ missions: [mission({ objective })] })) })} />)
+    const card = await screen.findByText((_, node) => node?.tagName === 'P' && node.textContent === objective)
+    expect(card.className).toContain('line-clamp-3')
+  })
+})

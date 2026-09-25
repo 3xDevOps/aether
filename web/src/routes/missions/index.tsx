@@ -59,6 +59,49 @@ function newIdempotencyKey(): string {
     : `mission-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+const objectiveTitleLimit = 80
+
+// The header sits above the scroll area, so it gets one short line; the full
+// objective is rendered inside the scroll area by MissionObjective.
+function objectiveTitle(objective: string): string {
+  const lines = objective.split('\n').map((line) => line.trim()).filter(Boolean)
+  const first = lines[0] ?? 'Mission'
+  if (lines.length === 1 && first.length <= objectiveTitleLimit) return first
+  return `${first.slice(0, objectiveTitleLimit).trimEnd()}…`
+}
+
+function MissionObjective({ objective }: { objective: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [clipped, setClipped] = useState(false)
+  const ref = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const measure = () => setClipped(element.scrollHeight > element.clientHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [objective, expanded])
+  return (
+    <section className="mb-3" aria-label="Mission objective">
+      <p ref={ref} className={`whitespace-pre-wrap break-words text-sm ${expanded ? '' : 'line-clamp-3'}`}>
+        {objective}
+      </p>
+      {(clipped || expanded) && (
+        <button
+          type="button"
+          className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </section>
+  )
+}
+
 const statusLabel: Record<MissionTask['status'], string> = {
   ready: 'Ready',
   working: 'Working',
@@ -233,7 +276,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="break-words font-medium">{mission.objective}</p>
+                    <p className="line-clamp-3 whitespace-pre-wrap break-words font-medium">{mission.objective}</p>
                     <p className="mt-1 font-mono text-[11px] text-muted-foreground">{mission.id}</p>
                   </div>
                   <PhaseChip mission={mission} />
@@ -393,7 +436,8 @@ function MissionDetailView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader
-        title={mission?.objective ?? 'Mission'}
+        title={mission ? objectiveTitle(mission.objective) : 'Mission'}
+        titleTooltip={mission?.objective}
         subtitle={mission ? `${missionStatus(mission, detail?.tasks ?? [], detail?.submissions ?? [])} · ${mission.id}` : undefined}
         actions={
           <>
@@ -419,6 +463,7 @@ function MissionDetailView({
         {loading && !detail && <p className="text-sm text-muted-foreground">Loading mission…</p>}
         {mission && detail && (
           <>
+            <MissionObjective objective={mission.objective} />
             <PhaseBanner mission={mission} integratorRun={integratorRun} integratorMissing={integratorLookup === 'missing'} canReplace={canReplace} onReplace={() => setReplaceOpen(true)} />
             <section className="border bg-card p-3" aria-label="Mission authorization">
               <div className="flex flex-wrap items-start justify-between gap-3">
