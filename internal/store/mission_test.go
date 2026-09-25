@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -119,46 +120,73 @@ func TestMissionAttemptReservationIsAtomicAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestMissionDependenciesRejectCyclesAndProjectBlocked(t *testing.T) {
+// TestMissionDependenciesFollowTheDependencyCurrentRevision: a dependency is
+// satisfied by an accepted submission of the dependency task's current
+// revision, whatever revision existed when it was declared, and a cycle or
+// self reference is refused inside the revision's own transaction.
+func TestMissionDependenciesFollowTheDependencyCurrentRevision(t *testing.T) {
+	ctx := context.Background()
 	db := openTestDB(t)
 	workspace := mustCreateWorkspace(t, db)
 	member := mustCreateMember(t, db)
 	mission := mustCreateMission(t, db, workspace.ID, member.ID, 2, 4)
 	// Both tasks carry an approved revision 1: the integrator may only accept
-	// revisions of work a human already approved. Dependencies are declared on
-	// the proposed revision 2, which acceptance then makes current.
+	// revisions of work a human already approved. The dependency is declared
+	// on the proposed revision 2, which acceptance then makes current.
 	first := mustCreateMissionTask(t, db, mission.ID, "first")
 	second := mustCreateMissionTask(t, db, mission.ID, "second")
-	revised, err := db.ProposeTaskRevision(context.Background(), first.ID, &domain.TaskRevision{Title: "first", Objective: "first"}, "first-rev-2")
+	revised, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "first", DependsOn: []domain.TaskID{second.ID}}, "first-rev-2")
 	if err != nil {
 		t.Fatalf("ProposeTaskRevision: %v", err)
 	}
-	if dependencyErr := db.SetTaskDependencies(context.Background(), first.ID, revised.Revision, []domain.TaskDependency{{TaskID: first.ID, Revision: revised.Revision, DependsOnTaskID: second.ID, DependsOnRevision: 1}}, "dep-a"); dependencyErr != nil {
-		t.Fatalf("set dependency: %v", dependencyErr)
-	}
-	if acceptErr := db.AcceptTaskRevision(context.Background(), first.ID, revised.Revision, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-first"); acceptErr != nil {
+	if acceptErr := db.AcceptTaskRevision(ctx, first.ID, revised.Revision, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-first"); acceptErr != nil {
 		t.Fatalf("accept first: %v", acceptErr)
 	}
-	projected, projectErr := db.ProjectTask(context.Background(), first.ID)
-	if projectErr != nil {
-		t.Fatalf("ProjectTask: %v", projectErr)
+	first.CurrentRevision = revised.Revision
+	expectBlocked := func(step string) {
+		t.Helper()
+		projected, projectErr := db.ProjectTask(ctx, first.ID)
+		if projectErr != nil {
+			t.Fatalf("%s: ProjectTask: %v", step, projectErr)
+		}
+		if projected.Status != domain.TaskBlocked || len(projected.Blockers) != 1 || projected.Blockers[0].TaskID != second.ID {
+			t.Fatalf("%s: projection = %s %+v, want blocked by %s", step, projected.Status, projected.Blockers, second.ID)
+		}
+		if _, _, reserveErr := reserveMissionAttempt(t, db, mission, first, "dispatch-"+step); !errors.Is(reserveErr, ErrMissionNotReady) || !strings.Contains(reserveErr.Error(), "task "+string(first.ID)+" waits for task "+string(second.ID)) {
+			t.Fatalf("%s: reserve = %v, want ErrMissionNotReady naming %s", step, reserveErr, second.ID)
+		}
 	}
-	if projected.Status != domain.TaskBlocked || len(projected.Blockers) != 1 {
-		t.Fatalf("blocked projection = %+v, want one dependency blocker", projected)
+	expectBlocked("declared")
+
+	mustAcceptMissionSubmission(t, db, mission, mustSubmitMissionAttempt(t, db, mission, second, "second-1"), "accept-second-1")
+	projected, err := db.ProjectTask(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("ProjectTask after acceptance: %v", err)
 	}
-	cycleA := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "cycle-a", Objective: "cycle-a", Status: domain.TaskRevisionProposed}}
-	cycleB := &domain.Task{MissionID: mission.ID, Revision: &domain.TaskRevision{Title: "cycle-b", Objective: "cycle-b", Status: domain.TaskRevisionProposed}}
-	if cycleAErr := db.CreateTask(context.Background(), cycleA); cycleAErr != nil {
-		t.Fatalf("create cycle A: %v", cycleAErr)
+	if projected.Status != domain.TaskReady || len(projected.Dependencies) != 1 || projected.Dependencies[0].DependsOnRevision != 1 {
+		t.Fatalf("projection after acceptance = %s %+v, want ready with the revision 1 dependency row", projected.Status, projected.Dependencies)
 	}
-	if cycleBErr := db.CreateTask(context.Background(), cycleB); cycleBErr != nil {
-		t.Fatalf("create cycle B: %v", cycleBErr)
+
+	// A new current revision of the dependency has no accepted output yet,
+	// so the dependent waits again even though the row still names revision 1.
+	secondRevised, err := db.ProposeTaskRevision(ctx, second.ID, &domain.TaskRevision{Title: "second", Objective: "second again"}, "second-rev-2")
+	if err != nil {
+		t.Fatalf("revise second: %v", err)
 	}
-	if dependencyErr := db.SetTaskDependencies(context.Background(), cycleA.ID, 1, []domain.TaskDependency{{TaskID: cycleA.ID, Revision: 1, DependsOnTaskID: cycleB.ID, DependsOnRevision: 1}}, "dep-cycle-a"); dependencyErr != nil {
-		t.Fatalf("set cycle A dependency: %v", dependencyErr)
+	if acceptErr := db.AcceptTaskRevision(ctx, second.ID, secondRevised.Revision, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-second-rev-2"); acceptErr != nil {
+		t.Fatalf("accept second revision 2: %v", acceptErr)
 	}
-	if cycleErr := db.SetTaskDependencies(context.Background(), cycleB.ID, 1, []domain.TaskDependency{{TaskID: cycleB.ID, Revision: 1, DependsOnTaskID: cycleA.ID, DependsOnRevision: 1}}, "dep-cycle-b"); !errors.Is(cycleErr, ErrMissionCycle) {
-		t.Fatalf("cycle dependency = %v, want ErrMissionCycle", cycleErr)
+	expectBlocked("revised")
+
+	if _, cycleErr := db.ProposeTaskRevision(ctx, second.ID, &domain.TaskRevision{Title: "second", Objective: "second", DependsOn: []domain.TaskID{first.ID}}, "second-rev-3"); !errors.Is(cycleErr, ErrMissionCycle) || !strings.Contains(cycleErr.Error(), "task "+string(second.ID)+" waits for task "+string(first.ID)+", which waits for task "+string(second.ID)) {
+		t.Fatalf("cycle dependency = %v, want ErrMissionCycle naming the cycle", cycleErr)
+	}
+	if _, selfErr := db.ProposeTaskRevision(ctx, second.ID, &domain.TaskRevision{Title: "second", Objective: "second", DependsOn: []domain.TaskID{second.ID}}, "second-rev-self"); !errors.Is(selfErr, ErrMissionCycle) {
+		t.Fatalf("self dependency = %v, want ErrMissionCycle", selfErr)
+	}
+	reloaded, err := db.GetTask(ctx, second.ID)
+	if err != nil || reloaded.CurrentRevision != secondRevised.Revision || reloaded.PendingRevision != nil {
+		t.Fatalf("second after refused revisions = %+v (err %v), want no pending revision", reloaded, err)
 	}
 }
 

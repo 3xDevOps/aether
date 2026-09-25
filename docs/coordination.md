@@ -487,7 +487,8 @@ For a useful plan, also declare paths and evidence requirements before approval:
   },
   "evidence_requirements": [
     {"kind": "transcript", "detail": "Retain test output showing expired sessions are rejected"}
-  ]
+  ],
+  "depends_on": ["task-1"]
 }
 ```
 
@@ -495,9 +496,18 @@ For a useful plan, also declare paths and evidence requirements before approval:
 paths. Each evidence requirement has a non-empty `kind` and optional `detail`.
 Kinds name retained evidence sources, such as `transcript` or `git`, not test
 types. Describe the required test output in `detail`; do not use `test` as a kind.
+`depends_on` lists the IDs of tasks in the same mission whose output this task
+needs. Until every one of them has an accepted submission for its current
+revision, `task show` reports the task as `blocked` with a `dependency` blocker
+naming the task, and `worker start` is refused with code `-32003` and the
+message `task task-2 waits for task task-1`. A new revision of a dependency
+has no accepted submission yet, so the dependent waits again until one is.
+A `depends_on` entry that names an unknown, abandoned, or self ID, or that
+would form a cycle, is refused and the revision is not written.
 Set `"material": true` for an amendment changing scope, constraints, or success
 criteria. Do not copy server-managed IDs, revision numbers, status, or
-timestamps from a response. A revision supplies the whole spec, not a patch.
+timestamps from a response. A revision supplies the whole spec, not a patch:
+a revision without `depends_on` drops the dependencies of the previous one.
 JSON input is capped at 32 KiB; save files outside the read-only `/run/aether`.
 
 For an integrator in `planning`, `clarified`, or `active`, after preparing

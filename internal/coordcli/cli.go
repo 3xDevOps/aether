@@ -311,10 +311,14 @@ Declare the intended scope before human approval, for example:
 scope.expected_paths and scope.exclusions are arrays of repository-relative paths.
 evidence_requirements is an array of {kind, detail} objects; detail is optional.
 Kinds name retained evidence sources, such as transcript or git, not test types.
+depends_on is an array of task IDs in this mission; the task stays blocked, and
+worker start is refused, until each one's current revision has an accepted
+submission. A cycle or an unknown, abandoned, or self ID is refused.
 Set "material":true for changed scope, constraints, or success criteria requiring
 a human-approved amendment. IDs, revision numbers, status, and timestamps are
 server-managed; do not copy them from task show. Revise supplies the whole spec,
-not a patch. --revision-file - reads stdin. Store files outside /run/aether.
+not a patch, so a revision without depends_on drops earlier dependencies.
+--revision-file - reads stdin. Store files outside /run/aether.
 `
 
 func writeHelp(out io.Writer, command string) (int, error) {

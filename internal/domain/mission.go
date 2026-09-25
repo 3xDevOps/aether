@@ -263,13 +263,16 @@ type TaskRevision struct {
 	// store.AcceptTaskRevision, a reason the revision needs a human round.
 	Material             bool
 	EvidenceRequirements []EvidenceRequirement
-	Status               TaskRevisionStatus
-	ProposedByRunID      RunID
-	SupersedesRevision   int
-	AcceptedByMemberID   MemberID
-	AcceptedByRunID      RunID
-	CreatedAt            time.Time
-	AcceptedAt           *time.Time
+	// DependsOn is what the proposer declared; the store writes it as the
+	// revision's dependency rows and reads it back through Task.Dependencies.
+	DependsOn          []TaskID
+	Status             TaskRevisionStatus
+	ProposedByRunID    RunID
+	SupersedesRevision int
+	AcceptedByMemberID MemberID
+	AcceptedByRunID    RunID
+	CreatedAt          time.Time
+	AcceptedAt         *time.Time
 }
 
 type TaskDependency struct {
