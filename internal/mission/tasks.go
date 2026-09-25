@@ -425,7 +425,7 @@ func (s *Service) createTask(ctx context.Context, t *domain.Task, key string) er
 // the caller learns which tasks form the cycle instead of a conflict code.
 func dependencyRefusal(err error) error {
 	if errors.Is(err, store.ErrMissionCycle) {
-		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "mission: " + err.Error()}
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
 	return err
 }

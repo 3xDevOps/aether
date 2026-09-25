@@ -499,9 +499,11 @@ types. Describe the required test output in `detail`; do not use `test` as a kin
 `depends_on` lists the IDs of tasks in the same mission whose output this task
 needs. Until every one of them has an accepted submission for its current
 revision, `task show` reports the task as `blocked` with a `dependency` blocker
-naming the task, and `worker start` is refused with code `-32003` and the
-message `task task-2 waits for task task-1`. A new revision of a dependency
-has no accepted submission yet, so the dependent waits again until one is.
+naming the task, and `worker start` is refused with code `-32003` and a
+message ending in `task task-2 waits for task task-1`. A new revision of a
+dependency has no accepted submission yet, so the dependent waits again until
+one is; the `depends_on_revision` a projected dependency reports is the
+dependency's revision when the row was written, not the one readiness checks.
 A `depends_on` entry that names an unknown, abandoned, or self ID, or that
 would form a cycle, is refused and the revision is not written.
 Set `"material": true` for an amendment changing scope, constraints, or success

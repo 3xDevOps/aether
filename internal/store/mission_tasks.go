@@ -727,8 +727,10 @@ func droppedExclusions(approved, proposed []string) []string {
 // stores the dependency's current revision at write time, but readiness
 // (ProjectTask, ReserveAttempt) follows the dependency task's current
 // revision, so revising a dependency never leaves the dependent blocked for
-// good. Cycle detection walks every live revision of the mission: an edge on a
-// proposed revision becomes real once that revision is accepted.
+// good. Cycle detection walks the edges ProjectTask exposes: each task's
+// current revision and its latest pending draft. Older drafts stay 'proposed'
+// once the mission is active, so walking every proposed revision would refuse
+// cycles that no visible revision forms.
 func writeTaskDependencies(ctx context.Context, tx *sql.Tx, missionID domain.MissionID, id domain.TaskID, revision int, dependsOn []domain.TaskID, now int64) error {
 	if len(dependsOn) == 0 {
 		return nil
@@ -737,7 +739,7 @@ func writeTaskDependencies(ctx context.Context, tx *sql.Tx, missionID domain.Mis
 		return errors.New("store: task revision has too many dependencies")
 	}
 	adj := make(map[domain.TaskID][]domain.TaskID)
-	rows, err := tx.QueryContext(ctx, `SELECT d.task_id, d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id = d.task_id JOIN mission_task_revisions r ON r.task_id = d.task_id AND r.revision = d.task_revision WHERE t.mission_id = ? AND t.abandoned_at IS NULL AND r.status IN ('proposed', 'accepted')`, missionID)
+	rows, err := tx.QueryContext(ctx, `SELECT d.task_id, d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id = d.task_id WHERE t.mission_id = ? AND t.abandoned_at IS NULL AND (d.task_revision = t.current_revision OR d.task_revision = (SELECT MAX(p.revision) FROM mission_task_revisions p WHERE p.task_id = t.id AND p.status = 'proposed' AND p.revision > t.current_revision))`, missionID)
 	if err != nil {
 		return err
 	}

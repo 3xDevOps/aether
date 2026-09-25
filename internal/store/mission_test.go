@@ -188,6 +188,25 @@ func TestMissionDependenciesFollowTheDependencyCurrentRevision(t *testing.T) {
 	if err != nil || reloaded.CurrentRevision != secondRevised.Revision || reloaded.PendingRevision != nil {
 		t.Fatalf("second after refused revisions = %+v (err %v), want no pending revision", reloaded, err)
 	}
+
+	// In an active mission a replaced draft stays proposed. Its edges must not
+	// count: only the current revision and the latest draft are visible.
+	firstFree, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "first alone"}, "first-rev-3")
+	if err != nil {
+		t.Fatalf("revise first without dependencies: %v", err)
+	}
+	if acceptErr := db.AcceptTaskRevision(ctx, first.ID, firstFree.Revision, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-first-rev-3"); acceptErr != nil {
+		t.Fatalf("accept first revision 3: %v", acceptErr)
+	}
+	if _, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "stale draft", DependsOn: []domain.TaskID{second.ID}}, "first-rev-4"); err != nil {
+		t.Fatalf("propose stale draft: %v", err)
+	}
+	if _, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "latest draft"}, "first-rev-5"); err != nil {
+		t.Fatalf("propose latest draft: %v", err)
+	}
+	if _, err := db.ProposeTaskRevision(ctx, second.ID, &domain.TaskRevision{Title: "second", Objective: "second", DependsOn: []domain.TaskID{first.ID}}, "second-rev-4"); err != nil {
+		t.Fatalf("dependency on a task whose stale draft depended back = %v, want accepted", err)
+	}
 }
 
 func TestMissionAcceptanceRequiresExactEvidenceAndRevision(t *testing.T) {
