@@ -3,12 +3,14 @@ package mission
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -24,16 +26,43 @@ func (c *recordingCanceller) CancelMission(_ context.Context, run domain.RunID) 
 }
 
 type recordingBus struct {
-	calls int
-	err   error
+	mu     sync.Mutex
+	calls  int
+	err    error
+	events []events.Event
 }
 
-func (b *recordingBus) Publish(context.Context, events.Event) (events.Event, error) {
+func (b *recordingBus) Publish(_ context.Context, event events.Event) (events.Event, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.calls++
 	if b.err != nil {
 		return events.Event{}, b.err
 	}
+	b.events = append(b.events, event)
 	return events.Event{}, nil
+}
+
+// waitForTimelineNote waits for the stamp a delivered notice leaves on the
+// integrator run's timeline; it lands after the terminal write returns.
+func (b *recordingBus) waitForTimelineNote(t *testing.T, run domain.RunID, message string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		b.mu.Lock()
+		for _, event := range b.events {
+			note, ok := event.Payload.(events.TimelinePayload)
+			if ok && event.RunID == run && note.Kind == events.TimelineNote && note.Message == message {
+				b.mu.Unlock()
+				return
+			}
+		}
+		b.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatalf("timeline never recorded %q for run %s", message, run)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func (b *recordingBus) Subscribe(context.Context, events.SubscribeOptions) (events.Subscription, error) {
@@ -50,17 +79,30 @@ type reconcileReportFixture struct {
 	attempt   *domain.Attempt
 	canceller *recordingCanceller
 	bus       *recordingBus
+	notices   *recordingInjector
 	packet    protocol.EvidencePacket
 }
 
 func setupReconcileReport(t *testing.T, outcome store.CoordOutcome) (reconcileReportFixture, *store.CoordReport) {
+	t.Helper()
+	return setupReconcileReportFor(t, outcome, domain.LaunchHeadless)
+}
+
+// setupReconcileReportFor builds one dispatched worker attempt under an
+// integrator run of the given mode, with a terminal that records notices.
+func setupReconcileReportFor(t *testing.T, outcome store.CoordOutcome, integratorMode domain.LaunchMode) (reconcileReportFixture, *store.CoordReport) {
 	t.Helper()
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
 	workspace := regressionWorkspace(t, db)
 	member := regressionMember(t, db, "integrator")
 	mission := regressionMission(t, db, workspace.ID, member.ID)
-	regressionRun(t, db, mission.CurrentIntegratorRunID, workspace.ID, member.ID, "integrator")
+	if err := db.CreateRunWithID(ctx, &domain.Run{
+		ID: mission.CurrentIntegratorRunID, WorkspaceID: workspace.ID, MemberID: member.ID, Task: "integrator",
+		Harness: "claude", Mode: integratorMode, Status: domain.RunQueued,
+	}); err != nil {
+		t.Fatalf("create integrator run: %v", err)
+	}
 	task := &domain.Task{
 		MissionID: mission.ID,
 		Revision: &domain.TaskRevision{
@@ -94,9 +136,10 @@ func setupReconcileReport(t *testing.T, outcome store.CoordOutcome) (reconcileRe
 	}
 	canceller := &recordingCanceller{}
 	bus := &recordingBus{}
+	notices := &recordingInjector{writes: make(chan injectedLine, 16)}
 	svc, err := New(Config{
 		Store: db, Missions: db, Evidence: &mutableEvidenceReader{packet: packet},
-		Cancel: canceller, Bus: bus, AuthorizationMu: &sync.Mutex{},
+		Cancel: canceller, Bus: bus, AuthorizationMu: &sync.Mutex{}, PTY: notices,
 		Now: func() time.Time { return clock },
 	})
 	if err != nil {
@@ -111,8 +154,17 @@ func setupReconcileReport(t *testing.T, outcome store.CoordOutcome) (reconcileRe
 	}
 	return reconcileReportFixture{
 		db: db, svc: svc, mission: mission, task: task, attempt: attempt,
-		canceller: canceller, bus: bus, packet: packet,
+		canceller: canceller, bus: bus, notices: notices, packet: packet,
 	}, report
+}
+
+// expectNotice requires exactly one aether: line carrying text to reach the
+// integrator terminal and the matching stamp to reach the timeline.
+func (f reconcileReportFixture) expectNotice(t *testing.T, step, text string) {
+	t.Helper()
+	f.notices.expect(t, step, f.mission.CurrentIntegratorRunID, text, harness.SubmitSequence("claude"))
+	f.bus.waitForTimelineNote(t, f.mission.CurrentIntegratorRunID, "mission notice: "+text)
+	f.notices.expectNone(t, step+" again")
 }
 
 func TestReconcileReportSuccessCreatesSubmission(t *testing.T) {
@@ -307,5 +359,115 @@ func TestReconcileReportFailureKeepsReportedOutcomeAcrossCancel(t *testing.T) {
 	}
 	if len(settler.runs) != 1 || settler.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", settler.runs, fix.attempt.RunID)
+	}
+}
+
+// TestReconcileReportNoticesTheIntegratorTerminal covers the wake-up an
+// interactive integrator depends on after dispatching: each worker report
+// types exactly one aether: line naming the attempt, a replay types none, and
+// the line never carries the worker's own summary.
+func TestReconcileReportNoticesTheIntegratorTerminal(t *testing.T) {
+	for _, outcome := range []store.CoordOutcome{store.CoordOutcomeSuccess, store.CoordOutcomeFailure, store.CoordOutcomeBlocked} {
+		t.Run(string(outcome), func(t *testing.T) {
+			ctx := context.Background()
+			fix, report := setupReconcileReportFor(t, outcome, domain.LaunchTUI)
+			report.Summary = "summary $(touch PWNED) `touch PWNED`; rm -rf /"
+			if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
+				t.Fatalf("ReconcileReport %s: %v", outcome, err)
+			}
+			text := workerReportNotice(outcome, fix.attempt)
+			fix.expectNotice(t, string(outcome)+" report", text)
+			if strings.Contains(text, report.Summary) || !strings.Contains(text, string(fix.attempt.ID)) ||
+				!strings.Contains(text, string(fix.attempt.TaskID)) || !strings.Contains(text, string(fix.attempt.RunID)) {
+				t.Fatalf("notice %q must name the attempt, task, and run and never the summary", text)
+			}
+			if outcome == store.CoordOutcomeBlocked {
+				return
+			}
+			if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
+				t.Fatalf("replayed ReconcileReport %s: %v", outcome, err)
+			}
+			fix.notices.expectNone(t, "replayed "+string(outcome)+" report")
+		})
+	}
+}
+
+// TestReconcileReportNoticeSkipsAHeadlessOrReplacedIntegrator: a headless
+// integrator never reads its terminal, and a report reconciled after the
+// integrator was replaced reaches the replacement, never the retired run.
+func TestReconcileReportNoticeSkipsAHeadlessOrReplacedIntegrator(t *testing.T) {
+	ctx := context.Background()
+	fix, report := setupReconcileReport(t, store.CoordOutcomeSuccess)
+	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
+		t.Fatalf("ReconcileReport for a headless integrator: %v", err)
+	}
+	fix.notices.expectNone(t, "success report to a headless integrator")
+
+	fix, report = setupReconcileReportFor(t, store.CoordOutcomeSuccess, domain.LaunchTUI)
+	choice := domain.MissionIntegrator{AccountMemberID: fix.mission.AccountableHumanID, Harness: "claude", Mode: domain.LaunchTUI}
+	replaced, err := fix.db.ReplaceIntegrator(ctx, fix.mission.ID, fix.mission.IntegratorGeneration, choice, fix.mission.AccountableHumanID, fix.mission.AccountableHumanID, "replacement-1")
+	if err != nil {
+		t.Fatalf("replace integrator: %v", err)
+	}
+	if err := fix.db.CreateRunWithID(ctx, &domain.Run{
+		ID: replaced.CurrentIntegratorRunID, WorkspaceID: fix.mission.WorkspaceID, MemberID: fix.mission.AccountableHumanID,
+		Task: "integrator", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunQueued,
+	}); err != nil {
+		t.Fatalf("create replacement integrator run: %v", err)
+	}
+	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
+		t.Fatalf("ReconcileReport after replacement: %v", err)
+	}
+	fix.notices.expect(t, "success report after the integrator was replaced", replaced.CurrentIntegratorRunID,
+		workerReportNotice(store.CoordOutcomeSuccess, fix.attempt), harness.SubmitSequence("claude"))
+	fix.notices.expectNone(t, "retired integrator after replacement")
+}
+
+// TestReconcileNoticesAWorkerThatEndedWithoutAReport: a worker whose run
+// ended before it reported is marked failed and the integrator is told; one
+// the integrator cancelled is not news to it.
+func TestReconcileNoticesAWorkerThatEndedWithoutAReport(t *testing.T) {
+	for reason, want := range map[string]domain.AttemptState{"exited 1": domain.AttemptFailed, "killed": domain.AttemptCancelled} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			fix, _ := setupReconcileReportFor(t, store.CoordOutcomeSuccess, domain.LaunchTUI)
+			fix.svc.cfg.ObserveMissionRun = func(context.Context, domain.RunID) (MissionRunObservation, error) {
+				return MissionRunObservation{State: MissionRunStopped, RetentionSettled: true}, nil
+			}
+			if err := fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunFailed, reason, nil, nil); err != nil {
+				t.Fatalf("end worker run: %v", err)
+			}
+			if err := fix.svc.reconcileMission(ctx, fix.mission); err != nil {
+				t.Fatalf("reconcile: %v", err)
+			}
+			attempt, err := fix.db.GetAttempt(ctx, fix.attempt.ID)
+			if err != nil {
+				t.Fatalf("get attempt: %v", err)
+			}
+			if attempt.State != want {
+				t.Fatalf("attempt state after the run ended %q = %q, want %q", reason, attempt.State, want)
+			}
+			if want == domain.AttemptCancelled {
+				fix.notices.expectNone(t, "cancelled worker")
+				return
+			}
+			fix.expectNotice(t, "worker ended without a report", attemptEndedNotice(fix.attempt))
+		})
+	}
+}
+
+// TestWorkerNoticesAreShellInert: a notice can land in the shell left on an
+// exited integrator's terminal, so its text holds nothing a shell acts on.
+func TestWorkerNoticesAreShellInert(t *testing.T) {
+	attempt := &domain.Attempt{ID: "attempt-1", TaskID: "task-1", RunID: "run-1"}
+	for _, text := range []string{
+		workerReportNotice(store.CoordOutcomeSuccess, attempt),
+		workerReportNotice(store.CoordOutcomeFailure, attempt),
+		workerReportNotice(store.CoordOutcomeBlocked, attempt),
+		attemptEndedNotice(attempt),
+	} {
+		if strings.ContainsAny(text, "\"'`;()<>|&$\n") {
+			t.Fatalf("notice %q carries a shell-active character", text)
+		}
 	}
 }

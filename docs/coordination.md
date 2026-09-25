@@ -367,9 +367,13 @@ mission to `active`. `mission.cancel` is the same kind of human-only method.
 Rejecting and cancelling both move the mission to `rejected`, and the server
 then cancels the integrator run.
 
-An answer to a mission question and every plan decision are also typed into
-the integrator's terminal as one `aether:` line naming the command to run
-next. The integrator is always interactive (TUI): `mission.create` and
+An answer to a mission question, every plan decision, and every worker report
+are also typed into the integrator's terminal as one `aether:` line naming
+the command to run next. A worker's line carries only the worker run, task,
+and attempt IDs, never the worker's summary. A worker whose run ends before
+it reports gets the same kind of line once reconcile marks its attempt
+failed; a worker the integrator cancelled gets none. The integrator is always
+interactive (TUI): `mission.create` and
 `mission.replace-integrator` refuse any other mode with `-32602` and
 `integrator mode must be tui: a headless integrator exits after one turn and
 cannot be asked or told`. `mission.create` needs the integrator's exact
@@ -622,6 +626,12 @@ a durable observation and does not stop the worker or submit the task.
 Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
+
+Every report is also typed into the integrator's terminal as one `aether:`
+line naming the worker run, task, and attempt and the
+`worker inspect --attempt-id` command to run next; a blocked report names
+`inbox` as well. The integrator waits for workers with `inbox --wait 30`
+instead of polling `worker list`.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to

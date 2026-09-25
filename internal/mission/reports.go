@@ -105,9 +105,22 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	switch report.Outcome {
 	case store.CoordOutcomeBlocked:
 		// The durable coord.report already exists; keep the worker running.
-		return s.publishMissionChanged(ctx, m.ID)
+		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+			return publishErr
+		}
+		s.noticeIntegrator(ctx, m, workerReportNotice(report.Outcome, attempt))
+		return nil
 	case store.CoordOutcomeFailure:
-		return s.failAssignedWorker(ctx, m, attempt, report.Summary)
+		// A replay finds the attempt already failed and only re-cancels; the
+		// integrator was told when the failure first landed.
+		announce := attempt.State.HoldsConcurrency()
+		if failErr := s.failAssignedWorker(ctx, m, attempt, report.Summary); failErr != nil {
+			return failErr
+		}
+		if announce {
+			s.noticeIntegrator(ctx, m, workerReportNotice(report.Outcome, attempt))
+		}
+		return nil
 	case store.CoordOutcomeSuccess:
 	default:
 		return fmt.Errorf("mission: unsupported report outcome %q", report.Outcome)
@@ -126,7 +139,11 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if err != nil {
 		return err
 	}
-	return s.publishMissionChanged(ctx, m.ID)
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return publishErr
+	}
+	s.noticeIntegrator(ctx, m, workerReportNotice(report.Outcome, attempt))
+	return nil
 }
 
 func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {

@@ -672,6 +672,12 @@ run is terminal, so a rejection survives a server restart.
 It changes neither the phase nor the plan version and leaves an undecided
 review round decidable. A rejected mission refuses it.
 
+The integrator does not poll for any of this. The server types one `aether:`
+line into its terminal when a human answers or decides, when a worker
+reports, and when a worker's run ends without a report, each naming the
+command to run next. A notice never reaches a retired integrator run. See
+[coordination.md](coordination.md#the-mission-plan-gate).
+
 An amendment does not stop the approved plan. While a mission is in
 `amendment_review` the integrator still starts, retries, cancels, and inspects
 workers on approved tasks and still accepts their submissions; it cannot
