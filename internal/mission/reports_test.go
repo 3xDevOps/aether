@@ -382,7 +382,8 @@ func TestReconcileReportNoticesTheIntegratorTerminal(t *testing.T) {
 				t.Fatalf("notice %q must name the attempt, task, and run and never the summary", text)
 			}
 			if outcome == store.CoordOutcomeBlocked {
-				return
+				published := time.Now()
+				report.PublishedAt = &published
 			}
 			if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
 				t.Fatalf("replayed ReconcileReport %s: %v", outcome, err)
@@ -466,7 +467,7 @@ func TestWorkerNoticesAreShellInert(t *testing.T) {
 		workerReportNotice(store.CoordOutcomeBlocked, attempt),
 		attemptEndedNotice(attempt),
 	} {
-		if strings.ContainsAny(text, "\"'`;()<>|&$\n") {
+		if strings.ContainsAny(text, "\"'`;()<>|&$*?[]{}!#~\\\n") {
 			t.Fatalf("notice %q carries a shell-active character", text)
 		}
 	}

@@ -388,12 +388,15 @@ func (s *Service) settleObservedAttempt(ctx context.Context, mission *domain.Mis
 	if err := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, target, run.Reason); err != nil {
 		return err
 	}
+	if err := s.publishMissionChanged(ctx, attempt.MissionID); err != nil {
+		return err
+	}
 	// A cancelled attempt is what the integrator asked for; only a worker
 	// that died without reporting is news to it.
 	if target == domain.AttemptFailed {
 		s.noticeIntegrator(ctx, mission, attemptEndedNotice(attempt))
 	}
-	return s.publishMissionChanged(ctx, attempt.MissionID)
+	return nil
 }
 
 func (s *Service) markAttemptUnknown(ctx context.Context, attempt *domain.Attempt, detail string) {
