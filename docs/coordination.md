@@ -298,11 +298,9 @@ when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
 
-A `tui` run does not have to block on `--wait` to learn that a peer wrote: the
-first message after each inbox read is announced by one `aether:` line in the
-terminal, as described under
+For the terminal line that announces a new message to a `tui` run, see
 [delivery and acknowledgement](#delivery-acknowledgement-and-retries). A
-headless run gets no line and should read the inbox at its checkpoints.
+headless run reads the inbox at its checkpoints.
 
 ### The mission plan gate
 
