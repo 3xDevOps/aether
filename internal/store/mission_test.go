@@ -189,8 +189,8 @@ func TestMissionDependenciesFollowTheDependencyCurrentRevision(t *testing.T) {
 		t.Fatalf("second after refused revisions = %+v (err %v), want no pending revision", reloaded, err)
 	}
 
-	// In an active mission a replaced draft stays proposed. Its edges must not
-	// count: only the current revision and the latest draft are visible.
+	// A newer draft supersedes the one before it, so a replaced draft can
+	// neither be accepted nor lend its edges to the cycle check.
 	firstFree, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "first alone"}, "first-rev-3")
 	if err != nil {
 		t.Fatalf("revise first without dependencies: %v", err)
@@ -198,11 +198,15 @@ func TestMissionDependenciesFollowTheDependencyCurrentRevision(t *testing.T) {
 	if acceptErr := db.AcceptTaskRevision(ctx, first.ID, firstFree.Revision, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-first-rev-3"); acceptErr != nil {
 		t.Fatalf("accept first revision 3: %v", acceptErr)
 	}
-	if _, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "stale draft", DependsOn: []domain.TaskID{second.ID}}, "first-rev-4"); err != nil {
+	stale, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "stale draft", DependsOn: []domain.TaskID{second.ID}}, "first-rev-4")
+	if err != nil {
 		t.Fatalf("propose stale draft: %v", err)
 	}
 	if _, err := db.ProposeTaskRevision(ctx, first.ID, &domain.TaskRevision{Title: "first", Objective: "latest draft"}, "first-rev-5"); err != nil {
 		t.Fatalf("propose latest draft: %v", err)
+	}
+	if acceptErr := db.AcceptTaskRevision(ctx, first.ID, stale.Revision, mission.IntegratorGeneration, mission.CurrentIntegratorRunID, "accept-stale"); !errors.Is(acceptErr, ErrConflict) {
+		t.Fatalf("accept the superseded draft = %v, want ErrConflict", acceptErr)
 	}
 	if _, err := db.ProposeTaskRevision(ctx, second.ID, &domain.TaskRevision{Title: "second", Objective: "second", DependsOn: []domain.TaskID{first.ID}}, "second-rev-4"); err != nil {
 		t.Fatalf("dependency on a task whose stale draft depended back = %v, want accepted", err)

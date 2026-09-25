@@ -477,6 +477,11 @@ func (d *DB) proposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 	if depErr := writeTaskDependencies(ctx, tx, missionID, id, next, r.DependsOn, n); depErr != nil {
 		return nil, depErr
 	}
+	// Only the latest draft stays acceptable: an older one could otherwise be
+	// accepted later and revive edges the cycle check no longer sees.
+	if _, supersedeErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status = 'superseded' WHERE task_id = ? AND status = 'proposed' AND revision > ? AND revision < ?`, id, current, next); supersedeErr != nil {
+		return nil, fmt.Errorf("store: supersede earlier draft of task %s: %w", id, supersedeErr)
+	}
 	// Before approval, accept is forbidden, so nothing would ever advance
 	// current_revision and the human would review a stale draft. Superseding
 	// the never-accepted draft and moving current_revision to the new revision
@@ -727,10 +732,8 @@ func droppedExclusions(approved, proposed []string) []string {
 // stores the dependency's current revision at write time, but readiness
 // (ProjectTask, ReserveAttempt) follows the dependency task's current
 // revision, so revising a dependency never leaves the dependent blocked for
-// good. Cycle detection walks the edges ProjectTask exposes: each task's
-// current revision and its latest pending draft. Older drafts stay 'proposed'
-// once the mission is active, so walking every proposed revision would refuse
-// cycles that no visible revision forms.
+// good. Cycle detection walks every live revision: the current one and the
+// latest draft, since proposing a draft supersedes the one before it.
 func writeTaskDependencies(ctx context.Context, tx *sql.Tx, missionID domain.MissionID, id domain.TaskID, revision int, dependsOn []domain.TaskID, now int64) error {
 	if len(dependsOn) == 0 {
 		return nil
@@ -739,7 +742,7 @@ func writeTaskDependencies(ctx context.Context, tx *sql.Tx, missionID domain.Mis
 		return errors.New("store: task revision has too many dependencies")
 	}
 	adj := make(map[domain.TaskID][]domain.TaskID)
-	rows, err := tx.QueryContext(ctx, `SELECT d.task_id, d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id = d.task_id WHERE t.mission_id = ? AND t.abandoned_at IS NULL AND (d.task_revision = t.current_revision OR d.task_revision = (SELECT MAX(p.revision) FROM mission_task_revisions p WHERE p.task_id = t.id AND p.status = 'proposed' AND p.revision > t.current_revision))`, missionID)
+	rows, err := tx.QueryContext(ctx, `SELECT d.task_id, d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id = d.task_id JOIN mission_task_revisions r ON r.task_id = d.task_id AND r.revision = d.task_revision WHERE t.mission_id = ? AND t.abandoned_at IS NULL AND r.status IN ('proposed', 'accepted')`, missionID)
 	if err != nil {
 		return err
 	}
