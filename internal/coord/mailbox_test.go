@@ -298,12 +298,13 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 
 	// The overlap persists untouched for 45 minutes - nothing calls the
 	// service - then clears in real time: the index reports a's set is
-	// now just c and publishes it. The banner for c proves the event was
+	// now just c and publishes it. The banner for c, after the message
+	// notice the send above put in b's terminal, proves the event was
 	// consumed before the sends below.
 	h.advance(45 * time.Minute)
 	h.peers.pair(a, c, "src/other.go")
 	h.announce(t, a, events.OverlapPeer{RunID: c, Files: []string{"src/other.go"}})
-	h.waitForInjections(t, 1)
+	h.waitForInjections(t, 2)
 
 	h.advance(DefaultGrace - time.Minute)
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-grace")); err != nil {
@@ -445,6 +446,16 @@ func TestSendStampsOneWorkspaceNote(t *testing.T) {
 	}
 	if !strings.Contains(p.Message, "coordination message to run "+string(b)) {
 		t.Fatalf("note = %q, want the outgoing stamp", p.Message)
+	}
+	// The recipient is interactive, so its terminal notice is stamped too.
+	select {
+	case delivered := <-timeline.Events():
+		dp, dok := delivered.Payload.(events.TimelinePayload)
+		if !dok || delivered.RunID != b || !strings.HasPrefix(dp.Message, "coordination notice: message from run ") {
+			t.Fatalf("second event = %+v, want the delivery stamp on the recipient's run", delivered)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the terminal notice was never stamped into the timeline")
 	}
 
 	// A second send is what proves the first left exactly one note: its own

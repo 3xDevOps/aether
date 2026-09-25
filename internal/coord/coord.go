@@ -169,6 +169,7 @@ type Service struct {
 	reportLocks    map[domain.RunID]*sync.Mutex
 	reportPackets  map[string]protocol.EvidencePacket
 	noticed        map[domain.RunID]map[domain.RunID]bool
+	messageNoticed map[domain.RunID]bool
 	runs           map[domain.RunID]*runLifecycle
 	reportCursor   store.CoordOutboxCursor
 	auditCursor    store.CoordOutboxCursor
@@ -220,6 +221,7 @@ func New(cfg Config) (*Service, error) {
 		reportPackets:  make(map[string]protocol.EvidencePacket),
 		runs:           make(map[domain.RunID]*runLifecycle),
 		noticed:        make(map[domain.RunID]map[domain.RunID]bool),
+		messageNoticed: make(map[domain.RunID]bool),
 	}, nil
 }
 

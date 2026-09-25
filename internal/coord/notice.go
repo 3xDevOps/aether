@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // noticeActor is the attribution the overlap banner carries. It is the
@@ -49,11 +50,15 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 			slog.Warn("coord: overlap notice skipped", "run", run, "peer", peer.RunID, "error", err)
 			continue
 		}
+		if r.Mode != domain.LaunchTUI {
+			continue
+		}
 		err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), noticeActor, "", text, harness.SubmitSequence(r.Harness))
 		switch {
 		case err == nil:
 			s.markNotified(run, peer.RunID)
-			s.stampNotice(ctx, run, peer)
+			s.stampNotice(ctx, r, fmt.Sprintf("coordination notice: run %s is also editing %s",
+				peer.RunID, fileList(peer.Files)))
 		case errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
 			// A run without a live terminal is exactly the degradation the
 			// design expects: the radar chip still stands for the humans.
@@ -67,27 +72,86 @@ func (s *Service) notify(ctx context.Context, run domain.RunID, with []events.Ov
 
 // stampNotice records a delivered notice on the notified run's workspace
 // timeline as a server-originated coordination event. It runs only after the
-// banner actually reached the terminal, so the feed says an agent was told
+// line actually reached the terminal, so the feed says an agent was told
 // rather than that one was meant to be, and a publish failure never unsays it.
-func (s *Service) stampNotice(ctx context.Context, run domain.RunID, peer events.OverlapPeer) {
-	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil {
-		slog.Warn("coord: overlap notice not stamped", "run", run, "peer", peer.RunID, "error", err)
-		return
-	}
-	_, err = s.cfg.Bus.Publish(ctx, events.Event{
+func (s *Service) stampNotice(ctx context.Context, r *domain.Run, message string) {
+	_, err := s.cfg.Bus.Publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID,
 		RunID:       r.ID,
 		ActorID:     "",
-		Payload: events.TimelinePayload{
-			Kind: events.TimelineNote,
-			Message: fmt.Sprintf("coordination notice: run %s is also editing %s",
-				peer.RunID, fileList(peer.Files)),
-		},
+		Payload:     events.TimelinePayload{Kind: events.TimelineNote, Message: message},
 	})
 	if err != nil {
-		slog.Warn("coord: timeline stamp failed", "run", run, "peer", peer.RunID, "error", err)
+		slog.Warn("coord: timeline stamp failed", "run", r.ID, "error", err)
 	}
+}
+
+// notifyMessage tells the recipient of a newly stored message, question, or
+// reply that its inbox has something, so an interactive agent does not have
+// to block on an inbox wait to find out. One line covers a whole burst: the
+// run is told once and re-armed by its next inbox read (rearmMessageNotice).
+// The inbox remains the source of truth; a lost line loses nothing durable.
+func (s *Service) notifyMessage(ctx context.Context, msg *store.RunMessage) {
+	if s.cfg.PTY == nil {
+		return
+	}
+	// Sends are concurrent RPCs, so the run is claimed before the write and
+	// released if the write fails; marking only on success would let two
+	// simultaneous sends both reach the terminal.
+	if !s.claimMessageNotice(msg.ToRun) {
+		return
+	}
+	r, err := s.cfg.Store.GetRun(ctx, msg.ToRun)
+	if err != nil {
+		s.rearmMessageNotice(msg.ToRun)
+		slog.Warn("coord: message notice skipped", "run", msg.ToRun, "message_id", msg.ID, "error", err)
+		return
+	}
+	// Every run has a terminal, but a headless harness never reads it: the
+	// line would sit unread while the timeline claimed delivery.
+	if r.Mode != domain.LaunchTUI {
+		s.rearmMessageNotice(msg.ToRun)
+		return
+	}
+	err = s.cfg.PTY.Inject(ctx, ptyhost.RunSession(r.ID), noticeActor, "", messageNoticeText(msg.FromRun), harness.SubmitSequence(r.Harness))
+	switch {
+	case err == nil:
+		s.stampNotice(ctx, r, fmt.Sprintf("coordination notice: message from run %s", msg.FromRun))
+	case errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
+		// No live terminal yet, as right after a restart: the message is
+		// safe in the inbox, and the next one tries the terminal again.
+		s.rearmMessageNotice(msg.ToRun)
+	default:
+		s.rearmMessageNotice(msg.ToRun)
+		slog.Warn("coord: message notice failed", "run", msg.ToRun, "message_id", msg.ID, "error", err)
+	}
+}
+
+// claimMessageNotice reports whether run is owed a message notice, taking
+// the claim when it is.
+func (s *Service) claimMessageNotice(run domain.RunID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.messageNoticed[run] {
+		return false
+	}
+	s.messageNoticed[run] = true
+	return true
+}
+
+// rearmMessageNotice lets the next message reach run's terminal again.
+func (s *Service) rearmMessageNotice(run domain.RunID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.messageNoticed, run)
+}
+
+// messageNoticeText renders the one line a message burst earns. The sender
+// ID is a server-issued ULID, so the fixed text stays shell-inert without
+// quoting; see noticeText for why that matters.
+func messageNoticeText(from domain.RunID) string {
+	return fmt.Sprintf("%s: New coordination message from run %s. Run /usr/local/bin/aether-internal inbox to read it, "+
+		"then acknowledge the batch with --ack.", noticeActor, from)
 }
 
 // pendingNotices forgets the peers run no longer overlaps - which is what

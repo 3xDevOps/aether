@@ -150,11 +150,28 @@ not mean that a peer has read the message or understood it. A timed-out
 request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
+When a message, question, or reply is stored for a run launched in `tui`
+mode, Aether also types one line into that run's terminal:
+
+```
+aether: New coordination message from run <sender run ID>. Run /usr/local/bin/aether-internal inbox to read it, then acknowledge the batch with --ack.
+```
+
+The line is a hint, not delivery: it fires once per burst, so further
+messages stay silent until the run next reads its inbox, and it is never
+sent to a headless run, whose harness does not read its terminal. A run
+whose terminal is not attached yet, as right after a server restart, gets no
+line and nothing is lost; the inbox remains the authoritative source. The
+same rule applies to the conflict radar's overlap banner: only a `tui` run
+receives it, and a headless run is not counted as told.
+
 Accepted messages, questions, and replies are attributed to their originating
 run and appended to the workspace timeline. These coordination notices are
 server-originated events with an empty actor identity; ownership changes cannot
 rewrite their historical attribution. The timeline records durable server
-acceptance; it does not imply that the recipient has read the item.
+acceptance, and a `coordination notice: message from run <sender>` note on the
+recipient's run when the terminal line was written; neither implies that the
+recipient has read the item.
 
 ## `aether-internal` CLI
 
@@ -227,8 +244,14 @@ its own task ID:
 Use the actual command from skill, not the example ID above. Read the returned
 task revision, objective, scope, exclusions, and evidence requirements before
 acting. Workers may read and propose; they must not spawn workers, accept tasks,
-or perform mission/integration operations. Ordinary runs have no mission
-authority. Help documents syntax, not permission.
+or perform mission/integration operations. A worker's skill also tells it to
+check the inbox after reading the task, before each commit, and before
+reporting, and that `status` lists its sibling workers. Ordinary runs have no
+mission authority. Help documents syntax, not permission.
+
+Every role's skill explains that a terminal line starting with `aether:`
+means a message or event is waiting and names the command that reads it, and
+that peers listed by `status` are reached with `send`, `ask`, and `reply`.
 
 Every role gets `status`, `inbox`, and top-level help bootstrap commands.
 An integrator's skill states its role before its phase guidance: turn the
@@ -278,6 +301,12 @@ the next command. `--wait` asks the server to wait once for up to 30 seconds
 when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
+
+A `tui` run does not have to block on `--wait` to learn that a peer wrote: the
+first message after each inbox read is announced by one `aether:` line in the
+terminal, as described under
+[delivery and acknowledgement](#delivery-acknowledgement-and-retries). A
+headless run gets no line and should read the inbox at its checkpoints.
 
 ### The mission plan gate
 
