@@ -1,9 +1,9 @@
 # Remote development and agent self-verification
 
-**Status:** Proposed implementation plan. The browser and agent-facing terminal
-commands described below are not shipped features. Operational guides remain
-the reference for current behavior until their implementation slices land.
-Session inventory and start instructions: [handoff.md](../../handoff.md).
+**Status:** Implemented on `feat/remote-development`; final acceptance is in
+progress. Operational guides describe the implemented commands and boundaries.
+Actual verification and remaining release gates are recorded in
+[handoff.md](../../handoff.md).
 
 **Goal:** A developer can implement, run, inspect, correct, and publish a change
 entirely through Aether. An agent can observe and operate the application it
@@ -119,10 +119,9 @@ produce an unavailable capability and the real reason, not instructions that
 pretend a working browser exists. An image-incapable model still gets textual
 page/screen observations; it must not claim it visually inspected an image.
 
-Keep the default skill short. Proposed `skill terminal`, `skill browser`, and
-`skill git` topics load version-matched details on demand. These names are a
-proposed CLI design, not commands to use against today's binary. The Git topic
-teaches ordinary `git` and `gh`; it does not introduce a generic Git wrapper.
+Keep the default skill short. `skill terminal`, `skill browser`, and `skill git`
+load version-matched details on demand. The Git topic teaches ordinary `git`
+and `gh`; it does not introduce a generic Git wrapper.
 
 ### Discovery and identity
 
@@ -418,8 +417,8 @@ Update [harnesses](../harnesses.md), [coordination](../coordination.md),
 [dashboard](../dashboard-frontend.md), [security](../security.md),
 [privacy](../privacy.md), [quickstart](../quickstart.md), and
 [testing](../testing.md) with their corresponding slices. Browser packaging also
-updates [install](../install.md) and [notices](../notices.md). Leave current guides
-truthful during this planning-only change.
+updates [install](../install.md) and [notices](../notices.md). Guides must describe
+implemented behavior and its actual deployment prerequisites.
 
 ## 10. Acceptance and release gate
 
