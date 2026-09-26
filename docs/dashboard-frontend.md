@@ -303,7 +303,9 @@ Relationships come from the run snapshot's `mission_id`, `mission_role`, and
 `integrator_run_id`, not task text or the currently opened mission page.
 `mission.changed` coalesces background refreshes of those relationship fields,
 including when another workspace is selected, without blocking run-status
-events or overwriting newer run state. Replacing an integrator moves its
+events or overwriting newer run state. Reconnect hydration supersedes pending
+relationship requests without waiting for them; their late responses and
+errors cannot change the fresh snapshot. Replacing an integrator moves its
 workers under the replacement and removes the old run's badge. Older servers
 that omit these fields retain the flat list.
 

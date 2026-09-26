@@ -1294,6 +1294,50 @@ describe('connect', () => {
     }
   })
 
+  it.each(['response', 'error'] as const)('hydrates on reconnect without waiting for an obsolete mission %s', async (outcome) => {
+    const store = createRootStore()
+    const worker = run({ mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'old-integrator' })
+    const activeRun = run({ id: 'active-run', workspace_id: otherWorkspace.id })
+    const refresh = Promise.withResolvers<Run[]>()
+    const refreshedWorker = { ...worker, integrator_run_id: 'new-integrator' }
+    const runList = vi.fn()
+      .mockResolvedValueOnce([worker, activeRun])
+      .mockImplementationOnce(() => refresh.promise)
+      .mockResolvedValueOnce([refreshedWorker, { ...activeRun, status: 'completed' }])
+      .mockResolvedValue([{ ...refreshedWorker, integrator_run_id: 'latest-integrator' }])
+    const client = fakeApi({
+      runList,
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods: ['*'], ws: ['events'] })),
+    })
+    const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.setState({ activeWorkspace: otherWorkspace.id })
+      deliver(socket, statusEvent({ seq: 1, run_id: '', type: 'mission.changed' }))
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(2))
+      socket.onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2), { timeout: 2000 })
+      const reconnected = await subscribe()
+      await vi.waitFor(() => expect(store.getState().runs[activeRun.id].status).toBe('completed'))
+      expect(store.getState().runs[worker.id].integrator_run_id).toBe('new-integrator')
+
+      deliver(reconnected, statusEvent({ seq: 2, run_id: '', type: 'mission.changed' }))
+      await vi.waitFor(() => expect(store.getState().runs[worker.id].integrator_run_id).toBe('latest-integrator'))
+      if (outcome === 'response') refresh.resolve([worker])
+      else refresh.reject(new TypeError('obsolete request failed'))
+      await refresh.promise.catch(() => {})
+      await Promise.resolve()
+      expect(store.getState().runs[worker.id].integrator_run_id).toBe('latest-integrator')
+      expect(store.getState().runs[activeRun.id].status).toBe('completed')
+      expect(store.getState().unreachable).toBeNull()
+      expect(store.getState().hydrationError).toBeNull()
+    } finally {
+      refresh.resolve([])
+      stop()
+    }
+  })
+
   it('waits for the subscription acknowledgement before it hydrates', async () => {
     const client = fakeApi()
     const store = createRootStore()

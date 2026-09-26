@@ -646,17 +646,20 @@ export function connect(store: RootStore, client: Api = api): () => void {
   })
 
   const missionRefreshes = new Set<string>()
-  let refreshingMissions: Promise<void> | undefined
+  let refreshingMissions = false
+  let missionGeneration = 0
 
   const refreshMissionRuns = () => {
     if (refreshingMissions || hydrating || signal.aborted || missionRefreshes.size === 0) return
-    refreshingMissions = (async () => {
-      while (missionRefreshes.size > 0 && !hydrating && !signal.aborted) {
+    refreshingMissions = true
+    const generation = missionGeneration
+    void (async () => {
+      while (missionRefreshes.size > 0 && !hydrating && !signal.aborted && generation === missionGeneration) {
         const workspaceID = missionRefreshes.values().next().value as string
         missionRefreshes.delete(workspaceID)
         try {
           const listed = await client.runList({ workspace_id: workspaceID })
-          if (signal.aborted) return
+          if (signal.aborted || generation !== missionGeneration) return
           store.setState((state) => {
             let runs = state.runs
             for (const run of listed) {
@@ -679,14 +682,15 @@ export function connect(store: RootStore, client: Api = api): () => void {
             return { runs }
           })
         } catch (err) {
-          if (signal.aborted) return
+          if (signal.aborted || generation !== missionGeneration) return
           store.getState().setUnreachable(classifyUnreachable(err, store))
           void load()
           return
         }
       }
     })().finally(() => {
-      refreshingMissions = undefined
+      if (generation !== missionGeneration) return
+      refreshingMissions = false
       refreshMissionRuns()
     })
   }
@@ -715,8 +719,11 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const load = async () => {
     if (signal.aborted || hydrating || store.getState().streamDead) return
     hydrating = true
+    // Full hydration supersedes pending relationship snapshots, not vice versa.
+    missionGeneration++
+    refreshingMissions = false
+    missionRefreshes.clear()
     await chain // let an event that is mid-flight finish first
-    await refreshingMissions
     const ok = await hydrate(store, client, signal)
     hydrating = false
     if (signal.aborted) return
