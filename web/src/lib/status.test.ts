@@ -26,6 +26,10 @@ describe('runLabel', () => {
     expect(runLabel({ title: 'Terminal title', task: words })).toBe(
       'Terminal title',
     )
+    const tabbed = runLabel({ task: `${'a'.repeat(70)}\t${'b'.repeat(100)}` })
+    expect(tabbed).toBe(`${'a'.repeat(70)}\u2026`)
+    const astral = runLabel({ task: `${'a'.repeat(119)}\u{1F600}${'b'.repeat(50)}` })
+    expect(astral).toBe(`${'a'.repeat(119)}\u{1F600}\u2026`)
   })
 })
 

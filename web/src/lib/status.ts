@@ -42,21 +42,17 @@ export function runState(status: RunStatus, pendingApproval = false): Presentati
 
 const fallbackLabelLength = 120
 
-/**
- * A run's human title. The title is whatever the agent last put in its
- * terminal title, so a run that never reported one, or died before it did,
- * has none; the fallback is the prompt's first line, bounded, never the
- * whole prompt.
- */
+/** A run's human title. An untitled run is named by its bounded first prompt line. */
 export function runLabel(run: { task: string; title?: string }): string {
   const title = run.title?.trim()
   if (title) return title
   const line = run.task.split('\n').find((l) => l.trim())?.trim() ?? ''
   if (!line) return 'Untitled run'
-  if (line.length <= fallbackLabelLength) return line
-  const cut = line.slice(0, fallbackLabelLength)
-  const space = cut.lastIndexOf(' ')
-  return `${cut.slice(0, space > fallbackLabelLength / 2 ? space : fallbackLabelLength).trimEnd()}\u2026`
+  const chars = Array.from(line)
+  if (chars.length <= fallbackLabelLength) return line
+  const cut = chars.slice(0, fallbackLabelLength).join('')
+  const space = cut.search(/\s\S*$/)
+  return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`
 }
 
 /** The runs an approval request is still waiting on, across every inbox. */
