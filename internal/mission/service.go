@@ -14,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -23,12 +22,6 @@ import (
 // honor the supplied run ID; a lost response must never create a second run.
 type Launcher interface {
 	LaunchMission(context.Context, MissionLaunchRequest) (*domain.Run, error)
-}
-
-// Injector writes an attributed line into a run's terminal, ending it with
-// the run harness's submit sequence; satisfied by *ptyhost.Host.
-type Injector interface {
-	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
 }
 
 // launchValidator is the optional seam that refuses, before anything is
@@ -108,9 +101,6 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
-	// PTY announces a human answer, a plan decision, or a worker report in
-	// the integrator's terminal; nil sends no notices.
-	PTY Injector
 	// Integration resolves the underlying candidate engine lazily. Mission
 	// policy owns the adapter while the engine remains the implementation.
 	Integration func() (sshd.IntegrationService, error)
@@ -377,7 +367,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 	return err
 }
 
-func (s *Service) settleObservedAttempt(ctx context.Context, mission *domain.Mission, attempt *domain.Attempt, run *domain.Run, obs MissionRunObservation) error {
+func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Attempt, run *domain.Run, obs MissionRunObservation) error {
 	if attempt == nil || run == nil || !run.Status.Terminal() || !obs.Settled() || !attempt.State.HoldsConcurrency() {
 		return nil
 	}
@@ -390,11 +380,6 @@ func (s *Service) settleObservedAttempt(ctx context.Context, mission *domain.Mis
 	}
 	if err := s.publishMissionChanged(ctx, attempt.MissionID); err != nil {
 		return err
-	}
-	// A cancelled attempt is what the integrator asked for; only a worker
-	// that died without reporting is news to it.
-	if target == domain.AttemptFailed {
-		s.noticeIntegrator(ctx, mission, attemptEndedNotice(attempt))
 	}
 	return nil
 }
@@ -485,7 +470,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				slog.Warn("mission: observe attempt", "attempt", attempt.ID, "error", observeErr)
 				continue
 			}
-			if settleErr := s.settleObservedAttempt(ctx, mission, attempt, current, obs); settleErr != nil {
+			if settleErr := s.settleObservedAttempt(ctx, attempt, current, obs); settleErr != nil {
 				slog.Warn("mission: settle attempt", "attempt", attempt.ID, "error", settleErr)
 			}
 			if !obs.Settled() && attempt.CancelRequestedAt != nil {

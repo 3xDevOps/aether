@@ -154,28 +154,33 @@ not mean that a peer has read the message or understood it. A timed-out
 request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
-When a message, question, or reply is stored for a run launched in `tui`
-mode, Aether also types one line into that run's terminal:
+Aether does not type automated coordination messages into terminals. Install
+the [copyable native hooks](harnesses.md#incoming-coordination-hooks) for your
+harness. At its supported lifecycle boundaries, a hook checks `coord.status`
+and adds a trusted instruction to read the inbox when messages are pending.
+It never acknowledges a batch or promotes a peer's message body into system
+instructions. The agent reads the original, attributed payload through `inbox`.
 
-```
-aether: New coordination message from run <sender run ID>. Run /usr/local/bin/aether-internal inbox to read it, then acknowledge the batch with --ack.
-```
+Hooks also direct agents with overlapping edits to `status`. Integrators get
+instructions to refresh `mission plan show` for human answers and decisions,
+and `worker list` for worker attempts, before waiting or declaring completion.
+Those APIs remain authoritative; no terminal notice is required.
 
-The line is a hint, not delivery: it fires once per burst, so further
-messages stay silent until the run next reads its inbox, and it is never
-sent to a headless run, whose harness does not read its terminal. A run
-whose terminal is not attached yet, for example right after a server restart, gets no
-line and nothing is lost; the inbox remains the authoritative source. The
-same rule applies to the conflict radar's overlap banner: only a `tui` run
-receives it, and a headless run is not counted as told.
+A blocked mission-worker report is forwarded to the current integrator as an
+ordinary inbox message: `from_run_id` is the reporting worker, `body` is its
+complete report summary, and `correlation_id` is the report ID. This message
+uses the same durable delivery and explicit acknowledgement as peer messages.
+If the inbox is full, the existing report-publication retry retains the work.
 
-Accepted messages, questions, and replies are attributed to their originating
-run and appended to the workspace timeline. These coordination notices are
-server-originated events with an empty actor identity; ownership changes cannot
-rewrite their historical attribution. The timeline records durable server
-acceptance, and a `coordination notice: message from run <sender>` note on the
-recipient's run when the terminal line was written; neither implies that the
-recipient has read the item.
+Delivery is boundary-driven. Mail arriving after the harness becomes idle
+waits for its next supported hook or an explicit inbox read. Hooks do not
+start exited headless runs. Missing, disabled, untrusted, or failed hooks do
+not lose mail; inspect the real harness error and read the inbox manually.
+Human terminal input and steering are unchanged.
+
+Accepted messages, questions, and replies retain their originating run in the
+workspace timeline. Timeline acceptance and hook execution do not prove that
+the recipient read or handled an item; there is no terminal-delivery stamp.
 
 ## `aether-internal` CLI
 
@@ -189,9 +194,9 @@ No skill package, manual identity argument, or credential setup is required.
 Run `skill` before acting so the assignment and capabilities come from current
 server state rather than copied prompt text.
 
-All commands below run inside the container. Commands other than `skill` and
-help write one JSON object followed by a newline. Successful commands use this
-shape:
+All commands below run inside the container. State commands write one JSON
+object followed by a newline. `skill`, help, and `hook` have their own output
+formats. Successful state commands use this shape:
 
 ```json
 {"schema_version":"v3","ok":true,"result":{}}
@@ -276,6 +281,38 @@ need run state return `-32004` and exit with status 4 when the socket is not
 available. Message, question, reply, and report bodies read from flags, files,
 or standard input are capped at 4 KiB before a request is sent.
 
+`skill` also checks the standard hook configuration locations without changing
+them. It reports configured, missing, invalid, disabled, or unverified
+installations and prints the matching file-export command, destination, merge
+instructions, and reload/trust steps. Install only the current harness.
+Configured on disk does not mean loaded or trusted. Explicit configuration
+paths, additional project ancestors, packages, and runtime overrides can be
+outside this bounded check.
+
+### Native hook files and handler
+
+```sh
+aether-internal hook file
+aether-internal hook file claude.json
+aether-internal hook --help
+```
+
+The files are embedded in the mounted binary, so installation needs no download.
+Exporting a file needs no socket. Merge JSON hook entries rather than replacing
+existing settings; copy extensions only after checking the destination.
+See [harness installation](harnesses.md#incoming-coordination-hooks) for each
+destination and the generic skeleton.
+
+The supplied files invoke `aether-internal hook <harness> <event>`. Command hooks
+read native JSON on stdin and write that harness's native JSON response.
+Extension hooks use event `context` and receive plain trusted context text.
+With no pending mail or applicable overlap/mission guidance, stdout is empty.
+A missing coordination socket also produces no output, so a user-level hook
+can stay installed outside Aether. An existing but broken socket or other
+failure returns nonzero and the actual error on stderr, never a success hint.
+Stop hooks continue only for pending mail and do not repeat a forced continuation.
+
+
 ### Send a message
 
 ```sh
@@ -302,9 +339,9 @@ when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
 
-For the terminal line that announces a new message to a `tui` run, see
-[delivery and acknowledgement](#delivery-acknowledgement-and-retries). A
-headless run reads the inbox at its checkpoints.
+Native hooks announce pending messages at supported lifecycle boundaries in
+interactive or headless runs where the harness supports that event. Check
+the inbox before waiting or reporting even when hooks are installed.
 
 ### The mission plan gate
 

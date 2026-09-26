@@ -142,6 +142,113 @@ admission. Expired or unavailable runs cannot relaunch. A deployment-supplied
 argv override receives no registry-only flags, because nothing checks that the
 override is still the registered CLI. See [failure-handling.md](failure-handling.md).
 
+## Incoming coordination hooks
+
+Incoming messages use the existing run mailbox and native harness hooks, not
+terminal keystrokes. These copyable integrations are separate from the
+automatic **status reporters** below: a reporter tells Aether what the agent
+is doing; an inbox hook tells the agent to read pending messages.
+
+Inside the run, inspect installation and print the files from the mounted CLI:
+
+```sh
+aether-internal skill
+aether-internal hook file
+aether-internal hook file claude.json
+```
+
+| Harness | File to export | Default installation destination |
+| --- | --- | --- |
+| Claude Code | `claude.json` | Merge into `~/.claude/settings.json` |
+| Codex | `codex.json` | Merge into `~/.codex/hooks.json` |
+| oh-my-pi | `omp.ts` | `~/.omp/agent/extensions/aether.ts` |
+| OpenCode V1 | `opencode-v1.js` | `~/.config/opencode/plugins/aether.js` |
+| OpenCode V2 | `opencode-v2.js` | `.opencode/plugins/aether.js`; use only the V2 API |
+| GitHub Copilot CLI | `copilot.json` | Merge into `~/.copilot/hooks/aether.json` |
+| Gemini CLI | `gemini.json` | Merge into `~/.gemini/settings.json` |
+| Cursor CLI | `cursor.json` | Merge into `~/.cursor/hooks.json` |
+| Native pi | `pi.ts` | `~/.pi/agent/extensions/aether.ts` |
+| Unlisted harness | `generic.sh` | Adapt to its documented context hook |
+
+Hook files do not add built-in launch profiles for additional CLIs. Use a
+deployment-defined harness where the registry has no profile.
+
+For JSON, append missing Aether entries to each `hooks` event array, preserving
+all unrelated settings and hooks. Do not install duplicates at both user and
+project scope. Copilot and Cursor snippets include `version: 1`; resolve a
+different existing version rather than overwriting it. The commands call
+`/usr/local/bin/aether-internal` directly; no extra shell script, `jq`, or
+Python is needed.
+
+For a new OMP extension installation:
+
+```sh
+mkdir -p "$HOME/.omp/agent/extensions"
+test ! -e "$HOME/.omp/agent/extensions/aether.ts" &&
+  aether-internal hook file omp.ts > "$HOME/.omp/agent/extensions/aether.ts"
+```
+
+If the destination exists, inspect it before editing. TypeScript/JavaScript
+extensions need no executable bit. If adapting `generic.sh` as an executable
+command, copy it to the selected harness's hook directory, run `chmod +x` on
+that file, and adapt its plain context output to the native response format.
+The skeleton has no background loop and does not acknowledge mail.
+
+`skill` resolves documented environment roots, including `CLAUDE_CONFIG_DIR`,
+`CODEX_HOME`, `COPILOT_HOME`, and `PI_CODING_AGENT_DIR`. `GEMINI_CLI_HOME` names
+the **parent** of `.gemini`. OMP profiles change the agent directory; confirm
+it with `omp config path`. The checker also looks in the current directory's
+project configuration; it does not infer CLI-only overrides or scan every
+ancestor/package. Cursor custom configuration variables do not establish a
+documented relocation rule for `hooks.json`; verify those in the running CLI.
+
+Restart the harness after installation. Native pi also supports `/reload`.
+Review Codex's exact hook definitions in `/hooks`; installation and project
+trust do not grant hook trust. Use the harness's normal trust UI, preserve
+managed policy and intentional disable settings, and inspect real load errors.
+Gemini's `/hooks list` shows loaded registrations. `skill` is read-only and
+reports disk configuration, not runtime activation.
+
+### Delivery boundaries and supported APIs
+
+- Claude Code: `SessionStart`, `UserPromptSubmit`, `PostToolBatch`, `Stop`.
+- Codex: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`.
+- Copilot CLI: `sessionStart`, `postToolUse`, `agentStop`. Config-file
+  `userPromptSubmitted` output is not used for context delivery.
+- Gemini CLI: `BeforeAgent`, `AfterTool`, `AfterAgent`.
+- Cursor CLI: `sessionStart`, `postToolUse`, `stop`. Older `--print` releases,
+  including 2026.08.11-e8db854, omit `stop`; verify the installed version.
+  Another stop hook can supersede its `followup_message`.
+- Native pi and OMP: the main session's per-model `context` event.
+- OpenCode: a per-model context hook, bound to the first explicitly prompted
+  root session for that plugin lifetime. Child and sibling sessions do not
+  take over the run's mailbox; restart the plugin host to select another root.
+
+The extension contracts target native pi 0.87.1, OMP 18.3.1, OpenCode
+V1 1.18.32, and OpenCode V2 2.0.18 (`@opencode/cli` with `@opencode/plugin`).
+Do not load both OpenCode files or assume V1/V2 compatibility. Pi binds the
+first native session and follows its new/resume/fork lifecycle; OMP uses its
+existing main agent registry. Independent multi-root SDK hosts are not supported.
+Command-hook contracts follow the current vendor references:
+[Claude](https://code.claude.com/docs/en/hooks),
+[Codex](https://learn.chatgpt.com/docs/hooks),
+[Copilot](https://docs.github.com/en/copilot/reference/hooks-reference),
+[Gemini](https://geminicli.com/docs/hooks/reference/), and
+[Cursor](https://cursor.com/docs/hooks). Older harness releases may lack
+these events or context outputs.
+
+Hooks add only trusted Aether guidance, never peer bodies at system/developer
+priority. The agent reads `aether-internal inbox`, processes the attributed
+messages, and explicitly acknowledges the returned token. Empty mail produces
+no inbox hint; active overlap and integrator refresh guidance can still appear.
+Printing context is not acknowledgement.
+
+There is no idle watcher: mail waits for the next supported native boundary.
+Stop hooks can request one continuation for mail already pending at completion,
+but do not override an aborted Cursor turn or repeatedly force continuation.
+Hooks cannot restart exited headless runs. Without working hooks, read the
+inbox explicitly. See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries).
+
 ## Status reporting
 
 **Needs you** means the agent is waiting for you, or the run stalled. The

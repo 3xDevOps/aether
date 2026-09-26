@@ -24,7 +24,7 @@ func TestCancelEndsAMissionInEveryPhaseBeforeApproval(t *testing.T) {
 		domain.MissionPhasePlanning:  func(*testing.T, *planGateFixture) {},
 		domain.MissionPhaseClarified: func(t *testing.T, f *planGateFixture) { f.clarify(t, "1") },
 		domain.MissionPhasePlanReview: func(t *testing.T, f *planGateFixture) {
-			f.proposeAndSubmit(t, "1")
+			f.proposeAndSubmit(t)
 		},
 	} {
 		t.Run(string(phase), func(t *testing.T) {
@@ -80,7 +80,7 @@ func TestCancelRefusesAnApprovedOrEndedMission(t *testing.T) {
 	}
 
 	rejected := newPlanGateFixture(t)
-	version := rejected.proposeAndSubmit(t, "1")
+	version := rejected.proposeAndSubmit(t)
 	rejected.decide(t, version, domain.MissionPlanReject, "", "decide-reject-1")
 	if _, err := rejected.cancel(rejected.member.ID, "cancel-rejected"); !errors.Is(err, store.ErrMissionPhase) {
 		t.Fatalf("cancel in rejected = %v, want ErrMissionPhase", err)

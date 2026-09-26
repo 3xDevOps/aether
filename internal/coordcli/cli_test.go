@@ -156,9 +156,6 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 			if !strings.Contains(raw, "Role: "+role+"\n") || !strings.Contains(raw, "Run: run-current\n") {
 				t.Fatalf("skill lost live identity: %s", raw)
 			}
-			if !strings.Contains(raw, "A terminal line starting with aether: means a message or event is waiting\n") {
-				t.Fatalf("%s skill does not explain the terminal notice: %s", role, raw)
-			}
 			if role == "worker" {
 				if !strings.Contains(raw, "aether-internal task show --task-id task-current\n") ||
 					!strings.Contains(raw, "Task revision: 7\n") || !strings.Contains(raw, "Attempt ID: attempt-current\n") {

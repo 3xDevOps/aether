@@ -47,8 +47,8 @@ type Config struct {
 	ErrOut io.Writer
 }
 
-// Envelope is the stable output wrapper for every command except skill,
-// whose output is concise human-readable instructions by design.
+// Envelope is the stable output wrapper for state commands. Skill and help
+// write text; hook writes the harness's native response.
 type Envelope struct {
 	SchemaVersion string    `json:"schema_version"`
 	OK            bool      `json:"ok"`
@@ -77,9 +77,9 @@ func Execute(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 	return Run(ctx, args, Config{In: in, Out: out, ErrOut: errOut})
 }
 
-// Run executes one command and writes exactly one JSON envelope for success or
-// failure, except skill which writes its text directly. It never changes the
-// calling process's cwd or environment and never writes a user repository.
+// Run executes one command without changing the calling process's cwd,
+// environment, or repository. State commands write one JSON envelope; skill,
+// help, and hook use their documented output formats.
 func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	if cfg.Socket == "" {
 		cfg.Socket = defaultSocketPath
@@ -110,6 +110,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = status(ctx, cfg.Socket, args[1:])
 	case "skill":
 		return skill(ctx, cfg.Socket, args[1:], cfg.Out)
+	case "hook":
+		return hook(ctx, cfg, args[1:])
 	case "send":
 		result, err = send(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "inbox":
@@ -146,6 +148,7 @@ const topUsage = `usage: aether-internal <command> [options]
 Commands:
   status    inspect this run and its authorized peers
   skill     print the coordination workflow and live assignment
+  hook      run a native inbox hook or print a copyable integration file
   send      send a durable message to an authorized peer
   inbox     read the at-least-once inbox
   ask       ask an authorized peer a durable question
@@ -160,6 +163,7 @@ Run "aether-internal <command> --help" for command options.
 `
 
 var commandUsages = map[string]string{
+	"hook": hookUsage,
 	"status": `usage: aether-internal status [--json]
 
 Print this run's identity, assignment, authorized peers, unread count, and capabilities
@@ -167,8 +171,9 @@ in the v3 JSON envelope. --json is optional; output is always JSON.
 `,
 	"skill": `usage: aether-internal skill
 
-Print the bounded coordination workflow. Outside a coordinated run this still
-prints the general workflow, without claiming an identity or assignment.
+Print the coordination workflow, live assignment, and read-only hook installation
+checks. Missing integrations include commands to obtain copyable hook files.
+Outside a coordinated run this prints general guidance without claiming identity.
 `,
 	"send": `usage: aether-internal send --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
 
@@ -390,8 +395,8 @@ const skillWorkflow = `Coordination and completion:
 Stay within your assignment. Peers listed by status are reachable with send,
 ask, and reply; ask when a decision is theirs:
   aether-internal ask --help
-A terminal line starting with aether: means a message or event is waiting
-and names the command that reads it. Wait without reporting an outcome:
+Native hooks announce pending inbox items at harness lifecycle boundaries.
+Check the inbox before waiting or reporting. Wait without reporting an outcome:
   aether-internal inbox --wait 30
 Process the batch before acknowledging it: on the next inbox call pass
 --ack with that batch's ack_token. Without acknowledgement it may repeat.
@@ -487,6 +492,9 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 	}
 	if _, err := io.WriteString(out, skillBootstrap+skillWorkflow); err != nil {
 		return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
+	}
+	if err := writeHookInstallation(out); err != nil {
+		return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
 	}
 	return ExitOK, nil
 }

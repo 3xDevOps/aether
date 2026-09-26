@@ -145,8 +145,8 @@ func TestMissionPeerBeyondTheStatusBoundKeepsItsFiles(t *testing.T) {
 	}
 }
 
-// TestMissionRunSeesAndMessagesRadarPeers follows the overlap notice a
-// mission worker gets about a run outside its mission: status lists that
+// TestMissionRunSeesAndMessagesRadarPeers follows the hook context a
+// mission worker reads about a run outside its mission: status lists that
 // run with the shared files after the assignment peers, and the worker can
 // message or ask it, while a run it shares nothing with stays refused.
 func TestMissionRunSeesAndMessagesRadarPeers(t *testing.T) {
@@ -376,13 +376,30 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 
 	// The overlap persists untouched for 45 minutes - nothing calls the
 	// service - then clears in real time: the index reports a's set is
-	// now just c and publishes it. The banner for c, after the message
-	// notice the send above put in b's terminal, proves the event was
-	// consumed before the sends below.
+	// now just c and publishes it. Wait for the witnessed clear to be
+	// recorded before advancing the test clock.
 	h.advance(45 * time.Minute)
 	h.peers.pair(a, c, "src/other.go")
-	h.announce(t, a, events.OverlapPeer{RunID: c, Files: []string{"src/other.go"}})
-	h.waitForInjections(t, 2)
+	if _, err := h.bus.Publish(ctx, events.Event{
+		WorkspaceID: h.workspace, RunID: a,
+		Payload: events.OverlapPayload{With: []events.OverlapPeer{{RunID: c, Files: []string{"src/other.go"}}}},
+	}); err != nil {
+		t.Fatalf("publish overlap: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		h.svc.radar.mu.Lock()
+		peer := h.svc.radar.state[a][b]
+		observed := peer != nil && !peer.live && peer.lastSeen.Equal(h.now())
+		h.svc.radar.mu.Unlock()
+		if observed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("overlap clear was not consumed")
+		}
+		time.Sleep(time.Millisecond)
+	}
 
 	h.advance(DefaultGrace - time.Minute)
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-grace")); err != nil {
@@ -525,17 +542,6 @@ func TestSendStampsOneWorkspaceNote(t *testing.T) {
 	if !strings.Contains(p.Message, "coordination message to run "+string(b)) {
 		t.Fatalf("note = %q, want the outgoing stamp", p.Message)
 	}
-	// The recipient is interactive, so its terminal notice is stamped too.
-	select {
-	case delivered := <-timeline.Events():
-		dp, dok := delivered.Payload.(events.TimelinePayload)
-		if !dok || delivered.RunID != b || !strings.HasPrefix(dp.Message, "coordination notice: message from run ") {
-			t.Fatalf("second event = %+v, want the delivery stamp on the recipient's run", delivered)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the terminal notice was never stamped into the timeline")
-	}
-
 	// A second send is what proves the first left exactly one note: its own
 	// stamp is the next event on the stream, with nothing between them.
 	if _, serr := h.svc.Send(ctx, a, sendParams(b, "still on it")); serr != nil {
@@ -899,4 +905,79 @@ func TestCoordOutboxQuarantinesEventIDConflict(t *testing.T) {
 			t.Fatalf("audit conflict state = %+v, want one quarantined attempt", pub)
 		}
 	})
+}
+
+type blockedReportMission struct {
+	missionTransportStub
+	worker     domain.RunID
+	integrator domain.RunID
+}
+
+func (m blockedReportMission) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
+	if run == m.worker {
+		return protocol.CoordMissionAssignment{
+			MissionID: "mission-1", Role: "worker", IntegratorRunID: string(m.integrator),
+		}, nil
+	}
+	return protocol.CoordMissionAssignment{MissionID: "mission-1", Role: "integrator"}, nil
+}
+
+func TestBlockedReportRetriesFullInboxAndPreservesWorkerReason(t *testing.T) {
+	ctx := context.Background()
+	capture := &coordReportEvidenceCapture{id: "blocked-packet"}
+	h := newHarness(t, 2, func(c *Config) { c.Evidence = capture })
+	worker, integrator := h.run(0), h.run(1)
+	h.svc.cfg.Mission = blockedReportMission{worker: worker, integrator: integrator}
+	for range protocol.CoordMaxUnread {
+		if err := h.db.AppendRunMessage(ctx, &store.RunMessage{
+			WorkspaceID: h.workspace, FromRun: worker, ToRun: integrator, Body: "earlier message",
+		}, protocol.CoordMaxUnread); err != nil {
+			t.Fatalf("fill inbox: %v", err)
+		}
+	}
+	summary := strings.Repeat("x", protocol.CoordMaxSummaryBytes)
+	result, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeBlocked, Summary: summary, IdempotencyKey: "blocked",
+	})
+	if rpcErr != nil {
+		t.Fatalf("retain blocked report: %v", rpcErr)
+	}
+	report, err := h.db.GetCoordReport(ctx, result.ReportID)
+	if err != nil || report.State != store.CoordReportFinalized || report.PublishedAt != nil {
+		t.Fatalf("full-inbox report = %+v, %v; want finalized with publication pending", report, err)
+	}
+	batch, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+	if rpcErr != nil {
+		t.Fatalf("read earlier messages: %v", rpcErr)
+	}
+	if _, ackErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: batch.AckToken}); ackErr != nil {
+		t.Fatalf("ack earlier messages: %v", ackErr)
+	}
+	if _, _, drainErr := h.svc.drainOutboxPage(ctx); drainErr != nil {
+		t.Fatalf("retry blocked publication: %v", drainErr)
+	}
+	status, rpcErr := h.svc.Status(ctx, integrator)
+	if rpcErr != nil || status.Unread != 1 {
+		t.Fatalf("blocked context = %+v, %v; want one pending message", status, rpcErr)
+	}
+	key := "coord-report-blocked:" + result.ReportID + ":" + string(integrator)
+	message, err := h.db.GetRunMessageByIdempotency(ctx, worker, key)
+	if err != nil || message.FromRun != worker || message.Body != summary || message.CorrelationID != result.ReportID ||
+		message.DeliveredAt != nil || message.AckedAt != nil {
+		t.Fatalf("undelivered blocked message = %+v, %v", message, err)
+	}
+	inbox, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{})
+	if rpcErr != nil || len(inbox.Messages) != 1 || inbox.Messages[0].Body != summary ||
+		inbox.Messages[0].FromRunID != string(worker) || inbox.Messages[0].CorrelationID != result.ReportID {
+		t.Fatalf("blocked inbox = %+v, %v", inbox, rpcErr)
+	}
+	if _, rpcErr := h.svc.Inbox(ctx, integrator, protocol.CoordInboxParams{AckToken: inbox.AckToken}); rpcErr != nil {
+		t.Fatalf("ack blocked message: %v", rpcErr)
+	}
+	if err := h.svc.enqueueBlockedReport(ctx, report); err != nil {
+		t.Fatalf("replay blocked message: %v", err)
+	}
+	if unread, err := h.db.CountUnackedRunMessages(ctx, integrator); err != nil || unread != 0 {
+		t.Fatalf("replayed blocked unread = %d, %v; want zero after explicit ack", unread, err)
+	}
 }
