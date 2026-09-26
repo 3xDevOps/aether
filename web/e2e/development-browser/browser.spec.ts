@@ -32,6 +32,11 @@ test('real shared login, HMR, popups, watcher takeover and stale authority', asy
     await page.getByRole('button', { name: 'Close page', exact: true }).click()
     await fixture.waitText('Signed in as test@example.invalid')
     expect((await fixture.currentPage()).page_id).toBe(beforePopup.page_id)
+    // Closing the streamed page disconnects its controller; the surviving
+    // page is observed first and requires an explicit new acquisition.
+    await expect(page.getByText(/Watch mode · Controller: Nobody/)).toBeVisible()
+    await page.getByRole('button', { name: 'Acquire control', exact: true }).click()
+    await expect(page.getByText(/You control this browser/)).toBeVisible()
 
     const stalePage = await fixture.currentPage()
     const ownership = await fixture.member.api.rpc<DevControlStatusResult>('dev.control.status', { run_id: fixture.runID, surface: { kind: 'browser', id: 'browser', incarnation: stalePage.session_id } })
@@ -61,6 +66,10 @@ test('real shared login, HMR, popups, watcher takeover and stale authority', asy
       watchPage.once('dialog', (dialog) => void dialog.accept())
       await watchPage.getByRole('button', { name: 'Reset session', exact: true }).click()
       await expect.poll(async () => (await fixture.member.api.rpc<{ session_id: string }>('dev.browser.status', { run_id: fixture.runID })).session_id).not.toBe(stalePage.session_id)
+      const reset = await fixture.member.api.rpc<{ session_id: string }>('dev.browser.status', { run_id: fixture.runID })
+      // The backend reset can finish before the pane observes its new identity.
+      // Acquire only after the rendered surface has dropped the old fence.
+      await expect(watchPage.getByText(reset.session_id, { exact: false })).toBeVisible()
       await expect(watchPage.getByRole('button', { name: 'Open browser', exact: true })).toBeDisabled()
       await watchPage.getByRole('button', { name: 'Acquire control', exact: true }).click()
       await watchPage.getByRole('button', { name: 'Open browser', exact: true }).click()

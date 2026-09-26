@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import type { DevControlStatusResult, DevTerminalListResult } from '../../src/lib/types'
+import type { DevControlStatusResult, DevTerminalListResult, DevTerminalScreenshotResult } from '../../src/lib/types'
 import { expect, test } from '../fixtures'
 import { dockerReachable } from '../harness/server'
 import { memberID, seedWorkspace } from '../harness/setup'
@@ -130,12 +130,28 @@ test('agent-created TUI shares authority, geometry, protocol responses and proce
   await dock.getByRole('button', { name: 'Take shell control' }).click()
   if (await page.getByRole('button', { name: 'Confirm takeover' }).isVisible()) await page.getByRole('button', { name: 'Confirm takeover' }).click()
   await expect(dock.getByRole('button', { name: 'Release shell control' })).toBeVisible()
+  // A first capture includes companion launch and has a bounded 90s API
+  // lifecycle; do not abort that request at the ordinary 30s locator limit.
+  const captureResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/dev.terminal.screenshot'), { timeout: 95_000 })
   await dock.getByRole('button', { name: 'Screenshot', exact: true }).click()
+  const captured = await captureResponse
+  expect(captured.ok(), await captured.text()).toBe(true)
+  const { artifact } = await captured.json() as DevTerminalScreenshotResult
+  expect(artifact).toMatchObject({ source: 'terminal', run_id: run.id, terminal_id: terminal.terminal_id, incarnation: terminal.incarnation })
+  const image = await fetch(new URL(`/api/v1/dev/${run.id}/artifacts/${artifact.id}`, alice.url), {
+    headers: { authorization: `Bearer ${new URL(alice.url).searchParams.get('token')}` },
+    signal: AbortSignal.timeout(30_000),
+  })
+  expect(image.status).toBe(200)
+  expect(image.headers.get('content-type')).toBe('image/png')
+  await testInfo.attach('shared-terminal-capture', { body: Buffer.from(await image.arrayBuffer()), contentType: 'image/png' })
+  await testInfo.attach('shared-terminal-capture-metadata', { body: JSON.stringify(artifact), contentType: 'application/json' })
   await expect(dock.getByRole('status').filter({ hasText: /Captured/ })).toBeVisible()
   await dock.getByRole('button', { name: 'Stop terminal' }).click()
   await page.getByRole('button', { name: 'Confirm stop' }).click()
   await expect.poll(async () => (await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.process.state).not.toBe('running')
   await page.reload()
+  await page.getByRole('complementary', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   await page.getByRole('region', { name: 'Terminal dock' }).getByRole('tab', { name: /agent-tui/ }).click()
   await expect(page.getByRole('region', { name: 'Terminal dock' }).getByRole('button', { name: 'Stop terminal' })).toBeDisabled()
   expect(file('starts')).toBe('start\n')
