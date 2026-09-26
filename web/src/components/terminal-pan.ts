@@ -5,7 +5,7 @@ export function useTerminalPan(terminal: Terminal | null, enabled: boolean) {
   useLayoutEffect(() => {
     const host = terminal?.element?.parentElement
     if (!enabled || !terminal || !host) return
-    let touch: { x: number; y: number; moved: boolean } | null = null
+    let touch: { x: number; y: number; moved: boolean; panned: boolean } | null = null
     let following = true
     let frame = 0
 
@@ -16,20 +16,23 @@ export function useTerminalPan(terminal: Terminal | null, enabled: boolean) {
       if (!screen) return
       const bounds = screen.getBoundingClientRect()
       const viewport = host.getBoundingClientRect()
+      // client sizes round fractional CSS dimensions; keep the entire cell inside.
+      const height = Math.floor(viewport.height - host.offsetHeight + host.clientHeight)
       const buffer = terminal.buffer.active
       const cellHeight = bounds.height / terminal.rows
       const top = bounds.top - viewport.top + host.scrollTop +
         (buffer.baseY + buffer.cursorY - buffer.viewportY) * cellHeight
-      if (top < host.scrollTop) host.scrollTop = top
-      else if (top + cellHeight > host.scrollTop + host.clientHeight) {
-        host.scrollTop = top + cellHeight - host.clientHeight
+      if (top < host.scrollTop) host.scrollTop = Math.floor(top)
+      else if (top + cellHeight > host.scrollTop + height) {
+        host.scrollTop = Math.ceil(top + cellHeight - height)
       }
       if (terminal.textarea === document.activeElement) {
+        const width = Math.floor(viewport.width - host.offsetWidth + host.clientWidth)
         const cellWidth = bounds.width / terminal.cols
         const left = bounds.left - viewport.left + host.scrollLeft + buffer.cursorX * cellWidth
-        if (left < host.scrollLeft) host.scrollLeft = left
-        else if (left + cellWidth > host.scrollLeft + host.clientWidth) {
-          host.scrollLeft = left + cellWidth - host.clientWidth
+        if (left < host.scrollLeft) host.scrollLeft = Math.floor(left)
+        else if (left + cellWidth > host.scrollLeft + width) {
+          host.scrollLeft = Math.ceil(left + cellWidth - width)
         }
       }
     }
@@ -39,7 +42,7 @@ export function useTerminalPan(terminal: Terminal | null, enabled: boolean) {
     const resume = () => { following = true; schedule() }
     const start = (event: TouchEvent) => {
       const point = event.touches.length === 1 ? event.touches[0] : undefined
-      touch = point ? { x: point.clientX, y: point.clientY, moved: false } : null
+      touch = point ? { x: point.clientX, y: point.clientY, moved: false, panned: false } : null
     }
     const move = (event: TouchEvent) => {
       const point = event.touches[0]
@@ -53,16 +56,20 @@ export function useTerminalPan(terminal: Terminal | null, enabled: boolean) {
       following = false
       const horizontal = Math.abs(dx) > Math.abs(dy)
       if (!horizontal && host.scrollHeight <= host.clientHeight) return
+      if (horizontal && (host.scrollWidth <= host.clientWidth ||
+        (dx < 0 && host.scrollLeft <= 0) ||
+        (dx > 0 && host.scrollLeft >= host.scrollWidth - host.clientWidth))) return
       // At the top of the shared screen, normal-buffer history owns the drag.
       if (!horizontal && dy < 0 && host.scrollTop <= 0 &&
         terminal.buffer.active === terminal.buffer.normal) return
+      touch.panned = true
       event.preventDefault()
       event.stopPropagation()
       if (horizontal) host.scrollLeft += dx
       else host.scrollTop += dy
     }
     const end = (event: TouchEvent) => {
-      if (touch?.moved) {
+      if (touch?.panned) {
         event.preventDefault()
         event.stopPropagation()
       }

@@ -17,7 +17,7 @@ const maxScrollPixels = 4_000_000
 
 type Row = { index: number; line: TerminalHistoryLine }
 type Viewport = { top: number; left: number; height: number; width: number }
-type CaptureIntent = { viewportY: number; left: number; delta: number }
+type CaptureIntent = { viewportY: number; top: number; left: number; delta: number }
 type PendingCapture = { terminal: Terminal; buffer: Terminal['buffer']['active']; intent: CaptureIntent; dispose: () => void }
 
 type TerminalHistoryProps = {
@@ -78,6 +78,8 @@ export function TerminalHistory({
   const scroller = useRef<HTMLDivElement>(null)
   const anchor = useRef<HistoryAnchor>({ row: 0, offset: 0, left: 0 })
   const lastTop = useRef(0)
+  // Detached hosts lose their scroll offsets before xterm's effect cleanup.
+  const livePan = useRef({ top: 0, left: 0, paddingTop: 0 })
   const maxColumns = useRef(0)
   const current = useRef<SavedHistoryView | null>(null)
   const previousScreen = useRef<FrozenTerminal | null>(null)
@@ -124,7 +126,8 @@ export function TerminalHistory({
       // terminal and retain the scroll intent if it beat the requested frame.
       const view = captureView(leaving, pending?.terminal === leaving ? pending.intent : {
         viewportY: leaving.buffer.normal.viewportY,
-        left: leaving.element?.parentElement?.scrollLeft ?? 0,
+        top: livePan.current.top,
+        left: livePan.current.left,
         delta: 0,
       })
       if (view) void cache.saveView(view)
@@ -255,7 +258,7 @@ export function TerminalHistory({
     const top = rowTop(viewportY, -count, screen.cellHeight)
     return {
       screen,
-      anchor: anchorAt(Math.max(0, top + intent.delta), intent.left, -count, screen.cellHeight),
+      anchor: anchorAt(Math.max(0, top + intent.top + intent.delta), intent.left, -count, screen.cellHeight),
     }
   }
 
@@ -264,8 +267,9 @@ export function TerminalHistory({
     if (terminal.buffer.active === terminal.buffer.alternate && !explicit) return
     const intent: CaptureIntent = {
       viewportY: terminal.buffer.normal.viewportY,
+      top: Math.max(0, (terminal.element?.parentElement?.scrollTop ?? 0) - livePan.current.paddingTop),
       left: terminal.element?.parentElement?.scrollLeft ?? 0,
-      delta: delta + (terminal.element?.parentElement?.scrollTop ?? 0),
+      delta,
     }
     const pending = pendingCapture.current
     if (pending?.terminal === terminal && pending.buffer === terminal.buffer.active) {
@@ -308,6 +312,12 @@ export function TerminalHistory({
     const host = terminal?.element?.parentElement
     if (!terminal || !host || !enabled || restoring || frozen) return
     const normal = () => terminal.buffer.active === terminal.buffer.normal
+    livePan.current.paddingTop = Number.parseFloat(getComputedStyle(host).paddingTop) || 0
+    const rememberPan = () => {
+      livePan.current.top = Math.max(0, host.scrollTop - livePan.current.paddingTop)
+      livePan.current.left = host.scrollLeft
+    }
+    rememberPan()
     const wheel = (event: WheelEvent) => {
       if (!normal() || event.defaultPrevented || host.scrollTop > 0 || event.deltaY >= 0 || event.ctrlKey) return
       event.preventDefault()
@@ -348,6 +358,7 @@ export function TerminalHistory({
     const pointerDown = (event: PointerEvent) => {
       if (event.target instanceof Element &&
         event.target.closest('.xterm-scrollable-element > .scrollbar')) {
+        rememberPan()
         scrollbarPointer.current = event.pointerId
       }
     }
@@ -363,6 +374,7 @@ export function TerminalHistory({
         terminal.buffer.normal.viewportY < terminal.buffer.normal.baseY) enter()
     })
     host.addEventListener('pointerdown', pointerDown, true)
+    host.addEventListener('scroll', rememberPan, { passive: true })
     document.addEventListener('pointerup', pointerEnd)
     document.addEventListener('pointercancel', pointerEnd)
     host.addEventListener('wheel', wheel, { capture: true, passive: false })
@@ -371,6 +383,7 @@ export function TerminalHistory({
     host.addEventListener('touchmove', touchMove, { capture: true, passive: false })
     return () => {
       nativeScroll.dispose()
+      host.removeEventListener('scroll', rememberPan)
       host.removeEventListener('pointerdown', pointerDown, true)
       document.removeEventListener('pointerup', pointerEnd)
       document.removeEventListener('pointercancel', pointerEnd)

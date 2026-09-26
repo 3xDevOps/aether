@@ -314,6 +314,7 @@ live grid, then continues into recorded history. Swipe toward newer output
 to return live at the bottom. An oversized alternate screen can be panned
 the same way, without entering history. When the grid fits vertically,
 alternate-screen scrolling remains with the running application.
+Horizontal drags remain native when the grid cannot pan in that direction.
 The phone follows a desktop viewer's resizes; watching, steering, panning
 and opening the keyboard never change the shared PTY size.
 

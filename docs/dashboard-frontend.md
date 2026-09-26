@@ -1450,6 +1450,9 @@ A following terminal therefore:
   On phones the live terminal host exposes both axes. `useTerminalPan`
   reveals the cursor on entry, focus, input and viewport changes, without
   resizing xterm; a manual pan pauses following until focus or input resumes it.
+  It rounds fractional viewport bounds inward so the whole cursor cell remains visible.
+  History capture keeps the absolute outer pan offset separate from
+  accumulated gesture deltas, including when disposal beats the next paint.
   The integrated run-history surface owns both axes while reading, with
   live-grid panning disabled. Steering still keeps this viewer out of the
   shared size calculation.
