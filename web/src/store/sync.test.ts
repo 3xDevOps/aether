@@ -1230,6 +1230,114 @@ describe('connect', () => {
     socket.onmessage?.({ data: JSON.stringify(ev) })
   }
 
+  it('coalesces mission hints without delaying run events or overwriting their state', async () => {
+    const store = createRootStore()
+    const retired = run({ id: 'old-integrator', mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'old-integrator' })
+    const worker = run({ id: 'worker', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: retired.id })
+    const deleted = run({ id: 'deleted' })
+    const unrelated = run({ id: 'unrelated', workspace_id: otherWorkspace.id })
+    const replacement = run({ id: 'new-integrator', mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'new-integrator' })
+    const refresh = Promise.withResolvers<Run[]>()
+    const listed = [run({ id: retired.id }), { ...worker, integrator_run_id: replacement.id }, deleted, replacement]
+    const runList = vi.fn()
+      .mockResolvedValueOnce([retired, worker, deleted, unrelated])
+      .mockImplementationOnce(() => refresh.promise)
+      .mockResolvedValue(listed)
+    const client = fakeApi({ runList, runGet: vi.fn(async () => replacement) })
+    const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.setState({ activeWorkspace: otherWorkspace.id, route: { name: 'overview', params: {} } })
+      const hint = (seq: number) => statusEvent({ seq, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1' } })
+      deliver(socket, hint(1))
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(2))
+      deliver(socket, hint(2))
+      deliver(socket, hint(3))
+      deliver(socket, statusEvent({ seq: 4, run_id: replacement.id }))
+      deliver(socket, statusEvent({ seq: 5, run_id: worker.id, payload: { to: 'failed' } }))
+      deliver(socket, statusEvent({ seq: 6, run_id: deleted.id, type: 'run.deleted' }))
+      deliver(socket, statusEvent({ seq: 7, workspace_id: otherWorkspace.id, run_id: unrelated.id, payload: { to: 'completed' } }))
+      await vi.waitFor(() => expect(store.getState().lastSeq).toBe(7))
+      expect(store.getState().runs[unrelated.id].status).toBe('completed')
+      expect(runList).toHaveBeenCalledTimes(2)
+
+      refresh.resolve(listed)
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(3))
+      await vi.waitFor(() => expect(store.getState().runs[worker.id].integrator_run_id).toBe(replacement.id))
+      const state = store.getState()
+      expect(state.runs[retired.id].mission_role).toBeUndefined()
+      expect(state.runs[replacement.id].mission_role).toBe('integrator')
+      expect(state.runs[worker.id].status).toBe('failed')
+      expect(state.runs[deleted.id]).toBeUndefined()
+      expect(state.runs[unrelated.id].workspace_id).toBe(otherWorkspace.id)
+    } finally {
+      stop()
+    }
+  })
+
+  it('repairs a failed mission projection with a fresh hydration', async () => {
+    const store = createRootStore()
+    const runList = vi.fn()
+      .mockResolvedValueOnce([run()])
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValue([run({ mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'run_1' })])
+    const stop = connect(store, fakeApi({ runList }))
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      deliver(socket, statusEvent({ type: 'mission.changed', run_id: '', payload: { mission_id: 'mission_1' } }))
+      await vi.waitFor(() => expect(store.getState().runs.run_1.mission_role).toBe('integrator'))
+      expect(store.getState().unreachable).toBeNull()
+    } finally {
+      stop()
+    }
+  })
+
+  it.each(['response', 'error'] as const)('hydrates on reconnect without waiting for an obsolete mission %s', async (outcome) => {
+    const store = createRootStore()
+    const worker = run({ mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'old-integrator' })
+    const activeRun = run({ id: 'active-run', workspace_id: otherWorkspace.id })
+    const refresh = Promise.withResolvers<Run[]>()
+    const refreshedWorker = { ...worker, integrator_run_id: 'new-integrator' }
+    const runList = vi.fn()
+      .mockResolvedValueOnce([worker, activeRun])
+      .mockImplementationOnce(() => refresh.promise)
+      .mockResolvedValueOnce([refreshedWorker, { ...activeRun, status: 'completed' }])
+      .mockResolvedValue([{ ...refreshedWorker, integrator_run_id: 'latest-integrator' }])
+    const client = fakeApi({
+      runList,
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods: ['*'], ws: ['events'] })),
+    })
+    const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.setState({ activeWorkspace: otherWorkspace.id })
+      deliver(socket, statusEvent({ seq: 1, run_id: '', type: 'mission.changed' }))
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(2))
+      socket.onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2), { timeout: 2000 })
+      const reconnected = await subscribe()
+      await vi.waitFor(() => expect(store.getState().runs[activeRun.id].status).toBe('completed'))
+      expect(store.getState().runs[worker.id].integrator_run_id).toBe('new-integrator')
+
+      deliver(reconnected, statusEvent({ seq: 2, run_id: '', type: 'mission.changed' }))
+      await vi.waitFor(() => expect(store.getState().runs[worker.id].integrator_run_id).toBe('latest-integrator'))
+      if (outcome === 'response') refresh.resolve([worker])
+      else refresh.reject(new TypeError('obsolete request failed'))
+      await refresh.promise.catch(() => {})
+      await Promise.resolve()
+      expect(store.getState().runs[worker.id].integrator_run_id).toBe('latest-integrator')
+      expect(store.getState().runs[activeRun.id].status).toBe('completed')
+      expect(store.getState().unreachable).toBeNull()
+      expect(store.getState().hydrationError).toBeNull()
+    } finally {
+      refresh.resolve([])
+      stop()
+    }
+  })
+
   it('waits for the subscription acknowledgement before it hydrates', async () => {
     const client = fakeApi()
     const store = createRootStore()

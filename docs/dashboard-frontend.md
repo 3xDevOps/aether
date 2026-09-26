@@ -285,10 +285,29 @@ overflow when all destinations do not fit. The adjacent sidebar defaults to
 are clamped when rendered. Runs, the attention count, New run, and Status /
 Member stay on one row; a phone drawer remains bounded by its viewport.
 
-The sidebar is a workspace switcher over a flat list of that workspace's runs.
-There is no run tree: one workspace is in view at a time, so the runs group
-instead by state or by owning member (`groupBy`, persisted). Rows and headers
-are compact rather than a lower navigation card.
+The sidebar scopes runs to the selected workspace and groups them by state or
+owning member (`groupBy`, persisted). A swarm is a mission whose integrator
+coordinates worker runs, shown as subsessions. Its current integrator carries
+an **Integrator** badge; subsessions sit directly below it with indented tree
+guides, including finished workers. Each row keeps its own state dot, owner
+color, harness, and navigation target.
+
+Swarm rows stay together in both grouping modes. **Member** uses the
+integrator's owner; **Status** uses the most urgent run in the swarm, so a
+worker needing attention keeps the tree out of the collapsed Done group.
+Trees and their subsessions sort by attention, then most recent change.
+Group counts include subsessions. If an integrator is missing or archived,
+its visible workers remain top-level rows marked **Subsession**.
+
+Relationships come from the run snapshot's `mission_id`, `mission_role`, and
+`integrator_run_id`, not task text or the currently opened mission page.
+`mission.changed` coalesces background refreshes of those relationship fields,
+including when another workspace is selected, without blocking run-status
+events or overwriting newer run state. Reconnect hydration supersedes pending
+relationship requests without waiting for them; their late responses and
+errors cannot change the fresh snapshot. Replacing an integrator moves its
+workers under the replacement and removes the old run's badge. Older servers
+that omit these fields retain the flat list.
 
 Every rendered group header is a disclosure button with its run count. When
 grouped by **Status**, every status header toggles its own member rows; `Done`
@@ -324,10 +343,10 @@ way.
   is a choice: a single workspace renders as a plain label with its base branch
   under it, because a picker with one option is a control that cannot be used.
 - **The runs come from `sidebarRuns`/`sidebarGroups`** in
-  `src/store/selectors.ts`, filtered to `activeWorkspace` and sorted
-  worst-state-first, then most-recently-changed-first, so what needs a human is
-  at the top of whichever group it is in. An empty scope shows every run, which
-  is what the list falls back to before hydration has named a workspace.
+  `src/store/selectors.ts`, filtered to `activeWorkspace`. `sidebarRuns`
+  keeps the flat attention-ordered list for other run surfaces;
+  `sidebarGroups` assembles the sidebar's swarm trees. An empty scope shows
+  every run until hydration names a workspace.
 - **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
