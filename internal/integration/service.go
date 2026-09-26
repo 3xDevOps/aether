@@ -63,6 +63,7 @@ type Store interface {
 	UpdateIntegrationCandidate(context.Context, *store.IntegrationCandidate, int64) error
 	ListIntegrationCandidates(context.Context, domain.WorkspaceID, int) ([]*store.IntegrationCandidateSummary, error)
 	ListIntegrationCleanupCandidatesAfter(context.Context, time.Time, string, int) ([]*store.IntegrationCandidate, error)
+	ListIntegrationCandidateIDs(context.Context, domain.WorkspaceID) ([]string, error)
 	DeleteIntegrationCandidate(context.Context, string, int64) error
 }
 
@@ -98,25 +99,26 @@ type Config struct {
 	Now            func() time.Time
 }
 type Service struct {
-	store          Store
-	git            Git
-	evidence       EvidenceSource
-	runtime        runtime.Runtime
-	root           string
-	environment    func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
-	prepareRuntime func(context.Context, *runtime.Spec) error
-	releaseRuntime func(context.Context, string) error
-	admission      AdmissionFunc
-	now            func() time.Time
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	life           sync.Mutex
-	closed         bool
-	active         map[string]context.CancelFunc
-	locks          sync.Map
-	asyncMu        sync.Mutex
-	asyncErr       error
+	store             Store
+	git               Git
+	evidence          EvidenceSource
+	runtime           runtime.Runtime
+	root              string
+	environment       func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
+	prepareRuntime    func(context.Context, *runtime.Spec) error
+	releaseRuntime    func(context.Context, string) error
+	admission         AdmissionFunc
+	now               func() time.Time
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	life              sync.Mutex
+	closed            bool
+	active            map[string]context.CancelFunc
+	locks             sync.Map
+	workspaceDeleteMu sync.RWMutex
+	asyncMu           sync.Mutex
+	asyncErr          error
 }
 
 func (s *Service) recordAsyncError(err error) {

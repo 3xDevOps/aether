@@ -134,6 +134,8 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 		return
 	}
 	defer s.releaseSyncChannel(member)
+	s.workspaceLifecycleMu.RLock()
+	defer s.workspaceLifecycleMu.RUnlock()
 
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
 	if err != nil {

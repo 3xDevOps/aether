@@ -241,6 +241,7 @@ async function local<T>(
   verb: string,
   params: unknown = {},
   signal?: AbortSignal,
+  keepalive = false,
 ): Promise<T> {
   const token = bearer()
   const res = await fetch(`/local/v1/${verb}`, {
@@ -255,6 +256,7 @@ async function local<T>(
     // needs that: leaving the step must stop the work, not just stop
     // waiting for it.
     signal,
+    keepalive,
   })
   if (!res.ok) {
     const err = await failure(res)
@@ -538,6 +540,8 @@ export const api = {
     call<{ workspaces: Workspace[] }>('workspace.list').then(
       (r) => r.workspaces,
     ),
+  workspaceDelete: (workspaceID: string) =>
+    call<{ ok: true }>('workspace.delete', { workspace_id: workspaceID }),
   workspaceSettings: (params: { workspace_id: string; steer_others?: string }) =>
     call<{ workspace: Workspace }>('workspace.settings', {
       workspace_id: params.workspace_id,
@@ -651,6 +655,13 @@ export const api = {
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   // The local gateway's client-machine verbs; see the `local` helper.
   localLinkStatus: () => local<LinkStatus>('link.status'),
+  localWorkspaceSelection: (workspaceID?: string) =>
+    local<{ workspace_id: string }>(
+      'workspace.selection',
+      { workspace_id: workspaceID },
+      undefined,
+      workspaceID !== undefined,
+    ),
   localLinkApply: (params: { addr: string; invite?: string; name?: string }) =>
     local<LinkApplyResult>('link.apply', params),
   localLinkRepo: (repo: string, workspaceID?: string) =>

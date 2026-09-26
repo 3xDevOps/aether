@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { message, timeAgo } from '@/lib/format'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,22 +20,32 @@ import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { useCapability, useIsAdmin } from '@/store/hooks'
 import { useDelayed } from '@/lib/hooks'
 
 export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
+  const isAdmin = useIsAdmin()
+  const canDelete = isAdmin && caps.hasMethod('workspace.delete')
   const navigate = useStore((s) => s.navigate)
-  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
+  const workspaceMap = useStore((s) => s.workspaces)
+  const workspaces = useMemo(() => Object.values(workspaceMap), [workspaceMap])
+  const [loaded, setLoaded] = useState(useStore.getState().hydrated)
+  const [deleting, setDeleting] = useState<Workspace | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const loading = useDelayed(workspaces === null && error === null)
+  const loading = useDelayed(!loaded && error === null)
+  const fetchVersion = useRef(0)
 
   const refetch = useCallback(async () => {
+    const version = ++fetchVersion.current
     setError(null)
     try {
-      setWorkspaces(await client.workspaceListFull())
+      const fresh = await client.workspaceListFull()
+      if (version !== fetchVersion.current) return
+      useStore.getState().setWorkspaces(fresh)
+      setLoaded(true)
     } catch (err) {
-      setError(message(err))
+      if (version === fetchVersion.current) setError(message(err))
     }
   }, [client])
 
@@ -37,7 +57,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
         title="Manage workspaces"
-        subtitle={workspaces ? `${workspaces.length} total` : 'Workspace scope and defaults'}
+        subtitle={loaded ? `${workspaces.length} total` : 'Workspace scope and defaults'}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1200px] min-w-0 flex-col gap-4 p-4 sm:p-6">
@@ -68,14 +88,14 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
               <h2 id="workspace-list-heading" className="text-[13px] font-semibold">
                 Workspaces
               </h2>
-              {workspaces && (
+              {loaded && (
                 <span className="text-xs text-muted-foreground">
                   {workspaces.length} {workspaces.length === 1 ? 'workspace' : 'workspaces'}
                 </span>
               )}
             </div>
 
-            {workspaces && workspaces.length > 0 ? (
+            {loaded && workspaces.length > 0 ? (
               <ul className="border-b" aria-label="Workspace list">
                 {workspaces.map((workspace) => (
                   <li
@@ -91,13 +111,24 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                           Created <time dateTime={workspace.created_at}>{timeAgo(workspace.created_at)}</time>
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => navigate('workspace', { workspaceId: workspace.id })}
-                      >
-                        Open
-                      </Button>
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate('workspace', { workspaceId: workspace.id })}
+                        >
+                          Open
+                        </Button>
+                        {canDelete && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setDeleting(workspace)}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <dl className="mt-3 grid min-w-0 gap-2 border-t pt-3 text-xs sm:grid-cols-2">
                       <div className="min-w-0">
@@ -118,7 +149,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                   </li>
                 ))}
               </ul>
-            ) : workspaces ? (
+            ) : loaded ? (
               <div className="border-b border-dashed px-3 py-8 text-center">
                 <p className="text-[13px] font-medium">No workspaces yet.</p>
                 {caps.hasMethod('workspace.add') && (
@@ -131,7 +162,88 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           </section>
         </div>
       </div>
+      {deleting && canDelete && (
+        <DeleteDialog
+          workspace={deleting}
+          client={client}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            const state = useStore.getState()
+            state.setWorkspaces(
+              Object.values(state.workspaces).filter((workspace) => workspace.id !== deleting.id),
+            )
+            void refetch()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function DeleteDialog({
+  workspace,
+  client,
+  onClose,
+  onDeleted,
+}: {
+  workspace: Workspace
+  client: Api
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const remove = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await client.workspaceDelete(workspace.id)
+      onDeleted()
+      onClose()
+      toast.success(`${workspace.name} deleted`)
+    } catch (err) {
+      setBusy(false)
+      setError(message(err))
+    }
+  }
+
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && !busy && onClose()}>
+      <AlertDialogContent className="max-h-[calc(100dvh-1rem)] sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {workspace.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently deletes the workspace, its finished runs, retained
+            containers, files, history, and server repository. This cannot be
+            undone. Members, their account environments, and external repositories
+            are not deleted.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          Close or stop unfinished runs, wait for pending mission or review work
+          and cleanup to finish, and remove schedules first. The server refuses
+          deletion while any of these remain.
+        </p>
+        {error && (
+          <p role="alert" className="border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed">
+            {error}
+          </p>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault()
+              void remove()
+            }}
+          >
+            {busy ? 'Deleting...' : 'Delete workspace'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

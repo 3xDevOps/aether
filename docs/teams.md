@@ -144,6 +144,29 @@ aether workspace init myproject [--base <branch>]
 aether workspace add myproject [--base <branch>]
 ```
 
+An admin can permanently delete an inactive workspace by name or ID:
+
+```sh
+aether workspace delete myproject --yes
+```
+
+`--yes` is required. In **Manage workspaces**, admins use **Delete** and confirm
+**Delete workspace** in the warning dialog. Both remove the workspace, finished
+runs (including completed runs), retained containers, checkouts, transcripts, evidence,
+integration candidates, missions, templates, budget, costs, timeline,
+repository branches, and server-side mirror keys. Member accounts, homes,
+local clones, and upstream repositories remain. Revoke any remote mirror
+deploy key separately.
+
+Deletion never force-stops active work. Close or stop queued, provisioning,
+running, and needs-attention runs; wait for runtime cleanup and pending
+mission attempts or candidate verifications/delivery to settle; remove
+schedules first. A mission awaiting its initial integrator launch also blocks
+deletion. The error names the blocker. In-flight control or Git operations
+return `workspace operations are in progress; retry deletion when they
+finish`. If filesystem or runtime cleanup fails, the workspace remains so
+an admin can retry; data already removed is not restored.
+
 Four settings belong to the workspace rather than to any run in it:
 
 - **The base branch** is what every new run's worktree is cut from. `--base`

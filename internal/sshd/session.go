@@ -161,6 +161,8 @@ func parseGitCommand(cmd string) (op, wsID string, ok bool) {
 // protocol through the git transport seam.
 func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch ssh.Channel, op, wsID string) {
 	defer func() { _ = ch.Close() }()
+	s.workspaceLifecycleMu.RLock()
+	defer s.workspaceLifecycleMu.RUnlock()
 	if err := s.checkMember(ctx, member); err != nil {
 		_, _ = fmt.Fprintf(ch.Stderr(), "aether: %v\n", err)
 		sendExitStatus(ch, 128)

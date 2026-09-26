@@ -231,6 +231,14 @@ and `navigate('workspace', ...)` makes the workspace it opens the active scope
 for the same reason.
 Member configuration is account-scoped and does not require a workspace.
 
+The last selected workspace survives reopening. Browser and server-hosted
+dashboards use the `aether.ui` local-storage preference. The local gateway also
+stores it through `workspace.selection`, keyed by server address and member,
+because the desktop app's ephemeral port changes the browser origin on each
+launch. Startup restores this value before choosing a fallback; a selection
+made while startup is loading takes precedence. A failed preference read or
+write remains visible as the gateway's error.
+
 Derived data (the sidebar's grouped run list, the attention-ordered run list)
 lives in
 `src/store/selectors.ts` as pure functions over a narrow input type, wrapped by
@@ -610,12 +618,14 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
 fetches hydrates the store (`server.info`, `workspace.list`, `member.list`,
 `run.list`, `run.overlaps`, and `GET /api/v1/capabilities`), then `/ws/events`
-is the only thing that changes it. Hydration also repairs the scope: an unset
-`activeWorkspace`, or one naming a workspace that is gone, falls back to the
-first by ID rather than leaving every scoped surface pointed at nothing. The capabilities fetch may fail without
-failing hydration - a legacy gateway has no such endpoint - and the store
-then holds `null`. The snapshot also seeds the board's paused map from each
-run's wire `paused` field, skipping runs that do not carry it.
+is the only thing that changes it. `setWorkspaces` keeps a valid selection;
+an unset selection or a workspace that has been deleted falls back to the
+first by ID, or clears the selection when none remain. An open deleted
+workspace route moves to the replacement workspace or **Manage workspaces**;
+an open run in a deleted workspace returns to the board. The capabilities
+fetch may fail without failing hydration; a legacy gateway then holds `null`.
+The snapshot also seeds the board's paused map from each run's wire `paused`
+field, skipping runs that do not carry it.
 
 - **The subscription is established first.** Hydration starts only once the
   server acknowledges it (`{"ok":true}`), which is also when the client calls
@@ -1896,6 +1906,21 @@ Room tab count, and neither creates a second action inbox.
 `src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
 shows its name, creation time, base branch, steering policy and an **Open**
 button.
+
+Admins also get **Delete**. The confirmation lists what is permanently
+removed; **Cancel** leaves the workspace untouched. The server refuses active
+work, pending cleanup and configured schedules rather than stopping them.
+Failures remain in the dialog verbatim, so the admin can resolve the blocker
+and retry. See [workspace deletion](teams.md#workspaces) for the CLI and
+cleanup rules.
+
+![Workspace deletion confirmation](media/workspace-delete-confirmation.webp)
+
+![Deletion refused while a schedule remains](media/workspace-delete-refusal.webp)
+
+After deletion, the list and workspace switcher update together.
+`workspace.deleted` events reconcile other connected dashboards, including
+their selection and any open deleted workspace or run.
 
 ## Settings
 

@@ -441,6 +441,27 @@ func (s *Service) Disable(ctx context.Context, workspace domain.WorkspaceID) (Re
 	return result, nil
 }
 
+// PurgeWorkspace retires every mirror key generation before the repository is
+// removed. Remote deploy-key revocation remains the administrator's job.
+func (s *Service) PurgeWorkspace(ctx context.Context, workspace domain.WorkspaceID) error {
+	unlock := s.workspaceLock(workspace)
+	defer unlock()
+	if _, err := s.store.GetWorkspaceMirror(ctx, workspace); err == nil {
+		if disableErr := s.git.DisableWorkspaceMirror(ctx, workspace); disableErr != nil {
+			return disableErr
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err := retireWorkspaceSecrets(s.root, string(workspace)); err != nil {
+		return err
+	}
+	if err := s.store.DeleteWorkspaceMirror(ctx, workspace); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
 // Capture strictly refreshes a configured mirror unless cachedCommit is
 // supplied. A local-only workspace reads its normal base branch directly and
 // never makes a network claim. Cached mode verifies both persisted consent and

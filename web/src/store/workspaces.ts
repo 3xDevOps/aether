@@ -10,7 +10,26 @@ export interface WorkspacesSlice {
 export const createWorkspacesSlice: SliceCreator<WorkspacesSlice> = (set) => ({
   workspaces: {},
   setWorkspaces: (workspaces) =>
-    set({ workspaces: Object.fromEntries(workspaces.map((w) => [w.id, w])) }),
+    set((s) => {
+      const byID = Object.fromEntries(workspaces.map((w) => [w.id, w]))
+      const activeWorkspace = byID[s.activeWorkspace]
+        ? s.activeWorkspace
+        : workspaces.reduce((first, w) => !first || w.id < first ? w.id : first, '')
+      const missingWorkspaceRoute =
+        s.route.name === 'workspace' && !byID[s.route.params.workspaceId]
+      const missingRunRoute =
+        s.route.params.runId && s.runs[s.route.params.runId] &&
+        !byID[s.runs[s.route.params.runId].workspace_id]
+      return {
+        workspaces: byID,
+        activeWorkspace,
+        route: missingWorkspaceRoute
+          ? activeWorkspace
+            ? { name: 'workspace', params: { workspaceId: activeWorkspace } }
+            : { name: 'workspaces', params: {} }
+          : missingRunRoute ? { name: 'board', params: {} } : s.route,
+      }
+    }),
   upsertWorkspace: (workspace) =>
     set((s) => ({ workspaces: { ...s.workspaces, [workspace.id]: workspace } })),
 })

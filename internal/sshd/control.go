@@ -288,6 +288,18 @@ func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method st
 			Message: "membership pending admin approval; ask an admin to run member.approve " + string(member),
 		}
 	}
+	if method == protocol.MethodWorkspaceDelete {
+		if m.Role != domain.RoleAdmin {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: method + " requires the admin role"}
+		}
+		if !s.workspaceLifecycleMu.TryLock() {
+			return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "workspace operations are in progress; retry deletion when they finish"}
+		}
+		defer s.workspaceLifecycleMu.Unlock()
+	} else {
+		s.workspaceLifecycleMu.RLock()
+		defer s.workspaceLifecycleMu.RUnlock()
+	}
 	result, rpcErr := handler(s, ctx, member, params)
 	if rpcErr != nil {
 		return nil, rpcErr

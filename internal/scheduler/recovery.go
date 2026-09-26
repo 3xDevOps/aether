@@ -41,6 +41,13 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if err != nil {
 		return nil, err
 	}
+	lock := s.workspaceLock(old.WorkspaceID)
+	lock.RLock()
+	defer lock.RUnlock()
+	old, err = s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return nil, err
+	}
 	if old.Mode != domain.LaunchTUI ||
 		(old.Status != domain.RunMerged && old.Status != domain.RunAbandoned) ||
 		old.Reason != retainedCloseReason {

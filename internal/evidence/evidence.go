@@ -77,6 +77,7 @@ type Store interface {
 type StagingStore interface {
 	CreateEvidenceStaging(context.Context, *store.EvidenceStaging) error
 	ListEvidenceStaging(context.Context, time.Time, int) ([]*store.EvidenceStaging, error)
+	ListRunEvidenceStaging(context.Context, domain.RunID, int) ([]*store.EvidenceStaging, error)
 	DeleteEvidenceStaging(context.Context, string) error
 }
 

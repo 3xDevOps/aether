@@ -242,6 +242,61 @@ describe('hydrate', () => {
     expect(chosen.getState().activeWorkspace).toBe(otherWorkspace.id)
   })
 
+  it('restores the local gateway selection on a fresh browser origin', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events'],
+        local: ['workspace.selection'],
+      })),
+      localWorkspaceSelection: vi.fn(async () => ({ workspace_id: otherWorkspace.id })),
+    }))
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('keeps a workspace selected while startup preferences are loading', async () => {
+    const store = createRootStore()
+    const saved = Promise.withResolvers<{ workspace_id: string }>()
+    const read = vi.fn(() => saved.promise)
+    const loading = hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local', methods: ['*'], ws: ['events'], local: ['workspace.selection'],
+      })),
+      localWorkspaceSelection: read,
+    }))
+    await vi.waitFor(() => expect(read).toHaveBeenCalled())
+    store.getState().setActiveWorkspace(otherWorkspace.id)
+    saved.resolve({ workspace_id: workspace.id })
+    await loading
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('restores a browser selection across store recreation and list reordering', async () => {
+    const previous = createRootStore()
+    await hydrate(previous, fakeApi())
+    previous.getState().setActiveWorkspace(otherWorkspace.id)
+    const reopened = createRootStore()
+    await hydrate(reopened, fakeApi({
+      workspaceListFull: vi.fn(async () => [otherWorkspace, workspace]),
+    }))
+    expect(reopened.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('clears a deleted final workspace and leaves its detail route', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('workspace', { workspaceId: otherWorkspace.id })
+    await hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(async () => []),
+      runList: vi.fn(async () => []),
+    }))
+    expect(store.getState().activeWorkspace).toBe('')
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    expect(createRootStore().getState().activeWorkspace).toBe('')
+  })
+
   it('re-points a scope whose workspace is gone, so no surface is left blank', async () => {
     const store = createRootStore()
     store.getState().setActiveWorkspace('wsp_deleted')
@@ -933,6 +988,22 @@ describe('applyEvent', () => {
     expect(store.getState().workspaces[workspace.id]).toBeDefined()
   })
 
+  it('removes a remotely deleted workspace and leaves its open run', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('terminal', { runId: 'run_1' })
+    const applied = await applyEvent(store, statusEvent({
+      type: 'workspace.deleted', run_id: '', payload: {},
+    }), fakeApi({
+      workspaceListFull: vi.fn(async () => [otherWorkspace]),
+    }))
+    expect(applied).toBe(true)
+    expect(store.getState().workspaces[workspace.id]).toBeUndefined()
+    expect(store.getState().runs.run_1).toBeUndefined()
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
   it('keeps the older mission pages the reader loaded on a mission change', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({
@@ -1070,6 +1141,37 @@ describe('connect', () => {
 
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     stop()
+  })
+
+  it('saves the last selection even when an earlier save is still pending', async () => {
+    let persisted = ''
+    const firstSave = Promise.withResolvers<void>()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local', methods: ['*'], ws: ['events'], local: ['workspace.selection'],
+      })),
+      localWorkspaceSelection: vi.fn(async (id?: string) => {
+        if (id === workspace.id) await firstSave.promise
+        if (id !== undefined) persisted = id
+        return { workspace_id: persisted }
+      }),
+    })
+    const store = createRootStore()
+    const stop = connect(store, client)
+    try {
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.getState().setActiveWorkspace(otherWorkspace.id)
+      firstSave.resolve()
+      await vi.waitFor(() => expect(persisted).toBe(otherWorkspace.id))
+      window.localStorage.clear()
+      const reopened = createRootStore()
+      await hydrate(reopened, client)
+      expect(reopened.getState().activeWorkspace).toBe(otherWorkspace.id)
+    } finally {
+      firstSave.resolve()
+      stop()
+    }
   })
 
   it.each([

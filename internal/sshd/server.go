@@ -63,13 +63,14 @@ const (
 // Config wires the server to its collaborators. All collaborators are
 // required.
 type Config struct {
-	Addr        string // default ":2222"
-	HostKeyPath string // <data>/ssh/host_ed25519_key; generated on first start if absent
-	Store       store.Store
-	Bus         events.Bus
-	Git         GitTransport
-	PTY         PTYAttacher
-	Runs        RunController
+	Addr            string // default ":2222"
+	HostKeyPath     string // <data>/ssh/host_ed25519_key; generated on first start if absent
+	Store           store.Store
+	Bus             events.Bus
+	Git             GitTransport
+	PTY             PTYAttacher
+	Runs            RunController
+	DeleteWorkspace func(context.Context, domain.WorkspaceID, domain.MemberID) error
 	// Control owns the per-run controller lease shared by SSH and local
 	// gateway attaches. Nil preserves deployments without controller
 	// arbitration.
@@ -158,6 +159,10 @@ type Server struct {
 	// paths never acquire registerMu or mu, so the lock order cannot cycle.
 	authorizationMu *sync.Mutex
 	handoffSeq      atomic.Uint64
+
+	// workspaceLifecycleMu drains finite RPCs and Git transports before a
+	// workspace deletion, including readers that can lazily create its repo.
+	workspaceLifecycleMu sync.RWMutex
 
 	mu    sync.Mutex
 	ln    net.Listener

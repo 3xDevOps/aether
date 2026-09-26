@@ -348,6 +348,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		node, nodeErr = tailscaled.Self(discoverCtx)
 		cancel()
 	}
+	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus}
 	authMu := &sync.Mutex{}
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
@@ -367,20 +368,22 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Profiles:          prof,
 		Config:            sshd.NewConfigBackend(homes, s.db),
 		AuthorizationMu:   authMu,
+		DeleteWorkspace:   workspaces.Delete,
 	}
 	if err = s.buildServices(Deps{
-		Config:   cfg,
-		DataDir:  cfg.DataDir,
-		Store:    s.db,
-		Bus:      s.bus,
-		Events:   s.log,
-		Runs:     s.sched,
-		Runtime:  s.rt,
-		Git:      s.git,
-		PTY:      s.pty,
-		SSH:      &sshCfg,
-		Control:  s.control,
-		Evidence: s.evidence,
+		Config:     cfg,
+		DataDir:    cfg.DataDir,
+		Store:      s.db,
+		Bus:        s.bus,
+		Events:     s.log,
+		Runs:       s.sched,
+		Runtime:    s.rt,
+		Git:        s.git,
+		PTY:        s.pty,
+		SSH:        &sshCfg,
+		Control:    s.control,
+		Evidence:   s.evidence,
+		Workspaces: workspaces,
 	}); err != nil {
 		return nil, err
 	}
