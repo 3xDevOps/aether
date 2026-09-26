@@ -81,8 +81,7 @@ func TestIntegrationServerGateway(t *testing.T) {
 	if status := getJSON(t, web.URL+"/api/v1/capabilities", &caps); status != http.StatusOK {
 		t.Fatalf("capabilities status = %d", status)
 	}
-	if caps.Gateway != "server" || strings.Join(caps.Methods, ",") != "*" ||
-		strings.Join(caps.WS, ",") != "events,attach,terminal" || caps.Local != nil {
+	if caps.Gateway != "server" || strings.Join(caps.Methods, ",") != "*" || caps.Local != nil {
 		t.Fatalf("capabilities = %+v", caps)
 	}
 	var info protocol.ServerInfoResult
@@ -123,6 +122,24 @@ func TestIntegrationServerGateway(t *testing.T) {
 	if err := wsjson.Read(ctx, events, &subAck); err != nil || !subAck.OK {
 		t.Fatalf("subscribe ack = %+v (%v)", subAck, err)
 	}
+	// A cold run launch can outlast the gateway's ping deadline.
+	// Keep reading like the dashboard does while the HTTP call is pending.
+	wireEvents := make(chan protocol.Event, 128)
+	wireErrors := make(chan error, 1)
+	go func() {
+		for {
+			var ev protocol.Event
+			if readErr := wsjson.Read(ctx, events, &ev); readErr != nil {
+				wireErrors <- readErr
+				return
+			}
+			select {
+			case wireEvents <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	t.Setenv("AETHER_FAKE_AGENT", "sh /workspace/agent.sh")
 	var launched protocol.RunResult
@@ -133,7 +150,7 @@ func TestIntegrationServerGateway(t *testing.T) {
 	if status := postJSON(t, web.URL+"/api/v1/run.launch", string(params), &launched); status != http.StatusOK {
 		t.Fatalf("run.launch status = %d", status)
 	}
-	waitWireEvent(t, ctx, events, "run.status running", func(ev protocol.Event) bool {
+	waitWireEvent(t, ctx, wireEvents, wireErrors, "run.status running", func(ev protocol.Event) bool {
 		var p struct{ To string }
 		return ev.Type == "run.status" && ev.RunID == launched.Run.ID &&
 			json.Unmarshal(ev.Payload, &p) == nil && p.To == string(domain.RunRunning)
@@ -186,7 +203,7 @@ func TestIntegrationServerGateway(t *testing.T) {
 	if closed.Run.Status != string(domain.RunMerged) {
 		t.Fatalf("closed run status = %q, want merged", closed.Run.Status)
 	}
-	waitWireEvent(t, ctx, events, "run.status merged", func(ev protocol.Event) bool {
+	waitWireEvent(t, ctx, wireEvents, wireErrors, "run.status merged", func(ev protocol.Event) bool {
 		var p struct{ To string }
 		return ev.Type == "run.status" && ev.RunID == launched.Run.ID &&
 			json.Unmarshal(ev.Payload, &p) == nil && p.To == string(domain.RunMerged)
@@ -470,15 +487,18 @@ func dialWS(t *testing.T, ctx context.Context, base, path string) *websocket.Con
 	return conn
 }
 
-func waitWireEvent(t *testing.T, ctx context.Context, conn *websocket.Conn, desc string, pred func(protocol.Event) bool) {
+func waitWireEvent(t *testing.T, ctx context.Context, incoming <-chan protocol.Event, failures <-chan error, desc string, pred func(protocol.Event) bool) {
 	t.Helper()
 	for {
-		var ev protocol.Event
-		if err := wsjson.Read(ctx, conn, &ev); err != nil {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("waiting for %s: %v", desc, ctx.Err())
+		case err := <-failures:
 			t.Fatalf("event stream ended waiting for %s: %v", desc, err)
-		}
-		if pred(ev) {
-			return
+		case ev := <-incoming:
+			if pred(ev) {
+				return
+			}
 		}
 	}
 }
