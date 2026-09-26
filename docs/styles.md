@@ -78,7 +78,15 @@ Use compact workbench geometry rather than landing-page ornament:
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main
 page never gains horizontal overflow; text and code may scroll inside their
-own surfaces. Coarse pointer controls may grow to 32px where required.
+own surfaces. Shared buttons, inputs and selectors use 40-44px touch targets
+under `coarse:` while retaining desktop density. Floating menus stay inside
+the available viewport and scroll to their last action.
+
+Route roots own the shell's bounded height; their content regions use
+`min-h-0` and vertical overflow. On phones Diff scrolls its local controls
+and patch together, so long fetch output cannot strand the patch. Files
+keeps its header actions on a two-column grid, and its touch-sized search
+panel scrolls independently without consuming the entire editor.
 
 ## Shell, palette and focus
 

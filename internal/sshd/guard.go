@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -57,6 +58,20 @@ func workspaceTarget(s *Server, ctx context.Context, params json.RawMessage) (pe
 	return permissions.Target{Workspace: id}, nil
 }
 
+func (s *Server) workspaceLock(id domain.WorkspaceID) *sync.RWMutex {
+	s.workspaceLocksMu.Lock()
+	defer s.workspaceLocksMu.Unlock()
+	if s.workspaceLocks == nil {
+		s.workspaceLocks = make(map[domain.WorkspaceID]*sync.RWMutex)
+	}
+	lock := s.workspaceLocks[id]
+	if lock == nil {
+		lock = &sync.RWMutex{}
+		s.workspaceLocks[id] = lock
+	}
+	return lock
+}
+
 // registerGuarded adds a control-channel handler behind a capability
 // check: the caller's role is re-fetched per request, resolve names the
 // target (nil for none), and permissions.Check runs before h. Denials are
@@ -78,6 +93,15 @@ func registerGuarded(name string, cap permissions.Capability, resolve targetReso
 		}
 		if cerr := permissions.Check(cap, actor, target); cerr != nil {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: name + ": " + cerr.Error()}
+		}
+		if target.Workspace != "" {
+			lock := s.workspaceLock(target.Workspace)
+			lock.RLock()
+			defer lock.RUnlock()
+			// Target resolution precedes the lock; deletion may have won.
+			if _, err := s.cfg.Store.GetWorkspace(ctx, target.Workspace); err != nil {
+				return nil, rpcError(err)
+			}
 		}
 		return h(s, ctx, member, params)
 	})

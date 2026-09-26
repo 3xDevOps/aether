@@ -18,6 +18,9 @@ export interface Run {
   member_id: string
   /** Account backing the run; absent on servers predating account sharing. */
   account_member_id?: string
+  mission_id?: string
+  mission_role?: 'integrator' | 'worker'
+  integrator_run_id?: string
   task: string
   /** Latest terminal title, omitted by older servers and for empty titles. */
   title?: string

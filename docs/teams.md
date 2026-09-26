@@ -144,6 +144,30 @@ aether workspace init myproject [--base <branch>]
 aether workspace add myproject [--base <branch>]
 ```
 
+An admin can permanently delete an inactive workspace by name or ID:
+
+```sh
+aether workspace delete myproject --yes
+```
+
+`--yes` is required. In **Manage workspaces**, admins use **Delete** and confirm
+**Delete workspace** in the warning dialog. Both remove the workspace, finished
+runs (including completed runs), retained containers, checkouts, transcripts, evidence,
+integration candidates, missions, templates, budget, costs, timeline,
+repository branches, and server-side mirror keys. Member accounts, homes,
+local clones, and upstream repositories remain. Revoke any remote mirror
+deploy key separately.
+
+Deletion never force-stops active work. Close or stop queued, provisioning,
+running, and needs-attention runs; wait for runtime cleanup and pending
+mission attempts or candidate verifications/delivery to settle; remove
+schedules first. A mission awaiting its initial integrator launch also blocks
+deletion. The error names the blocker. In-flight control, Git, or live-sync
+operations on that workspace return `workspace operations are in progress;
+retry deletion when they finish`. Unrelated Git transfers and live overlays
+do not block deletion. If filesystem or runtime cleanup fails, the workspace
+remains so an admin can retry; data already removed is not restored.
+
 Four settings belong to the workspace rather than to any run in it:
 
 - **The base branch** is what every new run's worktree is cut from. `--base`
@@ -661,9 +685,42 @@ ID                          TASK                        STATE    RUN
 ```
 
 `show` prints the launch error, when there is one, after the integrator line.
-Answering questions, approving or sending back the plan, and cancelling the
-swarm are done in the dashboard's Missions page until the CLI gains those
-commands.
+
+The integrator's questions and its plan wait for you. `show` lists the
+question IDs and the plan version under review; the commands below act on
+them, as the dashboard's Missions page does. Each one reads the swarm, then
+sends one mutation with a fresh idempotency key against the plan version or
+integrator generation it read. A decision, `cancel`, and `replace-integrator`
+print the swarm's phase afterwards; `answer` prints the question ID. A server
+refusal is printed verbatim.
+
+```sh
+aether swarm answer 01m3bnfkwbqx7y9m98m351mxq2 \
+  --question 01m3bnh2v6xk7g8p1q4r9s0t2u "net/http, no framework"
+aether swarm approve 01m3bnfkwbqx7y9m98m351mxq2
+aether swarm request-changes 01m3bnfkwbqx7y9m98m351mxq2 "document the endpoint in its own task"
+aether swarm reject 01m3bnfkwbqx7y9m98m351mxq2 "wrong repository"
+aether swarm cancel 01m3bnfkwbqx7y9m98m351mxq2
+aether swarm replace-integrator 01m3bnfkwbqx7y9m98m351mxq2 --agent codex
+```
+
+```
+swarm 01m3bnfkwbqx7y9m98m351mxq2 active
+```
+
+`answer` takes the answer as its last argument, or `-` to read it from stdin,
+and refuses a question ID that is not on that swarm. `approve`,
+`request-changes`, and `reject` decide the plan version `show` reports, so a
+plan the integrator resubmitted in the meantime is not decided unread;
+`request-changes` requires feedback and `reject` accepts it. The server
+refuses `reject` on an amendment, refuses `cancel` once a plan is approved,
+and refuses every one of these from anyone but the accountable human or an
+admin; see [Mission identity and current
+authority](#mission-identity-and-current-authority). `replace-integrator`
+starts a new integrator run on the `--agent` harness in `tui` mode, under the
+current integrator's account or the one named by `--account`; both must be
+among the swarm's execution choices. It sends the integrator generation `show`
+reports and prints the new run ID after the phase.
 
 ### Mission identity and current authority
 

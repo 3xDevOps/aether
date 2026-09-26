@@ -83,7 +83,7 @@ function DiffView({ params }: RouteProps) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <RunHeader run={run} subtitle={run.branch} active="diff" />
-      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col')}>
+      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden')}>
         <Land run={run} />
 
         <div className="shrink-0 bg-sidebar">
@@ -168,7 +168,7 @@ function DiffView({ params }: RouteProps) {
         )}
         <div
           className={cn(
-            'grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden',
+            'grid min-h-0 min-w-0 flex-none grid-cols-1 md:flex-1 md:overflow-hidden',
             !hidden && 'md:grid-cols-[14rem_minmax(0,1fr)]',
           )}
         >

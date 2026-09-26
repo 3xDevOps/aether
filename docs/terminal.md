@@ -302,16 +302,25 @@ only one attached, where there is no other screen to protect and the
 terminal follows your window the way `ssh` does. A second attach ends
 that, and the size is recomputed without you.
 
-On a phone every terminal here - a run's, its shells, and this one - shows
-the session at the size it already is rather than at the phone's own width,
-and provides horizontal panning across an oversized grid. There is only one
-vertical reading surface: live xterm or the run's integrated history, never
-two nested vertical scrollers. Drag a finger downward to read older normal-
-buffer output, then swipe toward newer output to return live at the bottom.
-Ordinary alternate-screen gestures remain owned by the running application. The
-phone follows the shared size, so when someone with a bigger screen resizes the
-terminal, it redraws at the new one. Nothing a phone does changes that size,
-watching or steering, so an agent's screen is never reflowed by a phone.
+On a phone every terminal here - a run's, its shells, and this one - keeps
+the session's existing size. Swipe vertically or horizontally to reach parts
+of a desktop-sized grid that do not fit on the phone, including an agent's
+input prompt near the bottom. The viewport initially reveals the cursor and
+keeps it visible while you type or the keyboard reduces the available height.
+Panning pauses that following until you tap or focus the terminal or type again.
+
+In a run's normal buffer, dragging downward first reveals the top of the
+live grid, then continues into recorded history. Swipe toward newer output
+to return live at the bottom. An oversized alternate screen can be panned
+the same way, without entering history. When the grid fits vertically,
+alternate-screen scrolling remains with the running application.
+Horizontal drags remain native when the grid cannot pan in that direction.
+The phone follows a desktop viewer's resizes; watching, steering, panning
+and opening the keyboard never change the shared PTY size.
+
+**Tools** opens the named search, text-size, copy, paste and image controls.
+The menu scrolls when the keyboard leaves too little room for every action.
+Closing it restores that space to the terminal.
 
 On a phone every run - including one you own - opens as a read-only mirror,
 where on a desktop an unoccupied owner's first attach may already have

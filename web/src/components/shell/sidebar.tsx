@@ -672,27 +672,48 @@ function Group({
             <ChevronRight className="size-3.5 shrink-0" />
           )}
           <span className="truncate">{group.label}</span>
-          <span className="ml-auto shrink-0 normal-case">{group.runs.length}</span>
+          <span className="ml-auto shrink-0 normal-case">
+            {group.runs.reduce((count, run) => count + 1 + run.children.length, 0)}
+          </span>
         </button>
       </h2>
-      <div id={regionId} hidden={!expanded}>
-        {expanded &&
-          group.runs.map((run) => <RunRow key={run.run.id} entry={run} />)}
-      </div>
+      <ul id={regionId} hidden={!expanded}>
+        {expanded && group.runs.map((run) => (
+          <li key={run.run.id}>
+            <RunRow entry={run} />
+            {run.children.length > 0 && (
+              <ul aria-label={`Subsessions of ${runLabel(run.run)}`}>
+                {run.children.map((child, index) => (
+                  <li key={child.run.id}>
+                    <RunRow entry={child} branch={index === run.children.length - 1 ? 'last' : 'middle'} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
 
-function RunRow({ entry }: { entry: SidebarRun }) {
+function RunRow({ entry, branch }: { entry: SidebarRun; branch?: 'middle' | 'last' }) {
   const navigate = useStore((s) => s.navigate)
   const route = useStore((s) => s.route)
   // Acks are app-wide, so a row mutes at the same moment its board card does.
   const unseen = useStore((s) => isUnseen(s.acked, entry.run))
   const selected = isRunRoute(route, entry.run.id)
+  const label = runLabel(entry.run)
+  const role = entry.run.mission_role === 'integrator'
+    ? 'Integrator'
+    : entry.run.mission_role === 'worker' ? 'Subsession' : undefined
+  const description = [label, role, entry.run.harness].filter(Boolean).join(' · ')
   return (
     <button
       type="button"
       aria-current={selected ? 'page' : undefined}
+      aria-label={description}
+      title={description}
       onClick={() => navigate('terminal', { runId: entry.run.id })}
       style={{ borderLeftColor: entry.owner?.color }}
       className={cn(
@@ -700,7 +721,8 @@ function RunRow({ entry }: { entry: SidebarRun }) {
         // Full bleed inside a scroll container: an outline drawn outside the
         // row would be clipped at both edges.
         'focus-visible:-outline-offset-2',
-        'flex h-7 min-h-7 w-full items-center gap-2 border-l-2 py-0.5 pr-3 pl-5 text-left text-[13px] hover:bg-toolbar-hover coarse:h-11 coarse:min-h-11',
+        'relative flex h-7 min-h-7 w-full items-center gap-2 border-l-2 py-0.5 pr-3 text-left text-[13px] hover:bg-toolbar-hover coarse:h-11 coarse:min-h-11',
+        branch ? 'pl-11' : 'pl-5',
         selected
           ? 'bg-selection font-medium text-selection-foreground'
           : unseen
@@ -708,11 +730,25 @@ function RunRow({ entry }: { entry: SidebarRun }) {
             : 'text-muted-foreground',
       )}
     >
+      {branch && (
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-6 w-3 text-muted-foreground/40">
+          <span className={cn('absolute top-0 left-0 border-l border-current', branch === 'last' ? 'h-1/2' : 'h-full')} />
+          <span className="absolute top-1/2 left-0 w-3 border-t border-current" />
+        </span>
+      )}
       <StateDot
         state={entry.state}
         className={cn(entry.state === 'working' && 'state-pulse')}
       />
-      <span className="truncate">{runLabel(entry.run)}</span>
+      <span className="min-w-0 truncate">{label}</span>
+      {role && !branch && (
+        <span className={cn(
+          'shrink-0 rounded-sm border px-1 text-[10px] font-medium leading-4',
+          selected ? 'border-current/40' : 'border-primary/40 bg-primary/10 text-foreground',
+        )}>
+          {role}
+        </span>
+      )}
       <span className={cn('ml-auto shrink-0', !selected && 'text-muted-foreground')}>
         {entry.run.harness}
       </span>

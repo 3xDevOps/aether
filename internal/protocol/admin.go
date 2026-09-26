@@ -35,6 +35,15 @@ type WorkspaceAddResult struct {
 	Workspace Workspace `json:"workspace"`
 }
 
+// WorkspaceDeleteParams permanently removes an inactive workspace (admin only).
+type WorkspaceDeleteParams struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type WorkspaceDeleteResult struct {
+	OK bool `json:"ok"`
+}
+
 // MemberInviteParams are the params of member.invite (admin only).
 // TTLSeconds defaults to 86400 when zero.
 type MemberInviteParams struct {

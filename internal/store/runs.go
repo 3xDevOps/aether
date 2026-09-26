@@ -119,7 +119,8 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.UnansweredQuestions); err != nil {
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.UnansweredQuestions,
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -146,8 +147,18 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 // list and single-run snapshots cannot disagree, without walking room history
 // once per run.
 func runSnapshotQuery(where string) string {
-	return `SELECT ` + runCols + `, COUNT(question.id)
+	return `SELECT ` + runCols + `, COUNT(question.id),
+		COALESCE(integrator.id, worker_mission.id, ''),
+		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
+		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
+		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, '')
 		FROM runs
+		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
+		LEFT JOIN missions worker_mission ON worker_mission.id = (
+			SELECT MIN(attempt.mission_id) FROM mission_attempts attempt
+			WHERE attempt.run_id = runs.id
+			HAVING COUNT(DISTINCT attempt.mission_id) = 1
+		)
 		LEFT JOIN room_messages question
 			ON question.run_id = runs.id
 			AND question.kind = 'question'

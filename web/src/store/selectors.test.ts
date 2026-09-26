@@ -102,4 +102,75 @@ describe('sidebarGroups', () => {
   it('yields no groups when the active workspace holds no runs', () => {
     expect(sidebarGroups({ ...input, workspace: workspace.id, runs: {} })).toEqual([])
   })
+
+  const integrator = record({
+    id: 'integrator',
+    status: 'running',
+    mission_id: 'mission_1',
+    mission_role: 'integrator',
+    integrator_run_id: 'integrator',
+  })
+  const worker = record({
+    id: 'worker',
+    member_id: bob.id,
+    status: 'completed',
+    mission_id: 'mission_1',
+    mission_role: 'worker',
+    integrator_run_id: integrator.id,
+  })
+
+  it('keeps subsessions under their integrator across owners and statuses', () => {
+    const groups = sidebarGroups({
+      ...input,
+      groupBy: 'member',
+      runs: { integrator, worker, attention: runs.attention },
+    })
+    expect(groups.map((group) => group.label)).toEqual(['Alice'])
+    expect(groups[0].runs.map((entry) => entry.run.id)).toEqual(['attention', 'integrator'])
+    expect(groups[0].runs[1].children.map((entry) => entry.run.id)).toEqual(['worker'])
+    expect(groups[0].runs[1].children[0].owner).toEqual(bob)
+  })
+
+  it('raises a swarm to its most urgent child without changing individual states', () => {
+    const groups = sidebarGroups({
+      ...input,
+      runs: { integrator, worker },
+      pending: new Set([worker.id]),
+    })
+    expect(groups.map((group) => group.key)).toEqual(['needs-attention'])
+    expect(groups[0].runs[0].state).toBe('working')
+    expect(groups[0].runs[0].children[0].state).toBe('needs-attention')
+  })
+
+  it('orders subsessions by attention and retains standalone runs exactly once', () => {
+    const failed = { ...worker, id: 'failed-worker', status: 'failed' as const }
+    const groups = sidebarGroups({
+      ...input,
+      runs: { worker, integrator, failed, attention: runs.attention },
+    })
+    expect(groups.map((group) => group.key)).toEqual(['needs-attention', 'failed'])
+    expect(groups.flatMap((group) => group.runs.map((entry) => entry.run.id)))
+      .toEqual(['attention', 'integrator'])
+    expect(groups[1].runs[0].children.map((entry) => entry.run.id)).toEqual(['failed-worker', 'worker'])
+  })
+
+  it.each(['missing', 'archived', 'other-workspace', 'other-mission'] as const)(
+    'keeps a subsession visible when its integrator is %s',
+    (kind) => {
+      const parent = {
+        ...integrator,
+        ...(kind === 'archived' ? { status: 'merged' as const, archived_at: '2026-08-15T00:00:00Z' } : {}),
+        ...(kind === 'other-workspace' ? { workspace_id: otherWorkspace.id } : {}),
+        ...(kind === 'other-mission' ? { mission_id: 'mission_2' } : {}),
+      }
+      const groups = sidebarGroups({
+        ...input,
+        workspace: workspace.id,
+        runs: kind === 'missing' ? { worker } : { worker, integrator: parent },
+      })
+      const roots = groups.flatMap((group) => group.runs)
+      expect(roots.find((entry) => entry.run.id === worker.id)?.children).toEqual([])
+      expect(roots.flatMap((entry) => entry.children)).toEqual([])
+    },
+  )
 })

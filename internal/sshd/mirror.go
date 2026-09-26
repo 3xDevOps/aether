@@ -15,11 +15,11 @@ import (
 )
 
 func init() {
-	registerGuarded(protocol.MethodWorkspaceMirrorStatus, permissions.WorkspaceAdmin, nil, (*Server).workspaceMirrorStatus)
-	registerGuarded(protocol.MethodWorkspaceMirrorConfigure, permissions.WorkspaceAdmin, nil, (*Server).workspaceMirrorConfigure)
-	registerGuarded(protocol.MethodWorkspaceMirrorRefresh, permissions.WorkspaceAdmin, nil, (*Server).workspaceMirrorRefresh)
-	registerGuarded(protocol.MethodWorkspaceMirrorAdopt, permissions.WorkspaceAdmin, nil, (*Server).workspaceMirrorAdopt)
-	registerGuarded(protocol.MethodWorkspaceMirrorDisable, permissions.WorkspaceAdmin, nil, (*Server).workspaceMirrorDisable)
+	registerGuarded(protocol.MethodWorkspaceMirrorStatus, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorStatus)
+	registerGuarded(protocol.MethodWorkspaceMirrorConfigure, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorConfigure)
+	registerGuarded(protocol.MethodWorkspaceMirrorRefresh, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorRefresh)
+	registerGuarded(protocol.MethodWorkspaceMirrorAdopt, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorAdopt)
+	registerGuarded(protocol.MethodWorkspaceMirrorDisable, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceMirrorDisable)
 }
 
 // MirrorService is the control-channel and launch view of

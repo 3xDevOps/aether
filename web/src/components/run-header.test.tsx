@@ -96,6 +96,21 @@ describe('run header', () => {
     }
   })
 
+  // A swarm worker's prompt is a whole brief; without a terminal title the
+  // heading must stay short and the brief stays behind the disclosure.
+  it('keeps an untitled run with a long prompt to a short heading', () => {
+    const task = `Goal: fix conflict communication for mission runs.\n${'x'.repeat(2000)}`
+    seed({ title: '', task })
+    const bar = runHeader('terminal')
+    const heading = within(bar).getByRole('heading', { level: 1 })
+
+    expect(heading.textContent).toBe('Goal: fix conflict communication for mission runs.')
+    expect(heading.className).toContain('line-clamp-2')
+    expect(heading.getAttribute('title')).toBe(heading.textContent)
+    expect(within(bar).getByText('View full task')).toBeDefined()
+    expect(bar.textContent).toContain('x'.repeat(2000))
+  })
+
   // The shield used to sit on the Overview alone, which is not the tab
   // anyone reaches for the steer button it is warning about.
   it('warns that a run is protected on the tab that steers it', () => {

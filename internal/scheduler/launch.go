@@ -203,6 +203,9 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 // base is captured after launch inputs are validated and before the run row is
 // created, so a failed capture leaves no durable or in-memory run state.
 func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	lock := s.workspaceLock(workspace)
+	lock.RLock()
+	defer lock.RUnlock()
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}

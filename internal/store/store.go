@@ -137,6 +137,7 @@ type Store interface {
 	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, limit int) ([]*IntegrationCandidateSummary, error)
 	ListIntegrationCleanupCandidates(ctx context.Context, now time.Time, limit int) ([]*IntegrationCandidate, error)
 	ListIntegrationCleanupCandidatesAfter(ctx context.Context, now time.Time, afterID string, limit int) ([]*IntegrationCandidate, error)
+	ListIntegrationCandidateIDs(ctx context.Context, workspace domain.WorkspaceID) ([]string, error)
 	DeleteIntegrationCandidate(ctx context.Context, id string, expectedVersion int64) error
 
 	// Profile snapshots are content-addressed per member+harness.

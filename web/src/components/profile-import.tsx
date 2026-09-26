@@ -523,7 +523,7 @@ function ProfileImportForm({ client, identityKey }: { client: Api; identityKey: 
           ) : (
             <select
               aria-label="Configuration destination"
-              className="h-7 min-w-44 rounded-sm border border-input bg-background px-2 text-sm"
+              className="h-7 min-w-44 max-w-full rounded-sm border border-input bg-background px-2 text-sm coarse:h-11 coarse:text-base"
               value={selectedHarness}
               disabled={importing || Boolean(result)}
               onChange={(event) => chooseDestination(event.target.value)}

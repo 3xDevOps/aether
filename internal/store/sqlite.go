@@ -520,10 +520,6 @@ func (d *DB) ListHarnessDefinitions(ctx context.Context, member domain.MemberID)
 	return collect(rows, scanHarnessDefinition)
 }
 
-func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
-	return d.execDelete(ctx, "delete workspace", `DELETE FROM workspaces WHERE id = ?`, id)
-}
-
 // Members
 
 func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {

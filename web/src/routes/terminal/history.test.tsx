@@ -57,6 +57,7 @@ function mountHistory(
   onReadingChange: (reading: boolean) => void = vi.fn(),
 ) {
   const host = document.createElement('div')
+  host.style.paddingTop = '8px'
   const element = document.createElement('div')
   const terminalScreen = document.createElement('div')
   const nativeScrollable = document.createElement('div')
@@ -186,6 +187,25 @@ test('accepts the first upward gesture as soon as the restored live surface is a
   const view = mountHistory(cacheFor(fakeApi()), false, true, (reading) => {
     if (!reading) view.host.dispatchEvent(new WheelEvent('wheel', { deltaY: -30, bubbles: true, cancelable: true }))
   })
+  expect(await screen.findByRole('region', { name: 'Terminal scrollback' })).toBeDefined()
+  view.dispose()
+})
+
+test('pans the live grid before entering history and leaves horizontal drags alone', async () => {
+  const view = mountHistory(cacheFor(fakeApi()))
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
+  view.host.scrollTop = 60
+  fireEvent.wheel(view.host, { deltaY: -30 })
+  fireEvent.touchStart(view.host, { touches: [{ clientX: 100, clientY: 100 }] })
+  fireEvent.touchMove(view.host, { touches: [{ clientX: 100, clientY: 130 }] })
+  expect(screen.queryByRole('region', { name: 'Terminal scrollback' })).toBeNull()
+
+  view.host.scrollTop = 0
+  fireEvent.touchStart(view.host, { touches: [{ clientX: 100, clientY: 100 }] })
+  fireEvent.touchMove(view.host, { touches: [{ clientX: 150, clientY: 104 }] })
+  expect(screen.queryByRole('region', { name: 'Terminal scrollback' })).toBeNull()
+  fireEvent.touchStart(view.host, { touches: [{ clientX: 100, clientY: 100 }] })
+  fireEvent.touchMove(view.host, { touches: [{ clientX: 100, clientY: 130 }] })
   expect(await screen.findByRole('region', { name: 'Terminal scrollback' })).toBeDefined()
   view.dispose()
 })
@@ -463,6 +483,46 @@ test('finishes a native scrollbar drag before capturing its final row and horizo
   expect(firstVisibleRow(output)).toEqual({ text: 'original screen 5', offset: 0 })
   expect(output.scrollLeft).toBe(37)
   expect(screen.getByText('original screen 5')).toBeDefined()
+  view.dispose()
+})
+
+test('restores the latest phone pan when navigation precedes its scroll event', async () => {
+  const cache = cacheFor(fakeApi())
+  const view = mountHistory(cache)
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
+  let top = 41
+  let left = 47
+  Object.defineProperties(view.host, {
+    scrollTop: { get: () => view.host.isConnected ? top : 0 },
+    scrollLeft: { get: () => view.host.isConnected ? left : 0 },
+  })
+  fireEvent.scroll(view.host)
+  fireEvent.pointerDown(view.nativeSlider, { pointerId: 7 })
+  act(() => view.scrollNative(5))
+  top = 81
+  left = 71
+  view.unmount()
+  view.host.remove()
+  view.dispose()
+  expect(await cache.readView()).toMatchObject({ anchor: { row: 12, offset: 3, left: 71 } })
+  const restored = mountHistory(cache)
+  const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
+  expect(firstVisibleRow(output)).toEqual({ text: 'original screen 12', offset: -3 })
+  expect(output.scrollLeft).toBe(71)
+  restored.dispose()
+})
+
+test('counts the phone pan offset once while native capture waits for paint', async () => {
+  const view = mountHistory(cacheFor(fakeApi()), false, false)
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
+  view.host.scrollTop = 41
+  view.host.scrollLeft = 29
+  act(() => view.scrollNative(12))
+  act(() => view.scrollNative(5))
+  act(() => view.renderTerminal())
+  const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
+  expect(firstVisibleRow(output)).toEqual({ text: 'original screen 8', offset: -3 })
+  expect(output.scrollLeft).toBe(29)
   view.dispose()
 })
 

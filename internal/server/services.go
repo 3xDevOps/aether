@@ -43,7 +43,8 @@ type Deps struct {
 	Control *control.Service
 	// Evidence is the one durable evidence service shared by lifecycle hooks,
 	// room handoffs, and SSH/local evidence reads.
-	Evidence *evidence.Service
+	Evidence   *evidence.Service
+	Workspaces *workspaceDeletion
 }
 
 type serviceBuilder struct {

@@ -131,7 +131,7 @@ export function SyncPanel({
 
   return (
     <section aria-label="Sync" className="min-w-0 space-y-3 border-t border-border/70 pt-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">Local sync overlay</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">

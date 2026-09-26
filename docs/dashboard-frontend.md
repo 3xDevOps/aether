@@ -231,6 +231,15 @@ and `navigate('workspace', ...)` makes the workspace it opens the active scope
 for the same reason.
 Member configuration is account-scoped and does not require a workspace.
 
+The last selected workspace survives reopening. Browser and server-hosted
+dashboards use the `aether.ui` local-storage preference. The local gateway also
+stores it through `workspace.selection`, keyed by server address and member,
+because the desktop app's ephemeral port changes the browser origin on each
+launch. Startup restores this value before choosing a fallback; a selection
+made while startup is loading takes precedence. A failed preference read shows
+the gateway's original error in a toast without blocking workspace and run
+data: the current valid selection or normal fallback still applies.
+
 Derived data (the sidebar's grouped run list, the attention-ordered run list)
 lives in
 `src/store/selectors.ts` as pure functions over a narrow input type, wrapped by
@@ -276,10 +285,29 @@ overflow when all destinations do not fit. The adjacent sidebar defaults to
 are clamped when rendered. Runs, the attention count, New run, and Status /
 Member stay on one row; a phone drawer remains bounded by its viewport.
 
-The sidebar is a workspace switcher over a flat list of that workspace's runs.
-There is no run tree: one workspace is in view at a time, so the runs group
-instead by state or by owning member (`groupBy`, persisted). Rows and headers
-are compact rather than a lower navigation card.
+The sidebar scopes runs to the selected workspace and groups them by state or
+owning member (`groupBy`, persisted). A swarm is a mission whose integrator
+coordinates worker runs, shown as subsessions. Its current integrator carries
+an **Integrator** badge; subsessions sit directly below it with indented tree
+guides, including finished workers. Each row keeps its own state dot, owner
+color, harness, and navigation target.
+
+Swarm rows stay together in both grouping modes. **Member** uses the
+integrator's owner; **Status** uses the most urgent run in the swarm, so a
+worker needing attention keeps the tree out of the collapsed Done group.
+Trees and their subsessions sort by attention, then most recent change.
+Group counts include subsessions. If an integrator is missing or archived,
+its visible workers remain top-level rows marked **Subsession**.
+
+Relationships come from the run snapshot's `mission_id`, `mission_role`, and
+`integrator_run_id`, not task text or the currently opened mission page.
+`mission.changed` coalesces background refreshes of those relationship fields,
+including when another workspace is selected, without blocking run-status
+events or overwriting newer run state. Reconnect hydration supersedes pending
+relationship requests without waiting for them; their late responses and
+errors cannot change the fresh snapshot. Replacing an integrator moves its
+workers under the replacement and removes the old run's badge. Older servers
+that omit these fields retain the flat list.
 
 Every rendered group header is a disclosure button with its run count. When
 grouped by **Status**, every status header toggles its own member rows; `Done`
@@ -315,10 +343,10 @@ way.
   is a choice: a single workspace renders as a plain label with its base branch
   under it, because a picker with one option is a control that cannot be used.
 - **The runs come from `sidebarRuns`/`sidebarGroups`** in
-  `src/store/selectors.ts`, filtered to `activeWorkspace` and sorted
-  worst-state-first, then most-recently-changed-first, so what needs a human is
-  at the top of whichever group it is in. An empty scope shows every run, which
-  is what the list falls back to before hydration has named a workspace.
+  `src/store/selectors.ts`, filtered to `activeWorkspace`. `sidebarRuns`
+  keeps the flat attention-ordered list for other run surfaces;
+  `sidebarGroups` assembles the sidebar's swarm trees. An empty scope shows
+  every run until hydration names a workspace.
 - **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
@@ -519,8 +547,8 @@ it in a follow-up.
 finger has to hit carries its touch size beside its desktop one - for example
 `size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
 laptop with a trackpad keeps the desktop density. Under it the `Button`
-sizes, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`, the
-`Select` trigger and its options, the dialog close, the palette trigger and
+sizes, `Input`, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`,
+the `Select` trigger and its options, the dialog close, the palette trigger and
 input, the status bar controls, the sidebar run rows and the sidebar's own
 buttons, the run-list title, the files tree rows and the approvals controls
 grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
@@ -583,7 +611,11 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   billing history are explicitly outside this read-only surface; credentials
   remain server-side.
 - **The run header** gives its first section two lines: the title and task
-  disclosure, then state, harness/mode and branch metadata. The second section
+  disclosure, then state, harness/mode and branch metadata. The title is the
+  agent's last terminal title; a run without one is named by the first line
+  of its prompt, cut at 120 characters. The heading clamps to two lines and
+  keeps the full label in its `title`; the whole prompt is behind
+  **View full task**. The second section
   holds only the run-detail tabs and actions. Desktop actions all appear from
   a 512px header width, with icon labels expanding from 1024px; narrower
   headers retain More. Metadata and tabs scroll inside their own regions
@@ -610,12 +642,19 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
 fetches hydrates the store (`server.info`, `workspace.list`, `member.list`,
 `run.list`, `run.overlaps`, and `GET /api/v1/capabilities`), then `/ws/events`
-is the only thing that changes it. Hydration also repairs the scope: an unset
-`activeWorkspace`, or one naming a workspace that is gone, falls back to the
-first by ID rather than leaving every scoped surface pointed at nothing. The capabilities fetch may fail without
-failing hydration - a legacy gateway has no such endpoint - and the store
-then holds `null`. The snapshot also seeds the board's paused map from each
-run's wire `paused` field, skipping runs that do not carry it.
+is the only thing that changes it. `setWorkspaces` keeps a valid selection;
+an unset selection or a workspace that has been deleted falls back to the
+first by ID, or clears the selection when none remain. An open deleted
+workspace route moves to the replacement workspace or **Manage workspaces**;
+an open run in a deleted workspace returns to the board. The capabilities
+fetch may fail without failing hydration; a legacy gateway then holds `null`.
+The snapshot also seeds the board's paused map from each run's wire `paused`
+field, skipping runs that do not carry it.
+
+`removeWorkspace` records deleted IDs for the lifetime of the in-memory store.
+Every workspace snapshot and upsert excludes those IDs, so an older route or
+hydration response cannot resurrect a deletion received from another member.
+Removal also repairs the selection and open route before any refresh awaits.
 
 - **The subscription is established first.** Hydration starts only once the
   server acknowledges it (`{"ok":true}`), which is also when the client calls
@@ -1447,11 +1486,17 @@ A following terminal therefore:
   local measurements and resize reports, while `setGeometry()` applies the
   server's grid just as on desktop. The header carries `standardGeometry`
   (80x24) only for a session being created, such as a new shell tab.
-  The live terminal pane exposes horizontal overflow only, so a grid wider
-  than the phone can be panned sideways. The integrated run-history surface
-  owns both axes while reading, without a competing outer vertical scroller.
-  While steering, the flag still keeps this viewer out of the shared size
-  calculation.
+  On phones the live terminal host exposes both axes. `useTerminalPan`
+  reveals the cursor on entry, focus, input and viewport changes, without
+  resizing xterm; a manual pan pauses following until a tap, focus or input resumes it.
+  It rounds fractional viewport bounds inward so the whole cursor cell remains visible.
+  History capture keeps the absolute outer pan offset separate from
+  accumulated gesture deltas, including when disposal beats the next paint.
+  Layout cleanup records the latest pan before host detachment, even if its
+  scroll event has not fired.
+  The integrated run-history surface owns both axes while reading, with
+  live-grid panning disabled. Steering still keeps this viewer out of the
+  shared size calculation.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no
@@ -1464,16 +1509,18 @@ and Ctrl+C, each through `terminal.input` so the replay gate and
 modifier held in the host (`armCtrl`), because a soft keyboard sends
 characters and never a modifier: it rewrites the next character into its
 control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte. The two copy actions carry a visible
-word beside them under `coarse:`, because a tooltip is the only other thing
-telling them apart and hover is what opens one.
+than spending it on the wrong byte. On phones **Tools** opens a bounded,
+scrollable popover with named search, text-size, copy, paste and upload
+actions instead of a second permanent toolbar row. Wider touch screens keep
+the inline tools and visible copy labels.
 
-The phone's outer pane is a horizontal pan area only. In a run's normal buffer,
-a downward finger drag hands off continuously to integrated history; subsequent
-swipes browse older pages or return live at the bottom. The read surface keeps
-horizontal panning and does not resize the PTY or raise an input keyboard.
-Ordinary alternate-screen gestures still belong to the application. Shell and
-environment terminals retain native xterm scrollback.
+In a run's normal buffer, a downward finger drag pans the live grid to its
+top before handing off continuously to integrated history. Horizontal drags
+do not enter history. Subsequent history swipes browse older pages or return
+live at the bottom. Panning either surface does not resize the PTY or raise
+an input keyboard. Oversized alternate screens use live-grid panning too;
+when the grid fits vertically, application scrolling remains native. Shell
+and environment terminals retain native xterm scrollback.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
@@ -1896,6 +1943,21 @@ Room tab count, and neither creates a second action inbox.
 `src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
 shows its name, creation time, base branch, steering policy and an **Open**
 button.
+
+Admins also get **Delete**. The confirmation lists what is permanently
+removed; **Cancel** leaves the workspace untouched. The server refuses active
+work, pending cleanup and configured schedules rather than stopping them.
+Failures remain in the dialog verbatim, so the admin can resolve the blocker
+and retry. See [workspace deletion](teams.md#workspaces) for the CLI and
+cleanup rules.
+
+![Workspace deletion confirmation](media/workspace-delete-confirmation.webp)
+
+![Deletion refused while a schedule remains](media/workspace-delete-refusal.webp)
+
+After deletion, the list and workspace switcher update together.
+`workspace.deleted` events reconcile other connected dashboards, including
+their selection and any open deleted workspace or run.
 
 ## Settings
 
@@ -2641,8 +2703,15 @@ for review`, `Active`, `Amendment ready for review`, `Rejected`. The detail
 view's status line answers the phase first and falls back to the
 task-derived string only in `active`.
 
-A phase banner sits under the mission header in every phase and says what
-the human must do next. When `current_integrator_run_id` names a run whose
+The detail header shows the objective's first line, cut to 80 characters
+with an ellipsis, and carries the full objective in its `title` attribute.
+The full objective opens the scrollable detail, clamped to three lines with
+a **Show more** toggle when it overflows; a long objective never pushes the
+plan review below the viewport. Mission cards clamp the objective the same
+way.
+
+A phase banner sits under the objective in every phase and says what the
+human must do next. When `current_integrator_run_id` names a run whose
 status in the store is terminal, the banner adds `The integrator run <id>
 has exited; replace the integrator to continue` with the **Replace
 integrator** control inline, in every phase but `rejected` - an integrator

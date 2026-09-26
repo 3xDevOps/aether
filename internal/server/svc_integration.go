@@ -177,6 +177,7 @@ func init() {
 		if err != nil {
 			return nil, fmt.Errorf("integration: create service: %w", err)
 		}
+		d.Workspaces.candidates = svc
 		// SSH owns the transport adapter, while the service remains the one
 		// durable candidate engine shared by every transport. If mission
 		// registered first, complete its lazy base binding instead.

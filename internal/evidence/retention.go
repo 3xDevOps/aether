@@ -343,6 +343,25 @@ func (s *Service) PurgeRun(ctx context.Context, workspace domain.WorkspaceID, ru
 			}
 		}
 	}
+	if staging := s.stagingStore(); staging != nil {
+		for {
+			rows, err := staging.ListRunEvidenceStaging(cleanupCtx, run, MaxPageSize)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				break
+			}
+			for _, row := range rows {
+				if err := s.removeStagedArtifacts(cleanupCtx, workspace, row.ID); err != nil {
+					return err
+				}
+				if err := staging.DeleteEvidenceStaging(cleanupCtx, row.ID); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	if cleanup != nil {
 		if err := cleanup(cleanupCtx); err != nil {
 			return fmt.Errorf("evidence: run cleanup: %w", err)

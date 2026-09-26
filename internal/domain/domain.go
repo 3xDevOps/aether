@@ -631,6 +631,12 @@ type Run struct {
 	// questions without a correlated reply. It is populated by run snapshot
 	// reads and is zero for newly-created runs.
 	UnansweredQuestions int
+	// Mission fields are read-only snapshot metadata from durable mission and
+	// attempt relationships, not authorization. MissionRole is "integrator"
+	// only for the current integrator, or "worker" even for finished attempts.
+	MissionID       MissionID
+	MissionRole     string
+	IntegratorRunID RunID
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID

@@ -45,7 +45,10 @@ type Run struct {
 	// UnansweredQuestions is server-computed in run snapshots. It is always
 	// present on modern gateways, including zero; web clients keep the field
 	// optional so snapshots from older gateways remain valid.
-	UnansweredQuestions int `json:"unanswered_questions"`
+	UnansweredQuestions int    `json:"unanswered_questions"`
+	MissionID           string `json:"mission_id,omitempty"`
+	MissionRole         string `json:"mission_role,omitempty"`
+	IntegratorRunID     string `json:"integrator_run_id,omitempty"`
 	// BaseCommit, BaseBranch, BaseSource, and BaseCheckedAt are the
 	// immutable base provenance captured for this run.
 	BaseCommit    string  `json:"base_commit,omitempty"`
@@ -158,6 +161,9 @@ func RunFromDomain(r *domain.Run) Run {
 		FinishedAt:          rfc3339Ptr(r.FinishedAt),
 		ProfileSnapshotID:   string(r.ProfileSnapshotID),
 		UnansweredQuestions: r.UnansweredQuestions,
+		MissionID:           string(r.MissionID),
+		MissionRole:         r.MissionRole,
+		IntegratorRunID:     string(r.IntegratorRunID),
 		BaseCommit:          r.BaseCommit,
 		BaseBranch:          r.BaseBranch,
 		BaseSource:          r.BaseSource,

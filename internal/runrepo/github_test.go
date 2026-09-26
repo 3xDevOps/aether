@@ -296,7 +296,6 @@ func TestPRCreateRejectsRemoteMismatchIdentitySwitchAndRevokedMutation(t *testin
 		t.Run(mode, func(t *testing.T) {
 			s, run, expected := newRepo(t)
 			f := newGitHubFixture(expected.Head)
-			s.exec = githubExec(t, f)
 			request := PRCreateRequest{Expected: expected, Target: f.target, Title: "Publish", ExpectedLogin: "shared-bot"}
 			if mode == "remote" {
 				f.head = strings.Repeat("b", 40)
@@ -312,6 +311,7 @@ func TestPRCreateRejectsRemoteMismatchIdentitySwitchAndRevokedMutation(t *testin
 					return nil
 				}
 			}
+			s.exec = githubExec(t, f)
 			result, err := s.CreatePR(t.Context(), run, request)
 			if err == nil || result.Created || result.CreationUncertain {
 				t.Fatalf("unsafe create=%+v err=%v", result, err)

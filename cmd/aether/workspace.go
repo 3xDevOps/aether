@@ -12,20 +12,22 @@ import (
 func init() {
 	register(command{
 		name:  "workspace",
-		short: "manage workspaces: init, add, list, settings, origin, mirror",
+		short: "manage workspaces: init, add, delete, list, settings, origin, mirror",
 		run:   runWorkspace,
 	})
 }
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace <init|add|list|settings|origin|mirror>")
+		return fmt.Errorf("usage: aether workspace <init|add|delete|list|settings|origin|mirror>")
 	}
 	switch args[0] {
 	case "init":
 		return workspaceInit(args[1:])
 	case "add":
 		return workspaceAdd(args[1:])
+	case "delete":
+		return workspaceDelete(args[1:])
 	case "list":
 		return workspaceList(args[1:])
 	case "settings":
@@ -104,6 +106,31 @@ func createWorkspace(opts workspaceCreateOptions) error {
 			return err
 		}
 		fmt.Printf("workspace %s %s\n", res.Workspace.ID, res.Workspace.Name)
+		return nil
+	})
+}
+
+func workspaceDelete(args []string) error {
+	fs := flag.NewFlagSet("workspace delete", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	yes := fs.Bool("yes", false, "confirm permanent deletion of the workspace and all its data")
+	name, err := parseLeadingArg(fs, args)
+	if err != nil || name == "" {
+		return fmt.Errorf("usage: aether workspace delete <name-or-id> --yes")
+	}
+	if !*yes {
+		return fmt.Errorf("--yes is required because workspace deletion permanently removes its runs, repository and data")
+	}
+	return withControl(func(c *protocol.Client) error {
+		ws, err := resolveMirrorWorkspace(c, name, false)
+		if err != nil {
+			return err
+		}
+		var result protocol.WorkspaceDeleteResult
+		if err := c.Call(protocol.MethodWorkspaceDelete, protocol.WorkspaceDeleteParams{WorkspaceID: ws.ID}, &result); err != nil {
+			return err
+		}
+		fmt.Printf("deleted workspace %s %s\n", ws.ID, ws.Name)
 		return nil
 	})
 }

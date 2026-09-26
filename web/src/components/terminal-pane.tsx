@@ -14,6 +14,7 @@ import {
   RotateCcw,
   ScanText,
   Search,
+  SlidersHorizontal,
   X,
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -22,13 +23,15 @@ import type { XtermController } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   TerminalImageAction,
   type TerminalImageController,
   useTerminalImage,
 } from '@/components/terminal-image'
 import { TerminalKeys } from '@/components/terminal-keys'
-import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { useTerminalPan } from '@/components/terminal-pan'
+import { coarsePointer, phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { copyScreen, copySelection } from '@/lib/term-clipboard'
 import {
   defaultTerminalFontSize,
@@ -61,12 +64,18 @@ function ToolButton({
           <Button
             {...triggerProps}
             {...props}
+            className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
             aria-disabled={disabled || undefined}
             onClick={(event) => {
               if (disabled) return
               onClick?.(event)
             }}
-          />
+          >
+            {props.children}
+            <span className="hidden group-data-[expanded=true]/terminal-tools:inline">
+              {props['aria-label']}
+            </span>
+          </Button>
         )}
       />
       <Tooltip.Content>{hint}</Tooltip.Content>
@@ -81,17 +90,19 @@ function ToolButton({
  * where there is no pointer to hover with.
  */
 function ToolLabel({ children }: { children: React.ReactNode }) {
-  return <span className="hidden pr-1 text-[12px] text-muted-foreground coarse:inline">{children}</span>
+  return <span className="hidden pr-1 text-[12px] text-muted-foreground coarse:inline group-data-[expanded=true]/terminal-tools:hidden">{children}</span>
 }
 
 function TerminalTools({
   controller,
   image,
   readingSurface,
+  expanded = false,
 }: {
   controller: XtermController
   image: TerminalImageController
   readingSurface?: React.RefObject<TerminalReadSurface | null>
+  expanded?: boolean
 }) {
   const terminal = controller.terminal
   const fontSize = useStore((state) => state.terminalFontSize)
@@ -101,7 +112,11 @@ function TerminalTools({
     <div
       role="toolbar"
       aria-label="Terminal controls"
-      className="flex min-w-32 max-w-full shrink items-center gap-0.5 overflow-x-auto"
+      data-expanded={expanded}
+      className={cn(
+        'group/terminal-tools flex min-w-32 max-w-full shrink gap-0.5',
+        expanded ? 'flex-col items-stretch [&>span]:hidden' : 'items-center overflow-x-auto',
+      )}
     >
       <ToolButton
         type="button"
@@ -244,7 +259,7 @@ function FindBar({
         aria-label="Find in terminal"
         placeholder="Find"
         value={term}
-        className="h-[26px] min-w-0 flex-1 coarse:h-10 sm:w-40"
+        className="h-[26px] min-w-0 flex-1 coarse:h-10 coarse:min-h-10 sm:w-40"
         onChange={(event) => {
           setTerm(event.target.value)
           request.current++
@@ -338,6 +353,8 @@ export function TerminalPane({
     focusTerminal: controller.focusTerminal,
   })
   const coarse = useMediaQuery(coarsePointer)
+  const phone = useMediaQuery(phoneScreen)
+  useTerminalPan(controller.terminal, phone && !replaying && !readingSurface)
   // A terminal that cannot take input holds no modifier: the key bar goes
   // with the write access it needed, and a Ctrl left armed across that
   // would turn the first character of the next turn at the keyboard into a
@@ -372,7 +389,19 @@ export function TerminalPane({
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-2 coarse:min-h-12">
         {!controller.findOpen ? (
-          <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
+          phone ? (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm" aria-label="Terminal tools">
+                  <SlidersHorizontal />
+                  Tools
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[min(300px,calc(100vw-16px))] p-1">
+                <TerminalTools controller={controller} image={image} readingSurface={readingSurface} expanded />
+              </PopoverContent>
+            </Popover>
+          ) : <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
         ) : (
           <FindBar
             search={readingSurface ? {
@@ -401,7 +430,7 @@ export function TerminalPane({
           className,
         )}
         style={{
-          overflowY: 'hidden',
+          overflowY: phone ? 'auto' : 'hidden',
           overscrollBehaviorY: 'none',
           visibility: replaying || readingSurface ? 'hidden' : undefined,
         }}

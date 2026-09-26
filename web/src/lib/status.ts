@@ -40,9 +40,19 @@ export function runState(status: RunStatus, pendingApproval = false): Presentati
   }
 }
 
-/** A run's human title. Empty titles fall back to the task. */
+const fallbackLabelLength = 120
+
+/** A run's human title. An untitled run is named by its bounded first prompt line. */
 export function runLabel(run: { task: string; title?: string }): string {
-  return run.title?.trim() || run.task.trim() || 'Untitled run'
+  const title = run.title?.trim()
+  if (title) return title
+  const line = run.task.split('\n').find((l) => l.trim())?.trim() ?? ''
+  if (!line) return 'Untitled run'
+  const chars = Array.from(line)
+  if (chars.length <= fallbackLabelLength) return line
+  const cut = chars.slice(0, fallbackLabelLength).join('')
+  const space = cut.search(/\s\S*$/)
+  return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`
 }
 
 /** The runs an approval request is still waiting on, across every inbox. */

@@ -496,6 +496,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberRole: vi.fn(async () => bob),
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+    workspaceDelete: vi.fn(async () => ({ ok: true as const })),
     workspaceSettings: vi.fn(async () => workspace),
     // Local-only is the default in the mirror control plane; tests that
     // exercise configuration override the relevant response.
@@ -554,6 +555,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       }),
     ),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),
+    localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,
       linked: true,
