@@ -307,7 +307,7 @@ the session's existing size. Swipe vertically or horizontally to reach parts
 of a desktop-sized grid that do not fit on the phone, including an agent's
 input prompt near the bottom. The viewport initially reveals the cursor and
 keeps it visible while you type or the keyboard reduces the available height.
-Panning pauses that following until you focus the terminal or type again.
+Panning pauses that following until you tap or focus the terminal or type again.
 
 In a run's normal buffer, dragging downward first reveals the top of the
 live grid, then continues into recorded history. Swipe toward newer output

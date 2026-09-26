@@ -486,24 +486,29 @@ test('finishes a native scrollbar drag before capturing its final row and horizo
   view.dispose()
 })
 
-test('restores the phone pan offset when leaving during a native scrollbar drag', async () => {
+test('restores the latest phone pan when navigation precedes its scroll event', async () => {
   const cache = cacheFor(fakeApi())
   const view = mountHistory(cache)
   await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
+  let top = 41
+  let left = 47
   Object.defineProperties(view.host, {
-    scrollTop: { get: () => view.host.isConnected ? 41 : 0 },
-    scrollLeft: { get: () => view.host.isConnected ? 47 : 0 },
+    scrollTop: { get: () => view.host.isConnected ? top : 0 },
+    scrollLeft: { get: () => view.host.isConnected ? left : 0 },
   })
   fireEvent.scroll(view.host)
   fireEvent.pointerDown(view.nativeSlider, { pointerId: 7 })
   act(() => view.scrollNative(5))
+  top = 81
+  left = 71
+  view.unmount()
   view.host.remove()
   view.dispose()
-  expect(await cache.readView()).toMatchObject({ anchor: { row: 8, offset: 3, left: 47 } })
+  expect(await cache.readView()).toMatchObject({ anchor: { row: 12, offset: 3, left: 71 } })
   const restored = mountHistory(cache)
   const output = await screen.findByRole('region', { name: 'Terminal scrollback' })
-  expect(firstVisibleRow(output)).toEqual({ text: 'original screen 8', offset: -3 })
-  expect(output.scrollLeft).toBe(47)
+  expect(firstVisibleRow(output)).toEqual({ text: 'original screen 12', offset: -3 })
+  expect(output.scrollLeft).toBe(71)
   restored.dispose()
 })
 

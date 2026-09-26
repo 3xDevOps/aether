@@ -196,7 +196,11 @@ done`)
       await drag(-80)
       await expect.poll(promptVisible).toBe(true)
 
-      await prompt.tap({ position: { x: 30, y: 8 } })
+      const promptBox = await prompt.boundingBox()
+      if (!promptBox) throw new Error('terminal prompt is missing')
+      // xterm's screen owns touch events; its painted text rows do not.
+      await page.touchscreen.tap(promptBox.x + 30, promptBox.y + promptBox.height / 2)
+      await expect(page.locator('.xterm-helper-textarea')).toBeFocused()
       const restore = await shrinkToKeyboardHeight(page)
       await expect.poll(promptVisible).toBe(true)
       await page.locator('.xterm-helper-textarea').pressSequentially(`phone-${buffer}`)

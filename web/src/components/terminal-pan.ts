@@ -72,6 +72,9 @@ export function useTerminalPan(terminal: Terminal | null, enabled: boolean) {
       if (touch?.panned) {
         event.preventDefault()
         event.stopPropagation()
+      } else if (touch && !touch.moved && event.type === 'touchend' &&
+        terminal.textarea === document.activeElement) {
+        resume()
       }
       touch = null
     }

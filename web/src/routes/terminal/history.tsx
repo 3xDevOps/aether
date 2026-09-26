@@ -382,6 +382,7 @@ export function TerminalHistory({
     host.addEventListener('touchstart', touchStart, { passive: true })
     host.addEventListener('touchmove', touchMove, { capture: true, passive: false })
     return () => {
+      if (host.isConnected) rememberPan()
       nativeScroll.dispose()
       host.removeEventListener('scroll', rememberPan)
       host.removeEventListener('pointerdown', pointerDown, true)
