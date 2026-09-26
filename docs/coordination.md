@@ -75,8 +75,12 @@ line. The base coordination method set is:
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
 
-The `coord.*` wire and its six base methods are unchanged. Mission-assigned
-runs additionally receive assignment-scoped `task.*` and `worker.*` methods
+The six advertised coordination methods are unchanged. Native hooks use
+`coord.hook.status`, an internal read-only endpoint with the same result and
+authorization as `coord.status`, but a separate request budget. It is not an
+additional agent capability or MCP tool.
+
+Mission-assigned runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
 `integration.prepare`, `integration.show`, `integration.verify`,
 `integration.request_delivery`, `integration.deliver`,
@@ -117,10 +121,13 @@ also enforces these bounds:
 - an inbox holds at most 100 unacknowledged messages;
 - sends allow a burst of five, then one message per five seconds;
 - inbox reads allow a burst of ten, then one read per second;
-- every non-empty, bounded request line consumes a per-run transport budget
-  of 30 requests per burst, refilling at one request per second. This charge
-  happens before JSON, method, or parameter parsing, so malformed and unknown
-  requests cannot bypass it;
+- ordinary requests have a per-run transport budget of 30 requests per burst,
+  refilling at one request per second. Malformed envelopes and unknown methods
+  consume this budget too;
+- valid `coord.hook.status` requests use a separate per-run budget with the
+  same limits, so automatic checks cannot starve explicit inbox, status, send,
+  or report commands. The server parses the bounded envelope once to select
+  the budget, then admits or rejects it before method-specific work;
 - `wait_seconds` is a server-side wait from 0 through 30 seconds;
 - each run socket accepts at most 16 concurrent connections, and inactive
   connections are reaped after five minutes;
@@ -156,7 +163,7 @@ returned receipt.
 
 Aether does not type automated coordination messages into terminals. Install
 the [copyable native hooks](harnesses.md#incoming-coordination-hooks) for your
-harness. At its supported lifecycle boundaries, a hook checks `coord.status`
+harness. At its supported lifecycle boundaries, a hook checks `coord.hook.status`
 and adds a trusted instruction to read the inbox when messages are pending.
 It never acknowledges a batch or promotes a peer's message body into system
 instructions. The agent reads the original, attributed payload through `inbox`.
@@ -310,8 +317,10 @@ With no pending mail or applicable overlap/mission guidance, stdout is empty.
 A missing coordination socket also produces no output, so a user-level hook
 can stay installed outside Aether. An existing but broken socket or other
 failure returns nonzero and the actual error on stderr, never a success hint.
-Stop hooks continue only for pending mail and do not repeat a forced continuation.
-
+Stop hooks request at most one continuation for pending mail or an integrator's
+final mission refresh, even with an empty inbox. Native repeat-stop guards
+prevent a continuation loop; ordinary and worker runs with empty inboxes do
+not get a forced refresh.
 
 ### Send a message
 

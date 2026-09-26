@@ -244,8 +244,11 @@ no inbox hint; active overlap and integrator refresh guidance can still appear.
 Printing context is not acknowledgement.
 
 There is no idle watcher: mail waits for the next supported native boundary.
-Stop hooks can request one continuation for mail already pending at completion,
-but do not override an aborted Cursor turn or repeatedly force continuation.
+Stop hooks can request one continuation for pending mail or an integrator's
+final mission refresh, even with an empty inbox. Native repeat-stop guards
+prevent loops and do not override an aborted Cursor turn. Automatic status
+checks have their own bounded request allowance; they cannot consume the
+capacity needed by explicit inbox, status, send, or report commands.
 Hooks cannot restart exited headless runs. Without working hooks, read the
 inbox explicitly. See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries).
 

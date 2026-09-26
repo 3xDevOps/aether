@@ -154,6 +154,7 @@ type Service struct {
 	buckets        map[domain.RunID]*bucket
 	inboxBuckets   map[domain.RunID]*bucket
 	requestBuckets map[domain.RunID]*bucket
+	hookBuckets    map[domain.RunID]*bucket
 	inboxWaiters   map[domain.RunID]*inboxWaiter
 	reportLocks    map[domain.RunID]*sync.Mutex
 	reportPackets  map[string]protocol.EvidencePacket
@@ -203,6 +204,7 @@ func New(cfg Config) (*Service, error) {
 		buckets:        make(map[domain.RunID]*bucket),
 		inboxBuckets:   make(map[domain.RunID]*bucket),
 		requestBuckets: make(map[domain.RunID]*bucket),
+		hookBuckets:    make(map[domain.RunID]*bucket),
 		inboxWaiters:   make(map[domain.RunID]*inboxWaiter),
 		reportLocks:    make(map[domain.RunID]*sync.Mutex),
 		reportPackets:  make(map[string]protocol.EvidencePacket),

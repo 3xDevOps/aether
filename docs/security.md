@@ -563,9 +563,13 @@ operator-facing stances are these.
   available. Run-bound CLI calls and bridge calls return unavailable; the
   identity-free CLI can still provide general help and non-run skill guidance.
   The overlap radar remains active.
-- **The base socket exposes six coordination methods and no control verbs.**
-  `coord.status`, `coord.send`, `coord.inbox`, `coord.ask`, `coord.reply`, and
-  `coord.report` are the complete `coord.*` wire set. A mission-assigned run
+- **The run socket exposes no general control verbs.** Its six advertised
+  coordination methods are `coord.status`, `coord.send`, `coord.inbox`,
+  `coord.ask`, `coord.reply`, and `coord.report`. Native hooks also use the
+  internal read-only `coord.hook.status` endpoint, with the same run identity
+  and status authorization but an independent bounded request budget.
+  Malformed envelopes and unknown methods still consume the ordinary budget;
+  the hook endpoint cannot dispatch mutations. A mission-assigned run
   additionally receives only the current assignment's `task.*` and `worker.*`
   methods over that same run-authenticated socket; those methods are not a
   general control API. There is no `run.kill`, no Git access, and no other

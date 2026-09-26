@@ -214,6 +214,7 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.buckets, run)
 	delete(s.inboxBuckets, run)
 	delete(s.requestBuckets, run)
+	delete(s.hookBuckets, run)
 	delete(s.reportLocks, run)
 	delete(s.runs, run)
 	s.mu.Unlock()
@@ -452,27 +453,20 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		if s.isRunClosing(run) {
 			return
 		}
-		// Charge at the authenticated socket boundary, before parsing the
-		// envelope, method, or params. A malformed request still consumes
-		// transport budget and cannot be used to bypass the limiter.
-		if !s.transportAllowed(run) {
-			resp, ok := rateLimitedResponse(line)
+		// Parse the bounded envelope once. Only the exact, valid read-only
+		// hook method gets the separate budget; malformed and unknown
+		// requests still spend ordinary transport allowance.
+		req, resp, valid := protocol.ParseRequest(line)
+		hook := valid && req.Method == protocol.MethodCoordHookStatus
+		if !s.transportAllowed(run, hook) {
+			var ok bool
+			resp, ok = rateLimitedResponse(resp, hook)
 			if !ok {
 				return
 			}
-			out, merr := json.Marshal(resp)
-			if merr != nil {
-				return
-			}
-			if err = conn.SetWriteDeadline(time.Now().Add(s.cfg.idle)); err != nil {
-				return
-			}
-			if _, err = conn.Write(append(out, '\n')); err != nil {
-				return
-			}
-			continue
+		} else if valid {
+			resp = s.handleParsed(connCtx, run, req, resp)
 		}
-		resp := s.handle(connCtx, run, line)
 		if connCtx.Err() != nil {
 			return
 		}
@@ -502,13 +496,16 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 	if !valid {
 		return resp
 	}
+	return s.handleParsed(ctx, run, req, resp)
+}
 
+func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protocol.Request, resp protocol.Response) protocol.Response {
 	var (
 		result any
 		rpcErr *protocol.Error
 	)
 	switch req.Method {
-	case protocol.MethodCoordStatus:
+	case protocol.MethodCoordStatus, protocol.MethodCoordHookStatus:
 		result, rpcErr = s.Status(ctx, run)
 	case protocol.MethodCoordSend:
 		p, perr := decodeParams[protocol.CoordSendParams](req.Method, req.Params)
@@ -605,13 +602,12 @@ func isMissionMethod(method string) bool {
 		return false
 	}
 }
-func rateLimitedResponse(line []byte) (protocol.Response, bool) {
-	_, resp, _ := protocol.ParseRequest(line)
+func rateLimitedResponse(resp protocol.Response, hook bool) (protocol.Response, bool) {
 	if len(resp.ID) == 0 || bytes.Equal(bytes.TrimSpace(resp.ID), []byte("null")) {
 		return protocol.Response{}, false
 	}
 	resp.Result = nil
-	resp.Error = transportRateError()
+	resp.Error = transportRateError(hook)
 	return resp, true
 }
 

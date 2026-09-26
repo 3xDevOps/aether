@@ -35,7 +35,8 @@ const (
 )
 
 // requestBurst/refill bound transport work independently of mutation effects.
-// Every coordination method spends this budget, including idempotent retries.
+// Native hook status has its own equally bounded budget so frequent hooks
+// cannot starve explicit coordination (or vice versa).
 const (
 	requestBurst  = 30
 	requestRefill = time.Second
@@ -227,15 +228,23 @@ func missionRPCError(method string, err error) *protocol.Error {
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
-func (s *Service) transportAllowed(run domain.RunID) bool {
-	return s.spend(s.requestBuckets, run, requestBurst, requestRefill)
+func (s *Service) transportAllowed(run domain.RunID, hook bool) bool {
+	buckets := s.requestBuckets
+	if hook {
+		buckets = s.hookBuckets
+	}
+	return s.spend(buckets, run, requestBurst, requestRefill)
 }
 
-func transportRateError() *protocol.Error {
+func transportRateError(hook bool) *protocol.Error {
+	budget := "transport"
+	if hook {
+		budget = "hook"
+	}
 	return &protocol.Error{
 		Code: protocol.CodeConflict,
-		Message: fmt.Sprintf("coord: transport request rate limit exceeded (burst %d, 1 request per %ds)",
-			requestBurst, int(requestRefill.Seconds())),
+		Message: fmt.Sprintf("coord: %s request rate limit exceeded (burst %d, 1 request per %ds)",
+			budget, requestBurst, int(requestRefill.Seconds())),
 	}
 }
 
@@ -1038,8 +1047,8 @@ func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.R
 
 func (s *Service) sendMessage(ctx context.Context, method string, from, to domain.RunID, body string,
 	kind store.RunMessageKind, correlation, idempotency string, correlated bool) (*store.RunMessage, *protocol.Error) {
-	// The transport budget is charged by the public method before this
-	// helper. Retries still avoid radar refresh and mutation work here.
+	// The transport budget is charged at the authenticated socket boundary.
+	// Retries still avoid radar refresh and mutation work here.
 	if prior, err := s.cfg.Mail.GetRunMessageByIdempotency(ctx, from, idempotency); err == nil {
 		if !coordMessageMatches(prior, to, body, kind, correlation) {
 			return nil, &protocol.Error{
