@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,8 +22,14 @@ import (
 )
 
 type controlCall struct {
-	request Request
-	response chan State
+	request   Request
+	response  chan State
+	delivered chan struct{}
+}
+
+func (c controlCall) reply(state State) {
+	c.response <- state
+	<-c.delivered
 }
 
 // Run owns exactly one child process group. The child inherits Docker's real
@@ -30,10 +37,14 @@ type controlCall struct {
 // signals, job control and ioctl geometry all reach the actual application.
 // This must run in a dedicated helper process: subreaping and signal handling
 // are process-wide properties, not appropriate for the Aether server itself.
-func Run(key string, argv []string) (int, error) {
-	if key == "" || len(key) > 1024 || len(argv) == 0 || argv[0] == "" {
-		return 125, errors.New("creation key and command are required")
+func Run(key, claim string, argv []string) (int, error) {
+	if key == "" || len(key) > 1024 || strings.ContainsRune(key, 0) || claim == "" || len(claim) > 1024 || len(argv) == 0 || argv[0] == "" {
+		return 125, errors.New("creation key, claim identity and command are required")
 	}
+	// Linux parent-death signals track the creating OS thread, not the Go
+	// process. Keep that thread alive until the owned children have ended.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if _, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS); err != nil {
 		return 125, fmt.Errorf("owned command requires an inherited PTY: %w", err)
 	}
@@ -57,15 +68,16 @@ func Run(key string, argv []string) (int, error) {
 	go serveControl(listener, calls, done)
 
 	signals := make(chan os.Signal, 16)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH, syscall.SIGCHLD)
 	defer signal.Stop(signals)
-	state := State{CreationKey: key}
+	state := State{CreationKey: key, ClaimToken: claim}
 	startup := time.NewTimer(StartupTimeout)
 	defer startup.Stop()
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
 	var child *exec.Cmd
 	var stopAt time.Time
+	var killDeadline time.Time
 	var killing bool
 	var rootReaped bool
 	var rootCode int
@@ -87,6 +99,7 @@ func Run(key string, argv []string) (int, error) {
 			return err
 		}
 		killing = true
+		killDeadline = time.Now().Add(ReapTimeout)
 		return nil
 	}
 	// Any infrastructure error after Start still cleans up our descendants.
@@ -95,7 +108,10 @@ func Run(key string, argv []string) (int, error) {
 			if !rootReaped {
 				_ = beginKill()
 			}
-			for {
+			if killDeadline.IsZero() {
+				killDeadline = time.Now().Add(ReapTimeout)
+			}
+			for time.Now().Before(killDeadline) {
 				_ = signalChildren(unix.SIGKILL)
 				var status unix.WaitStatus
 				pid, waitErr := unix.Wait4(-1, &status, unix.WNOHANG, nil)
@@ -118,53 +134,55 @@ func Run(key string, argv []string) (int, error) {
 		case call := <-calls:
 			req := call.request
 			response := state
-			if req.ExecID == "" || (state.ExecID != "" && state.ExecID != req.ExecID) {
+			if req.ClaimToken != claim || req.ExecID == "" || (state.ExecID != "" && state.ExecID != req.ExecID) {
 				response.Error = "execution identity mismatch"
-				call.response <- response
+				call.reply(response)
 				continue
 			}
 			switch req.Action {
 			case "start":
-				if child == nil {
-					state.ExecID = req.ExecID
-					child = exec.Command(argv[0], argv[1:]...)
-					child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-					child.SysProcAttr = &syscall.SysProcAttr{
-						Setpgid: true, Foreground: true, Ctty: int(os.Stdin.Fd()),
-						Pdeathsig: syscall.SIGKILL,
+				if child != nil {
+					response.Error = "execution creation key has already been used"
+					break
+				}
+				state.ExecID = req.ExecID
+				child = exec.Command(argv[0], argv[1:]...)
+				child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+				child.SysProcAttr = &syscall.SysProcAttr{
+					Setpgid: true, Foreground: true, Ctty: int(os.Stdin.Fd()),
+					Pdeathsig: syscall.SIGKILL,
+				}
+				if err := child.Start(); err != nil {
+					child = nil
+					code := 126
+					if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
+						code = 127
 					}
-					if err := child.Start(); err != nil {
-						child = nil
-						code := 126
-						if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
-							code = 127
-						}
-						_, saveErr := finish(code, err)
-						call.response <- state
-						return code, saveErr
-					}
-					startup.Stop()
-					state.Running = true
-					if err := saveState(state); err != nil {
-						response = state
-						response.Error = err.Error()
-						call.response <- response
-						return 125, err
-					}
+					_, saveErr := finish(code, err)
+					call.reply(state)
+					return code, saveErr
+				}
+				startup.Stop()
+				state.Running = true
+				if err := saveState(state); err != nil {
+					response = state
+					response.Error = err.Error()
+					call.reply(response)
+					return 125, err
 				}
 				response = state
 			case "status":
 				response = state
 			case "stop":
-				if child == nil {
-					state.ExecID = req.ExecID
-					code, err := finish(125, nil)
-					call.response <- state
-					return code, err
-				}
 				if req.GraceMillis < 0 || req.GraceMillis > 60000 {
 					response.Error = "stop grace must be between 0 and 60000 milliseconds"
 					break
+				}
+				if child == nil {
+					state.ExecID = req.ExecID
+					code, err := finish(125, nil)
+					call.reply(state)
+					return code, err
 				}
 				deadline := time.Now().Add(time.Duration(req.GraceMillis) * time.Millisecond)
 				if stopAt.IsZero() || deadline.Before(stopAt) {
@@ -178,8 +196,19 @@ func Run(key string, argv []string) (int, error) {
 			default:
 				response.Error = "unknown execution control operation"
 			}
-			call.response <- response
+			call.reply(response)
 		case received := <-signals:
+			if received == syscall.SIGCHLD {
+				if child != nil && !killing {
+					if err := reapAdopted(child.Process.Pid); err != nil {
+						return 125, err
+					}
+				}
+				continue
+			}
+			if received == syscall.SIGWINCH && child == nil {
+				continue
+			}
 			if child == nil {
 				return finish(128+int(received.(syscall.Signal)), nil)
 			}
@@ -216,6 +245,9 @@ func Run(key string, argv []string) (int, error) {
 			// recycled elsewhere in the container can never be targeted.
 			if err := signalChildren(unix.SIGKILL); err != nil {
 				return 125, err
+			}
+			if !time.Now().Before(killDeadline) {
+				return 125, errors.New("owned descendants did not exit after SIGKILL")
 			}
 			for {
 				var status unix.WaitStatus
@@ -256,17 +288,19 @@ func serveControl(listener net.Listener, calls chan<- controlCall, done <-chan s
 		_ = conn.SetDeadline(time.Now().Add(StartupTimeout))
 		var request Request
 		if err := json.NewDecoder(io.LimitReader(conn, 16<<10)).Decode(&request); err == nil {
-			call := controlCall{request: request, response: make(chan State, 1)}
+			call := controlCall{request: request, response: make(chan State, 1), delivered: make(chan struct{})}
 			select {
 			case calls <- call:
 				select {
 				case state := <-call.response:
 					_ = json.NewEncoder(conn).Encode(state)
+					close(call.delivered)
 				case <-done:
 					// A final response may have been queued just before exit.
 					select {
 					case state := <-call.response:
 						_ = json.NewEncoder(conn).Encode(state)
+						close(call.delivered)
 					default:
 					}
 				}
@@ -300,6 +334,25 @@ func directChildren() ([]int, error) {
 		}
 	}
 	return children, nil
+}
+
+// Keep long-lived executions from accumulating orphaned zombies. The root is
+// deliberately excluded: its unreaped PID pins the process-group identity.
+func reapAdopted(root int) error {
+	children, err := directChildren()
+	if err != nil {
+		return err
+	}
+	for _, pid := range children {
+		if pid == root {
+			continue
+		}
+		var status unix.WaitStatus
+		if _, err := unix.Wait4(pid, &status, unix.WNOHANG, nil); err != nil && !errors.Is(err, unix.EINTR) && !errors.Is(err, unix.ECHILD) {
+			return err
+		}
+	}
+	return nil
 }
 
 func signalChildren(signal unix.Signal) error {

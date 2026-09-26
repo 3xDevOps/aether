@@ -11,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // noticeActor is the attribution an integrator notice carries: the server
@@ -35,6 +36,27 @@ func planDecisionNotice(d domain.MissionPlanDecision) string {
 	default:
 		return "The plan was rejected and the mission is over. Run /usr/local/bin/aether-internal skill."
 	}
+}
+
+// workerReportNotice is the line that tells the integrator a worker
+// reported. It carries only server-issued IDs: a worker's summary is its own
+// text and would land in the shell left on an exited integrator's terminal.
+func workerReportNotice(outcome store.CoordOutcome, attempt *domain.Attempt) string {
+	inspect := "worker inspect --attempt-id " + string(attempt.ID)
+	switch outcome {
+	case store.CoordOutcomeSuccess:
+		return fmt.Sprintf("Worker run %s reported success on task %s, attempt %s. Run /usr/local/bin/aether-internal %s to review the submission, then task accept-submission or retry.", attempt.RunID, attempt.TaskID, attempt.ID, inspect)
+	case store.CoordOutcomeFailure:
+		return fmt.Sprintf("Worker run %s reported failure on task %s, attempt %s. Run /usr/local/bin/aether-internal %s.", attempt.RunID, attempt.TaskID, attempt.ID, inspect)
+	default:
+		return fmt.Sprintf("Worker run %s reports blocked on task %s, attempt %s. Run /usr/local/bin/aether-internal inbox and %s.", attempt.RunID, attempt.TaskID, attempt.ID, inspect)
+	}
+}
+
+// attemptEndedNotice is the line that tells the integrator a worker's run
+// ended before it reported.
+func attemptEndedNotice(attempt *domain.Attempt) string {
+	return fmt.Sprintf("Worker run %s on task %s ended without a report, attempt %s. Run /usr/local/bin/aether-internal worker inspect --attempt-id %s.", attempt.RunID, attempt.TaskID, attempt.ID, attempt.ID)
 }
 
 // publishMissionChanged emits a projection hint only after the caller's
@@ -66,10 +88,10 @@ func (s *Service) publishMissionChanged(ctx context.Context, missionID domain.Mi
 }
 
 // noticeIntegrator writes text into the mission's current integrator
-// terminal in the background, so an agent idle after asking or submitting
-// learns that a human acted without the human's request waiting on the PTY.
-// Delivery is best effort: the durable change already committed, and
-// mission.plan.show still reports it.
+// terminal in the background, so an agent idle after asking, submitting, or
+// dispatching learns that a human or a worker acted without that request
+// waiting on the PTY. Delivery is best effort: the durable change already
+// committed, and mission.plan.show and worker list still report it.
 func (s *Service) noticeIntegrator(ctx context.Context, m *domain.Mission, text string) {
 	if s.cfg.PTY == nil || m.CurrentIntegratorRunID == "" {
 		return

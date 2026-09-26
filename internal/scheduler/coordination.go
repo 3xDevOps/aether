@@ -82,8 +82,8 @@ func (s *Scheduler) UseCoordination(svc Coordinator, binDir string, enabled ...b
 	}
 }
 
-// RequireCoordination is the admission seam for services that need a real
-// run identity. It never returns a disabled or unconfigured coordinator.
+// RequireCoordination is mission admission, not a transport availability check.
+// It never returns a disabled or unconfigured conflict coordinator.
 func (s *Scheduler) RequireCoordination() (Coordinator, error) {
 	c := s.coordinationSeam()
 	if c == nil || !c.enabled || c.svc == nil {
@@ -346,7 +346,27 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		}
 		maps.Copy(files, profile.DiscoveryFiles)
 		launchArgs = append(launchArgs, profile.DiscoveryLaunchArgs(coordtransport.MountDir)...)
-		maps.Copy(launchEnv, profile.DiscoveryLaunchEnv(coordtransport.MountDir))
+		for key, value := range profile.DiscoveryLaunchEnv(coordtransport.MountDir) {
+			if key == "OPENCODE_CONFIG_CONTENT" && launchEnv[key] != "" {
+				// OpenCode has one inline config variable. Preserve the reporter
+				// only when it was actually provisioned above, rather than making
+				// discovery reference an absent plugin with conflict policy off.
+				var statusConfig, discoveryConfig map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(launchEnv[key]), &statusConfig); err != nil {
+					return nil, nil, nil, fmt.Errorf("decode harness status config: %w", err)
+				}
+				if err := json.Unmarshal([]byte(value), &discoveryConfig); err != nil {
+					return nil, nil, nil, fmt.Errorf("decode harness discovery config: %w", err)
+				}
+				maps.Copy(statusConfig, discoveryConfig)
+				combined, err := json.Marshal(statusConfig)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("combine harness config: %w", err)
+				}
+				value = string(combined)
+			}
+			launchEnv[key] = value
+		}
 	}
 	dir, err := c.svc.Provision(ctx, run.ID, files)
 	if err != nil {

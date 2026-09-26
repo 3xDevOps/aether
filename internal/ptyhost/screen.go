@@ -48,11 +48,12 @@ type ScreenSnapshot struct {
 }
 
 type terminalScreen struct {
-	term  *xterm.Terminal
-	addon *xterm.SerializeAddon
-	cols  uint
-	rows  uint
-	palette *terminalPalette
+	term                *xterm.Terminal
+	addon               *xterm.SerializeAddon
+	cols                uint
+	rows                uint
+	palette             *terminalPalette
+	unsupportedGraphics []string
 
 	// xterm-go deliberately keeps parser and UTF-8 decoder state private to
 	// Terminal. This mirror tracks only the bytes that have not reached a

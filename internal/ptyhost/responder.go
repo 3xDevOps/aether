@@ -26,7 +26,9 @@ func (s *session) enableProtocolResponder() {
 	t.OnData(s.queueProtocolReplyLocked)
 	t.OnColor(func(events []xterm.ColorEvent) {
 		for _, event := range events {
-			if event.Index < 0 || event.Index >= len(s.screen.palette.colors) { continue }
+			if event.Index < 0 || event.Index >= len(s.screen.palette.colors) {
+				continue
+			}
 			switch event.Type {
 			case xterm.ColorRequestSet:
 				if event.Color != nil {
@@ -44,31 +46,108 @@ func (s *session) enableProtocolResponder() {
 	// ColorEvent conflates that request with restoring index zero, so handle
 	// just the empty form before its default handler.
 	t.RegisterOscHandler(104, xterm.NewOscStringHandler(func(data string) bool {
-		if data != "" { return false }
-		for i := range 256 { s.screen.palette.colors[i] = defaultTerminalColor(i) }
+		if data != "" {
+			return false
+		}
+		for i := range 256 {
+			s.screen.palette.colors[i] = defaultTerminalColor(i)
+		}
 		return true
 	}))
 	// RIS also resets palette overrides. Return false to retain emulator reset.
 	t.RegisterEscHandler(xterm.FunctionIdentifier{Final: 'c'}, func() bool {
-		for i := range s.screen.palette.colors { s.screen.palette.colors[i] = defaultTerminalColor(i) }
+		for i := range s.screen.palette.colors {
+			s.screen.palette.colors[i] = defaultTerminalColor(i)
+		}
 		return false
+	})
+	// Observe graphics through the existing continuation parser. Incremental
+	// handlers mark even unfinished/oversized images without retaining payloads.
+	parser := s.screen.continuationParser
+	parser.RegisterDcsHandler(xterm.FunctionIdentifier{Final: 'q'}, &unsupportedSixel{screen: s.screen})
+	parser.RegisterApcHandler(xterm.FunctionIdentifier{Final: 'G'}, &unsupportedGraphicsString{screen: s.screen, kind: "kitty"})
+	parser.RegisterOscHandler(1337, &unsupportedGraphicsString{screen: s.screen, kind: "iterm2"})
+	parser.RegisterEscHandler(xterm.FunctionIdentifier{Final: 'c'}, func() bool {
+		s.screen.unsupportedGraphics = nil
+		return true
 	})
 }
 
+func (s *terminalScreen) markUnsupportedGraphics(kind string) {
+	for _, existing := range s.unsupportedGraphics {
+		if existing == kind {
+			return
+		}
+	}
+	s.unsupportedGraphics = append(s.unsupportedGraphics, kind)
+}
+
+// Discard sixel payload incrementally instead of buffering an image that the
+// emulator cannot render. Mark at the opener, including an unfinished image.
+type unsupportedSixel struct{ screen *terminalScreen }
+
+func (h *unsupportedSixel) Hook(*xterm.Params)   { h.screen.markUnsupportedGraphics("sixel") }
+func (*unsupportedSixel) Put([]uint32, int, int) {}
+func (*unsupportedSixel) Unhook(bool) bool       { return true }
+
+type unsupportedGraphicsString struct {
+	screen *terminalScreen
+	kind   string
+	prefix [14]byte
+	count  int
+}
+
+func (h *unsupportedGraphicsString) Start() {
+	h.count = 0
+	if h.kind == "kitty" {
+		h.screen.markUnsupportedGraphics(h.kind)
+	}
+}
+
+func (h *unsupportedGraphicsString) Put(data []uint32, start, end int) {
+	if h.kind != "iterm2" {
+		return
+	}
+	for _, char := range data[start:end] {
+		if h.count == len(h.prefix) {
+			return
+		}
+		if char > 127 {
+			h.count = len(h.prefix)
+			return
+		}
+		h.prefix[h.count] = byte(char)
+		h.count++
+		if (h.count == 5 && string(h.prefix[:5]) == "File=") ||
+			(h.count == 14 && string(h.prefix[:14]) == "MultipartFile=") {
+			h.screen.markUnsupportedGraphics(h.kind)
+			h.count = len(h.prefix)
+		}
+	}
+}
+
+func (*unsupportedGraphicsString) End(bool) bool { return true }
+
 func (s *session) queueProtocolReplyLocked(data string) {
-	if s.ended || s.stopped || s.protocolErr != nil { return }
+	if s.ended || s.stopped || s.protocolErr != nil {
+		return
+	}
 	if len(data) > maxProtocolReplyBytes-len(s.protocolPending) {
 		s.protocolErr = errors.New("ptyhost: terminal protocol response queue overflow")
 	} else {
 		s.protocolPending = append(s.protocolPending, data...)
 	}
-	select { case s.protocolWake <- struct{}{}: default: }
+	select {
+	case s.protocolWake <- struct{}{}:
+	default:
+	}
 }
 
 func (s *session) respond() {
 	for {
 		select {
-		case <-s.done: return
+		case <-s.done:
+			return
 		case <-s.protocolWake:
 		}
 		for {
@@ -78,7 +157,9 @@ func (s *session) respond() {
 			s.protocolPending = nil
 			ended := s.ended || s.stopped
 			s.mu.Unlock()
-			if ended { return }
+			if ended {
+				return
+			}
 			if failure == nil && len(data) != 0 {
 				failure = s.writeStdinContext(context.Background(), data)
 			}
@@ -90,43 +171,57 @@ func (s *session) respond() {
 				// A failed response lane is a failed attachment, not silent
 				// success. Retain its final screen/error for observation.
 				s.end()
-				if att != nil { _ = att.Close() }
+				if att != nil {
+					_ = att.Close()
+				}
 				return
 			}
-			if len(data) == 0 { break }
+			if len(data) == 0 {
+				break
+			}
 		}
 	}
 }
 
 // A shared session has one stable xterm palette, independent of which viewer
 // happens to be connected. Applications can change it with standard OSCs.
-type terminalPalette struct { colors [259]uint32 }
+type terminalPalette struct{ colors [259]uint32 }
 
 func newTerminalPalette() *terminalPalette {
 	p := &terminalPalette{}
-	for i := range p.colors { p.colors[i] = defaultTerminalColor(i) }
+	for i := range p.colors {
+		p.colors[i] = defaultTerminalColor(i)
+	}
 	return p
 }
 
 func defaultTerminalColor(index int) uint32 {
 	ansi := [...]uint32{0x000000, 0xcd0000, 0x00cd00, 0xcdcd00, 0x0000ee, 0xcd00cd, 0x00cdcd, 0xe5e5e5,
 		0x7f7f7f, 0xff0000, 0x00ff00, 0xffff00, 0x5c5cff, 0xff00ff, 0x00ffff, 0xffffff}
-	if index < 16 { return ansi[index] }
+	if index < 16 {
+		return ansi[index]
+	}
 	if index < 232 {
-		v := index-16
+		v := index - 16
 		levels := [...]uint32{0, 95, 135, 175, 215, 255}
 		return levels[v/36]<<16 | levels[(v/6)%6]<<8 | levels[v%6]
 	}
 	if index < 256 {
-		v := uint32(8+(index-232)*10)
+		v := uint32(8 + (index-232)*10)
 		return v<<16 | v<<8 | v
 	}
-	if index == 257 { return 0x000000 }
+	if index == 257 {
+		return 0x000000
+	}
 	return 0xffffff
 }
 
 func appendColorReport(out []byte, index int, rgb uint32) []byte {
-	if index < 256 { out = fmt.Appendf(out, "\x1b]4;%d;", index) } else { out = fmt.Appendf(out, "\x1b]%d;", index-246) }
+	if index < 256 {
+		out = fmt.Appendf(out, "\x1b]4;%d;", index)
+	} else {
+		out = fmt.Appendf(out, "\x1b]%d;", index-246)
+	}
 	return fmt.Appendf(out, "rgb:%04x/%04x/%04x\x1b\\", ((rgb>>16)&255)*257, ((rgb>>8)&255)*257, (rgb&255)*257)
 }
 

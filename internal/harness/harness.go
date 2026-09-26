@@ -443,10 +443,10 @@ var profiles = map[string]Profile{
 		},
 		StatusFiles: map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
 		// OpenCode discovers instruction files from its merged config.
-		// Include the status plugin in this one-shot overlay because the
-		// launch environment has one value for OPENCODE_CONFIG_CONTENT.
+		// Discovery must also work without the lifecycle reporter. The
+		// scheduler combines these independent config overlays when both apply.
 		DiscoveryEnv: map[string]string{
-			"OPENCODE_CONFIG_CONTENT": `{"plugin":["file://` + CoordPlaceholder + "/" + agentstatus.OpenCodePluginName + `"],"instructions":["` + CoordPlaceholder + "/" + DiscoveryFileName + `"]}`,
+			"OPENCODE_CONFIG_CONTENT": `{"instructions":["` + CoordPlaceholder + "/" + DiscoveryFileName + `"]}`,
 		},
 		DiscoveryFiles: map[string][]byte{DiscoveryFileName: []byte(DiscoveryInstruction + "\n")},
 		InstallScript:  "curl -fsSL https://opencode.ai/install | bash",

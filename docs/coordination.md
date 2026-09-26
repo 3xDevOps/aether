@@ -57,9 +57,9 @@ Caller-supplied mounts are validated before these mounts are appended. A caller 
 cannot shadow the socket or either executable. The server fails closed if it
 cannot stage and verify its binary: managed-container creation or launch is
 refused rather than proceeding without the canonical CLI or bridge.
-For enabled runs, the coordination directory and staged server binary are
-therefore either present as verified or absent from a container; the canonical
-read-only CLI mount is provisioned separately.
+Every run receives its own authenticated socket, independently of conflict
+policy. Member terminals and verification containers receive the CLI without
+borrowing a run's identity.
 
 ## Wire v3
 
@@ -85,9 +85,9 @@ and `mission.plan.submit`. These
 methods use the same run-authenticated socket but are not part of the base
 `coord.*` set.
 Every allow-list is derived from the current assignment, not from
-caller-supplied roles or identities. A mission may authorize its integrator
-and active worker runs as peers before any file overlap exists; ordinary runs
-retain the radar active/grace authorization described below.
+caller-supplied roles or identities. A mission authorizes its integrator
+and active worker runs as peers before any file overlap exists, on top of
+the radar active/grace authorization described below.
 
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
 IDs, the recorded task, each currently authorized peer, and the six base
@@ -95,8 +95,12 @@ coordination capabilities (or the assignment-scoped capability set for a
 mission run). The sender is never a parameter. An ordinary run can message
 only a peer in the same workspace that the radar currently marks as
 overlapping, or a peer in its ten-minute overlap grace period. A mission run
-can also message its current assignment peers, which are shown with
-`state: "mission"` even when no file overlap exists. A question reply is the
+can message those same radar peers plus its current assignment peers, so a
+worker that overlaps a run outside its mission can still answer the overlap
+notice. Status lists the assignment peers first with `state: "mission"` even
+when no file overlap exists, carrying the overlapping files when the radar
+also reports one; radar peers outside the mission follow with `state:
+"active"` or `"grace"`. Any other run is refused. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
 grace expires. It cannot be used to send an unrelated message or cross a
@@ -150,11 +154,28 @@ not mean that a peer has read the message or understood it. A timed-out
 request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
+When a message, question, or reply is stored for a run launched in `tui`
+mode, Aether also types one line into that run's terminal:
+
+```
+aether: New coordination message from run <sender run ID>. Run /usr/local/bin/aether-internal inbox to read it, then acknowledge the batch with --ack.
+```
+
+The line is a hint, not delivery: it fires once per burst, so further
+messages stay silent until the run next reads its inbox, and it is never
+sent to a headless run, whose harness does not read its terminal. A run
+whose terminal is not attached yet, for example right after a server restart, gets no
+line and nothing is lost; the inbox remains the authoritative source. The
+same rule applies to the conflict radar's overlap banner: only a `tui` run
+receives it, and a headless run is not counted as told.
+
 Accepted messages, questions, and replies are attributed to their originating
 run and appended to the workspace timeline. These coordination notices are
 server-originated events with an empty actor identity; ownership changes cannot
 rewrite their historical attribution. The timeline records durable server
-acceptance; it does not imply that the recipient has read the item.
+acceptance, and a `coordination notice: message from run <sender>` note on the
+recipient's run when the terminal line was written; neither implies that the
+recipient has read the item.
 
 ## `aether-internal` CLI
 
@@ -227,8 +248,10 @@ its own task ID:
 Use the actual command from skill, not the example ID above. Read the returned
 task revision, objective, scope, exclusions, and evidence requirements before
 acting. Workers may read and propose; they must not spawn workers, accept tasks,
-or perform mission/integration operations. Ordinary runs have no mission
-authority. Help documents syntax, not permission.
+or perform mission/integration operations. A worker's skill also tells it to
+check the inbox after reading the task, before each commit, and before
+reporting, and that `status` lists its sibling workers. Ordinary runs have no
+mission authority. Help documents syntax, not permission.
 
 Every role gets `status`, `inbox`, and top-level help bootstrap commands.
 An integrator's skill states its role before its phase guidance: turn the
@@ -278,6 +301,10 @@ the next command. `--wait` asks the server to wait once for up to 30 seconds
 when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
+
+For the terminal line that announces a new message to a `tui` run, see
+[delivery and acknowledgement](#delivery-acknowledgement-and-retries). A
+headless run reads the inbox at its checkpoints.
 
 ### The mission plan gate
 
@@ -367,9 +394,13 @@ mission to `active`. `mission.cancel` is the same kind of human-only method.
 Rejecting and cancelling both move the mission to `rejected`, and the server
 then cancels the integrator run.
 
-An answer to a mission question and every plan decision are also typed into
-the integrator's terminal as one `aether:` line naming the command to run
-next. The integrator is always interactive (TUI): `mission.create` and
+An answer to a mission question, every plan decision, and every worker report
+are also typed into the integrator's terminal as one `aether:` line naming
+the command to run next. A worker's line carries only the worker run, task,
+and attempt IDs, never the worker's summary. A worker whose run ends before
+it reports gets the same kind of line once reconcile marks its attempt
+failed; a worker the integrator cancelled gets none. The integrator is always
+interactive (TUI): `mission.create` and
 `mission.replace-integrator` refuse any other mode with `-32602` and
 `integrator mode must be tui: a headless integrator exits after one turn and
 cannot be asked or told`. `mission.create` needs the integrator's exact
@@ -487,7 +518,8 @@ For a useful plan, also declare paths and evidence requirements before approval:
   },
   "evidence_requirements": [
     {"kind": "transcript", "detail": "Retain test output showing expired sessions are rejected"}
-  ]
+  ],
+  "depends_on": ["task-1"]
 }
 ```
 
@@ -495,9 +527,23 @@ For a useful plan, also declare paths and evidence requirements before approval:
 paths. Each evidence requirement has a non-empty `kind` and optional `detail`.
 Kinds name retained evidence sources, such as `transcript` or `git`, not test
 types. Describe the required test output in `detail`; do not use `test` as a kind.
+`depends_on` lists the IDs of tasks in the same mission whose output this task
+needs. Until every one of them has an accepted submission for its current
+revision, `task show` reports the task as `blocked` with a `dependency` blocker
+naming the task, and `worker start` is refused with code `-32003` and a
+message ending in `task task-2 waits for task task-1`. A new revision of a
+dependency has no accepted submission yet, so the dependent waits again until
+one is; the `depends_on_revision` a projected dependency reports is the
+dependency's revision when the row was written, not the one readiness checks.
+A `depends_on` entry that names an unknown, abandoned, or self ID, or that
+would form a cycle, is refused and the revision is not written. The cycle
+check counts every task's current revision and its latest pending draft, so
+reversing a dependency takes two steps: get the revision that drops the old
+edge accepted, then propose the reversed one.
 Set `"material": true` for an amendment changing scope, constraints, or success
 criteria. Do not copy server-managed IDs, revision numbers, status, or
-timestamps from a response. A revision supplies the whole spec, not a patch.
+timestamps from a response. A revision supplies the whole spec, not a patch:
+a revision without `depends_on` drops the dependencies of the previous one.
 JSON input is capped at 32 KiB; save files outside the read-only `/run/aether`.
 
 For an integrator in `planning`, `clarified`, or `active`, after preparing
@@ -623,6 +669,12 @@ Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
 
+Every report is also typed into the integrator's terminal as one `aether:`
+line naming the worker run, task, and attempt and the
+`worker inspect --attempt-id` command to run next; a blocked report names
+`inbox` as well. The integrator waits for workers with `inbox --wait 30`
+instead of polling `worker list`.
+
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to
 16 MiB, then stores factual context, provenance, unresolved facts, and a next
@@ -670,10 +722,8 @@ Active runs and explicitly retained terminal TUI runs keep their socket,
 unread mailbox, and timeline entries through a server restart. Recovery
 rebinds `coord3.sock` for those runs. When a run's container is destroyed,
 Aether releases the coordination directory and mailbox after any required
-evidence capture has completed. With `--conflict-coordination=false`, a newly
-created container still receives the read-only canonical CLI mount, but no
-coordination socket or borrowed run identity is provided. Run-bound
-coordination requests are unavailable; `--help` and the general, identity-free
-`skill` workflow still work, and the CLI cannot authorize run operations. The
-optional MCP bridge has no usable socket. The conflict radar itself remains
-active.
+evidence capture has completed. With `--conflict-coordination=false`, runs
+still receive their identity socket and per-launch discovery hint.
+`coord.status` reports the live method allow-list; conflict and mission
+operations remain disabled rather than inheriting authority from the socket.
+The conflict radar itself remains active.

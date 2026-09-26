@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
-  "scripts": { "start": "node server.mjs", "test": "node --test companion.test.mjs" },
+  "scripts": { "start": "node server.mjs", "test": "node --test companion.test.mjs", "smoke": "node smoke.mjs" },
   "dependencies": { "@xterm/xterm": "6.0.0", "playwright": "1.63.0" }
 }

@@ -65,11 +65,11 @@ type lease struct {
 }
 
 type runState struct {
-	mu         sync.Mutex
+	mu sync.Mutex
 	// surfaceGate linearizes run-wide revocation against surface admission.
 	surfaceGate sync.RWMutex
-	generation uint64
-	current    *lease
+	generation  uint64
+	current     *lease
 }
 
 // Service is a concurrency-safe in-memory controller lease table. Runtime

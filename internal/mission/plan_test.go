@@ -138,12 +138,21 @@ func (r *recordingInjector) fail(err error) {
 // integrator notice carrying text, ended with submit.
 func (f *planGateFixture) expect(t *testing.T, step, text, submit string) {
 	t.Helper()
-	want := injectedLine{
-		key: ptyhost.RunSession(f.mission.CurrentIntegratorRunID), actor: "aether",
-		text: "aether: " + text, end: submit,
-	}
+	f.notices.expect(t, step, f.mission.CurrentIntegratorRunID, text, submit)
+}
+
+func (f *planGateFixture) expectNone(t *testing.T, step string) {
+	t.Helper()
+	f.notices.expectNone(t, step)
+}
+
+// expect waits for the next terminal write and requires it to be the notice
+// carrying text into run's terminal, ended with submit.
+func (r *recordingInjector) expect(t *testing.T, step string, run domain.RunID, text, submit string) {
+	t.Helper()
+	want := injectedLine{key: ptyhost.RunSession(run), actor: "aether", text: "aether: " + text, end: submit}
 	select {
-	case got := <-f.notices.writes:
+	case got := <-r.writes:
 		if got != want {
 			t.Fatalf("%s wrote %+v to the integrator terminal, want %+v", step, got, want)
 		}
@@ -155,10 +164,10 @@ func (f *planGateFixture) expect(t *testing.T, step, text, submit string) {
 // expectNone requires that no terminal write arrives within a short window.
 // The notice runs in the background, so absence can only be bounded, not
 // proven; the window is far longer than a delivery against SQLite takes.
-func (f *planGateFixture) expectNone(t *testing.T, step string) {
+func (r *recordingInjector) expectNone(t *testing.T, step string) {
 	t.Helper()
 	select {
-	case got := <-f.notices.writes:
+	case got := <-r.writes:
 		t.Fatalf("%s wrote %+v to the integrator terminal, want nothing", step, got)
 	case <-time.After(250 * time.Millisecond):
 	}

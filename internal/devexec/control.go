@@ -18,23 +18,30 @@ import (
 )
 
 const Command = "dev-exec"
+
 const StartupTimeout = 15 * time.Second
+
+// ReapTimeout bounds cleanup after SIGKILL. An unkillable descendant makes the
+// execution unavailable; it must never be reported as successfully stopped.
+const ReapTimeout = 5 * time.Second
 
 // State is written before the helper exits. An exited Docker exec without a
 // matching final record is unavailable, not an invented successful command.
 type State struct {
 	CreationKey string `json:"creation_key"`
-	ExecID string `json:"exec_id"`
-	Running bool `json:"running"`
-	Exited bool `json:"exited"`
-	ExitCode *int `json:"exit_code,omitempty"`
-	Error string `json:"error,omitempty"`
+	ExecID      string `json:"exec_id"`
+	ClaimToken  string `json:"claim_token"`
+	Running     bool   `json:"running"`
+	Exited      bool   `json:"exited"`
+	ExitCode    *int   `json:"exit_code,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type Request struct {
-	Action string `json:"action"`
-	ExecID string `json:"exec_id"`
-	GraceMillis int64 `json:"grace_millis,omitempty"`
+	Action      string `json:"action"`
+	ExecID      string `json:"exec_id"`
+	ClaimToken  string `json:"claim_token"`
+	GraceMillis int64  `json:"grace_millis,omitempty"`
 }
 
 func stateDir(key string) string {
@@ -60,15 +67,27 @@ func readState(key string) (State, error) {
 // deadline bounds startup waiting as well as the request itself. Completed
 // state can still be read after the owning supervisor has exited.
 func Control(ctx context.Context, key string, request Request) (State, error) {
-	if key == "" || request.ExecID == "" {
-		return State{}, errors.New("execution and creation identities are required")
+	if key == "" || len(key) > 1024 || request.ExecID == "" || request.ClaimToken == "" {
+		return State{}, errors.New("execution, creation and claim identities are required")
+	}
+	switch request.Action {
+	case "start", "status":
+	case "stop":
+		if request.GraceMillis < 0 || request.GraceMillis > 60000 {
+			return State{}, errors.New("stop grace must be between 0 and 60000 milliseconds")
+		}
+	default:
+		return State{}, errors.New("unknown execution control operation")
 	}
 	ctx, cancel := context.WithTimeout(ctx, StartupTimeout)
 	defer cancel()
 	for {
 		if state, err := readState(key); err == nil && state.Exited {
-			if state.ExecID != request.ExecID {
+			if state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
 				return State{}, errors.New("execution identity mismatch")
+			}
+			if request.Action == "start" {
+				return state, errors.New("execution creation key has already been used")
 			}
 			return state, nil
 		}
@@ -79,15 +98,22 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 			if err := conn.SetDeadline(deadline); err != nil {
 				return State{}, err
 			}
+			// A deadline alone does not unblock an already connected socket
+			// when its parent context is cancelled before that deadline.
+			stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+			defer stopCancel()
 			if err := json.NewEncoder(conn).Encode(request); err != nil {
 				return State{}, err
 			}
 			var state State
 			err = json.NewDecoder(io.LimitReader(conn, 16<<10)).Decode(&state)
 			if err != nil {
+				if ctx.Err() != nil {
+					return State{}, ctx.Err()
+				}
 				return State{}, err
 			}
-			if state.CreationKey != key || state.ExecID != request.ExecID {
+			if state.CreationKey != key || state.ExecID != request.ExecID || state.ClaimToken != request.ClaimToken {
 				return State{}, errors.New("execution identity mismatch")
 			}
 			if state.Error != "" {

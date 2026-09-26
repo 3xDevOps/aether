@@ -1,0 +1,86 @@
+package browser
+
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"image"
+	"image/png"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestCaptureRejectsWrongTargetAndImageGeometry(t *testing.T) {
+	var imageBytes bytes.Buffer
+	if err := png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 2, 3))); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name  string
+		page  string
+		width int
+	}{{"wrong-page", "other", 2}, {"wrong-width", "page", 3}} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				metadata, err := json.Marshal(Metadata{Page: Page{SessionID: "session", PageID: test.page, PageRevision: 1, Width: test.width, Height: 3}, ContentType: "image/png"})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				w.Header().Set("X-Aether-Metadata", base64.RawURLEncoding.EncodeToString(metadata))
+				w.Header().Set("Content-Type", "image/png")
+				_, _ = w.Write(imageBytes.Bytes())
+			}))
+			defer server.Close()
+			client := NewClient("unused")
+			defer client.Close()
+			transport := server.Client().Transport
+			client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+				copy := request.Clone(request.Context())
+				copy.URL.Host = strings.TrimPrefix(server.URL, "http://")
+				return transport.RoundTrip(copy)
+			})
+			capture, err := client.Capture(t.Context(), Request{SessionID: "session", PageID: "page", PageRevision: 1})
+			if err == nil || capture.Bytes != nil {
+				t.Fatalf("accepted mismatched image: %+v, %v", capture.Metadata, err)
+			}
+		})
+	}
+}
+
+type transportFunc func(*http.Request) (*http.Response, error)
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestTypedOperationLimits(t *testing.T) {
+	base := Request{SessionID: "session", PageID: "page", PageRevision: 1, ViewportID: "viewport"}
+	for _, test := range []struct {
+		name string
+		edit func(*Request)
+	}{
+		{"unknown-operation", func(r *Request) { r.Operation = "evaluate" }},
+		{"unbounded-timeout", func(r *Request) { r.Operation = "reload"; r.TimeoutMS = 10001 }},
+		{"oversized-snapshot", func(r *Request) { r.Operation = "snapshot"; r.MaxNodes = 501 }},
+		{"stale-node-identity", func(r *Request) { r.Operation = "click" }},
+		{"nonfinite-scroll", func(r *Request) { r.Operation = "scroll"; r.DeltaY = math.Inf(1) }},
+		{"empty-success-condition", func(r *Request) { r.Operation = "wait"; r.Condition = "text" }},
+		{"file-url", func(r *Request) { r.Operation = "navigate"; r.URL = "file:///etc/passwd" }},
+		{"unsafe-integer-cursor", func(r *Request) { r.Operation = "console"; r.After = 1 << 53 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := base
+			test.edit(&request)
+			if err := request.Validate(); err == nil {
+				t.Fatal("accepted invalid typed operation")
+			}
+		})
+	}
+	request := base
+	request.Operation, request.MaxNodes, request.MaxChars = "snapshot", 500, 32000
+	if err := request.Validate(); err != nil {
+		t.Fatalf("rejected supported snapshot boundary: %v", err)
+	}
+}

@@ -199,6 +199,7 @@ func (s *Service) Release(run domain.RunID) error {
 		delete(s.inboxWaiters, run)
 	}
 	delete(s.noticed, run)
+	delete(s.messageNoticed, run)
 	s.mu.Unlock()
 	s.radar.forget(run)
 	// Existing handlers keep using their scoped buckets and report lock until
@@ -595,7 +596,7 @@ func (s *Service) handleDevelopment(ctx context.Context, run domain.RunID, metho
 	// no spelling accepted by encoding/json may override the socket-bound run.
 	var fields map[string]json.RawMessage
 	if len(params) > 0 {
-		if err := json.Unmarshal(params, &fields); err != nil {
+		if err := json.Unmarshal(params, &fields); err != nil || fields == nil {
 			return nil, invalidParams(method, "expected an object")
 		}
 	}

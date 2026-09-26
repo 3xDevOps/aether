@@ -20,22 +20,33 @@ const delay = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
 });
 
+// Playwright action timeouts do not cover evaluate/title. Bound read-only CDP
+// observations too, including pages whose main thread is stuck in app code.
+export async function boundedRead(promise, timeout = limits.timeout) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new BrowserError('timeout', 'Browser observation timed out')), timeout);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 export class BrowserSession {
   static async launch() {
     // Playwright's transport is --remote-debugging-pipe. Sandbox failure is fatal;
     // there is deliberately no retry with --no-sandbox or a debugging listener.
-    const browser = await chromium.launch({ headless: true, chromiumSandbox: true, args: ['--disable-dev-shm-usage=false'] });
+    const browser = await chromium.launch({ channel: 'chromium', headless: true, chromiumSandbox: true, ignoreDefaultArgs: ['--disable-dev-shm-usage'], timeout: 15000 });
     return new BrowserSession(browser);
   }
   constructor(browser) {
     this.browser = browser;
     this.pages = new Map();
     this.selected = '';
+    this.processID = randomUUID();
     this.sessionID = randomUUID();
     this.logSequence = 0;
     this.context = null;
-    this.resetting = null;
-    this.closed = false;
+    this.resetting = false;
   }
   async initialize() {
     if (this.context) return;
@@ -48,13 +59,13 @@ export class BrowserSession {
     const known = [...this.pages.values()].find((entry) => entry.page === page);
     if (known) return known;
     if (this.pages.size >= limits.pages) { void page.close().catch(() => {}); return null; }
-    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, nodes: new Map(), console: [], network: [], streams: new Set(), cdp: null, touches: new Map() };
+    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), cdp: null, touches: new Map() };
     this.pages.set(state.id, state);
     this.selected ||= state.id;
     const log = (kind, value) => {
       const entries = state[kind];
       entries.push({ sequence: ++this.logSequence, captured_at: new Date().toISOString(), ...value });
-      if (entries.length > limits.logs) entries.shift();
+      if (entries.length > limits.logs) state.discarded[kind] = entries.shift().sequence;
     };
     page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) log('console', { level: message.type(), text: short(message.text()) }); });
     page.on('pageerror', (error) => log('console', { level: 'error', text: short(error.message) }));
@@ -66,13 +77,20 @@ export class BrowserSession {
       state.viewportID = randomUUID();
       state.viewportChanged = Date.now() / 1000;
       state.touches.clear();
-      void this.clearNodes(state);
+      for (const stream of state.streams) stream.invalidate();
+      void this.clearNodes(state).catch(() => {});
     });
     page.on('close', () => {
-      void this.clearNodes(state);
+      void this.clearNodes(state).catch(() => {});
       for (const stream of state.streams) stream.end();
       this.pages.delete(state.id);
       if (this.selected === state.id) this.selected = this.pages.keys().next().value ?? '';
+    });
+    page.on('crash', () => {
+      state.revision++;
+      void this.clearNodes(state).catch(() => {});
+      for (const stream of state.streams) stream.end();
+      log('console', { level: 'error', text: 'Page crashed; explicitly reload or close the page' });
     });
     page.on('dialog', (dialog) => { log('console', { level: 'warning', text: `Dismissed ${dialog.type()} dialog: ${short(dialog.message())}` }); void dialog.dismiss().catch(() => {}); });
     return state;
@@ -80,10 +98,10 @@ export class BrowserSession {
   async clearNodes(state) {
     const handles = [...state.nodes.values()];
     state.nodes.clear();
-    await Promise.all(handles.map((handle) => handle.dispose().catch(() => {})));
+    await boundedRead(Promise.all(handles.map((handle) => handle.dispose().catch(() => {}))));
   }
   target(request) {
-    requireValue(request.session_id === this.sessionID, 'Browser session changed; list pages again', 'stale_target');
+    requireValue(request && typeof request === 'object' && request.session_id === this.sessionID, 'Browser session changed; list pages again', 'stale_target');
     const state = this.pages.get(request.page_id);
     requireValue(state && !state.page.isClosed(), 'Page closed or unknown; list pages again', 'stale_target');
     requireValue(request.page_revision === state.revision, 'Page navigated; take another snapshot', 'stale_target');
@@ -93,9 +111,22 @@ export class BrowserSession {
     const node = state.nodes.get(request.node_id);
     requireValue(node, 'Node reference expired; take another snapshot', 'stale_target');
     let connected = false;
-    try { connected = await node.evaluate((element) => element.isConnected); } catch { /* navigation destroys handles */ }
+    try { connected = await boundedRead(node.evaluate((element) => element.isConnected)); }
+    catch (error) { if (error.code === 'timeout') throw error; /* navigation destroys handles */ }
     requireValue(connected && state.revision === request.page_revision, 'Node detached; take another snapshot', 'stale_target');
     return node;
+  }
+  async nodeAction(state, request, action) {
+    const node = await this.node(state, request);
+    try { return await action(node); }
+    catch (error) {
+      // A framework can replace the element after the initial connected check.
+      // ElementHandle never retargets it; preserve that failure as stale_target.
+      let connected = true;
+      try { connected = await boundedRead(node.evaluate((element) => element.isConnected), 1000); } catch {}
+      requireValue(connected && !state.page.isClosed() && state.revision === request.page_revision && state.nodes.has(request.node_id), 'Node detached or page changed; take another snapshot', 'stale_target');
+      throw error;
+    }
   }
   viewport(state, request) {
     requireValue(request.viewport_id === state.viewportID, 'Viewport changed; use a current frame', 'stale_viewport');
@@ -103,12 +134,15 @@ export class BrowserSession {
     requireValue(Number.isFinite(request.x) && Number.isFinite(request.y) && request.x >= 0 && request.y >= 0 && request.x < size.width && request.y < size.height, 'Input coordinates outside viewport');
   }
   async describe(state) {
-    return { session_id: this.sessionID, page_id: state.id, page_revision: state.revision, viewport_id: state.viewportID, url: short(state.page.url()), title: short(await state.page.title().catch(() => '')), ...state.page.viewportSize() };
+    const title = short(await boundedRead(state.page.title(), 1000).catch(() => ''));
+    return { session_id: this.sessionID, page_id: state.id, page_revision: state.revision, viewport_id: state.viewportID, url: short(state.page.url()), title, ...state.page.viewportSize() };
   }
   async list() {
     return { session_id: this.sessionID, selected_page_id: this.selected, pages: await Promise.all([...this.pages.values()].map((state) => this.describe(state))) };
   }
-  async snapshot(state, request) {
+  async snapshot(state, request, signal) {
+    const deadline = Date.now() + boundedInteger(request.timeout_ms, 5000, 1, limits.timeout);
+    const read = (promise) => boundedRead(promise, Math.max(1, deadline - Date.now()));
     await this.clearNodes(state);
     const maxNodes = boundedInteger(request.max_nodes, 200, 1, limits.nodes);
     const maxChars = boundedInteger(request.max_chars, 16000, 1, limits.chars);
@@ -116,9 +150,13 @@ export class BrowserSession {
     const nodes = [];
     let truncated = false;
     const revision = state.revision;
+    const unclaimed = new Set();
+    try {
     for (const frame of state.page.frames()) {
+      signal?.throwIfAborted();
+      requireValue(Date.now() < deadline, 'Snapshot timed out', 'timeout');
       if (nodes.length >= maxNodes || remaining <= 0) { truncated = true; break; }
-      const collection = await frame.evaluateHandle(({ count }) => {
+      const collection = await read(frame.evaluateHandle(({ count }) => {
         const found = [];
         let visited = 0;
         const visit = (root) => {
@@ -132,49 +170,70 @@ export class BrowserSession {
           }
         };
         visit(document.documentElement);
-        return found.slice(0, count + 1);
-      }, { count: maxNodes - nodes.length });
-      const properties = await collection.getProperties();
-      await collection.dispose();
-      for (const handle of properties.values()) {
+        return Object.assign(found.slice(0, count + 1), { scanTruncated: visited > 10000 });
+      }, { count: maxNodes - nodes.length }));
+      const properties = await read(collection.getProperties());
+      void collection.dispose().catch(() => {});
+      for (const handle of properties.values()) unclaimed.add(handle);
+      for (const [property, handle] of properties) {
+        if (property === 'scanTruncated') { truncated ||= await read(handle.jsonValue()); continue; }
+        signal?.throwIfAborted();
+        requireValue(Date.now() < deadline, 'Snapshot timed out', 'timeout');
         const node = handle.asElement();
-        if (!node || nodes.length >= maxNodes || remaining <= 0) { truncated = true; await handle.dispose(); continue; }
-        const info = await node.evaluate((element) => {
+        if (!node || nodes.length >= maxNodes || remaining <= 0) { truncated = true; continue; }
+        const info = await read(node.evaluate((element) => {
           const tag = element.tagName.toLowerCase();
           const implicit = { a: element.hasAttribute('href') ? 'link' : '', button: 'button', textarea: 'textbox', select: 'combobox', img: 'img', h1: 'heading', h2: 'heading', h3: 'heading', input: ['checkbox', 'radio'].includes(element.type) ? element.type : element.type === 'button' || element.type === 'submit' ? 'button' : 'textbox' };
           const labelled = (element.getAttribute('aria-labelledby') ?? '').split(/\s+/).slice(0, 20).map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim();
           const labels = element.labels ? [...element.labels].map((label) => label.textContent).join(' ') : '';
           const ownText = [...element.childNodes].filter((child) => child.nodeType === Node.TEXT_NODE).map((child) => child.textContent).join(' ').trim();
           const name = element.getAttribute('aria-label') || labelled || labels || element.getAttribute('alt') || element.getAttribute('title') || (['button', 'a', 'option'].includes(tag) ? element.textContent : ownText);
-          return { tag, role: element.getAttribute('role') || implicit[tag] || '', name: (name ?? '').slice(0, 1024), text: ownText.slice(0, 1024), value: element.type === 'password' ? undefined : typeof element.value === 'string' ? element.value.slice(0, 1024) : undefined, disabled: !!element.disabled, checked: typeof element.checked === 'boolean' ? element.checked : undefined, expanded: element.getAttribute('aria-expanded') ?? undefined };
-        });
+          return { tag: tag.slice(0, 64), role: (element.getAttribute('role') || implicit[tag] || '').slice(0, 64), name: (name ?? '').slice(0, 1024), text: ownText.slice(0, 1024), value: element.type === 'password' ? undefined : typeof element.value === 'string' ? element.value.slice(0, 1024) : undefined, disabled: !!element.disabled, checked: typeof element.checked === 'boolean' ? element.checked : undefined, expanded: element.getAttribute('aria-expanded')?.slice(0, 16) };
+        }));
         const nodeID = randomUUID();
         for (const key of ['name', 'text', 'value']) {
-          if (typeof info[key] === 'string') { info[key] = info[key].slice(0, remaining); remaining -= info[key].length; }
+          if (typeof info[key] === 'string') {
+            if (info[key].length > remaining) truncated = true;
+            info[key] = info[key].slice(0, remaining);
+            remaining -= info[key].length;
+          }
         }
         state.nodes.set(nodeID, node);
+        unclaimed.delete(node);
         nodes.push({ node_id: nodeID, frame_url: short(frame.url(), 512), ...info });
       }
     }
+    const page = await this.describe(state);
     requireValue(revision === state.revision, 'Page navigated during snapshot; retry', 'stale_target');
-    return { page: await this.describe(state), snapshot: { nodes, truncated } };
+    return { page, snapshot: { nodes, truncated } };
+    } catch (error) {
+      void this.clearNodes(state).catch(() => {});
+      if (revision !== state.revision) throw new BrowserError('stale_target', 'Page navigated during snapshot; retry');
+      throw error;
+    } finally {
+      for (const handle of unclaimed) void handle.dispose().catch(() => {});
+    }
   }
   async execute(request, signal) {
     signal?.throwIfAborted();
-    requireValue(request && typeof request === 'object', 'Request must be an object');
+    requireValue(request && typeof request === 'object' && !Array.isArray(request), 'Request must be an object');
+    requireValue(!this.resetting, 'Browser context reset is in progress', 'unavailable');
     await this.initialize();
     const timeout = boundedInteger(request.timeout_ms, 5000, 1, limits.timeout);
     if (request.operation === 'pages') return this.list();
     if (request.operation === 'reset') {
       requireValue(request.session_id === this.sessionID, 'Browser session changed', 'stale_target');
-      const old = this.context;
-      this.context = null;
-      await old.close();
-      this.pages.clear();
-      this.selected = '';
-      this.sessionID = randomUUID();
-      await this.initialize();
-      return this.list();
+      this.resetting = true;
+      try {
+        const old = this.context;
+        this.context = null;
+        await old.close();
+        this.pages.clear();
+        this.selected = '';
+        this.sessionID = randomUUID();
+        await this.initialize();
+        return this.list();
+      } finally { this.resetting = false; }
     }
     if (request.operation === 'open') {
       requireValue(!request.session_id || request.session_id === this.sessionID, 'Browser session changed', 'stale_target');
@@ -182,6 +241,7 @@ export class BrowserSession {
       const url = this.url(request.url || 'about:blank');
       const page = await this.context.newPage();
       const state = this.register(page);
+      requireValue(state, 'Maximum open pages reached while a popup opened', 'resource_limit');
       this.selected = state.id;
       if (url !== 'about:blank') await page.goto(url, { timeout, waitUntil: 'domcontentloaded' });
       return { page: await this.describe(state) };
@@ -196,11 +256,25 @@ export class BrowserSession {
       case 'back': await page.goBack({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'forward': await page.goForward({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'reload': await page.reload({ ...options, waitUntil: 'domcontentloaded' }); break;
-      case 'snapshot': return this.snapshot(state, request);
-      case 'click': await (await this.node(state, request)).click({ ...options, button: request.button || 'left' }); break;
-      case 'fill': requireValue(typeof request.text === 'string' && request.text.length <= limits.chars, 'Text exceeds limit'); await (await this.node(state, request)).fill(request.text, options); break;
-      case 'select_option': requireValue(Array.isArray(request.values) && request.values.length <= 100 && request.values.every((value) => typeof value === 'string' && value.length <= 1024), 'Invalid selection values'); await (await this.node(state, request)).selectOption(request.values, options); break;
-      case 'key': requireValue(typeof request.key === 'string' && request.key.length <= 100, 'Invalid key'); if (request.node_id) await (await this.node(state, request)).press(request.key, options); else if (request.action === 'down') await page.keyboard.down(request.key); else if (request.action === 'up') await page.keyboard.up(request.key); else await page.keyboard.press(request.key); break;
+      case 'snapshot': return this.snapshot(state, request, signal);
+      case 'click': requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button'); await this.nodeAction(state, request, (node) => node.click({ ...options, button: request.button || 'left' })); break;
+      case 'fill': requireValue(typeof request.text === 'string' && request.text.length <= limits.chars, 'Text exceeds limit'); await this.nodeAction(state, request, (node) => node.fill(request.text, options)); break;
+      case 'select_option': requireValue(Array.isArray(request.values) && request.values.length <= 100 && request.values.every((value) => typeof value === 'string' && value.length <= 1024), 'Invalid selection values'); await this.nodeAction(state, request, (node) => node.selectOption(request.values, options)); break;
+      case 'key': {
+        requireValue(typeof request.key === 'string' && request.key.length > 0 && request.key.length <= 100, 'Invalid key');
+        requireValue(!request.action || ['down', 'up', 'press'].includes(request.action), 'Invalid key action');
+        if (request.node_id && !['down', 'up'].includes(request.action)) await this.nodeAction(state, request, (node) => node.press(request.key, options));
+        else {
+          if (request.node_id) {
+            await this.nodeAction(state, request, (node) => node.focus());
+            this.target(request);
+          }
+          if (request.action === 'down') await page.keyboard.down(request.key);
+          else if (request.action === 'up') await page.keyboard.up(request.key);
+          else await page.keyboard.press(request.key);
+        }
+        break;
+      }
       case 'text': requireValue(typeof request.text === 'string' && request.text.length <= limits.chars, 'Text exceeds limit'); await page.keyboard.insertText(request.text); break;
       case 'scroll': this.viewport(state, request); requireValue(Number.isFinite(request.delta_x) && Number.isFinite(request.delta_y) && Math.abs(request.delta_x) <= 10000 && Math.abs(request.delta_y) <= 10000, 'Invalid scroll delta'); await page.mouse.move(request.x, request.y); await page.mouse.wheel(request.delta_x, request.delta_y); break;
       case 'pointer': {
@@ -230,19 +304,21 @@ export class BrowserSession {
         await page.setViewportSize({ width, height });
         state.viewportID = randomUUID();
         state.viewportChanged = Date.now() / 1000;
+        state.touches.clear();
+        for (const stream of state.streams) stream.invalidate();
         break;
       }
       case 'wait': {
         requireValue(['text', 'url', 'visible', 'hidden', 'load'].includes(request.condition), 'Unknown wait condition');
-        requireValue(typeof request.text !== 'string' || request.text.length <= 2048, 'Wait text exceeds limit');
+        if (['text', 'url'].includes(request.condition)) requireValue(typeof request.text === 'string' && request.text.length > 0 && request.text.length <= 2048, 'Wait text must be non-empty and bounded');
         let matched = false;
         const deadline = Date.now() + timeout;
         do {
           signal?.throwIfAborted();
           this.target(request);
           if (request.condition === 'url') matched = page.url().includes(request.text || '');
-          else if (request.condition === 'load') matched = await page.evaluate(() => document.readyState === 'complete');
-          else if (request.condition === 'text') matched = await page.evaluate((text) => document.body?.innerText.slice(0, 1000000).includes(text) ?? false, request.text || '');
+          else if (request.condition === 'load') matched = await boundedRead(page.evaluate(() => document.readyState === 'complete'), Math.max(1, deadline - Date.now()));
+          else if (request.condition === 'text') matched = await boundedRead(page.evaluate((text) => document.body?.innerText.slice(0, 1000000).includes(text) ?? false, request.text || ''), Math.max(1, deadline - Date.now()));
           else {
             const node = await this.node(state, request);
             matched = request.condition === 'visible' ? await node.isVisible() : await node.isHidden();
@@ -251,7 +327,11 @@ export class BrowserSession {
         } while (!matched && Date.now() < deadline);
         return { page: await this.describe(state), matched, timed_out: !matched };
       }
-      case 'console': case 'network': return { page: await this.describe(state), logs: state[request.operation].filter((entry) => entry.sequence > (request.after || 0)), latest_sequence: this.logSequence };
+      case 'console': case 'network': {
+        const after = request.after ?? 0;
+        requireValue(Number.isSafeInteger(after) && after >= 0 && after <= this.logSequence, 'Invalid log cursor');
+        return { page: await this.describe(state), logs: state[request.operation].filter((entry) => entry.sequence > after), latest_sequence: this.logSequence, truncated: after < state.discarded[request.operation] };
+      }
       default: throw new BrowserError('invalid_request', 'Unknown browser operation');
     }
     signal?.throwIfAborted();
@@ -270,8 +350,9 @@ export class BrowserSession {
     const revision = state.revision;
     const bytes = await state.page.screenshot({ type: 'png', timeout: limits.timeout, animations: 'allow' });
     requireValue(bytes.length <= limits.image, 'Screenshot exceeds image limit', 'resource_limit');
+    const page = await this.describe(state);
     requireValue(revision === state.revision, 'Page navigated during screenshot', 'stale_target');
-    return { bytes, metadata: { ...await this.describe(state), captured_at: new Date().toISOString(), content_type: 'image/png' } };
+    return { bytes, metadata: { ...page, captured_at: new Date().toISOString(), content_type: 'image/png' } };
   }
-  async close() { this.closed = true; await this.browser.close(); }
+  async close() { await this.browser.close(); }
 }

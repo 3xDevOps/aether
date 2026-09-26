@@ -22,34 +22,37 @@ type ManagedExecRuntime interface {
 // WorkingDir inherits its configured working directory. Argv is executed
 // directly; callers wanting shell syntax must explicitly use /bin/sh -c.
 type ExecSpec struct {
-	Argv []string
-	WorkingDir string
-	Cols, Rows uint
+	Argv        []string
+	WorkingDir  string
+	Cols, Rows  uint
 	CreationKey string
 }
 
 // ExecIdentity must be persisted before publishing the terminal. ExecID names a
 // specific Docker exec, not a PID that might later name unrelated work.
 type ExecIdentity struct {
-	ContainerID ID `json:"container_id"`
-	ExecID string `json:"exec_id"`
+	ContainerID ID     `json:"container_id"`
+	ExecID      string `json:"exec_id"`
 	CreationKey string `json:"creation_key"`
+	ClaimToken  string `json:"claim_token"`
 }
 
 // ExecState keeps transport availability separate from command lifecycle.
 // ExitCode is present only after the owned command and its descendants end.
 type ExecState struct {
-	Running bool `json:"running"`
-	Exited bool `json:"exited"`
-	ExitCode *int `json:"exit_code,omitempty"`
-	Attached bool `json:"attached"`
+	Running           bool   `json:"running"`
+	Exited            bool   `json:"exited"`
+	ExitCode          *int   `json:"exit_code,omitempty"`
+	Attached          bool   `json:"attached"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
 // ManagedExec owns a command independently of any dashboard/stream. Detach
-// only closes the stream. Stop signals and reaps the command's process group
-// and adopted descendants without stopping the run container. A recovered
-// Docker execution has no Attachment: Docker cannot reattach an exec PTY.
+// only closes the stream. Attachment retains buffered output after EOF until
+// Detach; Status.Attached reports whether the transport is still live.
+// Stop signals and reaps the command's process group and adopted descendants
+// without stopping the run container. A recovered Docker execution has no
+// Attachment: Docker cannot reattach an exec PTY.
 type ManagedExec interface {
 	Identity() ExecIdentity
 	Attachment() Attachment

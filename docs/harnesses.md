@@ -75,14 +75,17 @@ launchable for runs but is not offered in that setup flow.
 
 Every newly created managed runtime container receives the verified
 `/usr/local/bin/aether-internal` CLI, including taskless runs, custom images,
-member terminals, and verification containers. CLI availability does not grant
-run identity or enable disabled coordination.
+member terminals, and verification containers. Runs also receive their own
+identity socket, including when conflict coordination is disabled. Member
+terminals and verification containers do not inherit a run identity.
 Staging failure refuses creation rather than silently omitting the CLI.
 
 No harness receives an automatic Aether MCP registration flag or config.
 Supported harnesses receive a short native per-launch discovery hint;
-`aether-internal skill` loads live assignment-specific guidance. Containers
-without run identity receive only general guidance, not borrowed authority.
+`aether-internal skill` loads live capability and assignment guidance.
+Containers without run identity receive only general guidance, not borrowed
+authority. OpenCode's discovery configuration does not depend on the optional
+lifecycle-status plugin.
 
 The startup switches follow the vendor references: [Claude CLI
 reference](https://code.claude.com/docs/en/cli-reference),

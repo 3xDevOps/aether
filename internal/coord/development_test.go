@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -28,7 +29,7 @@ func (d *developmentAuthorityStub) HandleAgent(context.Context, domain.RunID, st
 type developmentMissionStub struct{ missionTransportStub }
 
 func (developmentMissionStub) Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error) {
-	return protocol.CoordMissionAssignment{MissionID: "mission", Capabilities: []string{protocol.MethodCoordStatus, protocol.MethodTaskShow, protocol.MethodDevBrowserOpen}}, nil
+	return protocol.CoordMissionAssignment{MissionID: "mission", Capabilities: []string{protocol.MethodCoordStatus, protocol.MethodTaskShow, protocol.MethodDevBrowserOpen, "run.git.push"}}, nil
 }
 
 func TestStatusCombinesIndependentDevelopmentAndMissionAuthority(t *testing.T) {
@@ -48,6 +49,9 @@ func TestStatusCombinesIndependentDevelopmentAndMissionAuthority(t *testing.T) {
 			}
 			if !slices.Equal(status.Capabilities, want) {
 				t.Fatalf("capabilities = %v, want %v", status.Capabilities, want)
+			}
+			if status.Assignment != nil && !slices.Equal(status.Assignment.Capabilities, []string{protocol.MethodCoordStatus, protocol.MethodTaskShow}) {
+				t.Fatalf("mission advertised authority outside its allowlist: %v", status.Assignment.Capabilities)
 			}
 			if disabled && (status.Assignment != nil || len(status.Peers) != 0 || status.Unread != 0) {
 				t.Fatalf("disabled status leaked mission/mailbox authority: %+v", status)
@@ -71,6 +75,7 @@ func TestDevelopmentSocketRejectsIdentityAndLifetimeEscapes(t *testing.T) {
 		map[string]string{"run_id": ""},
 		map[string]string{"RUN_ID": string(h.run(1))},
 		[]string{"not an object"},
+		json.RawMessage(`null`),
 	} {
 		err := client.Call(protocol.MethodDevTerminalList, params, nil)
 		var rpcErr *protocol.Error
@@ -128,5 +133,43 @@ func TestUnconfiguredDevelopmentIsNotAdvertisedOrDispatched(t *testing.T) {
 	var rpcErr *protocol.Error
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeMethodNotFound {
 		t.Fatalf("unconfigured development = %v", err)
+	}
+}
+
+type developmentResultStub struct {
+	developmentAuthorityStub
+	result atomic.Value
+}
+
+func (d *developmentResultStub) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
+	return d.result.Load(), nil
+}
+
+func TestDevelopmentSocketBoundsSerializedResults(t *testing.T) {
+	dev := &developmentResultStub{}
+	h := newHarness(t, 1, func(c *Config) { c.Disabled, c.Development = true, dev })
+	h.start()
+	if _, err := h.svc.Provision(t.Context(), h.run(0), nil); err != nil {
+		t.Fatal(err)
+	}
+	client := h.dial(t, h.run(0))
+	// Quotes count toward the serialized result budget.
+	dev.result.Store(strings.Repeat("x", protocol.MaxDevResultBytes-2))
+	var result string
+	if err := client.Call(protocol.MethodDevTerminalList, nil, &result); err != nil {
+		t.Fatalf("result at limit: %v", err)
+	}
+	if len(result) != protocol.MaxDevResultBytes-2 {
+		t.Fatal("result at limit was silently truncated")
+	}
+	dev.result.Store(strings.Repeat("x", protocol.MaxDevResultBytes-1))
+	err := client.Call(protocol.MethodDevTerminalList, nil, nil)
+	var rpcErr *protocol.Error
+	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInternal {
+		t.Fatalf("oversized result = %v, want explicit failure", err)
+	}
+	var status protocol.CoordStatusResult
+	if err := client.Call(protocol.MethodCoordStatus, nil, &status); err != nil || status.RunID != string(h.run(0)) {
+		t.Fatalf("socket unusable after oversized result: %+v, %v", status, err)
 	}
 }

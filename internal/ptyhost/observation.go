@@ -15,68 +15,72 @@ const MaxWait = 30 * time.Second
 
 // ScreenColor preserves default, indexed, and RGB colors without choosing a viewer theme.
 type ScreenColor struct {
-	Mode string `json:"mode"`
-	Value int `json:"value"`
+	Mode  string `json:"mode"`
+	Value int    `json:"value"`
 }
 
 type ScreenCell struct {
-	Text string `json:"text"`
-	Width int `json:"width"`
-	Foreground ScreenColor `json:"foreground"`
-	Background ScreenColor `json:"background"`
+	Text           string      `json:"text"`
+	Width          int         `json:"width"`
+	Foreground     ScreenColor `json:"foreground"`
+	Background     ScreenColor `json:"background"`
 	UnderlineColor ScreenColor `json:"underline_color"`
-	Bold bool `json:"bold"`
-	Dim bool `json:"dim"`
-	Italic bool `json:"italic"`
-	Blink bool `json:"blink"`
-	Inverse bool `json:"inverse"`
-	Invisible bool `json:"invisible"`
-	Strikethrough bool `json:"strikethrough"`
-	Overline bool `json:"overline"`
-	Underline int `json:"underline"`
-	Protected bool `json:"protected"`
+	Bold           bool        `json:"bold"`
+	Dim            bool        `json:"dim"`
+	Italic         bool        `json:"italic"`
+	Blink          bool        `json:"blink"`
+	Inverse        bool        `json:"inverse"`
+	Invisible      bool        `json:"invisible"`
+	Strikethrough  bool        `json:"strikethrough"`
+	Overline       bool        `json:"overline"`
+	Underline      int         `json:"underline"`
+	Protected      bool        `json:"protected"`
 }
 
 type ScreenLine struct {
-	Text string `json:"text"`
-	Wrapped bool `json:"wrapped"`
-	Cells []ScreenCell `json:"cells"`
+	Text    string       `json:"text"`
+	Wrapped bool         `json:"wrapped"`
+	Cells   []ScreenCell `json:"cells"`
 }
 
 // Cursor coordinates are zero-based. X equal to Cols means wrap is pending.
 type ScreenCursor struct {
-	X int `json:"x"`
-	Y int `json:"y"`
+	X       int  `json:"x"`
+	Y       int  `json:"y"`
 	Visible bool `json:"visible"`
 }
 
 type TerminalModes struct {
-	ApplicationCursorKeys bool `json:"application_cursor_keys"`
-	ApplicationKeypad bool `json:"application_keypad"`
-	BracketedPaste bool `json:"bracketed_paste"`
-	MouseTracking string `json:"mouse_tracking"`
-	MouseEncoding string `json:"mouse_encoding"`
-	SendFocus bool `json:"send_focus"`
+	ApplicationCursorKeys bool   `json:"application_cursor_keys"`
+	ApplicationKeypad     bool   `json:"application_keypad"`
+	BracketedPaste        bool   `json:"bracketed_paste"`
+	MouseTracking         string `json:"mouse_tracking"`
+	MouseEncoding         string `json:"mouse_encoding"`
+	SendFocus             bool   `json:"send_focus"`
 }
 
 // ScreenObservation captures the active viewport, not a transcript tail. Every
 // field, including the replayable VT snapshot, is read at one session boundary.
 type ScreenObservation struct {
-	Generation uint64 `json:"generation"`
-	Incarnation string `json:"incarnation"`
-	Position TerminalPosition `json:"position"`
-	Revision uint64 `json:"revision"`
-	GeometryRevision uint64 `json:"geometry_revision"`
-	Cols uint `json:"cols"`
-	Rows uint `json:"rows"`
-	Text string `json:"text"`
-	Lines []ScreenLine `json:"lines"`
-	Cursor ScreenCursor `json:"cursor"`
-	Alternate bool `json:"alternate"`
-	Modes TerminalModes `json:"modes"`
-	Snapshot ScreenSnapshot `json:"snapshot"`
-	Ended bool `json:"ended"`
-	ProtocolError string `json:"protocol_error,omitempty"`
+	Generation       uint64           `json:"generation"`
+	Incarnation      string           `json:"incarnation"`
+	Position         TerminalPosition `json:"position"`
+	Revision         uint64           `json:"revision"`
+	GeometryRevision uint64           `json:"geometry_revision"`
+	Cols             uint             `json:"cols"`
+	Rows             uint             `json:"rows"`
+	Text             string           `json:"text"`
+	Lines            []ScreenLine     `json:"lines"`
+	Cursor           ScreenCursor     `json:"cursor"`
+	Alternate        bool             `json:"alternate"`
+	Modes            TerminalModes    `json:"modes"`
+	Snapshot         ScreenSnapshot   `json:"snapshot"`
+	Ended            bool             `json:"ended"`
+	ProtocolError    string           `json:"protocol_error,omitempty"`
+	// Palette contains RGB slots 0..255, then default foreground, background
+	// and cursor colors. It is copied so later OSC changes cannot alter capture.
+	Palette             []uint32 `json:"palette,omitempty"`
+	UnsupportedGraphics []string `json:"unsupported_graphics,omitempty"`
 }
 
 func screenColor(mode uint32, value int) ScreenColor {
@@ -103,7 +107,7 @@ func (s *session) observationLocked() (ScreenObservation, error) {
 		Generation: s.generation, Incarnation: s.resumeID,
 		Position: s.currentPositionLocked(), Revision: s.revision,
 		GeometryRevision: s.geometryRevision, Cols: s.screen.cols, Rows: s.screen.rows,
-		Cursor: ScreenCursor{X: t.CursorX(), Y: t.CursorY(), Visible: !t.IsCursorHidden()},
+		Cursor:    ScreenCursor{X: t.CursorX(), Y: t.CursorY(), Visible: !t.IsCursorHidden()},
 		Alternate: t.IsAltBufferActive(), Ended: s.ended,
 		Modes: TerminalModes{ApplicationCursorKeys: m.ApplicationCursorKeys,
 			ApplicationKeypad: m.ApplicationKeypad, BracketedPaste: m.BracketedPasteMode,
@@ -113,30 +117,36 @@ func (s *session) observationLocked() (ScreenObservation, error) {
 	if s.protocolErr != nil {
 		o.ProtocolError = s.protocolErr.Error()
 	}
+	if s.screen.palette != nil {
+		o.Palette = append([]uint32(nil), s.screen.palette.colors[:]...)
+	}
+	o.UnsupportedGraphics = append([]string(nil), s.screen.unsupportedGraphics...)
 	buf := t.Buffer()
 	cells := make([]ScreenCell, t.Rows()*t.Cols())
 	var text strings.Builder
 	var cell xterm.CellData
 	for y := range o.Lines {
-		line := buf.Lines.Get(buf.YBase+y)
+		line := buf.Lines.Get(buf.YBase + y)
 		row := &o.Lines[y]
-		row.Cells = cells[y*t.Cols():(y+1)*t.Cols()]
+		row.Cells = cells[y*t.Cols() : (y+1)*t.Cols()]
 		if line != nil {
 			row.Text = line.TranslateToString(true, 0, t.Cols())
 			row.Wrapped = line.IsWrapped
 			for x := range row.Cells {
 				line.LoadCell(x, &cell)
 				row.Cells[x] = ScreenCell{Text: cell.GetChars(), Width: cell.GetWidth(),
-					Foreground: screenColor(cell.GetFgColorMode(), cell.GetFgColor()),
-					Background: screenColor(cell.GetBgColorMode(), cell.GetBgColor()),
+					Foreground:     screenColor(cell.GetFgColorMode(), cell.GetFgColor()),
+					Background:     screenColor(cell.GetBgColorMode(), cell.GetBgColor()),
 					UnderlineColor: screenColor(cell.GetUnderlineColorMode(), cell.GetUnderlineColor()),
-					Bold: cell.IsBold()!=0, Dim: cell.IsDim()!=0, Italic: cell.IsItalic()!=0,
-					Blink: cell.IsBlink()!=0, Inverse: cell.IsInverse()!=0, Invisible: cell.IsInvisible()!=0,
-					Strikethrough: cell.IsStrikethrough()!=0, Overline: cell.IsOverline()!=0,
-					Underline: int(cell.GetUnderlineStyle()), Protected: cell.IsProtected()!=0}
+					Bold:           cell.IsBold() != 0, Dim: cell.IsDim() != 0, Italic: cell.IsItalic() != 0,
+					Blink: cell.IsBlink() != 0, Inverse: cell.IsInverse() != 0, Invisible: cell.IsInvisible() != 0,
+					Strikethrough: cell.IsStrikethrough() != 0, Overline: cell.IsOverline() != 0,
+					Underline: int(cell.GetUnderlineStyle()), Protected: cell.IsProtected() != 0}
 			}
 		}
-		if y != 0 { text.WriteByte('\n') }
+		if y != 0 {
+			text.WriteByte('\n')
+		}
 		text.WriteString(row.Text)
 	}
 	o.Text = text.String()
@@ -145,28 +155,31 @@ func (s *session) observationLocked() (ScreenObservation, error) {
 
 func (h *Host) ObserveSession(key SessionKey) (ScreenObservation, error) {
 	s := h.lookup(key)
-	if s == nil { return ScreenObservation{}, ErrNoSession }
+	if s == nil {
+		return ScreenObservation{}, ErrNoSession
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.observationLocked()
 }
 
 type OutputRequest struct {
-	After *TerminalPosition
-	MaxBytes int
+	After      *TerminalPosition
+	MaxBytes   int
+	Generation uint64
 }
 
 type OutputObservation struct {
-	Generation uint64 `json:"generation"`
-	Incarnation string `json:"incarnation"`
-	Start TerminalPosition `json:"start"`
-	Next TerminalPosition `json:"next"`
-	Position TerminalPosition `json:"position"`
-	Data []byte `json:"data"`
-	MissingCursor bool `json:"missing_cursor"`
-	Truncated bool `json:"truncated"`
-	More bool `json:"more"`
-	Ended bool `json:"ended"`
+	Generation    uint64           `json:"generation"`
+	Incarnation   string           `json:"incarnation"`
+	Start         TerminalPosition `json:"start"`
+	Next          TerminalPosition `json:"next"`
+	Position      TerminalPosition `json:"position"`
+	Data          []byte           `json:"data"`
+	MissingCursor bool             `json:"missing_cursor"`
+	Truncated     bool             `json:"truncated"`
+	More          bool             `json:"more"`
+	Ended         bool             `json:"ended"`
 }
 
 // outputBoundaryLocked distinguishes an absent/wrong/future cursor from an
@@ -174,28 +187,43 @@ type OutputObservation struct {
 func (s *session) outputBoundaryLocked(after *TerminalPosition) (start TerminalPosition, missing, truncated bool) {
 	end := s.currentPositionLocked()
 	start = end
-	if s.ring != nil { start.Sequence -= TerminalSequence(len(s.ring.buf)) }
+	if s.ring != nil {
+		start.Sequence -= TerminalSequence(len(s.ring.buf))
+	}
 	if after == nil || after.Epoch != end.Epoch || after.Sequence > end.Sequence {
 		return start, true, start.Sequence != 0
 	}
-	if after.Sequence < start.Sequence { return start, false, true }
+	if after.Sequence < start.Sequence {
+		return start, false, true
+	}
 	return *after, false, false
 }
 
 func (h *Host) ReadSessionOutput(key SessionKey, request OutputRequest) (OutputObservation, error) {
-	if request.MaxBytes < 0 || request.MaxBytes > MaxOutputBytes { return OutputObservation{}, errors.New("ptyhost: output limit out of bounds") }
-	if request.MaxBytes == 0 { request.MaxBytes = 64 << 10 }
+	if request.MaxBytes < 0 || request.MaxBytes > MaxOutputBytes {
+		return OutputObservation{}, errors.New("ptyhost: output limit out of bounds")
+	}
+	if request.MaxBytes == 0 {
+		request.MaxBytes = 64 << 10
+	}
 	s := h.lookup(key)
-	if s == nil { return OutputObservation{}, ErrNoSession }
+	if s == nil {
+		return OutputObservation{}, ErrNoSession
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.stopped { return OutputObservation{}, ErrNoSession }
+	if s.stopped {
+		return OutputObservation{}, ErrNoSession
+	}
+	if request.Generation != 0 && s.generation != request.Generation {
+		return OutputObservation{}, ErrSessionReplaced
+	}
 	start, missing, truncated := s.outputBoundaryLocked(request.After)
 	o := OutputObservation{Generation: s.generation, Incarnation: s.resumeID,
 		Start: start, Next: start, Position: s.currentPositionLocked(), MissingCursor: missing,
 		Truncated: truncated, Ended: s.ended}
 	if s.ring != nil {
-		offset := len(s.ring.buf)-int(o.Position.Sequence-start.Sequence)
+		offset := len(s.ring.buf) - int(o.Position.Sequence-start.Sequence)
 		n := min(request.MaxBytes, len(s.ring.buf)-offset)
 		o.Data = append([]byte(nil), s.ring.buf[offset:offset+n]...)
 		o.Next.Sequence += TerminalSequence(n)
@@ -205,20 +233,20 @@ func (h *Host) ReadSessionOutput(key SessionKey, request OutputRequest) (OutputO
 }
 
 type WaitRequest struct {
-	Generation uint64
+	Generation    uint64
 	AfterRevision uint64
-	AfterOutput *TerminalPosition
-	Contains string
-	Ended bool
-	Timeout time.Duration
+	AfterOutput   *TerminalPosition
+	Contains      string
+	Ended         bool
+	Timeout       time.Duration
 }
 
 type WaitObservation struct {
-	Screen ScreenObservation `json:"screen"`
-	Matched bool `json:"matched"`
-	TimedOut bool `json:"timed_out"`
-	MissingCursor bool `json:"missing_cursor"`
-	Truncated bool `json:"truncated"`
+	Screen        ScreenObservation `json:"screen"`
+	Matched       bool              `json:"matched"`
+	TimedOut      bool              `json:"timed_out"`
+	MissingCursor bool              `json:"missing_cursor"`
+	Truncated     bool              `json:"truncated"`
 }
 
 // WaitSession waits for any requested condition. Timeout is an observation,
@@ -230,20 +258,30 @@ func (h *Host) WaitSession(ctx context.Context, key SessionKey, request WaitRequ
 	if request.AfterRevision == 0 && request.AfterOutput == nil && request.Contains == "" && !request.Ended {
 		return WaitObservation{}, errors.New("ptyhost: wait condition required")
 	}
-	if request.Timeout == 0 { request.Timeout = MaxWait }
+	if request.Timeout == 0 {
+		request.Timeout = MaxWait
+	}
 	s := h.lookup(key)
-	if s == nil { return WaitObservation{}, ErrNoSession }
-	timer := time.NewTimer(request.Timeout)
+	if s == nil {
+		return WaitObservation{}, ErrNoSession
+	}
+	deadline := time.Now().Add(request.Timeout)
+	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	timedOut := false
 	for {
-		if err := ctx.Err(); err != nil { return WaitObservation{}, err }
-		if h.lookup(key) != s || s.generation != request.Generation { return WaitObservation{}, ErrSessionReplaced }
+		if err := ctx.Err(); err != nil {
+			return WaitObservation{}, err
+		}
+		if h.lookup(key) != s || s.generation != request.Generation {
+			return WaitObservation{}, ErrSessionReplaced
+		}
 		s.mu.Lock()
 		if s.stopped {
 			s.mu.Unlock()
 			return WaitObservation{}, ErrSessionReplaced
 		}
+		timedOut = timedOut || !time.Now().Before(deadline)
 		_, missing, truncated := s.outputBoundaryLocked(request.AfterOutput)
 		outputMatch := request.AfterOutput != nil && (missing || truncated || s.currentPositionLocked() != *request.AfterOutput)
 		matched := (request.AfterRevision != 0 && s.revision != request.AfterRevision) || outputMatch || (request.Ended && s.ended)
@@ -253,15 +291,19 @@ func (h *Host) WaitSession(ctx context.Context, key SessionKey, request WaitRequ
 		if matched || timedOut || s.ended {
 			o, err := s.observationLocked()
 			s.mu.Unlock()
-			return WaitObservation{Screen: o, Matched: matched, TimedOut: timedOut && !matched,
+			return WaitObservation{Screen: o, Matched: matched && !timedOut, TimedOut: timedOut,
 				MissingCursor: request.AfterOutput != nil && missing, Truncated: request.AfterOutput != nil && truncated}, err
 		}
-		if s.changed == nil { s.changed = make(chan struct{}) }
+		if s.changed == nil {
+			s.changed = make(chan struct{})
+		}
 		changed := s.changed
 		s.mu.Unlock()
 		select {
-		case <-ctx.Done(): return WaitObservation{}, ctx.Err()
-		case <-timer.C: timedOut = true
+		case <-ctx.Done():
+			return WaitObservation{}, ctx.Err()
+		case <-timer.C:
+			timedOut = true
 		case <-changed:
 		}
 	}
@@ -272,7 +314,9 @@ func (s *session) visibleTextLocked() string {
 	buf := t.Buffer()
 	var text strings.Builder
 	for y := range t.Rows() {
-		if y != 0 { text.WriteByte('\n') }
+		if y != 0 {
+			text.WriteByte('\n')
+		}
 		text.WriteString(buf.TranslateBufferLineToString(buf.YBase+y, true, 0, t.Cols()))
 	}
 	return text.String()
@@ -280,5 +324,8 @@ func (s *session) visibleTextLocked() string {
 
 func (s *session) changedLocked() {
 	s.revision++
-	if s.changed != nil { close(s.changed); s.changed = nil }
+	if s.changed != nil {
+		close(s.changed)
+		s.changed = nil
+	}
 }

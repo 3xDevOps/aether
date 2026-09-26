@@ -111,7 +111,8 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 		Scope                domain.TaskScope
 		Material             bool
 		EvidenceRequirements []domain.EvidenceRequirement
-	}{t.MissionID, t.Revision.Title, t.Revision.Objective, t.Revision.Scope, t.Revision.Material, t.Revision.EvidenceRequirements})
+		DependsOn            []domain.TaskID `json:",omitempty"`
+	}{t.MissionID, t.Revision.Title, t.Revision.Objective, t.Revision.Scope, t.Revision.Material, t.Revision.EvidenceRequirements, t.Revision.DependsOn})
 	if err != nil {
 		return nil, false, err
 	}
@@ -181,6 +182,9 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 		return nil, false, fmt.Errorf("store: create task: %w", mapConstraint(err, ErrConflict))
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_task_revisions (task_id,revision,title,objective,scope,evidence_requirements,material,status,proposed_by_run_id,created_at) VALUES (?,1,?,?,?,?,?,?,?,?)`, id, t.Revision.Title, t.Revision.Objective, scope, reqs, t.Revision.Material, status, t.Revision.ProposedByRunID, n); err != nil {
+		return nil, false, err
+	}
+	if err := writeTaskDependencies(ctx, tx, t.MissionID, domain.TaskID(id), 1, t.Revision.DependsOn, n); err != nil {
 		return nil, false, err
 	}
 	if err := recordMutationReceipt(tx, ctx, t.MissionID, "task.create", key, payload, id, 1, n); err != nil {
@@ -339,7 +343,7 @@ func (d *DB) ProjectTask(ctx context.Context, id domain.TaskID) (*domain.Task, e
 	}
 	for _, dep := range t.Dependencies {
 		var n int
-		err := d.db.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances a WHERE a.task_id = ? AND a.task_revision = ? AND EXISTS (SELECT 1 FROM missions m WHERE m.id = ? AND m.id = a.mission_id)`, dep.DependsOnTaskID, dep.DependsOnRevision, t.MissionID).Scan(&n)
+		err := d.db.QueryRowContext(ctx, `SELECT 1 FROM mission_acceptances a JOIN mission_tasks t ON t.id = a.task_id AND t.current_revision = a.task_revision WHERE a.task_id = ? AND a.mission_id = ?`, dep.DependsOnTaskID, t.MissionID).Scan(&n)
 		if errors.Is(err, sql.ErrNoRows) {
 			t.Blockers = append(t.Blockers, domain.TaskBlocker{Kind: "dependency", TaskID: dep.DependsOnTaskID, Action: "accept required dependency output"})
 		} else if err != nil {
@@ -432,7 +436,8 @@ func (d *DB) proposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 		Scope                domain.TaskScope
 		Material             bool
 		EvidenceRequirements []domain.EvidenceRequirement
-	}{id, r.Title, r.Objective, r.Scope, r.Material, r.EvidenceRequirements})
+		DependsOn            []domain.TaskID `json:",omitempty"`
+	}{id, r.Title, r.Objective, r.Scope, r.Material, r.EvidenceRequirements, r.DependsOn})
 	if err != nil {
 		return nil, err
 	}
@@ -468,6 +473,14 @@ func (d *DB) proposeTaskRevision(ctx context.Context, id domain.TaskID, r *domai
 	n, _ := encodeTime(now)
 	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_task_revisions (task_id, revision, title, objective, scope, evidence_requirements, material, status, proposed_by_run_id, supersedes_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)`, id, next, r.Title, r.Objective, scope, reqs, r.Material, r.ProposedByRunID, current, n); execErr != nil {
 		return nil, fmt.Errorf("store: propose task revision: %w", execErr)
+	}
+	if depErr := writeTaskDependencies(ctx, tx, missionID, id, next, r.DependsOn, n); depErr != nil {
+		return nil, depErr
+	}
+	// Only the latest draft stays acceptable: an older one could otherwise be
+	// accepted later and revive edges the cycle check no longer sees.
+	if _, supersedeErr := tx.ExecContext(ctx, `UPDATE mission_task_revisions SET status = 'superseded' WHERE task_id = ? AND status = 'proposed' AND revision > ? AND revision < ?`, id, current, next); supersedeErr != nil {
+		return nil, fmt.Errorf("store: supersede earlier draft of task %s: %w", id, supersedeErr)
 	}
 	// Before approval, accept is forbidden, so nothing would ever advance
 	// current_revision and the human would review a stale draft. Superseding
@@ -715,52 +728,21 @@ func droppedExclusions(approved, proposed []string) []string {
 	return out
 }
 
-func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision int, deps []domain.TaskDependency, key string) error {
-	if key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 {
-		return errors.New("store: task dependency idempotency_key is invalid")
+// writeTaskDependencies records what a new revision waits for. Each row
+// stores the dependency's current revision at write time, but readiness
+// (ProjectTask, ReserveAttempt) follows the dependency task's current
+// revision, so revising a dependency never leaves the dependent blocked for
+// good. Cycle detection walks every live revision: the current one and the
+// latest draft, since proposing a draft supersedes the one before it.
+func writeTaskDependencies(ctx context.Context, tx *sql.Tx, missionID domain.MissionID, id domain.TaskID, revision int, dependsOn []domain.TaskID, now int64) error {
+	if len(dependsOn) == 0 {
+		return nil
 	}
-	if revision <= 0 || len(deps) > 128 {
-		return errors.New("store: task dependency revision or count is invalid")
-	}
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var missionID domain.MissionID
-	if missionErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, id).Scan(&missionID); errors.Is(missionErr, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if missionErr != nil {
-		return missionErr
-	}
-	payload, err := mutationPayload(struct {
-		TaskID       domain.TaskID
-		Revision     int
-		Dependencies []domain.TaskDependency
-	}{id, revision, deps})
-	if err != nil {
-		return err
-	}
-	_, _, replayed, err := mutationReceipt(tx, ctx, missionID, "task.dependencies", key, payload)
-	if err != nil {
-		return err
-	}
-	if replayed {
-		return tx.Commit()
-	}
-	var exists int
-	var revisionStatus string
-	if revisionErr := tx.QueryRowContext(ctx, `SELECT status FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, id, revision).Scan(&revisionStatus); revisionErr != nil {
-		if errors.Is(revisionErr, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return revisionErr
-	}
-	if revisionStatus == string(domain.TaskRevisionAccepted) {
-		return ErrConflict
+	if len(dependsOn) > domain.MaxTaskDependencies {
+		return errors.New("store: task revision has too many dependencies")
 	}
 	adj := make(map[domain.TaskID][]domain.TaskID)
-	rows, err := tx.QueryContext(ctx, `SELECT d.task_id, d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id = d.task_id WHERE t.mission_id = ? AND NOT (d.task_id = ? AND d.task_revision = ?)`, missionID, id, revision)
+	rows, err := tx.QueryContext(ctx, `SELECT d.task_id, d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id = d.task_id JOIN mission_task_revisions r ON r.task_id = d.task_id AND r.revision = d.task_revision WHERE t.mission_id = ? AND t.abandoned_at IS NULL AND r.status IN ('proposed', 'accepted')`, missionID)
 	if err != nil {
 		return err
 	}
@@ -773,61 +755,58 @@ func (d *DB) SetTaskDependencies(ctx context.Context, id domain.TaskID, revision
 		adj[from] = append(adj[from], to)
 	}
 	_ = rows.Close()
-	for _, dep := range deps {
-		if dep.DependsOnTaskID == "" || dep.DependsOnRevision <= 0 || dep.DependsOnTaskID == id {
-			return ErrMissionCycle
+	seen := make(map[domain.TaskID]bool, len(dependsOn))
+	for _, dep := range dependsOn {
+		if seen[dep] {
+			return fmt.Errorf("%w: task %s lists dependency %s twice", ErrConflict, id, dep)
 		}
+		seen[dep] = true
 		var depMission domain.MissionID
-		if depErr := tx.QueryRowContext(ctx, `SELECT mission_id FROM mission_tasks WHERE id = ?`, dep.DependsOnTaskID).Scan(&depMission); depErr != nil {
-			return ErrNotFound
+		var depRevision int
+		var abandoned *int64
+		if depErr := tx.QueryRowContext(ctx, `SELECT mission_id, current_revision, abandoned_at FROM mission_tasks WHERE id = ?`, dep).Scan(&depMission, &depRevision, &abandoned); errors.Is(depErr, sql.ErrNoRows) {
+			return fmt.Errorf("%w: task %s depends on unknown task %s", ErrNotFound, id, dep)
+		} else if depErr != nil {
+			return depErr
 		}
 		if depMission != missionID {
-			return ErrConflict
+			return fmt.Errorf("%w: dependency %s is outside the mission", ErrConflict, dep)
 		}
-		if revisionErr := tx.QueryRowContext(ctx, `SELECT 1 FROM mission_task_revisions WHERE task_id = ? AND revision = ?`, dep.DependsOnTaskID, dep.DependsOnRevision).Scan(&exists); revisionErr != nil {
-			return ErrNotFound
+		if abandoned != nil {
+			return fmt.Errorf("%w: dependency %s is abandoned", ErrConflict, dep)
 		}
-		adj[id] = append(adj[id], dep.DependsOnTaskID)
+		if chain := dependencyChain(adj, dep, id); chain != nil {
+			return fmt.Errorf("%w: task %s waits for task %s", ErrMissionCycle, id, strings.Join(chain, ", which waits for task "))
+		}
+		if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_task_dependencies (task_id, task_revision, depends_on_task_id, depends_on_revision, created_at) VALUES (?, ?, ?, ?, ?)`, id, revision, dep, depRevision, now); insertErr != nil {
+			return fmt.Errorf("store: write task dependency: %w", insertErr)
+		}
+		adj[id] = append(adj[id], dep)
 	}
-	visiting := map[domain.TaskID]bool{}
+	return nil
+}
+
+// dependencyChain returns the tasks from one to another along dependency
+// edges, nil when none leads there.
+func dependencyChain(adj map[domain.TaskID][]domain.TaskID, from, to domain.TaskID) []string {
 	visited := map[domain.TaskID]bool{}
-	var visit func(domain.TaskID) bool
-	visit = func(n domain.TaskID) bool {
-		if visiting[n] {
-			return false
+	var walk func(domain.TaskID) []string
+	walk = func(n domain.TaskID) []string {
+		if n == to {
+			return []string{string(n)}
 		}
 		if visited[n] {
-			return true
+			return nil
 		}
-		visiting[n] = true
-		for _, child := range adj[n] {
-			if !visit(child) {
-				return false
+		visited[n] = true
+		for _, next := range adj[n] {
+			if chain := walk(next); chain != nil {
+				return append([]string{string(n)}, chain...)
 			}
 		}
-		visiting[n] = false
-		visited[n] = true
-		return true
+		return nil
 	}
-	for n := range adj {
-		if !visit(n) {
-			return ErrMissionCycle
-		}
-	}
-	if _, deleteErr := tx.ExecContext(ctx, `DELETE FROM mission_task_dependencies WHERE task_id = ? AND task_revision = ?`, id, revision); deleteErr != nil {
-		return deleteErr
-	}
-	now := missionNow(time.Time{})
-	n, _ := encodeTime(now)
-	for _, dep := range deps {
-		if _, insertErr := tx.ExecContext(ctx, `INSERT INTO mission_task_dependencies (task_id, task_revision, depends_on_task_id, depends_on_revision, output_ref, created_at) VALUES (?, ?, ?, ?, ?, ?)`, id, revision, dep.DependsOnTaskID, dep.DependsOnRevision, dep.OutputRef, n); insertErr != nil {
-			return fmt.Errorf("store: set task dependencies: %w", insertErr)
-		}
-	}
-	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "task.dependencies", key, payload, string(id), revision, n); receiptErr != nil {
-		return receiptErr
-	}
-	return tx.Commit()
+	return walk(from)
 }
 
 // AbandonTask drops a whole task, or, when revision names a pending revision

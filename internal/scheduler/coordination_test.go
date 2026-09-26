@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -373,7 +374,7 @@ func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *test
 			root := t.TempDir()
 			coord := &recordingCoordinator{
 				fakeCoordinator: fakeCoordinator{root: filepath.Join(root, "coord")},
-				files: make(map[domain.RunID]map[string][]byte),
+				files:           make(map[domain.RunID]map[string][]byte),
 			}
 			e.sched.UseCoordination(coord, filepath.Join(root, "bin"), false)
 			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", name, domain.LaunchTUI)
@@ -409,9 +410,46 @@ func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *test
 					t.Fatalf("native discovery argument %q missing from %v", arg, spec.Command)
 				}
 			}
-			for key, value := range profile.DiscoveryLaunchEnv(coordtransport.MountDir) {
-				if spec.Env[key] != value {
-					t.Fatalf("native discovery environment %s = %q, want %q", key, spec.Env[key], value)
+		})
+	}
+}
+
+func TestOpenCodeDiscoveryReferencesOnlyProvisionedAssets(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "identity-only", true: "with-reporter"}[enabled], func(t *testing.T) {
+			e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "opencode discovery")))
+			root := t.TempDir()
+			coord := &recordingCoordinator{
+				fakeCoordinator: fakeCoordinator{root: filepath.Join(root, "coord")},
+				files:           make(map[domain.RunID]map[string][]byte),
+			}
+			e.sched.UseCoordination(coord, filepath.Join(root, "bin"), enabled)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "opencode", domain.LaunchTUI)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec := e.rt.byName(string(run.ID)).spec
+			var config struct {
+				Plugins      []string `json:"plugin"`
+				Instructions []string `json:"instructions"`
+			}
+			if err := json.Unmarshal([]byte(spec.Env["OPENCODE_CONFIG_CONTENT"]), &config); err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Instructions) != 1 {
+				t.Fatalf("discovery instruction files = %v", config.Instructions)
+			}
+			wantPlugins := 0
+			if enabled {
+				wantPlugins = 1
+			}
+			if len(config.Plugins) != wantPlugins {
+				t.Fatalf("status plugins = %v with policy enabled=%v", config.Plugins, enabled)
+			}
+			for _, path := range append(config.Instructions, config.Plugins...) {
+				path = strings.TrimPrefix(path, "file://")
+				if filepath.Dir(path) != coordtransport.MountDir || coord.file(run.ID, filepath.Base(path)) == nil {
+					t.Fatalf("launch references unprovisioned asset %q", path)
 				}
 			}
 		})

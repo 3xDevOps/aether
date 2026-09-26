@@ -394,28 +394,33 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	}
 	// Initial geometry goes out before the session is attachable, so a
 	// concurrent write-attach clamp can never be overwritten by it.
-	_ = att.Resize(ctx, initialCols, initialRows)
+	if err := att.Resize(ctx, initialCols, initialRows); err != nil && development {
+		_ = tr.close()
+		screen.dispose()
+		h.unreserve(key)
+		return fmt.Errorf("ptyhost: initialize development geometry: %w", err)
+	}
 	s := &session{
-		run:          key,
-		resumeID:     resumeID,
-		att:          att,
-		tr:           tr,
-		history:      history,
-		checkpoint:   checkpointPath(path),
-		stdin:        att.Stdin(),
-		clients:      make(map[*client]struct{}),
-		ring:         newRingAt(h.cfg.ReplayBytes, position),
-		cols:         initialCols,
-		rows:         initialRows,
-		acceptedCols: initialCols,
-		acceptedRows: initialRows,
-		geoTold:      [2]uint{initialCols, initialRows},
-		done:         make(chan struct{}),
-		modes:        modes,
-		screen:       screen,
-		revision:     1,
+		run:              key,
+		resumeID:         resumeID,
+		att:              att,
+		tr:               tr,
+		history:          history,
+		checkpoint:       checkpointPath(path),
+		stdin:            att.Stdin(),
+		clients:          make(map[*client]struct{}),
+		ring:             newRingAt(h.cfg.ReplayBytes, position),
+		cols:             initialCols,
+		rows:             initialRows,
+		acceptedCols:     initialCols,
+		acceptedRows:     initialRows,
+		geoTold:          [2]uint{initialCols, initialRows},
+		done:             make(chan struct{}),
+		modes:            modes,
+		screen:           screen,
+		revision:         1,
 		geometryRevision: 1,
-		development:  development,
+		development:      development,
 	}
 	if development {
 		s.enableProtocolResponder()
@@ -824,6 +829,10 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	if a.SessionGeneration != 0 && s.generation != a.SessionGeneration {
 		return ErrSessionReplaced
 	}
+	_, responderAware := conn.(TerminalResponderWriter)
+	if s.development && !a.ReadOnly && (!responderAware || a.InputAdmission == nil) {
+		return fmt.Errorf("%w: development viewers require fenced input and disabled protocol replies", ErrWriteDenied)
+	}
 	if a.Cols == 0 {
 		a.Cols = h.cfg.DefaultCols
 	}
@@ -903,6 +912,9 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	if a.OnControlReady != nil {
 		a.OnControlReady(func(readOnly bool) error {
 			if !readOnly {
+				if s.development && (!responderAware || a.InputAdmission == nil) {
+					return fmt.Errorf("%w: development viewers require fenced input and disabled protocol replies", ErrWriteDenied)
+				}
 				if err := ctx.Err(); err != nil {
 					return err
 				}
@@ -1035,7 +1047,17 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 				resize = nil
 				continue
 			}
-			s.resizeClient(c, sz[0], sz[1])
+			if s.development {
+				if !s.clientWritable(c) || c.follow {
+					continue
+				}
+				admission := SessionAdmission{Generation: s.generation, Member: a.Member, Admit: a.InputAdmission}
+				if err := h.ResizeSession(ctx, key, admission, sz[0], sz[1]); err != nil {
+					return err
+				}
+			} else {
+				s.resizeClient(c, sz[0], sz[1])
+			}
 		}
 	}
 }

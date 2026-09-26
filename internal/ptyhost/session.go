@@ -647,6 +647,12 @@ func (s *session) resizeClient(c *client, cols, rows uint) {
 // unchanged; a fresh screen-bearing client can still force a redraw nudge at
 // that current size.
 func (s *session) reconcileLocked(force bool) {
+	// Development geometry is an explicitly admitted physical mutation. A
+	// client's join, detach, or read-only transition must never queue a resize
+	// that can outlive its controller generation.
+	if s.development {
+		return
+	}
 	var cols, rows uint
 	found := false
 	for c := range s.clients {
@@ -726,7 +732,7 @@ func (s *session) applyResizeContext(parent context.Context) error {
 	s.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(parent, resizeTimeout)
-	if rows > 1 {
+	if rows > 1 && !s.development {
 		_ = att.Resize(ctx, cols, rows-1)
 	}
 	rpcErr := att.Resize(ctx, cols, rows)

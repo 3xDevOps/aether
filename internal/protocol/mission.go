@@ -156,13 +156,17 @@ type TaskRevision struct {
 	Scope                TaskScope             `json:"scope"`
 	Material             bool                  `json:"material,omitempty"`
 	EvidenceRequirements []EvidenceRequirement `json:"evidence_requirements"`
-	Status               string                `json:"status"`
-	ProposedByRunID      string                `json:"proposed_by_run_id,omitempty"`
-	SupersedesRevision   int                   `json:"supersedes_revision,omitempty"`
-	AcceptedByMemberID   string                `json:"accepted_by_member_id,omitempty"`
-	AcceptedByRunID      string                `json:"accepted_by_run_id,omitempty"`
-	CreatedAt            string                `json:"created_at"`
-	AcceptedAt           *string               `json:"accepted_at,omitempty"`
+	// DependsOn is author-supplied only: the IDs of tasks in the same mission
+	// whose accepted output this revision waits for. A projected task reports
+	// them back as Task.Dependencies.
+	DependsOn          []string `json:"depends_on,omitempty"`
+	Status             string   `json:"status"`
+	ProposedByRunID    string   `json:"proposed_by_run_id,omitempty"`
+	SupersedesRevision int      `json:"supersedes_revision,omitempty"`
+	AcceptedByMemberID string   `json:"accepted_by_member_id,omitempty"`
+	AcceptedByRunID    string   `json:"accepted_by_run_id,omitempty"`
+	CreatedAt          string   `json:"created_at"`
+	AcceptedAt         *string  `json:"accepted_at,omitempty"`
 }
 
 type TaskDependency struct {

@@ -1,5 +1,4 @@
 # Build from repository root: docker build -f images/browser/Dockerfile .
-# Manifest digest verified against registry-1.docker.io on 2026-09-25.
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
@@ -8,7 +7,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
 WORKDIR /opt/aether-browser
 COPY images/browser/package.json images/browser/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
-    && npx --no-install playwright install --with-deps chromium \
+    && npx --no-install playwright install --with-deps --no-shell chromium \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     && chmod -R a+rX /opt/playwright
 COPY images/browser/*.mjs ./

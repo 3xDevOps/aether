@@ -13,8 +13,11 @@ async function readJSON(request) {
     requireValue(length <= limits.request, 'Request exceeds byte limit', 'resource_limit');
     chunks.push(chunk);
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  let body;
+  try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new BrowserError('invalid_request', 'Invalid JSON request'); }
+  requireValue(body && typeof body === 'object' && !Array.isArray(body), 'Request must be an object');
+  return body;
 }
 function json(response, status, value) {
   response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -22,7 +25,9 @@ function json(response, status, value) {
 }
 function image(response, capture) {
   // Binary body with bounded metadata header, never a caller-chosen file path.
-  response.writeHead(200, { 'Content-Type': capture.metadata.content_type, 'Content-Length': capture.bytes.length, 'X-Aether-Metadata': Buffer.from(JSON.stringify(capture.metadata)).toString('base64url'), 'Cache-Control': 'no-store' });
+  const metadata = Buffer.from(JSON.stringify(capture.metadata));
+  requireValue(metadata.length <= 16384 && capture.bytes.length <= limits.image, 'Image exceeds transport limit', 'resource_limit');
+  response.writeHead(200, { 'Content-Type': capture.metadata.content_type, 'Content-Length': capture.bytes.length, 'X-Aether-Metadata': metadata.toString('base64url'), 'Cache-Control': 'no-store' });
   response.end(capture.bytes);
 }
 
@@ -31,7 +36,7 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
   await mkdir(process.env.HOME || '/tmp/aether-browser-home', { recursive: true, mode: 0o700 });
   let startupError;
   let session;
-  const startup = launch().then(async (value) => { session = value; await value.initialize(); return value; }).catch((error) => { startupError = error; console.error(`Browser sandbox startup failed: ${error.message}`); });
+  const startup = Promise.resolve().then(launch).then(async (value) => { session = value; await value.initialize(); return value; }).catch((error) => { startupError = error; console.error(`Browser sandbox startup failed: ${error.message}`); });
   let queue = Promise.resolve();
   let pending = 0;
   const serialize = (operation, signal) => {
@@ -50,7 +55,7 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
       if (request.method === 'GET' && request.url === '/health') {
         if (startupError) return json(response, 503, { error: { code: 'unavailable', message: startupError.message.slice(0, 8192) }, creation_key: creationKey });
         if (!session?.context || !session.browser.isConnected()) return json(response, 503, { error: { code: 'unavailable', message: 'Chromium is not connected' }, creation_key: creationKey });
-        return json(response, 200, { creation_key: creationKey, session_id: session.sessionID, protocol_version: 1 });
+        return json(response, 200, { creation_key: creationKey, process_id: session.processID, session_id: session.sessionID, protocol_version: 1 });
       }
       requireValue(request.method === 'POST', 'Only POST operations are accepted');
       const body = await readJSON(request);

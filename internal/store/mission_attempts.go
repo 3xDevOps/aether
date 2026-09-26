@@ -114,12 +114,13 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 			return nil, false, fmt.Errorf("%w: task %s has a revision awaiting human approval; wait for the decision", ErrMissionNotReady, r.TaskID)
 		}
 	}
-	var blocked int
-	if blockedErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_task_dependencies d WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=d.depends_on_revision)`, r.TaskID, r.TaskRevision).Scan(&blocked); blockedErr != nil {
-		return nil, false, blockedErr
+	var blocker domain.TaskID
+	blockedErr := tx.QueryRowContext(ctx, `SELECT d.depends_on_task_id FROM mission_task_dependencies d JOIN mission_tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? AND d.task_revision=? AND NOT EXISTS (SELECT 1 FROM mission_acceptances a WHERE a.task_id=d.depends_on_task_id AND a.task_revision=t.current_revision) ORDER BY d.depends_on_task_id LIMIT 1`, r.TaskID, r.TaskRevision).Scan(&blocker)
+	if blockedErr == nil {
+		return nil, false, fmt.Errorf("%w: task %s waits for task %s", ErrMissionNotReady, r.TaskID, blocker)
 	}
-	if blocked > 0 {
-		return nil, false, ErrMissionNotReady
+	if !errors.Is(blockedErr, sql.ErrNoRows) {
+		return nil, false, blockedErr
 	}
 	var takeover int
 	if takeoverErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_worker_takeovers WHERE mission_id=? AND task_id=? AND active=1`, r.MissionID, r.TaskID).Scan(&takeover); takeoverErr != nil {

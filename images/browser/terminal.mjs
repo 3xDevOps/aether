@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { limits, requireValue, boundedInteger } from './session.mjs';
 
 const root = new URL('./', import.meta.url);
@@ -15,13 +14,18 @@ async function rendererAssets() {
 }
 
 export async function renderTerminal(browser, request) {
+  requireValue(request && typeof request === 'object' && !Array.isArray(request), 'Terminal request must be an object');
   requireValue(typeof request.vt === 'string' && Buffer.byteLength(request.vt) <= limits.request - 4096, 'Terminal VT exceeds capture limit');
   requireValue(typeof request.session_id === 'string' && request.session_id.length <= 256 && request.session_id.length > 0, 'Terminal session identity required');
   requireValue(Number.isSafeInteger(request.screen_revision) && request.screen_revision >= 0, 'Terminal screen revision required');
+  requireValue(Number.isSafeInteger(request.output_position) && request.output_position >= 0, 'Terminal output position required');
+  requireValue(typeof request.captured_at === 'string' && Number.isFinite(Date.parse(request.captured_at)), 'Terminal capture timestamp required');
   // xterm does not implement Sixel, Kitty graphics or iTerm inline images.
-  requireValue(!/\x1bP[^\x1b]*q|\x90[^\x9c]*q|\x1b_G|\x1b\]1337;File=/.test(request.vt), 'Terminal graphics protocol is not supported by the PNG renderer', 'unsupported_graphics');
-  const cols = boundedInteger(request.cols, 80, 1, 320);
-  const rows = boundedInteger(request.rows, 24, 1, 120);
+  requireValue(!/(?:\x1bP|\x90)[0-?]*q|\x1b_G|\x9fG|(?:\x1b\]|\x9d)1337;File=/.test(request.vt), 'Terminal graphics protocol is not supported by the PNG renderer', 'unsupported_graphics');
+  requireValue(Number.isInteger(request.cols) && request.cols >= 1 && request.cols <= 320, 'Terminal columns must be in 1..320');
+  requireValue(Number.isInteger(request.rows) && request.rows >= 1 && request.rows <= 120, 'Terminal rows must be in 1..120');
+  const cols = request.cols;
+  const rows = request.rows;
   const fontSize = boundedInteger(request.font_size, 14, 8, 24);
   const [script, css, regular, bold] = await rendererAssets();
   const context = await browser.newContext({ viewport: { width: 4096, height: 4096 }, offline: true, serviceWorkers: 'block', javaScriptEnabled: true, acceptDownloads: false });
@@ -49,6 +53,6 @@ export async function renderTerminal(browser, request) {
     await page.setViewportSize({ width: dimensions.width, height: dimensions.height });
     const bytes = await page.locator('#terminal').screenshot({ type: 'png', timeout: limits.timeout });
     requireValue(bytes.length <= limits.image, 'Terminal PNG exceeds image limit', 'resource_limit');
-    return { bytes, metadata: { content_type: 'image/png', session_id: request.session_id, screen_revision: request.screen_revision, output_position: request.output_position, cols, rows, ...dimensions, captured_at: request.captured_at || new Date().toISOString() } };
+    return { bytes, metadata: { content_type: 'image/png', session_id: request.session_id, screen_revision: request.screen_revision, output_position: request.output_position, cols, rows, ...dimensions, captured_at: request.captured_at } };
   } finally { await context.close(); }
 }

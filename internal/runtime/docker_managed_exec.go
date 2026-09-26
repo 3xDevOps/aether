@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +45,12 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 	if err != nil {
 		return nil, fmt.Errorf("runtime: inspect managed execution container: %w", err)
 	}
-	argv := append([]string{coordtransport.CLIPath, devexec.Command, "run", spec.CreationKey}, spec.Argv...)
+	var token [32]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return nil, fmt.Errorf("runtime: create execution claim: %w", err)
+	}
+	claim := hex.EncodeToString(token[:])
+	argv := append([]string{coordtransport.CLIPath, devexec.Command, "run", spec.CreationKey, claim}, spec.Argv...)
 	created, err := d.cli.ExecCreate(ctx, container.Container.ID, client.ExecCreateOptions{
 		TTY: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
 		Cmd: argv, WorkingDir: spec.WorkingDir,
@@ -54,6 +61,7 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 	}
 	execution := &dockerManagedExec{docker: d, identity: ExecIdentity{
 		ContainerID: ID(container.Container.ID), ExecID: created.ID, CreationKey: spec.CreationKey,
+		ClaimToken: claim,
 	}}
 	published := false
 	defer func() {
@@ -94,7 +102,7 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 // and the helper's claim identity. It cannot restore an exec's stdio: consumers
 // must expose the unavailable terminal, not launch a replacement implicitly.
 func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (ManagedExec, error) {
-	if identity.ContainerID == "" || identity.ExecID == "" || identity.CreationKey == "" {
+	if identity.ContainerID == "" || identity.ExecID == "" || identity.CreationKey == "" || identity.ClaimToken == "" {
 		return nil, fmt.Errorf("%w: incomplete identity", ErrExecUnavailable)
 	}
 	execution := &dockerManagedExec{docker: d, identity: identity}
@@ -108,9 +116,9 @@ func (d *Docker) RecoverExec(ctx context.Context, identity ExecIdentity) (Manage
 }
 
 type dockerManagedExec struct {
-	docker *Docker
-	identity ExecIdentity
-	mu sync.Mutex
+	docker     *Docker
+	identity   ExecIdentity
+	mu         sync.Mutex
 	attachment *execAttachment
 }
 
@@ -119,15 +127,12 @@ func (e *dockerManagedExec) Identity() ExecIdentity { return e.identity }
 func (e *dockerManagedExec) Attachment() Attachment {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// EOF still leaves buffered output for the initial consumer to drain.
+	// Transport availability is reported separately by Status.
 	if e.attachment == nil {
 		return nil
 	}
-	select {
-	case <-e.attachment.done:
-		return nil
-	default:
-		return e.attachment
-	}
+	return e.attachment
 }
 
 func (e *dockerManagedExec) inspect(ctx context.Context) (client.ExecInspectResult, error) {
@@ -142,17 +147,20 @@ func (e *dockerManagedExec) inspect(ctx context.Context) (client.ExecInspectResu
 }
 
 func (e *dockerManagedExec) control(ctx context.Context, action string, grace time.Duration) (devexec.State, error) {
-	args := []string{coordtransport.CLIPath, devexec.Command, "control", e.identity.CreationKey, e.identity.ExecID, action, strconv.FormatInt(grace.Milliseconds(), 10)}
+	args := []string{coordtransport.CLIPath, devexec.Command, "control", e.identity.CreationKey, e.identity.ExecID, e.identity.ClaimToken, action, strconv.FormatInt(grace.Milliseconds(), 10)}
 	code, stdout, stderr, err := e.docker.Exec(ctx, e.identity.ContainerID, args, "")
 	if err != nil {
 		return devexec.State{}, err
 	}
 	var state devexec.State
 	decodeErr := json.Unmarshal([]byte(stdout), &state)
-	if decodeErr == nil && state.ExecID == e.identity.ExecID && state.CreationKey == e.identity.CreationKey {
+	if decodeErr == nil && state.ExecID == e.identity.ExecID && state.CreationKey == e.identity.CreationKey && state.ClaimToken == e.identity.ClaimToken {
 		if state.Error != "" {
 			if state.Exited && state.ExitCode != nil && (*state.ExitCode == 126 || *state.ExitCode == 127) {
-				return state, &ExecExitError{Code: *state.ExitCode}
+				if action == "start" {
+					return state, &ExecExitError{Code: *state.ExitCode}
+				}
+				return state, nil
 			}
 			return state, errors.New(state.Error)
 		}
@@ -168,7 +176,10 @@ func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {
 	if err != nil {
 		return ExecState{}, err
 	}
-	state := ExecState{Running: info.Running, Attached: e.Attachment() != nil}
+	e.mu.Lock()
+	attached := e.attachment != nil && e.attachment.connected()
+	e.mu.Unlock()
+	state := ExecState{Running: info.Running, Attached: attached}
 	if !state.Attached {
 		state.UnavailableReason = "PTY attachment is unavailable; Docker exec terminals cannot be reattached"
 	}
@@ -212,6 +223,9 @@ func (e *dockerManagedExec) Stop(ctx context.Context, grace time.Duration) (Exit
 	if grace > time.Minute {
 		return ExitStatus{}, errors.New("runtime: managed execution stop grace exceeds one minute")
 	}
+	stopCtx, cancel := context.WithTimeout(ctx, devexec.StartupTimeout+grace+devexec.ReapTimeout)
+	defer cancel()
+	ctx = stopCtx
 	if _, err := e.inspect(ctx); err != nil {
 		return ExitStatus{}, err
 	}
@@ -225,7 +239,10 @@ func (e *dockerManagedExec) Resize(ctx context.Context, cols, rows uint) error {
 	if cols == 0 || rows == 0 || cols > 65535 || rows > 65535 {
 		return errors.New("runtime: execution terminal dimensions must be between 1 and 65535")
 	}
-	if e.Attachment() == nil {
+	e.mu.Lock()
+	attached := e.attachment != nil && e.attachment.connected()
+	e.mu.Unlock()
+	if !attached {
 		return fmt.Errorf("%w: cannot resize an unavailable PTY", ErrExecUnavailable)
 	}
 	_, err := e.docker.cli.ExecResize(ctx, e.identity.ExecID, client.ExecResizeOptions{Width: cols, Height: rows})
