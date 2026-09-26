@@ -27,6 +27,12 @@ obsolete. Operational commands belong in the public guides, not this file.
   The production dashboard plus CLI/server build passed with Go 1.26.8.
   Run-link and startup navigation corrections passed 87 focused store tests
   and both real import scenarios. Final-head checks remain required.
+- Retention retries reject changed capture selections/notes and expired packets.
+  Real API checks preserved the original PNG and metadata after both changed
+  retries, returned the same usable packet after transient deletion, and
+  refused the expired packet while an independent packet remained readable.
+  SQLite/file regressions cover database restart, exact expiry, and tombstones
+  after clock rollback; integrated Go gates passed after the fix.
 - An isolated Ubuntu 24.04 server VM runs in `multi-user.target`, with no X11,
   Wayland, Xvfb, desktop session, or host Chromium. Real Docker builds of the
   standard environment and browser companion passed there.
@@ -37,6 +43,10 @@ obsolete. Operational commands belong in the public guides, not this file.
   static-frame replay, bounds, and held-input cleanup. Aborting a renderer with
   Chromium virtual time paused closed its context and released the queue while
   preserving the app; the same probe failed against the previous image.
+  The stalled render without caller cancellation returned `timeout` in
+  31.422 seconds; only the app context remained.
+  A terminal PNG before any browser open started the companion and returned
+  the actual 90×28 TUI in 28.836 seconds.
 - Kernel inspection verified Chromium renderer namespace isolation,
   `NoNewPrivs`, seccomp filtering, and additional renderer filters. The browser
   retains Docker's AppArmor policy and its explicit seccomp profile; no
@@ -55,6 +65,13 @@ obsolete. Operational commands belong in the public guides, not this file.
   preserved the documented ownership and explicit-restart boundaries.
   Development input and browser interaction preserved a real human's primary
   mission PTY lease and durable hold; explicit primary release cleared the hold.
+- Killing only Chromium left Node, the harness, and the app alive; the live
+  browser viewer ended and status reported `unavailable` with the actual
+  Chromium-disconnected reason. Explicit reset with the original control
+  fence restored browsing without restarting the app.
+- Revoking workspace Steer and then removing an authenticated collaborator
+  ended both real SSH development streams in about two seconds. Subsequent
+  input/actions were denied, controllers cleared, and app/browser work survived.
 - Three companions were admitted and the fourth refused without starving
   coordination. Four streams were admitted; a fifth returned 429. With three
   private companion readers stalled, the fourth received 101 frames in
@@ -72,10 +89,15 @@ obsolete. Operational commands belong in the public guides, not this file.
   member-account credential removal. The uncertain-create case discarded the
   response to one successful real POST; read-only reconciliation found that
   exact PR without another create.
-- PR #247's first CI run passed native harness and browser companion smoke on
-  amd64 and arm64, release builds, and most integration shards. Windows socket
-  paths, privileged integration setup, and dashboard fixture readiness need
-  corrected final-head CI; the full integration/E2E gate is not yet green.
+- PR #247's second CI run passed native amd64/arm64 harness and companion
+  smoke, Windows, release builds, and all but one server integration test.
+  The remaining server failure began with an obsolete websocket assertion;
+  a cold-launch check also exposed a test client that stopped answering pings.
+  The corrected continuously-reading client passed the actual Docker-backed
+  server gateway integration in 30.620 seconds.
+  Dashboard E2E recorded 60 passes, the expected conditional live-GitHub skip,
+  and two failures after reload: browser control and terminal-dock visibility.
+  Corrections and final-head CI remain required.
 
 ## Acceptance still in progress
 
@@ -89,10 +111,6 @@ obsolete. Operational commands belong in the public guides, not this file.
 - Final desktop and shared-terminal dashboard scenarios on the rebuilt
   companion. Cached title reads remove observed physical-input delays without
   weakening the one-second input expiry or control fences.
-- Chromium-only failure with Node still running exposed a status error path.
-  Both health and page-inventory failures now return structured unavailability
-  with the actual reason; real explicit recovery and permission revocation
-  still need final proof.
 - Production hosted HTTPS/WhoIs acceptance awaits temporary tailnet-node
   authorization. Local-gateway tests do not substitute for that boundary.
 - Complete Docker integration, final merged quality gates, PR review/CI, merge,
