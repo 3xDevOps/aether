@@ -583,7 +583,11 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   billing history are explicitly outside this read-only surface; credentials
   remain server-side.
 - **The run header** gives its first section two lines: the title and task
-  disclosure, then state, harness/mode and branch metadata. The second section
+  disclosure, then state, harness/mode and branch metadata. The title is the
+  agent's last terminal title; a run without one is named by the first line
+  of its prompt, cut at 120 characters. The heading clamps to two lines and
+  keeps the full label in its `title`; the whole prompt is behind
+  **View full task**. The second section
   holds only the run-detail tabs and actions. Desktop actions all appear from
   a 512px header width, with icon labels expanding from 1024px; narrower
   headers retain More. Metadata and tabs scroll inside their own regions
