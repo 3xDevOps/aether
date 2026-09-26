@@ -188,6 +188,9 @@ Do not start work, mutate tasks, or report an outcome. Cancellation is terminal.
 const activeAmendments = `Next: dispatch approved tasks and review their submissions.
   aether-internal worker start --help
   aether-internal task accept-submission --help
+When a worker reports, the server types an aether: line into this terminal
+naming the command to run next. While waiting for workers, wait with
+aether-internal inbox --wait 30 instead of polling worker list.
 Use current task revisions, integrator generation, accepted-set version, and
 approved execution choices from live results; never guess IDs or generations.
 Changes outside approved scope, dropped exclusions, material changes, and new

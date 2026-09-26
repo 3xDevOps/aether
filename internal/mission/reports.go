@@ -105,9 +105,26 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	switch report.Outcome {
 	case store.CoordOutcomeBlocked:
 		// The durable coord.report already exists; keep the worker running.
-		return s.publishMissionChanged(ctx, m.ID)
+		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+			return publishErr
+		}
+		// Nothing durable marks a blocked report as announced, so the
+		// report's own publication is the replay boundary.
+		if report.PublishedAt == nil {
+			s.noticeIntegrator(ctx, m, workerReportNotice(report.Outcome, attempt))
+		}
+		return nil
 	case store.CoordOutcomeFailure:
-		return s.failAssignedWorker(ctx, m, attempt, report.Summary)
+		// A replay finds the attempt already failed and only re-cancels; the
+		// integrator was told by the call that failed it.
+		failed, failErr := s.failAssignedWorker(ctx, m, attempt, report.Summary)
+		if failErr != nil {
+			return failErr
+		}
+		if failed {
+			s.noticeIntegrator(ctx, m, workerReportNotice(report.Outcome, attempt))
+		}
+		return nil
 	case store.CoordOutcomeSuccess:
 	default:
 		return fmt.Errorf("mission: unsupported report outcome %q", report.Outcome)
@@ -126,7 +143,11 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if err != nil {
 		return err
 	}
-	return s.publishMissionChanged(ctx, m.ID)
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return publishErr
+	}
+	s.noticeIntegrator(ctx, m, workerReportNotice(report.Outcome, attempt))
+	return nil
 }
 
 func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
@@ -159,25 +180,31 @@ func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.Run
 	if !containsString(report.EvidenceRefs, packet.ID) {
 		return fmt.Errorf("mission: report does not retain evidence packet %s", packet.ID)
 	}
-	return s.failAssignedWorker(ctx, m, attempt, report.Summary)
+	_, failErr := s.failAssignedWorker(ctx, m, attempt, report.Summary)
+	return failErr
 }
 
-func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, detail string) error {
+// failAssignedWorker reports whether this call moved the attempt to failed;
+// a concurrent replay loses that race with ErrMissionStale and only re-cancels.
+func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, detail string) (bool, error) {
 	if m == nil || attempt == nil || attempt.RunID == "" {
-		return errors.New("mission: failed worker assignment is required")
+		return false, errors.New("mission: failed worker assignment is required")
 	}
 	if s.cfg.Cancel == nil {
-		return errors.New("mission: scheduler cancel unavailable")
+		return false, errors.New("mission: scheduler cancel unavailable")
 	}
+	failed := false
 	if attempt.State.HoldsConcurrency() {
-		if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail); stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
-			return stateErr
+		stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail)
+		if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
+			return false, stateErr
 		}
+		failed = stateErr == nil
 	}
 	if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
-		return fmt.Errorf("mission: cancel failed worker %s: %w", attempt.RunID, cancelErr)
+		return false, fmt.Errorf("mission: cancel failed worker %s: %w", attempt.RunID, cancelErr)
 	}
-	return s.publishMissionChanged(ctx, m.ID)
+	return failed, s.publishMissionChanged(ctx, m.ID)
 }
 
 func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) []domain.SubmissionEvidence {

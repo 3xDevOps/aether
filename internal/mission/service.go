@@ -108,8 +108,8 @@ type Config struct {
 	RequireCoordination func() error
 	Bus                 events.Bus
 	Now                 func() time.Time
-	// PTY announces a human answer or plan decision in the integrator's
-	// terminal; nil sends no notices.
+	// PTY announces a human answer, a plan decision, or a worker report in
+	// the integrator's terminal; nil sends no notices.
 	PTY Injector
 	// Integration resolves the underlying candidate engine lazily. Mission
 	// policy owns the adapter while the engine remains the implementation.
@@ -377,7 +377,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 	return err
 }
 
-func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Attempt, run *domain.Run, obs MissionRunObservation) error {
+func (s *Service) settleObservedAttempt(ctx context.Context, mission *domain.Mission, attempt *domain.Attempt, run *domain.Run, obs MissionRunObservation) error {
 	if attempt == nil || run == nil || !run.Status.Terminal() || !obs.Settled() || !attempt.State.HoldsConcurrency() {
 		return nil
 	}
@@ -388,7 +388,15 @@ func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Att
 	if err := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, target, run.Reason); err != nil {
 		return err
 	}
-	return s.publishMissionChanged(ctx, attempt.MissionID)
+	if err := s.publishMissionChanged(ctx, attempt.MissionID); err != nil {
+		return err
+	}
+	// A cancelled attempt is what the integrator asked for; only a worker
+	// that died without reporting is news to it.
+	if target == domain.AttemptFailed {
+		s.noticeIntegrator(ctx, mission, attemptEndedNotice(attempt))
+	}
+	return nil
 }
 
 func (s *Service) markAttemptUnknown(ctx context.Context, attempt *domain.Attempt, detail string) {
@@ -477,7 +485,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				slog.Warn("mission: observe attempt", "attempt", attempt.ID, "error", observeErr)
 				continue
 			}
-			if settleErr := s.settleObservedAttempt(ctx, attempt, current, obs); settleErr != nil {
+			if settleErr := s.settleObservedAttempt(ctx, mission, attempt, current, obs); settleErr != nil {
 				slog.Warn("mission: settle attempt", "attempt", attempt.ID, "error", settleErr)
 			}
 			if !obs.Settled() && attempt.CancelRequestedAt != nil {
