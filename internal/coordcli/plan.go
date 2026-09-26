@@ -142,7 +142,7 @@ func missionPlanSubmit(ctx context.Context, socket string, args []string, in io.
 	return out, nil
 }
 
-const integratorRole = "You are this mission's integrator: turn the objective into tasks for workers and coordinate them; do not implement the objective yourself.\n"
+const integratorRole = "You are this mission's integrator: turn the objective into tasks for workers and coordinate them; do not implement the objective yourself. Workers reach you with send and ask; answer with reply. An aether: line in your terminal means a message or mission event is waiting and names the command that reads it.\n"
 
 const planningFlow = `Next: clarify the objective before submitting a plan.
 If you need an answer from the accountable human (not a peer):

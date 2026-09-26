@@ -160,20 +160,22 @@ type Service struct {
 	stop     context.CancelFunc
 	sub      events.Subscription
 
-	mu             sync.Mutex
-	listeners      map[socketKey]*net.UnixListener
-	buckets        map[domain.RunID]*bucket
-	inboxBuckets   map[domain.RunID]*bucket
-	requestBuckets map[domain.RunID]*bucket
-	inboxWaiters   map[domain.RunID]*inboxWaiter
-	reportLocks    map[domain.RunID]*sync.Mutex
-	reportPackets  map[string]protocol.EvidencePacket
-	noticed        map[domain.RunID]map[domain.RunID]bool
-	runs           map[domain.RunID]*runLifecycle
-	reportCursor   store.CoordOutboxCursor
-	auditCursor    store.CoordOutboxCursor
-	closed         bool
-	wg             sync.WaitGroup
+	mu               sync.Mutex
+	listeners        map[socketKey]*net.UnixListener
+	buckets          map[domain.RunID]*bucket
+	inboxBuckets     map[domain.RunID]*bucket
+	requestBuckets   map[domain.RunID]*bucket
+	inboxWaiters     map[domain.RunID]*inboxWaiter
+	reportLocks      map[domain.RunID]*sync.Mutex
+	reportPackets    map[string]protocol.EvidencePacket
+	noticed          map[domain.RunID]map[domain.RunID]bool
+	messageNoticed   map[domain.RunID]uint64
+	messageNoticeSeq uint64
+	runs             map[domain.RunID]*runLifecycle
+	reportCursor     store.CoordOutboxCursor
+	auditCursor      store.CoordOutboxCursor
+	closed           bool
+	wg               sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -220,6 +222,7 @@ func New(cfg Config) (*Service, error) {
 		reportPackets:  make(map[string]protocol.EvidencePacket),
 		runs:           make(map[domain.RunID]*runLifecycle),
 		noticed:        make(map[domain.RunID]map[domain.RunID]bool),
+		messageNoticed: make(map[domain.RunID]uint64),
 	}, nil
 }
 

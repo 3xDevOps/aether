@@ -428,6 +428,7 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 			}
 		}
 	}
+	s.rearmMessageNotice(run)
 	out := make([]protocol.CoordMessage, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, protocol.CoordMessage{
@@ -1080,7 +1081,6 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 		return nil, internalError(method, err)
 	}
 	if created {
-		s.wakeInbox(msg.ToRun)
 		if audit, ok := s.cfg.Mail.(store.CoordAuditStore); ok {
 			if pub, aerr := audit.GetCoordAuditPublication(ctx, msg.ID); aerr == nil {
 				if pubErr := s.publishCoordAudit(ctx, audit, pub); pubErr != nil {
@@ -1090,6 +1090,10 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 				slog.Warn("coord: audit outbox lookup failed", "message_id", msg.ID, "error", aerr)
 			}
 		}
+		// The claim is taken before the waiter wakes, so a read that races
+		// the notice re-arms it rather than being suppressed by a late claim.
+		s.notifyMessage(target, msg)
+		s.wakeInbox(msg.ToRun)
 	}
 	return msg, nil
 }

@@ -383,9 +383,11 @@ current authority; help describes syntax, not permission.
 `
 
 const skillWorkflow = `Coordination and completion:
-Stay within your assignment. Ask authorized peers when needed:
+Stay within your assignment. Peers listed by status are reachable with send,
+ask, and reply; ask when a decision is theirs:
   aether-internal ask --help
-Wait without reporting an outcome:
+A terminal line starting with aether: means a message or event is waiting
+and names the command that reads it. Wait without reporting an outcome:
   aether-internal inbox --wait 30
 Process the batch before acknowledging it: on the next inbox call pass
 --ack with that batch's ack_token. Without acknowledgement it may repeat.
@@ -439,7 +441,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 			}
 			switch role {
 			case "worker":
-				if _, err := fmt.Fprintf(out, "Task ID: %s\nTask revision: %d\nAttempt ID: %s\nPhase: %s\nRead your full assigned task before acting (use the assigned revision above):\n  aether-internal task show --task-id %s\nWorkers may read and propose only; do not spawn workers, accept tasks, or perform mission/integration operations.\n",
+				if _, err := fmt.Fprintf(out, "Task ID: %s\nTask revision: %d\nAttempt ID: %s\nPhase: %s\nRead your full assigned task before acting (use the assigned revision above):\n  aether-internal task show --task-id %s\nWorkers may read and propose only; do not spawn workers, accept tasks, or perform mission/integration operations.\nCheck the inbox after reading the task, before each commit, and before reporting; sibling workers are listed by status.\n",
 					boundedSkillField(assignment.TaskID), assignment.TaskRevision, boundedSkillField(assignment.AttemptID), boundedSkillField(assignment.Phase), shellquote.Quote(assignment.TaskID)); err != nil {
 					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
 				}

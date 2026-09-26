@@ -205,6 +205,7 @@ func (s *Service) Release(run domain.RunID) error {
 		delete(s.inboxWaiters, run)
 	}
 	delete(s.noticed, run)
+	delete(s.messageNoticed, run)
 	s.mu.Unlock()
 	s.radar.forget(run)
 	// Existing handlers keep using their scoped buckets and report lock until

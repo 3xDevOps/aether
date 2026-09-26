@@ -13,6 +13,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
@@ -247,5 +248,226 @@ func TestNoticeSurvivesAnInjectFailure(t *testing.T) {
 	h.barrier(t, c, d)
 	if all := h.pty.forRun(a); len(all) != 1 {
 		t.Fatalf("injections for %s after a successful delivery = %d, want 1", a, len(all))
+	}
+}
+
+// timelineNotes subscribes to the workspace timeline and returns a reader
+// for the next note's message, so a test can pin the order of stamps.
+func (h *coordHarness) timelineNotes(t *testing.T) func() (domain.RunID, string) {
+	t.Helper()
+	sub, err := h.bus.Subscribe(context.Background(), events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Close() })
+	return func() (domain.RunID, string) {
+		select {
+		case e := <-sub.Events():
+			p, ok := e.Payload.(events.TimelinePayload)
+			if !ok || p.Kind != events.TimelineNote || e.ActorID != "" {
+				t.Fatalf("timeline event = %+v, want a server-originated note", e)
+			}
+			return e.RunID, p.Message
+		case <-time.After(2 * time.Second):
+			t.Fatal("no timeline note arrived")
+			return "", ""
+		}
+	}
+}
+
+// setMode changes one run's launch mode in the store.
+func (h *coordHarness) setMode(t *testing.T, i int, mode domain.LaunchMode) {
+	t.Helper()
+	h.runs[i].Mode = mode
+	if err := h.db.UpdateRun(context.Background(), h.runs[i]); err != nil {
+		t.Fatalf("update run %d: %v", i, err)
+	}
+}
+
+// TestMessageNoticeFiresOncePerBurstAndReArms follows the real path: a
+// peer sends twice, the interactive recipient is told once in its terminal
+// and once on the timeline, its next inbox read re-arms the line, and the
+// line itself is inert if it lands in a shell.
+func TestMessageNoticeFiresOncePerBurstAndReArms(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
+	h.advance(radarRefreshInterval)
+	next := h.timelineNotes(t)
+
+	for _, body := range []string{"hold off on auth.go", "still on it"} {
+		if _, err := h.svc.Send(ctx, a, sendParams(b, body)); err != nil {
+			t.Fatalf("Send %q: %v", body, err)
+		}
+	}
+	h.waitForInjections(t, 1)
+	got := h.pty.forRun(b)
+	if len(got) != 1 {
+		t.Fatalf("injections for %s after two sends = %+v, want one", b, got)
+	}
+	notice := got[0].message
+	for _, want := range []string{
+		"aether: New coordination message from run " + string(a),
+		"/usr/local/bin/aether-internal inbox", "--ack",
+	} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice %q does not mention %q", notice, want)
+		}
+	}
+	if i := strings.IndexAny(notice, ";<>()'\"`$"); i >= 0 {
+		t.Fatalf("notice %q carries shell syntax %q at %d", notice, notice[i], i)
+	}
+	// Two send stamps and exactly one delivery stamp on the recipient; the
+	// delivery runs detached, so its place among the sends is not pinned.
+	if got := h.nextNotes(t, next, 3); got.sends != 2 || got.deliveries[b] != 1 {
+		t.Fatalf("notes after two sends = %+v, want two send stamps and one delivery stamp on %s", got, b)
+	}
+
+	if _, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{}); err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "one more")); err != nil {
+		t.Fatalf("Send after the inbox read: %v", err)
+	}
+	h.waitForInjections(t, 2)
+	if got = h.pty.forRun(b); len(got) != 2 {
+		t.Fatalf("injections for %s after its inbox read = %d, want 2", b, len(got))
+	}
+
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command(bash, "-c", notice)
+	cmd.Dir = dir
+	out, runErr := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(runErr, &exit) || exit.ExitCode() != 127 {
+		t.Fatalf("bash -c on the notice = %v (%s), want exit 127 command not found", runErr, out)
+	}
+	if entries, rerr := os.ReadDir(dir); rerr != nil || len(entries) != 0 {
+		t.Fatalf("the notice touched the shell's directory: %v (%v)", entries, rerr)
+	}
+}
+
+// TestMessageNoticeSkipsAHeadlessRun: a headless harness never reads its
+// terminal, so the recipient gets no line and the timeline does not claim
+// it was told, while an interactive sibling still is.
+func TestMessageNoticeSkipsAHeadlessRun(t *testing.T) {
+	h := newHarness(t, 3)
+	ctx := context.Background()
+	a, b, c := h.run(0), h.run(1), h.run(2)
+	h.setMode(t, 1, domain.LaunchHeadless)
+	h.peers.hub(a, []domain.RunID{b, c}, "src/auth.go")
+	h.advance(radarRefreshInterval)
+	next := h.timelineNotes(t)
+
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "hold off on auth.go")); err != nil {
+		t.Fatalf("Send to the headless run: %v", err)
+	}
+	if _, err := h.svc.Send(ctx, a, sendParams(c, "hold off on auth.go")); err != nil {
+		t.Fatalf("Send to the interactive run: %v", err)
+	}
+	h.waitForInjections(t, 1)
+	if got := h.pty.forRun(c); len(got) != 1 {
+		t.Fatalf("injections for the interactive run %s = %+v, want one", c, got)
+	}
+	if got := h.pty.forRun(b); len(got) != 0 || h.pty.attemptsFor(b) != 0 {
+		t.Fatalf("headless run %s was written to: %+v", b, got)
+	}
+	// Two send stamps, one delivery stamp on the interactive sibling, and
+	// none on the headless run.
+	if got := h.nextNotes(t, next, 3); got.sends != 2 || got.deliveries[c] != 1 || got.deliveries[b] != 0 {
+		t.Fatalf("notes = %+v, want two send stamps and one delivery stamp on %s only", got, c)
+	}
+}
+
+// TestMessageNoticeRetriesOnceTheTerminalExists: a message stored before the
+// recipient's terminal is attached, as right after a restart, is not told,
+// but the claim is released so the next message tries the terminal again.
+func TestMessageNoticeRetriesOnceTheTerminalExists(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
+	h.advance(radarRefreshInterval)
+
+	h.pty.setErr(ptyhost.ErrNoSession)
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "hold off on auth.go")); err != nil {
+		t.Fatalf("Send while the terminal is gone: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for h.pty.attemptsFor(b) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no injection was attempted while the terminal was gone")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := h.pty.all(); len(got) != 0 {
+		t.Fatalf("injections while the terminal was gone = %+v, want none", got)
+	}
+
+	h.pty.setErr(nil)
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "still on it")); err != nil {
+		t.Fatalf("Send once the terminal exists: %v", err)
+	}
+	got := h.waitForInjections(t, 1)
+	if got[0].run != b || !strings.Contains(got[0].message, string(a)) {
+		t.Fatalf("retried notice = %+v, want run %s told about %s", got[0], b, a)
+	}
+}
+
+// noteTally is what a fixed number of timeline notes amount to: how many
+// were send stamps and how many delivery stamps landed on each run.
+type noteTally struct {
+	sends      int
+	deliveries map[domain.RunID]int
+}
+
+// nextNotes reads n timeline notes and tallies them, so a test can pin what
+// was stamped without pinning an order the detached notice does not promise.
+func (h *coordHarness) nextNotes(t *testing.T, next func() (domain.RunID, string), n int) noteTally {
+	t.Helper()
+	tally := noteTally{deliveries: make(map[domain.RunID]int)}
+	for range n {
+		run, note := next()
+		switch {
+		case strings.HasPrefix(note, "coordination message to run "):
+			tally.sends++
+		case strings.HasPrefix(note, "coordination notice: message from run "):
+			tally.deliveries[run]++
+		default:
+			t.Fatalf("unexpected timeline note %q on run %s", note, run)
+		}
+	}
+	return tally
+}
+
+// TestOverlapNoticeSkipsAHeadlessRun: the banner too is only for a run that
+// reads its terminal, and skipping it must not spend the pair's one notice.
+func TestOverlapNoticeSkipsAHeadlessRun(t *testing.T) {
+	h := newHarness(t, 4)
+	a, b := h.run(0), h.run(1)
+	c, d := h.run(2), h.run(3)
+	h.setMode(t, 1, domain.LaunchHeadless)
+	h.start()
+	peer := events.OverlapPeer{RunID: a, Files: []string{"src/auth.go"}}
+
+	h.announce(t, b, peer)
+	h.barrier(t, c, d)
+	if got := h.pty.forRun(b); len(got) != 0 || h.pty.attemptsFor(b) != 0 {
+		t.Fatalf("headless run %s was written to: %+v", b, got)
+	}
+
+	// Relaunched interactively, the same overlap is announced as if new.
+	h.setMode(t, 1, domain.LaunchTUI)
+	h.announce(t, b, peer)
+	h.barrier(t, c, d)
+	if got := h.pty.forRun(b); len(got) != 1 || !strings.Contains(got[0].message, string(a)) {
+		t.Fatalf("injections for %s once interactive = %+v, want the banner about %s", b, got, a)
 	}
 }
