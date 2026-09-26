@@ -15,7 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const swarmCreateUsage = "usage: aether swarm create \"<objective>\" --integrator <harness> [--account <member-id>] [--worker <harness[:tui|headless]>] [--max-concurrent-attempts <n>] [--max-total-attempts <n>] [--workspace <name-or-id>]"
+const swarmCreateUsage = "usage: aether swarm create \"<objective>\" --integrator <harness> [--account <member-id>] [--worker <harness[:tui|headless]>] [--max-concurrent-attempts <n>] [--max-total-attempts <n>] [--workspace <name-or-id>] [--idempotency-key <key>]"
 
 func init() {
 	register(command{
@@ -63,6 +63,7 @@ type swarmCreateOptions struct {
 	workers          []swarmWorkerOption
 	maxConcurrent    int
 	maxTotalAttempts int
+	idempotencyKey   string
 }
 
 func parseSwarmCreate(args []string) (swarmCreateOptions, error) {
@@ -73,8 +74,9 @@ func parseSwarmCreate(args []string) (swarmCreateOptions, error) {
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	maxConcurrent := fs.Int("max-concurrent-attempts", 2, "maximum workers running at once (1 through 8)")
 	maxTotal := fs.Int("max-total-attempts", 8, "maximum worker attempts for the swarm (at least concurrent, at most 128)")
+	key := fs.String("idempotency-key", "", "reuse this key and the same options to retry an uncertain create")
 	var workerValues swarmWorkerFlags
-	fs.Var(&workerValues, "worker", "allowed worker harness[:tui|headless] (repeatable; default: integrator harness in headless mode)")
+	fs.Var(&workerValues, "worker", "allowed worker harness[:tui|headless] (repeatable; default mode: tui)")
 
 	objective := ""
 	if len(args) > 0 && args[0] != "--" && !strings.HasPrefix(args[0], "-") {
@@ -102,13 +104,10 @@ func parseSwarmCreate(args []string) (swarmCreateOptions, error) {
 	}
 
 	workers := make([]swarmWorkerOption, 0, len(workerValues))
-	if len(workerValues) == 0 {
-		workers = append(workers, swarmWorkerOption{harness: *integrator, mode: string(domain.LaunchHeadless)})
-	}
 	for _, value := range workerValues {
 		harness, mode, hasMode := strings.Cut(value, ":")
 		if !hasMode {
-			mode = string(domain.LaunchHeadless)
+			mode = string(domain.LaunchTUI)
 		}
 		harness = strings.TrimSpace(harness)
 		mode = strings.TrimSpace(mode)
@@ -128,24 +127,25 @@ func parseSwarmCreate(args []string) (swarmCreateOptions, error) {
 		workers:          workers,
 		maxConcurrent:    *maxConcurrent,
 		maxTotalAttempts: *maxTotal,
+		idempotencyKey:   *key,
 	}, nil
 }
 
 func runSwarmCreate(args []string) error {
-	return executeSwarmCreate(args, withControl, os.Stdout)
+	return executeSwarmCreate(args, withControl, os.Stdout, os.Stderr)
 }
 
-func executeSwarmCreate(args []string, openControl func(func(*protocol.Client) error) error, out io.Writer) error {
+func executeSwarmCreate(args []string, openControl func(func(*protocol.Client) error) error, out, errOut io.Writer) error {
 	options, err := parseSwarmCreate(args)
 	if err != nil {
 		return err
 	}
 	return openControl(func(c *protocol.Client) error {
-		return createSwarm(c, options, out)
+		return createSwarm(c, options, out, errOut)
 	})
 }
 
-func createSwarm(c *protocol.Client, options swarmCreateOptions, out io.Writer) error {
+func createSwarm(c *protocol.Client, options swarmCreateOptions, out, errOut io.Writer) error {
 	workspaceID, err := resolveWorkspace(c, options.workspace)
 	if err != nil {
 		return err
@@ -190,6 +190,10 @@ func createSwarm(c *protocol.Client, options swarmCreateOptions, out io.Writer) 
 		}
 		uniqueChoices = append(uniqueChoices, choice)
 	}
+	key := options.idempotencyKey
+	if key == "" {
+		key = cli.NewControlSessionID()
+	}
 	params := protocol.MissionCreateParams{
 		WorkspaceID: workspaceID,
 		Objective:   options.objective,
@@ -201,7 +205,10 @@ func createSwarm(c *protocol.Client, options swarmCreateOptions, out io.Writer) 
 		ExecutionChoices:      uniqueChoices,
 		MaxConcurrentAttempts: options.maxConcurrent,
 		MaxTotalAttempts:      options.maxTotalAttempts,
-		IdempotencyKey:        cli.NewControlSessionID(),
+		IdempotencyKey:        key,
+	}
+	if _, err := fmt.Fprintf(errOut, "idempotency-key: %s\n", key); err != nil {
+		return fmt.Errorf("write create retry key: %w", err)
 	}
 	var result protocol.MissionCreateResult
 	if err := c.Call(protocol.MethodMissionCreate, params, &result); err != nil {
@@ -280,16 +287,26 @@ func listMissions(c *protocol.Client, workspaceID string) ([]protocol.Mission, e
 
 func renderMissions(out io.Writer, missions []protocol.Mission) error {
 	if len(missions) == 0 {
-		_, err := fmt.Fprintln(out, "no swarms")
-		return err
+		if _, err := fmt.Fprintln(out, "no swarms"); err != nil {
+			return fmt.Errorf("write swarm list: %w", err)
+		}
+		return nil
 	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tPHASE\tINTEGRATOR\tOPEN QUESTIONS\tOBJECTIVE")
+	if _, err := fmt.Fprintln(tw, "ID\tPHASE\tINTEGRATOR\tOPEN QUESTIONS\tOBJECTIVE"); err != nil {
+		return fmt.Errorf("write swarm list header: %w", err)
+	}
 	for _, mission := range missions {
 		integrator := strings.Join([]string{mission.Integrator.AccountMemberID, mission.Integrator.Harness, mission.Integrator.Mode}, "/")
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", mission.ID, mission.Phase, integrator, mission.OpenQuestions, mission.Objective)
+		objective := strings.Join(strings.Fields(mission.Objective), " ")
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", mission.ID, mission.Phase, integrator, mission.OpenQuestions, objective); err != nil {
+			return fmt.Errorf("write swarm %s: %w", mission.ID, err)
+		}
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("write swarm list: %w", err)
+	}
+	return nil
 }
 
 func runSwarmShow(args []string) error {
@@ -334,9 +351,13 @@ func renderMissionShow(out io.Writer, result protocol.MissionShowResult) error {
 	}
 	if err := writeMissionSection(out, "EXECUTION CHOICES", len(m.ExecutionChoices), func(w io.Writer) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ACCOUNT\tHARNESS\tMODE")
+		if _, err := fmt.Fprintln(tw, "ACCOUNT\tHARNESS\tMODE"); err != nil {
+			return err
+		}
 		for _, choice := range m.ExecutionChoices {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", choice.AccountMemberID, choice.Harness, choice.Mode)
+			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", choice.AccountMemberID, choice.Harness, choice.Mode); err != nil {
+				return err
+			}
 		}
 		return tw.Flush()
 	}); err != nil {
@@ -344,15 +365,25 @@ func renderMissionShow(out io.Writer, result protocol.MissionShowResult) error {
 	}
 	if err := writeMissionSection(out, "TASKS", len(result.Tasks), func(w io.Writer) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tREVISION\tTITLE")
+		if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tREVISION\tTITLE"); err != nil {
+			return err
+		}
 		for _, task := range result.Tasks {
-			title := ""
-			if task.Revision != nil {
-				title = task.Revision.Title
-			} else if task.PendingRevision != nil {
-				title = task.PendingRevision.Title
+			if task.CurrentRevision != 0 || task.PendingRevision == nil {
+				title := ""
+				if task.Revision != nil {
+					title = strings.Join(strings.Fields(task.Revision.Title), " ")
+				}
+				if _, err := fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", task.ID, task.Status, task.CurrentRevision, title); err != nil {
+					return err
+				}
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", task.ID, task.Status, task.CurrentRevision, title)
+			if pending := task.PendingRevision; pending != nil {
+				title := strings.Join(strings.Fields(pending.Title), " ")
+				if _, err := fmt.Fprintf(tw, "%s\t%s\t%d (pending)\t%s\n", task.ID, task.Status, pending.Revision, title); err != nil {
+					return err
+				}
+			}
 		}
 		return tw.Flush()
 	}); err != nil {
@@ -360,9 +391,14 @@ func renderMissionShow(out io.Writer, result protocol.MissionShowResult) error {
 	}
 	if err := writeMissionSection(out, "ATTEMPTS", len(result.Attempts), func(w io.Writer) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tTASK\tSTATE\tHARNESS\tMODE\tRUN\tERROR")
+		if _, err := fmt.Fprintln(tw, "ID\tTASK\tSTATE\tHARNESS\tMODE\tRUN\tERROR"); err != nil {
+			return err
+		}
 		for _, attempt := range result.Attempts {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", attempt.ID, attempt.TaskID, attempt.State, attempt.Harness, attempt.Mode, attempt.RunID, attempt.LastError)
+			lastError := strings.Join(strings.Fields(attempt.LastError), " ")
+			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", attempt.ID, attempt.TaskID, attempt.State, attempt.Harness, attempt.Mode, attempt.RunID, lastError); err != nil {
+				return err
+			}
 		}
 		return tw.Flush()
 	}); err != nil {
@@ -370,9 +406,13 @@ func renderMissionShow(out io.Writer, result protocol.MissionShowResult) error {
 	}
 	if err := writeMissionSection(out, "SUBMISSIONS", len(result.Submissions), func(w io.Writer) error {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tTASK\tSTATE")
+		if _, err := fmt.Fprintln(tw, "ID\tTASK\tSTATE"); err != nil {
+			return err
+		}
 		for _, submission := range result.Submissions {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", submission.ID, submission.TaskID, submission.State)
+			if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", submission.ID, submission.TaskID, submission.State); err != nil {
+				return err
+			}
 		}
 		return tw.Flush()
 	}); err != nil {
@@ -422,7 +462,10 @@ func writeMissionSection(out io.Writer, title string, count int, render func(io.
 		return nil
 	}
 	if _, err := fmt.Fprintf(out, "\n%s\n", title); err != nil {
-		return err
+		return fmt.Errorf("write %s heading: %w", title, err)
 	}
-	return render(out)
+	if err := render(out); err != nil {
+		return fmt.Errorf("write %s: %w", title, err)
+	}
+	return nil
 }

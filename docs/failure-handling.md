@@ -207,7 +207,7 @@ the scheduler wrote the run row before failing:
 
 ```
 mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically: <cause>
-mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Missions page or inspect with `aether swarm show <mission-id>`: <cause>
+mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Missions page or inspect with aether swarm show <mission-id>: <cause>
 ```
 
 With no run row, mission reconciliation retries the launch of the reserved
@@ -217,6 +217,9 @@ with the same contents and idempotency key also retries the launch, and
 returns the same mission. The Missions page shows `The integrator run has not
 started.` for that mission. Inspect its recorded state with
 `aether swarm show <mission-id>`.
+For a CLI retry, repeat `aether swarm create` with the same options and
+`--idempotency-key <key>`, using the key printed to stderr before the original
+request. Omitting the key creates a new mission instead of recovering this one.
 `mission.show` and `mission.list` carry the last launch error in
 `integrator_launch_error` and the time it was first seen in
 `integrator_launch_error_at`; both clear once the run is live (a row that
