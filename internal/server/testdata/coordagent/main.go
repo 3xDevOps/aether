@@ -9,7 +9,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -50,9 +49,6 @@ const poll = 2 * time.Minute
 const retouch = 10 * time.Second
 
 func main() {
-	// The overlap notice arrives on stdin and the write carrying it blocks
-	// until it is read, so drain for the whole life of the run.
-	go drainStdin()
 	// The supervisor attaches this terminal just after the container
 	// starts, and output the terminal never carried is output no test can
 	// read. Waiting is only ever a head start, never a guarantee: what has
@@ -310,13 +306,6 @@ func call(ctx context.Context, cs *mcp.ClientSession, name string, args, out any
 		return fmt.Errorf("%s: decode result: %w", name, err)
 	}
 	return nil
-}
-
-func drainStdin() {
-	scan := bufio.NewScanner(os.Stdin)
-	for scan.Scan() {
-		say("notice:%s", scan.Text())
-	}
 }
 
 // say writes one line to the terminal the test reads over its attach. The

@@ -16,7 +16,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -76,74 +75,14 @@ func (f *fakePeers) clear() {
 	f.entries = nil
 }
 
-// fakePTY records injections instead of writing to a terminal. attempts
-// counts every Inject call per run, delivered or not, so a test can prove
-// the consumer reached a given run's event instead of sleeping and hoping.
-type fakePTY struct {
-	mu       sync.Mutex
-	injected []injection
-	attempts map[domain.RunID]int
-	err      error
-}
-
-type injection struct {
-	run     domain.RunID
-	message string
-}
-
-func (f *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, _, _, message, _ string) error {
-	run, _ := key.Run()
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.attempts == nil {
-		f.attempts = make(map[domain.RunID]int)
-	}
-	f.attempts[run]++
-	if f.err != nil {
-		return f.err
-	}
-	f.injected = append(f.injected, injection{run: run, message: message})
-	return nil
-}
-
-func (f *fakePTY) attemptsFor(run domain.RunID) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.attempts[run]
-}
-
-// forRun returns the injections that reached one run's terminal.
-func (f *fakePTY) forRun(run domain.RunID) []injection {
-	var out []injection
-	for _, in := range f.all() {
-		if in.run == run {
-			out = append(out, in)
-		}
-	}
-	return out
-}
-
-func (f *fakePTY) setErr(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.err = err
-}
-
-func (f *fakePTY) all() []injection {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]injection(nil), f.injected...)
-}
-
 // coordHarness is a coordination service over a real store and bus, with
-// the radar and the terminals faked and the clock under test control.
+// the radar faked and the clock under test control.
 type coordHarness struct {
 	t         *testing.T
 	dir       string
 	db        *store.DB
 	bus       *events.InProc
 	peers     *fakePeers
-	pty       *fakePTY
 	svc       *Service
 	workspace domain.WorkspaceID
 	runs      []*domain.Run
@@ -218,7 +157,6 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 		db:        db,
 		bus:       bus,
 		peers:     &fakePeers{},
-		pty:       &fakePTY{},
 		workspace: ws.ID,
 		clock:     time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
 	}
@@ -243,7 +181,6 @@ func newHarness(t *testing.T, runs int, opts ...func(*Config)) *coordHarness {
 		Mail:     db,
 		Bus:      bus,
 		Peers:    h.peers,
-		PTY:      h.pty,
 		Evidence: testEvidenceCapture{workspace: ws.ID},
 		now:      h.now,
 	}

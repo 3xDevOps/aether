@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "exec": "/usr/local/bin/aether-internal",
+        "args": ["hook", "copilot", "sessionStart"],
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "exec": "/usr/local/bin/aether-internal",
+        "args": ["hook", "copilot", "postToolUse"],
+        "timeoutSec": 5
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "exec": "/usr/local/bin/aether-internal",
+        "args": ["hook", "copilot", "agentStop"],
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

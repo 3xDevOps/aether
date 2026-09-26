@@ -18,10 +18,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// The coordination E2E's fake agent. It plays the part a real harness
-// plays: it edits a file the radar can see it shares with a peer, it reads
-// what lands in its terminal, and - when this fixture elects to exercise
-// MCP - manually invokes the bridge through its mounted socket.
+// The coordination E2E's fake agent edits a shared file the radar sees and,
+// when this fixture elects to exercise MCP, manually invokes the bridge
+// through its mounted socket.
 //
 // The bridge it drives is the real one, speaking the real coordination
 // wire on the socket its own mount carries; it runs in process rather than
@@ -58,18 +57,6 @@ type coordAgent struct {
 }
 
 func (a coordAgent) run(ctx context.Context, c *e2eContainer) {
-	// The notice arrives on the agent's stdin and the write carrying it
-	// blocks until it is read, so drain stdin for the whole life of the
-	// run: an agent that reads late stalls the injector for every peer.
-	go func() {
-		for {
-			line, ok := c.readStdinLine()
-			if !ok {
-				return
-			}
-			c.output("notice:" + line + "\r\n")
-		}
-	}()
 	// The diff watch is registered just after the container starts, and a
 	// write it never saw is a run the radar never hears about.
 	time.Sleep(time.Second)

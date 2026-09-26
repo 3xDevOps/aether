@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "/usr/local/bin/aether-internal hook cursor sessionStart"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "/usr/local/bin/aether-internal hook cursor postToolUse"
+      }
+    ],
+    "stop": [
+      {
+        "command": "/usr/local/bin/aether-internal hook cursor stop",
+        "loop_limit": 5
+      }
+    ]
+  }
+}

@@ -47,8 +47,8 @@ type Config struct {
 	ErrOut io.Writer
 }
 
-// Envelope is the stable output wrapper for every command except skill,
-// whose output is concise human-readable instructions by design.
+// Envelope is the stable output wrapper for state commands. Skill and help
+// write text; hook writes the harness's native response.
 type Envelope struct {
 	SchemaVersion string    `json:"schema_version"`
 	OK            bool      `json:"ok"`
@@ -77,9 +77,9 @@ func Execute(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 	return Run(ctx, args, Config{In: in, Out: out, ErrOut: errOut})
 }
 
-// Run executes one command and writes exactly one JSON envelope for success or
-// failure, except skill which writes its text directly. It never changes the
-// calling process's cwd or environment and never writes a user repository.
+// Run executes one command without changing the calling process's cwd,
+// environment, or repository. State commands write one JSON envelope; skill,
+// help, and hook use their documented output formats.
 func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	if cfg.Socket == "" {
 		cfg.Socket = defaultSocketPath
@@ -110,6 +110,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = status(ctx, cfg.Socket, args[1:])
 	case "skill":
 		return skill(ctx, cfg.Socket, args[1:], cfg.Out)
+	case "hook":
+		return hook(ctx, cfg, args[1:])
 	case "send":
 		result, err = send(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "inbox":
@@ -148,6 +150,7 @@ const topUsage = `usage: aether-internal <command> [options]
 Commands:
   status    inspect this run and its authorized peers
   skill     print live assignment or a terminal/browser/git workflow topic
+  hook      run a native inbox hook or print a copyable integration file
   send      send a durable message to an authorized peer
   inbox     read the at-least-once inbox
   ask       ask an authorized peer a durable question
@@ -160,12 +163,13 @@ Commands:
   terminal  run, observe and interact with development PTYs
   browser   operate the isolated headless browser companion
   control   inspect, acquire and release development surface control
-  artifact  inspect and delete private capture artifacts
+  artifact  inspect, retain and delete private capture artifacts
 
 Run "aether-internal <command> --help" for command options.
 `
 
 var commandUsages = map[string]string{
+	"hook": hookUsage,
 	"status": `usage: aether-internal status [--json]
 
 Print this run's identity, assignment, authorized peers, unread count, and capabilities
@@ -173,8 +177,9 @@ in the v3 JSON envelope. --json is optional; output is always JSON.
 `,
 	"skill": `usage: aether-internal skill [terminal|browser|git]
 
-Print the live assignment and conditional development topics. Without a socket,
-print only short capability-neutral discovery; no tools or authority are implied.
+Print the live assignment, conditional development topics, and read-only hook
+installation checks with copyable integrations. Without a socket, print only
+short capability-neutral discovery; no tools or authority are implied.
 `,
 	"send": `usage: aether-internal send --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
 
@@ -415,8 +420,8 @@ const skillWorkflow = `Coordination and completion:
 Stay within your assignment. Peers listed by status are reachable with send,
 ask, and reply; ask when a decision is theirs:
   aether-internal ask --help
-A terminal line starting with aether: means a message or event is waiting
-and names the command that reads it. Wait without reporting an outcome:
+Native hooks announce pending inbox items at harness lifecycle boundaries.
+Check the inbox before waiting or reporting. Wait without reporting an outcome:
   aether-internal inbox --wait 30
 Process the batch before acknowledging it: on the next inbox call pass
 --ack with that batch's ack_token. Without acknowledgement it may repeat.
@@ -525,6 +530,9 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 		}
 	} else if _, err := io.WriteString(out, "Use aether-internal status for current authority and --help for syntax.\nNo coordination mailbox or mission commands are implied by a run socket.\n"); err != nil {
 		return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
+	}
+	if err := writeHookInstallation(out); err != nil {
+		return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
 	}
 	return ExitOK, nil
 }
