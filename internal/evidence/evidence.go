@@ -389,6 +389,18 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 			existing.IdempotencyKey != req.IdempotencyKey {
 			return protocol.EvidencePacket{}, errors.New("evidence: durable idempotency lookup returned a mismatched packet")
 		}
+		if existing.Availability == store.EvidenceExpired ||
+			(existing.ExpiresAt != nil && !s.now().Before(*existing.ExpiresAt)) {
+			return protocol.EvidencePacket{}, ErrExpired
+		}
+		sameSelection := len(existing.Captures) == len(req.ArtifactIDs) &&
+			existing.VerificationNotes == req.VerificationNotes
+		for i := 0; sameSelection && i < len(req.ArtifactIDs); i++ {
+			sameSelection = existing.Captures[i].ID == req.ArtifactIDs[i]
+		}
+		if !sameSelection {
+			return protocol.EvidencePacket{}, fmt.Errorf("%w: idempotency key already used with different capture selection or verification notes", ErrInvalidRequest)
+		}
 		packet := safePacket(protocol.EvidencePacketFromStore(existing))
 		s.mu.Lock()
 		s.packets[key] = clonePacket(packet)

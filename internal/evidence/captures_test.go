@@ -171,7 +171,10 @@ func TestRetainedCaptureSurvivesTransientCleanupAndDatabaseRestart(t *testing.T)
 	if err != nil || retried.ID != packet.ID {
 		t.Fatalf("idempotent retry after source cleanup = %q, %v", retried.ID, err)
 	}
-	f.now = f.now.Add(DefaultRetention + time.Second)
+	f.now = f.now.Add(DefaultRetention)
+	if _, retryErr := s.Capture(t.Context(), f.request("review", artifact.ID)); !errors.Is(retryErr, ErrExpired) {
+		t.Fatalf("retry at expiry = %v, want ErrExpired", retryErr)
+	}
 	if _, _, openErr := s.OpenArtifact(t.Context(), f.run.WorkspaceID, packet.ID, artifact.ID); !errors.Is(openErr, ErrExpired) {
 		t.Fatalf("expired retained capture was readable: %v", openErr)
 	}
@@ -184,6 +187,62 @@ func TestRetainedCaptureSurvivesTransientCleanupAndDatabaseRestart(t *testing.T)
 	}
 	if _, statErr := os.Stat(retainedDir); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("expiry left capture bytes: %v", statErr)
+	}
+	s = f.restart(t)
+	f.now = f.now.Add(-DefaultRetention)
+	if _, retryErr := s.Capture(t.Context(), f.request("review", artifact.ID)); !errors.Is(retryErr, ErrExpired) {
+		t.Fatalf("retry after expiry cleanup and clock rollback = %v, want ErrExpired", retryErr)
+	}
+}
+
+func TestRetainedCaptureRetryBindsSelectionAndNotes(t *testing.T) {
+	f := newDurableCaptureFixture(t)
+	s := f.service(t)
+	first, original := f.source.add(t, f.run.ID, 1)
+	second, _ := f.source.add(t, f.run.ID, 2)
+	third, _ := f.source.add(t, f.run.ID, 3)
+	req := f.request("review", first.ID, second.ID)
+	packet, err := s.Capture(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removeErr := os.RemoveAll(f.source.dir); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	s = f.restart(t)
+	for _, tc := range []struct {
+		name string
+		ids  []string
+		note string
+	}{
+		{"replacement", []string{first.ID, third.ID}, req.VerificationNotes},
+		{"removed", []string{first.ID}, req.VerificationNotes},
+		{"reordered", []string{second.ID, first.ID}, req.VerificationNotes},
+		{"notes", req.ArtifactIDs, "A different observation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := f.request(req.IdempotencyKey, tc.ids...)
+			changed.VerificationNotes = tc.note
+			if _, retryErr := s.Capture(t.Context(), changed); !errors.Is(retryErr, ErrInvalidRequest) {
+				t.Fatalf("changed retry = %v, want ErrInvalidRequest", retryErr)
+			}
+		})
+	}
+	retried, err := s.Capture(t.Context(), req)
+	if err != nil || !reflect.DeepEqual(retried, packet) {
+		t.Fatalf("unchanged retry after rejected changes = %+v, %v; want %+v", retried, err, packet)
+	}
+	_, reader, err := s.OpenArtifact(t.Context(), f.run.WorkspaceID, packet.ID, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, readErr := io.ReadAll(reader)
+	closeErr := reader.Close()
+	if streamErr := errors.Join(readErr, closeErr); streamErr != nil {
+		t.Fatal(streamErr)
+	}
+	if !bytes.Equal(data, original) {
+		t.Fatal("rejected retry changed retained bytes")
 	}
 }
 

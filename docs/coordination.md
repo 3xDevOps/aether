@@ -471,7 +471,10 @@ Retention rechecks current authority after acquiring the run lock, before
 opening each source, and at publication. A busy authorization admission returns
 `authorization admission in progress; retry retention`, not a success or an
 automatic retry. Inspect evidence after an uncertain result; if explicitly
-retrying, reuse the same idempotency key and exact selection and notes.
+retrying, reuse the same idempotency key, ordered capture IDs and exact notes.
+Changed selections or notes are refused rather than returning the earlier
+packet. An expired packet is also refused, including after its bytes have been
+cleaned up. Use a new key for a new retention request.
 
 ### Native Git and pull requests
 
