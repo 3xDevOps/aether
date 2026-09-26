@@ -181,7 +181,10 @@ func (g *Gateway) handleDevelopmentArtifact(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	stopGateway := context.AfterFunc(g.ctx, cancel)
 	defer stopGateway()
-	req := protocol.DevArtifactDownloadRequest{DevArtifactGetParams: protocol.DevArtifactGetParams{DevRunParams: protocol.DevRunParams{RunID: r.PathValue("run")}, ArtifactID: r.PathValue("artifact")}}
+	req := protocol.DevArtifactDownloadRequest{
+		DevArtifactGetParams: protocol.DevArtifactGetParams{DevRunParams: protocol.DevRunParams{RunID: r.PathValue("run")}, ArtifactID: r.PathValue("artifact")},
+		EvidencePacketID:     r.URL.Query().Get("evidence_packet_id"),
+	}
 	source, artifact, err := stream.Artifact(ctx, req)
 	if err != nil {
 		perr := developmentError(err)

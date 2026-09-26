@@ -292,7 +292,7 @@ thin typed CLI command:
 | `terminal` | `list`, `start`, `output`, `screen`, `screenshot`, `input`, `resize`, `wait`, `stop` |
 | `browser` | `status`, `open`, `pages`, `navigate`, `snapshot`, `action`, `screenshot`, `viewport`, `wait`, `console`, `network`, `reset`, `close` |
 | `control` | `status`, `acquire`, `release` |
-| `artifact` | `list`, `get`, `delete` |
+| `artifact` | `list`, `get`, `delete`, `retain` |
 
 All use `aether-internal <family> <subcommand> [--params-file FILE|-] [--json]`.
 Omitting `--params-file` sends `{}`; use this for `terminal list`, `browser
@@ -365,6 +365,12 @@ Acquire the browser surface with that exact incarnation, then explicitly
 `browser reset` with the acquired lease to recover. The broker destroys only
 the recorded owned companion; another `open` never silently recreates it.
 
+Browser observers receive the latest complete frame when joining an active
+stream, even when the page is static; slow viewers do not queue an image
+history. On controller release, revocation or disconnect, the server clears
+held browser keys, buttons and touches before admitting another controller.
+If cleanup cannot be confirmed, new control remains fenced.
+
 Terminal wait/stop and browser navigation/action/wait bounds are 30 seconds.
 First browser open has a 90-second bootstrap budget and reset has 30 seconds.
 The transport adds a three-second framing margin; browser navigation/action/wait
@@ -376,10 +382,39 @@ behavior. Browser snapshots/console/network and terminal output/screens are
 useful diagnostics but not image-based evidence. Open the screenshot artifact
 path with a harness image-consuming tool **only if one actually exists**. If
 the harness cannot read images, report that exact limitation and the checks
-actually performed; never infer visual correctness from text alone. Captures
-remain private; no automatic public upload or PR attachment happens.
-Collect evidence and verify **before** stopping resources, deleting captures
-or submitting a terminal worker report, which may clean up those resources.
+actually performed; never infer visual correctness from text alone. Transient
+captures require live **Steer** and backing-account access; they are not durable
+evidence references.
+
+Before deleting captures, stopping the run or submitting a terminal worker
+report (including headless completion), explicitly retain the reviewed selection:
+
+```sh
+printf '%s\n' '{"artifact_ids":["<capture_id>"],"verification_notes":"Observed behavior and verification limits","idempotency_key":"review-captures-1"}' |
+  aether-internal artifact retain --params-file -
+```
+
+`artifact retain` returns `result.packet_id`. Read back that packet in the
+dashboard's evidence view, including its selected captures and notes, then pass
+the ID to the existing `report --evidence-ref <packet_id>`. Retention does not
+report an outcome or prove verification. Select 1–64 captures; optional notes
+must be valid UTF-8 and at most 4096 bytes. Retained and staged capture files
+together are bounded to 64 captures and 128 MiB per run, with an 8 MiB limit
+per capture. Transient captures separately have a 64-capture/128 MiB run bound.
+
+Retention copies immutable capture bytes and their original observation
+metadata; the packet's later Git snapshot is a separate boundary, not proof of
+the checkout state when pixels were captured. Unknown capture-time Git state
+stays unknown. Deleting a transient capture does not remove its retained copy.
+Retained copies use existing evidence expiry and broader workspace **View**
+access, not private live-session permissions. Review pixels, URLs and notes for
+secrets before retaining; no automatic public upload or PR attachment happens.
+
+Retention rechecks current authority after acquiring the run lock, before
+opening each source, and at publication. A busy authorization admission returns
+`authorization admission in progress; retry retention`, not a success or an
+automatic retry. Inspect evidence after an uncertain result; if explicitly
+retrying, reuse the same idempotency key and exact selection and notes.
 
 ### Native Git and pull requests
 

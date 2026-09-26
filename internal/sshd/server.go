@@ -500,10 +500,11 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 
 	connCtx, cancelConn := context.WithCancel(ctx)
 	defer cancelConn()
-	// Channel.Close only sends SSH_MSG_CHANNEL_CLOSE; a hostile peer can
-	// withhold its acknowledgement and leave channel.Read blocked. Closing
-	// the raw transport unblocks both packet I/O and all channel readers.
-	// Do not change its shared deadlines for a single healthy channel.
+	// Channel.Close and exit-status share the SSH packet writer and can stall
+	// behind a peer that stops reading. A peer can also withhold its close
+	// acknowledgement and leave channel.Read blocked. Close-deadline expiry
+	// uses this raw abort to unblock packet I/O and all channel readers.
+	// Do not change shared transport deadlines for a single healthy channel.
 	abortConn := func() {
 		cancelConn()
 		_ = c.Close()

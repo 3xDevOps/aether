@@ -53,6 +53,7 @@ func init() {
 	registerDevelopment[protocol.DevArtifactListParams](protocol.MethodDevArtifactList)
 	registerDevelopment[protocol.DevArtifactGetParams](protocol.MethodDevArtifactGet)
 	registerDevelopment[protocol.DevArtifactDeleteParams](protocol.MethodDevArtifactDelete)
+	registerDevelopment[protocol.DevArtifactRetainParams](protocol.MethodDevArtifactRetain)
 }
 
 func decodeDevelopment(raw json.RawMessage, dst any) *protocol.Error {

@@ -2,6 +2,7 @@ package control
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -55,7 +56,10 @@ type surfaceKey struct {
 
 type surfaceState struct {
 	runState
-	principal Principal
+	principal     Principal
+	cleanup       func() error
+	cleanupNeeded bool
+	cleanupErr    error
 }
 
 func (s *Service) validateSurface(run string, surface Surface) error {
@@ -95,6 +99,48 @@ func (s *Service) surfaceStateFor(run string, surface Surface, create bool) *sur
 	return state
 }
 
+// BindSurfaceCleanup installs the resource's bounded input cleanup. It runs
+// under the same surface gate as physical writes, never under the table mutex.
+// It must not call Service or acquire an upstream resource/mutation lock.
+// First binding treats retained physical state as unknown until an authorized
+// acquire cleans it; rebinding does not touch the current writer's input.
+func (s *Service) BindSurfaceCleanup(run string, surface Surface, cleanup func() error) error {
+	if s.validateSurface(run, surface) != nil || cleanup == nil {
+		return ErrInvalid
+	}
+	runState := s.stateFor(domain.RunID(run), true)
+	runState.surfaceGate.RLock()
+	defer runState.surfaceGate.RUnlock()
+	state := s.surfaceStateFor(run, surface, true)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.cleanup == nil {
+		state.cleanup = cleanup
+		state.cleanupNeeded = true
+	}
+	return nil
+}
+
+func (s *Service) cleanSurfaceLocked(state *surfaceState) error {
+	if state.cleanup != nil && state.cleanupNeeded {
+		state.cleanupErr = state.cleanup()
+		if state.cleanupErr != nil {
+			slog.Warn("control: surface input cleanup failed; replacement admission remains fenced", "error", state.cleanupErr)
+		}
+		if state.cleanupErr == nil {
+			state.cleanupNeeded = false
+		}
+	}
+	return state.cleanupErr
+}
+
+func (s *Service) expireSurfaceLocked(state *surfaceState, now time.Time) {
+	if state.current != nil && !state.current.connected && !state.current.expiresAt.After(now) {
+		state.current = nil
+		_ = s.cleanSurfaceLocked(state)
+	}
+}
+
 func surfaceSnapshot(run string, surface Surface, state *surfaceState) SurfaceSnapshot {
 	c := state.current
 	return SurfaceSnapshot{RunID: domain.RunID(run), Surface: surface, Principal: state.principal,
@@ -131,7 +177,7 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	now := s.now()
-	s.expireLocked(&state.runState, now)
+	s.expireSurfaceLocked(state, now)
 	if expectedGeneration != 0 && (state.current == nil || state.generation != expectedGeneration) {
 		return SurfaceSnapshot{}, nil, ErrStale
 	}
@@ -139,6 +185,13 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 	if c := state.current; c != nil {
 		if state.principal == principal && c.sessionID == session && !c.connected {
 			if err := authorize(); err != nil {
+				return SurfaceSnapshot{}, nil, err
+			}
+			if state.generation == ^uint64(0) {
+				return SurfaceSnapshot{}, nil, ErrGenerationExhausted
+			}
+			if err := s.cleanSurfaceLocked(state); err != nil {
+				state.current = nil
 				return SurfaceSnapshot{}, nil, err
 			}
 			generation, err := s.nextGenerationLocked(&state.runState)
@@ -157,6 +210,15 @@ func (s *Service) AcquireSurface(run string, surface Surface, principal Principa
 		displaced = &copy
 	}
 	if err := authorize(); err != nil {
+		return SurfaceSnapshot{}, nil, err
+	}
+	if state.generation == ^uint64(0) {
+		return SurfaceSnapshot{}, nil, ErrGenerationExhausted
+	}
+	if err := s.cleanSurfaceLocked(state); err != nil {
+		// Cleanup may have partially reached the resource. Neither the old
+		// writer nor a replacement can write until cleanup is confirmed.
+		state.current = nil
 		return SurfaceSnapshot{}, nil, err
 	}
 	generation, err := s.nextGenerationLocked(&state.runState)
@@ -186,7 +248,7 @@ func (s *Service) withSurface(run string, surface Surface, fn func(*surfaceState
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	s.expireLocked(&state.runState, s.now())
+	s.expireSurfaceLocked(state, s.now())
 	return fn(state)
 }
 
@@ -208,6 +270,7 @@ func (s *Service) AdmitSurface(run string, surface Surface, principal Principal,
 		if !s.matchSurface(state, principal, session, generation, true) {
 			return ErrStale
 		}
+		state.cleanupNeeded = state.cleanup != nil
 		return fn()
 	})
 }
@@ -229,7 +292,7 @@ func (s *Service) ReleaseSurface(run string, surface Surface, principal Principa
 			return err
 		}
 		s.fenceSurfaceLocked(run, surface, state)
-		return nil
+		return state.cleanupErr
 	})
 }
 
@@ -241,6 +304,7 @@ func (s *Service) DisconnectSurface(run string, surface Surface, principal Princ
 		if s.matchSurface(state, principal, session, generation, true) {
 			state.current.connected = false
 			state.current.expiresAt = s.now().Add(s.reconnectWindow)
+			_ = s.cleanSurfaceLocked(state)
 		}
 		return nil
 	})
@@ -266,6 +330,7 @@ func (s *Service) fenceSurfaceLocked(run string, surface Surface, state *surface
 		state.current = nil
 	}
 	_, _ = s.nextGenerationLocked(&state.runState)
+	_ = s.cleanSurfaceLocked(state)
 	return displaced
 }
 
@@ -284,11 +349,12 @@ func (s *Service) RevokeSurface(run string, surface Surface, revoke func() error
 	state := s.surfaceStateFor(run, surface, true)
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	s.expireLocked(&state.runState, s.now())
+	s.expireSurfaceLocked(state, s.now())
 	if err := revoke(); err != nil {
 		return nil, err
 	}
-	return s.fenceSurfaceLocked(run, surface, state), nil
+	displaced := s.fenceSurfaceLocked(run, surface, state)
+	return displaced, state.cleanupErr
 }
 
 // fenceSurfacesLocked requires the run's exclusive surfaceGate. Called by the
@@ -296,14 +362,20 @@ func (s *Service) RevokeSurface(run string, surface Surface, revoke func() error
 // leave a development writer admitted after the run-wide boundary.
 func (s *Service) fenceSurfacesLocked(run domain.RunID) []SurfaceSnapshot {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	var displaced []SurfaceSnapshot
+	type entry struct {
+		surface Surface
+		state   *surfaceState
+	}
+	var states []entry
 	for key, state := range s.surfaces {
-		if key.run != run {
-			continue
+		if key.run == run {
+			states = append(states, entry{key.surface, state})
 		}
-		s.expireLocked(&state.runState, s.now())
-		if old := s.fenceSurfaceLocked(string(run), key.surface, state); old != nil {
+	}
+	s.mu.Unlock()
+	var displaced []SurfaceSnapshot
+	for _, entry := range states {
+		if old := s.fenceSurfaceLocked(string(run), entry.surface, entry.state); old != nil {
 			displaced = append(displaced, *old)
 		}
 	}

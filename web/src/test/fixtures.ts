@@ -3,6 +3,10 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  DevController,
+  DevControlStatusParams,
+  DevTerminal,
+  DevTerminalTarget,
   EvidencePacket,
   Member,
   Mission,
@@ -15,6 +19,7 @@ import type {
   RoomMessage,
   RoomStatusResult,
   Run,
+  RunGitStatusResult,
   Schedule,
   ServerInfo,
   ServerUpdateStatus,
@@ -343,6 +348,7 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
     trigger: 'report',
     objective: 'Inspect the change',
     captured_at: '2026-08-14T10:00:00Z',
+    availability: 'available',
     event_boundary: 1,
     created_at: '2026-08-14T10:00:00Z',
     updated_at: '2026-08-14T10:00:00Z',
@@ -353,6 +359,37 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
 
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
+  const terminals = new Map<string, Map<string, DevTerminal>>()
+  const controllers = new Map<string, DevController>()
+  let terminalSequence = 0
+  let controlGeneration = 0
+  const gitStatus: RunGitStatusResult = {
+    branch: run().branch,
+    head: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
+    detached: false,
+    unborn: false,
+    changes: [],
+    truncated: false,
+    account_member_id: alice.id,
+    account_name: alice.display_name,
+    identity: 'alice',
+    remotes: [],
+    output: { exit_code: 0, truncated: false },
+  }
+  const gitState = { branch: gitStatus.branch, head: gitStatus.head }
+  function findTerminal(params: DevTerminalTarget): DevTerminal {
+    const terminal = terminals.get(params.run_id)?.get(params.terminal_id)
+    if (!terminal || terminal.incarnation !== params.incarnation) {
+      throw new Error('Test terminal does not exist or its incarnation changed')
+    }
+    return terminal
+  }
+  function controlKey(params: DevControlStatusParams): string {
+    return JSON.stringify([params.run_id, params.surface.kind, params.surface.id, params.surface.incarnation])
+  }
+  function needsOverride(method: string): never {
+    throw new Error(`fakeApi: override ${method} to exercise this operation`)
+  }
   return {
     serverInfo: vi.fn(async () => serverInfo),
     workspaceGet: vi.fn(async () => workspace),
@@ -376,6 +413,125 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
+    runGitStatus: vi.fn<Api['runGitStatus']>(async () => ({
+      ...gitStatus, changes: [], remotes: [], output: { ...gitStatus.output },
+    })),
+    runGitDiff: vi.fn<Api['runGitDiff']>(async () => ({
+      state: { ...gitState }, output: { exit_code: 0, truncated: false },
+    })),
+    runGitCommit: vi.fn<Api['runGitCommit']>(async () => needsOverride('runGitCommit')),
+    runGitPush: vi.fn<Api['runGitPush']>(async () => needsOverride('runGitPush')),
+    runPRStatus: vi.fn<Api['runPRStatus']>(async () => ({
+      identity: gitStatus.identity,
+      account_member_id: alice.id,
+      pull_request: null,
+      output: { exit_code: 0, truncated: false },
+    })),
+    runPRCreate: vi.fn<Api['runPRCreate']>(async () => needsOverride('runPRCreate')),
+    runPRFeedback: vi.fn<Api['runPRFeedback']>(async () => ({
+      identity: gitStatus.identity,
+      account_member_id: alice.id,
+      pull_request: null,
+      checks: [], comments: [], reviews: [], review_comments: [],
+      truncated: false,
+      output: { exit_code: 0, truncated: false },
+    })),
+    workspaceImport: vi.fn<Api['workspaceImport']>(async () => needsOverride('workspaceImport')),
+    devTerminalList: vi.fn<Api['devTerminalList']>(async ({ run_id }) => ({
+      terminals: Array.from(terminals.get(run_id)?.values() ?? [], (terminal) => ({
+        ...terminal, process: { ...terminal.process },
+      })),
+    })),
+    devTerminalStart: vi.fn<Api['devTerminalStart']>(async ({ run_id, name, cols, rows }) => {
+      const inventory = terminals.get(run_id) ?? new Map<string, DevTerminal>()
+      if (Array.from(inventory.values()).filter((terminal) => terminal.process.state === 'running').length >= 4) {
+        throw new Error('Test run already has four active terminals')
+      }
+      terminalSequence++
+      const terminal: DevTerminal = {
+        terminal_id: `terminal_${terminalSequence}`,
+        incarnation: `incarnation_${terminalSequence}`,
+        name: name || `Terminal ${terminalSequence}`,
+        cols: cols || 80,
+        rows: rows || 24,
+        process: { state: 'running' },
+      }
+      inventory.set(terminal.terminal_id, terminal)
+      terminals.set(run_id, inventory)
+      return { terminal: { ...terminal, process: { ...terminal.process } } }
+    }),
+    devTerminalOutput: vi.fn<Api['devTerminalOutput']>(async () => needsOverride('devTerminalOutput')),
+    devTerminalScreen: vi.fn<Api['devTerminalScreen']>(async () => needsOverride('devTerminalScreen')),
+    devTerminalScreenshot: vi.fn<Api['devTerminalScreenshot']>(async () => needsOverride('devTerminalScreenshot')),
+    devTerminalInput: vi.fn<Api['devTerminalInput']>(async (params) => {
+      if (findTerminal(params).process.state !== 'running') throw new Error('Test terminal is not running')
+      return { accepted: true }
+    }),
+    devTerminalResize: vi.fn<Api['devTerminalResize']>(async (params) => {
+      const current = findTerminal(params)
+      const terminal = { ...current, cols: params.cols, rows: params.rows }
+      terminals.get(params.run_id)!.set(params.terminal_id, terminal)
+      return { terminal, screen_revision: 1, geometry_revision: 1 }
+    }),
+    devTerminalWait: vi.fn<Api['devTerminalWait']>(async () => needsOverride('devTerminalWait')),
+    devTerminalStop: vi.fn<Api['devTerminalStop']>(async (params) => {
+      const current = findTerminal(params)
+      const terminal: DevTerminal = { ...current, process: { state: 'stopped' } }
+      terminals.get(params.run_id)!.set(params.terminal_id, terminal)
+      return { terminal, stopped: true, timed_out: false }
+    }),
+    devControlStatus: vi.fn<Api['devControlStatus']>(async (params) => ({
+      surface: params.surface, controller: controllers.get(controlKey(params)) ?? null,
+    })),
+    devControlAcquire: vi.fn<Api['devControlAcquire']>(async (params) => {
+      const key = controlKey(params)
+      const displaced = controllers.get(key)
+      if (displaced && displaced.control_session_id !== params.control_session_id && !params.takeover) {
+        throw new Error('Test surface already has a controller')
+      }
+      const controller: DevController = {
+        kind: 'member',
+        member_id: alice.id,
+        control_session_id: params.control_session_id,
+        control_generation: ++controlGeneration,
+        connected: true,
+        acquired_at: '2026-08-14T10:05:00Z',
+      }
+      controllers.set(key, controller)
+      return { surface: params.surface, controller, ...(displaced ? { displaced } : {}) }
+    }),
+    devControlRelease: vi.fn<Api['devControlRelease']>(async (params) => {
+      const key = controlKey(params)
+      const controller = controllers.get(key)
+      const released = controller?.control_session_id === params.control_session_id &&
+        controller.control_generation === params.control_generation
+      if (released) controllers.delete(key)
+      return { released }
+    }),
+    devBrowserStatus: vi.fn<Api['devBrowserStatus']>(async () => ({
+      available: false, running: false, state: 'unavailable', reason: 'No browser configured in this test',
+    })),
+    devBrowserPages: vi.fn<Api['devBrowserPages']>(async () => ({ pages: [] })),
+    devBrowserOpen: vi.fn<Api['devBrowserOpen']>(async () => needsOverride('devBrowserOpen')),
+    devBrowserNavigate: vi.fn<Api['devBrowserNavigate']>(async () => needsOverride('devBrowserNavigate')),
+    devBrowserSnapshot: vi.fn<Api['devBrowserSnapshot']>(async () => needsOverride('devBrowserSnapshot')),
+    devBrowserAction: vi.fn<Api['devBrowserAction']>(async () => needsOverride('devBrowserAction')),
+    devBrowserScreenshot: vi.fn<Api['devBrowserScreenshot']>(async () => needsOverride('devBrowserScreenshot')),
+    devBrowserViewport: vi.fn<Api['devBrowserViewport']>(async () => needsOverride('devBrowserViewport')),
+    devBrowserWait: vi.fn<Api['devBrowserWait']>(async () => needsOverride('devBrowserWait')),
+    devBrowserConsole: vi.fn<Api['devBrowserConsole']>(async () => ({
+      entries: [], next: 0, missing_cursor: false, truncated: false,
+    })),
+    devBrowserNetwork: vi.fn<Api['devBrowserNetwork']>(async () => ({
+      entries: [], next: 0, missing_cursor: false, truncated: false,
+    })),
+    devBrowserReset: vi.fn<Api['devBrowserReset']>(async () => needsOverride('devBrowserReset')),
+    devBrowserClose: vi.fn<Api['devBrowserClose']>(async () => needsOverride('devBrowserClose')),
+    devArtifactList: vi.fn<Api['devArtifactList']>(async () => ({ artifacts: [], truncated: false })),
+    devArtifactGet: vi.fn<Api['devArtifactGet']>(async () => needsOverride('devArtifactGet')),
+    devArtifactDelete: vi.fn<Api['devArtifactDelete']>(async () => needsOverride('devArtifactDelete')),
+    devArtifactRetain: vi.fn<Api['devArtifactRetain']>(async () => needsOverride('devArtifactRetain')),
+    devArtifactDownload: vi.fn<Api['devArtifactDownload']>(async () => needsOverride('devArtifactDownload')),
     runDelete: vi.fn(async () => ({})),
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),

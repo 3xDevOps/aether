@@ -277,6 +277,16 @@ jobs:
           AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
+      - name: Export the tested standard image
+        if: matrix.arch == 'amd64'
+        run: docker save --output "$RUNNER_TEMP/aether-standard.tar" aether-standard:ci
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'amd64'
+        with:
+          name: standard-image-amd64
+          path: ${{ runner.temp }}/aether-standard.tar
+          compression-level: 0
+          retention-days: 1
 
   # Build the same Dockerfile on both supported server architectures. This
   # gate is display-free; browser libraries and Chromium exist only inside
@@ -419,8 +429,8 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
-    needs: [changes, browser]
-    if: ${{ !cancelled() && needs.browser.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: [changes, browser, smoke]
+    if: ${{ !cancelled() && needs.browser.result == 'success' && needs.smoke.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -477,10 +487,17 @@ jobs:
           path: ${{ runner.temp }}
       - name: Load the tested browser companion
         run: docker load --input "$RUNNER_TEMP/aether-browser.tar"
+      - uses: actions/download-artifact@v4
+        with:
+          name: standard-image-amd64
+          path: ${{ runner.temp }}
+      - name: Load the tested standard environment
+        run: docker load --input "$RUNNER_TEMP/aether-standard.tar"
       - name: Dashboard end-to-end suite
         env:
           AETHER_BROWSER_TEST_IMAGE: aether/browser:test
           AETHER_BROWSER_IMAGE: aether/browser:test
+          AETHER_E2E_STANDARD_IMAGE: aether-standard:ci
         run: make test-e2e
       # Uploaded on a pass too: the mobile project attaches a full-page
       # screenshot of every phone scenario, and a layout can be wrong with

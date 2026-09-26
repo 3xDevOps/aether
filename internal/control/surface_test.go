@@ -235,3 +235,199 @@ func TestSurfaceFailedAdmissionAndInvalidPrincipalsDoNotDisplaceWriter(t *testin
 		t.Fatalf("failed authorization displaced writer: %v", err)
 	}
 }
+
+func TestSurfaceCleanupFencesUncertainInputAndPreservesDeniedController(t *testing.T) {
+	s := New(Config{})
+	surface := Surface{Kind: SurfaceBrowser, ID: "browser", Incarnation: "one"}
+	human := Principal{Kind: PrincipalMember, MemberID: "member"}
+	held := false
+	unavailable := errors.New("physical input state not confirmed")
+	failCleanup := false
+	if err := s.BindSurfaceCleanup("run", surface, func() error {
+		if failCleanup {
+			return unavailable
+		}
+		held = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := acquireTestSurface(t, s, "run", surface, human, "first")
+	if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, func() error { held = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("denied")
+	for name, attempt := range map[string]func() error{
+		"denied takeover": func() error {
+			_, _, err := s.AcquireSurface("run", surface, human, "next", true, first.Generation, func() error { return denied })
+			return err
+		},
+		"stale takeover": func() error {
+			_, _, err := s.AcquireSurface("run", surface, human, "next", true, first.Generation+1, allowSurface)
+			return err
+		},
+		"denied release": func() error {
+			return s.ReleaseSurface("run", surface, human, first.SessionID, first.Generation, func() error { return denied })
+		},
+		"wrong session": func() error { return s.ReleaseSurface("run", surface, human, "other", first.Generation, allowSurface) },
+		"wrong principal": func() error {
+			return s.ReleaseSurface("run", surface, Principal{Kind: PrincipalMember, MemberID: "other"}, first.SessionID, first.Generation, allowSurface)
+		},
+		"wrong surface": func() error {
+			return s.ReleaseSurface("run", Surface{Kind: SurfaceTerminal, ID: surface.ID, Incarnation: surface.Incarnation}, human, first.SessionID, first.Generation, allowSurface)
+		},
+		"denied revocation": func() error { _, err := s.RevokeRunSurfaces("run", func() error { return denied }); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := attempt(); err == nil {
+				t.Fatal("invalid authority transition succeeded")
+			}
+			if !held {
+				t.Fatal("refused transition cleared the legitimate controller's physical input")
+			}
+			if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, allowSurface); err != nil {
+				t.Fatalf("refused transition displaced the legitimate writer: %v", err)
+			}
+		})
+	}
+	failCleanup = true
+	if _, _, err := s.AcquireSurface("run", surface, human, "next", true, first.Generation, allowSurface); !errors.Is(err, unavailable) {
+		t.Fatalf("uncertain cleanup admitted takeover: %v", err)
+	}
+	if _, present := s.SurfaceStatus("run", surface); present {
+		t.Fatal("partially cleaned authority remained writable")
+	}
+	if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, allowSurface); !errors.Is(err, ErrStale) {
+		t.Fatalf("old controller wrote after uncertain cleanup: %v", err)
+	}
+	if _, _, err := s.AcquireSurface("run", surface, human, "next", false, 0, allowSurface); !errors.Is(err, unavailable) {
+		t.Fatalf("replacement inherited uncertain input: %v", err)
+	}
+	failCleanup = false
+	next := acquireTestSurface(t, s, "run", surface, human, "next")
+	if held || next.Generation <= first.Generation {
+		t.Fatal("replacement did not start with confirmed clean input and a new generation")
+	}
+}
+
+func TestSurfaceCleanupCompletesBeforeReplacementCanWrite(t *testing.T) {
+	s := New(Config{})
+	surface := Surface{Kind: SurfaceBrowser, ID: "browser", Incarnation: "one"}
+	human := Principal{Kind: PrincipalMember, MemberID: "member"}
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	dirty := false
+	if err := s.BindSurfaceCleanup("run", surface, func() error {
+		if dirty {
+			close(entered)
+			<-unblock
+			dirty = false
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := acquireTestSurface(t, s, "run", surface, human, "first")
+	other := Surface{Kind: SurfaceTerminal, ID: "shell", Incarnation: "one"}
+	terminal := acquireTestSurface(t, s, "run", other, human, "terminal")
+	if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, func() error { dirty = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		next, _, err := s.AcquireSurface("run", surface, human, "next", true, first.Generation, allowSurface)
+		if err == nil {
+			err = s.AdmitSurface("run", surface, human, next.SessionID, next.Generation, func() error {
+				if dirty {
+					return errors.New("new writer inherited held input")
+				}
+				return nil
+			})
+		}
+		result <- err
+	}()
+	<-entered
+	select {
+	case err := <-result:
+		close(unblock)
+		t.Fatalf("replacement passed incomplete cleanup: %v", err)
+	default:
+	}
+	// Resource cleanup cannot retain the global table mutex or block another
+	// surface's independent physical input path.
+	terminalResult := make(chan error, 1)
+	go func() {
+		terminalResult <- s.AdmitSurface("run", other, human, terminal.SessionID, terminal.Generation, allowSurface)
+	}()
+	select {
+	case err := <-terminalResult:
+		if err != nil {
+			close(unblock)
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		close(unblock)
+		t.Fatal("browser cleanup blocked terminal authority")
+	}
+	close(unblock)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, allowSurface); !errors.Is(err, ErrStale) {
+		t.Fatalf("old writer admitted after cleanup: %v", err)
+	}
+}
+
+func TestSurfaceCleanupCoversReleaseDisconnectAndRevocation(t *testing.T) {
+	for _, transition := range []string{"release", "disconnect", "surface revoke", "run lifecycle", "permission revoke", "fence"} {
+		t.Run(transition, func(t *testing.T) {
+			clock := newTestClock()
+			s := New(Config{Now: clock.Now})
+			surface := Surface{Kind: SurfaceBrowser, ID: "browser", Incarnation: "one"}
+			human := Principal{Kind: PrincipalMember, MemberID: "member"}
+			held := true // Retained companion state on a server reconnect.
+			if err := s.BindSurfaceCleanup("run", surface, func() error { held = false; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			first := acquireTestSurface(t, s, "run", surface, human, "first")
+			if held {
+				t.Fatal("first acquired controller inherited retained input")
+			}
+			if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, func() error { held = true; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch transition {
+			case "release":
+				err = s.ReleaseSurface("run", surface, human, first.SessionID, first.Generation, allowSurface)
+			case "disconnect":
+				s.DisconnectSurface("run", surface, human, first.SessionID, first.Generation)
+				if held {
+					t.Fatal("disconnected transport left native input held during reconnect grace")
+				}
+				clock.Advance(DefaultReconnectWindow)
+			case "surface revoke":
+				_, err = s.RevokeSurface("run", surface, allowSurface)
+			case "run lifecycle":
+				_, err = s.RevokeRunSurfaces("run", allowSurface)
+			case "permission revoke":
+				_, err = s.AdmitRevoke("run", allowSurface)
+			case "fence":
+				s.Fence("run")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if held {
+				t.Fatal("authority loss left physical input held")
+			}
+			if err := s.AdmitSurface("run", surface, human, first.SessionID, first.Generation, allowSurface); !errors.Is(err, ErrStale) {
+				t.Fatalf("revoked controller can re-press input: %v", err)
+			}
+			next := acquireTestSurface(t, s, "run", surface, human, "next")
+			if next.Generation <= first.Generation || held {
+				t.Fatal("replacement inherited old input or generation")
+			}
+		})
+	}
+}

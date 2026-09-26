@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -104,15 +105,15 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 			case protocol.SubsystemControl:
 				handler = func() { s.serveControl(ctx, member, ch, abortConn) }
 			case protocol.SubsystemEvents:
-				handler = func() { s.serveEvents(ctx, member, sshConn{ch}) }
+				handler = func() { s.serveEvents(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemAttach:
-				handler = func() { s.serveAttach(ctx, member, st, sshConn{ch}) }
+				handler = func() { s.serveAttach(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemTerminal:
-				handler = func() { s.serveTerminal(ctx, member, st, sshConn{ch}) }
+				handler = func() { s.serveTerminal(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemDevBrowser:
-				handler = func() { s.serveDevelopmentBrowser(ctx, member, sshConn{ch}) }
+				handler = func() { s.serveDevelopmentBrowser(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemDevArtifact:
-				handler = func() { s.serveDevelopmentArtifact(ctx, member, sshConn{ch}) }
+				handler = func() { s.serveDevelopmentArtifact(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemSync:
 				handler = func() { s.serveSync(ctx, member, ch) }
 			}
@@ -222,6 +223,24 @@ type subsystemConn interface {
 	exit(status int)
 }
 
-type sshConn struct{ ssh.Channel }
+const sshChannelCloseTimeout = time.Second
 
-func (c sshConn) exit(status int) { sendExitStatus(c.Channel, status) }
+type sshConn struct {
+	ssh.Channel
+	abort func()
+}
+
+// Status and close share the transport's packet writer with every channel.
+// Only abort that transport if the graceful operation itself stops progressing;
+// a responsive peer keeps its other sessions and receives the denial status.
+func (c sshConn) exit(status int) {
+	timer := time.AfterFunc(sshChannelCloseTimeout, c.abort)
+	defer timer.Stop()
+	sendExitStatus(c.Channel, status)
+}
+
+func (c sshConn) Close() error {
+	timer := time.AfterFunc(sshChannelCloseTimeout, c.abort)
+	defer timer.Stop()
+	return c.Channel.Close()
+}

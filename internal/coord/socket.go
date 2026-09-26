@@ -621,7 +621,7 @@ func isDevelopmentMethod(method string) bool {
 		protocol.MethodDevBrowserConsole, protocol.MethodDevBrowserNetwork, protocol.MethodDevBrowserReset,
 		protocol.MethodDevBrowserClose, protocol.MethodDevControlStatus, protocol.MethodDevControlAcquire,
 		protocol.MethodDevControlRelease, protocol.MethodDevArtifactList, protocol.MethodDevArtifactGet,
-		protocol.MethodDevArtifactDelete:
+		protocol.MethodDevArtifactDelete, protocol.MethodDevArtifactRetain:
 		return true
 	default:
 		return false

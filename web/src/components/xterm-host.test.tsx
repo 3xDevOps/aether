@@ -12,8 +12,12 @@ import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
 import { hintOn } from '@/test/tooltip'
 
-function Probe({ onReady }: { onReady: (terminal: Terminal) => void }) {
-  const { hostRef, terminal } = useXterm()
+function Probe({ onReady, serverOwnedResponder, onData }: {
+  onReady: (terminal: Terminal) => void
+  serverOwnedResponder?: () => boolean
+  onData?: (data: string) => void
+}) {
+  const { hostRef, terminal } = useXterm({ serverOwnedResponder, onData })
   useEffect(() => {
     if (terminal) onReady(terminal)
   }, [onReady, terminal])
@@ -74,6 +78,37 @@ describe('xterm links', () => {
     expect(register).toHaveBeenCalledTimes(1)
     view.unmount()
     register.mockRestore()
+  })
+})
+
+describe('server-owned protocol responses', () => {
+  it('suppresses actual parser queries while preserving mixed color setters, Unicode and real input', async () => {
+    let ready: Terminal | null = null
+    let owned = true
+    const received: string[] = []
+    const view = render(<Probe onReady={(terminal) => { ready = terminal }} serverOwnedResponder={() => owned} onData={(data) => received.push(data)} />)
+    await waitFor(() => expect(ready).not.toBeNull())
+    const terminal = ready as unknown as Terminal
+    const write = (data: string) => new Promise<void>((resolve) => terminal.write(data, resolve))
+    await write('\x1b[?1049h\x1b[H界λ\x1b[c\x1b[>c\x1b[6n\x1b[?6n\x1b[?25$p\x1bP$qm\x1b\\')
+    await write('\x1b]4;1;rgb:aa/bb/cc;2;?\x07\x1b]10;?;rgb:11/22/33;?\x07')
+    expect(received).toEqual([])
+    expect(terminal.buffer.active.type).toBe('alternate')
+    expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('界λ')
+    // This input happens while a query-bearing output write is still queued.
+    const rendering = write('\x1b[6n')
+    terminal.input('typed')
+    terminal.paste('paste λ')
+    await rendering
+    expect(received.join('')).toBe('typedpaste λ')
+    received.length = 0
+    owned = false
+    await write('\x1b]4;1;?\x07\x1b]11;?\x07\x1b[6n')
+    const responses = received.join('')
+    expect(responses).toContain('rgb:aaaa/bbbb/cccc')
+    expect(responses).toContain('rgb:1111/2222/3333')
+    expect(responses).toContain('\x1b[1;4R')
+    view.unmount()
   })
 })
 

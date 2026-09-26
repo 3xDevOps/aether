@@ -330,13 +330,16 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
+	authMu := &sync.Mutex{}
 	if s.evidence, err = evidence.New(evidence.Config{
-		Store:       s.db,
-		Git:         s.git,
-		Runs:        s.db,
-		Transcript:  ptyTranscript{host: s.pty},
-		Events:      s.log,
-		EvidenceDir: filepath.Join(cfg.DataDir, "evidence"),
+		Store:           s.db,
+		Git:             s.git,
+		Runs:            s.db,
+		Transcript:      ptyTranscript{host: s.pty},
+		Events:          s.log,
+		Artifacts:       s.sched,
+		EvidenceDir:     filepath.Join(cfg.DataDir, "evidence"),
+		AuthorizationMu: authMu,
 	}); err != nil {
 		return nil, err
 	}
@@ -356,7 +359,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		cancel()
 	}
 	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus}
-	authMu := &sync.Mutex{}
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
 		HostKeyPath:       filepath.Join(cfg.DataDir, "ssh", "host_ed25519_key"),

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 const (
@@ -38,6 +40,7 @@ const (
 	MethodDevArtifactList       = "dev.artifact.list"
 	MethodDevArtifactGet        = "dev.artifact.get"
 	MethodDevArtifactDelete     = "dev.artifact.delete"
+	MethodDevArtifactRetain     = "dev.artifact.retain"
 
 	MaxDevParamsBytes       = 48 << 10
 	MaxDevResultBytes       = 48 << 10
@@ -582,6 +585,8 @@ type DevBrowserActionParams struct {
 	DeltaX     float64  `json:"delta_x,omitempty"`
 	DeltaY     float64  `json:"delta_y,omitempty"`
 	Button     string   `json:"button,omitempty"`
+	TouchID    int      `json:"touch_id,omitempty"`
+	ClickCount int      `json:"click_count,omitempty"`
 	Phase      string   `json:"phase,omitempty"` // down, move, up, cancel
 	TimeoutMS  int      `json:"timeout_ms,omitempty"`
 }
@@ -684,30 +689,7 @@ type DevBrowserCloseResult struct {
 // Captures are handles, never image bytes or caller-selected host paths. Path
 // is assigned by the artifact store inside the run's read-only capture mount.
 // GitHead/Dirty are optional: absence means that boundary was not observed.
-type DevArtifact struct {
-	ID               string `json:"id"`
-	Path             string `json:"path"`
-	Source           string `json:"source"`
-	RunID            string `json:"run_id"`
-	Incarnation      string `json:"incarnation"`
-	TerminalID       string `json:"terminal_id,omitempty"`
-	PageID           string `json:"page_id,omitempty"`
-	PageRevision     uint64 `json:"page_revision,omitempty"`
-	ScreenRevision   uint64 `json:"screen_revision,omitempty"`
-	GeometryRevision uint64 `json:"geometry_revision,omitempty"`
-	ViewportID       string `json:"viewport_id,omitempty"`
-	URL              string `json:"url,omitempty"`
-	CapturedAt       string `json:"captured_at"`
-	ContentType      string `json:"content_type"`
-	Bytes            int64  `json:"bytes"`
-	Width            int    `json:"width"`
-	Height           int    `json:"height"`
-	Cols             uint   `json:"cols,omitempty"`
-	Rows             uint   `json:"rows,omitempty"`
-	GitHead          string `json:"git_head,omitempty"`
-	Dirty            *bool  `json:"dirty,omitempty"`
-	Truncated        bool   `json:"truncated"`
-}
+type DevArtifact = store.DevelopmentArtifact
 
 type DevArtifactListParams struct {
 	DevRunParams
@@ -736,4 +718,15 @@ type DevArtifactDeleteParams struct {
 
 type DevArtifactDeleteResult struct {
 	Deleted bool `json:"deleted"`
+}
+
+type DevArtifactRetainParams struct {
+	DevRunParams
+	ArtifactIDs       []string `json:"artifact_ids"`
+	VerificationNotes string   `json:"verification_notes,omitempty"`
+	IdempotencyKey    string   `json:"idempotency_key"`
+}
+
+type DevArtifactRetainResult struct {
+	PacketID string `json:"packet_id"`
 }

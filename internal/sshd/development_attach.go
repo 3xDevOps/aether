@@ -129,7 +129,7 @@ func (s *Server) serveDevelopmentAttach(ctx context.Context, member domain.Membe
 		return nil
 	}
 	ctx, stop := developmentStreamLifetime(ctx, ch, streamAuthorize)
-	defer stop()
+	defer stop(-1)
 	conn := newAttachConn(ch, reader, ack, req.Framed, func() error { return streamAuthorize(ctx) })
 	position := req.ResumePosition()
 	client := ptyhost.AttachClient{Member: member, Cols: cols, Rows: rows, ReadOnly: readOnly, Screen: req.Screen, Snapshot: req.Framed, Follow: req.Follow, Resume: req.Resume,

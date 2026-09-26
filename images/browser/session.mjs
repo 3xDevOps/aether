@@ -59,7 +59,7 @@ export class BrowserSession {
     const known = [...this.pages.values()].find((entry) => entry.page === page);
     if (known) return known;
     if (this.pages.size >= limits.pages) { void page.close().catch(() => {}); return null; }
-    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), cdp: null, touches: new Map() };
+    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), latestFrame: null, cdp: null, touches: new Map(), keys: new Set(), buttons: new Set() };
     this.pages.set(state.id, state);
     this.selected ||= state.id;
     const log = (kind, value) => {
@@ -76,24 +76,53 @@ export class BrowserSession {
       state.revision++;
       state.viewportID = randomUUID();
       state.viewportChanged = Date.now() / 1000;
-      state.touches.clear();
-      for (const stream of state.streams) stream.invalidate();
+      this.invalidateFrames(state);
       void this.clearNodes(state).catch(() => {});
     });
     page.on('close', () => {
       void this.clearNodes(state).catch(() => {});
+      this.invalidateFrames(state);
       for (const stream of state.streams) stream.end();
       this.pages.delete(state.id);
       if (this.selected === state.id) this.selected = this.pages.keys().next().value ?? '';
     });
     page.on('crash', () => {
       state.revision++;
+      this.invalidateFrames(state);
       void this.clearNodes(state).catch(() => {});
       for (const stream of state.streams) stream.end();
       log('console', { level: 'error', text: 'Page crashed; explicitly reload or close the page' });
     });
     page.on('dialog', (dialog) => { log('console', { level: 'warning', text: `Dismissed ${dialog.type()} dialog: ${short(dialog.message())}` }); void dialog.dismiss().catch(() => {}); });
     return state;
+  }
+  invalidateFrames(state) {
+    state.latestFrame = null;
+    for (const stream of state.streams) stream.invalidate();
+  }
+  // Host-only authority cleanup, serialized with /command by the companion.
+  // A different context has already destroyed the named session's input; never
+  // release anything in that replacement context.
+  async releaseInput(sessionID) {
+    requireValue(typeof sessionID === 'string' && sessionID.length > 0, 'Browser session is required');
+    if (sessionID !== this.sessionID) return { session_id: this.sessionID, released: false };
+    for (const state of this.pages.values()) {
+      if (state.page.isClosed()) continue;
+      for (const key of state.keys) {
+        await boundedRead(state.page.keyboard.up(key));
+        state.keys.delete(key);
+      }
+      for (const button of state.buttons) {
+        await boundedRead(state.page.mouse.up({ button }));
+        state.buttons.delete(button);
+      }
+      if (state.touches.size) {
+        const cdp = await this.cdp(state);
+        await boundedRead(cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }));
+        state.touches.clear();
+      }
+    }
+    return { session_id: this.sessionID, released: true };
   }
   async clearNodes(state) {
     const handles = [...state.nodes.values()];
@@ -266,22 +295,40 @@ export class BrowserSession {
       case 'forward': await page.goForward({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'reload': await page.reload({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'snapshot': return this.snapshot(state, request, signal);
-      case 'click': requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button'); await this.nodeAction(state, request, (node) => node.click({ ...options, button: request.button || 'left', modifiers: request.modifiers })); break;
+      case 'click': {
+        requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button');
+        const button = request.button || 'left';
+        const addedModifiers = modifiers.filter((key) => !state.keys.has(key));
+        for (const key of addedModifiers) state.keys.add(key);
+        state.buttons.add(button);
+        await this.nodeAction(state, request, (node) => node.click({ ...options, button, modifiers: request.modifiers }));
+        state.buttons.delete(button);
+        for (const key of addedModifiers) state.keys.delete(key);
+        break;
+      }
       case 'fill': requireValue(typeof request.text === 'string' && request.text.length <= limits.chars, 'Text exceeds limit'); await this.nodeAction(state, request, (node) => node.fill(request.text, options)); break;
       case 'select_option': requireValue(Array.isArray(request.values) && request.values.length <= 100 && request.values.every((value) => typeof value === 'string' && value.length <= 1024), 'Invalid selection values'); await this.nodeAction(state, request, (node) => node.selectOption(request.values, options)); break;
       case 'key': {
         requireValue(typeof request.key === 'string' && request.key.length > 0 && request.key.length <= 100, 'Invalid key');
         requireValue(!request.action || ['down', 'up', 'press'].includes(request.action), 'Invalid key action');
         const key = [...modifiers, request.key].join('+');
-        if (request.node_id && !['down', 'up'].includes(request.action)) await this.nodeAction(state, request, (node) => node.press(key, options));
-        else {
-          if (request.node_id) {
-            await this.nodeAction(state, request, (node) => node.focus());
-            this.target(request);
-          }
+        if (request.node_id && ['down', 'up'].includes(request.action)) {
+          await this.nodeAction(state, request, (node) => node.focus());
+          this.target(request);
+        }
+        const keys = request.action === 'down' || request.action === 'up' ? [request.key] : key.endsWith('+') ? [...key.slice(0, -1).split('+').filter(Boolean), '+'] : key.split('+');
+        requireValue(new Set([...state.keys, ...keys]).size <= 256, 'Maximum held keys reached', 'resource_limit');
+        if (request.action === 'up') {
+          await page.keyboard.up(request.key);
+          state.keys.delete(request.key);
+        } else {
+          for (const held of keys) state.keys.add(held);
           if (request.action === 'down') await page.keyboard.down(request.key);
-          else if (request.action === 'up') await page.keyboard.up(request.key);
-          else await page.keyboard.press(key);
+          else {
+            if (request.node_id) await this.nodeAction(state, request, (node) => node.press(key, options));
+            else await page.keyboard.press(key);
+            for (const held of keys) state.keys.delete(held);
+          }
         }
         break;
       }
@@ -293,29 +340,36 @@ export class BrowserSession {
         requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button');
         await page.mouse.move(request.x, request.y);
         const mouseOptions = { button: request.button || 'left', clickCount: boundedInteger(request.click_count, 1, 1, 3) };
+        if (request.action === 'down' || request.action === 'click') state.buttons.add(mouseOptions.button);
         if (request.action === 'click') await page.mouse.click(request.x, request.y, mouseOptions);
         else if (request.action !== 'move') await page.mouse[request.action](mouseOptions);
+        if (request.action === 'up' || request.action === 'click') state.buttons.delete(mouseOptions.button);
         break;
       }
       case 'touch': {
         this.viewport(state, request);
         requireValue(['start', 'move', 'end', 'cancel'].includes(request.action), 'Invalid touch action');
         const id = boundedInteger(request.touch_id, 1, 1, 10);
-        if (request.action === 'start' || request.action === 'move') state.touches.set(id, { x: request.x, y: request.y, id });
-        else state.touches.delete(id);
-        if (request.action === 'cancel') state.touches.clear();
         const cdp = await this.cdp(state);
-        await cdp.send('Input.dispatchTouchEvent', { type: { start: 'touchStart', move: 'touchMove', end: 'touchEnd', cancel: 'touchCancel' }[request.action], touchPoints: [...state.touches.values()] });
+        if (request.action === 'start' || request.action === 'move') state.touches.set(id, { x: request.x, y: request.y, id });
+        const points = request.action === 'cancel' ? [] : [...state.touches.values()].filter((point) => request.action !== 'end' || point.id !== id);
+        await cdp.send('Input.dispatchTouchEvent', { type: { start: 'touchStart', move: 'touchMove', end: 'touchEnd', cancel: 'touchCancel' }[request.action], touchPoints: points });
+        if (request.action === 'end') state.touches.delete(id);
+        if (request.action === 'cancel') state.touches.clear();
         break;
       }
       case 'viewport': {
         const width = boundedInteger(request.width, 1280, 240, 2560);
         const height = boundedInteger(request.height, 800, 240, 1600);
-        await page.setViewportSize({ width, height });
-        state.viewportID = randomUUID();
-        state.viewportChanged = Date.now() / 1000;
-        state.touches.clear();
-        for (const stream of state.streams) stream.invalidate();
+        state.frameBlocked = true;
+        this.invalidateFrames(state);
+        try { await page.setViewportSize({ width, height }); }
+        finally {
+          state.viewportID = randomUUID();
+          state.viewportChanged = Date.now() / 1000;
+          state.frameBlocked = false;
+          this.invalidateFrames(state);
+        }
         break;
       }
       case 'wait': {

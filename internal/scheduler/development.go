@@ -137,6 +137,12 @@ func (s *Scheduler) Capabilities(ctx context.Context, id domain.RunID) ([]string
 			capabilities = append(capabilities, protocol.MethodDevTerminalScreenshot)
 		}
 	}
+	s.mu.Lock()
+	retainer, retains := s.evidence.(interface{ RetainsDevelopmentArtifacts() bool })
+	s.mu.Unlock()
+	if retains && retainer.RetainsDevelopmentArtifacts() {
+		capabilities = append(capabilities, protocol.MethodDevArtifactRetain)
+	}
 	if terminals || browserAvailable {
 		capabilities = append(capabilities, protocol.MethodDevControlStatus, protocol.MethodDevControlAcquire, protocol.MethodDevControlRelease)
 	}
@@ -243,6 +249,8 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 		result, err = s.DevelopmentTerminal(ctx, id, p, method, raw, auth)
 	case strings.HasPrefix(method, "dev.browser."):
 		result, err = s.developmentBrowser(ctx, id, p, method, raw, auth)
+	case method == protocol.MethodDevArtifactRetain:
+		result, err = s.retainDevelopmentArtifacts(ctx, id, p, raw, auth)
 	case strings.HasPrefix(method, "dev.artifact."):
 		result, err = s.developmentArtifact(id, method, raw, auth)
 	default:
@@ -329,6 +337,20 @@ func (s *Scheduler) developmentControl(ctx context.Context, id domain.RunID, p c
 		surface, surfaceErr := s.validateDevelopmentSurface(ctx, id, req.Surface)
 		if surfaceErr != nil {
 			return nil, surfaceErr
+		}
+		if surface.Kind == control.SurfaceBrowser {
+			live, err := s.ResolveLiveRun(ctx, id, false)
+			if err != nil {
+				return nil, err
+			}
+			status, client, err := s.browserClient(ctx, live, false)
+			if err == nil {
+				if bindErr := s.bindBrowserInput(id, status, client); bindErr != nil {
+					return nil, bindErr
+				}
+			} else if !errors.Is(err, browser.ErrUnavailable) {
+				return nil, err
+			}
 		}
 		current, displaced, acquireErr := s.cfg.Control.AcquireSurface(string(id), surface, p, req.ControlSessionID, req.Takeover, req.ExpectedGeneration, func() error {
 			if _, err := s.validateDevelopmentSurface(ctx, id, req.Surface); err != nil {

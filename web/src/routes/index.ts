@@ -3,6 +3,7 @@
 import '@/components/shortcuts'
 import '@/routes/agents'
 import '@/routes/board'
+import '@/routes/browser'
 import '@/routes/configuration'
 import '@/routes/diff'
 import '@/routes/files'

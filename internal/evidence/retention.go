@@ -377,6 +377,9 @@ func (s *Service) purgePacket(ctx context.Context, p *store.EvidencePacket) erro
 	cleanupCtx, cancel := s.cleanupContext(ctx)
 	defer cancel()
 	key := packetCaptureKey(p)
+	if err := s.removeCaptures(key); err != nil {
+		return err
+	}
 	path, err := s.artifactPath(key)
 	if err != nil {
 		return err
@@ -546,6 +549,13 @@ func appendSourceFacts(dst []store.EvidenceSourceFact, facts ...store.EvidenceSo
 	return dst
 }
 func clonePacket(in protocol.EvidencePacket) protocol.EvidencePacket {
+	in.Captures = append([]protocol.DevArtifact(nil), in.Captures...)
+	for i := range in.Captures {
+		if in.Captures[i].Dirty != nil {
+			dirty := *in.Captures[i].Dirty
+			in.Captures[i].Dirty = &dirty
+		}
+	}
 	in.ChangedFiles = append([]protocol.ChangedFileFact(nil), in.ChangedFiles...)
 	in.Sources = append([]protocol.EvidenceSourceFact(nil), in.Sources...)
 	in.RelatedRoomMessageIDs = append([]string(nil), in.RelatedRoomMessageIDs...)

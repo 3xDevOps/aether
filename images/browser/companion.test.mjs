@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { BrowserSession, limits } from './session.mjs';
 import { encodeFrame } from './stream.mjs';
 import { renderTerminal } from './terminal.mjs';
+import { startServer } from './server.mjs';
 
 // Without Chromium: node --test --test-name-pattern='^pure boundaries:' companion.test.mjs
 // The complete suite intentionally requires a working non-root Chromium sandbox.
@@ -103,4 +108,156 @@ test('detached DOM targets, navigation, popups and reset preserve session bounda
   });
   const bounded = await session.execute({ ...page, operation: 'snapshot' });
   assert.equal(bounded.snapshot.truncated, true, 'DOM scan cap must not claim a complete observation');
+});
+
+async function liveCompanion(t, html) {
+  const app = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'text/html');
+    response.end(html);
+  });
+  await new Promise((resolve, reject) => { app.once('error', reject); app.listen(0, '127.0.0.1', resolve); });
+  t.after(async () => { app.closeAllConnections(); await new Promise((resolve) => app.close(resolve)); });
+  const directory = await mkdtemp(join(tmpdir(), 'aether-browser-test-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const socketPath = join(directory, 'browser.sock');
+  let session;
+  const companion = await startServer({ socketPath, creationKey: 'companion-test', launch: async () => { session = await BrowserSession.launch(); return session; } });
+  t.after(() => companion.close());
+  await companion.ready;
+  const call = (path, value) => new Promise((resolve, reject) => {
+    const request = http.request({ socketPath, path, method: 'POST' }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('error', reject);
+      response.on('end', () => {
+        const result = JSON.parse(Buffer.concat(chunks));
+        if (response.statusCode !== 200) reject(Object.assign(new Error(result.error.message), result.error));
+        else resolve(result);
+      });
+    });
+    request.on('error', reject);
+    request.setTimeout(15000, () => request.destroy(new Error('Companion request timed out')));
+    request.end(JSON.stringify(value));
+  });
+  const watch = (page) => {
+    const records = [];
+    let stream;
+    const first = new Promise((resolve, reject) => {
+      stream = http.request({ socketPath, path: '/stream', method: 'POST' }, (response) => {
+        if (response.statusCode !== 200) { reject(new Error(`Stream HTTP ${response.statusCode}`)); response.resume(); return; }
+        let buffered = Buffer.alloc(0);
+        response.on('error', reject);
+        response.on('data', (chunk) => {
+          buffered = Buffer.concat([buffered, chunk]);
+          while (buffered.length >= 8) {
+            const metadataSize = buffered.readUInt32BE(0);
+            const imageSize = buffered.readUInt32BE(4);
+            if (buffered.length < 8 + metadataSize + imageSize) break;
+            const record = { metadata: JSON.parse(buffered.subarray(8, 8 + metadataSize)), bytes: buffered.subarray(8 + metadataSize, 8 + metadataSize + imageSize) };
+            buffered = buffered.subarray(8 + metadataSize + imageSize);
+            records.push(record);
+            if (records.length > 32) records.shift();
+            resolve(record);
+          }
+        });
+      });
+      stream.on('error', reject);
+      stream.setTimeout(10000, () => stream.destroy(new Error('Current frame timed out')));
+      stream.end(JSON.stringify(page));
+    });
+    t.after(() => stream.destroy());
+    return { first, records, close: () => stream.destroy() };
+  };
+  return { session, call, watch, origin: `http://127.0.0.1:${app.address().port}` };
+}
+
+test('late static viewers receive original current pixels and invalidated frames never cross page geometry', { timeout: 120000 }, async (t) => {
+  const { session, call, watch, origin } = await liveCompanion(t, '<!doctype html><title>Static observers</title><style>body{background:#14532d;color:white}</style><h1>Unchanged current content</h1><script>window.boot=crypto.randomUUID()</script>');
+  let { page } = await call('/command', { operation: 'open', url: origin, width: 800, height: 600 });
+  const native = session.pages.get(page.page_id).page;
+  const boot = await native.evaluate(() => window.boot);
+  const first = watch(page);
+  await first.first;
+  await delay(250); // Let the initial compositor updates settle, without changing the app.
+  const second = watch(page);
+  const replay = await second.first;
+  let original;
+  const deadline = Date.now() + 2000;
+  do {
+    original = first.records.find((record) => record.metadata.sequence === replay.metadata.sequence);
+    if (!original) await delay(10);
+  } while (!original && Date.now() < deadline);
+  assert.ok(original, 'late viewer receives a frame already observed by the first viewer');
+  assert.deepEqual(replay, original, 'pixels, actual timestamp, revision and viewport must remain unchanged');
+  assert.equal(replay.metadata.viewport_id, page.viewport_id);
+  assert.equal(await native.evaluate(() => window.boot), boot, 'attaching must not reload the app');
+  second.close();
+  ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
+  const resized = watch(page);
+  const resizedFrame = await resized.first;
+  assert.equal(resizedFrame.metadata.viewport_id, page.viewport_id);
+  assert.deepEqual([resizedFrame.metadata.width, resizedFrame.metadata.height], [640, 480]);
+  assert.ok(resizedFrame.metadata.sequence > replay.metadata.sequence);
+  resized.close();
+  ({ page } = await call('/command', { ...page, operation: 'navigate', url: `${origin}/next` }));
+  const navigated = watch(page);
+  const nextFrame = await navigated.first;
+  assert.equal(nextFrame.metadata.page_revision, page.page_revision);
+  assert.equal(nextFrame.metadata.viewport_id, page.viewport_id);
+  assert.ok(nextFrame.metadata.sequence > resizedFrame.metadata.sequence);
+  first.close();
+  navigated.close();
+  await delay(100);
+  const reattached = await watch(page).first;
+  assert.ok(reattached.metadata.sequence > nextFrame.metadata.sequence, 'stream restart cannot reuse its old cache');
+});
+
+test('host authority cleanup releases native held input without clearing another session or app state', { timeout: 120000 }, async (t) => {
+  const { session, call, origin } = await liveCompanion(t, `<!doctype html><title>Native input</title><style>body{height:500px;touch-action:none}input{width:150px}</style><input id="value"><script>
+    window.events=[];
+    for(const type of ['keydown','keyup','mousemove','mouseup','touchstart','touchmove','touchend','touchcancel'])
+      document.addEventListener(type,e=>events.push({type,key:e.key,ctrl:e.ctrlKey,shift:e.shiftKey,repeat:e.repeat,buttons:e.buttons,touches:e.touches?.length}));
+    document.cookie='held-test=present';localStorage.setItem('held-test','present');
+  </script>`);
+  const { page } = await call('/command', { operation: 'open', url: origin, width: 800, height: 600 });
+  const native = session.pages.get(page.page_id).page;
+  const input = (value) => call('/command', { ...page, ...value });
+  await native.locator('#value').focus();
+  await input({ operation: 'key', action: 'down', key: 'Control' });
+  await input({ operation: 'key', action: 'down', key: 'Shift' });
+  await input({ operation: 'key', action: 'down', key: 'ArrowLeft' });
+  await input({ operation: 'pointer', action: 'down', button: 'left', x: 250, y: 180 });
+  const ignored = await call('/release-input', { session_id: 'not-the-current-session' });
+  assert.equal(ignored.released, false);
+  await native.locator('#value').focus();
+  await input({ operation: 'key', key: 'a' });
+  const deniedKey = await native.evaluate(() => events.findLast((event) => event.type === 'keydown'));
+  assert.equal(deniedKey.ctrl, true);
+  assert.equal(deniedKey.shift, true);
+  await input({ operation: 'pointer', action: 'move', x: 260, y: 180 });
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'mousemove').buttons), 1);
+  await input({ operation: 'touch', action: 'start', touch_id: 1, x: 300, y: 250 });
+  await input({ operation: 'touch', action: 'start', touch_id: 2, x: 350, y: 250 });
+  await call('/release-input', { session_id: 'not-the-current-session' });
+  await input({ operation: 'touch', action: 'move', touch_id: 1, x: 330, y: 250 });
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'touchmove').touches), 2);
+  await assert.rejects(input({ operation: 'release_input' }), { code: 'invalid_request' });
+  const released = await call('/release-input', { session_id: page.session_id });
+  assert.equal(released.released, true);
+  assert.equal(released.session_id, page.session_id);
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'touchcancel').touches), 0);
+  await native.locator('#value').focus();
+  await input({ operation: 'key', key: 'x' });
+  assert.equal(await native.locator('#value').inputValue(), 'x');
+  const cleanKey = await native.evaluate(() => events.findLast((event) => event.type === 'keydown'));
+  assert.deepEqual([cleanKey.ctrl, cleanKey.shift, cleanKey.repeat], [false, false, false]);
+  await input({ operation: 'key', key: 'ArrowLeft' });
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'keydown').repeat), false);
+  await input({ operation: 'pointer', action: 'move', x: 270, y: 190 });
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'mousemove').buttons), 0);
+  await input({ operation: 'touch', action: 'start', touch_id: 1, x: 300, y: 250 });
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'touchstart').touches), 1);
+  await input({ operation: 'touch', action: 'end', touch_id: 1, x: 300, y: 250 });
+  assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'touchend').touches), 0);
+  assert.deepEqual(await native.evaluate(() => [document.cookie, localStorage.getItem('held-test')]), ['held-test=present', 'present']);
 });

@@ -207,6 +207,8 @@ type EvidencePacket struct {
 	RetainedRevision      string
 	ChangedFiles          []ChangedFileFact
 	Sources               []EvidenceSourceFact
+	Captures              []DevelopmentArtifact
+	VerificationNotes     string
 	RelatedRoomMessageIDs []string
 	UnresolvedFacts       []string
 	NextAction            string
@@ -336,7 +338,7 @@ type CollaborationStore interface {
 var _ CollaborationStore = (*DB)(nil)
 
 const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at`
-const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at`
+const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at, captures, verification_notes`
 
 func marshalCollaborationJSON(v any, empty string) (string, error) {
 	b, err := json.Marshal(v)

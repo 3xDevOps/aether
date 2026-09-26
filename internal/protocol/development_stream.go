@@ -16,7 +16,10 @@ const (
 )
 
 type DevBrowserStreamRequest struct{ DevBrowserPageTarget }
-type DevArtifactDownloadRequest struct{ DevArtifactGetParams }
+type DevArtifactDownloadRequest struct {
+	DevArtifactGetParams
+	EvidencePacketID string `json:"evidence_packet_id,omitempty"`
+}
 type DevStreamResponse struct {
 	OK       bool         `json:"ok"`
 	Error    string       `json:"error,omitempty"`

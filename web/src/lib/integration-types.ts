@@ -22,13 +22,9 @@ export type DeliveryAction = 'update_ref' | 'proposal'
 export type DeliveryState = 'pending' | 'approved' | 'denied' | 'delivering' | 'delivered'
 export type DeliveryResult = 'landed' | 'proposed'
 
-/** The protocol snapshot includes availability/origin fields not present in
- * the older run evidence wire type. */
 export interface CandidatePacket extends EvidencePacket {
   origin: { kind: string; id: string }
   owner_id?: string
-  availability: 'available' | 'expired' | string
-  expired_at?: string
 }
 
 export interface SubmissionRef {

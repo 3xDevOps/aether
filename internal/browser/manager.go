@@ -211,6 +211,17 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	return status, entry.client, nil
 }
 
+// InputSessionGone is physical proof for a failed cleanup, not a health-check
+// fallback: an unreachable, paused or still-running companion is not gone.
+func (m *Manager) InputSessionGone(ctx context.Context, status Status) bool {
+	info, err := m.browser.InspectBrowser(ctx, status.ContainerID)
+	if errors.Is(err, containerruntime.ErrNotFound) {
+		return true
+	}
+	return err == nil && info.CreationKey == status.CreationKey && info.RunContainer == status.RunContainer &&
+		(info.State == "exited" || info.State == "dead" || info.State == "removed")
+}
+
 func (m *Manager) Reconcile(ctx context.Context, run Run) (Status, *Client, error) {
 	entry, dir, err := m.entry(run)
 	if err != nil {

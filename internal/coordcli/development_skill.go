@@ -78,6 +78,24 @@ clean up all worker development resources. Do not report while a check still
 needs them. Read the inbox before the report and take no new work afterwards.
 `
 
+const retainCaptureSkill = `Retain only deliberately selected, reviewed captures:
+Before artifact deletion, run cleanup, or a success/failure report, call
+aether-internal artifact retain --params-file FILE with
+{"artifact_ids":["capture-id"],"verification_notes":"What was actually checked and any limits","idempotency_key":"your-unique-key"}.
+The selection is 1..64 captures and notes are at most 4096 UTF-8 bytes. The
+mounted socket supplies identity; never send run_id. Inspect the returned
+packet_id, then use the existing report --evidence-ref <packet_id>. Retain is
+not a report and creates no new outcome semantics. A transient path or handle
+alone will not survive cleanup. On an uncertain result, inspect evidence and
+explicitly reuse the same key and exact request if retrying; do not retry
+mutations automatically or create a different key to conceal a failure.
+The retained copy is visible under existing evidence permissions and expiry,
+which differ from private live-session access. Review pixels, URLs and notes
+for sensitive data yourself; no reliable credential redaction is promised.
+Retaining never publishes images to a PR. The later packet-retain revision
+does not prove the Git boundary of an earlier screenshot; unknown stays unknown.
+`
+
 const nativeGitSkill = `Native Git and gh (not an Aether Git RPC/tool registration):
 Check command availability in your harness/account environment before use.
 Inspect git status --short, git diff, git diff --cached, git branch --show-current
@@ -172,6 +190,9 @@ func writeDevelopmentSkill(out io.Writer, status *protocol.CoordStatusResult, to
 		text = terminalSkill + captureSkill
 	case "browser":
 		text = browserSkill + captureSkill
+	}
+	if topic != "git" && hasSkillCapability(status, protocol.MethodDevArtifactRetain) {
+		text += retainCaptureSkill
 	}
 	if _, err := io.WriteString(out, "Use only operations advertised above; other steps may be unavailable.\n"+text); err != nil {
 		return ExitFailure, err

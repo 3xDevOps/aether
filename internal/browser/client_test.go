@@ -62,6 +62,7 @@ func TestTypedOperationLimits(t *testing.T) {
 		edit func(*Request)
 	}{
 		{"unknown-operation", func(r *Request) { r.Operation = "evaluate" }},
+		{"private-cleanup-not-action", func(r *Request) { r.Operation = "release_input" }},
 		{"unbounded-timeout", func(r *Request) { r.Operation = "reload"; r.TimeoutMS = 30001 }},
 		{"oversized-snapshot", func(r *Request) { r.Operation = "snapshot"; r.MaxNodes = 129 }},
 		{"stale-node-identity", func(r *Request) { r.Operation = "click" }},

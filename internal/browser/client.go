@@ -136,6 +136,31 @@ func (c *Client) Do(ctx context.Context, request Request) (Result, error) {
 	return result, err
 }
 
+// ReleaseInput is an internal authority-boundary operation, not a browser
+// action. Callers must hold the surface admission/revocation gate throughout.
+func (c *Client) ReleaseInput(ctx context.Context, session string) error {
+	if session == "" {
+		return errors.New("browser input cleanup requires a session")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	var result struct {
+		SessionID string `json:"session_id"`
+		Released  bool   `json:"released"`
+	}
+	if err := c.json(ctx, http.MethodPost, "/release-input", struct {
+		SessionID string `json:"session_id"`
+	}{session}, &result); err != nil {
+		return err
+	}
+	// A reset destroys the old context. The companion must report the actual
+	// replacement identity and must not release that new context's input.
+	if result.SessionID == "" || (result.SessionID == session && !result.Released) {
+		return errors.New("browser input cleanup was not confirmed")
+	}
+	return nil
+}
+
 func (c *Client) capture(ctx context.Context, endpoint string, request any) (Capture, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

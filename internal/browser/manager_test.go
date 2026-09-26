@@ -17,6 +17,7 @@ type recoveryRuntime struct {
 	containerruntime.Runtime
 	info               containerruntime.BrowserInfo
 	created, destroyed bool
+	inspectErr         error
 }
 
 func (r *recoveryRuntime) CreateBrowser(context.Context, containerruntime.BrowserSpec) (containerruntime.ID, error) {
@@ -24,7 +25,7 @@ func (r *recoveryRuntime) CreateBrowser(context.Context, containerruntime.Browse
 	return "", errors.New("unexpected companion creation")
 }
 func (r *recoveryRuntime) InspectBrowser(context.Context, containerruntime.ID) (containerruntime.BrowserInfo, error) {
-	return r.info, nil
+	return r.info, r.inspectErr
 }
 func (r *recoveryRuntime) FindByCreationKey(context.Context, string) (containerruntime.ID, error) {
 	return "companion", nil
@@ -121,5 +122,34 @@ func TestManagerRefusesRemovingAnotherRunCompanion(t *testing.T) {
 	}
 	if runtime.destroyed {
 		t.Fatal("ownership failure reached destruction")
+	}
+}
+
+func TestInputSessionGoneRequiresPhysicalProof(t *testing.T) {
+	status := Status{ContainerID: "companion", CreationKey: "creation", RunContainer: "run"}
+	for _, tc := range []struct {
+		name     string
+		state    string
+		creation string
+		err      error
+		gone     bool
+	}{
+		{"running", "running", "creation", nil, false},
+		{"paused", "paused", "creation", nil, false},
+		{"unreachable", "exited", "creation", errors.New("runtime unavailable"), false},
+		{"foreign", "exited", "other", nil, false},
+		{"exited", "exited", "creation", nil, true},
+		{"removed", "", "", containerruntime.ErrNotFound, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := &recoveryRuntime{info: containerruntime.BrowserInfo{ContainerID: "companion", RunContainer: "run", CreationKey: tc.creation, State: tc.state}, inspectErr: tc.err}
+			manager, err := NewManager(t.TempDir(), runtime, Config{Image: "aether/browser:test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := manager.InputSessionGone(t.Context(), status); got != tc.gone {
+				t.Fatalf("physical input state gone = %v, want %v", got, tc.gone)
+			}
+		})
 	}
 }

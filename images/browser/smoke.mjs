@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -43,17 +43,29 @@ export async function smoke() {
     await companion.ready;
     const health = await call('/health');
     assert.equal(health.creation_key, 'smoke');
-    // Check Chromium's own report, not merely the requested launch flags.
-    const sandbox = await session.context.newPage();
-    await sandbox.goto('chrome://sandbox');
-    const sandboxStatus = await sandbox.locator('body').innerText();
-    assert.match(sandboxStatus, /Namespace sandbox\s+Yes/);
-    assert.match(sandboxStatus, /Seccomp-BPF sandbox\s+Yes/);
-    await sandbox.close();
     let { page } = await call('/command', { operation: 'open', url: origin });
     const snapshot = await call('/command', { ...page, operation: 'snapshot' });
     const counter = snapshot.snapshot.nodes.find((node) => node.role === 'button' && node.name === 'Count: 0');
     assert.ok(counter, 'counter is present in the actual DOM snapshot');
+    // Check kernel confinement, not requested flags or diagnostic-page wording.
+    const cdp = await session.browser.newBrowserCDPSession();
+    const { processInfo } = await cdp.send('SystemInfo.getProcessInfo');
+    await cdp.detach();
+    const statuses = [];
+    for (const process of processInfo.filter(({ type }) => type === 'browser' || type === 'renderer')) {
+      const text = await readFile(`/proc/${process.id}/status`, 'utf8');
+      const fields = Object.fromEntries(text.trim().split('\n').map((line) => line.split(/:\s*/, 2)));
+      statuses.push({ type: process.type, namespaces: fields.NSpid.split(/\s+/).length, filters: Number(fields.Seccomp_filters), seccomp: fields.Seccomp, noNewPrivileges: fields.NoNewPrivs });
+    }
+    const browserStatus = statuses.find(({ type }) => type === 'browser');
+    const renderers = statuses.filter(({ type }) => type === 'renderer');
+    assert.ok(browserStatus && renderers.length > 0, 'browser and live renderer kernel state is available');
+    for (const renderer of renderers) {
+      assert.ok(renderer.namespaces > browserStatus.namespaces, 'renderer has its own nested PID namespace');
+      assert.equal(renderer.noNewPrivileges, '1');
+      assert.equal(renderer.seccomp, '2');
+      assert.ok(renderer.filters > browserStatus.filters, 'renderer installs Chromium seccomp in addition to Docker seccomp');
+    }
     ({ page } = await call('/command', { ...page, operation: 'click', node_id: counter.node_id }));
     const waited = await call('/command', { ...page, operation: 'wait', condition: 'text', text: 'Count: 1' });
     assert.equal(waited.matched, true);

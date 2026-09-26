@@ -70,6 +70,13 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
           if (!controller.signal.aborted) json(response, 200, result);
           break;
         }
+        // This private socket endpoint is not a /command operation and is never
+        // exposed by the public browser action allow-list.
+        case '/release-input': {
+          const result = await serialize(() => session.releaseInput(body.session_id), controller.signal);
+          if (!controller.signal.aborted) json(response, 200, result);
+          break;
+        }
         case '/capture': image(response, await serialize(() => session.capture(body), controller.signal)); break;
         case '/terminal': image(response, await serialize(() => renderTerminal(session.browser, body), controller.signal)); break;
         case '/stream': await serialize(() => streamPage(session, body, response), controller.signal); break;

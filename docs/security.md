@@ -148,11 +148,28 @@ touches the home.
 
 ## Remote development and browser isolation
 
-Development terminals and the shared app browser require **Steer**, including
-reads and captures: an app session can already be authenticated. Ordinary
-permission to view a run is not permission to inspect that app session.
-The server also rechecks access to the run's backing account. Local SSH
-gateways and the server-hosted dashboard use the same checks.
+Development terminals, the shared app browser and transient captures require
+**Steer**, including reads and captures: an app session can already be
+authenticated. Ordinary permission to view a run is not permission to inspect
+that app session. The server also rechecks access to the run's backing account.
+Local SSH gateways and the server-hosted dashboard use the same checks.
+
+Explicitly retaining selected captures crosses a sharing boundary: retained
+bytes and verification notes become ordinary workspace evidence, readable with
+**View** under the packet's existing scope and expiry, without live Steer or
+backing-account access. Retain only reviewed content before headless completion
+or other cleanup. Capture bytes and observation metadata are immutable; the
+packet's later retained Git revision does not establish capture-time Git state.
+Notes are at most 4096 UTF-8 bytes; retained plus staged captures are bounded to
+64 files and 128 MiB per run, with at most 8 MiB per capture.
+
+Retention re-resolves current authority after taking the per-run evidence lock
+and before opening each selected source. Immediately before publishing the
+packet it rechecks under the shared `authorizationMu` admission gate, which
+also serializes account, membership, role and workspace-policy changes. A busy
+gate refuses publication with a visible retry-retention conflict and rolls
+back staged work; it never silently retries. After an uncertain result, inspect
+evidence and retry explicitly with the same key and exact request if needed.
 
 A human member and a run agent are distinct principals. The agent's identity
 comes from its run socket, not a member ID in a request. Each app terminal
@@ -161,6 +178,11 @@ commands carry that lease's generation. A human can explicitly take over,
 which fences stale writes. An agent cannot force a takeover. Taking an app
 surface does not take the primary harness terminal or release its mission
 hold; primary-terminal control and mission dispatch retain their own rules.
+Held browser keys, buttons and touches are cleared server-side when the
+controller releases, loses authority or disconnects, and before replacement
+control is admitted. A cleanup failure fences new control rather than handing
+the next controller potentially held input. A disconnected observer is not a
+controller release.
 
 This is shared-input ownership, **not a restricted execution sandbox**.
 An app terminal executes in the live run container, under the selected

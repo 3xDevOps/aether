@@ -107,12 +107,17 @@ func (s *Scheduler) pauseDevelopmentBrowser(ctx context.Context, id domain.RunID
 	lock.Lock()
 	defer lock.Unlock()
 	run := browser.Run{ID: string(id), ContainerID: cid}
-	status, _, probeErr := d.manager.Reconcile(ctx, run)
+	status, client, probeErr := d.manager.Reconcile(ctx, run)
 	if errors.Is(probeErr, os.ErrNotExist) {
 		return nil
 	}
 	if status.State == "exited" || status.State == "dead" || status.State == "removed" {
 		return nil
+	}
+	if probeErr == nil {
+		if err := s.clearRecoveredBrowserInput(id, status, client); err != nil {
+			return err
+		}
 	}
 	_, err := d.manager.Pause(ctx, run)
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, containerruntime.ErrNotFound) {
@@ -128,12 +133,12 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 	lock := d.lock(id)
 	lock.Lock()
 	defer lock.Unlock()
-	status, _, reconcileErr := d.manager.Reconcile(ctx, browser.Run{ID: string(id), ContainerID: cid})
+	status, client, reconcileErr := d.manager.Reconcile(ctx, browser.Run{ID: string(id), ContainerID: cid})
 	if errors.Is(reconcileErr, os.ErrNotExist) {
 		return nil
 	}
 	if reconcileErr == nil {
-		return nil
+		return s.clearRecoveredBrowserInput(id, status, client)
 	}
 	if status.State != "paused" {
 		return reconcileErr
@@ -141,8 +146,15 @@ func (s *Scheduler) resumeDevelopmentBrowser(ctx context.Context, id domain.RunI
 	if err := s.reserveBrowser(id); err != nil {
 		return err
 	}
-	_, resumeErr := d.manager.Resume(ctx, browser.Run{ID: string(id), ContainerID: cid})
-	return resumeErr
+	run := browser.Run{ID: string(id), ContainerID: cid}
+	if _, err := d.manager.Resume(ctx, run); err != nil {
+		return err
+	}
+	status, client, reconcileErr = d.manager.Reconcile(ctx, run)
+	if reconcileErr != nil {
+		return reconcileErr
+	}
+	return s.clearRecoveredBrowserInput(id, status, client)
 }
 
 // StopDevelopmentRun is called only after the terminal report/evidence commit.
@@ -225,11 +237,17 @@ func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 		}
 		lock := d.lock(entry.runID)
 		lock.Lock()
-		status, _, err := d.manager.Reconcile(ctx, browser.Run{ID: string(entry.runID), ContainerID: entry.containerID})
+		status, client, err := d.manager.Reconcile(ctx, browser.Run{ID: string(entry.runID), ContainerID: entry.containerID})
 		if !errors.Is(err, os.ErrNotExist) {
 			d.mu.Lock()
 			d.reserved[entry.runID] = true
 			d.mu.Unlock()
+		}
+		if err == nil {
+			if clearErr := s.clearRecoveredBrowserInput(entry.runID, status, client); clearErr != nil {
+				lock.Unlock()
+				return clearErr
+			}
 		}
 		// Unknown/lost sessions stay unavailable; no create/restart on recovery.
 		if entry.freeze && status.State == "running" {

@@ -3,7 +3,7 @@
 Aether is self-hosted software. Nothing about you reaches the people who
 publish it. This page is the privacy policy for the Aether Android app
 (package `io.aether.android`), whether it came from a GitHub release or from
-Google Play, and for the dashboard the app shows. Effective 2026-09-13.
+Google Play, and for the dashboard the app shows. Effective 2026-09-26.
 
 ## Who publishes it
 
@@ -83,9 +83,12 @@ under their own policies. This is separate from the Android shell's lack of
 analytics or third-party reporting.
 
 An app session can contain test-account cookies, tokens, personal data, page
-URLs, or secrets printed by an app or terminal. Reading it, streaming it, or
-taking a capture requires **Steer** and access to the backing account, not
-merely permission to view a run. Human members and the run agent have distinct
+URLs, or secrets printed by an app or terminal. Reading the live session,
+streaming it, or taking a transient capture requires **Steer** and access to
+the backing account, not merely permission to view a run. Deliberately retained
+evidence copies instead use the existing evidence **View** permission and
+expiry; review what you retain for that audience. Human members and the run
+agent have distinct
 per-surface control identities; taking over a shared app surface is not a
 promise that the selected account's other processes or credentials are
 isolated from that run.
@@ -107,8 +110,9 @@ not silently evict old evidence. Files and their metadata are stored below
 `<data-dir>/coord/<run-id>/captures/`, exposed read-only to the run as
 `/run/aether/captures/<random-id>.png`. Metadata identifies the run,
 terminal or page, session/revision, capture time, dimensions, and page URL
-where applicable. It does not attest to an atomically observed Git commit or
-clean checkout.
+where applicable. Optional Git HEAD and dirty-state fields describe only what
+was actually observed at capture time; absent fields mean **unknown**, not a
+clean checkout or the packet's later retained revision.
 
 These captures remain transient run-owned files until explicit deletion or
 cleanup of that run's coordination mount. A retained, explicitly closed TUI
@@ -119,14 +123,34 @@ console warning/error entries and 100 failed/error-response request entries
 per page.
 URLs and logged messages can still reveal sensitive information.
 
-Preserve only deliberately selected, reviewed evidence outside transient
-storage before cleanup. Captures do not currently have a managed
-retention-promotion operation. A capture handle or live frame by itself is
-not durable evidence, and resetting the browser does
-not delete already-written PNGs. There is no automatic public pull-request
-image upload or credential-entry recording. Do not capture credentials or
-publish app logins, cookies, tokens, or customer data; Aether cannot reliably
-redact secrets an app renders in pixels or text. A member who explicitly
+To preserve a reviewed capture before cleanup, explicitly select it in the
+existing Evidence drawer, optionally enter verification notes, and choose
+**Retain selected captures**. An agent with the advertised capability uses
+`aether-internal artifact retain` with selected `artifact_ids`, optional
+`verification_notes`, and an `idempotency_key`. This copies only the selected
+PNGs into the existing retained evidence packet storage and returns a
+`packet_id`; it does not verify the application or report an outcome.
+Agents can pass that packet ID to the existing report `--evidence-ref`.
+Retain before a success/failure report, capture deletion, or other cleanup
+can remove the transient originals. A capture handle or live frame alone is
+not durable evidence.
+
+Retained copies remain readable after development processes stop, subject
+to evidence access and expiry. Each run's retained copies are separately
+bounded to **64 captures**, **128 MiB total**, and **8 MiB per PNG** across
+packets; deleting transient captures does not reclaim retained-copy space.
+Verification notes are bounded to **4096 UTF-8 bytes**. Original source,
+capture time, session, geometry, URL and any observed Git boundary travel
+with the copy. The packet's later retained Git revision does not rewrite or
+attest to an earlier screenshot's Git boundary. Missing, truncated and
+expired evidence is not a successful verification result.
+
+Nothing is retained automatically. Resetting the browser does not delete
+already-written PNGs, and retaining an image does not upload it to a public
+pull request. There is no credential-entry recording. Do not capture
+credentials or publish app logins, cookies, tokens, or customer data; Aether
+cannot reliably redact secrets an app renders in pixels or text, or those
+you include in verification notes. A member who explicitly downloads,
 exports or publishes a capture creates a separate copy under that
 destination's access and retention rules.
 

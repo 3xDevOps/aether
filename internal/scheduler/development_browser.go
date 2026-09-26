@@ -37,6 +37,38 @@ func browserIncarnation(status browser.Status) string {
 	}
 	return ""
 }
+
+func (s *Scheduler) bindBrowserInput(id domain.RunID, status browser.Status, client *browser.Client) error {
+	manager := s.developmentState().manager
+	return s.cfg.Control.BindSurfaceCleanup(string(id), browserSurface(status.SessionID), func() error {
+		// Authority cleanup outlives the triggering request. The client bounds
+		// it, and the companion serializes it behind already admitted work.
+		// Do not take developmentState.lock here: callers already hold the
+		// control gate, downstream of that browser mutation lock.
+		ctx, cancel := context.WithTimeout(context.Background(), 18*time.Second)
+		defer cancel()
+		err := client.ReleaseInput(ctx, status.SessionID)
+		// Confirmed process death leaves no held input and must not prevent
+		// explicit reset. An unreachable/paused companion is not that proof.
+		if err != nil && manager.InputSessionGone(ctx, status) {
+			return nil
+		}
+		return err
+	})
+}
+
+func (s *Scheduler) clearRecoveredBrowserInput(id domain.RunID, status browser.Status, client *browser.Client) error {
+	if s.cfg.Control == nil {
+		// Without a control service, development writers are unavailable.
+		// The lifecycle caller still holds the browser mutation lock.
+		return client.ReleaseInput(context.Background(), status.SessionID)
+	}
+	if err := s.bindBrowserInput(id, status, client); err != nil {
+		return err
+	}
+	_, err := s.cfg.Control.RevokeSurface(string(id), browserSurface(status.SessionID), func() error { return nil })
+	return err
+}
 func (s *Scheduler) browserClient(ctx context.Context, live LiveRun, create bool) (browser.Status, *browser.Client, error) {
 	d := s.developmentState()
 	if d.reason != nil {
@@ -115,6 +147,9 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 			return s.restartDevelopmentBrowser(ctx, live, p, raw, browserIncarnation(status), auth)
 		}
 		return nil, browserErr
+	}
+	if err := s.bindBrowserInput(id, status, client); err != nil {
+		return nil, err
 	}
 	var req browser.Request
 	var fence protocol.DevControlFence
@@ -201,6 +236,8 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 		req.DeltaX = p.DeltaX
 		req.DeltaY = p.DeltaY
 		req.Button = p.Button
+		req.TouchID = p.TouchID
+		req.ClickCount = p.ClickCount
 		req.TimeoutMS = p.TimeoutMS
 		if p.Action == "touch" {
 			if req.Action == "down" {
@@ -411,6 +448,9 @@ func (s *Scheduler) openDevelopmentBrowser(ctx context.Context, live LiveRun, p 
 	})
 	if admissionErr != nil {
 		return nil, admissionErr
+	}
+	if err := s.bindBrowserInput(live.Run.ID, status, client); err != nil {
+		return nil, err
 	}
 	surface := browserSurface(status.SessionID)
 	fence := req.DevControlFence

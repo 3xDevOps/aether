@@ -64,6 +64,13 @@ Layers, per the design spec's testing strategy:
   `aether-server`. They own the paths a person walks in the dashboard, which
   no Go test and no jsdom test reaches. CI runs them in one `dashboard-e2e`
   job.
+  Remote-development scenarios live in `web/e2e/development-browser/`
+  (shared real companion, login, live app update, popups, takeover and phone
+  viewport input), `web/e2e/development-terminal/` (agent-created shared TUI,
+  protocol replies, control, geometry and process lifetime), and
+  `web/e2e/remote-development-git/` (remote import, native selected-path commit
+  and push, plus opt-in actual GitHub PR publication). These use deterministic
+  harness fixtures, not authenticated vendor-agent loops.
 
 Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
 install and reinstall must preserve the CLI and unrelated files in the
@@ -105,6 +112,7 @@ needed by the companion. Build and exercise the exact native image:
 
 ```sh
 docker info
+docker build -f images/standard/Dockerfile -t aether-standard:ci .
 make browser-image
 make browser-smoke
 
@@ -118,16 +126,21 @@ sudo env "PATH=$PATH" "HOME=$HOME" \
 AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
 AETHER_BROWSER_IMAGE=aether/browser:test make test-integration
 
+# Install the dashboard driver's Chromium once; it is separate from the companion.
+(cd web && bunx playwright install chromium)
+
 # Real dashboard interaction through the built gateway/server.
+AETHER_E2E_STANDARD_IMAGE=aether-standard:ci \
 AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
 AETHER_BROWSER_IMAGE=aether/browser:test make test-e2e
 ```
 
 `make browser-smoke BROWSER_IMAGE=<reference>` exercises another exact image.
 The image contains the scripts, Playwright, Chromium, OS dependencies and
-fonts; no source or member-home bind participates. The smoke inspects
-`chrome://sandbox` for both **Namespace sandbox Yes** and **Seccomp-BPF
-sandbox Yes**, interacts with a loopback app, captures a browser PNG and a
+fonts; no source or member-home bind participates. The smoke reads Linux
+`/proc/<pid>/status` to verify nested renderer PID namespaces, no-new-privileges
+and Chromium seccomp filters beyond Docker's filters. It interacts with a
+loopback app, captures a browser PNG and a
 bounded JPEG frame, exercises a popup and console report, renders a terminal
 PNG with screen metadata, and resets the browser context. The companion's
 additional behavior checks run in the same image. A Docker spec or requested
@@ -147,6 +160,27 @@ architecture images before publishing and require anonymous pulls of the
 versioned multiarchitecture manifest. An administrator must make the new
 GHCR package public before that gate can succeed; neither this guide nor a
 workflow definition proves publication or a successful run.
+
+The E2E native Git scenarios require the real `aether-standard:ci` image built
+from `images/standard/Dockerfile` (or the exact image selected by
+`AETHER_E2E_STANDARD_IMAGE`), with native Git and `gh`; a fake executable is not
+a substitute. Browser scenarios require the real companion image in the same
+Docker daemon and the loopback app image `node:22.14.0-alpine3.21` available to
+pull or already loaded. The Playwright dashboard driver has its own Chromium
+and host dependencies; the companion's lack of host-browser prerequisites
+does not waive the driver's setup. Build/load prerequisites and run commands
+are not evidence that these suites have passed.
+
+`web/e2e/remote-development-git/github.spec.ts` is a separately gated, externally
+visible smoke. It runs only with `AETHER_E2E_GITHUB_PUBLISH=1`,
+`AETHER_E2E_GITHUB_TOKEN`, `AETHER_E2E_GITHUB_BASE_REPOSITORY` (a public
+`owner/name`) and `AETHER_E2E_GITHUB_HEAD_REPOSITORY` (a writable fork
+`owner/name`); `AETHER_E2E_GITHUB_BASE_BRANCH` defaults to `main`. Supply the
+token through the test environment, never documentation or logs. Its authority
+must allow pushing the fork and creating, commenting on and closing upstream
+PRs. The scenario creates and closes a real PR and removes its temporary head
+branch. An absent credential, disabled opt-in or skipped smoke is an explicit
+GitHub coverage gap; native/local publication tests do not replace it.
 
 **Native Git boundary for commit coverage.** Managed selected-path commits use
 native prepared `git update-ref --stdin` transactions inside the run. The
@@ -187,13 +221,17 @@ and WebView behavior were exercised; viewport emulation does not prove those.
   Confirm a phone follows the shared terminal without silently resizing it.
 - Open the app's run-local URL in the companion, use a real DOM snapshot and
   action, navigate and switch pages, inspect console/request failures, view
-  streamed frames, change viewport, and capture evidence. After navigation,
-  reset, closure, or restart, old page/node/viewport references must fail
-  rather than act on another target.
+  streamed frames, change viewport, and capture evidence. Join a static page
+  after another observer and confirm the latest complete frame appears.
+  After navigation, reset, closure, or restart, old page/node/viewport
+  references must fail rather than act on another target.
 - Let a run agent own an app surface, explicitly take it over as a human,
   confirm stale agent input is rejected, then release/reacquire it. A second
   terminal and the browser must remain independently controlled; the primary
   harness's mission hold must remain intact.
+  Hold browser input across release, revocation and controller disconnect;
+  confirm server-side cleanup and refusal of replacement control if cleanup
+  fails. Observer disconnect must not clear a live controller's input.
 - Confirm read/capture/stream and write authorization on both gateways,
   including a member without Steer, backing-account revocation, lifecycle
   stop/pause, stale control generations, and reconnect after server restart.
@@ -203,9 +241,19 @@ and WebView behavior were exercised; viewport emulation does not prove those.
   rejection, commit-hook disclosure, native reference-transaction hook
   behavior, and fail-closed transaction diagnostics. Confirm no browser
   profile or capture enters the source tree or commit.
-- Inspect only deliberately selected evidence, its attribution and retention;
-  confirm bounded transient captures and cleanup. Keep credential entry out
-  of recordings and confirm nothing uploads images to a public PR by itself.
+- Inspect deliberately selected evidence, its attribution and retention.
+  Retain reviewed captures and bounded notes before headless report/cleanup,
+  read back the packet and download its exact bytes using `evidence_packet_id`.
+  Confirm workspace View can read retained evidence while private transient
+  access still requires Steer/account-use. Exercise queued revocation and busy
+  publication admission with explicit retry, retained-plus-staged quotas,
+  transient deletion, and the separate capture-time and later packet Git
+  boundaries. Keep credential entry out of recordings and confirm nothing
+  uploads images to a public PR by itself.
+- Cancel or revoke idle browser streams and capture downloads through both
+  transports, including a stalled SSH peer. Source cleanup must not wait for
+  blocked status/close writes; responsive connections must preserve sibling
+  channels. Interrupted downloads must not look like complete captures.
 - Complete two genuine authenticated vendor-agent loops through the shared
   development tools, with observed terminal/app changes and reviewed evidence.
   Record which vendors, image identities, gateways and phone were exercised,

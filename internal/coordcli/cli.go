@@ -257,6 +257,9 @@ are explicit identities for retry-safe starts and retries.
 Submit one durable outcome. Success/failure are terminal worker outcomes;
 blocked is a nonterminal observation, not a way to wait for a peer or human.
 A summary file of "-" reads standard input.
+When live capabilities advertise artifact retain, deliberately retain reviewed
+captures before a terminal report can clean up the run; pass its packet_id as
+--evidence-ref. A transient capture handle is not a durable evidence reference.
 `,
 	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
 

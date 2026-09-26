@@ -362,18 +362,7 @@ func (s *Scheduler) OpenDevelopmentArtifact(ctx context.Context, id domain.RunID
 	if err := auth(); err != nil {
 		return artifact, nil, err
 	}
-	d := s.developmentState()
-	d.captures.Lock()
-	defer d.captures.Unlock()
-	dir, err := s.captureDir(id)
-	if err != nil {
-		return artifact, nil, err
-	}
-	artifact, err = readCapture(dir, id, handle)
-	if err != nil {
-		return artifact, nil, err
-	}
-	reader, err := os.Open(filepath.Join(dir, handle+".png"))
+	artifact, reader, err := s.OpenEvidenceArtifact(ctx, id, handle)
 	if err != nil {
 		return artifact, nil, err
 	}

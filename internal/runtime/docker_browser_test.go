@@ -188,7 +188,11 @@ func TestDockerBrowserRejectsHostNetwork(t *testing.T) {
 	if err := docker.Start(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	_, err = docker.CreateBrowser(t.Context(), runtime.BrowserSpec{RunContainer: run, Image: image, CreationKey: "reject-host", ControlHostPath: t.TempDir(), CPULimit: 1, MemoryLimitBytes: 1 << 30})
+	controlDir := t.TempDir()
+	if chmodErr := os.Chmod(controlDir, 0o700); chmodErr != nil {
+		t.Fatal(chmodErr)
+	}
+	_, err = docker.CreateBrowser(t.Context(), runtime.BrowserSpec{RunContainer: run, Image: image, CreationKey: "reject-host", ControlHostPath: controlDir, CPULimit: 1, MemoryLimitBytes: 1 << 30})
 	if err == nil || !strings.Contains(err.Error(), "cannot join host networking") {
 		t.Fatalf("host-network browser creation = %v", err)
 	}
