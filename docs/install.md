@@ -863,8 +863,10 @@ workaround. A lost companion reports
 be explicit because its old authenticated browser session may be gone.
 
 For broker clients, `dev.browser.status` returns the lifecycle state
-(`not_started`, `running`, `paused`, `creating`, or `session_lost`) and the
-actual failure reason. Recovery is explicit: acquire the browser surface
+(`not_started`, `running`, `paused`, `creating`, `session_lost`, or `unavailable`)
+and the actual failure reason. An unavailable Chromium session reports
+`available: false` and `running: false`, even when its companion container is
+still running. Recovery is explicit: acquire the browser surface
 using that status's `session_id`, then call `dev.browser.reset` with the
 current control lease. If initial creation failed before establishing a
 session, the returned `pending:<creation-key>` is an opaque recovery

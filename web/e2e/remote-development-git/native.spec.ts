@@ -75,8 +75,8 @@ test('selected paths preserve unrelated staging, report index failure, and retai
     await exec('docker', ['exec', '-w', '/workspace', container, 'rm', '-f', '.git/index.lock'])
   }
 
-  await page.getByLabel('Push remote', { exact: true }).selectOption('writable')
-  await page.getByLabel('Writable push URL', { exact: true }).selectOption('/tmp/published.git')
+  await page.getByRole('combobox', { name: 'Push remote', exact: true }).selectOption('writable')
+  await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).selectOption('/tmp/published.git')
   await page.getByLabel('Push head branch', { exact: true }).fill('reviewed-native')
   await page.getByRole('checkbox', { name: 'I reviewed the run account, branch, HEAD and exact push destination above.' }).check()
   await page.getByRole('button', { name: 'Push reviewed branch' }).click()

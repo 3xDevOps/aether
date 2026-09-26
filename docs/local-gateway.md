@@ -66,12 +66,19 @@ than retrying a credential the gateway has already rejected. Open the URL
 
 `run` is the other query parameter the dashboard reads on first load, and it
 leaves the address bar the same way. `?run=<run_id>` opens that run's
-terminal as soon as the first hydration has the runs; a run the member cannot
-see is ignored and the board stays. This is how both shells deliver an
+terminal as soon as the first hydration has the runs, even when the local
+gateway has no project clone. An authorized run link takes precedence over
+optional local onboarding. A run the member cannot see is ignored.
+This is how both shells deliver an
 `aether://run/<id>` deep link - the desktop shell (`desktop/main.js`) and the
 Android app (`android/`) append it to the dashboard URL and load that -
 and removing it is what stops a reload, or the re-hydration a reconnect runs,
 from reopening a run the member has since left.
+
+Once a server is configured, local-repository onboarding is only an initial
+landing page. Choosing **Manage workspaces** during startup keeps that route;
+reconnecting does not send it back to onboarding. Remote import needs no local
+clone.
 
 ### Agent OAuth logins
 

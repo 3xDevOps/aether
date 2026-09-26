@@ -133,16 +133,6 @@ export async function hydrate(
     }
     if (signal?.aborted) return false
     s.setCapabilities(capabilities)
-    // A deep link (`aether://run/<id>` from either shell) arrives as
-    // `?run=<id>` and can only be acted on now that the runs are here. A
-    // member is sent the runs they may see, so an id that is not among them
-    // is not theirs or no longer exists: the board stays, rather than
-    // mounting a run detail for something nothing can load. Before the
-    // onboarding redirect below, which outranks it.
-    const requested = takeRequestedRun()
-    if (requested && store.getState().runs[requested]) {
-      store.getState().navigate('terminal', { runId: requested })
-    }
     // The status bar's link chip reads linkStatus, and nothing else
     // fetches it until the settings or onboarding view opens - so without
     // this, a linked machine launches looking unlinked and the chip points
@@ -161,10 +151,18 @@ export async function hydrate(
     if (signal?.aborted) return false
     s.setHydrated(true)
     if (
+      !s.hydrated &&
+      s.route.name === 'board' &&
+      store.getState().route === s.route &&
       !store.getState().onboarded &&
       capabilities?.local?.includes('link.status') === true
     ) {
       store.setState({ route: { name: 'onboarding', params: {} } })
+    }
+    // An authorized run link outranks optional local-repository onboarding.
+    const requested = takeRequestedRun()
+    if (requested && store.getState().runs[requested]) {
+      store.getState().navigate('terminal', { runId: requested })
     }
     s.setUnreachable(null)
     return true

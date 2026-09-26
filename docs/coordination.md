@@ -405,7 +405,9 @@ use the observed `viewport_id`; semantic actions use revision-scoped node IDs
 from `snapshot`. Re-observe after navigation/DOM/viewport changes. `reset` is
 explicit, invalidates old identities, and requires a new control acquisition.
 Browser status also reports `state`: `not_started`, `creating`, `running`,
-`paused`, or `session_lost`. Failed initial creation may return an opaque
+`paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
+session reports `available: false`, `running: false`, and its actual error.
+Failed initial creation may return an opaque
 `pending:` session ID. It is a recovery fence, not a usable page session.
 Acquire the browser surface with that exact incarnation, then explicitly
 `browser reset` with the acquired lease to recover. The broker destroys only
@@ -417,11 +419,20 @@ history. On controller release, revocation or disconnect, the server clears
 held browser keys, buttons and touches before admitting another controller.
 If cleanup cannot be confirmed, new control remains fenced.
 
+Page inventories and physical-input acknowledgements use cached, best-effort
+titles without waiting for a DOM read. Inventories refresh titles asynchronously;
+navigation clears the old title. Explicit page observations wait at most one
+second for a title. Session, page, revision, URL, and viewport fences remain live.
+
 Terminal wait/stop and browser navigation/action/wait bounds are 30 seconds.
 First browser open has a 90-second bootstrap budget and reset has 30 seconds.
+Terminal screenshots have a 90-second total budget, including first companion
+startup; the isolated renderer has 30 seconds for page/font setup, VT replay,
+and PNG capture, plus five seconds for its response. Cancellation closes that
+renderer context without closing the app's browser session.
 The transport adds a three-second framing margin; browser navigation/action/wait
-also allow the companion's five-second response margin. These are
-method-specific budgets, and earlier caller cancellation still applies.
+also allow the companion's five-second response margin. Earlier caller
+cancellation still applies.
 
 Use the full loop: edit, run, observe, interact, correct, and verify the changed
 behavior. Browser snapshots/console/network and terminal output/screens are

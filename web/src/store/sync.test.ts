@@ -229,6 +229,37 @@ describe('hydrate', () => {
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
     })
+
+    it.each(['run_1', 'run_someone_elses'])('resolves %s without requiring a local clone', async (requested) => {
+      window.history.replaceState({}, '', `/?run=${requested}`)
+      const store = createRootStore()
+      const client = fakeApi({
+        capabilities: vi.fn(async () => ({
+          gateway: 'local',
+          methods: ['*'],
+          ws: ['events', 'attach'],
+          local: ['link.status'],
+        })),
+        localLinkStatus: vi.fn(async () => ({
+          server_configured: true,
+          linked: false,
+          addr: 'host:2222',
+          user: 'alice',
+          repo: '',
+        })),
+      })
+      await hydrate(store, client)
+
+      expect(store.getState().route).toEqual(requested === 'run_1'
+        ? { name: 'terminal', params: { runId: requested } }
+        : { name: 'onboarding', params: {} })
+      expect(window.location.search).toBe('')
+      if (requested === 'run_1') {
+        store.getState().navigate('board')
+        await hydrate(store, client)
+        expect(store.getState().route.name).toBe('board')
+      }
+    })
   })
 
   it('points the app at a workspace, keeping one the member already chose', async () => {
@@ -514,6 +545,39 @@ describe('hydrate', () => {
       expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
       if (tc.linked) expect(store.getState().onboarded).toBe(true)
     }
+  })
+
+  it.each(['before', 'during'])('preserves navigation %s initial hydration without a local clone', async (when) => {
+    const store = createRootStore()
+    let resolveInfo!: (value: typeof serverInfoFixture) => void
+    const info = new Promise<typeof serverInfoFixture>((resolve) => { resolveInfo = resolve })
+    const client = fakeApi({
+      serverInfo: vi.fn(() => info),
+      capabilities: vi.fn(async () => ({
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach'],
+        local: ['link.status'],
+      })),
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: true,
+        linked: false,
+        addr: 'host:2222',
+        user: 'alice',
+        repo: '',
+      })),
+    })
+    if (when === 'before') store.getState().navigate('workspaces')
+    const pending = hydrate(store, client)
+    if (when === 'during') store.getState().navigate('workspaces')
+    resolveInfo(serverInfoFixture)
+    await pending
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    await hydrate(store, client)
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    store.getState().navigate('board')
+    await hydrate(store, client)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
   })
 
   it('treats a missing capabilities endpoint as the legacy remote monitor', async () => {

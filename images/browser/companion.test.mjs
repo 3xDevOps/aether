@@ -110,6 +110,34 @@ test('detached DOM targets, navigation, popups and reset preserve session bounda
   assert.equal(bounded.snapshot.truncated, true, 'DOM scan cap must not claim a complete observation');
 });
 
+test('physical input keeps live identity and the last observed title until observation refreshes it', { timeout: 120000 }, async (t) => {
+  const fixture = await liveCompanion(t, '<!doctype html><title>Observed title</title><button style="position:absolute;left:20px;top:10px;width:120px;height:40px" onpointerdown="document.title=\'Pressed title\';window.presses=(window.presses||0)+1">Press</button><input aria-label="Value" style="position:absolute;left:20px;top:80px" onkeydown="document.title=\'Typed title\'">');
+  const { session, origin, call } = fixture;
+  let { page } = await call('/command', { operation: 'open', url: origin, width: 640, height: 480 });
+  const state = session.pages.get(page.page_id);
+  await state.page.waitForLoadState('load');
+  ({ page } = await call('/command', { ...page, operation: 'snapshot' }));
+  assert.equal(page.title, 'Observed title');
+  const pressed = await call('/command', { ...page, operation: 'pointer', action: 'down', x: 80, y: 25 });
+  assert.equal(await state.page.evaluate(() => window.presses), 1);
+  assert.equal(await state.page.title(), 'Pressed title');
+  assert.deepEqual(pressed.page, page, 'input keeps authoritative geometry and identity without replacing the observed title');
+  await call('/command', { ...pressed.page, operation: 'pointer', action: 'up', x: 80, y: 25 });
+  ({ page } = await call('/command', { ...page, operation: 'snapshot' }));
+  assert.equal(page.title, 'Pressed title');
+  await state.page.getByLabel('Value').focus();
+  const typed = await call('/command', { ...page, operation: 'key', key: 'K' });
+  assert.equal(await state.page.getByLabel('Value').inputValue(), 'K');
+  assert.equal(await state.page.title(), 'Typed title');
+  assert.deepEqual(typed.page, page);
+  ({ page } = await call('/command', { ...page, operation: 'snapshot' }));
+  assert.equal(page.title, 'Typed title');
+  const navigated = await call('/command', { ...page, operation: 'navigate', url: `${origin}/next` });
+  assert.equal(navigated.page.url, `${origin}/next`);
+  assert.notEqual(navigated.page.page_revision, page.page_revision);
+  assert.equal(navigated.page.title, 'Observed title', 'navigation must not retain the previous document title');
+});
+
 async function liveCompanion(t, html) {
   const app = http.createServer((request, response) => {
     response.setHeader('Content-Type', 'text/html');

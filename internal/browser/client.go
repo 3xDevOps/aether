@@ -161,8 +161,8 @@ func (c *Client) ReleaseInput(ctx context.Context, session string) error {
 	return nil
 }
 
-func (c *Client) capture(ctx context.Context, endpoint string, request any) (Capture, error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+func (c *Client) capture(ctx context.Context, endpoint string, request any, timeout time.Duration) (Capture, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	response, err := c.request(ctx, http.MethodPost, endpoint, request)
 	if err != nil {
@@ -205,7 +205,7 @@ func (c *Client) Capture(ctx context.Context, request Request) (Capture, error) 
 	if err := request.validateTarget(); err != nil {
 		return Capture{}, err
 	}
-	capture, err := c.capture(ctx, "/capture", request)
+	capture, err := c.capture(ctx, "/capture", request, 15*time.Second)
 	if err == nil && (capture.Metadata.SessionID != request.SessionID || capture.Metadata.PageID != request.PageID || capture.Metadata.PageRevision != request.PageRevision) {
 		return Capture{}, errors.New("browser image target mismatch")
 	}
@@ -215,7 +215,7 @@ func (c *Client) RenderTerminal(ctx context.Context, snapshot TerminalSnapshot) 
 	if err := snapshot.Validate(); err != nil {
 		return Capture{}, err
 	}
-	capture, err := c.capture(ctx, "/terminal", snapshot)
+	capture, err := c.capture(ctx, "/terminal", snapshot, 35*time.Second)
 	if err == nil && (capture.Metadata.SessionID != snapshot.SessionID || capture.Metadata.ScreenRevision != snapshot.ScreenRevision || capture.Metadata.OutputPosition != snapshot.OutputPosition || capture.Metadata.Cols != snapshot.Cols || capture.Metadata.Rows != snapshot.Rows) {
 		return Capture{}, errors.New("terminal image snapshot mismatch")
 	}

@@ -78,7 +78,7 @@ export async function startServer({ socketPath = '/aether-control/browser.sock',
           break;
         }
         case '/capture': image(response, await serialize(() => session.capture(body), controller.signal)); break;
-        case '/terminal': image(response, await serialize(() => renderTerminal(session.browser, body), controller.signal)); break;
+        case '/terminal': image(response, await serialize(() => renderTerminal(session.browser, body, controller.signal), controller.signal)); break;
         case '/stream': await serialize(() => streamPage(session, body, response), controller.signal); break;
         default: throw new BrowserError('invalid_request', 'Unknown companion endpoint');
       }

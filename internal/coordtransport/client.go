@@ -38,7 +38,7 @@ func callTimeout(method string, params any) time.Duration {
 		// Browser operations allow 30 seconds plus the companion's five-second
 		// response margin before the outer socket framing margin.
 		timeout = 35*time.Second + callMargin
-	case protocol.MethodDevBrowserOpen:
+	case protocol.MethodDevBrowserOpen, protocol.MethodDevTerminalScreenshot:
 		// First launch includes image acquisition and companion readiness.
 		timeout = 90*time.Second + callMargin
 	}

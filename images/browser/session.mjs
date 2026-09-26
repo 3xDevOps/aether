@@ -14,6 +14,7 @@ export function boundedInteger(value, fallback, min, max) {
   return value;
 }
 const short = (value, max = 2048) => String(value ?? '').slice(0, max);
+const hotInputOperations = new Set(['pointer', 'key', 'touch', 'text', 'scroll']);
 const delay = (ms, signal) => new Promise((resolve, reject) => {
   const abort = () => { clearTimeout(timer); reject(signal.reason); };
   const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
@@ -59,7 +60,7 @@ export class BrowserSession {
     const known = [...this.pages.values()].find((entry) => entry.page === page);
     if (known) return known;
     if (this.pages.size >= limits.pages) { void page.close().catch(() => {}); return null; }
-    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), latestFrame: null, cdp: null, touches: new Map(), keys: new Set(), buttons: new Set() };
+    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, title: '', titleRead: null, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), latestFrame: null, cdp: null, touches: new Map(), keys: new Set(), buttons: new Set() };
     this.pages.set(state.id, state);
     this.selected ||= state.id;
     const log = (kind, value) => {
@@ -73,6 +74,7 @@ export class BrowserSession {
     page.on('response', (response) => { if (response.status() >= 400) log('network', { url: short(response.url()), status: response.status(), method: response.request().method() }); });
     page.on('framenavigated', (frame) => {
       // Child-frame navigations also invalidate the composite DOM observation.
+      if (frame === page.mainFrame()) { state.title = ''; state.titleRead = null; }
       state.revision++;
       state.viewportID = randomUUID();
       state.viewportChanged = Date.now() / 1000;
@@ -162,12 +164,33 @@ export class BrowserSession {
     const size = state.page.viewportSize();
     requireValue(Number.isFinite(request.x) && Number.isFinite(request.y) && request.x >= 0 && request.y >= 0 && request.x < size.width && request.y < size.height, 'Input coordinates outside viewport');
   }
+  metadata(state) {
+    return { session_id: this.sessionID, page_id: state.id, page_revision: state.revision, viewport_id: state.viewportID, url: short(state.page.url()), title: state.title, ...state.page.viewportSize() };
+  }
+  observeTitle(state) {
+    if (!state.titleRead) {
+      const revision = state.revision;
+      const pending = state.page.title().then((title) => {
+        if (revision === state.revision) state.title = short(title);
+      }).catch(() => {}).finally(() => {
+        if (state.titleRead === pending) state.titleRead = null;
+      });
+      state.titleRead = pending;
+    }
+    return state.titleRead;
+  }
   async describe(state) {
-    const title = short(await boundedRead(state.page.title(), 1000).catch(() => ''));
-    return { session_id: this.sessionID, page_id: state.id, page_revision: state.revision, viewport_id: state.viewportID, url: short(state.page.url()), title, ...state.page.viewportSize() };
+    await boundedRead(this.observeTitle(state), 1000).catch(() => {});
+    return this.metadata(state);
   }
   async list() {
-    return { session_id: this.sessionID, selected_page_id: this.selected, pages: await Promise.all([...this.pages.values()].map((state) => this.describe(state))) };
+    // Periodic inventory must not hold the command queue behind a DOM read.
+    // At most one read per document remains outstanding, even if it is hung.
+    const pages = [...this.pages.values()].map((state) => {
+      void this.observeTitle(state);
+      return this.metadata(state);
+    });
+    return { session_id: this.sessionID, selected_page_id: this.selected, pages };
   }
   async snapshot(state, request, signal) {
     const deadline = Date.now() + boundedInteger(request.timeout_ms, 5000, 1, limits.operationTimeout);
@@ -399,7 +422,9 @@ export class BrowserSession {
       default: throw new BrowserError('invalid_request', 'Unknown browser operation');
     }
     signal?.throwIfAborted();
-    return { page: await this.describe(state) };
+    // Input acknowledgements must not queue behind a best-effort DOM title
+    // read. Identity and geometry remain live; observations refresh the title.
+    return { page: hotInputOperations.has(request.operation) ? this.metadata(state) : await this.describe(state) };
   }
   url(value) {
     requireValue(typeof value === 'string' && value.length <= 8192, 'Invalid URL');

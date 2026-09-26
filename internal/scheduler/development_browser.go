@@ -119,17 +119,20 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
 		}
-		if err != nil {
-			out.Available = false
-			out.Reason = err.Error()
-			return out, nil
+		if err == nil {
+			result, resultErr := client.Do(ctx, browser.Request{Operation: "pages", SessionID: status.SessionID})
+			if resultErr == nil {
+				out.Running = true
+				out.SelectedPageID = result.SelectedPageID
+				return out, nil
+			}
+			err = resultErr
 		}
-		result, err := client.Do(ctx, browser.Request{Operation: "pages", SessionID: status.SessionID})
-		if err != nil {
-			return nil, err
+		out.Available = false
+		if out.State == "running" {
+			out.State = "unavailable"
 		}
-		out.Running = true
-		out.SelectedPageID = result.SelectedPageID
+		out.Reason = err.Error()
 		return out, nil
 	}
 	if d.reason != nil {

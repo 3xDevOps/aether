@@ -182,7 +182,7 @@ function BrowserRoute({ runID }: { runID: string }) {
     <RunHeader run={run} active="browser" />
     <section {...runTabPanel('browser', 'flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-2 sm:p-3')}>
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span role="status">Browser: {status?.state ?? 'Checking'}{status?.session_id ? ` · ${status.session_id}` : ''}</span>
+        <span role="status">Browser: {status?.state ?? (error ? 'Unavailable' : 'Checking')}{status?.session_id ? ` · ${status.session_id}` : ''}</span>
         <span>{owns ? 'You control this browser' : 'Watch mode'} · Controller: {controllerName}{controller?.expires_at ? ` · expires ${new Date(controller.expires_at).toLocaleTimeString()}` : ''}</span>
         {surface && (!owns || blocked) && <Button size="sm" variant="outline" disabled={busy} onClick={() => acquire(false)}>Acquire control</Button>}
         {surface && controller && !owns && <Button size="sm" variant="outline" disabled={busy} onClick={() => acquire(true)}>Take over browser</Button>}

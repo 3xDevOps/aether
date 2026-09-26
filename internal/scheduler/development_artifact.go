@@ -293,6 +293,8 @@ func (s *Scheduler) developmentArtifact(id domain.RunID, method string, raw json
 	return nil, errors.New("unknown artifact operation")
 }
 func (s *Scheduler) captureTerminal(ctx context.Context, id domain.RunID, raw json.RawMessage, auth func() error) (any, error) {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
 	var req protocol.DevTerminalScreenshotParams
 	if err := decodeDevelopment(raw, &req); err != nil {
 		return nil, err

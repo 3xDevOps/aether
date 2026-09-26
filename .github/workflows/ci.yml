@@ -393,7 +393,13 @@ jobs:
           GOFLAGS: -v
           AETHER_BROWSER_TEST_IMAGE: aether/browser:test
           AETHER_BROWSER_IMAGE: aether/browser:test
-        run: make test-integration ${{ matrix.make }}
+        # The installed service runs as root to assign private browser control
+        # directories to UID 1000. Keep that boundary in real server scenarios.
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
+            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
+            make test-integration ${{ matrix.make }}
 
   dashboard:
     needs: changes
@@ -498,7 +504,15 @@ jobs:
           AETHER_BROWSER_TEST_IMAGE: aether/browser:test
           AETHER_BROWSER_IMAGE: aether/browser:test
           AETHER_E2E_STANDARD_IMAGE: aether-standard:ci
-        run: make test-e2e
+        # The server spawned by Playwright needs the installed service's
+        # ownership authority; Chromium itself remains sandboxed in Docker.
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" "CI=$CI" \
+            "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
+            "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
+            "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
+            "AETHER_E2E_STANDARD_IMAGE=$AETHER_E2E_STANDARD_IMAGE" \
+            make test-e2e
       # Uploaded on a pass too: the mobile project attaches a full-page
       # screenshot of every phone scenario, and a layout can be wrong with
       # every assertion green. Not on a cancelled job, which has no report.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,7 +18,12 @@ import (
 
 func transportSocket(t *testing.T, serve func(net.Conn)) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "coord.sock")
+	dir, err := os.MkdirTemp("", "act-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "coord.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)

@@ -212,41 +212,6 @@ func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *
 	return valid
 }
 
-// assertDisabledCLIOnly inspects a live disabled run. The staged CLI remains
-// a read-only digest-pinned bind, while the bridge and socket directory are
-// absent from the actual container.
-func (e *coordEnv) assertDisabledCLIOnly(ctx context.Context, t *testing.T, cli *client.Client, run, user string) {
-	t.Helper()
-	insp, err := cli.ContainerInspect(ctx, containerName(run), client.ContainerInspectOptions{})
-	if err != nil {
-		t.Fatalf("inspect disabled run %s's container: %v", run, err)
-	}
-	if insp.Container.Config.User != user {
-		t.Fatalf("disabled run %s user = %q, want %q", run, insp.Container.Config.User, user)
-	}
-	staged := filepath.Join(e.dataDir, "runtime", "bin", "aether-server-"+fileDigest(t, e.serverBinary))
-	var cliMount *container.MountPoint
-	for i := range insp.Container.Mounts {
-		m := &insp.Container.Mounts[i]
-		switch m.Destination {
-		case coordtransport.CLIPath:
-			cliMount = m
-		case coordtransport.BinaryPath, coordtransport.MountDir:
-			t.Errorf("disabled run %s unexpectedly has coordination mount %s", run, m.Destination)
-		}
-	}
-	if cliMount == nil {
-		t.Fatalf("disabled run %s has no CLI mount: %+v", run, insp.Container.Mounts)
-	}
-	want := resolved(t, staged)
-	if cliMount.Source != want {
-		t.Errorf("disabled run %s CLI source = %q, want %q", run, cliMount.Source, want)
-	}
-	if cliMount.RW {
-		t.Errorf("disabled run %s CLI mount is writable", run)
-	}
-}
-
 // collectCoordinationTimeline drains a short, bounded window after a mount
 // assertion fails so an advisory provisioning error is not hidden behind the
 // runtime's realized-mount report.
@@ -273,9 +238,8 @@ func collectCoordinationTimeline(t *testing.T, sub events.Subscription, seen *[]
 	}
 }
 
-// TestIntegrationCoordinationCLIWhenDisabled proves that an ordinary
-// taskless member terminal still gets the staged CLI in a custom non-root
-// image, while the disabled switch gives it no socket or coordination bind.
+// TestIntegrationCoordinationCLIWhenDisabled proves an ordinary taskless
+// non-root terminal retains live development discovery without peer authority.
 func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -283,7 +247,7 @@ func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 	if !dockerReachable(t) {
 		t.Skip("the disabled CLI scenario needs a reachable Docker daemon")
 	}
-	image, user := buildCoordAgentImage(t)
+	image, _ := buildCoordAgentImage(t)
 	docker, _, ok := dockerRuntime(t)
 	if !ok {
 		t.Fatal("the Docker daemon went away after the image was built")
@@ -293,19 +257,34 @@ func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 		dataDir: filepath.Join(shortTempDir(t), "data"),
 	}
 	srv := e.seed(ctx, t, true)
-	ctrl, memberClient := srv.control(t, e.ada.key)
+	ctrl, _ := srv.control(t, e.ada.key)
 	run := e.launch(t, ctrl, "", "pi")
-	att := openAttach(t, memberClient, run.ID)
-	if _, err := att.stdin.Write([]byte("aether-cli-start\r")); err != nil {
-		t.Fatalf("start disabled shell fixture: %v", err)
+	live, err := srv.srv.sched.ResolveLiveRun(ctx, domain.RunID(run.ID), false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	att.waitOutput(t, "cli-no-auto-mcp:")
-	att.waitOutput(t, "cli-help:")
-	att.waitOutput(t, "cli-status-no-socket:")
-	att.waitOutput(t, "cli-digest:"+fileDigest(t, e.serverBinary))
-	att.waitOutput(t, "cli-disabled-no-socket:")
-	assertNoAgentError(t, att)
-	e.assertDisabledCLIOnly(ctx, t, newDockerCLI(t), run.ID, user)
+	code, stdout, stderr, err := docker.Exec(ctx, live.ContainerID, []string{coordtransport.CLIPath, "status"}, live.Workdir)
+	if err != nil || code != 0 {
+		t.Fatalf("disabled CLI discovery: exit=%d err=%v stderr=%s", code, err, stderr)
+	}
+	var envelope struct {
+		OK     bool                       `json:"ok"`
+		Result protocol.CoordStatusResult `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil || !envelope.OK {
+		t.Fatalf("disabled CLI status = %s, decode error %v", stdout, err)
+	}
+	assertDevelopmentDiscovery(t, envelope.Result, run, true, protocol.MethodDevTerminalList, protocol.MethodDevBrowserOpen)
+	e.assertRunAuthority(ctx, t, run, true, run.ID)
+	code, stdout, stderr, err = docker.Exec(ctx, live.ContainerID, []string{coordtransport.CLIPath, "inbox"}, live.Workdir)
+	var refused struct {
+		OK    bool            `json:"ok"`
+		Error *protocol.Error `json:"error"`
+	}
+	if decodeErr := json.Unmarshal([]byte(stdout), &refused); err != nil || code != 4 || decodeErr != nil ||
+		refused.OK || refused.Error == nil || refused.Error.Code != protocol.CodeUnavailable {
+		t.Fatalf("disabled CLI inbox: exit=%d err=%v stdout=%s stderr=%s decode=%v", code, err, stdout, stderr, decodeErr)
+	}
 }
 
 // TestIntegrationCoordinationMissionIntegratorInContainer proves a mission's
@@ -434,27 +413,12 @@ case "$skill" in
 	?*) echo "cli-skill-available:$AETHER_RUN_ID" ;;
 	*) fail "skill output was empty" ;;
 esac
-# The CLI and bridge are the same staged binary when coordination is live,
-# but the CLI remains intentionally present when the bridge is disabled.
+# The CLI and bridge are the same staged binary.
 digest=$(sha256sum /usr/local/bin/aether-internal |
 	awk 'NR == 1 {print $1}')
 [ -n "$digest" ] || fail "digest unavailable"
 echo "cli-digest:$digest"
 
-# The disabled server still gives every image the version-matched CLI, but it
-# deliberately gives no run socket or coordination directory.
-if [ ! -e /run/aether/coord3.sock ]; then
-	status_code=0
-	status=$(/usr/local/bin/aether-internal status) || status_code=$?
-	[ "$status_code" -eq 4 ] || fail "no-socket status exit:$status_code:$status"
-	case "$status" in
-		*'"ok":false'*'"code":-32004'*) echo "cli-status-no-socket:$AETHER_RUN_ID" ;;
-		*) fail "no-socket status:$status" ;;
-	esac
-	echo "cli-disabled-no-socket:$AETHER_RUN_ID"
-	sleep 60
-	exit 0
-fi
 case "$skill" in
 	*"Run:"*) echo "cli-skill-live:$AETHER_RUN_ID" ;;
 	*) fail "skill did not report live run identity" ;;

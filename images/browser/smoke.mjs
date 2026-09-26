@@ -22,8 +22,8 @@ export async function smoke() {
   const origin = `http://127.0.0.1:${app.address().port}`;
   let companion;
   let session;
-  const call = (endpoint, value) => new Promise((resolve, reject) => {
-    const request = http.request({ socketPath, path: endpoint, method: value === undefined ? 'GET' : 'POST', headers: value === undefined ? {} : { 'Content-Type': 'application/json' } }, (response) => {
+  const call = (endpoint, value, signal) => new Promise((resolve, reject) => {
+    const request = http.request({ socketPath, path: endpoint, method: value === undefined ? 'GET' : 'POST', signal, headers: value === undefined ? {} : { 'Content-Type': 'application/json' } }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('error', reject);
@@ -34,7 +34,7 @@ export async function smoke() {
         resolve(JSON.parse(bytes));
       });
     });
-    request.setTimeout(20000, () => request.destroy(new Error('Smoke request timed out')));
+    request.setTimeout(endpoint === '/terminal' ? 35000 : 20000, () => request.destroy(new Error('Smoke request timed out')));
     request.on('error', reject);
     request.end(value === undefined ? undefined : JSON.stringify(value));
   });
@@ -112,18 +112,75 @@ export async function smoke() {
     assert.ok(pages.pages.some((entry) => entry.url === `${origin}/popup`));
     const logs = await call('/command', { ...page, operation: 'console' });
     assert.ok(logs.logs.some((entry) => entry.text === 'smoke-console'));
-    const terminal = await call('/terminal', { session_id: 'terminal-smoke', screen_revision: 7, output_position: 19, captured_at: new Date().toISOString(), cols: 40, rows: 8, vt: '\x1b[?1049h\x1b[2J\x1b[H\x1b[32mTerminal smoke Ω\x1b[0m\r\n界 wide text' });
+    const terminalRequest = { session_id: 'terminal-smoke', screen_revision: 7, output_position: 19, captured_at: new Date().toISOString(), cols: 240, rows: 8, vt: '\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[32mTerminal smoke Ω\x1b[0m\r\n界 wide text\x1b[1;240H\x1b[48;2;0;255;0m \x1b[0m' };
+    const terminal = await call('/terminal', terminalRequest);
     assert.equal(terminal.metadata.active_buffer, 'alternate');
     assert.equal(terminal.metadata.screen_revision, 7);
     assert.equal(terminal.metadata.output_position, 19);
     assert.equal(terminal.bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    const rightmostCellVisible = await session.pages.get(page.page_id).page.evaluate(async (png) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const start = Math.floor(canvas.width * 3 / 4);
+      const pixels = context.getImageData(start, 0, canvas.width - start, canvas.height).data;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] === 0 && pixels[i + 1] === 255 && pixels[i + 2] === 0 && pixels[i + 3] === 255) return true;
+      }
+      return false;
+    }, terminal.bytes.toString('base64'));
+    assert.ok(rightmostCellVisible, 'wide terminal capture includes its final column, not just the initial renderer viewport');
+    const createContext = session.browser.newContext;
+    let freeze;
+    let freezeFailed;
+    const frozen = new Promise((resolve, reject) => { freeze = resolve; freezeFailed = reject; });
+    session.browser.newContext = async function (...args) {
+      const context = await createContext.apply(this, args);
+      context.once('page', (target) => {
+        void (async () => {
+          const closed = new Promise((resolve) => context.once('close', resolve));
+          const cdp = await context.newCDPSession(target);
+          await cdp.send('Emulation.setVirtualTimePolicy', { policy: 'pause' });
+          freeze({ closed });
+        })().catch(freezeFailed);
+      });
+      return context;
+    };
+    const controller = new AbortController();
+    const watchdog = new AbortController();
+    try {
+      const interrupted = call('/terminal', terminalRequest, controller.signal).then(
+        (value) => ({ value }), (error) => ({ error }),
+      );
+      const { closed } = await Promise.race([
+        frozen,
+        delay(10000, undefined, { signal: watchdog.signal }).then(() => { throw new Error('Terminal renderer did not freeze'); }),
+      ]);
+      controller.abort();
+      assert.equal((await interrupted).error?.code, 'ABORT_ERR');
+      await Promise.race([
+        closed,
+        delay(10000, undefined, { signal: watchdog.signal }).then(() => { throw new Error('Cancelled terminal render kept its context alive'); }),
+      ]);
+    } finally {
+      controller.abort();
+      watchdog.abort();
+      session.browser.newContext = createContext;
+    }
+    const survivingPage = await call('/command', { ...page, operation: 'snapshot' });
+    assert.ok(survivingPage.snapshot.nodes.some((node) => node.role === 'button' && node.name === 'Count: 1'), 'cancelling a terminal render preserves the app and releases the command queue');
     const reset = await call('/command', { operation: 'reset', session_id: health.session_id });
     assert.notEqual(reset.session_id, health.session_id);
     assert.equal(reset.pages.length, 0);
     const after = await call('/health');
     assert.equal(after.process_id, health.process_id);
     assert.equal(after.session_id, reset.session_id);
-    console.log(JSON.stringify({ sandbox: 'namespace+seccomp', localhost: origin, click: 'Count: 1', popup: true, browser_png: capture.bytes.length, screencast_jpeg: frame.imageSize, terminal_png: terminal.bytes.length, terminal_buffer: terminal.metadata.active_buffer, reset: 'clean-context' }));
+    console.log(JSON.stringify({ sandbox: 'namespace+seccomp', localhost: origin, click: 'Count: 1', popup: true, browser_png: capture.bytes.length, screencast_jpeg: frame.imageSize, terminal_png: terminal.bytes.length, terminal_buffer: terminal.metadata.active_buffer, terminal_abort: 'context-closed', reset: 'clean-context' }));
   } finally {
     if (companion) await companion.close();
     else if (session) await session.close();

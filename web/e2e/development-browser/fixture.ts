@@ -104,17 +104,35 @@ export async function clickRemote(page: Page, x: number, y: number, touch = fals
   const scale = Math.min(geometry.width / geometry.frameWidth, geometry.height / geometry.frameHeight)
   const px = geometry.left + (geometry.width - geometry.frameWidth * scale) / 2 + x * scale
   const py = geometry.top + (geometry.height - geometry.frameHeight * scale) / 2 + y * scale
+  const controlled = await canvas.getAttribute('tabindex') === '0'
+  const completed = controlled ? page.waitForResponse((response) => {
+    if (!response.url().endsWith('/api/v1/dev.browser.action')) return false
+    const input = response.request().postDataJSON()
+    return input.action === (touch ? 'touch' : 'pointer') && input.phase === 'up' && (touch || input.click_count === clickCount)
+  }) : null
   if (touch) await page.touchscreen.tap(px, py)
   else await page.mouse.click(px, py, { clickCount })
+  if (completed) {
+    const response = await completed
+    expect(response.ok(), await response.text()).toBe(true)
+  }
 }
 
 export async function typeRemote(page: Page, text: string, phone = false): Promise<void> {
   if (phone) {
     await page.getByRole('button', { name: 'Keyboard', exact: true }).click()
+    const completed = page.waitForResponse((response) => response.url().endsWith('/api/v1/dev.browser.action') && response.request().postDataJSON().action === 'text')
     await page.keyboard.insertText(text)
+    const response = await completed
+    expect(response.ok(), await response.text()).toBe(true)
   } else {
-    // Pace real physical key events so this does not test a synthetic burst
-    // faster than the bounded remote input channel can admit.
-    await page.keyboard.type(text, { delay: 100 })
+    // Keep real physical key events, but wait for each admission rather than
+    // outpacing a remote server with a fixed synthetic typing interval.
+    for (const character of text) {
+      const completed = page.waitForResponse((response) => response.url().endsWith('/api/v1/dev.browser.action') && response.request().postDataJSON().action === 'key')
+      await page.keyboard.type(character)
+      const response = await completed
+      expect(response.ok(), await response.text()).toBe(true)
+    }
   }
 }

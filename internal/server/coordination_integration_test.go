@@ -4,9 +4,7 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -120,22 +118,15 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	attA := openAttach(t, adaClient, runA.ID)
 	attB := openAttach(t, boClient, runB.ID)
 
-	// Cold start with the switch off: the image still receives the staged CLI,
-	// but no socket or coordination directory is provisioned.
-	attA.waitOutput(t, "assets:none")
-	attB.waitOutput(t, "assets:none")
-	e.assertNoCoordination(t, runA)
-	e.assertNoCoordination(t, runB)
-	if _, err := os.Stat(filepath.Join(e.dataDir, "coord")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("coordination directory exists with coordination off (stat error %v)", err)
-	}
-	// The radar still reacts, and it is the only coordination side effect.
+	// The policy switch removes peer and mission authority, not authenticated
+	// run discovery or the independent development broker.
+	e.assertRunAuthority(ctx, t, runA, true, runB.ID)
+	e.assertRunAuthority(ctx, t, runB, true, runA.ID)
 	waitOverlap(t, adaCtrl, runA.ID, runB.ID)
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID)
 	drain(sub, &seen)
 	assertNoCoordNote(t, seen)
-	// A swarm's integrator and workers talk over the same mailbox, so
-	// mission.create names the switch that took it away.
+	// A swarm needs the disabled mailbox authority.
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "claude", Mode: string(domain.LaunchTUI)}
 	createErr := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
 		WorkspaceID: string(e.ws.ID), Objective: "swarm with coordination off", IdempotencyKey: "kill-switch-swarm",
@@ -143,13 +134,12 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
 		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
 	}, nil)
-	const wantCreate = "swarms need conflict coordination; the server was started with --conflict-coordination=false: scheduler: coordination is unavailable"
-	if createErr == nil || !strings.Contains(createErr.Error(), wantCreate) {
-		t.Errorf("mission.create with coordination off = %v, want %q", createErr, wantCreate)
+	if createErr == nil {
+		t.Error("mission.create succeeded with coordination off")
 	}
 
-	// Off -> on. Only a new run gains the bridge; the two containers that
-	// predate the switch keep exactly what they were given.
+	// Off -> on restores coordination authority for recovered runs as well
+	// as new runs; all retain their run-scoped development identity.
 	srv.stop()
 	srv = e.start(ctx, t, false)
 	sub, seen = srv.subscribe(ctx, t), nil
@@ -158,24 +148,23 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 
 	runC := e.launch(t, adaCtrl, taskC, "claude")
 	attC := openAttach(t, adaClient, runC.ID)
-	attC.waitOutput(t, "assets:manual-mcp")
-	e.assertRegistered(t, runC)
-	e.assertNoCoordination(t, runA)
-	e.assertNoCoordination(t, runB)
+	e.assertRunAuthority(ctx, t, runC, false, runA.ID)
+	e.assertRunAuthority(ctx, t, runA, false, runB.ID)
+	e.assertRunAuthority(ctx, t, runB, false, runA.ID)
 	waitOverlap(t, adaCtrl, runC.ID, runA.ID)
 
-	// On -> off. Run C's already-created container retains its read-only
-	// mounts, but the service unlinks the socket on recovery.
+	// On -> off recovers the same sockets, serving discovery and development
+	// while refusing mailbox and mission calls.
 	srv.stop()
-	dir := e.coordDir(runC.ID)
 	srv = e.start(ctx, t, true)
 	sub, seen = srv.subscribe(ctx, t), nil
 	adaCtrl, _ = srv.control(t, e.ada.key)
-	e.assertRegistered(t, runC)
-	if _, serr := os.Stat(filepath.Join(dir, coordtransport.SocketName)); !errors.Is(serr, fs.ErrNotExist) {
-		t.Errorf("the coordination socket survived the switch being turned off (stat error %v)", serr)
+	for _, run := range []protocol.Run{runA, runB, runC} {
+		e.assertRunAuthority(ctx, t, run, true, runA.ID)
 	}
-	assertToolsUnavailable(ctx, t, filepath.Join(dir, coordtransport.SocketName), runA.ID)
+	for _, att := range []*attachConn{attA, attB, attC} {
+		assertNoAgentError(t, att)
+	}
 
 	// No side effect anywhere, and the radar is still exactly as it was.
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID, runC.ID)
@@ -414,25 +403,27 @@ func (e *coordEnv) assertUnregistered(t *testing.T, run protocol.Run) {
 	}
 }
 
-// assertNoCoordination is what a run launched with the kill switch off
-// carries: the version-matched CLI only, with no socket or bridge mount.
-func (e *coordEnv) assertNoCoordination(t *testing.T, run protocol.Run) {
+// assertDevelopmentDiscovery checks the authenticated identity and independent
+// development authority, including when conflict coordination is disabled.
+func assertDevelopmentDiscovery(t *testing.T, status protocol.CoordStatusResult, run protocol.Run, disabled bool, development ...string) {
 	t.Helper()
-	c := e.container(t, run.ID)
-	if slices.Contains(c.spec.Command, "--mcp-config") {
-		t.Errorf("run %s received obsolete automatic MCP config: %v", run.ID, c.spec.Command)
+	if status.RunID != run.ID || status.WorkspaceID != run.WorkspaceID || status.MemberID != run.MemberID {
+		t.Fatalf("discovery identity = %+v, want run %+v", status, run)
 	}
-	m, ok := c.mount(coordtransport.CLIPath)
-	if !ok || !m.ReadOnly {
-		t.Errorf("run %s has no read-only CLI mount with coordination off: %+v", run.ID, c.spec.Mounts)
-	}
-	for _, target := range []string{coordtransport.MountDir, coordtransport.BinaryPath} {
-		if _, ok := c.mount(target); ok {
-			t.Errorf("run %s has a %s mount with coordination off: %+v", run.ID, target, c.spec.Mounts)
+	for _, method := range append([]string{protocol.MethodCoordStatus}, development...) {
+		if !slices.Contains(status.Capabilities, method) {
+			t.Errorf("run %s did not advertise %s: %v", run.ID, method, status.Capabilities)
 		}
 	}
-	if _, err := os.Stat(e.coordDir(run.ID)); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("run %s has a coordination directory with coordination off (stat error %v)", run.ID, err)
+	if disabled {
+		if len(status.Peers) != 0 || status.Unread != 0 || status.Assignment != nil {
+			t.Errorf("disabled coordination exposed peer or mission state: %+v", status)
+		}
+		for _, method := range status.Capabilities {
+			if method != protocol.MethodCoordStatus && !strings.HasPrefix(method, "dev.") {
+				t.Errorf("disabled coordination advertised %s", method)
+			}
+		}
 	}
 }
 
@@ -453,31 +444,41 @@ func (e *coordEnv) assertNoMail(ctx context.Context, t *testing.T, srv *coordSer
 	}
 }
 
-// assertToolsUnavailable drives the real bridge at a socket the kill
-// switch unlinked: every tool must report Aether's unavailable code.
-func assertToolsUnavailable(ctx context.Context, t *testing.T, sock, peer string) {
+func (e *coordEnv) assertRunAuthority(ctx context.Context, t *testing.T, run protocol.Run, disabled bool, peer string) {
 	t.Helper()
-	cs, stop, err := bridgeSession(ctx, sock)
-	if err != nil {
-		t.Fatalf("start a bridge on the inert socket: %v", err)
+	sock := filepath.Join(e.coordDir(run.ID), coordtransport.SocketName)
+	var status protocol.CoordStatusResult
+	if err := coordtransport.Call(ctx, sock, protocol.MethodCoordStatus, nil, &status); err != nil {
+		t.Fatalf("run %s discovery: %v", run.ID, err)
 	}
-	defer stop()
-	calls := []struct {
-		tool string
-		args any
-	}{
-		{toolStatus, nil},
-		{toolSend, protocol.CoordSendParams{ToRunID: peer, Body: "anyone there?"}},
-		{toolInbox, nil},
-	}
-	for _, call := range calls {
-		res, cerr := callTool(ctx, cs, call.tool, call.args, nil)
-		if cerr == nil {
-			t.Errorf("%s answered with coordination off", call.tool)
-			continue
+	assertDevelopmentDiscovery(t, status, run, disabled)
+	if slices.Contains(status.Capabilities, protocol.MethodDevTerminalList) {
+		var terminals protocol.DevTerminalListResult
+		if err := coordtransport.Call(ctx, sock, protocol.MethodDevTerminalList, nil, &terminals); err != nil {
+			t.Fatalf("run %s development terminal list: %v", run.ID, err)
 		}
-		if code := toolErrorCode(res); code != protocol.CodeUnavailable {
-			t.Errorf("%s error code = %d, want %d (unavailable): %v", call.tool, code, protocol.CodeUnavailable, cerr)
+	}
+	if !disabled {
+		if !slices.Contains(status.Capabilities, protocol.MethodCoordSend) {
+			t.Errorf("run %s did not regain peer messaging: %v", run.ID, status.Capabilities)
+		}
+		if err := coordtransport.Call(ctx, sock, protocol.MethodCoordInbox, nil, nil); err != nil {
+			t.Errorf("run %s did not regain mailbox access: %v", run.ID, err)
+		}
+		return
+	}
+	for _, call := range []struct {
+		method string
+		params any
+	}{
+		{protocol.MethodCoordSend, protocol.CoordSendParams{ToRunID: peer, Body: "anyone there?"}},
+		{protocol.MethodCoordInbox, nil},
+		{protocol.MethodTaskList, nil},
+		{protocol.MethodRunReport, nil},
+	} {
+		err := coordtransport.Call(ctx, sock, call.method, call.params, nil)
+		if code := coordtransport.ErrorCode(err); code != protocol.CodeUnavailable {
+			t.Errorf("%s with coordination off = %v, want unavailable (%d)", call.method, err, protocol.CodeUnavailable)
 		}
 	}
 }

@@ -21,36 +21,80 @@ obsolete. Operational commands belong in the public guides, not this file.
 
 ## Verification recorded so far
 
-- Repository formatting, vet, lint, full Go race tests, script tests, and public
-  audit passed before the native-hook merge. Merged-union checks are running.
-- Dashboard typecheck, 91 files / 1,381 tests, and the production dashboard plus
-  CLI/server build passed. Focused merged coordinator/CLI tests and rebuilt
-  binaries also passed.
+- Integrated formatting, vet, lint, full Go race tests, script tests, and public
+  audit passed after the capture-budget and browser-status fixes. Dashboard
+  typecheck and 91 files / 1,385 tests passed.
+  The production dashboard plus CLI/server build passed with Go 1.26.8.
+  Run-link and startup navigation corrections passed 87 focused store tests
+  and both real import scenarios. Final-head checks remain required.
 - An isolated Ubuntu 24.04 server VM runs in `multi-user.target`, with no X11,
   Wayland, Xvfb, desktop session, or host Chromium. Real Docker builds of the
   standard environment and browser companion passed there.
 - The actual companion smoke exercised a loopback app, DOM actions, popups,
-  console, PNG/JPEG capture, alternate-buffer terminal PNG, and clean-session
-  reset. All four companion behavior tests passed, including stale DOM/frame
-  invalidation, static-frame replay, bounds, and held-input cleanup.
+  console, PNG/JPEG capture, a 240-column alternate-buffer terminal PNG with its
+  final column visible, and clean-session reset. All five companion behavior
+  tests passed, including stale DOM/frame invalidation, cached-title input,
+  static-frame replay, bounds, and held-input cleanup. Aborting a renderer with
+  Chromium virtual time paused closed its context and released the queue while
+  preserving the app; the same probe failed against the previous image.
 - Kernel inspection verified Chromium renderer namespace isolation,
   `NoNewPrivs`, seccomp filtering, and additional renderer filters. The browser
   retains Docker's AppArmor policy and its explicit seccomp profile; no
   privileged or unconfined fallback was used.
-- Real Docker integration passed the Git engine and integration packages.
-  The full integration gate is not yet complete: a negative browser fixture's
-  directory permissions were corrected, and the remaining packages need their
-  complete run. Do not infer a full gate from these partial results.
+- Genuine OMP completed the edit/run/observe/correct loop through its registered
+  harness: CLI exit codes and file effects before any browser launch, valid and
+  invalid sign-in, HMR, desktop/phone layouts, and alternate-screen TUI input,
+  Unicode, queries, resize, and PNG capture. Its native image-read records
+  match the three retained PNGs by SHA-256.
+- After headless cleanup, the actual dashboard displayed those retained
+  desktop, phone, and terminal images with their capture/revision boundaries.
+- The actual mobile shared-browser scenario passed HMR, reconnect, handoff,
+  accented text, Japanese IME, two touches, phone layout, and sign-out.
+- Actual detach, pause/resume, interactive harness exit, server restart,
+  close/relaunch, whole-companion failure, deletion, and worker completion
+  preserved the documented ownership and explicit-restart boundaries.
+  Development input and browser interaction preserved a real human's primary
+  mission PTY lease and durable hold; explicit primary release cleared the hold.
+- Three companions were admitted and the fourth refused without starving
+  coordination. Four streams were admitted; a fifth returned 429. With three
+  private companion readers stalled, the fourth received 101 frames in
+  30 seconds. Exact Node RSS measurements are observations, not a formal heap
+  bound. Capture count, 128 MiB aggregate, 8 MiB image, and dimension limits
+  refused excess work without retaining artifacts. A deliberately unavailable
+  namespace sandbox returned its actual failure without a privileged fallback.
+- Fifteen native startup variants exercised the five shipped adapters.
+  Authenticated taskless OMP and OpenCode independently discovered the skill
+  entry point and live capabilities. Claude, Codex, and pi authentication
+  refusals are startup evidence, not authenticated model-loop acceptance.
+- Native Git and gh against disposable GitHub repositories passed selected-path
+  commit, explicit fork/head/base targeting, feedback to Run Room, wrong-target
+  refusal, non-fast-forward push refusal, direct gh-created PR discovery, and
+  member-account credential removal. The uncertain-create case discarded the
+  response to one successful real POST; read-only reconciliation found that
+  exact PR without another create.
+- PR #247's first CI run passed native harness and browser companion smoke on
+  amd64 and arm64, release builds, and most integration shards. Windows socket
+  paths, privileged integration setup, and dashboard fixture readiness need
+  corrected final-head CI; the full integration/E2E gate is not yet green.
 
 ## Acceptance still in progress
 
-- Genuine OMP and OpenCode model-driven web/TUI/CLI loops through registered
-  Aether harnesses, including explicit retained captures after headless cleanup.
-- Actual dashboard desktop/phone interaction and visual inspection, shared
-  control, reconnect, and the full dashboard end-to-end suite.
-- Real disposable GitHub repository/fork publishing, exact head/base rejection,
-  native push failure, direct gh-created PR discovery, uncertain creation,
-  member-account credential removal, and feedback to Run Room.
+- A complete second native harness loop remains required. OpenCode's original
+  terminal PNG requests exceeded the 15-second HTTP deadline. Removing the
+  oversized initial viewport helped but did not fix the actual 164-column
+  dashboard capture. Rendering now has a 30-second whole-operation deadline,
+  caller cancellation, and transport margins. A later OpenCode attempt crashed
+  inside its bundled Bun 1.3.14 before reaching terminal capture; that attempt
+  is not accepted.
+- Final desktop and shared-terminal dashboard scenarios on the rebuilt
+  companion. Cached title reads remove observed physical-input delays without
+  weakening the one-second input expiry or control fences.
+- Chromium-only failure with Node still running exposed a status error path.
+  Both health and page-inventory failures now return structured unavailability
+  with the actual reason; real explicit recovery and permission revocation
+  still need final proof.
+- Production hosted HTTPS/WhoIs acceptance awaits temporary tailnet-node
+  authorization. Local-gateway tests do not substitute for that boundary.
 - Complete Docker integration, final merged quality gates, PR review/CI, merge,
   and a new tag plus published release. Release CI must prove public pulls of
   both companion architectures before downloadable binaries are published.

@@ -29,6 +29,10 @@ export interface Gateway {
   stop: () => Promise<void>
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
 function gatewayEnv(home: string, configDir: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -47,12 +51,13 @@ function gatewayEnv(home: string, configDir: string): NodeJS.ProcessEnv {
     PATH: '/usr/bin:/bin',
     // OpenSSH resolves ~ from the password database, not from HOME, so git
     // would otherwise look for this member's key and known_hosts in the real
-    // user's home. Both files are the ones the Link step writes.
+    // user's home. Both files are the ones the Link step writes. Quote for
+    // the shell and, for known_hosts, OpenSSH's own space-separated file list.
     GIT_SSH_COMMAND: [
       'ssh',
-      `-i ${path.join(home, '.ssh', 'id_ed25519')}`,
+      `-i ${shellQuote(path.join(home, '.ssh', 'id_ed25519'))}`,
       '-o IdentitiesOnly=yes',
-      `-o UserKnownHostsFile=${path.join(home, '.ssh', 'known_hosts')}`,
+      `-o ${shellQuote(`UserKnownHostsFile=${JSON.stringify(path.join(home, '.ssh', 'known_hosts'))}`)}`,
       '-o BatchMode=yes',
     ].join(' '),
   }

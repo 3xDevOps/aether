@@ -24,7 +24,7 @@ test('phone operates the shared login with touch, soft keyboard and composition'
       await driver.send('Input.imeSetComposition', { text: '日本語', selectionStart: 3, selectionEnd: 3 })
       await driver.send('Input.insertText', { text: '日本語' })
       await fixture.waitText('Note: Phone café 日本語')
-      await expect.poll(async () => (await fixture.snapshot()).nodes.find((node) => node.name === 'Shared note')?.value).toBe('Phone café 日本語')
+      await expect.poll(async () => (await fixture.snapshot()).nodes.find((node) => node.role === 'textbox' && node.name === 'Shared note')?.value).toBe('Phone café 日本語')
       const contacts = await page.getByLabel('Shared browser page', { exact: true }).evaluate((node) => {
         const canvas = node as HTMLCanvasElement
         const box = canvas.getBoundingClientRect()

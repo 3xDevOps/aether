@@ -224,7 +224,10 @@ output parsing is not a reason to discard user input. This policy applies only
 to development terminals; primary harness replay gating is unchanged.
 
 **Screenshot** calls the terminal screenshot API and captures the server's
-actual emulator state. Open the existing **Evidence** drawer to inspect and
+actual emulator state, without needing a connected viewer. Its total budget is
+90 seconds, including first companion startup; rendering itself is bounded to
+30 seconds. Cancelling the request closes only its isolated renderer, not the
+app's browser session. Open the existing **Evidence** drawer to inspect and
 select transient captures and explicitly retain them with verification notes.
 Taking a screenshot alone does not retain it as durable evidence.
 

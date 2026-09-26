@@ -7,12 +7,24 @@ import { dockerReachable } from '../harness/server'
 import { memberID, seedWorkspace } from '../harness/setup'
 
 const tui = readFileSync(new URL('./querying-tui.sh', import.meta.url), 'utf8')
-const launch = `printf '%s' '{"name":"agent-tui","command":["dev-tui"],"cols":73,"rows":19}' | aether-internal terminal start --params-file -
+// The executable starts while the container is still provisioning. Discover
+// live authority before issuing the one terminal-start mutation, just as an
+// agent must; never retry a mutation whose outcome could be ambiguous.
+const launch = `remaining=100
+while :; do
+  status=$(aether-internal status) || exit 1
+  case "$status" in *'"dev.terminal.start"'*) break ;; esac
+  remaining=$((remaining - 1))
+  if [ "$remaining" -eq 0 ]; then printf '%s\\n' "$status" >&2; exit 1; fi
+  sleep 0.1
+done
+printf '%s' '{"name":"agent-tui","command":["dev-tui"],"cols":73,"rows":19}' | aether-internal terminal start --params-file - || exit 1
 while :; do sleep 1; done`
 
 async function openDock(page: Page, url: string): Promise<Locator> {
   await page.goto(url)
   const sidebar = page.getByRole('button', { name: 'Expand sidebar' })
+  await expect(sidebar.or(page.getByRole('complementary', { name: 'Runs' }))).toBeVisible()
   if (await sidebar.isVisible()) {
     await sidebar.click()
     await page.getByRole('dialog', { name: 'Runs' }).getByRole('button', { name: /development terminal acceptance/ }).click()
