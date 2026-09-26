@@ -168,10 +168,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           client={client}
           onClose={() => setDeleting(null)}
           onDeleted={() => {
-            const state = useStore.getState()
-            state.setWorkspaces(
-              Object.values(state.workspaces).filter((workspace) => workspace.id !== deleting.id),
-            )
+            useStore.getState().removeWorkspace(deleting.id)
             void refetch()
           }}
         />

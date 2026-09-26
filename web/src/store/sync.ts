@@ -1,7 +1,9 @@
 // Hydration and live updates: one HTTP fetch fills the store, then the event
 // stream is the only thing that changes it.
 
+import { toast } from 'sonner'
 import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
+import { message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
@@ -88,11 +90,18 @@ export async function hydrate(
       store.getState().resetFiles()
     }
     if (!s.hydrated && capabilities?.local?.includes('workspace.selection')) {
-      const saved = await client.localWorkspaceSelection()
-      if (signal?.aborted) return false
-      // A choice made while startup was fetching outranks the saved one.
-      if (store.getState().activeWorkspace === s.activeWorkspace && saved.workspace_id) {
-        s.setActiveWorkspace(saved.workspace_id)
+      try {
+        const saved = await client.localWorkspaceSelection()
+        if (signal?.aborted) return false
+        // A choice made while startup was fetching outranks the saved one.
+        if (store.getState().activeWorkspace === s.activeWorkspace && saved.workspace_id) {
+          s.setActiveWorkspace(saved.workspace_id)
+        }
+      } catch (err) {
+        if (signal?.aborted) return false
+        // Preferences are optional; report the gateway's error without
+        // turning a successful server snapshot into a connection failure.
+        toast.error(message(err))
       }
     }
     s.setIdentityKey(incomingIdentity)
@@ -100,7 +109,7 @@ export async function hydrate(
     s.setWorkspaces(workspaces)
     const active = store.getState().activeWorkspace
     s.setMembers(members)
-    s.setRuns(runs)
+    s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
     s.seedPaused(
@@ -276,6 +285,11 @@ export async function applyEvent(
     store.getState().resetSeq()
     return false
   }
+  if (ev.type === 'workspace.deleted') {
+    // Record deletion before any fetch: every list writer must reject older
+    // snapshots, even while this event's own reconciliation is pending.
+    store.getState().removeWorkspace(ev.workspace_id)
+  }
 
   // Workspaces arrive only by fetch, so an event for one we do not know means
   // a teammate created it after we hydrated. Without this its runs would be
@@ -354,10 +368,6 @@ export async function applyEvent(
     case 'workspace.deleted': {
       try {
         store.getState().setWorkspaces(await client.workspaceListFull())
-        const s = store.getState()
-        for (const run of Object.values(s.runs)) {
-          if (run.workspace_id === ev.workspace_id) s.removeRun(run.id)
-        }
       } catch (err) {
         store.getState().setUnreachable(classifyUnreachable(err, store))
         return false

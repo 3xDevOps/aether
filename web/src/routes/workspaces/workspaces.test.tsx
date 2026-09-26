@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { WorkspacesRoute } from '@/routes/workspaces'
 import { useStore, type RootState } from '@/store'
+import { applyEvent } from '@/store/sync'
 import { alice, bob, fakeApi, otherWorkspace, serverInfo, vera, workspace } from '@/test/fixtures'
 
 function seed(extra: Partial<RootState> = {}) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
+    deletedWorkspaceIDs: new Set(),
+    lastSeq: 0,
     activeWorkspace: '',
     members: { [alice.id]: alice },
     info: serverInfo,
@@ -183,5 +186,59 @@ describe('workspaces view', () => {
     await act(async () => resolveInitial([workspace, otherWorkspace]))
     expect(screen.queryByText(workspace.name)).toBeNull()
     expect(useStore.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it.each([
+    { label: 'another workspace remains', remaining: [otherWorkspace] },
+    { label: 'the last workspace is deleted', remaining: [] },
+  ])('rejects a pending route snapshot after remote deletion when $label', async ({ remaining }) => {
+    const initial = Promise.withResolvers<typeof workspace[]>()
+    const refresh = Promise.withResolvers<typeof workspace[]>()
+    const client = fakeApi({
+      workspaceListFull: vi.fn()
+        .mockReturnValueOnce(initial.promise)
+        .mockReturnValueOnce(refresh.promise),
+    })
+    seed({
+      workspaces: Object.fromEntries([workspace, ...remaining].map((w) => [w.id, w])),
+      activeWorkspace: workspace.id,
+      route: { name: 'workspace', params: { workspaceId: workspace.id } },
+    })
+    render(<WorkspacesRoute params={{}} client={client} />)
+    let deletion!: Promise<boolean>
+    act(() => {
+      deletion = applyEvent(useStore, {
+        id: 'evt_delete', seq: 1, time: '2026-08-14T11:00:00Z',
+        workspace_id: workspace.id, run_id: '', actor_id: '',
+        type: 'workspace.deleted', payload: {},
+      }, client)
+    })
+
+    const expectedRoute = remaining.length
+      ? { name: 'workspace', params: { workspaceId: otherWorkspace.id } }
+      : { name: 'workspaces', params: {} }
+    expect(screen.queryByText(workspace.name)).toBeNull()
+    expect(useStore.getState().route).toEqual(expectedRoute)
+
+    // The route request started before deletion and resolves while the
+    // event's reconciliation is still pending.
+    await act(async () => initial.resolve([workspace, ...remaining]))
+    expect(screen.queryByText(workspace.name)).toBeNull()
+    expect(useStore.getState().activeWorkspace).toBe(remaining[0]?.id ?? '')
+    expect(useStore.getState().route).toEqual(expectedRoute)
+
+    // Even the event's own refresh may carry a stale snapshot.
+    await act(async () => {
+      refresh.resolve([workspace, ...remaining])
+      expect(await deletion).toBe(true)
+    })
+    expect(useStore.getState().workspaces).toEqual(
+      Object.fromEntries(remaining.map((w) => [w.id, w])),
+    )
+    expect(useStore.getState().activeWorkspace).toBe(remaining[0]?.id ?? '')
+    expect(useStore.getState().route).toEqual(expectedRoute)
+    expect(screen.queryByText(workspace.name)).toBeNull()
+    if (remaining.length) expect(screen.getByText(otherWorkspace.name)).toBeDefined()
+    else expect(screen.getByText('No workspaces yet.')).toBeDefined()
   })
 })

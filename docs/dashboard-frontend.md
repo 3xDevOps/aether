@@ -236,8 +236,9 @@ dashboards use the `aether.ui` local-storage preference. The local gateway also
 stores it through `workspace.selection`, keyed by server address and member,
 because the desktop app's ephemeral port changes the browser origin on each
 launch. Startup restores this value before choosing a fallback; a selection
-made while startup is loading takes precedence. A failed preference read or
-write remains visible as the gateway's error.
+made while startup is loading takes precedence. A failed preference read shows
+the gateway's original error in a toast without blocking workspace and run
+data: the current valid selection or normal fallback still applies.
 
 Derived data (the sidebar's grouped run list, the attention-ordered run list)
 lives in
@@ -626,6 +627,11 @@ an open run in a deleted workspace returns to the board. The capabilities
 fetch may fail without failing hydration; a legacy gateway then holds `null`.
 The snapshot also seeds the board's paused map from each run's wire `paused`
 field, skipping runs that do not carry it.
+
+`removeWorkspace` records deleted IDs for the lifetime of the in-memory store.
+Every workspace snapshot and upsert excludes those IDs, so an older route or
+hydration response cannot resurrect a deletion received from another member.
+Removal also repairs the selection and open route before any refresh awaits.
 
 - **The subscription is established first.** Hydration starts only once the
   server acknowledges it (`{"ok":true}`), which is also when the client calls

@@ -812,6 +812,8 @@ file atomically with mode `0600`. The gateway token and same-origin checks
 apply. The dashboard reads the preference at startup and saves changes in
 order, so an ephemeral gateway port does not reset the selection. A deleted
 selection falls back to a remaining workspace, or clears when none remain.
+An unreadable preference produces a dashboard error toast but does not prevent
+the server snapshot from loading.
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
