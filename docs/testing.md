@@ -392,7 +392,7 @@ covered - WebKit is not installed.
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `run-views.mobile.spec.ts` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
-| `terminal-phone.mobile.spec.ts` | A real run's Terminal tab on a phone, against the real gateway: a desktop writer sets 132x43, the phone mirrors and pans that grid without changing it through control, key-bar input or keyboard-height changes, then follows the writer's resize. A long-output run exercises a continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal touch panning does not raise an editable keyboard, send input or alter the shared PTY geometry |
+| `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
 | `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome |
 
 The installed window itself is not in the suite. Chromium exposes no
@@ -435,6 +435,13 @@ They add about 15 seconds to `make test-e2e` and to the `dashboard-e2e` job,
 which stays inside the suite's 30-minute `globalTimeout` unchanged. That job
 uploads its `playwright-report` artifact on a pass as well as a failure, so
 the phone screenshots are on every run.
+
+Reference screenshots from a Chromium touch audit use synthetic API data
+and a 132x43 terminal: [terminal before/after and keyboard-height input](media/mobile-terminal-scroll.webp),
+and [short-screen page and dialog layouts](media/mobile-layout-audit.webp).
+The audit exercised 390x844, 360x740 and 390x524 viewports, including the
+bottom actions of long pages and dialogs. These images show browser layout,
+not a physical keyboard or a live vendor session.
 
 ### Adding a step to the wizard
 

@@ -23,9 +23,9 @@ function PopoverContent({
         data-slot="popover-content"
         sideOffset={sideOffset}
         align={align}
+        collisionPadding={8}
         className={cn(
-          'z-50 max-h-[min(640px,calc(100dvh-16px))] w-[min(420px,calc(100vw-16px))] overflow-y-auto rounded-[4px] border border-border bg-popover p-3 text-[13px] leading-5 text-popover-foreground shadow-overlay outline-none',
-          'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
+          'z-50 max-h-[min(640px,calc(100dvh-16px),var(--radix-popover-content-available-height))] w-[min(420px,calc(100vw-16px))] overflow-y-auto rounded-[4px] border border-border bg-popover p-3 text-[13px] leading-5 text-popover-foreground shadow-overlay outline-none',
           className,
         )}
         {...props}

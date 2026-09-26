@@ -132,7 +132,7 @@ function LinkCard({ client }: { client: Api }) {
               <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Repository
               </dt>
-              <dd className="truncate font-mono" title={link.repo}>
+              <dd className="break-all font-mono">
                 {link.repo}
               </dd>
             </div>
@@ -274,13 +274,13 @@ function DaemonCard({ client }: { client: Api }) {
       )}
       {status?.installed && !installed && (
         <p className="border-l-2 border-state-done/60 bg-state-done/5 px-3 py-2 text-sm">
-          Installed at <span className="font-mono">{status.unit_path}</span>.
+          Installed at <span className="break-all font-mono">{status.unit_path}</span>.
         </p>
       )}
       {installed && (
         <div className="min-w-0 space-y-3 border-t border-state-done/30 bg-state-done/5 py-3">
           <p className="text-sm">
-            Installed at <span className="font-mono">{installed.unit_path}</span>.
+            Installed at <span className="break-all font-mono">{installed.unit_path}</span>.
           </p>
           <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
             <Input

@@ -519,8 +519,8 @@ it in a follow-up.
 finger has to hit carries its touch size beside its desktop one - for example
 `size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
 laptop with a trackpad keeps the desktop density. Under it the `Button`
-sizes, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`, the
-`Select` trigger and its options, the dialog close, the palette trigger and
+sizes, `Input`, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`,
+the `Select` trigger and its options, the dialog close, the palette trigger and
 input, the status bar controls, the sidebar run rows and the sidebar's own
 buttons, the run-list title, the files tree rows and the approvals controls
 grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
@@ -1447,11 +1447,12 @@ A following terminal therefore:
   local measurements and resize reports, while `setGeometry()` applies the
   server's grid just as on desktop. The header carries `standardGeometry`
   (80x24) only for a session being created, such as a new shell tab.
-  The live terminal pane exposes horizontal overflow only, so a grid wider
-  than the phone can be panned sideways. The integrated run-history surface
-  owns both axes while reading, without a competing outer vertical scroller.
-  While steering, the flag still keeps this viewer out of the shared size
-  calculation.
+  On phones the live terminal host exposes both axes. `useTerminalPan`
+  reveals the cursor on entry, focus, input and viewport changes, without
+  resizing xterm; a manual pan pauses following until focus or input resumes it.
+  The integrated run-history surface owns both axes while reading, with
+  live-grid panning disabled. Steering still keeps this viewer out of the
+  shared size calculation.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
   what makes xterm's textarea read-only, so a tap on a mirror raises no
@@ -1464,16 +1465,18 @@ and Ctrl+C, each through `terminal.input` so the replay gate and
 modifier held in the host (`armCtrl`), because a soft keyboard sends
 characters and never a modifier: it rewrites the next character into its
 control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte. The two copy actions carry a visible
-word beside them under `coarse:`, because a tooltip is the only other thing
-telling them apart and hover is what opens one.
+than spending it on the wrong byte. On phones **Tools** opens a bounded,
+scrollable popover with named search, text-size, copy, paste and upload
+actions instead of a second permanent toolbar row. Wider touch screens keep
+the inline tools and visible copy labels.
 
-The phone's outer pane is a horizontal pan area only. In a run's normal buffer,
-a downward finger drag hands off continuously to integrated history; subsequent
-swipes browse older pages or return live at the bottom. The read surface keeps
-horizontal panning and does not resize the PTY or raise an input keyboard.
-Ordinary alternate-screen gestures still belong to the application. Shell and
-environment terminals retain native xterm scrollback.
+In a run's normal buffer, a downward finger drag pans the live grid to its
+top before handing off continuously to integrated history. Horizontal drags
+do not enter history. Subsequent history swipes browse older pages or return
+live at the bottom. Panning either surface does not resize the PTY or raise
+an input keyboard. Oversized alternate screens use live-grid panning too;
+when the grid fits vertically, application scrolling remains native. Shell
+and environment terminals retain native xterm scrollback.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once

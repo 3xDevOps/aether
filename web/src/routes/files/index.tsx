@@ -536,7 +536,7 @@ function FileEditor({
   return (
     <article className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <header className="shrink-0 border-b bg-sidebar">
-        <div className="flex min-w-0 flex-wrap items-center gap-2 px-2 py-1">
+        <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-2 py-1 md:flex md:flex-wrap">
           <button
             type="button"
             className={cn(
@@ -548,7 +548,7 @@ function FileEditor({
             <ArrowLeft className="size-3.5" aria-hidden />
             Browse
           </button>
-          <div className="min-w-0 flex-[1_1_14rem]">
+          <div className="min-w-0 md:flex-[1_1_14rem]">
             <p className="truncate font-mono text-[12px] font-medium" title={selection.path}>
               {selection.path}
             </p>
@@ -574,7 +574,7 @@ function FileEditor({
             disabled={!canEdit || !draft || draft.content === draft.baseContent || draft.saving}
             className={cn(
               focusRing,
-              'h-[26px] coarse:h-11 coarse:min-h-11 border border-input bg-primary px-2 text-[11px] text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50',
+              'min-h-[26px] min-w-0 max-w-full justify-self-start whitespace-normal break-all coarse:min-h-11 border border-input bg-primary px-2 py-1 text-[11px] text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50',
             )}
             onClick={() => void save()}
           >
@@ -732,6 +732,17 @@ function EditableDocument({
             '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--muted-foreground)' },
             '.cm-activeLineGutter': { backgroundColor: 'transparent' },
             '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--selection) 35%, transparent)' },
+            '@media (pointer: coarse)': {
+              '.cm-panels': { maxHeight: '60%', overflowY: 'auto', backgroundColor: 'var(--sidebar)', color: 'var(--foreground)' },
+              '.cm-panels .cm-panel.cm-search': { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', padding: '8px', fontSize: '13px' },
+              '.cm-panels .cm-panel.cm-search > *': { margin: '0' },
+              '.cm-panels .cm-panel.cm-search .cm-textfield': { boxSizing: 'border-box', minWidth: '0', maxWidth: '100%', height: '44px', fontSize: '16px', backgroundColor: 'var(--field-background)', color: 'var(--foreground)', border: '1px solid var(--input)' },
+              '.cm-panels .cm-panel.cm-search .cm-textfield[name=search]': { order: '-2', width: 'calc(100% - 50px)' },
+              '.cm-panels .cm-panel.cm-search .cm-button': { minWidth: '44px', minHeight: '44px', padding: '0 8px', fontSize: '13px', background: 'var(--secondary)', color: 'var(--foreground)', border: '1px solid var(--input)' },
+              '.cm-panels .cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '4px', minHeight: '44px', fontSize: '13px' },
+              '.cm-panels .cm-panel.cm-search input[type=checkbox]': { width: '18px', height: '18px' },
+              '.cm-panels .cm-panel.cm-search button[name=close]': { position: 'static', order: '-1', minWidth: '44px', minHeight: '44px' },
+            },
           }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !syncing.current) onChange(update.state.doc.toString())

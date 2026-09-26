@@ -190,6 +190,25 @@ test('accepts the first upward gesture as soon as the restored live surface is a
   view.dispose()
 })
 
+test('pans the live grid before entering history and leaves horizontal drags alone', async () => {
+  const view = mountHistory(cacheFor(fakeApi()))
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
+  view.host.scrollTop = 60
+  fireEvent.wheel(view.host, { deltaY: -30 })
+  fireEvent.touchStart(view.host, { touches: [{ clientX: 100, clientY: 100 }] })
+  fireEvent.touchMove(view.host, { touches: [{ clientX: 100, clientY: 130 }] })
+  expect(screen.queryByRole('region', { name: 'Terminal scrollback' })).toBeNull()
+
+  view.host.scrollTop = 0
+  fireEvent.touchStart(view.host, { touches: [{ clientX: 100, clientY: 100 }] })
+  fireEvent.touchMove(view.host, { touches: [{ clientX: 150, clientY: 104 }] })
+  expect(screen.queryByRole('region', { name: 'Terminal scrollback' })).toBeNull()
+  fireEvent.touchStart(view.host, { touches: [{ clientX: 100, clientY: 100 }] })
+  fireEvent.touchMove(view.host, { touches: [{ clientX: 100, clientY: 130 }] })
+  expect(await screen.findByRole('region', { name: 'Terminal scrollback' })).toBeDefined()
+  view.dispose()
+})
+
 test('keeps typing in the reading surface from launching a run or navigating away', async () => {
   await hydrate(useStore, fakeApi())
   useStore.setState({ paletteDialog: null, route: { name: 'terminal', params: { runId: 'run_1' } } })

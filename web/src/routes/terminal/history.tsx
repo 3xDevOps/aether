@@ -85,6 +85,7 @@ export function TerminalHistory({
   const searchRevision = useRef(0)
   const searchMatch = useRef<{ query: string; row: number } | null>(null)
   const touchY = useRef<number | null>(null)
+  const touchX = useRef<number | null>(null)
   const surfaceTouchY = useRef<number | null>(null)
   const episode = useRef(0)
   const liveFocus = useRef<{ owner: Element | null; terminal: Terminal | null } | null>(null)
@@ -264,7 +265,7 @@ export function TerminalHistory({
     const intent: CaptureIntent = {
       viewportY: terminal.buffer.normal.viewportY,
       left: terminal.element?.parentElement?.scrollLeft ?? 0,
-      delta,
+      delta: delta + (terminal.element?.parentElement?.scrollTop ?? 0),
     }
     const pending = pendingCapture.current
     if (pending?.terminal === terminal && pending.buffer === terminal.buffer.active) {
@@ -308,7 +309,7 @@ export function TerminalHistory({
     if (!terminal || !host || !enabled || restoring || frozen) return
     const normal = () => terminal.buffer.active === terminal.buffer.normal
     const wheel = (event: WheelEvent) => {
-      if (!normal() || event.deltaY >= 0 || event.ctrlKey) return
+      if (!normal() || event.defaultPrevented || host.scrollTop > 0 || event.deltaY >= 0 || event.ctrlKey) return
       event.preventDefault()
       event.stopPropagation()
       const height = terminal.element?.querySelector('.xterm-screen')?.getBoundingClientRect().height
@@ -324,14 +325,25 @@ export function TerminalHistory({
       event.stopPropagation()
       enter(home ? -Number.MAX_SAFE_INTEGER : -host.clientHeight * 0.9, event.shiftKey)
     }
-    const touchStart = (event: TouchEvent) => { touchY.current = event.touches[0]?.clientY ?? null }
+    const touchStart = (event: TouchEvent) => {
+      touchY.current = event.touches[0]?.clientY ?? null
+      touchX.current = event.touches[0]?.clientX ?? null
+    }
     const touchMove = (event: TouchEvent) => {
-      const y = event.touches[0]?.clientY
-      if (!normal() || touchY.current === null || y === undefined || y <= touchY.current) return
+      const point = event.touches[0]
+      if (!point || touchY.current === null || touchX.current === null || event.touches.length !== 1) return
+      const delta = touchY.current - point.clientY
+      const horizontal = Math.abs(touchX.current - point.clientX) > Math.abs(delta)
+      if (event.defaultPrevented || host.scrollTop > 0 || horizontal) {
+        touchY.current = point.clientY
+        touchX.current = point.clientX
+        return
+      }
+      if (!normal() || delta > -6) return
       event.preventDefault()
       event.stopPropagation()
-      enter(touchY.current - y)
-      touchY.current = y
+      enter(delta)
+      touchY.current = point.clientY
     }
     const pointerDown = (event: PointerEvent) => {
       if (event.target instanceof Element &&
