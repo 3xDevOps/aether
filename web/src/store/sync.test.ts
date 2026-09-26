@@ -1151,6 +1151,49 @@ describe('applyEvent', () => {
     expect(store.getState().missionListWorkspace).toBe(workspace.id)
   })
 
+  it('reparents swarm runs after integrator replacement outside the mission view', async () => {
+    const store = createRootStore()
+    const retired = run({ id: 'old-integrator', mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'old-integrator' })
+    const worker = run({ id: 'worker', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: retired.id })
+    const unrelated = run({ id: 'unrelated', workspace_id: otherWorkspace.id })
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [retired, worker, unrelated]) }))
+    store.setState({ activeWorkspace: otherWorkspace.id, route: { name: 'overview', params: {} } })
+    const replacement = run({ id: 'new-integrator', mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'new-integrator' })
+
+    await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_1' },
+    }), fakeApi({
+      runList: vi.fn(async () => [
+        run({ id: retired.id, status: 'completed' }),
+        { ...worker, integrator_run_id: replacement.id },
+        replacement,
+      ]),
+    }))
+
+    const state = store.getState()
+    expect(state.runs[retired.id].mission_role).toBeUndefined()
+    expect(state.runs[worker.id].integrator_run_id).toBe(replacement.id)
+    expect(state.runs[replacement.id].mission_role).toBe('integrator')
+    expect(state.runs[unrelated.id].workspace_id).toBe(otherWorkspace.id)
+  })
+
+  it('does not consume a mission change when its run snapshot cannot refresh', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const before = store.getState().lastSeq
+    const applied = await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_1' },
+    }), fakeApi({ runList: vi.fn(async () => { throw new TypeError('offline') }) }))
+
+    expect(applied).toBe(false)
+    expect(store.getState().lastSeq).toBe(before)
+    expect(store.getState().runs.run_1).toBeDefined()
+  })
+
   it('follows a server update and never moves it backwards', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

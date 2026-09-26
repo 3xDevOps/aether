@@ -1264,6 +1264,10 @@ ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
 ALTER TABLE missions ADD COLUMN integrator_run_launched INTEGER NOT NULL DEFAULT 0;
 UPDATE missions SET integrator_run_launched = 1 WHERE current_integrator_run_id <> '';
 `,
+	`
+CREATE INDEX idx_missions_integrator_run ON missions(current_integrator_run_id);
+CREATE INDEX idx_mission_attempts_run ON mission_attempts(run_id);
+`,
 }
 
 // migrate brings the schema to the current version. It is idempotent:

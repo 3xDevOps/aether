@@ -297,6 +297,15 @@ Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
 the same capability and member-authorization checks regardless of transport.
 
+`run.list` and `run.get` include optional `mission_id`, `mission_role`, and
+`integrator_run_id` fields on each run snapshot. The current mission integrator
+has role `integrator` and points to its own run ID; workers have role `worker`
+and point to that mission's current integrator, including finished and older
+attempts. Replacing the integrator changes that parent ID on worker snapshots
+and removes the mission fields from the replaced integrator. Ordinary runs
+omit all three fields. These fields come from durable mission and attempt
+relationships, not task text, and confer no authorization.
+
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
 waits for supervision to publish the final branch before removing the

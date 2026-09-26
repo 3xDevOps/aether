@@ -308,6 +308,20 @@ export async function applyEvent(
     await client.memberList().then(store.getState().setMembers).catch(ignore)
   }
 
+  if (ev.type === 'mission.changed' && ev.workspace_id) {
+    try {
+      const runs = await client.runList({ workspace_id: ev.workspace_id })
+      const state = store.getState()
+      state.setRuns([
+        ...Object.values(state.runs).filter((run) => run.workspace_id !== ev.workspace_id),
+        ...runs,
+      ])
+    } catch (err) {
+      store.getState().setUnreachable(classifyUnreachable(err, store))
+      return false
+    }
+  }
+
   // Mission events are scoped projection hints. Never let an event from a
   // background workspace refresh the mission currently visible in this tab.
   if (ev.type.startsWith('mission.') && ev.workspace_id) {
