@@ -84,7 +84,9 @@ func (s *Service) scopeDiagnostics(ctx context.Context, tasks []*domain.Task, at
 	}
 
 	// Observed overlap is derived from the same run.diff snapshots consumed by
-	// the overlap index. Snapshot failures are retained as an explicit unknown.
+	// the overlap index. Only a live attempt's run can hold a snapshot, so a
+	// finished attempt is skipped; for a live one a snapshot failure is
+	// retained as an explicit unknown.
 	type observed struct {
 		attempt *domain.Attempt
 		paths   []string
@@ -93,7 +95,7 @@ func (s *Service) scopeDiagnostics(ctx context.Context, tasks []*domain.Task, at
 	}
 	observedRuns := make([]observed, 0, len(attempts))
 	for _, attempt := range attempts {
-		if attempt == nil || attempt.RunID == "" || byTask[attempt.TaskID] == nil {
+		if attempt == nil || attempt.RunID == "" || byTask[attempt.TaskID] == nil || !attemptLive(attempt.State) {
 			continue
 		}
 		var paths []string
@@ -198,6 +200,13 @@ func latestSubmission(submissions []*domain.Submission, taskID domain.TaskID, re
 		}
 	}
 	return selected
+}
+
+// attemptLive reports whether the attempt's run may still be running:
+// reserved, launching, running, or unknown. A submitted attempt's run has
+// already finished.
+func attemptLive(state domain.AttemptState) bool {
+	return state.HoldsConcurrency() && state != domain.AttemptSubmitted
 }
 
 func taskAttempts(in []*domain.Attempt) []domain.RunID {

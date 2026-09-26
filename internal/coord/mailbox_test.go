@@ -118,6 +118,84 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	}
 }
 
+// TestMissionPeerBeyondTheStatusBoundKeepsItsFiles proves a mission peer
+// that also overlaps is reported with its files and counted once even when
+// the radar's bounded status view leaves it out.
+func TestMissionPeerBeyondTheStatusBoundKeepsItsFiles(t *testing.T) {
+	stub := &missionTransportStub{}
+	total := protocol.CoordMaxStatusPeers + 2
+	h := newHarness(t, total+1, func(c *Config) { c.Mission = stub })
+	worker, integrator := h.run(0), h.run(total)
+	others := make([]domain.RunID, 0, total)
+	for i := 1; i <= total; i++ {
+		others = append(others, h.run(i))
+	}
+	stub.mission = []domain.RunID{worker, integrator}
+	h.peers.hub(worker, others, "src/auth.go")
+
+	st, err := h.svc.Status(context.Background(), worker)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(st.Peers) != protocol.CoordMaxStatusPeers || st.PeerTotal != total || !st.PeersTruncated {
+		t.Fatalf("status = %d peers, total %d, truncated %v; want %d, %d, true", len(st.Peers), st.PeerTotal, st.PeersTruncated, protocol.CoordMaxStatusPeers, total)
+	}
+	if p := st.Peers[0]; p.RunID != string(integrator) || p.State != protocol.CoordPeerMission || len(p.Files) != 1 || p.Files[0] != "src/auth.go" {
+		t.Fatalf("first peer = %+v, want the integrator in state mission with src/auth.go", p)
+	}
+}
+
+// TestMissionRunSeesAndMessagesRadarPeers follows the overlap notice a
+// mission worker gets about a run outside its mission: status lists that
+// run with the shared files after the assignment peers, and the worker can
+// message or ask it, while a run it shares nothing with stays refused.
+func TestMissionRunSeesAndMessagesRadarPeers(t *testing.T) {
+	stub := &missionTransportStub{}
+	h := newHarness(t, 4, func(c *Config) { c.Mission = stub })
+	ctx := context.Background()
+	worker, integrator, outsider, unrelated := h.run(0), h.run(1), h.run(2), h.run(3)
+	stub.mission = []domain.RunID{worker, integrator}
+	h.peers.hub(worker, []domain.RunID{integrator, outsider}, "src/auth.go")
+
+	st, err := h.svc.Status(ctx, worker)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.Assignment == nil || len(st.Peers) != 2 || st.PeerTotal != 2 || st.PeersTruncated {
+		t.Fatalf("status = %+v, want an assignment and exactly two peers", st)
+	}
+	for i, want := range []struct {
+		run   domain.RunID
+		state string
+	}{{integrator, protocol.CoordPeerMission}, {outsider, protocol.CoordPeerActive}} {
+		p := st.Peers[i]
+		if p.RunID != string(want.run) || p.State != want.state || p.MemberID == "" ||
+			len(p.Files) != 1 || p.Files[0] != "src/auth.go" || p.FileTotal != 1 || p.FilesTruncated {
+			t.Fatalf("peer %d = %+v, want run %s in state %q with src/auth.go", i, p, want.run, want.state)
+		}
+	}
+
+	if _, err = h.svc.Send(ctx, worker, sendParams(integrator, "mission peer")); err != nil {
+		t.Fatalf("send to a mission peer: %v", err)
+	}
+	if _, err = h.svc.Send(ctx, worker, sendParams(outsider, "we both touch auth.go")); err != nil {
+		t.Fatalf("send to an overlapping run outside the mission: %v", err)
+	}
+	if _, err = h.svc.Ask(ctx, worker, protocol.CoordAskParams{
+		ToRunID: string(outsider), Body: "May I take auth.go?", IdempotencyKey: "ask-outsider",
+	}); err != nil {
+		t.Fatalf("ask an overlapping run outside the mission: %v", err)
+	}
+	_, err = h.svc.Send(ctx, worker, sendParams(unrelated, "ping"))
+	if err == nil || err.Code != protocol.CodeDenied ||
+		err.Message != fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s", unrelated, worker) {
+		t.Fatalf("send to an unrelated run = %v, want CodeDenied", err)
+	}
+	if st, err = h.svc.Status(ctx, outsider); err != nil || st.Unread != 2 {
+		t.Fatalf("outsider unread = %d (err %v), want 2", st.Unread, err)
+	}
+}
+
 // TestSendCaps covers the three guards that keep an agent bounded: body
 // size, inbox depth, and the send rate.
 func TestSendCaps(t *testing.T) {
