@@ -52,11 +52,11 @@ func TestMirrorImportInitializesAndRequiresInitialAdoption(t *testing.T) {
 	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
 		t.Fatal(err)
 	}
-	observed, err := e.RefreshWorkspaceMirror(t.Context(), ws, req)
-	if err != nil || observed.Status != domain.MirrorStatusPending || observed.CandidateCommit != commit || observed.AcceptedCommit != "" || observed.BaseCommit != "" {
-		t.Fatalf("first observation = %+v, %v", observed, err)
+	observed, refreshErr := e.RefreshWorkspaceMirror(t.Context(), ws, req)
+	if refreshErr != nil || observed.Status != domain.MirrorStatusPending || observed.CandidateCommit != commit || observed.AcceptedCommit != "" || observed.BaseCommit != "" {
+		t.Fatalf("first observation = %+v, %v", observed, refreshErr)
 	}
-	if _, err := e.WorkspaceBranchCommit(t.Context(), ws, "main"); err == nil {
+	if _, branchErr := e.WorkspaceBranchCommit(t.Context(), ws, "main"); branchErr == nil {
 		t.Fatal("first observation silently accepted the base")
 	}
 	adopted, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation)
@@ -64,8 +64,8 @@ func TestMirrorImportInitializesAndRequiresInitialAdoption(t *testing.T) {
 		t.Fatalf("adoption = %+v, %v", adopted, err)
 	}
 	// Repeating initialization/configuration cannot reset an accepted ref.
-	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
-		t.Fatal(err)
+	if _, configErr := e.ConfigureWorkspaceMirror(t.Context(), ws, req); configErr != nil {
+		t.Fatal(configErr)
 	}
 	again, err := e.RefreshWorkspaceMirror(t.Context(), ws, req)
 	if err != nil || again.AcceptedCommit != commit || again.BaseCommit != commit {
@@ -126,25 +126,25 @@ func TestMirrorImportPreservesSeededBaseAndRejectsRewrite(t *testing.T) {
 	e := newUnitEngine(t)
 	e.cfg.MirrorFetch = mirrorImportTransport
 	source, candidate := mirrorImportSource(t, e, true)
-	seed, base := mirrorImportSource(t, e, false)
+	seed, _ := mirrorImportSource(t, e, false)
 	mirrorImportGit(t, e, seed, "-c", "user.name=Seed", "-c", "user.email=seed@example.test", "commit", "--allow-empty", "-m", "unrelated seeded base")
-	base = mirrorImportGit(t, e, seed, "rev-parse", "HEAD")
+	base := mirrorImportGit(t, e, seed, "rev-parse", "HEAD")
 	const ws domain.WorkspaceID = "seeded-import"
-	repo, err := e.InitWorkspaceRepo(t.Context(), ws)
-	if err != nil {
-		t.Fatal(err)
+	repo, initErr := e.InitWorkspaceRepo(t.Context(), ws)
+	if initErr != nil {
+		t.Fatal(initErr)
 	}
 	mirrorImportGit(t, e, repo, "fetch", seed, "refs/heads/main:refs/heads/main")
 	req := MirrorRequest{SourceURL: source, Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
-	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
-		t.Fatal(err)
+	if _, configErr := e.ConfigureWorkspaceMirror(t.Context(), ws, req); configErr != nil {
+		t.Fatal(configErr)
 	}
 	observed, err := e.RefreshWorkspaceMirror(t.Context(), ws, req)
 	if err != nil || observed.BaseCommit != base || observed.CandidateCommit != candidate || observed.AcceptedCommit != "" {
 		t.Fatalf("seeded base overwritten: %+v, %v", observed, err)
 	}
-	if _, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation); err != nil {
-		t.Fatal(err)
+	if _, adoptErr := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation); adoptErr != nil {
+		t.Fatal(adoptErr)
 	}
 	mirrorImportGit(t, e, source, "fetch", seed, "refs/heads/main")
 	mirrorImportGit(t, e, source, "update-ref", "refs/heads/main", base)

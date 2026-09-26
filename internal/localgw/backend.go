@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,8 +28,8 @@ type sshBackend struct {
 }
 
 // NewSSHBackend returns a Backend that dials cfg lazily on first use and
-// redials once when the connection has gone away under a call, except for
-// config.import, whose writes cannot safely be replayed.
+// redials once when the connection has gone away under a replay-safe call.
+// Imports and development/repository operations retain uncertain outcomes.
 func NewSSHBackend(cfg cli.Config) Backend {
 	return &sshBackend{cfg: cfg}
 }
@@ -187,7 +188,8 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 // Call performs one control call on its own channel. A server-reported
 // failure comes back as that *protocol.Error; a transport failure
 // triggers one redial and one retry before surfacing as CodeUnavailable,
-// except for config.import, whose outcome may already include committed files.
+// except for imports and development/repository operations, which may have
+// already committed a mutation before the response was lost.
 func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	result, err := b.callOnce(ctx, method, params)
 	if err == nil {
@@ -197,9 +199,10 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	if errors.As(err, &perr) {
 		return nil, perr
 	}
-	if method == protocol.MethodConfigImport {
-		// The response may have been lost after files were written. callOnce
-		// invalidated the connection; reconnect only on the next explicit call.
+	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport ||
+		strings.HasPrefix(method, "dev.") || strings.HasPrefix(method, "run.git.") || strings.HasPrefix(method, "run.pr.") {
+		// The response may have been lost after committing a mutation. Preserve
+		// that uncertainty; reconnect only on the next explicit request.
 		return nil, unreachableError(err)
 	}
 	// Transport failure: the connection was stale (server restart,
@@ -294,3 +297,21 @@ func (b *sshBackend) Forward(target string, port uint32) (io.ReadWriteCloser, er
 		return c.Forward(target, port)
 	})
 }
+
+func (b *sshBackend) BrowserFrames(ctx context.Context, req protocol.DevBrowserStreamRequest) (io.ReadCloser, error) {
+	return stream(b, func(c *cli.Conn) (io.ReadCloser, error) { return c.BrowserFrames(ctx, req) })
+}
+
+func (b *sshBackend) Artifact(ctx context.Context, req protocol.DevArtifactDownloadRequest) (io.ReadCloser, protocol.DevArtifact, error) {
+	type capture struct {
+		stream   io.ReadCloser
+		artifact protocol.DevArtifact
+	}
+	out, err := stream(b, func(c *cli.Conn) (capture, error) {
+		source, artifact, err := c.Artifact(ctx, req)
+		return capture{stream: source, artifact: artifact}, err
+	})
+	return out.stream, out.artifact, err
+}
+
+var _ webgate.DevelopmentBackend = (*sshBackend)(nil)

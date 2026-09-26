@@ -27,7 +27,10 @@ test('detached DOM targets, navigation, popups and reset preserve session bounda
   const session = await BrowserSession.launch();
   t.after(() => session.close());
   const origin = `http://127.0.0.1:${app.address().port}`;
-  let { page } = await session.execute({ operation: 'open', url: origin });
+  let { page } = await session.execute({ operation: 'open', url: origin, width: 800, height: 600 });
+  assert.deepEqual([page.width, page.height], [800, 600]);
+  const longWait = await session.execute({ ...page, operation: 'wait', condition: 'url', text: origin, timeout_ms: 30000 });
+  assert.equal(longWait.matched, true);
   const state = session.pages.get(page.page_id);
   const first = await session.execute({ ...page, operation: 'snapshot' });
   const target = first.snapshot.nodes.find((node) => node.name === 'Target' && node.role === 'button');
@@ -43,6 +46,23 @@ test('detached DOM targets, navigation, popups and reset preserve session bounda
   await session.execute({ ...page, operation: 'fill', node_id: input.node_id, text: 'typed' });
   await session.execute({ ...page, operation: 'fill', node_id: input.node_id, text: '' });
   assert.equal(await state.page.locator('#value').inputValue(), '');
+  await state.page.evaluate(() => {
+    document.getElementById('target').addEventListener('click', (event) => { window.shiftClicked = event.shiftKey; });
+    document.getElementById('value').addEventListener('keydown', (event) => { window.controlPressed = event.ctrlKey; });
+  });
+  await session.execute({ ...page, operation: 'click', node_id: current.node_id, modifiers: ['Shift'] });
+  assert.equal(await state.page.evaluate(() => window.shiftClicked), true);
+  await session.execute({ ...page, operation: 'key', node_id: input.node_id, key: 'a', modifiers: ['Control'] });
+  assert.equal(await state.page.evaluate(() => window.controlPressed), true);
+  await assert.rejects(session.execute({ ...page, operation: 'pointer', action: 'click', x: 1, y: 1, modifiers: ['Shift'] }), { code: 'invalid_request' });
+  await state.page.evaluate(() => { document.body.style.height = '2000px'; });
+  const full = await session.capture({ ...page, full_page: true });
+  assert.ok(full.metadata.height >= 2000 && full.metadata.height > page.height);
+  assert.equal(full.bytes.readUInt32BE(20), full.metadata.height);
+  assert.equal(full.metadata.viewport_id, '', 'document-coordinate evidence is not a viewport input frame');
+  await state.page.evaluate(() => { document.body.style.height = '9000px'; });
+  await assert.rejects(session.capture({ ...page, full_page: true }), { code: 'resource_limit' });
+  await state.page.evaluate(() => { document.body.style.height = ''; });
   const oldViewport = page.viewport_id;
   ({ page } = await session.execute({ ...page, operation: 'viewport', width: 640, height: 480 }));
   await assert.rejects(session.execute({ ...page, operation: 'pointer', viewport_id: oldViewport, action: 'click', x: 1, y: 1 }), { code: 'stale_viewport' });

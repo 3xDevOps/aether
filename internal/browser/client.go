@@ -30,7 +30,7 @@ func NewClient(socketPath string) *Client {
 		MaxConnsPerHost:        24,
 		MaxIdleConnsPerHost:    4,
 		IdleConnTimeout:        30 * time.Second,
-		ResponseHeaderTimeout:  15 * time.Second,
+		ResponseHeaderTimeout:  35 * time.Second,
 		MaxResponseHeaderBytes: 32 << 10,
 	}
 	return &Client{http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -66,7 +66,7 @@ func (c *Client) request(ctx context.Context, method, endpoint string, value any
 	if response.StatusCode == http.StatusOK {
 		return response, nil
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	data, err := readBounded(response.Body, MaxMetadataBytes)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (c *Client) json(ctx context.Context, method, endpoint string, value, targe
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	data, err := readBounded(response.Body, MaxRequestBytes)
 	if err != nil {
 		return err
@@ -125,7 +125,11 @@ func (c *Client) Do(ctx context.Context, request Request) (Result, error) {
 	if request.Operation == "select_option" && request.Values == nil {
 		request.Values = []string{}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeout := 15 * time.Second
+	if requested := time.Duration(request.TimeoutMS)*time.Millisecond + 5*time.Second; requested > timeout {
+		timeout = requested
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var result Result
 	err := c.json(ctx, http.MethodPost, "/command", request, &result)
@@ -139,7 +143,7 @@ func (c *Client) capture(ctx context.Context, endpoint string, request any) (Cap
 	if err != nil {
 		return Capture{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	encoded := response.Header.Get("X-Aether-Metadata")
 	if len(encoded) > MaxMetadataBytes*4/3+4 {
 		return Capture{}, errors.New("browser image metadata exceeds limit")
@@ -149,7 +153,7 @@ func (c *Client) capture(ctx context.Context, endpoint string, request any) (Cap
 		return Capture{}, fmt.Errorf("decode browser image metadata: %w", err)
 	}
 	var capture Capture
-	if err := json.Unmarshal(data, &capture.Metadata); err != nil {
+	if err = json.Unmarshal(data, &capture.Metadata); err != nil {
 		return Capture{}, fmt.Errorf("decode browser image metadata: %w", err)
 	}
 	if capture.Metadata.ContentType != "image/png" || response.Header.Get("Content-Type") != "image/png" {
@@ -166,7 +170,7 @@ func (c *Client) capture(ctx context.Context, endpoint string, request any) (Cap
 	if err != nil {
 		return Capture{}, fmt.Errorf("decode browser PNG: %w", err)
 	}
-	if config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 4096 || config.Width != capture.Metadata.Width || config.Height != capture.Metadata.Height {
+	if config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 8192 || int64(config.Width)*int64(config.Height) > 32<<20 || config.Width != capture.Metadata.Width || config.Height != capture.Metadata.Height {
 		return Capture{}, errors.New("browser image dimensions do not match bounded metadata")
 	}
 	return capture, nil
@@ -204,11 +208,17 @@ func (c *Client) Stream(ctx context.Context, request Request, receive func(Captu
 	if receive == nil {
 		return errors.New("browser frame receiver is required")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Long-running commands may wait for 30 seconds, but attaching a stream
+	// still has its original short header deadline. Keep the body live after it.
+	headerDeadline := time.AfterFunc(15*time.Second, cancel)
 	response, err := c.request(ctx, http.MethodPost, "/stream", request)
+	headerDeadline.Stop()
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.Header.Get("Content-Type") != "application/x-aether-browser-frames" {
 		return errors.New("browser returned unsupported stream content type")
 	}

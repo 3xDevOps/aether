@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 type PRTarget struct {
@@ -49,12 +52,14 @@ type PRCreateRequest struct {
 }
 
 type PRFeedback struct {
-	Identity       string          `json:"identity"`
-	PullRequest    PullRequest     `json:"pull_request"`
-	Checks         json.RawMessage `json:"checks"`
-	Comments       json.RawMessage `json:"comments"`
-	Reviews        json.RawMessage `json:"reviews"`
-	ReviewComments json.RawMessage `json:"review_comments"`
+	Identity       string
+	PullRequest    *PullRequest
+	Checks         []protocol.RunPRCheck
+	Comments       []protocol.RunPRComment
+	Reviews        []protocol.RunPRReview
+	ReviewComments []protocol.RunPRReviewComment
+	Truncated      bool
+	Output         CommandOutput
 }
 
 type githubPR struct {
@@ -100,7 +105,7 @@ func validRepository(repo string) bool {
 			return false
 		}
 		for _, c := range part {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' && c != '.' {
 				return false
 			}
 		}
@@ -139,18 +144,25 @@ func (s *Service) Identity(ctx context.Context, run Execution) (string, error) {
 
 func (s *Service) lookup(ctx context.Context, run Execution, target PRTarget, state string) (*PullRequest, CommandOutput, error) {
 	query := url.Values{"state": {state}, "head": {strings.SplitN(target.HeadRepository, "/", 2)[0] + ":" + target.HeadBranch}, "base": {target.BaseBranch}, "sort": {"created"}, "direction": {"desc"}, "per_page": {"100"}}
-	out, err := s.gh(ctx, run, false, "repos/"+target.Repository+"/pulls?"+query.Encode(), "--paginate", "--slurp")
+	out, err := s.gh(ctx, run, false, "repos/"+target.Repository+"/pulls?"+query.Encode(), "--paginate", "--jq", `map({number,html_url,state,title,draft,merged_at,base:{ref:.base.ref,repo:{full_name:.base.repo.full_name}},head:{ref:.head.ref,sha:.head.sha,repo:{full_name:.head.repo.full_name}}})`)
 	text, err := complete(out, err)
 	if err != nil {
 		return nil, out, err
 	}
-	var pages [][]githubPR
-	if err := json.Unmarshal([]byte(text), &pages); err != nil {
-		return nil, out, fmt.Errorf("runrepo: decode PR lookup: %w", err)
-	}
+	decoder := json.NewDecoder(strings.NewReader(text))
+	var page []githubPR
+	havePage := false
 	var latest *PullRequest
 	var open *PullRequest
-	for _, page := range pages {
+	for {
+		err := decoder.Decode(&page)
+		if err == io.EOF && havePage {
+			break
+		}
+		if err != nil {
+			return nil, out, fmt.Errorf("runrepo: decode PR lookup: %w", err)
+		}
+		havePage = true
 		for _, pr := range page {
 			if !pr.matches(target) {
 				continue
@@ -194,15 +206,20 @@ func (s *Service) LookupPR(ctx context.Context, run Execution, target PRTarget) 
 // stderr survive. The caller must retain a successful PushResult independently.
 func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateRequest) (PRResult, error) {
 	result := PRResult{}
-	if !cleanText(req.Title, 512) || len(req.Body) > 64<<10 || strings.ContainsRune(req.Body, 0) || req.ExpectedLogin != "" && !cleanText(req.ExpectedLogin, 100) {
+	if !cleanText(req.Title, 512) || len(req.Body) > protocol.MaxRunPRBodyBytes || strings.ContainsRune(req.Body, 0) || req.ExpectedLogin != "" && !cleanText(req.ExpectedLogin, 100) {
 		return result, errors.New("runrepo: invalid PR title, body, or expected login")
 	}
 	if err := s.target(ctx, run, req.Target); err != nil {
 		return result, err
 	}
-	if _, err := s.checkExpected(ctx, run, req.Expected); err != nil {
+	if err := s.CheckExpected(ctx, run, req.Expected); err != nil {
 		return result, err
 	}
+	body, err := s.withCoAuthors(ctx, run, req.Body, protocol.MaxRunPRBodyBytes)
+	if err != nil {
+		return result, err
+	}
+	req.Body = body
 	identity, err := s.Identity(ctx, run)
 	result.Identity = identity
 	if err != nil {
@@ -217,7 +234,7 @@ func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateReque
 	}
 	// A local commit is not proof the selected fork branch was pushed. Verify
 	// the explicit remote head, never gh's implicit origin/branch heuristics.
-	out, err := s.gh(ctx, run, false, "repos/"+req.Target.HeadRepository+"/commits/"+url.PathEscape(req.Target.HeadBranch), "--jq", ".sha")
+	out, err := s.gh(ctx, run, false, "repos/"+req.Target.HeadRepository+"/git/ref/heads/"+url.PathEscape(req.Target.HeadBranch), "--jq", ".object.sha")
 	remoteHead, err := complete(out, err)
 	if err != nil {
 		result.Output = out
@@ -234,7 +251,7 @@ func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateReque
 	if currentLogin != identity {
 		return result, fmt.Errorf("runrepo: GitHub identity changed from %s to %s", identity, currentLogin)
 	}
-	if _, err := s.checkExpected(ctx, run, req.Expected); err != nil {
+	if err = s.CheckExpected(ctx, run, req.Expected); err != nil {
 		return result, err
 	}
 	args := []string{"repos/" + req.Target.Repository + "/pulls", "--method", "POST", "--raw-field", "title=" + req.Title, "--raw-field", "body=" + req.Body, "--raw-field", "base=" + req.Target.BaseBranch, "--raw-field", "head=" + strings.SplitN(req.Target.HeadRepository, "/", 2)[0] + ":" + req.Target.HeadBranch, "--field", "draft=" + strconv.FormatBool(req.Draft)}
@@ -243,6 +260,14 @@ func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateReque
 	}
 	out, createErr := s.gh(ctx, run, true, args...)
 	result.Output = out
+	if createErr != nil {
+		var commandErr *CommandError
+		if !errors.As(createErr, &commandErr) {
+			// Admission failed before any process ran: no external mutation
+			// was attempted, and it is not an uncertain GitHub creation.
+			return result, createErr
+		}
+	}
 	if createErr == nil && !out.Truncated {
 		var pr githubPR
 		if err := json.Unmarshal([]byte(out.Stdout), &pr); err == nil && pr.matches(req.Target) {
@@ -264,90 +289,10 @@ func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateReque
 		result.PullRequest = found
 		result.Reconciled = true
 		result.CreationUncertain = false
-		return result, nil
+		return result, createErr
 	}
 	if reconcileErr != nil {
 		return result, errors.Join(createErr, fmt.Errorf("runrepo: reconcile PR creation: %w", reconcileErr))
 	}
 	return result, createErr
-}
-
-// PRFeedback returns current checks, issue comments, reviews, and inline review
-// comments. All collection endpoints paginate; an over-limit response fails
-// explicitly rather than presenting a truncated collection as complete.
-func (s *Service) PRFeedback(ctx context.Context, run Execution, target PRTarget, number int) (PRFeedback, error) {
-	result := PRFeedback{}
-	if err := s.target(ctx, run, target); err != nil {
-		return result, err
-	}
-	if number <= 0 {
-		return result, errors.New("runrepo: positive PR number required")
-	}
-	identity, err := s.Identity(ctx, run)
-	result.Identity = identity
-	if err != nil {
-		return result, err
-	}
-	prefix := "repos/" + target.Repository
-	pullPath := prefix + "/pulls/" + strconv.Itoa(number)
-	out, err := s.gh(ctx, run, false, pullPath)
-	text, err := complete(out, err)
-	if err != nil {
-		return result, err
-	}
-	var pr githubPR
-	if err := json.Unmarshal([]byte(text), &pr); err != nil {
-		return result, fmt.Errorf("runrepo: decode PR: %w", err)
-	}
-	if !pr.matches(target) || pr.Number != number {
-		return result, errors.New("runrepo: PR does not match the selected repository, base, and fork head")
-	}
-	result.PullRequest = *pr.public(target)
-	for _, collection := range []struct {
-		path        string
-		destination *json.RawMessage
-	}{
-		{prefix + "/issues/" + strconv.Itoa(number) + "/comments?per_page=100", &result.Comments},
-		{pullPath + "/reviews?per_page=100", &result.Reviews},
-		{pullPath + "/comments?per_page=100", &result.ReviewComments},
-	} {
-		out, err := s.gh(ctx, run, false, collection.path, "--paginate", "--slurp")
-		text, err := complete(out, err)
-		if err != nil {
-			return result, err
-		}
-		var pages []json.RawMessage
-		if err := json.Unmarshal([]byte(text), &pages); err != nil {
-			return result, fmt.Errorf("runrepo: decode feedback: %w", err)
-		}
-		var all []json.RawMessage
-		for _, page := range pages {
-			var items []json.RawMessage
-			if err := json.Unmarshal(page, &items); err != nil {
-				return result, fmt.Errorf("runrepo: decode feedback page: %w", err)
-			}
-			all = append(all, items...)
-		}
-		if all == nil {
-			all = []json.RawMessage{}
-		}
-		*collection.destination, err = json.Marshal(all)
-		if err != nil {
-			return result, err
-		}
-	}
-	// gh combines legacy commit statuses and check runs into one rollup.
-	out, err = s.command(ctx, run, false, "gh", "pr", "view", strconv.Itoa(number), "--repo", "github.com/"+target.Repository, "--json", "statusCheckRollup")
-	text, err = complete(out, err)
-	if err != nil {
-		return result, err
-	}
-	var checks struct {
-		Checks json.RawMessage `json:"statusCheckRollup"`
-	}
-	if err := json.Unmarshal([]byte(text), &checks); err != nil {
-		return result, fmt.Errorf("runrepo: decode PR checks: %w", err)
-	}
-	result.Checks = checks.Checks
-	return result, nil
 }

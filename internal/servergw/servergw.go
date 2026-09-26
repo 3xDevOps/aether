@@ -59,7 +59,7 @@ func New(cfg Config) (*Gateway, error) {
 		Authorize: g.authorize,
 		Capabilities: protocol.GatewayCapabilities{
 			Gateway: "server",
-			WS:      []string{"events", "attach", "terminal"},
+			WS:      []string{"events", "attach", "terminal", "dev/browser"},
 		},
 		Static: cfg.Static,
 	})

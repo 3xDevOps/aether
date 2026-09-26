@@ -86,6 +86,8 @@ type Config struct {
 	// StandardImage is the server-owned image used for all runs until member
 	// image selection is available. Empty uses DefaultStandardImage.
 	StandardImage string
+	// BrowserImage is the pinned, sandboxed headless companion image.
+	BrowserImage string
 	// TailnetAutoJoin registers unknown tailnet identities as approved
 	// members instead of pending ones.
 	TailnetAutoJoin bool
@@ -210,6 +212,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if cfg.StandardImage == "" {
 		cfg.StandardImage = DefaultStandardImage
 	}
+	if cfg.BrowserImage == "" {
+		cfg.BrowserImage = DefaultBrowserImage
+	}
 
 	s := &Server{}
 	defer func() {
@@ -298,6 +303,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
+	s.control = control.New(control.Config{})
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
@@ -309,6 +315,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
 		Profiles:      prof,
 		StandardImage: cfg.StandardImage,
+		BrowserImage:  cfg.BrowserImage,
+		Control:       s.control,
 		// What this build ships with, so the scheduler can tell a member
 		// whether a server update would move their environment image.
 		DefaultStandardImage: DefaultStandardImage,
@@ -322,7 +330,6 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
-	s.control = control.New(control.Config{})
 	if s.evidence, err = evidence.New(evidence.Config{
 		Store:       s.db,
 		Git:         s.git,

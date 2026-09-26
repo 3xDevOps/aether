@@ -23,6 +23,18 @@ DIST := dist
 BUN  := bun
 NODE := node
 
+# The companion carries Chromium, its OS libraries and fonts. No host browser
+# or display service participates. Keep these limits aligned with server
+# admission and internal/runtime/docker_browser.go.
+BROWSER_IMAGE ?= aether/browser:test
+BROWSER_RUN = docker run --rm --init --user 1000:1000 \
+	--network none --ipc private --shm-size 256m --read-only \
+	--cap-drop ALL --security-opt no-new-privileges=true \
+	--security-opt 'seccomp=$(CURDIR)/internal/runtime/browser_seccomp.json' \
+	--cpus 1 --memory 1g --memory-swap 1g --pids-limit 256 \
+	--tmpfs /tmp:rw,nosuid,nodev,size=536870912,mode=1777 \
+	--entrypoint node '$(BROWSER_IMAGE)'
+
 # The Go version go.mod pins: the `toolchain` line when it names one, else the
 # `go` directive. `toolchain default` is legal and names no version, so only a
 # goX.Y value counts. Assigned lazily - only `lint` reads it.
@@ -122,12 +134,22 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
+.PHONY: all build browser-image browser-smoke test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
 
 all: build
 
 build: dashboard
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(DIST)/ ./cmd/aether-server ./cmd/aether
+
+browser-image:
+	docker build --tag '$(BROWSER_IMAGE)' --file images/browser/Dockerfile .
+
+# A working Ubuntu kernel/user-namespace AppArmor policy is a prerequisite;
+# sandbox failures fail this gate, never trigger an unconfined fallback.
+# Run the exact image intended for publication, without source/home mounts.
+browser-smoke:
+	$(BROWSER_RUN) /opt/aether-browser/smoke.mjs
+	$(BROWSER_RUN) --test /opt/aether-browser/companion.test.mjs
 
 test:
 	go test -race $(TEST_PKGS)

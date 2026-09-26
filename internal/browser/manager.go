@@ -129,7 +129,7 @@ func saveStatus(dir string, status Status) error {
 		return err
 	}
 	name := file.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if _, err = file.Write(data); err == nil {
 		err = file.Sync()
 	}
@@ -140,14 +140,14 @@ func saveStatus(dir string, status Status) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := os.Rename(name, filepath.Join(dir, "state.json")); err != nil {
+	if err = os.Rename(name, filepath.Join(dir, "state.json")); err != nil {
 		return err
 	}
 	directory, err := os.Open(dir)
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	return directory.Sync()
 }
 
@@ -178,7 +178,7 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	status.State = info.State
 	if info.State != "running" {
 		status.Reason = "Recorded companion is " + info.State
-		if err := saveStatus(dir, status); err != nil {
+		if err = saveStatus(dir, status); err != nil {
 			return status, nil, err
 		}
 		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Reason)
@@ -305,7 +305,7 @@ func (m *Manager) transition(ctx context.Context, run Run, action string) (Statu
 	}
 	if status.ContainerID == "" {
 		status.ContainerID, err = m.runtime.FindByCreationKey(ctx, status.CreationKey)
-		if err != nil && !(errors.Is(err, containerruntime.ErrNotFound) && (action == "remove" || action == "restart")) {
+		if err != nil && (!errors.Is(err, containerruntime.ErrNotFound) || (action != "remove" && action != "restart")) {
 			return status, err
 		}
 	}

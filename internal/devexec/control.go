@@ -55,7 +55,7 @@ func readState(key string) (State, error) {
 	if err != nil {
 		return state, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	err = json.NewDecoder(io.LimitReader(f, 16<<10)).Decode(&state)
 	if err == nil && state.CreationKey != key {
 		err = errors.New("execution creation identity mismatch")
@@ -93,17 +93,17 @@ func Control(ctx context.Context, key string, request Request) (State, error) {
 		}
 		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(stateDir(key), "control.sock"))
 		if err == nil {
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			deadline, _ := ctx.Deadline()
-			if err := conn.SetDeadline(deadline); err != nil {
-				return State{}, err
+			if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
+				return State{}, deadlineErr
 			}
 			// A deadline alone does not unblock an already connected socket
 			// when its parent context is cancelled before that deadline.
 			stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
 			defer stopCancel()
-			if err := json.NewEncoder(conn).Encode(request); err != nil {
-				return State{}, err
+			if encodeErr := json.NewEncoder(conn).Encode(request); encodeErr != nil {
+				return State{}, encodeErr
 			}
 			var state State
 			err = json.NewDecoder(io.LimitReader(conn, 16<<10)).Decode(&state)

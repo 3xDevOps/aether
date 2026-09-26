@@ -68,10 +68,10 @@ func TestManagerRecoveryDistinguishesResetFromProcessLoss(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.MkdirAll(filepath.Join(dir, "control"), 0o700); err != nil {
+			if err = os.MkdirAll(filepath.Join(dir, "control"), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, CreationKey: "creation", SessionID: "old-session", ProcessID: "process-one", State: "running"}); err != nil {
+			if err = saveStatus(dir, Status{RunID: run.ID, RunContainer: run.ContainerID, CreationKey: "creation", SessionID: "old-session", ProcessID: "process-one", State: "running"}); err != nil {
 				t.Fatal(err)
 			}
 			serveUnix(t, filepath.Join(dir, "control", "browser.sock"), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

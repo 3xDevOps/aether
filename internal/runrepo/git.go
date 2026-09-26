@@ -7,16 +7,11 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-type Change struct {
-	Path         string `json:"path"`
-	OriginalPath string `json:"original_path,omitempty"`
-	Index        string `json:"index"`
-	Worktree     string `json:"worktree"`
-	Untracked    bool   `json:"untracked,omitempty"`
-	Conflicted   bool   `json:"conflicted,omitempty"`
-}
+type Change = protocol.RunGitChange
 
 type Status struct {
 	Branch   string   `json:"branch"`
@@ -84,6 +79,59 @@ func (s *Service) Status(ctx context.Context, run Execution) (Status, error) {
 	return state, nil
 }
 
+// Remotes reads the checkout's actual URLs and configured upstream. None is
+// inferred from the workspace mirror or silently selected for publication.
+func (s *Service) Remotes(ctx context.Context, run Execution, branch string) ([]protocol.RunGitRemote, *protocol.RunGitUpstream, error) {
+	out, err := s.git(ctx, run, false, "remote")
+	text, err := complete(out, err)
+	if err != nil {
+		return nil, nil, err
+	}
+	remotes := []protocol.RunGitRemote{}
+	total := 0
+	for _, name := range strings.Fields(text) {
+		if len(remotes) >= 64 {
+			return remotes, nil, ErrTruncated
+		}
+		remote := protocol.RunGitRemote{Name: name, FetchURLs: []string{}, PushURLs: []string{}}
+		for _, push := range []bool{false, true} {
+			args := []string{"remote", "get-url", "--all"}
+			if push {
+				args = append(args, "--push")
+			}
+			urlOutput, urlErr := s.git(ctx, run, false, append(args, name)...)
+			urls, urlErr := complete(urlOutput, urlErr)
+			if urlErr != nil {
+				return remotes, nil, urlErr
+			}
+			total += len(urls)
+			if total > MaxOutput {
+				return remotes, nil, ErrTruncated
+			}
+			values := strings.Split(strings.TrimSuffix(urls, "\n"), "\n")
+			if push {
+				remote.PushURLs = values
+			} else {
+				remote.FetchURLs = values
+			}
+		}
+		remotes = append(remotes, remote)
+	}
+	if branch == "" {
+		return remotes, nil, nil
+	}
+	out, err = s.git(ctx, run, false, "for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", "refs/heads/"+branch)
+	text, err = complete(out, err)
+	if err != nil {
+		return remotes, nil, err
+	}
+	parts := strings.Split(strings.TrimSuffix(text, "\n"), "\x00")
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return remotes, &protocol.RunGitUpstream{Remote: parts[0], Branch: strings.TrimPrefix(parts[1], "refs/heads/")}, nil
+	}
+	return remotes, nil, nil
+}
+
 type DiffRequest struct {
 	Paths  []string `json:"paths,omitempty"`
 	Staged bool     `json:"staged"`
@@ -127,26 +175,45 @@ type CommitResult struct {
 	Output       CommandOutput `json:"output"`
 }
 
-// Commit constructs the selected worktree paths against the expected tree in
-// an isolated index. It never includes another path's staged content. Publication
-// is a native compare-and-swap of the explicit branch, not a scheduler lock.
-// Signing follows commit.gpgsign; plumbing intentionally does not run commit
-// hooks. Native writers can still change the worktree or switch branches during
-// this multi-command operation. An index reconciliation failure after the CAS
-// returns Committed=true, and must never be retried as a fresh commit blindly.
+// Commit constructs selected worktree paths in an isolated index and publishes
+// with a native HEAD/referent compare-and-swap transaction. After Git prepares
+// and holds both reference locks, symbolic HEAD is checked before commit.
+// Signing follows commit.gpgsign; commit-tree does not run commit hooks.
+// Native writers can still edit selected files while their contents are read.
+// Index reconciliation is separate and may fail after publication; Committed
+// remains true and the caller must not replay it.
 func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) (result CommitResult, err error) {
-	if err := validatePaths(req.Paths, true); err != nil {
+	if err = validatePaths(req.Paths, true); err != nil {
 		return result, err
 	}
-	if req.Message == "" || len(req.Message) > 64<<10 || strings.ContainsRune(req.Message, 0) {
-		return result, errors.New("runrepo: commit message is required and limited to 64 KiB")
+	if req.Message == "" || len(req.Message) > protocol.MaxRunGitMessageBytes || strings.ContainsRune(req.Message, 0) {
+		return result, errors.New("runrepo: commit message is required and limited to 16 KiB")
 	}
-	if _, err := s.checkExpected(ctx, run, req.Expected); err != nil {
+	if err = s.CheckExpected(ctx, run, req.Expected); err != nil {
+		return result, err
+	}
+	req.Message, err = s.withCoAuthors(ctx, run, req.Message, protocol.MaxRunGitMessageBytes)
+	if err != nil {
 		return result, err
 	}
 	state, err := s.Status(ctx, run)
 	if err != nil {
 		return result, err
+	}
+	for _, change := range state.Changes {
+		if change.Conflicted {
+			return result, errors.New("runrepo: checkout has unresolved conflicts; resolve with native Git before committing selected paths")
+		}
+	}
+	for _, operation := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
+		out, operationErr := s.git(ctx, run, false, "rev-parse", "--quiet", "--verify", operation)
+		if operationErr == nil {
+			return result, fmt.Errorf("runrepo: %s is active; complete the operation with native Git", operation)
+		}
+		var commandErr *CommandError
+		if !errors.As(operationErr, &commandErr) || commandErr.Cause != nil || out.ExitCode != 1 {
+			return result, operationErr
+		}
 	}
 	selected := make(map[string]bool, len(req.Paths))
 	paths := make([]string, 0, len(req.Paths))
@@ -164,17 +231,14 @@ func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) 
 		if found == nil {
 			return result, fmt.Errorf("runrepo: selected path %q is not a changed file; refresh status", p)
 		}
-		if found.Conflicted {
-			return result, fmt.Errorf("runrepo: selected path %q has unresolved conflicts", p)
-		}
 		selected[p] = true
 		paths = append(paths, p)
-		if found.OriginalPath != "" && !selected[found.OriginalPath] {
+		if found.OriginalPath != "" && (found.Index == "R" || found.Worktree == "R") && !selected[found.OriginalPath] {
 			selected[found.OriginalPath] = true
 			paths = append(paths, found.OriginalPath)
 		}
 	}
-	if err := validatePaths(paths, true); err != nil {
+	if err = validatePaths(paths, true); err != nil {
 		return result, err
 	}
 	out, err := s.command(ctx, run, true, "mktemp", "-d", "/tmp/aether-runrepo-XXXXXXXXXX")
@@ -189,11 +253,15 @@ func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) 
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		// The private directory was allocated by this operation. Cleanup must
-		// survive revocation; it never executes git or touches the checkout.
-		_, _, _, cleanupErr := s.exec(cleanupCtx, run.ContainerID, []string{"rm", "-rf", "--", dir}, run.WorkDir)
-		if cleanupErr != nil && err == nil {
-			err = fmt.Errorf("runrepo: remove private index: %w", cleanupErr)
+		// Even private-index cleanup rechecks the current account authority.
+		// Revocation can leave this private /tmp allocation for the run's
+		// normal container cleanup; it never justifies another native exec.
+		_, cleanupErr := s.command(cleanupCtx, run, true, "rm", "-rf", "--", dir)
+		if cleanupErr != nil {
+			if err == nil {
+				result.Output = FailureOutput(result.Output, cleanupErr)
+			}
+			err = errors.Join(err, fmt.Errorf("runrepo: remove private index: %w", cleanupErr))
 		}
 	}()
 	indexGit := func(args ...string) (CommandOutput, error) {
@@ -216,6 +284,19 @@ func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) 
 	if !validOID(tree) {
 		return result, errors.New("runrepo: invalid native tree ID")
 	}
+	// A selected file may become a directory while native Git stages it.
+	// Verify the resulting tree contains no descendants or other implicit
+	// additions: the selection is an exact file set, not a pathspec prefix.
+	out, err = s.git(ctx, run, false, "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", req.Expected.Head, tree)
+	changed, err := complete(out, err)
+	if err != nil {
+		return result, err
+	}
+	for _, path := range strings.Split(changed, "\x00") {
+		if path != "" && !selected[path] {
+			return result, fmt.Errorf("runrepo: selected paths changed while staging; unexpected path %q; refresh before committing", path)
+		}
+	}
 	out, err = s.git(ctx, run, false, "rev-parse", "--verify", req.Expected.Head+"^{tree}")
 	oldTree, err := complete(out, err)
 	if err != nil {
@@ -235,7 +316,7 @@ func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) 
 	if strings.TrimSpace(out.Stdout) == "true" {
 		args = append(args, "-S")
 	}
-	if _, err = s.checkExpected(ctx, run, req.Expected); err != nil {
+	if err = s.CheckExpected(ctx, run, req.Expected); err != nil {
 		return result, err
 	}
 	out, err = s.git(ctx, run, true, args...)
@@ -248,17 +329,33 @@ func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) 
 	if !validOID(commit) {
 		return result, errors.New("runrepo: invalid native commit ID")
 	}
-	if _, err = s.checkExpected(ctx, run, req.Expected); err != nil {
+	if err = s.CheckExpected(ctx, run, req.Expected); err != nil {
 		return result, err
 	}
-	out, err = s.git(ctx, run, true, "update-ref", "-m", "commit: "+strings.SplitN(req.Message, "\n", 2)[0], "refs/heads/"+req.Expected.Branch, commit, req.Expected.Head)
+	out, err = s.refTransaction(ctx, run, dir, req.Expected, commit, "commit: "+strings.SplitN(req.Message, "\n", 2)[0])
 	if err != nil {
 		result.Output = out
+		// A lost exec response may hide a successful reference transaction.
+		// Reconcile only by reading its explicit branch, never by retrying.
+		reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		defer cancel()
+		current, readErr := s.git(reconcileCtx, run, false, "rev-parse", "--verify", "refs/heads/"+req.Expected.Branch)
+		if readErr == nil && !current.Truncated && strings.TrimSpace(current.Stdout) == commit {
+			result.Committed = true
+			result.Head = commit
+		}
+		if readErr != nil {
+			err = errors.Join(err, fmt.Errorf("runrepo: reconcile commit publication: %w", readErr))
+		}
+		// Preserve native stderr and also report current branch/full HEAD.
+		if stateErr := s.CheckExpected(reconcileCtx, run, req.Expected); stateErr != nil {
+			err = errors.Join(err, stateErr)
+		}
 		return result, err
 	}
 	result.Committed = true
 	result.Head = commit
-	if _, err = s.checkExpected(ctx, run, Expected{Branch: req.Expected.Branch, Head: commit}); err != nil {
+	if err = s.CheckExpected(ctx, run, Expected{Branch: req.Expected.Branch, Head: commit}); err != nil {
 		return result, err
 	}
 	// reset uses Git's real index.lock and changes only the selected paths.
@@ -270,6 +367,122 @@ func (s *Service) Commit(ctx context.Context, run Execution, req CommitRequest) 
 	}
 	result.IndexUpdated = true
 	return result, nil
+}
+
+// Updating HEAD dereferences it under Git's own HEAD and branch locks. A
+// prepared transaction retains both until commit/abort (Git 2.27+). The fixed
+// shell checks the symbolic target only after the native prepare acknowledgement.
+// Git routes transaction-hook stdout to stderr, so hooks cannot spoof that ACK.
+// See Git refs/files-backend.c: split_symref_update, lock_ref_for_update;
+// refs.c: ref_transaction_prepare; builtin/update-ref.c: report_ok.
+// FIFOs carry protocol bytes only; they are not application-owned ref locks.
+const preparedRefInput = `set -eu
+dir=$1; expected=$2; text=$3; shift 3
+pid=
+cleanup() {
+	status=$?
+	trap - EXIT HUP INT TERM PIPE
+	exec 3>&- 4<&-
+	if [ -n "$pid" ]; then
+		kill "$pid" 2>/dev/null || :
+		wait "$pid" || :
+	fi
+	exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 141' PIPE
+mkfifo "$dir/ref-input" "$dir/ref-output"
+git --no-pager -c color.ui=false "$@" <"$dir/ref-input" >"$dir/ref-output" &
+pid=$!
+exec 3>"$dir/ref-input"
+exec 4<"$dir/ref-output"
+ack() {
+	if IFS= read -r reply <&4 && [ "$reply" = "$1: ok" ]; then
+		printf '%s\n' "$reply"
+		return
+	fi
+	exec 3>&-
+	if wait "$pid"; then status=1; else status=$?; fi
+	pid=
+	printf 'runrepo: native reference transaction did not acknowledge %s\n' "$1" >&2
+	exit "$status"
+}
+printf '%s' "$text" >&3
+ack start
+ack prepare
+if actual=$(git symbolic-ref --quiet --no-recurse HEAD); then
+	if [ "$actual" = "$expected" ]; then
+		printf 'commit\n' >&3
+		ack commit
+		exec 3>&-
+		if wait "$pid"; then status=0; else status=$?; fi
+		pid=
+		exit "$status"
+	fi
+	printf 'runrepo: symbolic HEAD changed: expected %s, found %s\n' "$expected" "$actual" >&2
+else
+	printf '%s\n' 'runrepo: symbolic HEAD changed to a detached or unreadable reference while preparing commit' >&2
+fi
+printf 'abort\n' >&3
+ack abort
+exec 3>&-
+if wait "$pid"; then status=1; else status=$?; fi
+pid=
+exit "$status"
+`
+
+func (s *Service) refTransaction(ctx context.Context, run Execution, dir string, expected Expected, newHead, message string) (CommandOutput, error) {
+	input := "start\nupdate HEAD " + newHead + " " + expected.Head + "\nprepare\n"
+	argv := []string{"sh", "-c", preparedRefInput, "aether-runrepo", dir, "refs/heads/" + expected.Branch, input, "update-ref", "--stdin", "-m", message}
+	return s.command(ctx, run, true, argv...)
+}
+
+// runtime.Exec has no stdin parameter. The fixed shell feeds only a positional
+// data argument to one native Git process; no request text is shell code.
+func (s *Service) gitInput(ctx context.Context, run Execution, mutate bool, input string, args ...string) (CommandOutput, error) {
+	argv := []string{"sh", "-c", `text=$1; shift; printf '%s' "$text" | "$@"`, "aether-runrepo", input, "git", "--no-pager", "-c", "color.ui=false"}
+	return s.command(ctx, run, mutate, append(argv, args...)...)
+}
+
+func (s *Service) withCoAuthors(ctx context.Context, run Execution, message string, limit int) (string, error) {
+	if run.CoAuthors == nil {
+		return message, nil
+	}
+	out, err := s.git(ctx, run, false, "var", "GIT_AUTHOR_IDENT")
+	identity, err := complete(out, err)
+	if err != nil {
+		return "", err
+	}
+	start, end := strings.LastIndex(identity, "<"), strings.LastIndex(identity, ">")
+	if start < 0 || end <= start {
+		return "", errors.New("runrepo: native Git author has no email")
+	}
+	trailers, err := run.CoAuthors(ctx, identity[start+1:end])
+	if err != nil {
+		return "", err
+	}
+	if len(trailers) == 0 {
+		return message, nil
+	}
+	args := []string{"interpret-trailers", "--if-exists=addIfDifferent", "--if-missing=add"}
+	for _, trailer := range trailers {
+		if !cleanText(trailer, 4096) || !strings.HasPrefix(trailer, "Co-authored-by: ") {
+			return "", errors.New("runrepo: invalid configured coauthor trailer")
+		}
+		args = append(args, "--trailer", trailer)
+	}
+	out, err = s.gitInput(ctx, run, false, message, args...)
+	text, err := complete(out, err)
+	if err != nil {
+		return "", err
+	}
+	if len(text) > limit {
+		return "", errors.New("runrepo: message with coauthors exceeds input limit")
+	}
+	return text, nil
 }
 
 type PushTarget struct {
@@ -318,7 +531,7 @@ func (s *Service) Push(ctx context.Context, run Execution, req PushRequest) (Pus
 	if strings.TrimSuffix(urls, "\n") != req.Target.Repository {
 		return result, fmt.Errorf("runrepo: remote %q push destination changed or has multiple destinations: %s", req.Target.Remote, strings.TrimSpace(urls))
 	}
-	if _, err := s.checkExpected(ctx, run, req.Expected); err != nil {
+	if err = s.CheckExpected(ctx, run, req.Expected); err != nil {
 		return result, err
 	}
 	// Push the reviewed object ID, never a moving symbolic ref. Use the

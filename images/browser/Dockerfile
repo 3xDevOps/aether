@@ -8,6 +8,7 @@ WORKDIR /opt/aether-browser
 COPY images/browser/package.json images/browser/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts \
     && npx --no-install playwright install --with-deps --no-shell chromium \
+    && apt-get purge -y xvfb \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     && chmod -R a+rX /opt/playwright
 COPY images/browser/*.mjs ./

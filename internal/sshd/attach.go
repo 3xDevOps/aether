@@ -74,13 +74,17 @@ func attachControlError(err error) (int, string) {
 // loop to the same statuses used by periodic policy/control revalidation.
 func attachExitForError(err error) int {
 	switch {
-	case errors.Is(err, control.ErrStale), errors.Is(err, control.ErrInvalidSession):
+	case errors.Is(err, control.ErrStale), errors.Is(err, control.ErrInvalidSession), errors.Is(err, errAttachControlRevoked):
 		return protocol.AttachExitControlRevoked
-	case errors.Is(err, errMemberRemoved), errors.Is(err, errMemberPending), errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, errMemberRemoved), errors.Is(err, errMemberPending), errors.Is(err, store.ErrNotFound), errors.Is(err, errAttachMembershipRevoked):
 		return protocol.AttachExitMembershipRevoked
-	case errors.Is(err, permissions.ErrDenied):
+	case errors.Is(err, permissions.ErrDenied), errors.Is(err, errAttachSteerRevoked):
 		return protocol.AttachExitSteerRevoked
 	default:
+		var perr *protocol.Error
+		if errors.As(err, &perr) && perr.Code == protocol.CodeDenied {
+			return protocol.AttachExitSteerRevoked
+		}
 		return 1
 	}
 }
@@ -184,23 +188,17 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
 		return
 	}
-	if req.Interactive && (!req.Framed || req.Shell != "") {
+	if req.Shell != "" {
+		s.serveDevelopmentAttach(ctx, member, st, ch, r, req)
+		return
+	}
+	if req.Interactive && !req.Framed {
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: protocol.CodeInvalidParams, Error: "interactive attach requires framed run stream"})
 		return
 	}
 	var controlLease *attachControlLease
 	var controlSnap control.Snapshot
 	controlHeld := false
-	shellTab := req.Shell
-	var shellReservation ptyhost.ShellTabReservation
-	defer func() {
-		if shellReservation == nil {
-			return
-		}
-		if err := shellReservation.Rollback(context.Background()); err != nil {
-			slog.Warn("sshd: roll back refused run shell", "run", run.ID, "tab", shellTab, "error", err)
-		}
-	}()
 	_, _, hasClientPTY := st.geometry()
 	wantsControl := !req.ReadOnly && hasClientPTY
 	releasedControl := false
@@ -241,23 +239,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 	if wantsControl && s.cfg.Control != nil && req.ControlSessionID == "" {
 		_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: protocol.CodeInvalidParams, Error: "control_session_id is required"})
 		return
-	}
-	if req.Shell != "" {
-		key = ptyhost.RunShellSession(run.ID, req.Shell)
-		if !readOnly {
-			if steerErr := checkSteer(ctx, s.cfg.Store, member, run.ID); steerErr != nil {
-				e := rpcError(steerErr)
-				_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
-				return
-			}
-			var ensureErr error
-			shellReservation, ensureErr = s.cfg.Runs.EnsureRunShellTabReserved(ctx, run.ID, req.Shell, cols, rows)
-			if ensureErr != nil {
-				e := rpcError(ensureErr)
-				_ = writeJSONLine(ch, protocol.AttachResponse{OK: false, Code: e.Code, Error: e.Message})
-				return
-			}
-		}
 	}
 	ack := &protocol.AttachResponse{
 		OK: true, Cols: cols, Rows: rows, Framed: req.Framed,
@@ -471,7 +452,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 	}
 	conn = newAttachConn(ch, r, ack, req.Framed, beforeAck)
-	conn.interactive = req.Interactive && req.Shell == ""
+	conn.interactive = req.Interactive
 	recordRevoked := func(lease *attachControlLease, err error) {
 		if lease == nil {
 			return
@@ -809,22 +790,11 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			Rows:     rows,
 			ReadOnly: readOnly,
 			Member:   member,
-			SessionGeneration: func() uint64 {
-				if shellReservation == nil {
-					return 0
-				}
-				return shellReservation.Generation()
-			}(),
 			OnControlReady: func(setReadOnly func(bool) error) {
 				setControlReady(setReadOnly)
 			},
-			Authorize: authorize,
-			Commit:    commit,
-			OnAttached: func() {
-				if shellReservation != nil {
-					shellReservation.Adopt()
-				}
-			},
+			Authorize:      authorize,
+			Commit:         commit,
 			InputGuard:     inputGuard,
 			InputAdmission: inputAdmission,
 			Snapshot:       req.Framed,
@@ -862,15 +832,6 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				return
 			}
 			if controlAcquireErr != nil {
-				// The member was allowed to create this shell. Keep it alive
-				// when another session owns control so this client can
-				// immediately reconnect as a read-only mirror.
-				if shellReservation != nil &&
-					(errors.Is(controlAcquireErr, control.ErrOccupied) ||
-						errors.Is(controlAcquireErr, control.ErrStale)) {
-					shellReservation.Adopt()
-					shellReservation = nil
-				}
 				ack := protocol.AttachResponse{OK: false}
 				ack.Code, ack.Error = attachControlError(controlAcquireErr)
 				if current, present := s.cfg.Control.Status(req.RunID); present {

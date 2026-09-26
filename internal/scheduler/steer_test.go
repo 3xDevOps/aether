@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -560,12 +559,19 @@ func TestCloseRunRetainedSidecarFailureRollsBack(t *testing.T) {
 	ctx := t.Context()
 	run, c := e.launchFake(t, "retained sidecar failure")
 	stateDir := e.cfg.StateDir
-	e.sched.cfg.StateDir = filepath.Join(stateDir, "missing")
+	// Keep the original ownership marker intact while rejecting every sidecar
+	// rename, independently of development admission/terminal state writes.
+	e.sched.cfg.StateDir = t.TempDir()
+	blockedSidecar := e.sched.sidecarPath(run.ID)
+	if err := os.Mkdir(blockedSidecar, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged)
 	e.sched.cfg.StateDir = stateDir
-	if err == nil || !strings.Contains(err.Error(), "persist retained close") {
-		t.Fatalf("CloseRun sidecar failure = %v", err)
+	var renameErr *os.LinkError
+	if !errors.As(err, &renameErr) || renameErr.New != blockedSidecar {
+		t.Fatalf("CloseRun sidecar failure = %v, want failed rename to %s", err, blockedSidecar)
 	}
 	row := e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	if row.Reason != "" {

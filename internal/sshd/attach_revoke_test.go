@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 	"time"
 
@@ -642,30 +641,34 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 	})
 }
 
-func TestOccupiedRunShellRemainsAvailableAsMirror(t *testing.T) {
+func TestRunShellLeaseIsIndependentOfPrimaryControl(t *testing.T) {
 	e := controlAttachEnv(t)
+	installDevelopmentTestService(e)
 	first, firstAck := rawAttachRequest(t, e, e.signer, protocol.AttachRequest{ControlSessionID: "incumbent"}, true)
 	if !firstAck.OK {
 		t.Fatalf("incumbent ack = %+v", firstAck)
 	}
 	defer func() { _ = first.ch.Close() }()
-	otherSigner, _ := addMember(t, e, "Shell member", domain.RoleCollaborator, false)
-	_, ack := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
+	otherSigner, other := addMember(t, e, "Shell member", domain.RoleCollaborator, false)
+	if err := e.store.ShareAccount(t.Context(), e.member.ID, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	shell, ack := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
 		ControlSessionID: "shell-writer", Shell: "shared",
 	}, true)
-	if ack.OK || ack.Code != protocol.CodeConflict {
-		t.Fatalf("occupied shell ack = %+v, want conflict", ack)
+	if !ack.OK || !ack.HasControl {
+		t.Fatalf("independent shell ack = %+v", ack)
 	}
-	for _, call := range e.runs.Calls() {
-		if call == "run-shell-stop:"+string(e.run.ID)+":shared" {
-			t.Fatalf("occupied shell was destroyed instead of retained for a mirror: %v", e.runs.Calls())
-		}
+	defer func() { _ = shell.ch.Close() }()
+	current, present := e.srv.cfg.Control.Status(string(e.run.ID))
+	if !present || current.SessionID != "incumbent" || current.Generation != firstAck.ControlGeneration {
+		t.Fatalf("shell acquisition changed primary control: %+v", current)
 	}
 	mirror, mirrorAck := rawAttachRequest(t, e, otherSigner, protocol.AttachRequest{
-		ControlSessionID: "shell-writer", Shell: "shared", ReadOnly: true,
+		ControlSessionID: "shell-mirror", Shell: "shared", ReadOnly: true, Incarnation: ack.Incarnation,
 	}, true)
-	if !mirrorAck.OK || mirrorAck.HasControl || mirrorAck.ControllerID != string(e.member.ID) {
-		t.Fatalf("shell mirror ack = %+v, want current controller without control", mirrorAck)
+	if !mirrorAck.OK || mirrorAck.HasControl || mirrorAck.ControllerID != string(other.ID) {
+		t.Fatalf("shell mirror ack = %+v", mirrorAck)
 	}
 	_ = mirror.ch.Close()
 }
@@ -703,14 +706,14 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 	t.Run("steer", func(t *testing.T) {
 		t.Parallel()
 		e := revocableEnv(t)
-		collab, _ := addMember(t, e, "Shell collaborator", domain.RoleCollaborator, false)
-		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
+		installDevelopmentTestService(e)
+		collab, cm := addMember(t, e, "Shell collaborator", domain.RoleCollaborator, false)
+		if err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
+			t.Fatal(err)
+		}
+		c, ack := rawAttachRequest(t, e, collab, protocol.AttachRequest{Shell: "shell", ControlSessionID: "writer"}, true)
 		if !ack.OK {
 			t.Fatalf("ack = %+v, want ok", ack)
-		}
-		calls := e.runs.Calls()
-		if len(calls) == 0 || !strings.HasPrefix(calls[len(calls)-1], "run-shell:"+string(e.run.ID)+":shell:") {
-			t.Fatalf("RunController calls = %v, want run shell ensure", calls)
 		}
 		c.expectOpen(t, 4*e.srv.cfg.revalidateInterval)
 		e.run.Protected = true
@@ -723,8 +726,12 @@ func TestRunShellAttachDropsOnSteerAndMembershipRevocation(t *testing.T) {
 	t.Run("membership", func(t *testing.T) {
 		t.Parallel()
 		e := revocableEnv(t)
+		installDevelopmentTestService(e)
 		collab, cm := addMember(t, e, "Shell viewer", domain.RoleCollaborator, false)
-		c, ack := rawAttach(t, e, collab, e.run.ID, true, "shell")
+		if err := e.store.ShareAccount(t.Context(), e.member.ID, cm.ID); err != nil {
+			t.Fatal(err)
+		}
+		c, ack := rawAttachRequest(t, e, collab, protocol.AttachRequest{Shell: "shell", ReadOnly: true}, true)
 		if !ack.OK {
 			t.Fatalf("ack = %+v, want ok", ack)
 		}

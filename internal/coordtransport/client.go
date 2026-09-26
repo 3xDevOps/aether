@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -30,6 +32,15 @@ func callTimeout(method string, params any) time.Duration {
 		timeout = callReportTimeout
 	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
+	case protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop, protocol.MethodDevBrowserReset:
+		timeout = 30*time.Second + callMargin
+	case protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserAction, protocol.MethodDevBrowserWait:
+		// Browser operations allow 30 seconds plus the companion's five-second
+		// response margin before the outer socket framing margin.
+		timeout = 35*time.Second + callMargin
+	case protocol.MethodDevBrowserOpen:
+		// First launch includes image acquisition and companion readiness.
+		timeout = 90*time.Second + callMargin
 	}
 	if timeout > callDeadlineCeiling && !longPoll(method) {
 		return callDeadlineCeiling
@@ -108,6 +119,9 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	if err != nil {
 		return internalError(method, err)
 	}
+	if strings.HasPrefix(method, "dev.") && len(line)+1 > 64<<10 {
+		return &coordError{Code: protocol.CodeInvalidParams, Message: method + ": request exceeds 64 KiB"}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, callTimeout(method, params))
 	defer cancel()
@@ -129,7 +143,13 @@ func (c *client) call(ctx context.Context, method string, params, result any) er
 	if _, werr := conn.Write(append(line, '\n')); werr != nil {
 		return unavailable(method, werr)
 	}
-	raw, err := protocol.ReadLine(bufio.NewReader(conn))
+	var responseReader io.Reader = conn
+	if strings.HasPrefix(method, "dev.") {
+		// The general protocol also transports large configuration files; a
+		// development control response never borrows that larger budget.
+		responseReader = io.LimitReader(conn, 64<<10)
+	}
+	raw, err := protocol.ReadLine(bufio.NewReader(responseReader))
 	if err != nil {
 		return unavailable(method, err)
 	}

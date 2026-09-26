@@ -236,8 +236,8 @@ Four things turn the reporter off:
 
 - **Headless runs.** `--mode headless` never gets the reporter: the agent
   exits when it is done and never waits for anyone.
-- **`--conflict-coordination=false`.** There are no mounts, so there is no
-  socket to report on and no directory to write the assets into.
+- **`--conflict-coordination=false`.** Lifecycle reporting is disabled, but
+  the run identity socket, canonical CLI and discovery remain available.
 - **An argv override.** A `--harness-definitions` entry that redefines a
   shipped harness drops the status arguments, status environment, and
   taskless discovery mechanism - nothing checks the overridden command is
@@ -306,11 +306,11 @@ that carries the prompt is then dropped, so `opencode --prompt={task}` leaves
 whole rather than dangling an empty flag. Headless mode has no interactive
 surface, so it still requires a task.
 
-Where conflict coordination is on and the launch has a task, Aether adds this
-short discovery instruction before substituting `{task}`:
+For a task-bearing launch, Aether includes a short discovery instruction.
+The taskless vendor-native paths use this capability-neutral hint:
 
 ```
-Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished.
+Use `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. Use only available capabilities and report only what you verified.
 ```
 
 For a taskless launch, the same instruction is delivered through the
@@ -334,6 +334,75 @@ finished. The co-author rule still asks the agent to read
 `/run/aether/co-authors` before each commit. Only the prompt
 the harness receives changes: the stored task, branch slug, and every CLI and
 dashboard surface keep what the member typed. See [coordination.md](coordination.md).
+
+Custom harnesses, `fake`, and argv-overridden shipped profiles do not receive
+guessed vendor flags or a fabricated initial task. They still get the staged
+CLI and the run identity socket. Their authors must call `aether-internal
+skill` manually or through their own native taskless startup mechanism. Aether
+does not create permanent repository settings, mutate member configuration,
+register MCP servers, or claim tools exist merely to make discovery appear
+successful. Standalone help works without a socket; standalone `skill` gives
+short capability-neutral discovery, never a borrowed run identity.
+
+### Agent development workflow
+
+`aether-internal status` reports the live capability allow-list.
+`aether-internal skill` preserves the mission/task/inbox/report workflow and
+offers `skill terminal`, `skill browser`, and native `skill git` only when the
+relevant development execution/observation capability is advertised. The Git
+topic does not claim that GitHub CLI, credentials, push permissions or image
+tools are installed.
+
+The command families are `terminal`, `browser`, `control`, and `artifact`.
+Each operation has command-specific offline help and accepts a typed JSON
+object via `--params-file FILE` or `--params-file -` (stdin); `--json` is optional
+because results already use the v3 envelope. Parameters are capped at 48 KiB
+before/after encoding, control frames at 64 KiB; identity/unknown fields are
+refused. There is no generic arbitrary RPC, run-ID selector or socket override.
+
+```sh
+aether-internal terminal list
+aether-internal terminal start --help
+printf '%s\n' '{"command":["npm","run","dev"],"name":"app"}' |
+  aether-internal terminal start --params-file -
+aether-internal skill browser
+aether-internal browser status
+aether-internal browser open --help
+aether-internal artifact list
+```
+
+Edit, run, observe, interact, correct and verify the changed path. A terminal
+command starts a real owned PTY process without a viewer. `terminal output`
+reads history; `terminal screen` reads the current styled cell grid;
+`terminal screenshot` returns a private artifact path. They are not
+interchangeable. Acquire the exact terminal incarnation's control lease before
+input/resize/stop, use its returned controller generation and release when
+finished. Detach/release does not stop the app.
+
+The browser companion is lazy and sandboxed on a standard **headless Ubuntu
+server**, without X11, Wayland, Xvfb, a desktop session or host browser.
+First `browser open` sends a URL, nonempty `control_session_id`, generation
+zero and no `session_id`; the broker creates the companion and acquires its
+surface. Retain returned `page` and `control`. Later page mutations use the
+session/page/revision plus controller fence; coordinate input also uses the
+observed viewport identity. Use `browser snapshot` for semantic nodes,
+`browser console`/`network` for diagnostics and `browser screenshot` for an
+image artifact. See [the complete commands and bootstrap contract](coordination.md#development-terminals-browser-and-captures).
+
+Only claim visible screenshot evidence after an actual image-consuming harness
+tool reads the returned artifact path. If no such tool exists, report that
+exact limitation and the text/DOM checks actually performed; text alone is
+not visual proof. Capture and verify before resource cleanup or a terminal
+worker success/failure report. Do not automatically upload screenshots publicly.
+
+Use native `git` and `gh`, not a second agent Git engine. Inspect the checkout
+origin separately from the workspace mirror import source; for fork PRs,
+explicitly choose base repository/branch and head owner/branch. Preserve
+existing signing/author configuration and coauthors, stage exact intended paths,
+inspect existing PRs before creating one, and follow assignment approval
+boundaries instead of automatically merging. See [native Git guidance](coordination.md#native-git-and-pull-requests).
+
+### Launch argv
 
 | `claude` | `claude --dangerously-skip-permissions {task}` | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions {task}` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox {task}` | `codex exec --json --dangerously-bypass-approvals-and-sandbox {task}` |

@@ -18,11 +18,12 @@ import (
 // member holds the steer capability on that run. The ack is the shared
 // AttachResponse.
 type DashAttachRequest struct {
-	Write       bool `json:"write,omitempty"`
-	Interactive bool `json:"interactive,omitempty"`
-	Screen      bool `json:"screen,omitempty"`
-	Cols        uint `json:"cols,omitempty"`
-	Rows        uint `json:"rows,omitempty"`
+	Write       bool   `json:"write,omitempty"`
+	Interactive bool   `json:"interactive,omitempty"`
+	Screen      bool   `json:"screen,omitempty"`
+	Cols        uint   `json:"cols,omitempty"`
+	Rows        uint   `json:"rows,omitempty"`
+	Incarnation string `json:"incarnation,omitempty"`
 	// Follow is AttachRequest.Follow: render at the session's geometry and
 	// impose none, so this client is left out of the minimum the PTY is
 	// sized to. The ack reports the size to draw at, and a geometry frame

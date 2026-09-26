@@ -57,9 +57,9 @@ func newImportService(t *testing.T, st Store) (*Service, *gitengine.Engine, stri
 }
 
 func TestImportNewWorkspacePreservesExplicitCheckoutOrigin(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "import.db"))
-	if err != nil {
-		t.Fatal(err)
+	db, openErr := store.Open(filepath.Join(t.TempDir(), "import.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	workspace := &domain.Workspace{Name: "remote-only", BaseBranch: "main"}
@@ -81,8 +81,8 @@ func TestImportNewWorkspacePreservesExplicitCheckoutOrigin(t *testing.T) {
 	if err != nil || observed.Mirror.Status != domain.MirrorStatusPending || observed.Mirror.ObservedCommit != commit || observed.Mirror.AcceptedCommit != "" {
 		t.Fatalf("initial candidate = %+v, %v", observed, err)
 	}
-	if _, err := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation); err != nil {
-		t.Fatal(err)
+	if _, adoptErr := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation); adoptErr != nil {
+		t.Fatal(adoptErr)
 	}
 	stored, err := db.GetWorkspace(t.Context(), workspace.ID)
 	if err != nil || stored.Origin != origin {
@@ -117,8 +117,8 @@ func TestImportReportsGitStateWhenPersistenceFails(t *testing.T) {
 				st.setErrors = []error{nil, persistence}
 				result, err = svc.Refresh(t.Context(), "import")
 			} else {
-				if _, err := svc.Refresh(t.Context(), "import"); err != nil {
-					t.Fatal(err)
+				if _, refreshErr := svc.Refresh(t.Context(), "import"); refreshErr != nil {
+					t.Fatal(refreshErr)
 				}
 				st.setErrors = []error{persistence}
 				result, err = svc.Adopt(t.Context(), "import", configured.Mirror.Generation)
@@ -139,9 +139,9 @@ func TestImportReportsGitStateWhenPersistenceFails(t *testing.T) {
 }
 
 func TestImportDoesNotInferCheckoutOriginFromSource(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "import.db"))
-	if err != nil {
-		t.Fatal(err)
+	db, openErr := store.Open(filepath.Join(t.TempDir(), "import.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	workspace := &domain.Workspace{Name: "no-push-target", BaseBranch: "main"}
@@ -155,11 +155,11 @@ func TestImportDoesNotInferCheckoutOriginFromSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Refresh(t.Context(), workspace.ID); err != nil {
-		t.Fatal(err)
+	if _, refreshErr := svc.Refresh(t.Context(), workspace.ID); refreshErr != nil {
+		t.Fatal(refreshErr)
 	}
-	if _, err := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation); err != nil {
-		t.Fatal(err)
+	if _, adoptErr := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation); adoptErr != nil {
+		t.Fatal(adoptErr)
 	}
 	stored, err := db.GetWorkspace(t.Context(), workspace.ID)
 	if err != nil || stored.Origin != "" {

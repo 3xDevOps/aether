@@ -45,25 +45,25 @@ func (d *Docker) browserContainerConfig(spec BrowserSpec) (*container.Config, *c
 	initEnabled := true
 	pids := int64(512)
 	return &container.Config{
-		Image:      spec.Image,
-		User:       "1000:1000",
-		WorkingDir: "/opt/aether-browser",
-		Entrypoint: []string{"node", "/opt/aether-browser/server.mjs"},
-		Env:        []string{"HOME=/tmp/aether-browser-home", "NODE_ENV=production", "PLAYWRIGHT_BROWSERS_PATH=/opt/playwright", "AETHER_BROWSER_CREATION_KEY=" + spec.CreationKey},
-		Labels:     labels,
-	}, &container.HostConfig{
-		Init:           &initEnabled,
-		NetworkMode:    container.NetworkMode("container:" + string(spec.RunContainer)),
-		IpcMode:        "private",
-		ShmSize:        BrowserSharedMemoryBytes,
-		ReadonlyRootfs: true,
-		CapDrop:        []string{"ALL"},
-		SecurityOpt:    []string{"no-new-privileges=true", "seccomp=" + browserSeccomp},
-		Tmpfs:          map[string]string{"/tmp": "rw,nosuid,nodev,size=536870912,mode=1777"},
-		Mounts:         []mount.Mount{{Type: mount.TypeBind, Source: spec.ControlHostPath, Target: "/aether-control", BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate}}},
-		Resources:      container.Resources{NanoCPUs: nanoCPUs(spec.CPULimit), Memory: spec.MemoryLimitBytes, MemorySwap: spec.MemoryLimitBytes, PidsLimit: &pids},
-		LogConfig:      container.LogConfig{Type: "local", Config: map[string]string{"max-size": "10m", "max-file": "2"}},
-	}
+			Image:      spec.Image,
+			User:       "1000:1000",
+			WorkingDir: "/opt/aether-browser",
+			Entrypoint: []string{"node", "/opt/aether-browser/server.mjs"},
+			Env:        []string{"HOME=/tmp/aether-browser-home", "NODE_ENV=production", "PLAYWRIGHT_BROWSERS_PATH=/opt/playwright", "AETHER_BROWSER_CREATION_KEY=" + spec.CreationKey},
+			Labels:     labels,
+		}, &container.HostConfig{
+			Init:           &initEnabled,
+			NetworkMode:    container.NetworkMode("container:" + string(spec.RunContainer)),
+			IpcMode:        "private",
+			ShmSize:        BrowserSharedMemoryBytes,
+			ReadonlyRootfs: true,
+			CapDrop:        []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges=true", "seccomp=" + browserSeccomp},
+			Tmpfs:          map[string]string{"/tmp": "rw,nosuid,nodev,size=536870912,mode=1777"},
+			Mounts:         []mount.Mount{{Type: mount.TypeBind, Source: spec.ControlHostPath, Target: "/aether-control", BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate}}},
+			Resources:      container.Resources{NanoCPUs: nanoCPUs(spec.CPULimit), Memory: spec.MemoryLimitBytes, MemorySwap: spec.MemoryLimitBytes, PidsLimit: &pids},
+			LogConfig:      container.LogConfig{Type: "local", Config: map[string]string{"max-size": "10m", "max-file": "2"}},
+		}
 }
 
 func (d *Docker) CreateBrowser(ctx context.Context, spec BrowserSpec) (ID, error) {
@@ -84,7 +84,7 @@ func (d *Docker) CreateBrowser(ctx context.Context, spec BrowserSpec) (ID, error
 	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
 		return "", errors.New("runtime: browser control directory must be private (0700)")
 	}
-	if err := d.checkBrowserNetwork(ctx, spec.RunContainer); err != nil {
+	if err = d.checkBrowserNetwork(ctx, spec.RunContainer); err != nil {
 		return "", err
 	}
 	image, err := d.cli.ImageInspect(ctx, spec.Image)
@@ -92,7 +92,7 @@ func (d *Docker) CreateBrowser(ctx context.Context, spec BrowserSpec) (ID, error
 		if strings.HasPrefix(spec.Image, "sha256:") {
 			return "", fmt.Errorf("runtime: immutable browser image %s is not loaded in the Docker daemon", spec.Image)
 		}
-		if err := d.pull(ctx, spec.Image); err != nil {
+		if err = d.pull(ctx, spec.Image); err != nil {
 			return "", err
 		}
 		image, err = d.cli.ImageInspect(ctx, spec.Image)

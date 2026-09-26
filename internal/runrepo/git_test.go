@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,16 @@ import (
 func localExec(ctx context.Context, _ runtime.ID, argv []string, dir string) (int, string, string, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+	// Command-local overrides (for example, env GIT_AUTHOR_EMAIL=...) still
+	// apply, but the developer's ambient identity must not replace the fixture.
+	for _, value := range os.Environ() {
+		key, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(key, "GIT_AUTHOR_") || strings.HasPrefix(key, "GIT_COMMITTER_") || key == "EMAIL" {
+			continue
+		}
+		cmd.Env = append(cmd.Env, value)
+	}
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -267,4 +277,327 @@ func slicesContain(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestCommitRejectsConcurrentBranchSwitchWithIdenticalHead(t *testing.T) {
+	for _, detach := range []bool{false, true} {
+		t.Run(fmt.Sprintf("detached=%t", detach), func(t *testing.T) {
+			s, run, expected := newRepo(t)
+			gitCmd(t, run.WorkDir, "branch", "other", expected.Head)
+			writeFile(t, run.WorkDir, "selected", "ours\n")
+			s.exec = func(ctx context.Context, id runtime.ID, args []string, dir string) (int, string, string, error) {
+				if slicesContain(args, "update-ref") {
+					if detach {
+						gitCmd(t, dir, "checkout", "--detach")
+					} else {
+						gitCmd(t, dir, "checkout", "other")
+					}
+				}
+				return localExec(ctx, id, args, dir)
+			}
+			result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "ours"})
+			var stale *StaleError
+			if !errors.As(err, &stale) || result.Committed || stale.Actual.Head != expected.Head || stale.Detached != detach {
+				t.Fatalf("branch switch: result=%+v stale=%+v err=%v", result, stale, err)
+			}
+			if !detach && stale.Actual.Branch != "other" {
+				t.Fatalf("actual branch=%q", stale.Actual.Branch)
+			}
+			for _, branch := range []string{"main", "other"} {
+				if got := gitCmd(t, run.WorkDir, "rev-parse", branch); got != expected.Head {
+					t.Fatalf("changed unrelated/non-current branch %s to %s", branch, got)
+				}
+			}
+		})
+	}
+}
+
+func TestCommitSigningFailureDoesNotPublishOrDiscardIndex(t *testing.T) {
+	s, run, expected := newRepo(t)
+	writeFile(t, run.WorkDir, "selected", "ours\n")
+	writeFile(t, run.WorkDir, "unrelated", "staged elsewhere\n")
+	gitCmd(t, run.WorkDir, "add", "unrelated")
+	gitCmd(t, run.WorkDir, "config", "gpg.format", "ssh")
+	gitCmd(t, run.WorkDir, "config", "user.signingkey", filepath.Join(run.WorkDir, "missing-signing-key"))
+	gitCmd(t, run.WorkDir, "config", "commit.gpgsign", "true")
+	result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "signed"})
+	var commandErr *CommandError
+	if !errors.As(err, &commandErr) || result.Committed || result.Output.ExitCode == 0 || !strings.Contains(result.Output.Stderr, "missing-signing-key") {
+		t.Fatalf("signing failure: %+v err=%v", result, err)
+	}
+	if got := gitCmd(t, run.WorkDir, "rev-parse", "HEAD"); got != expected.Head {
+		t.Fatalf("published unsigned commit %s", got)
+	}
+	if got := gitCmd(t, run.WorkDir, "show", ":unrelated"); got != "staged elsewhere" {
+		t.Fatalf("lost index: %q", got)
+	}
+}
+
+func TestCommitDeletionAndCoauthorsPreserveNativeIdentity(t *testing.T) {
+	s, run, expected := newRepo(t)
+	if err := os.Remove(filepath.Join(run.WorkDir, "selected")); err != nil {
+		t.Fatal(err)
+	}
+	run.CoAuthors = func(_ context.Context, author string) ([]string, error) {
+		if author != "run@example.test" {
+			return nil, fmt.Errorf("wrong actual author %q", author)
+		}
+		return []string{"Co-authored-by: Steering Person <steerer@example.test>"}, nil
+	}
+	result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "delete selected\n\nCo-authored-by: Steering Person <steerer@example.test>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitCmd(t, run.WorkDir, "ls-tree", "--name-only", result.Head); got != "unrelated" {
+		t.Fatalf("deletion tree=%q", got)
+	}
+	message := gitCmd(t, run.WorkDir, "log", "-1", "--format=%B")
+	if strings.Count(message, "Co-authored-by: Steering Person") != 1 {
+		t.Fatalf("trailers=%q", message)
+	}
+	if got := gitCmd(t, run.WorkDir, "log", "-1", "--format=%an <%ae>"); got != "Run Author <run@example.test>" {
+		t.Fatalf("author=%q", got)
+	}
+}
+
+func TestCommitRechecksAuthorityAtPublication(t *testing.T) {
+	s, run, expected := newRepo(t)
+	writeFile(t, run.WorkDir, "selected", "ours\n")
+	revoked := errors.New("shared account revoked")
+	revoke := false
+	run.Authorize = func(_ context.Context, mutate bool) error {
+		if revoke && mutate {
+			return revoked
+		}
+		return nil
+	}
+	s.exec = func(ctx context.Context, id runtime.ID, args []string, dir string) (int, string, string, error) {
+		code, stdout, stderr, err := localExec(ctx, id, args, dir)
+		if slicesContain(args, "mktemp") && code == 0 && err == nil {
+			private := strings.TrimSpace(stdout)
+			t.Cleanup(func() { _ = os.RemoveAll(private) })
+		}
+		if slicesContain(args, "commit-tree") {
+			revoke = true
+		}
+		return code, stdout, stderr, err
+	}
+	result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "ours"})
+	if !errors.Is(err, revoked) || result.Committed {
+		t.Fatalf("revoked result=%+v err=%v", result, err)
+	}
+	if got := gitCmd(t, run.WorkDir, "rev-parse", "HEAD"); got != expected.Head {
+		t.Fatalf("published after revoke: %s", got)
+	}
+}
+
+func TestCommitRejectsSelectedFileBecomingDirectory(t *testing.T) {
+	s, run, expected := newRepo(t)
+	writeFile(t, run.WorkDir, "selected", "ours\n")
+	s.exec = func(ctx context.Context, id runtime.ID, args []string, dir string) (int, string, string, error) {
+		if slicesContain(args, "add") {
+			if err := os.Remove(filepath.Join(dir, "selected")); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, dir, "selected/unreviewed", "must not publish\n")
+		}
+		return localExec(ctx, id, args, dir)
+	}
+	result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "ours"})
+	if err == nil || result.Committed || !strings.Contains(err.Error(), "unexpected path") {
+		t.Fatalf("directory race=%+v err=%v", result, err)
+	}
+	if got := gitCmd(t, run.WorkDir, "rev-parse", "HEAD"); got != expected.Head {
+		t.Fatalf("published unreviewed descendants: %s", got)
+	}
+}
+
+func TestPushRejectsMultipleConfiguredDestinations(t *testing.T) {
+	s, run, expected := newRepo(t)
+	first, second := t.TempDir(), t.TempDir()
+	gitCmd(t, first, "init", "--bare")
+	gitCmd(t, second, "init", "--bare")
+	gitCmd(t, run.WorkDir, "remote", "add", "publish", first)
+	gitCmd(t, run.WorkDir, "remote", "set-url", "--add", "--push", "publish", first)
+	gitCmd(t, run.WorkDir, "remote", "set-url", "--add", "--push", "publish", second)
+	result, err := s.Push(t.Context(), run, PushRequest{Expected: expected, Target: PushTarget{Remote: "publish", Repository: first, HeadBranch: "review"}})
+	if err == nil || result.Pushed || !strings.Contains(err.Error(), "multiple destinations") {
+		t.Fatalf("ambiguous push=%+v err=%v", result, err)
+	}
+	if got := gitCmd(t, first, "for-each-ref", "--format=%(refname)"); got != "" {
+		t.Fatalf("pushed first ambiguous destination: %s", got)
+	}
+	if got := gitCmd(t, second, "for-each-ref", "--format=%(refname)"); got != "" {
+		t.Fatalf("pushed second ambiguous destination: %s", got)
+	}
+}
+
+func TestCommitPreservesNonzeroCleanupAndEarlierFailure(t *testing.T) {
+	for _, indexFailure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("index-failure=%t", indexFailure), func(t *testing.T) {
+			s, run, expected := newRepo(t)
+			writeFile(t, run.WorkDir, "selected", "ours\n")
+			s.exec = func(ctx context.Context, id runtime.ID, args []string, dir string) (int, string, string, error) {
+				if slicesContain(args, "reset") && indexFailure {
+					writeFile(t, dir, ".git/index.lock", "native writer")
+				}
+				if slicesContain(args, "rm") {
+					private := args[len(args)-1]
+					t.Cleanup(func() { _ = os.RemoveAll(private) })
+					// Real rm exits nonzero with nil Exec transport error.
+					return localExec(ctx, id, []string{"rm", "--", filepath.Join(private, "missing-cleanup-entry")}, dir)
+				}
+				return localExec(ctx, id, args, dir)
+			}
+			result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "ours"})
+			if err == nil || !result.Committed || result.IndexUpdated == indexFailure || !strings.Contains(err.Error(), "missing-cleanup-entry") {
+				t.Fatalf("cleanup error lost partial state: %+v err=%v", result, err)
+			}
+			if indexFailure && !strings.Contains(err.Error(), "index.lock") {
+				t.Fatalf("cleanup replaced earlier failure: %v", err)
+			}
+			if !indexFailure && (result.Output.ExitCode == 0 || !strings.Contains(result.Output.Stderr, "missing-cleanup-entry")) {
+				t.Fatalf("cleanup lost actual command diagnostics: %+v", result.Output)
+			}
+			if got := gitCmd(t, run.WorkDir, "rev-parse", "HEAD"); got != result.Head {
+				t.Fatalf("partial result lost published HEAD %s", got)
+			}
+		})
+	}
+}
+
+func TestRemotesExposeIndependentFetchAndPushConfiguration(t *testing.T) {
+	s, run, _ := newRepo(t)
+	fetch, push := t.TempDir(), t.TempDir()
+	gitCmd(t, run.WorkDir, "remote", "add", "origin", fetch)
+	gitCmd(t, run.WorkDir, "remote", "set-url", "--push", "origin", push)
+	remotes, _, err := s.Remotes(t.Context(), run, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 1 || remotes[0].Name != "origin" || !reflect.DeepEqual(remotes[0].FetchURLs, []string{fetch}) || !reflect.DeepEqual(remotes[0].PushURLs, []string{push}) {
+		t.Fatalf("conflated fetch and push targets: %+v", remotes)
+	}
+}
+
+func TestCommitReconcilesLostPublicationResponseWithoutRepeatingMutation(t *testing.T) {
+	s, run, expected := newRepo(t)
+	writeFile(t, run.WorkDir, "selected", "ours\n")
+	lost := errors.New("exec transport response lost")
+	publications := 0
+	s.exec = func(ctx context.Context, id runtime.ID, args []string, dir string) (int, string, string, error) {
+		code, stdout, stderr, err := localExec(ctx, id, args, dir)
+		if slicesContain(args, "update-ref") && code == 0 && err == nil {
+			publications++
+			return code, stdout, stderr, lost
+		}
+		return code, stdout, stderr, err
+	}
+	result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "ours"})
+	if !errors.Is(err, lost) || !result.Committed || result.IndexUpdated || result.Head != gitCmd(t, run.WorkDir, "rev-parse", "HEAD") || publications != 1 {
+		t.Fatalf("lost publication response: %+v attempts=%d err=%v", result, publications, err)
+	}
+}
+
+func TestCommitPreservesNativeTransactionHooksAndTheirVeto(t *testing.T) {
+	for _, veto := range []bool{false, true} {
+		t.Run(fmt.Sprintf("veto=%t", veto), func(t *testing.T) {
+			s, run, expected := newRepo(t)
+			hooks := filepath.Join(t.TempDir(), "native hooks")
+			script := `#!/bin/sh
+set -eu
+cat >"hook-input-$1"
+printf '%s\n' "$1" >>hook-events
+if [ "$1" = prepared ]; then
+	test -f "$(git rev-parse --git-path HEAD.lock)"
+	test -f "$(git rev-parse --git-path refs/heads/main.lock)"
+	printf 'prepare: ok\ncommit: ok\n'
+`
+			if veto {
+				script += "	printf '%s\\n' 'native publication veto' >&2\n	exit 1\n"
+			}
+			script += "fi\n"
+			writeFile(t, hooks, "reference-transaction", script)
+			if err := os.Chmod(filepath.Join(hooks, "reference-transaction"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			gitCmd(t, run.WorkDir, "config", "core.hooksPath", hooks)
+			writeFile(t, run.WorkDir, "selected", "reviewed\n")
+			result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "native policy"})
+			if veto {
+				if err == nil || result.Committed || !strings.Contains(result.Output.Stderr, "native publication veto") || gitCmd(t, run.WorkDir, "rev-parse", "HEAD") != expected.Head {
+					t.Fatalf("transaction hook veto lost: result=%+v err=%v", result, err)
+				}
+			} else if err != nil || !result.Committed || !result.IndexUpdated {
+				t.Fatalf("native hook publication: result=%+v err=%v", result, err)
+			}
+			events, readErr := os.ReadFile(filepath.Join(run.WorkDir, "hook-events"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if strings.Count(string(events), "prepared\n") != 1 || strings.Contains(string(events), "committed\n") == veto || strings.Contains(string(events), "aborted\n") != veto {
+				t.Fatalf("native transaction lifecycle=%q", events)
+			}
+			input, readErr := os.ReadFile(filepath.Join(run.WorkDir, "hook-input-prepared"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !strings.Contains(string(input), expected.Head+" ") || !strings.Contains(string(input), " refs/heads/main\n") {
+				t.Fatalf("native hook lost transaction stdin=%q", input)
+			}
+			for _, ref := range []string{"HEAD", "refs/heads/main"} {
+				lock := gitCmd(t, run.WorkDir, "rev-parse", "--git-path", ref+".lock")
+				if !filepath.IsAbs(lock) {
+					lock = filepath.Join(run.WorkDir, lock)
+				}
+				if _, err := os.Stat(lock); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("native lock retained: %s: %v", lock, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCommitSignsSelectedFilesInLinkedWorktree(t *testing.T) {
+	s, run, initial := newRepo(t)
+	mainDir := run.WorkDir
+	run.WorkDir = filepath.Join(t.TempDir(), "linked")
+	gitCmd(t, mainDir, "worktree", "add", "-b", "linked", run.WorkDir)
+	expected := Expected{Branch: "linked", Head: initial.Head}
+	key := filepath.Join(t.TempDir(), "signing-key")
+	code, _, stderr, err := localExec(t.Context(), "test", []string{"ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key}, run.WorkDir)
+	if err != nil || code != 0 {
+		t.Fatalf("native signing key: code=%d stderr=%s err=%v", code, stderr, err)
+	}
+	publicKey, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := filepath.Join(t.TempDir(), "allowed-signers")
+	if err = os.WriteFile(allowed, []byte("run@example.test "+strings.TrimSpace(string(publicKey))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, run.WorkDir, "config", "gpg.format", "ssh")
+	gitCmd(t, run.WorkDir, "config", "user.signingkey", key)
+	gitCmd(t, run.WorkDir, "config", "gpg.ssh.allowedSignersFile", allowed)
+	gitCmd(t, run.WorkDir, "config", "commit.gpgsign", "true")
+	writeFile(t, run.WorkDir, "unrelated", "unrelated staged\n")
+	gitCmd(t, run.WorkDir, "add", "unrelated")
+	writeFile(t, run.WorkDir, "unrelated", "unrelated worktree\n")
+	writeFile(t, run.WorkDir, "selected", "signed selection\n")
+	result, err := s.Commit(t.Context(), run, CommitRequest{Expected: expected, Paths: []string{"selected"}, Message: "signed linked selection"})
+	if err != nil || !result.Committed || !result.IndexUpdated {
+		t.Fatalf("signed linked commit: %+v err=%v", result, err)
+	}
+	gitCmd(t, run.WorkDir, "verify-commit", result.Head)
+	if gitCmd(t, run.WorkDir, "symbolic-ref", "--short", "HEAD") != "linked" || gitCmd(t, mainDir, "rev-parse", "HEAD") != initial.Head {
+		t.Fatal("linked publication changed the wrong HEAD")
+	}
+	if gitCmd(t, run.WorkDir, "show", result.Head+":selected") != "signed selection" || gitCmd(t, run.WorkDir, "show", result.Head+":unrelated") != "original" || gitCmd(t, run.WorkDir, "show", ":unrelated") != "unrelated staged" {
+		t.Fatal("signed publication lost selected-tree or unrelated-index isolation")
+	}
+	worktree, err := os.ReadFile(filepath.Join(run.WorkDir, "unrelated"))
+	if err != nil || string(worktree) != "unrelated worktree\n" {
+		t.Fatalf("unrelated worktree changed: %q err=%v", worktree, err)
+	}
 }

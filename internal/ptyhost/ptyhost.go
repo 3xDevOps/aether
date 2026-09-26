@@ -274,20 +274,26 @@ func (h *Host) Close() error {
 // The session survives zero attachments; when the agent exits (stdout EOF)
 // it enters the ended state and stays queryable until StopSession.
 func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
-	return h.startSession(ctx, key, att, false)
+	return h.startSession(ctx, key, att, false, h.cfg.DefaultCols, h.cfg.DefaultRows)
 }
 
-// StartDevelopmentSession opts a run shell into server-owned terminal query
-// replies and retained post-exit observation. Primary harnesses keep their
-// existing client responder and cannot be started through this entry point.
-func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
+// StartDevelopmentSession adopts a run shell launched at cols by rows and opts
+// it into server-owned terminal query replies and retained post-exit observation.
+// The caller must use the same geometry in the runtime ExecSpec. Adoption never
+// resizes the process: a short-lived command may already have exited, and its
+// buffered output must be interpreted at its original geometry. Primary harnesses
+// keep their existing initial resize and client responder through StartSession.
+func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint) error {
 	if !strings.HasPrefix(string(key), "run-shell:") {
 		return errors.New("ptyhost: development session must be a run shell")
 	}
-	return h.startSession(ctx, key, att, true)
+	if err := validateScreenDimensions(cols, rows); err != nil {
+		return err
+	}
+	return h.startSession(ctx, key, att, true, cols, rows)
 }
 
-func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool) error {
+func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool, initialCols, initialRows uint) error {
 	// Reserve the key before touching the transcript file so a losing
 	// duplicate StartSession can never truncate the winner's transcript.
 	if err := h.reserve(key); err != nil {
@@ -314,7 +320,6 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	var recoveredHistory []castSegment
 	position := TerminalPosition{Epoch: epoch}
 	recoveredTranscript := false
-	initialCols, initialRows := h.cfg.DefaultCols, h.cfg.DefaultRows
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
 		if isRun {
 			recovered, segments, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false)
@@ -392,13 +397,10 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	if recoveredTranscript {
 		tr.seed(makeScreenSnapshot(screen, modes, position).Data)
 	}
-	// Initial geometry goes out before the session is attachable, so a
-	// concurrent write-attach clamp can never be overwritten by it.
-	if err := att.Resize(ctx, initialCols, initialRows); err != nil && development {
-		_ = tr.close()
-		screen.dispose()
-		h.unreserve(key)
-		return fmt.Errorf("ptyhost: initialize development geometry: %w", err)
+	// Ordinary sessions retain the pre-attach initial resize. Development
+	// processes were launched at the explicit geometry and may already be done.
+	if !development {
+		_ = att.Resize(ctx, initialCols, initialRows)
 	}
 	s := &session{
 		run:              key,
@@ -1117,6 +1119,23 @@ func (h *Host) SessionGeneration(key SessionKey) uint64 {
 		return 0
 	}
 	return s.generation
+}
+
+// SessionGeometry returns the runtime-accepted dimensions and process generation
+// at one session boundary without capturing cells or serializing a snapshot.
+// An in-flight or failed resize does not publish its requested dimensions.
+// Ended sessions retain their final geometry; stopped sessions are unavailable.
+func (h *Host) SessionGeometry(key SessionKey) (cols, rows uint, generation uint64, err error) {
+	s := h.lookup(key)
+	if s == nil {
+		return 0, 0, 0, ErrNoSession
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return 0, 0, 0, ErrNoSession
+	}
+	return s.acceptedCols, s.acceptedRows, s.generation, nil
 }
 
 // ActiveSessions returns the keys of live sessions with the given prefix.

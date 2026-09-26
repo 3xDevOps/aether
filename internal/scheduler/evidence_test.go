@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -198,7 +197,12 @@ func TestFinalizeLogsRetainedSidecarFailure(t *testing.T) {
 	destroyErr := errors.New("test: destroy unavailable")
 	e.sched.cfg.Runtime = &destroyFailureRuntime{Runtime: e.rt, destroyErr: destroyErr}
 	run, container := e.launchFake(t, "retained sidecar diagnostics")
-	e.sched.cfg.StateDir = filepath.Join(e.cfg.StateDir, "missing")
+	// Development cleanup creates its state subdirectories. Block the actual
+	// sidecar destination so those writes cannot repair the injected failure.
+	e.sched.cfg.StateDir = t.TempDir()
+	if err := os.Mkdir(e.sched.sidecarPath(run.ID), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	handler := &recordingSlogHandler{}
 	previous := slog.Default()

@@ -62,13 +62,22 @@ func TestTypedOperationLimits(t *testing.T) {
 		edit func(*Request)
 	}{
 		{"unknown-operation", func(r *Request) { r.Operation = "evaluate" }},
-		{"unbounded-timeout", func(r *Request) { r.Operation = "reload"; r.TimeoutMS = 10001 }},
-		{"oversized-snapshot", func(r *Request) { r.Operation = "snapshot"; r.MaxNodes = 501 }},
+		{"unbounded-timeout", func(r *Request) { r.Operation = "reload"; r.TimeoutMS = 30001 }},
+		{"oversized-snapshot", func(r *Request) { r.Operation = "snapshot"; r.MaxNodes = 129 }},
 		{"stale-node-identity", func(r *Request) { r.Operation = "click" }},
 		{"nonfinite-scroll", func(r *Request) { r.Operation = "scroll"; r.DeltaY = math.Inf(1) }},
 		{"empty-success-condition", func(r *Request) { r.Operation = "wait"; r.Condition = "text" }},
 		{"file-url", func(r *Request) { r.Operation = "navigate"; r.URL = "file:///etc/passwd" }},
 		{"unsafe-integer-cursor", func(r *Request) { r.Operation = "console"; r.After = 1 << 53 }},
+		{"open-oversized-empty-url", func(r *Request) { r.Operation = "open"; r.Width = 2561 }},
+		{"unknown-modifier", func(r *Request) { r.Operation = "key"; r.Key = "a"; r.Modifiers = []string{"Hyper"} }},
+		{"pointer-modifiers-not-silent", func(r *Request) { r.Operation = "pointer"; r.Action = "click"; r.Modifiers = []string{"Shift"} }},
+		{"keydown-modifiers-not-silent", func(r *Request) {
+			r.Operation = "key"
+			r.Action = "down"
+			r.Key = "a"
+			r.Modifiers = []string{"Control"}
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := base
@@ -79,8 +88,13 @@ func TestTypedOperationLimits(t *testing.T) {
 		})
 	}
 	request := base
-	request.Operation, request.MaxNodes, request.MaxChars = "snapshot", 500, 32000
+	request.Operation, request.MaxNodes, request.MaxChars = "snapshot", 128, 8192
 	if err := request.Validate(); err != nil {
 		t.Fatalf("rejected supported snapshot boundary: %v", err)
+	}
+	request = base
+	request.Operation, request.Condition, request.Text, request.TimeoutMS = "wait", "text", "ready", 30000
+	if err := request.Validate(); err != nil {
+		t.Fatalf("rejected declared public wait ceiling: %v", err)
 	}
 }

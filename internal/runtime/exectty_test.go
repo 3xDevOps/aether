@@ -43,7 +43,7 @@ func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 
 func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 	reader, writer := net.Pipe()
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 	attachment := newExecAttachment(nil, "exec", client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	readDone := make(chan error, 1)
 	go func() {

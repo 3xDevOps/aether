@@ -336,7 +336,7 @@ func TestCoordinationOffRetainsRunTransport(t *testing.T) {
 	if !ok || !cli.ReadOnly {
 		t.Fatalf("coordination is off but the container lacks a read-only CLI mount: %+v", container.spec.Mounts)
 	}
-	if _, ok := mountFor(container.spec, coordtransport.BinaryPath); !ok {
+	if _, bridgeMounted := mountFor(container.spec, coordtransport.BinaryPath); !bridgeMounted {
 		t.Fatalf("run lacks bridge mount: %+v", container.spec.Mounts)
 	}
 	dir, ok := mountFor(container.spec, coordtransport.MountDir)

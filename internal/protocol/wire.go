@@ -483,7 +483,8 @@ type AttachRequest struct {
 	// Framed carries output and geometry in one ordered terminal record stream.
 	Framed bool `json:"framed,omitempty"`
 	// Shell names a shell tab inside the run container; write is required.
-	Shell string `json:"shell,omitempty"`
+	Shell       string `json:"shell,omitempty"`
+	Incarnation string `json:"incarnation,omitempty"`
 	// Follow renders the session at the size it already is and imposes
 	// none of its own: the PTY is the minimum over the clients that do
 	// impose one, and a follower is left out of it whether or not it can
@@ -549,10 +550,13 @@ func (r *AttachRequest) UnmarshalJSON(data []byte) error {
 // geometry, or with the requested one when no session exists yet to have
 // its own; on failure the server sends OK false with a code and closes.
 type AttachResponse struct {
-	OK     bool `json:"ok"`
-	Cols   uint `json:"cols,omitempty"`
-	Rows   uint `json:"rows,omitempty"`
-	Framed bool `json:"framed,omitempty"`
+	OK                   bool   `json:"ok"`
+	Cols                 uint   `json:"cols,omitempty"`
+	Rows                 uint   `json:"rows,omitempty"`
+	Framed               bool   `json:"framed,omitempty"`
+	TerminalID           string `json:"terminal_id,omitempty"`
+	Incarnation          string `json:"incarnation,omitempty"`
+	ServerOwnedResponder bool   `json:"server_owned_responder,omitempty"`
 	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
 	Replay int `json:"replay,omitempty"`
 	// Cursor and ResumeID preserve source compatibility for legacy producers

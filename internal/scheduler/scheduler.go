@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -76,18 +77,21 @@ func (e *BaseCaptureError) Unwrap() error {
 
 // Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
-	Store         store.Store
-	Runtime       runtime.Runtime
-	Bus           events.Bus
-	Git           GitEngine
-	PTY           PTYHost
-	Bases         BaseCapture
-	StateDir      string
-	Homes         *memberhome.Manager
-	Profiles      profileService
-	ReposDir      string
-	WorktreeMount string
-	StandardImage string
+	Store                       store.Store
+	Runtime                     runtime.Runtime
+	Bus                         events.Bus
+	Git                         GitEngine
+	PTY                         PTYHost
+	Bases                       BaseCapture
+	StateDir                    string
+	Homes                       *memberhome.Manager
+	Profiles                    profileService
+	ReposDir                    string
+	WorktreeMount               string
+	StandardImage               string
+	BrowserImage                string
+	Control                     *control.Service
+	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
 	// DefaultStandardImage is the image this build ships with, before any
 	// --standard-image the operator set. A server update only moves the
 	// standard image when the two are the same.
@@ -193,6 +197,9 @@ type Scheduler struct {
 	// cannot be written under independent per-run locks.
 	runShellReservationMu sync.Mutex
 	runShellReservations  map[string]*shellTabState
+	runShellTerminals     map[domain.RunID]*runTerminalSet
+	developmentMu         sync.Mutex
+	development           *developmentState
 	terminalLocks         map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
@@ -512,6 +519,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.recoverTerminals(ctx); err != nil {
 		return recoveryError(err)
 	}
+	if err := s.recoverDevelopment(ctx); err != nil {
+		return recoveryError(err)
+	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
@@ -574,7 +584,7 @@ func (s *Scheduler) Close() error {
 	s.superCancel()
 	s.wg.Wait()
 	s.flushPendingRunTitles()
-	return nil
+	return s.DetachDevelopmentTerminals(context.Background())
 }
 
 // UseBaseCapture attaches the immutable base-capture service. The server

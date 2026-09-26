@@ -99,8 +99,8 @@ func TestDevelopmentSocketRejectsIdentityAndLifetimeEscapes(t *testing.T) {
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeDenied || dev.calls.Load() != 1 {
 		t.Fatalf("development control refusal = %v, calls=%d", err, dev.calls.Load())
 	}
-	if err := h.db.UpdateRunStatus(t.Context(), h.run(0), domain.RunCompleted, "", nil, nil); err != nil {
-		t.Fatal(err)
+	if updateErr := h.db.UpdateRunStatus(t.Context(), h.run(0), domain.RunCompleted, "", nil, nil); updateErr != nil {
+		t.Fatal(updateErr)
 	}
 	err = client.Call(protocol.MethodDevTerminalList, nil, nil)
 	if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable || dev.calls.Load() != 1 {

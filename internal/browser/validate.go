@@ -20,8 +20,29 @@ func (r Request) validateTarget() error {
 // Validate bounds typed operations before transport. The companion repeats the
 // checks at its trust boundary and resolves nodes only within the named page.
 func (r Request) Validate() error {
-	if r.TimeoutMS != 0 && !bounded(r.TimeoutMS, 1, 10000) {
-		return invalid("timeout must be in 1..10000 milliseconds")
+	if r.TimeoutMS != 0 && !bounded(r.TimeoutMS, 1, 30000) {
+		return invalid("timeout must be in 1..30000 milliseconds")
+	}
+	if len(r.Modifiers) > 5 {
+		return invalid("too many keyboard modifiers")
+	}
+	for i, modifier := range r.Modifiers {
+		switch modifier {
+		case "Alt", "Control", "ControlOrMeta", "Meta", "Shift":
+		default:
+			return invalid("unknown keyboard modifier")
+		}
+		for _, previous := range r.Modifiers[:i] {
+			if modifier == previous {
+				return invalid("duplicate keyboard modifier")
+			}
+		}
+	}
+	if len(r.Modifiers) != 0 && (r.Operation != "click" && r.Operation != "key") {
+		return invalid("modifiers require element click or key press; use separate modifier key down/up events for pointer input")
+	}
+	if len(r.Modifiers) != 0 && r.Operation == "key" && (r.Action == "down" || r.Action == "up") {
+		return invalid("key down/up modifiers must be sent as separate key events")
 	}
 	switch r.Operation {
 	case "pages":
@@ -34,6 +55,9 @@ func (r Request) Validate() error {
 	case "open":
 		if len(r.SessionID) > 256 {
 			return invalid("invalid session identity")
+		}
+		if (r.Width != 0 && !bounded(r.Width, 240, 2560)) || (r.Height != 0 && !bounded(r.Height, 240, 1600)) {
+			return invalid("open viewport exceeds dimension limit")
 		}
 	default:
 		if err := r.validateTarget(); err != nil {
@@ -57,7 +81,7 @@ func (r Request) Validate() error {
 		}
 	case "select", "close", "back", "forward", "reload":
 	case "snapshot":
-		if (r.MaxNodes != 0 && !bounded(r.MaxNodes, 1, 500)) || (r.MaxChars != 0 && !bounded(r.MaxChars, 1, 32000)) {
+		if (r.MaxNodes != 0 && !bounded(r.MaxNodes, 1, 128)) || (r.MaxChars != 0 && !bounded(r.MaxChars, 1, 8192)) {
 			return invalid("snapshot exceeds node or character limit")
 		}
 	case "click", "fill", "select_option":

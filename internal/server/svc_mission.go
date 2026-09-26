@@ -146,7 +146,10 @@ func (l lazyMissionScope) Snapshot(ctx context.Context, run domain.RunID) ([]str
 	return snapshot.Snapshot(ctx, run)
 }
 
-type lazyMission struct{ ssh *sshd.Config }
+type lazyMission struct {
+	ssh  *sshd.Config
+	runs *scheduler.Scheduler
+}
 
 func (l lazyMission) service() (sshd.MissionService, error) {
 	if l.ssh == nil || l.ssh.Services.Missions == nil {
@@ -196,9 +199,16 @@ func (l lazyMission) ReconcileReport(ctx context.Context, run domain.RunID, repo
 	if err != nil {
 		return err
 	}
-	return s.(interface {
+	assignment, assignmentErr := l.Assignment(ctx, run)
+	if err := s.(interface {
 		ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
-	}).ReconcileReport(ctx, run, report, packet)
+	}).ReconcileReport(ctx, run, report, packet); err != nil {
+		return err
+	}
+	if l.runs != nil && assignmentErr == nil && assignment.Role == "worker" && report != nil && (report.Outcome == store.CoordOutcomeSuccess || report.Outcome == store.CoordOutcomeFailure) {
+		return l.runs.StopDevelopmentRun(ctx, run)
+	}
+	return nil
 }
 
 var _ sshd.MissionService = (*mission.Service)(nil)

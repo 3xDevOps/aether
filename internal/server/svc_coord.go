@@ -33,13 +33,14 @@ func init() {
 			PTY:              d.PTY,
 			// The scheduler is the single writer of run statuses, so the
 			// agent's own status reports land on it.
-			Reports: d.Runs,
+			Reports:     d.Runs,
+			Development: d.Runs,
 			// coord.report captures evidence before accepting the durable
 			// outcome; the coordination service publishes its evidence event
 			// only after finalization.
 			Evidence:        coordEvidenceCapture{service: d.Evidence},
 			EvidencePackets: d.Store,
-			Mission:         lazyMission{ssh: d.SSH},
+			Mission:         lazyMission{ssh: d.SSH, runs: d.Runs},
 		})
 		if err != nil {
 			return nil, err

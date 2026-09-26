@@ -88,6 +88,7 @@ type serveOptions struct {
 	addr                 *string
 	webPort              *int
 	standardImage        *string
+	browserImage         *string
 	harnessDefinitions   *string
 	tailnetAutoJoin      *bool
 	tailnetRequireKey    *bool
@@ -112,6 +113,12 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"serve the dashboard over HTTPS on this host's tailnet addresses at this port (0 = off; 443 makes it https://<magicdns-name>/)")
 	o.standardImage = fs.String("standard-image", server.DefaultStandardImage,
 		"published standard environment image recommended at workspace creation")
+	browserImage := os.Getenv("AETHER_BROWSER_IMAGE")
+	if browserImage == "" {
+		browserImage = server.DefaultBrowserImage
+	}
+	o.browserImage = fs.String("browser-image", browserImage,
+		"versioned browser companion image or digest (AETHER_BROWSER_IMAGE; never untagged or latest)")
 	o.harnessDefinitions = fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
 		`JSON object of administrator-owned generic harness definitions`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
@@ -155,6 +162,7 @@ func serve(args []string) error {
 		Addr:              *o.addr,
 		WebPort:           *o.webPort,
 		StandardImage:     *o.standardImage,
+		BrowserImage:      *o.browserImage,
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *o.tailnetAutoJoin,
 		TailnetRequireKey: *o.tailnetRequireKey,

@@ -46,7 +46,7 @@ func (d *Docker) StartExecTTY(ctx context.Context, id ID, spec ExecSpec) (_ Mana
 		return nil, fmt.Errorf("runtime: inspect managed execution container: %w", err)
 	}
 	var token [32]byte
-	if _, err := rand.Read(token[:]); err != nil {
+	if _, err = rand.Read(token[:]); err != nil {
 		return nil, fmt.Errorf("runtime: create execution claim: %w", err)
 	}
 	claim := hex.EncodeToString(token[:])

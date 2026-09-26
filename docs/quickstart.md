@@ -2,13 +2,16 @@
 
 Zero to a finished agent run in about ten minutes, solo.
 
-Two machines are involved, though they can be the same one:
+The standard deployment is a **headless Ubuntu server** with Docker and git.
+Agents, repository fetches, builds, and run tools execute there; the server
+does not need a desktop session.
 
-- **the server box** - a Linux machine with Docker and git. Agents run here.
-- **your machine** - Linux, macOS, or Windows. Where you type.
-
-Your machine needs git and, unless both machines are on a tailnet
-(see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
+You can use its authenticated hosted dashboard/API from another machine with
+no local project clone or toolchain. Administrators can seed a repository with
+[remote import](#remote-only-import-no-local-clone) instead of a local push.
+The local-client path below is also available on Linux, macOS, or Windows.
+That path needs git for local linking/pushing and, unless both machines are on
+a tailnet (see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
 `~/.ssh/id_ed25519` and your ssh-agent. For a key somewhere else, pass
 `aether link --key <path>`; for a passphrase-protected one, `ssh-add` it
 first. Windows paths and the OpenSSH agent service are in
@@ -130,7 +133,7 @@ wizard asks for the same two fields in its **Git identity** step, right after
 Link, prefilled from this machine's `git config user.name` and `user.email`.
 `aether member git` with no flags shows what is set.
 
-## 4. Create a workspace and push your repo
+## 4. Create a workspace
 
 A **workspace** is the repo plus a server-owned scope for runs and shells.
 Creating one is an admin operation. Every container for a member starts from
@@ -200,11 +203,87 @@ commits, and nothing here force-pushes. See
 
 For optional source-mirror setup, see [the detailed instructions](#optional-configure-source-control).
 
+### Remote-only import (no local clone)
+
+Use this instead of `link --repo` and the initial push above. The administrator
+endpoint is `workspace.import`, available through the SSH control channel or
+`POST /api/v1/workspace.import` on either authenticated gateway. Collaborators
+cannot import workspaces. The commands below use the server-hosted HTTPS
+gateway from the administrator's tailnet device; set `AETHER_URL` to the
+dashboard URL printed by server setup. Authentication is the existing
+Tailscale identity, not a GitHub token.
+
+```sh
+export AETHER_URL='https://your-server.your-tailnet.ts.net:8443'
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.import" \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"myproject","environment":{},"source_url":"https://github.com/acme/myproject.git","base_branch":"main","origin":"https://github.com/my-account/myproject.git","auth":"public"}'
+```
+
+The server creates the workspace and its bare repository, configures the
+existing read-only mirror, and fetches immediately. No client clone, hidden
+push, or server restart is needed. In the response, retain `workspace.id`
+and inspect `mirror.observed_commit`, `mirror.generation`, and `mirror.status`.
+The first candidate remains **pending** with no `accepted_commit`: fetching
+is not approval. After reviewing the candidate, explicitly adopt the returned
+generation on that same workspace:
+
+```sh
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.adopt" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>","generation":1}'
+```
+
+Replace `1` with the actual returned generation. Adoption supplies the base
+for new runs. Later upstream rewrites never silently replace an accepted base;
+they require another explicit adoption through the existing mirror flow.
+
+For a private repository, send `"auth":"deploy-key"` instead. Import returns
+**pending** and `mirror.public_key` without attempting a fetch before you have
+installed that key. Add it to the source repository as a **read-only deploy
+key** (on GitHub: **Settings > Deploy keys > Add deploy key**, leave **Allow
+write access** off). Generic SSH sources also require pinned `known_hosts`
+contents in the request, as described below. Then verify and inspect the
+candidate before adopting:
+
+```sh
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.refresh" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>"}'
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.status" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>"}'
+```
+
+Use refresh, not configure, after installing the key; reconfiguration rotates
+the key and generation. Public authentication only accepts credential-free
+HTTPS; deploy-key authentication follows the same source and host-trust rules
+as ordinary mirror configuration.
+
+**Partial success matters:** after workspace creation the import response
+keeps `created:true`, `workspace.id`, the available mirror/key state, and an
+`error` string if configuration or fetch failed. An HTTP success alone does
+not mean the source fetched. Missing branches and empty upstream repositories
+return fetch failures, not an invented initial commit. Keep the workspace and
+repair its mirror with `workspace.mirror.configure` or
+`workspace.mirror.refresh`; do not submit another import. If the connection
+drops before the response arrives, inspect `workspace.list` before deciding
+whether creation is needed.
+
+The explicit `origin` is the checkout's push destination; it is **not** derived
+from `source_url`. Set it to `""` to leave the workspace without an external
+push destination. GitHub SSH origins are normalized to HTTPS just as with
+`workspace.origin`. Mirror deploy keys only read source: they neither grant
+push permission nor configure run-account GitHub authentication. Publishing
+uses the selected run account's native Git/`gh` credentials, independently of
+the mirror and of local repository linking.
+
 ### Optional: configure source control
 
 An administrator can make the workspace's base a read-only mirror of an
-upstream branch. Configure it from the CLI or local dashboard only after the
-initial workspace push or after reconciling the two repositories:
+upstream branch. Configure it from the CLI or local dashboard after a local
+push, or on a fresh workspace without one. A fresh repository's first fetched
+candidate needs explicit adoption as in [remote import](#remote-only-import-no-local-clone):
 
 ```sh
 # Public GitHub or any public HTTPS repository:

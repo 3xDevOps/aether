@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright';
 
-export const limits = Object.freeze({ request: 2 * 1024 * 1024, image: 8 * 1024 * 1024, frame: 2 * 1024 * 1024, pages: 16, nodes: 500, chars: 32000, logs: 100, timeout: 10000 });
+export const limits = Object.freeze({ request: 2 * 1024 * 1024, image: 8 * 1024 * 1024, frame: 2 * 1024 * 1024, pages: 16, nodes: 128, snapshotChars: 8192, chars: 32000, logs: 100, timeout: 10000, operationTimeout: 30000 });
 export class BrowserError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -141,11 +141,11 @@ export class BrowserSession {
     return { session_id: this.sessionID, selected_page_id: this.selected, pages: await Promise.all([...this.pages.values()].map((state) => this.describe(state))) };
   }
   async snapshot(state, request, signal) {
-    const deadline = Date.now() + boundedInteger(request.timeout_ms, 5000, 1, limits.timeout);
+    const deadline = Date.now() + boundedInteger(request.timeout_ms, 5000, 1, limits.operationTimeout);
     const read = (promise) => boundedRead(promise, Math.max(1, deadline - Date.now()));
     await this.clearNodes(state);
-    const maxNodes = boundedInteger(request.max_nodes, 200, 1, limits.nodes);
-    const maxChars = boundedInteger(request.max_chars, 16000, 1, limits.chars);
+    const maxNodes = boundedInteger(request.max_nodes, limits.nodes, 1, limits.nodes);
+    const maxChars = boundedInteger(request.max_chars, limits.snapshotChars, 1, limits.snapshotChars);
     let remaining = maxChars;
     const nodes = [];
     let truncated = false;
@@ -218,8 +218,12 @@ export class BrowserSession {
     signal?.throwIfAborted();
     requireValue(request && typeof request === 'object' && !Array.isArray(request), 'Request must be an object');
     requireValue(!this.resetting, 'Browser context reset is in progress', 'unavailable');
+    const modifiers = request.modifiers === undefined ? [] : request.modifiers;
+    requireValue(Array.isArray(modifiers) && modifiers.length <= 5 && new Set(modifiers).size === modifiers.length && modifiers.every((modifier) => ['Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'].includes(modifier)), 'Invalid keyboard modifiers');
+    requireValue(!modifiers.length || ['click', 'key'].includes(request.operation), 'Modifiers require element click or key press; use separate modifier key down/up events for pointer input');
+    requireValue(!modifiers.length || request.operation !== 'key' || !['down', 'up'].includes(request.action), 'Key down/up modifiers must be sent as separate key events');
     await this.initialize();
-    const timeout = boundedInteger(request.timeout_ms, 5000, 1, limits.timeout);
+    const timeout = boundedInteger(request.timeout_ms, 5000, 1, limits.operationTimeout);
     if (request.operation === 'pages') return this.list();
     if (request.operation === 'reset') {
       requireValue(request.session_id === this.sessionID, 'Browser session changed', 'stale_target');
@@ -239,9 +243,14 @@ export class BrowserSession {
       requireValue(!request.session_id || request.session_id === this.sessionID, 'Browser session changed', 'stale_target');
       requireValue(this.pages.size < limits.pages, 'Maximum open pages reached', 'resource_limit');
       const url = this.url(request.url || 'about:blank');
+      const width = boundedInteger(request.width, 1280, 240, 2560);
+      const height = boundedInteger(request.height, 800, 240, 1600);
       const page = await this.context.newPage();
       const state = this.register(page);
       requireValue(state, 'Maximum open pages reached while a popup opened', 'resource_limit');
+      await page.setViewportSize({ width, height });
+      state.viewportID = randomUUID();
+      state.viewportChanged = Date.now() / 1000;
       this.selected = state.id;
       if (url !== 'about:blank') await page.goto(url, { timeout, waitUntil: 'domcontentloaded' });
       return { page: await this.describe(state) };
@@ -257,13 +266,14 @@ export class BrowserSession {
       case 'forward': await page.goForward({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'reload': await page.reload({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'snapshot': return this.snapshot(state, request, signal);
-      case 'click': requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button'); await this.nodeAction(state, request, (node) => node.click({ ...options, button: request.button || 'left' })); break;
+      case 'click': requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button'); await this.nodeAction(state, request, (node) => node.click({ ...options, button: request.button || 'left', modifiers: request.modifiers })); break;
       case 'fill': requireValue(typeof request.text === 'string' && request.text.length <= limits.chars, 'Text exceeds limit'); await this.nodeAction(state, request, (node) => node.fill(request.text, options)); break;
       case 'select_option': requireValue(Array.isArray(request.values) && request.values.length <= 100 && request.values.every((value) => typeof value === 'string' && value.length <= 1024), 'Invalid selection values'); await this.nodeAction(state, request, (node) => node.selectOption(request.values, options)); break;
       case 'key': {
         requireValue(typeof request.key === 'string' && request.key.length > 0 && request.key.length <= 100, 'Invalid key');
         requireValue(!request.action || ['down', 'up', 'press'].includes(request.action), 'Invalid key action');
-        if (request.node_id && !['down', 'up'].includes(request.action)) await this.nodeAction(state, request, (node) => node.press(request.key, options));
+        const key = [...modifiers, request.key].join('+');
+        if (request.node_id && !['down', 'up'].includes(request.action)) await this.nodeAction(state, request, (node) => node.press(key, options));
         else {
           if (request.node_id) {
             await this.nodeAction(state, request, (node) => node.focus());
@@ -271,7 +281,7 @@ export class BrowserSession {
           }
           if (request.action === 'down') await page.keyboard.down(request.key);
           else if (request.action === 'up') await page.keyboard.up(request.key);
-          else await page.keyboard.press(request.key);
+          else await page.keyboard.press(key);
         }
         break;
       }
@@ -347,12 +357,32 @@ export class BrowserSession {
   async cdp(state) { state.cdp ||= await this.context.newCDPSession(state.page); return state.cdp; }
   async capture(request) {
     const state = this.target(request);
+    requireValue(request.full_page === undefined || typeof request.full_page === 'boolean', 'full_page must be a boolean');
     const revision = state.revision;
-    const bytes = await state.page.screenshot({ type: 'png', timeout: limits.timeout, animations: 'allow' });
+    const documentSize = () => boundedRead(state.page.evaluate(() => {
+      const body = document.body;
+      const root = document.documentElement;
+      return {
+        width: Math.max(body?.scrollWidth ?? 0, body?.offsetWidth ?? 0, root.scrollWidth, root.offsetWidth, root.clientWidth),
+        height: Math.max(body?.scrollHeight ?? 0, body?.offsetHeight ?? 0, root.scrollHeight, root.offsetHeight, root.clientHeight),
+      };
+    }));
+    const size = request.full_page ? await documentSize() : state.page.viewportSize();
+    requireValue(size.width > 0 && size.height > 0 && size.width <= 8192 && size.height <= 8192 && size.width * size.height <= 32 * 1024 * 1024, 'Full page exceeds screenshot dimension limit', 'resource_limit');
+    // Clip to the measured full page so a racing layout cannot allocate an
+    // unbounded bitmap. Reject changed geometry instead of returning a crop.
+    const bytes = await state.page.screenshot({ type: 'png', timeout: limits.timeout, animations: 'allow', fullPage: !!request.full_page, clip: request.full_page ? { x: 0, y: 0, ...size } : undefined });
     requireValue(bytes.length <= limits.image, 'Screenshot exceeds image limit', 'resource_limit');
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    requireValue(width === size.width && height === size.height, 'Page geometry changed during screenshot; capture again', 'stale_target');
+    if (request.full_page) {
+      const after = await documentSize();
+      requireValue(after.width === size.width && after.height === size.height, 'Full page geometry changed during screenshot; capture again', 'stale_target');
+    }
     const page = await this.describe(state);
     requireValue(revision === state.revision, 'Page navigated during screenshot', 'stale_target');
-    return { bytes, metadata: { ...page, captured_at: new Date().toISOString(), content_type: 'image/png' } };
+    return { bytes, metadata: { ...page, viewport_id: request.full_page ? '' : page.viewport_id, width, height, captured_at: new Date().toISOString(), content_type: 'image/png' } };
   }
   async close() { await this.browser.close(); }
 }

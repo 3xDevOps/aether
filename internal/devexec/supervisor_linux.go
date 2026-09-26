@@ -61,7 +61,7 @@ func Run(key, claim string, argv []string) (int, error) {
 	if err != nil {
 		return 125, err
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	calls := make(chan controlCall)
 	done := make(chan struct{})
 	defer close(done)

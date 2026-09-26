@@ -39,8 +39,79 @@ jobs:
             echo "allowed=false" >> "$GITHUB_OUTPUT"
           fi
 
-  release:
+  # Each architecture runs the exact image it publishes on a native headless
+  # Ubuntu host. No QEMU or host-installed Chromium changes the sandbox proof.
+  browser-image:
     needs: publisher-policy
+    if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate the release tag
+        run: sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the versioned browser companion
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/browser/Dockerfile
+          load: true
+          tags: ghcr.io/3xdevops/aether-browser:${{ github.ref_name }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=browser-${{ matrix.arch }}-main
+      - name: Prove sandbox, local app, actions, captures and streams
+        env:
+          BROWSER_IMAGE: ghcr.io/3xdevops/aether-browser:${{ github.ref_name }}-${{ matrix.arch }}
+        run: make browser-smoke
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Push the already-tested local image, not a second independent build.
+      - name: Publish the tested architecture
+        env:
+          BROWSER_IMAGE: ghcr.io/3xdevops/aether-browser:${{ github.ref_name }}-${{ matrix.arch }}
+        run: docker push "$BROWSER_IMAGE"
+
+  browser-manifest:
+    needs: browser-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the server-version browser manifest
+        run: |
+          image="ghcr.io/3xdevops/aether-browser:$GITHUB_REF_NAME"
+          docker buildx imagetools create --tag "$image" "$image-amd64" "$image-arm64"
+      # New GHCR packages must be made public by the repository administrator.
+      # An authenticated pull alone would ship a companion users cannot fetch.
+      - name: Verify anonymous availability on both server architectures
+        run: |
+          config=$(mktemp -d)
+          trap 'rm -rf "$config"' EXIT
+          image="ghcr.io/3xdevops/aether-browser:$GITHUB_REF_NAME"
+          docker --config "$config" pull --platform linux/amd64 "$image"
+          docker --config "$config" pull --platform linux/arm64 "$image"
+
+  release:
+    needs: [publisher-policy, browser-manifest]
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
     runs-on: ubuntu-latest
     # The same Gradle-in-a-container build as ci.yml's release-build, plus the
@@ -145,6 +216,10 @@ jobs:
       # The binaries default to the image published from this same tag, so
       # the image must exist before the release becomes downloadable: an
       # image build/push failure must abort the release, not orphan it.
+      - name: Enable standard-image cross-architecture builds
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GitHub Container Registry
@@ -169,28 +244,61 @@ jobs:
         with:
           context: .
           file: images/standard/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.standard-meta.outputs.tags }}
           labels: ${{ steps.standard-meta.outputs.labels }}
-          cache-from: type=gha,scope=standard-main
-      - name: Verify the published standard image is pullable
-        run: docker pull ghcr.io/3xdevops/aether-standard:${{ github.ref_name }}
+          cache-from: |
+            type=gha,scope=standard-amd64-main
+            type=gha,scope=standard-arm64-main
+      - name: Verify both standard image architectures are anonymously pullable
+        run: |
+          config=$(mktemp -d)
+          trap 'rm -rf "$config"' EXIT
+          image="ghcr.io/3xdevops/aether-standard:$GITHUB_REF_NAME"
+          docker --config "$config" pull --platform linux/amd64 "$image"
+          docker --config "$config" pull --platform linux/arm64 "$image"
       # A release whose default environment ships a broken toolchain is
       # worse than a failed release, so every tool must prove it runs.
-      - name: Smoke-check the standard image toolchains
+      - name: Smoke-check both standard image toolchains and native Git
         run: |
           img=ghcr.io/3xdevops/aether-standard:${{ github.ref_name }}
-          set -x
-          docker run --rm "$img" go version
-          docker run --rm "$img" node --version
-          docker run --rm "$img" npm --version
-          docker run --rm "$img" python3 --version
-          docker run --rm "$img" uv --version
-          docker run --rm "$img" rustc --version
-          docker run --rm "$img" cargo --version
-          docker run --rm "$img" rg --version
-          docker run --rm "$img" jq --version
-          docker run --rm "$img" git --version
+          for arch in amd64 arm64; do
+            docker run --rm --platform "linux/$arch" "$img" sh -euxc '
+              go version
+              node --version
+              npm --version
+              python3 --version
+              uv --version
+              rustc --version
+              cargo --version
+              rg --version
+              jq --version
+              gh --version
+              git --version
+              repo=$(mktemp -d)
+              trap '\''rm -rf "$repo"'\'' EXIT
+              git init -q --initial-branch=main "$repo"
+              cd "$repo"
+              git config user.name smoke
+              git config user.email smoke@example.invalid
+              tree=$(git mktree </dev/null)
+              old=$(printf "old\n" | git commit-tree "$tree")
+              git update-ref refs/heads/main "$old"
+              new=$(printf "new\n" | git commit-tree "$tree" -p "$old")
+              printf "start\nupdate HEAD %s %s\nprepare\ncommit\n" "$new" "$old" |
+                git update-ref --stdin
+              test "$(git rev-parse HEAD)" = "$new"
+              test "$(git symbolic-ref HEAD)" = refs/heads/main
+              test -x "$(git --exec-path)/git-remote-https"
+              printf "protocol=https\nhost=example.invalid\nusername=smoke\npassword=smoke\n\n" |
+                git credential-store --file="$repo/credentials" store
+              test -s "$repo/credentials"
+              ssh-keygen -q -t ed25519 -N "" -f "$repo/key"
+              printf "signed\n" | git -c gpg.format=ssh -c user.signingkey="$repo/key" commit-tree -S "$tree" -p "$new"
+              gpg --version
+            '
+          done
 
       - name: Publish the GitHub release
         env:

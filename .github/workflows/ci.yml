@@ -217,9 +217,17 @@ jobs:
   smoke:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    # ubuntu-latest provides Docker. 45 minutes covers a cold standard-image build.
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Native compilation and execution on both supported run architectures.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -246,8 +254,8 @@ jobs:
           file: images/standard/Dockerfile
           load: true
           tags: aether-standard:ci
-          cache-from: type=gha,scope=standard-main
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=standard-main' || '' }}
+          cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
+          cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=standard-{0}-main', matrix.arch) || '' }}
       # The agent CLIs on top, at whatever version their vendors ship
       # today: that is the drift this image exists to catch. It carries no
       # credentials, which is exactly what TestSmokeHeadlessNoLogin needs.
@@ -270,15 +278,65 @@ jobs:
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
 
+  # Build the same Dockerfile on both supported server architectures. This
+  # gate is display-free; browser libraries and Chromium exist only inside
+  # the image, and no registry write credentials enter a PR job.
+  browser:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the browser companion
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/browser/Dockerfile
+          load: true
+          tags: aether/browser:test
+          cache-from: type=gha,scope=browser-${{ matrix.arch }}-main
+          cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=browser-{0}-main', matrix.arch) || '' }}
+      - name: Prove headless Chromium sandbox and companion behavior
+        run: make browser-smoke
+      # The installed server owns UID-1000 control directories as root.
+      # Match that authority, not a chmod 777 workaround for the test runner.
+      - name: Exercise the real browser runtime
+        run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
+      - name: Save the tested image for server and dashboard scenarios
+        if: matrix.arch == 'amd64'
+        run: docker save --output "$RUNNER_TEMP/aether-browser.tar" aether/browser:test
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'amd64'
+        with:
+          name: browser-image-amd64
+          path: ${{ runner.temp }}/aether-browser.tar
+          retention-days: 1
+
   # Sharded so the slow server scenarios do not share one runner. Five shards
   # cover internal/server by test name, balanced by the durations -v prints; scheduler is its own package; rest is
   # every other integration package, so a package that gains integration tests
-  # is gated without a change here. Every test in these shards pulls the
-  # busybox image it needs itself, so none builds one.
+  # is gated without a change here. The browser runtime tests run once in the
+  # browser job; its tested image is loaded here for server-level scenarios.
   integration:
     name: integration (${{ matrix.shard }})
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: [changes, browser]
+    if: ${{ !cancelled() && needs.browser.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     # ubuntu-latest provides Docker for these real-runtime tests.
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -299,7 +357,7 @@ jobs:
           - shard: scheduler
             make: INTEGRATION_PKGS=./internal/scheduler
           - shard: rest
-            make: INTEGRATION_SKIP="./internal/harness ./internal/scheduler ./internal/server"
+            make: INTEGRATION_SKIP="./internal/harness ./internal/scheduler ./internal/server" INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -314,9 +372,17 @@ jobs:
       # The matrix values are literals from this file, passed as make
       # assignments. -v prints each test's duration, which is what the
       # shards are balanced by.
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-image-amd64
+          path: ${{ runner.temp }}
+      - name: Load the tested browser companion
+        run: docker load --input "$RUNNER_TEMP/aether-browser.tar"
       - name: Integration tests (real Docker, real git)
         env:
           GOFLAGS: -v
+          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
+          AETHER_BROWSER_IMAGE: aether/browser:test
         run: make test-integration ${{ matrix.make }}
 
   dashboard:
@@ -353,8 +419,8 @@ jobs:
   # real git. Separate from `dashboard` because that job is the fast jsdom
   # gate and this one starts containers.
   dashboard-e2e:
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: [changes, browser]
+    if: ${{ !cancelled() && needs.browser.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -405,7 +471,16 @@ jobs:
       - name: Install the browser
         run: bunx playwright install --with-deps chromium
         working-directory: web
+      - uses: actions/download-artifact@v4
+        with:
+          name: browser-image-amd64
+          path: ${{ runner.temp }}
+      - name: Load the tested browser companion
+        run: docker load --input "$RUNNER_TEMP/aether-browser.tar"
       - name: Dashboard end-to-end suite
+        env:
+          AETHER_BROWSER_TEST_IMAGE: aether/browser:test
+          AETHER_BROWSER_IMAGE: aether/browser:test
         run: make test-e2e
       # Uploaded on a pass too: the mobile project attaches a full-page
       # screenshot of every phone scenario, and a layout can be wrong with

@@ -25,6 +25,7 @@ type Request struct {
 	Text         string   `json:"text"`
 	Key          string   `json:"key,omitempty"`
 	Values       []string `json:"values"`
+	Modifiers    []string `json:"modifiers,omitempty"`
 	Action       string   `json:"action,omitempty"`
 	Button       string   `json:"button,omitempty"`
 	X            float64  `json:"x"`
@@ -40,6 +41,7 @@ type Request struct {
 	MaxNodes     int      `json:"max_nodes,omitempty"`
 	MaxChars     int      `json:"max_chars,omitempty"`
 	After        uint64   `json:"after,omitempty"`
+	FullPage     bool     `json:"full_page,omitempty"`
 }
 
 type Page struct {

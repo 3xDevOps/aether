@@ -40,4 +40,8 @@ type Services struct {
 	// Integration exposes authenticated candidate preparation, review,
 	// verification, and delivery through the generic control gateway.
 	Integration IntegrationService
+	// Development is the live run terminal, browser, and capture broker.
+	Development DevelopmentService
+	// RunRepo executes native Git/GitHub commands in the selected run account.
+	RunRepo RunRepoService
 }

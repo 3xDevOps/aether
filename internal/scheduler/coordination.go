@@ -352,16 +352,16 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 				// only when it was actually provisioned above, rather than making
 				// discovery reference an absent plugin with conflict policy off.
 				var statusConfig, discoveryConfig map[string]json.RawMessage
-				if err := json.Unmarshal([]byte(launchEnv[key]), &statusConfig); err != nil {
+				if err = json.Unmarshal([]byte(launchEnv[key]), &statusConfig); err != nil {
 					return nil, nil, nil, fmt.Errorf("decode harness status config: %w", err)
 				}
-				if err := json.Unmarshal([]byte(value), &discoveryConfig); err != nil {
+				if err = json.Unmarshal([]byte(value), &discoveryConfig); err != nil {
 					return nil, nil, nil, fmt.Errorf("decode harness discovery config: %w", err)
 				}
 				maps.Copy(statusConfig, discoveryConfig)
-				combined, err := json.Marshal(statusConfig)
-				if err != nil {
-					return nil, nil, nil, fmt.Errorf("combine harness config: %w", err)
+				combined, marshalErr := json.Marshal(statusConfig)
+				if marshalErr != nil {
+					return nil, nil, nil, fmt.Errorf("combine harness config: %w", marshalErr)
 				}
 				value = string(combined)
 			}

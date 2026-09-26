@@ -11,10 +11,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-const MaxOutput = 128 << 10
+const MaxOutput = protocol.MaxRunRepoOutputBytes
 
 // ExecFunc is runtime.Runtime.Exec, bound by the caller to its runtime.
 // Implementations must retain Runtime.Exec's combined 1 MiB capture bound.
@@ -28,18 +29,16 @@ type Execution struct {
 	ContainerID runtime.ID
 	WorkDir     string
 	Authorize   func(context.Context, bool) error
+	// CoAuthors reuses the scheduler's attribution list, excluding the
+	// actual native author email (including Git environment overrides).
+	CoAuthors func(context.Context, string) ([]string, error)
 }
 
 type Service struct{ exec ExecFunc }
 
 func New(exec ExecFunc) *Service { return &Service{exec: exec} }
 
-type CommandOutput struct {
-	ExitCode  int    `json:"exit_code"`
-	Stdout    string `json:"stdout"`
-	Stderr    string `json:"stderr"`
-	Truncated bool   `json:"truncated"`
-}
+type CommandOutput = protocol.RunRepoCommandOutput
 
 type CommandError struct {
 	Operation string
@@ -62,10 +61,7 @@ func (e *CommandError) Unwrap() error { return e.Cause }
 var ErrStale = errors.New("runrepo: branch or HEAD changed; refresh before acting")
 var ErrTruncated = errors.New("runrepo: output limit exceeded; response is incomplete")
 
-type Expected struct {
-	Branch string `json:"branch"`
-	Head   string `json:"head"`
-}
+type Expected = protocol.RunGitExpected
 
 type StaleError struct {
 	Expected Expected
@@ -90,21 +86,41 @@ func (s *Service) command(ctx context.Context, run Execution, mutate bool, argv 
 	args := []string{"env", "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GIT_LITERAL_PATHSPECS=1"}
 	args = append(args, argv...)
 	code, stdout, stderr, err := s.exec(ctx, run.ContainerID, args, run.WorkDir)
-	out := CommandOutput{ExitCode: code, Stdout: stdout, Stderr: stderr}
-	// Keep both streams and make truncation explicit. Runtime.Exec also bounds
-	// capture in flight; this smaller limit bounds the public response.
-	if len(out.Stdout) > MaxOutput {
-		out.Stdout = out.Stdout[:MaxOutput]
-		out.Truncated = true
-	}
-	if len(out.Stderr) > MaxOutput {
-		out.Stderr = out.Stderr[:MaxOutput]
-		out.Truncated = true
-	}
+	out := boundOutput(CommandOutput{ExitCode: code, Stdout: stdout, Stderr: stderr})
 	if err != nil || code != 0 {
 		return out, &CommandError{Operation: argv[0], Output: out, Cause: err}
 	}
 	return out, nil
+}
+
+// Diagnostics have priority over ordinary output within the combined bound.
+func boundOutput(out CommandOutput) CommandOutput {
+	if len(out.Stdout)+len(out.Stderr) > MaxOutput {
+		out.Truncated = true
+		out.Stderr = clipUTF8(out.Stderr, MaxOutput)
+		out.Stdout = clipUTF8(out.Stdout, MaxOutput-len(out.Stderr))
+	}
+	return out
+}
+
+func clipUTF8(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit]
+}
+
+// FailureOutput retains the actual failed command, not an earlier successful
+// read. Partial external-success booleans remain the caller's responsibility.
+func FailureOutput(out CommandOutput, err error) CommandOutput {
+	var ce *CommandError
+	if errors.As(err, &ce) {
+		return ce.Output
+	}
+	return out
 }
 
 func (s *Service) git(ctx context.Context, run Execution, mutate bool, args ...string) (CommandOutput, error) {
@@ -130,7 +146,7 @@ func validOID(value string) bool {
 		return false
 	}
 	for _, c := range value {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
@@ -138,13 +154,13 @@ func validOID(value string) bool {
 }
 
 func validatePaths(paths []string, required bool) error {
-	if len(paths) > 256 || required && len(paths) == 0 {
+	if len(paths) > protocol.MaxRunGitPaths || required && len(paths) == 0 {
 		return errors.New("runrepo: select between 1 and 256 paths")
 	}
 	total := 0
 	for _, p := range paths {
 		total += len(p)
-		if !cleanText(p, 4096) || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
+		if !cleanText(p, protocol.MaxRunGitPathBytes) || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
 			return fmt.Errorf("runrepo: invalid relative path %q", p)
 		}
 		for _, part := range strings.Split(p, "/") {
@@ -167,32 +183,32 @@ func (s *Service) branch(ctx context.Context, run Execution, branch string) erro
 	return err
 }
 
-func (s *Service) checkExpected(ctx context.Context, run Execution, expected Expected) (Expected, error) {
+func (s *Service) CheckExpected(ctx context.Context, run Execution, expected Expected) error {
 	if !validOID(expected.Head) {
-		return Expected{}, errors.New("runrepo: expected HEAD must be a full object ID")
+		return errors.New("runrepo: expected HEAD must be a full object ID")
 	}
 	if err := s.branch(ctx, run, expected.Branch); err != nil {
-		return Expected{}, err
+		return err
 	}
 	out, err := s.git(ctx, run, false, "rev-parse", "--verify", "HEAD")
 	head, err := complete(out, err)
 	if err != nil {
-		return Expected{}, err
+		return err
 	}
 	out, err = s.git(ctx, run, false, "symbolic-ref", "--quiet", "--short", "HEAD")
 	actual := Expected{Head: strings.TrimSpace(head), Branch: strings.TrimSpace(out.Stdout)}
 	if err != nil {
 		var commandErr *CommandError
 		if !errors.As(err, &commandErr) || commandErr.Cause != nil || out.ExitCode != 1 {
-			return actual, err
+			return err
 		}
-		return actual, &StaleError{Expected: expected, Actual: actual, Detached: true}
+		return &StaleError{Expected: expected, Actual: actual, Detached: true}
 	}
 	if out.Truncated {
-		return actual, ErrTruncated
+		return ErrTruncated
 	}
 	if actual != expected {
-		return actual, &StaleError{Expected: expected, Actual: actual}
+		return &StaleError{Expected: expected, Actual: actual}
 	}
-	return actual, nil
+	return nil
 }

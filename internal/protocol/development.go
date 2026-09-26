@@ -501,7 +501,10 @@ type DevBrowserPage struct {
 type DevBrowserStatusParams struct{ DevRunParams }
 type DevBrowserStatusResult struct {
 	DevCapability
-	Running        bool   `json:"running"`
+	Running bool   `json:"running"`
+	State   string `json:"state"`
+	// An unavailable pre-launch incarnation is a recovery fence, not a page.
+	// Acquire this session's control before an explicit reset.
 	SessionID      string `json:"session_id,omitempty"`
 	SelectedPageID string `json:"selected_page_id,omitempty"`
 }
@@ -516,7 +519,8 @@ type DevBrowserOpenParams struct {
 }
 
 type DevBrowserOpenResult struct {
-	Page DevBrowserPage `json:"page"`
+	Page    DevBrowserPage  `json:"page"`
+	Control DevControlFence `json:"control"`
 }
 type DevBrowserPagesParams struct{ DevBrowserTarget }
 type DevBrowserPagesResult struct {
@@ -543,15 +547,18 @@ type DevBrowserSnapshotParams struct {
 }
 
 type DevBrowserNode struct {
-	NodeID   string `json:"node_id,omitempty"`
-	ParentID string `json:"parent_id,omitempty"`
-	Role     string `json:"role,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Value    string `json:"value,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
-	Checked  *bool  `json:"checked,omitempty"`
-	Selected *bool  `json:"selected,omitempty"`
+	NodeID   string  `json:"node_id,omitempty"`
+	ParentID string  `json:"parent_id,omitempty"`
+	Role     string  `json:"role,omitempty"`
+	Name     string  `json:"name,omitempty"`
+	Text     string  `json:"text,omitempty"`
+	Value    string  `json:"value,omitempty"`
+	Tag      string  `json:"tag,omitempty"`
+	FrameURL string  `json:"frame_url,omitempty"`
+	Expanded *string `json:"expanded,omitempty"`
+	Disabled bool    `json:"disabled,omitempty"`
+	Checked  *bool   `json:"checked,omitempty"`
+	Selected *bool   `json:"selected,omitempty"`
 }
 
 type DevBrowserSnapshotResult struct {

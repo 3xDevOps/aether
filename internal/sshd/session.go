@@ -109,6 +109,10 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 				handler = func() { s.serveAttach(ctx, member, st, sshConn{ch}) }
 			case protocol.SubsystemTerminal:
 				handler = func() { s.serveTerminal(ctx, member, st, sshConn{ch}) }
+			case protocol.SubsystemDevBrowser:
+				handler = func() { s.serveDevelopmentBrowser(ctx, member, sshConn{ch}) }
+			case protocol.SubsystemDevArtifact:
+				handler = func() { s.serveDevelopmentArtifact(ctx, member, sshConn{ch}) }
 			case protocol.SubsystemSync:
 				handler = func() { s.serveSync(ctx, member, ch) }
 			}

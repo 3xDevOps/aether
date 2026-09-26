@@ -14,6 +14,7 @@ const (
 	MaxRunGitMessageBytes   = 16 << 10
 	MaxRunPRBodyBytes       = 32 << 10
 	MaxRunRepoOutputBytes   = 64 << 10
+	MaxRunRepoParamsBytes   = 128 << 10
 	MaxRunPRFeedbackEntries = 100
 )
 
@@ -60,13 +61,34 @@ type RunGitChange struct {
 	Conflicted   bool   `json:"conflicted"`
 }
 
+// Remotes describe native checkout configuration, not mirror provenance.
+// A push requires explicitly selecting one unambiguous push URL and branch.
+type RunGitRemote struct {
+	Name      string   `json:"name"`
+	FetchURLs []string `json:"fetch_urls"`
+	PushURLs  []string `json:"push_urls"`
+}
+
+type RunGitUpstream struct {
+	Remote string `json:"remote"`
+	Branch string `json:"branch"`
+}
+
 type RunGitStatusResult struct {
-	Branch    string         `json:"branch"`
-	Head      string         `json:"head"`
-	Detached  bool           `json:"detached"`
-	Unborn    bool           `json:"unborn"`
-	Changes   []RunGitChange `json:"changes"`
-	Truncated bool           `json:"truncated"`
+	Branch          string               `json:"branch"`
+	Head            string               `json:"head"`
+	Detached        bool                 `json:"detached"`
+	Unborn          bool                 `json:"unborn"`
+	Changes         []RunGitChange       `json:"changes"`
+	Truncated       bool                 `json:"truncated"`
+	AccountMemberID string               `json:"account_member_id"`
+	AccountName     string               `json:"account_name"`
+	Identity        string               `json:"identity"`
+	IdentityError   string               `json:"identity_error,omitempty"`
+	Remotes         []RunGitRemote       `json:"remotes"`
+	Upstream        *RunGitUpstream      `json:"upstream,omitempty"`
+	Output          RunRepoCommandOutput `json:"output"`
+	Error           string               `json:"error,omitempty"`
 }
 
 // RunRepoCommandOutput preserves real diagnostic output, including failures
@@ -87,6 +109,7 @@ type RunGitDiffParams struct {
 type RunGitDiffResult struct {
 	State  RunGitExpected       `json:"state"`
 	Output RunRepoCommandOutput `json:"output"`
+	Error  string               `json:"error,omitempty"`
 }
 
 type RunGitCommitParams struct {
@@ -97,12 +120,15 @@ type RunGitCommitParams struct {
 }
 
 type RunGitCommitResult struct {
-	Committed    bool                 `json:"committed"`
-	Head         string               `json:"head"`
-	IndexUpdated bool                 `json:"index_updated"`
-	Output       RunRepoCommandOutput `json:"output"`
-	Error        string               `json:"error,omitempty"`
-	Actual       *RunGitExpected      `json:"actual,omitempty"`
+	Committed    bool   `json:"committed"`
+	Head         string `json:"head"`
+	IndexUpdated bool   `json:"index_updated"`
+	// Selected-path commits use commit-tree and an atomic reference transaction.
+	// They honor identity/signing, but intentionally do not run commit hooks.
+	HooksRun bool                 `json:"hooks_run"`
+	Output   RunRepoCommandOutput `json:"output"`
+	Error    string               `json:"error,omitempty"`
+	Actual   *RunGitExpected      `json:"actual,omitempty"`
 }
 
 // Repository is the explicit push URL of Remote, NOT the source mirror or PR
@@ -144,12 +170,13 @@ type RunPRStatusParams struct {
 }
 
 type RunPRCreateParams struct {
-	RunID    string         `json:"run_id"`
-	Expected RunGitExpected `json:"expected"`
-	Target   RunPRTarget    `json:"target"`
-	Title    string         `json:"title"`
-	Body     string         `json:"body"`
-	Draft    bool           `json:"draft,omitempty"`
+	RunID         string         `json:"run_id"`
+	Expected      RunGitExpected `json:"expected"`
+	Target        RunPRTarget    `json:"target"`
+	Title         string         `json:"title"`
+	Body          string         `json:"body"`
+	Draft         bool           `json:"draft,omitempty"`
+	ExpectedLogin string         `json:"expected_login,omitempty"`
 }
 
 type RunPullRequest struct {
@@ -167,10 +194,12 @@ type RunPullRequest struct {
 
 // Status always comes from GitHub, including PRs created by native gh.
 type RunPRStatusResult struct {
-	Identity    string               `json:"identity"`
-	PullRequest *RunPullRequest      `json:"pull_request"`
-	Output      RunRepoCommandOutput `json:"output"`
-	Error       string               `json:"error,omitempty"`
+	Identity        string               `json:"identity"`
+	PullRequest     *RunPullRequest      `json:"pull_request"`
+	Output          RunRepoCommandOutput `json:"output"`
+	Error           string               `json:"error,omitempty"`
+	AccountMemberID string               `json:"account_member_id"`
+	Actual          *RunGitExpected      `json:"actual,omitempty"`
 }
 
 // A failed/uncertain create never undoes a prior push. CreationUncertain means
@@ -182,6 +211,7 @@ type RunPRCreateResult struct {
 	Created           bool                 `json:"created"`
 	Reconciled        bool                 `json:"reconciled"`
 	CreationUncertain bool                 `json:"creation_uncertain"`
+	AccountMemberID   string               `json:"account_member_id"`
 	Output            RunRepoCommandOutput `json:"output"`
 	Error             string               `json:"error,omitempty"`
 	Actual            *RunGitExpected      `json:"actual,omitempty"`
@@ -217,13 +247,34 @@ type RunPRReview struct {
 	SubmittedAt string `json:"submitted_at"`
 }
 
+type RunPRReviewComment struct {
+	ID           string `json:"id"`
+	ReviewID     string `json:"review_id"`
+	Author       string `json:"author"`
+	Body         string `json:"body"`
+	URL          string `json:"url"`
+	CreatedAt    string `json:"created_at"`
+	Path         string `json:"path"`
+	Line         *int   `json:"line,omitempty"`
+	OriginalLine *int   `json:"original_line,omitempty"`
+	Side         string `json:"side,omitempty"`
+	StartLine    *int   `json:"start_line,omitempty"`
+	StartSide    string `json:"start_side,omitempty"`
+	CommitOID    string `json:"commit_oid"`
+	InReplyToID  string `json:"in_reply_to_id,omitempty"`
+	DiffHunk     string `json:"diff_hunk,omitempty"`
+}
+
 type RunPRFeedbackResult struct {
-	Identity    string               `json:"identity"`
-	PullRequest *RunPullRequest      `json:"pull_request"`
-	Checks      []RunPRCheck         `json:"checks"`
-	Comments    []RunPRComment       `json:"comments"`
-	Reviews     []RunPRReview        `json:"reviews"`
-	Truncated   bool                 `json:"truncated"`
-	Output      RunRepoCommandOutput `json:"output"`
-	Error       string               `json:"error,omitempty"`
+	Identity        string               `json:"identity"`
+	PullRequest     *RunPullRequest      `json:"pull_request"`
+	Checks          []RunPRCheck         `json:"checks"`
+	Comments        []RunPRComment       `json:"comments"`
+	Reviews         []RunPRReview        `json:"reviews"`
+	ReviewComments  []RunPRReviewComment `json:"review_comments"`
+	AccountMemberID string               `json:"account_member_id"`
+	Actual          *RunGitExpected      `json:"actual,omitempty"`
+	Truncated       bool                 `json:"truncated"`
+	Output          RunRepoCommandOutput `json:"output"`
+	Error           string               `json:"error,omitempty"`
 }

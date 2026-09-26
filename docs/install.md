@@ -25,6 +25,19 @@ the Go server and CLI through `web/embed.go`. The CLI serves it from
 server binary is what refreshes the dashboard a phone loads. Running an
 installed server or CLI needs no Node.js and no Next server.
 
+The remote browser has its own Docker image. For an untagged, dirty, or
+git-describe source build, build it locally before opening a browser session:
+
+```sh
+make browser-image
+make browser-smoke
+```
+
+Both commands default to `aether/browser:test`; `BROWSER_IMAGE=<reference>`
+selects another image. The smoke command runs the image's native Chromium
+sandbox and companion checks, not a host-installed browser. See
+[testing.md](testing.md#headless-browser-and-remote-development-acceptance).
+
 ## The install script
 
 ```sh
@@ -767,6 +780,12 @@ Building the APK from a checkout is in
   reachable and the recommended identity layer. See
   [networking.md](networking.md).
 
+A standard headless Ubuntu server is sufficient. No desktop login, display
+server, `DISPLAY`, X11, Wayland, Xvfb, host Node.js, host Chromium, or host
+browser libraries are required. The companion image contains Chromium,
+Playwright, their matching OS libraries, and fonts. The optional desktop app
+is a client, not a server prerequisite.
+
 ## Images and containers
 
 An image is a read-only package used to create containers. A container is one
@@ -794,6 +813,111 @@ aether workspace init <name> --base <branch>
 
 Workspace variables and the setup script remain workspace settings and still
 apply to runs.
+
+### Headless browser companion
+
+The remote browser is a separate, lazy container, not part of the member's
+saved environment. A release binary defaults to
+`ghcr.io/3xdevops/aether-browser:<exact-release-version>`; development, dirty,
+and git-describe builds default to the local `aether/browser:test` image.
+There is no `latest` fallback. A versioned tag, registry digest
+(`registry/image@sha256:...`), or locally loaded immutable image ID selects
+the image; the runtime resolves a tag or digest to an immutable Docker image
+ID before creating a companion. A missing registry image is pulled; a missing
+local immutable ID is an error, not a request to substitute another image.
+
+Set the image with `--browser-image`, the persisted `browser-image` config
+key, or `AETHER_BROWSER_IMAGE`, in that order of precedence, followed by the
+build default. For example:
+
+```sh
+sudo aether-server config set browser-image aether/browser:test
+sudo systemctl restart aether-server
+```
+
+That local image must first exist in the server's Docker daemon. For an
+environment-variable override in the installed service, put
+`AETHER_BROWSER_IMAGE=<reference>` in `/etc/aether/aether-server.env` and
+restart; a persisted config value still takes precedence. Explicit
+`setup`/`install --browser-image` values are persisted, while an omitted
+option follows the default. An existing config remains operator-owned across
+upgrades; use `config show` to inspect the effective value.
+
+Merely starting a run does not allocate Chromium. Opening its browser or
+rendering a terminal PNG lazily reserves an additional 1 CPU and 1 GiB of
+memory **plus** a private 256 MiB `/dev/shm`; leave that capacity alongside
+the run. Insufficient capacity refuses the browser operation rather than
+weakening its limits.
+The browser uses the run's network namespace to reach local app ports, but
+has no checkout or member-home mount. See
+[security.md](security.md#remote-development-and-browser-isolation).
+
+Chromium runs headless as a non-root user with its namespace and seccomp
+sandboxes enabled. Docker's stock AppArmor policy is retained. A sandbox
+startup failure is fatal and its diagnostic is returned; inspect the Docker,
+kernel, and custom AppArmor policy on that host and rerun `make browser-smoke`
+after correcting it. Do not disable the sandbox, use a privileged/unconfined
+container, relax host-wide user-namespace controls, or install Xvfb as a
+workaround. A lost companion reports
+`browser companion unavailable; explicit restart required`; reopening must
+be explicit because its old authenticated browser session may be gone.
+
+For broker clients, `dev.browser.status` returns the lifecycle state
+(`not_started`, `running`, `paused`, `creating`, or `session_lost`) and the
+actual failure reason. Recovery is explicit: acquire the browser surface
+using that status's `session_id`, then call `dev.browser.reset` with the
+current control lease. If initial creation failed before establishing a
+session, the returned `pending:<creation-key>` is an opaque recovery
+incarnation, not a page or frame identity. After reset, obtain the new
+session and page references; do not replay old input.
+
+**Release prerequisite:** a new GHCR package starts private. Before the first
+server release can complete, a repository administrator must make the
+`aether-browser` package public. The release workflow smoke-checks each
+architecture natively, publishes their versioned manifest, then pulls both
+`linux/amd64` and `linux/arm64` anonymously before releasing the server.
+Missing or private images block that gate. This describes the publication
+requirement, not a claim that the new package already exists or that a smoke
+run has passed. Pull-request CI builds local images without registry writes.
+
+### Git inside run environments
+
+Managed selected-path commits use native prepared `git update-ref --stdin`
+transactions inside the selected run environment. The standard image uses
+Ubuntu 24.04's distribution Git; stock Git 2.43 supports the required
+primitive. No custom source build or new Ubuntu host upgrade is required,
+and no minimum version is asserted for other environments.
+
+One dereferencing `update HEAD NEW OLD` gives Git the expected old object ID
+for its native compare-and-swap. After the `prepare` acknowledgement, Aether
+checks symbolic `HEAD` while Git holds both the `HEAD` and branch locks,
+then commits or aborts within that transaction. A custom environment without
+the required native support fails closed; unrelated repository reads do not
+depend on this transaction.
+
+Failures preserve native Git stderr. A missing protocol acknowledgement adds
+`runrepo: native reference transaction did not acknowledge <phase>`, where
+the phase is `start`, `prepare`, `commit`, or `abort`. A branch mismatch reports
+`runrepo: symbolic HEAD changed: expected <branch>, found <branch>`; a detached
+or unreadable `HEAD` reports
+`runrepo: symbolic HEAD changed to a detached or unreadable reference while preparing commit`.
+Inspect the actual diagnostic: lock contention, a changed branch, a native
+hook veto, and unavailable transaction support are not interchangeable errors.
+Do not treat every failure as a request to upgrade Git.
+
+If a custom image lacks transaction support, install an appropriate native
+Git package in the selected member environment and save it for future runs,
+or use `aether env reset` to return to the standard image. Reset discards saved
+image customizations. Open a new environment terminal and start a new run;
+saving or resetting does not change an already-running container. See
+[environments.md](environments.md#git-in-run-environments).
+
+Managed commits honor native signing, identity, and coauthor trailers but
+report `hooks_run=false` for commit hooks; use native `git commit` in the run
+terminal when those hooks are required. Native `reference-transaction` hooks
+remain active, including their preparation veto. The selected-path and
+post-commit index boundary are explained in
+[security.md](security.md#managed-selected-path-git-commits).
 
 ## First boot
 
@@ -835,6 +959,11 @@ server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
 give up.
 
+Browser support also needs permission to assign its private control directory
+to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch
+the companion or render terminal PNGs. Keep the private directory permissions;
+do not make the control socket world-accessible to work around ownership errors.
+
 To run the server in the foreground instead - handy the first time - skip
 setup and serve directly:
 
@@ -858,6 +987,7 @@ uses the default; negative values have the semantics in the table.
 | `--addr` | `:2222` | The SSH listener. This is the port clients must be able to reach. |
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
+| `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -1017,8 +1147,8 @@ automatic.
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
-| `coord/` | Per-run conflict-coordination sockets, recreated each run. |
-| `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
+| `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained TUI runs retain this mount until expiry/deletion. |
+| `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes and mirror credentials are server-owned state. Back up the
 database, `homes/`, `profiles/`, and `mirrors/` when recovery matters. Those
@@ -1082,10 +1212,12 @@ sudo rm -rf /tmp/aether-patch-*
 
 Step 2 is the one people miss. The scheduler deliberately leaves run containers
 alive across a server restart so it can reattach to them, so they outlive the
-unit. Every container the server creates carries `aether.managed=true` and is
-named `aether-run-<id>`, so either the label filter or
-`--filter name=^/aether-run-` finds them. Use `docker ps -a`, not `docker ps`:
-a crashed run leaves an exited container behind.
+unit. Every container the server creates carries `aether.managed=true`; the
+label filter includes the browser companions as well as run containers.
+Filtering only `--filter name=^/aether-run-` misses companions. Use
+`docker ps -a`, not `docker ps`: a crashed run can leave an exited container
+behind. Remove companion images according to the same Docker image retention
+policy as standard and saved member images.
 
 The server writes no log files. Its output goes to the journal, so
 `sudo journalctl --rotate && sudo journalctl --vacuum-time=1s` is what clears

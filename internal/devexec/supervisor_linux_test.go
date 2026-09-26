@@ -116,8 +116,8 @@ func startSupervisor(t *testing.T, argv ...string) *supervisorProcess {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = master.Close() })
-	if err := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); err != nil {
-		t.Fatal(err)
+	if unlockErr := unix.IoctlSetPointerInt(int(master.Fd()), unix.TIOCSPTLCK, 0); unlockErr != nil {
+		t.Fatal(unlockErr)
 	}
 	number, err := unix.IoctlGetInt(int(master.Fd()), unix.TIOCGPTN)
 	if err != nil {
@@ -127,7 +127,7 @@ func startSupervisor(t *testing.T, argv ...string) *supervisorProcess {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer slave.Close()
+	defer func() { _ = slave.Close() }()
 	key := t.TempDir()
 	claim := "test-attempt"
 	args := append([]string{"-test.run=^TestSupervisorSubprocess$", "--", "run", key, claim}, argv...)
@@ -238,28 +238,28 @@ func TestSupervisorReapsEscapedDescendants(t *testing.T) {
 				t.Fatal(err)
 			}
 			p.line(t, "descendant-ready")
-			pidBytes, err := os.ReadFile(pidFile)
-			if err != nil {
-				t.Fatal(err)
+			pidBytes, readPIDErr := os.ReadFile(pidFile)
+			if readPIDErr != nil {
+				t.Fatal(readPIDErr)
 			}
-			pid, err := strconv.Atoi(string(pidBytes))
-			if err != nil || pid <= 0 {
-				t.Fatalf("descendant identity = %q: %v", pidBytes, err)
+			pid, parsePIDErr := strconv.Atoi(string(pidBytes))
+			if parsePIDErr != nil || pid <= 0 {
+				t.Fatalf("descendant identity = %q: %v", pidBytes, parsePIDErr)
 			}
 			request := p.request
 			request.Action, request.GraceMillis = "stop", 20
 			want := 137
 			switch mode {
 			case "tree":
-				if err := unix.Kill(pid, 0); err != nil {
-					t.Fatalf("descendant was not live before stop: %v", err)
+				if killErr := unix.Kill(pid, 0); killErr != nil {
+					t.Fatalf("descendant was not live before stop: %v", killErr)
 				}
-				if _, err := Control(t.Context(), p.key, request); err != nil {
-					t.Fatal(err)
+				if _, controlErr := Control(t.Context(), p.key, request); controlErr != nil {
+					t.Fatal(controlErr)
 				}
 			case "tree-exit":
-				if _, err := io.WriteString(p.pty, "exit now\n"); err != nil {
-					t.Fatal(err)
+				if _, writeErr := io.WriteString(p.pty, "exit now\n"); writeErr != nil {
+					t.Fatal(writeErr)
 				}
 				want = 23
 			case "zombie":
@@ -272,9 +272,9 @@ func TestSupervisorReapsEscapedDescendants(t *testing.T) {
 				}
 				status := p.request
 				status.Action = "status"
-				state, err := Control(t.Context(), p.key, status)
-				if err != nil || !state.Running || state.Exited {
-					t.Fatalf("reaping a descendant stopped the root command: %+v, %v", state, err)
+				state, statusErr := Control(t.Context(), p.key, status)
+				if statusErr != nil || !state.Running || state.Exited {
+					t.Fatalf("reaping a descendant stopped the root command: %+v, %v", state, statusErr)
 				}
 				if _, err := Control(t.Context(), p.key, request); err != nil {
 					t.Fatal(err)
@@ -317,7 +317,7 @@ func TestControlCancellationUnblocksConnectedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	accepted := make(chan struct{})
 	release := make(chan struct{})
 	defer close(release)
@@ -326,7 +326,7 @@ func TestControlCancellationUnblocksConnectedRequest(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		var request Request
 		if json.NewDecoder(conn).Decode(&request) != nil {
 			return

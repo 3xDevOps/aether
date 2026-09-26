@@ -95,6 +95,129 @@ and checks that installation changed neither protection settings nor exclusions.
 This is a detection gate, not a guarantee that an unsigned release will
 never receive a false positive on another machine.
 
+## Headless browser and remote-development acceptance
+
+These are commands and acceptance requirements, not a record of a completed
+smoke run. Use a stock headless Ubuntu Docker host with the source-build
+toolchain from [install.md](install.md#building-from-source). No display
+session, X11/Wayland, Xvfb, host Chromium, or host browser libraries are
+needed by the companion. Build and exercise the exact native image:
+
+```sh
+docker info
+make browser-image
+make browser-smoke
+
+# Match the installed server's authority over its private UID-1000 bind.
+sudo env "PATH=$PATH" "HOME=$HOME" \
+  AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+  go test -race -timeout=10m -tags=integration ./internal/runtime \
+    -run '^TestDockerBrowser' -v
+
+# Load/build that image in this daemon before the complete integration gate.
+AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+AETHER_BROWSER_IMAGE=aether/browser:test make test-integration
+
+# Real dashboard interaction through the built gateway/server.
+AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+AETHER_BROWSER_IMAGE=aether/browser:test make test-e2e
+```
+
+`make browser-smoke BROWSER_IMAGE=<reference>` exercises another exact image.
+The image contains the scripts, Playwright, Chromium, OS dependencies and
+fonts; no source or member-home bind participates. The smoke inspects
+`chrome://sandbox` for both **Namespace sandbox Yes** and **Seccomp-BPF
+sandbox Yes**, interacts with a loopback app, captures a browser PNG and a
+bounded JPEG frame, exercises a popup and console report, renders a terminal
+PNG with screen metadata, and resets the browser context. The companion's
+additional behavior checks run in the same image. A Docker spec or requested
+launch flag alone is not proof of a working Chromium sandbox.
+
+The runtime integration command separately exercises real namespace sharing,
+the private control mount, immutable image identity, lifecycle recovery and
+the absence of a CDP TCP listener. Run it with the installed server's root
+authority; do not make its control directory world-writable to get a pass.
+Sandbox failures must fail the gate. Inspect the host's kernel/Docker/custom
+AppArmor diagnostic; do not retry unconfined, with `--no-sandbox`, or after a
+global security-policy relaxation.
+
+CI's browser jobs use native Ubuntu amd64 and arm64 runners, building locally
+on pull requests without registry writes. Releases smoke the exact
+architecture images before publishing and require anonymous pulls of the
+versioned multiarchitecture manifest. An administrator must make the new
+GHCR package public before that gate can succeed; neither this guide nor a
+workflow definition proves publication or a successful run.
+
+**Native Git boundary for commit coverage.** Managed selected-path commits use
+native prepared `git update-ref --stdin` transactions inside the run. The
+standard image uses Ubuntu 24.04's distribution Git, not a special source
+build. Stock Git 2.43 supports the required native transaction. No custom Git
+build or new Ubuntu host Git upgrade is required.
+
+```sh
+go test ./internal/runrepo
+```
+
+This suite exercises native Git and native `gh` against an isolated TLS API
+fixture. It does not replace Docker, authenticated GitHub, or real-harness
+acceptance.
+
+Verify rejection of a changed symbolic HEAD and expected branch OID, including
+a branch switch to another branch at the same OID. Exercise native lock
+contention and abort behavior, selected-path exactness, unrelated staging
+preservation, native identity/signing/coauthors, and the distinct
+`committed=true, index_updated=false` outcome. Custom environments lacking
+transaction support must fail closed and retain native diagnostics; see
+[install.md](install.md#git-inside-run-environments). Do not label selected-path
+commits commit-hook-aware: their result is `hooks_run=false`; use native
+`git commit` in the run terminal when commit hooks are required. Native
+`reference-transaction` hooks must remain active, including a preparation
+veto, and hook output must not be mistaken for protocol acknowledgements.
+
+### End-to-end acceptance matrix
+
+Exercise the following against **both** a local `aether gui` gateway and the
+server-hosted HTTPS dashboard at desktop and phone viewport widths. Record
+separately whether real tailnet identity, mobile operating-system keyboard,
+and WebView behavior were exercised; viewport emulation does not prove those.
+
+- Start a real app in a named development terminal in the live run. Observe
+  initial output, reconnect/replay, screen and geometry changes, normal and
+  alternate-screen rendering, terminal capture, exit and explicit restart.
+  Confirm a phone follows the shared terminal without silently resizing it.
+- Open the app's run-local URL in the companion, use a real DOM snapshot and
+  action, navigate and switch pages, inspect console/request failures, view
+  streamed frames, change viewport, and capture evidence. After navigation,
+  reset, closure, or restart, old page/node/viewport references must fail
+  rather than act on another target.
+- Let a run agent own an app surface, explicitly take it over as a human,
+  confirm stale agent input is rejected, then release/reacquire it. A second
+  terminal and the browser must remain independently controlled; the primary
+  harness's mission hold must remain intact.
+- Confirm read/capture/stream and write authorization on both gateways,
+  including a member without Steer, backing-account revocation, lifecycle
+  stop/pause, stale control generations, and reconnect after server restart.
+  Browser loss must not silently replace an authenticated session.
+- Exercise real Git status/diff and an explicit selected-path commit in the
+  run environment; verify signing and branch identity, concurrent branch
+  rejection, commit-hook disclosure, native reference-transaction hook
+  behavior, and fail-closed transaction diagnostics. Confirm no browser
+  profile or capture enters the source tree or commit.
+- Inspect only deliberately selected evidence, its attribution and retention;
+  confirm bounded transient captures and cleanup. Keep credential entry out
+  of recordings and confirm nothing uploads images to a public PR by itself.
+- Complete two genuine authenticated vendor-agent loops through the shared
+  development tools, with observed terminal/app changes and reviewed evidence.
+  Record which vendors, image identities, gateways and phone were exercised,
+  and any missing prerequisites or unexercised rows.
+
+Public CI has no authenticated real-harness credentials. Its deterministic
+fake agents and scripted `claude`, `pi`, or `omp` fixtures prove their stated
+broker/transport paths, **not two genuine vendor loops**. No-login vendor
+smokes prove argument acceptance and login failure, not authenticated work.
+A skipped test, unavailable Docker daemon, fake runtime, or absent phone is
+an explicit coverage gap, never a passing real-harness or phone acceptance.
+
 ## Local configuration in tests
 
 Tests that read or write the linked-server config through `cli.Load`,

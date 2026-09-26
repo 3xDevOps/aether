@@ -23,10 +23,48 @@ func observationSession(t *testing.T, replay int) (*Host, SessionKey, *fakeAtt) 
 	key := RunShellSession(domain.RunID("observe-run"), "t1")
 	att := newFakeAtt()
 	t.Cleanup(func() { _ = att.inR.Close(); _ = att.inW.Close(); _ = att.outW.Close() })
-	if err := h.StartDevelopmentSession(context.Background(), key, att); err != nil {
+	if err := h.StartDevelopmentSession(context.Background(), key, att, 12, 3); err != nil {
 		t.Fatal(err)
 	}
 	return h, key, att
+}
+
+type completedDevelopmentAttachment struct {
+	*fakeAtt
+	output io.Reader
+}
+
+func (a *completedDevelopmentAttachment) Stdout() io.Reader { return a.output }
+
+func TestDevelopmentAdoptsCompletedOutputAtLaunchGeometry(t *testing.T) {
+	h, hostErr := New(Config{TranscriptDir: t.TempDir(), DefaultCols: 80, DefaultRows: 24})
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	att := &completedDevelopmentAttachment{fakeAtt: newFakeAtt(), output: strings.NewReader("abcdefghij")}
+	att.refuseResizes(errors.New("execution already exited"))
+	t.Cleanup(func() { _ = att.inR.Close(); _ = att.inW.Close(); _ = att.outW.Close() })
+	key := RunShellSession("short-lived", "t1")
+	if err := h.StartDevelopmentSession(context.Background(), key, att, 7, 3); err != nil {
+		t.Fatal(err)
+	}
+	final, err := h.WaitSession(context.Background(), key, WaitRequest{
+		Generation: h.SessionGeneration(key), Ended: true, Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !final.Matched || !final.Screen.Ended || final.Screen.Cols != 7 || final.Screen.Rows != 3 {
+		t.Fatalf("completed launch observation = %+v", final)
+	}
+	if final.Screen.Lines[0].Text != "abcdefg" || final.Screen.Lines[1].Text != "hij" ||
+		!final.Screen.Lines[1].Wrapped || final.Screen.Snapshot.Cols != 7 || final.Screen.Snapshot.Rows != 3 {
+		t.Fatalf("launch output was reinterpreted at host defaults: %+v", final.Screen)
+	}
+	if calls := att.sizeCalls(); len(calls) != 0 {
+		t.Fatalf("adoption resized an already completed execution: %v", calls)
+	}
 }
 
 func allowSession(h *Host, key SessionKey) SessionAdmission {
@@ -76,8 +114,8 @@ func TestObserveSessionResizeAndResetReviseWithoutInventingOutput(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.ResizeSession(context.Background(), key, allowSession(h, key), 20, 4); err != nil {
-		t.Fatal(err)
+	if resizeErr := h.ResizeSession(context.Background(), key, allowSession(h, key), 20, 4); resizeErr != nil {
+		t.Fatal(resizeErr)
 	}
 	after, err := h.ObserveSession(key)
 	if err != nil {
@@ -167,19 +205,18 @@ func TestSessionWaitScreenOutputTimeoutCancellationAndExit(t *testing.T) {
 	result := make(chan WaitObservation, 1)
 	fail := make(chan error, 1)
 	go func() {
-		o, err := h.WaitSession(context.Background(), key, WaitRequest{Generation: initial.Generation, AfterRevision: initial.Revision, Timeout: time.Second})
-		if err != nil {
-			fail <- err
-			return
+		o, waitErr := h.WaitSession(context.Background(), key, WaitRequest{Generation: initial.Generation, AfterRevision: initial.Revision, Timeout: time.Second})
+		if waitErr != nil {
+			fail <- waitErr
 		}
 		result <- o
 	}()
-	if err := h.ResizeSession(context.Background(), key, allowSession(h, key), 20, 3); err != nil {
-		t.Fatal(err)
+	if resizeErr := h.ResizeSession(context.Background(), key, allowSession(h, key), 20, 3); resizeErr != nil {
+		t.Fatal(resizeErr)
 	}
 	select {
-	case err := <-fail:
-		t.Fatal(err)
+	case waitErr := <-fail:
+		t.Fatal(waitErr)
 	case o := <-result:
 		if !o.Matched || o.TimedOut || o.Screen.Cols != 20 || o.Screen.Position != initial.Position {
 			t.Fatalf("resize wait = %+v", o)
@@ -227,7 +264,7 @@ func TestSessionAdmissionFencesReplacementAndDenial(t *testing.T) {
 	h.lookup(key).end()
 	replacement := newFakeAtt()
 	t.Cleanup(func() { _ = replacement.inR.Close(); _ = replacement.inW.Close(); _ = replacement.outW.Close() })
-	if err := h.StartDevelopmentSession(context.Background(), key, replacement); err != nil {
+	if err := h.StartDevelopmentSession(context.Background(), key, replacement, 12, 3); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.WriteSessionInput(context.Background(), key, old, []byte("bad")); !errors.Is(err, ErrSessionReplaced) {
@@ -269,7 +306,7 @@ func TestDevelopmentReadOnlyViewerCannotResize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Cols != 12 || o.Rows != 3 || len(att.sizeCalls()) != 1 {
+	if o.Cols != 12 || o.Rows != 3 || len(att.sizeCalls()) != 0 {
 		t.Fatalf("viewer resized terminal: %dx%d calls=%v", o.Cols, o.Rows, att.sizeCalls())
 	}
 }
@@ -409,8 +446,8 @@ func TestScreenPagesPreserveWideColumnsAndBoundEscapedPayloads(t *testing.T) {
 	if !first.Truncated || first.NextRow == nil || *first.NextRow != 0 || first.NextColumn != 256 || first.Lines[0].Cells[255].Text != "界" {
 		t.Fatalf("first page boundary = %+v", first)
 	}
-	if _, err := protocol.MarshalDevResult(first); err != nil {
-		t.Fatal(err)
+	if _, marshalErr := protocol.MarshalDevResult(first); marshalErr != nil {
+		t.Fatal(marshalErr)
 	}
 	request.RowOffset, request.ColumnOffset, request.ExpectedScreenRevision = *first.NextRow, first.NextColumn, first.ScreenRevision
 	second, err := protocol.PageDevTerminalScreen(screen, request)
@@ -421,8 +458,8 @@ func TestScreenPagesPreserveWideColumnsAndBoundEscapedPayloads(t *testing.T) {
 		t.Fatalf("continuation = %+v", second)
 	}
 	screen.ScreenRevision++
-	if _, err := protocol.PageDevTerminalScreen(screen, request); !errors.Is(err, protocol.ErrDevScreenChanged) {
-		t.Fatalf("mixed-revision continuation = %v", err)
+	if _, revisionErr := protocol.PageDevTerminalScreen(screen, request); !errors.Is(revisionErr, protocol.ErrDevScreenChanged) {
+		t.Fatalf("mixed-revision continuation = %v", revisionErr)
 	}
 	screen.Lines[0].Cells[0].Text = strings.Repeat("<&>\u0301", 600)
 	page, err := protocol.PageDevTerminalScreen(screen, protocol.DevTerminalScreenParams{})
@@ -470,8 +507,8 @@ func TestDevelopmentResizeFailureKeepsObservedGeometry(t *testing.T) {
 	}
 	denied := errors.New("runtime refused resize")
 	att.refuseResizes(denied)
-	if err := h.ResizeSession(context.Background(), key, allowSession(h, key), 40, 8); !errors.Is(err, denied) {
-		t.Fatalf("resize = %v", err)
+	if resizeErr := h.ResizeSession(context.Background(), key, allowSession(h, key), 40, 8); !errors.Is(resizeErr, denied) {
+		t.Fatalf("resize = %v", resizeErr)
 	}
 	after, err := h.ObserveSession(key)
 	if err != nil {
@@ -481,7 +518,7 @@ func TestDevelopmentResizeFailureKeepsObservedGeometry(t *testing.T) {
 		t.Fatalf("failed resize changed observation: before=%+v after=%+v", before, after)
 	}
 	calls := att.sizeCalls()
-	if len(calls) != 2 || calls[1] != [2]uint{40, 8} {
+	if len(calls) != 1 || calls[0] != [2]uint{40, 8} {
 		t.Fatalf("development resize performed an uncommitted nudge: %v", calls)
 	}
 	if _, err := h.ReadSessionOutput(key, OutputRequest{Generation: before.Generation + 1}); !errors.Is(err, ErrSessionReplaced) {
@@ -532,5 +569,51 @@ func TestWaitDoesNotReportLateTextAsSuccessAfterDeadline(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expired wait did not return")
+	}
+}
+
+func TestSessionGeometryPublishesOnlyAcceptedResize(t *testing.T) {
+	h, key, att := observationSession(t, 128)
+	blocked := &blockingResizeAtt{fakeAtt: att, block: make(chan struct{}, 1), entered: make(chan struct{}, 1)}
+	defer close(blocked.block)
+	s := h.lookup(key)
+	s.mu.Lock()
+	s.att = blocked
+	s.mu.Unlock()
+	generation := h.SessionGeneration(key)
+	done := make(chan error, 1)
+	go func() { done <- h.ResizeSession(context.Background(), key, allowSession(h, key), 40, 8) }()
+	select {
+	case <-blocked.entered:
+	case <-time.After(time.Second):
+		t.Fatal("resize did not enter runtime")
+	}
+	assertGeometry := func(wantCols, wantRows uint) {
+		t.Helper()
+		cols, rows, gotGeneration, err := h.SessionGeometry(key)
+		if err != nil || cols != wantCols || rows != wantRows || gotGeneration != generation {
+			t.Fatalf("geometry = %dx%d generation=%d err=%v, want %dx%d generation=%d", cols, rows, gotGeneration, err, wantCols, wantRows, generation)
+		}
+	}
+	assertGeometry(12, 3)
+	blocked.block <- struct{}{}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	assertGeometry(40, 8)
+	denied := errors.New("runtime refused resize")
+	att.refuseResizes(denied)
+	blocked.block <- struct{}{}
+	if err := h.ResizeSession(context.Background(), key, allowSession(h, key), 50, 10); !errors.Is(err, denied) {
+		t.Fatalf("refused resize = %v", err)
+	}
+	assertGeometry(40, 8)
+	s.end()
+	assertGeometry(40, 8)
+	if err := h.StopSession(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := h.SessionGeometry(key); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("stopped geometry = %v", err)
 	}
 }

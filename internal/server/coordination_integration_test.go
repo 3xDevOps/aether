@@ -200,8 +200,9 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 // switch in a different position while the containers it left behind stay
 // alive.
 type coordEnv struct {
-	rt    runtime.Runtime
-	image string
+	rt           runtime.Runtime
+	image        string
+	browserImage string
 	// serverBinary is what the scheduler stages as the in-container bridge;
 	// empty stages the running binary, which under `go test` is the test
 	// binary and has no mcp subcommand.
@@ -309,6 +310,7 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		Addr:                 "127.0.0.1:0",
 		Runtime:              e.rt,
 		StandardImage:        e.image,
+		BrowserImage:         e.browserImage,
 		CoordinationDisabled: disabled,
 		ServerBinary:         e.serverBinary,
 	})

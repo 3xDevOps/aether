@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
-# Every toolchain version is pinned here so a bump is a one-line diff.
-# Nothing in this file installs "latest".
+# Downloaded toolchain versions are pinned here. Git and other system tools
+# come from Ubuntu's packages.
 ARG GO_VERSION=1.27.0
 ARG NODE_VERSION=24.20.0
 ARG FNM_VERSION=1.39.0
@@ -19,6 +19,7 @@ RUN apt-get update \
         curl \
         findutils \
         git \
+        gnupg \
         grep \
         jq \
         openssh-client \

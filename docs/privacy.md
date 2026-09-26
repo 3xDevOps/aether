@@ -26,12 +26,14 @@ about this policy go to <https://github.com/3xDevOps/Aether/issues>.
   nothing reads it but the dashboard, and it lasts until you uninstall the
   app. Both are private to the app.
 
-No account, password, token, cookie or key is stored. There is no sign-in:
-the phone's Tailscale login identifies it to your server
-([networking.md](networking.md#the-dashboard)). Uninstalling the app deletes
-everything above. None of it is backed up: the app opts out of Google's cloud
-backup and of device-to-device transfer, so setting up a new phone asks for
-the server name again.
+No dashboard account, password, token, cookie or key is stored by the Android
+shell. There is no dashboard sign-in: the phone's Tailscale login identifies
+it to your server ([networking.md](networking.md#the-dashboard)). An app
+login in the remote development browser is separate server-side state, as
+described below. Uninstalling the app deletes everything stored on the phone.
+None of it is backed up: the app opts out of Google's cloud backup and of
+device-to-device transfer, so setting up a new phone asks for the server name
+again.
 
 ## What leaves the phone
 
@@ -69,6 +71,64 @@ the server name again.
 Everything above goes to one server, the one you typed in, and stops there.
 Nothing is sold, and nothing is handed to anyone the server's administrator
 has not made a member of it.
+
+## Remote-development data
+
+The shared app browser runs on your server, not in the phone's WebView.
+Browser input, app-terminal input, observations, frames, and explicit capture
+requests travel through your Aether server. A page opened there makes its
+own network requests from the run's network namespace; those app endpoints
+and any third parties the page contacts receive the usual browser requests
+under their own policies. This is separate from the Android shell's lack of
+analytics or third-party reporting.
+
+An app session can contain test-account cookies, tokens, personal data, page
+URLs, or secrets printed by an app or terminal. Reading it, streaming it, or
+taking a capture requires **Steer** and access to the backing account, not
+merely permission to view a run. Human members and the run agent have distinct
+per-surface control identities; taking over a shared app surface is not a
+promise that the selected account's other processes or credentials are
+isolated from that run.
+
+The companion has no member-home or source-checkout mount. Its browser
+context/profile is transient companion state, outside source control.
+Resetting the browser context removes its pages and session state; a lost
+browser process does not silently restore an authenticated session. Private
+control sockets and lifecycle journals live below
+`<data-dir>/scheduler/browser/`, not in the checkout or the run's visible
+coordination files. See
+[security.md](security.md#remote-development-and-browser-isolation).
+
+Captures are explicit PNG files, not continuous recording. Each run can keep
+at most **64 captures**, **128 MiB of PNG bytes in total**, and **8 MiB per
+image**. Reaching either aggregate limit refuses a new capture with
+`run capture limit reached; delete captures before taking another`; it does
+not silently evict old evidence. Files and their metadata are stored below
+`<data-dir>/coord/<run-id>/captures/`, exposed read-only to the run as
+`/run/aether/captures/<random-id>.png`. Metadata identifies the run,
+terminal or page, session/revision, capture time, dimensions, and page URL
+where applicable. It does not attest to an atomically observed Git commit or
+clean checkout.
+
+These captures remain transient run-owned files until explicit deletion or
+cleanup of that run's coordination mount. A retained, explicitly closed TUI
+run keeps its mount and captures until expiry or deletion. The live browser's
+frame stream is not automatically archived. Browser diagnostics are bounded
+observations, not a full traffic recording: the companion retains up to 100
+console warning/error entries and 100 failed/error-response request entries
+per page.
+URLs and logged messages can still reveal sensitive information.
+
+Preserve only deliberately selected, reviewed evidence outside transient
+storage before cleanup. Captures do not currently have a managed
+retention-promotion operation. A capture handle or live frame by itself is
+not durable evidence, and resetting the browser does
+not delete already-written PNGs. There is no automatic public pull-request
+image upload or credential-entry recording. Do not capture credentials or
+publish app logins, cookies, tokens, or customer data; Aether cannot reliably
+redact secrets an app renders in pixels or text. A member who explicitly
+exports or publishes a capture creates a separate copy under that
+destination's access and retention rules.
 
 ## Permissions
 

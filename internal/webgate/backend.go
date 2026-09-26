@@ -26,6 +26,13 @@ type Backend interface {
 	Terminal(ctx context.Context, req protocol.TerminalRequest) (Terminal, protocol.TerminalResponse, error)
 }
 
+// DevelopmentBackend carries bounded binary streams outside control NDJSON.
+// Both shipped backends implement this alongside Backend.
+type DevelopmentBackend interface {
+	BrowserFrames(context.Context, protocol.DevBrowserStreamRequest) (io.ReadCloser, error)
+	Artifact(context.Context, protocol.DevArtifactDownloadRequest) (io.ReadCloser, protocol.DevArtifact, error)
+}
+
 // Terminal is an attached PTY whose output and geometry share an ordered
 // framed stream. Its window can be resized while open; a read error of
 // *protocol.RemoteExitError carries the exit status the server ended the
