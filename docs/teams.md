@@ -664,9 +664,11 @@ ID                          TASK                        STATE    RUN
 
 The integrator's questions and its plan wait for you. `show` lists the
 question IDs and the plan version under review; the commands below act on
-them, as the dashboard's Missions page does. Each one calls the server once
-with a fresh idempotency key, prints the swarm's phase afterwards, and prints
-a server refusal verbatim.
+them, as the dashboard's Missions page does. Each one reads the swarm, then
+sends one mutation with a fresh idempotency key against the plan version or
+integrator generation it read. A decision, `cancel`, and `replace-integrator`
+print the swarm's phase afterwards; `answer` prints the question ID. A server
+refusal is printed verbatim.
 
 ```sh
 aether swarm answer 01m3bnfkwbqx7y9m98m351mxq2 \

@@ -207,7 +207,7 @@ the scheduler wrote the run row before failing:
 
 ```
 mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>: <cause>
-mission <mission-id> exists but its integrator run <run-id> failed to start; replace the integrator from the Missions page, or read it with aether swarm show <mission-id>: <cause>
+mission <mission-id> exists but its integrator run <run-id> failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <harness> or from the Missions page, or read it with aether swarm show <mission-id>: <cause>
 ```
 
 With no run row, mission reconciliation retries the launch of the reserved
