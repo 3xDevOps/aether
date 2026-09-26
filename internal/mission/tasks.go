@@ -123,7 +123,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 		// A worker may propose a split or a new task in its mission. The
 		t := &domain.Task{MissionID: mission.ID, Revision: r}
 		if createErr := s.createTask(ctx, t, p.IdempotencyKey); createErr != nil {
-			return nil, createErr
+			return nil, dependencyRefusal(createErr)
 		}
 		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
 			return nil, publishErr
@@ -167,7 +167,7 @@ func (s *Service) handleTaskMutation(ctx context.Context, run domain.RunID, meth
 			proposed, err = s.cfg.Missions.ReviseTask(ctx, task.ID, r, p.IdempotencyKey)
 		}
 		if err != nil {
-			return nil, err
+			return nil, dependencyRefusal(err)
 		}
 		if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
 			return nil, publishErr
@@ -420,6 +420,16 @@ func (s *Service) createTask(ctx context.Context, t *domain.Task, key string) er
 	}
 	return err
 }
+
+// dependencyRefusal turns a dependency cycle into an invalid-state error so
+// the caller learns which tasks form the cycle instead of a conflict code.
+func dependencyRefusal(err error) error {
+	if errors.Is(err, store.ErrMissionCycle) {
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+	}
+	return err
+}
+
 func validTaskKey(key string) bool {
 	return key != "" && len(key) <= 256 && !strings.ContainsAny(key, "\r\n\x00")
 }
@@ -431,6 +441,9 @@ func revisionFromWire(in protocol.TaskRevision, run domain.RunID) *domain.TaskRe
 		Material:           in.Material,
 		SupersedesRevision: in.SupersedesRevision, ProposedByRunID: run,
 		Status: domain.TaskRevisionProposed,
+	}
+	for _, id := range in.DependsOn {
+		r.DependsOn = append(r.DependsOn, domain.TaskID(strings.TrimSpace(id)))
 	}
 	if len(in.EvidenceRequirements) > 0 {
 		r.EvidenceRequirements = make([]domain.EvidenceRequirement, len(in.EvidenceRequirements))

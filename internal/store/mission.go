@@ -40,7 +40,6 @@ type MissionStore interface {
 	ProposeTaskRevision(context.Context, domain.TaskID, *domain.TaskRevision, string) (*domain.TaskRevision, error)
 	ReviseTask(context.Context, domain.TaskID, *domain.TaskRevision, string) (*domain.TaskRevision, error)
 	AcceptTaskRevision(context.Context, domain.TaskID, int, uint64, domain.RunID, string) error
-	SetTaskDependencies(context.Context, domain.TaskID, int, []domain.TaskDependency, string) error
 	ReserveAttempt(context.Context, *domain.AttemptReservation) (*domain.Attempt, bool, error)
 	GetAttempt(context.Context, domain.AttemptID) (*domain.Attempt, error)
 	GetAttemptByRun(context.Context, domain.RunID) (*domain.Attempt, error)
