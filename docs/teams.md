@@ -591,6 +591,51 @@ success cache only within a 10-second request floor; failures wait at least
 same-credential successful window, reports its error and stale status, and is
 not presented as current after a reset has passed without a fresh measurement.
 
+### Launching a swarm
+
+Create a swarm with an objective, a TUI integrator harness, and optional
+worker harness choices:
+
+```sh
+aether swarm create "Add structured logging to the API" \
+  --integrator claude \
+  --worker claude:headless \
+  --max-concurrent-attempts 2 \
+  --max-total-attempts 8
+aether swarm list
+aether swarm show <mission-id>
+```
+
+`--account <member-id>` selects an account shared with you; without it, the
+CLI uses your account. Repeat `--worker <harness[:tui|headless]>` to add worker
+choices. Workers default to TUI mode. Without `--worker`, the integrator's
+TUI choice is also available to workers; `:headless` must be explicit and
+requires a harness with a headless command. The limits default to two concurrent
+attempts and eight attempts total; the server permits at most eight concurrent
+and 128 total.
+
+Before sending `mission.create`, the CLI prints `idempotency-key: <key>` to
+stderr. If the response is lost or the integrator fails to launch, repeat the
+same command with `--idempotency-key <key>` to recover the saved mission without
+creating another. A create without that flag starts a new request. For scripts,
+choose and save the key before launching:
+
+```sh
+aether swarm create "Add structured logging to the API" \
+  --integrator claude --idempotency-key logging-rollout
+```
+
+Reuse that key only for retries with identical options. A failed integrator
+whose run row already exists is not relaunched by a retry; inspect it with
+`aether swarm show <mission-id>` and use **Replace integrator** on the Missions
+page. `swarm show` lists pending task revisions separately, marked `(pending)`,
+so proposed changes do not hide behind the current revision.
+
+Creation starts the integrator in `planning`. It does not start workers until
+a human approves the plan. Answering integrator questions and approving,
+revising, or rejecting a plan remain dashboard actions; the CLI can create,
+list, and inspect missions.
+
 ### Mission identity and current authority
 
 Mission work does not introduce a second identity or credential boundary.

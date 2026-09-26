@@ -392,6 +392,8 @@ A **run** is one agent execution with its own container, git worktree, and
 branch; `aether runs` lists them. Scoped commands default to the only
 workspace when there is exactly one, which is why nothing above named it.
 
+For multi-agent work, see [Launching a swarm](teams.md#launching-a-swarm).
+
 ## 7. Watch it
 
 ```sh
