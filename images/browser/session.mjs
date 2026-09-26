@@ -15,6 +15,7 @@ export function boundedInteger(value, fallback, min, max) {
 }
 const short = (value, max = 2048) => String(value ?? '').slice(0, max);
 const hotInputOperations = new Set(['pointer', 'key', 'touch', 'text', 'scroll']);
+const pointerPreservingOperations = new Set(['pointer', 'snapshot', 'wait', 'console', 'network']);
 const delay = (ms, signal) => new Promise((resolve, reject) => {
   const abort = () => { clearTimeout(timer); reject(signal.reason); };
   const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
@@ -60,7 +61,7 @@ export class BrowserSession {
     const known = [...this.pages.values()].find((entry) => entry.page === page);
     if (known) return known;
     if (this.pages.size >= limits.pages) { void page.close().catch(() => {}); return null; }
-    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, title: '', titleRead: null, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), latestFrame: null, cdp: null, touches: new Map(), keys: new Set(), buttons: new Set() };
+    const state = { page, id: randomUUID(), revision: 1, viewportID: randomUUID(), viewportChanged: Date.now() / 1000, title: '', titleRead: null, pointerX: null, pointerY: null, nodes: new Map(), console: [], network: [], discarded: { console: 0, network: 0 }, streams: new Set(), latestFrame: null, cdp: null, touches: new Map(), keys: new Set(), buttons: new Set() };
     this.pages.set(state.id, state);
     this.selected ||= state.id;
     const log = (kind, value) => {
@@ -75,6 +76,7 @@ export class BrowserSession {
     page.on('framenavigated', (frame) => {
       // Child-frame navigations also invalidate the composite DOM observation.
       if (frame === page.mainFrame()) { state.title = ''; state.titleRead = null; }
+      state.pointerX = state.pointerY = null;
       state.revision++;
       state.viewportID = randomUUID();
       state.viewportChanged = Date.now() / 1000;
@@ -110,6 +112,7 @@ export class BrowserSession {
     if (sessionID !== this.sessionID) return { session_id: this.sessionID, released: false };
     for (const state of this.pages.values()) {
       if (state.page.isClosed()) continue;
+      state.pointerX = state.pointerY = null;
       for (const key of state.keys) {
         await boundedRead(state.page.keyboard.up(key));
         state.keys.delete(key);
@@ -310,6 +313,7 @@ export class BrowserSession {
     const state = this.target(request);
     const page = state.page;
     const options = { timeout };
+    if (!pointerPreservingOperations.has(request.operation)) state.pointerX = state.pointerY = null;
     switch (request.operation) {
       case 'select': this.selected = state.id; await page.bringToFront(); break;
       case 'close': await page.close(); return this.list();
@@ -358,15 +362,22 @@ export class BrowserSession {
       case 'text': requireValue(typeof request.text === 'string' && request.text.length <= limits.chars, 'Text exceeds limit'); await page.keyboard.insertText(request.text); break;
       case 'scroll': this.viewport(state, request); requireValue(Number.isFinite(request.delta_x) && Number.isFinite(request.delta_y) && Math.abs(request.delta_x) <= 10000 && Math.abs(request.delta_y) <= 10000, 'Invalid scroll delta'); await page.mouse.move(request.x, request.y); await page.mouse.wheel(request.delta_x, request.delta_y); break;
       case 'pointer': {
+        const positioned = state.pointerX === request.x && state.pointerY === request.y;
+        const revision = state.revision;
+        // Unknown until the entire operation succeeds. DOM actions and other
+        // mutations invalidate this cache rather than guessing their position.
+        state.pointerX = state.pointerY = null;
         this.viewport(state, request);
         requireValue(['move', 'down', 'up', 'click'].includes(request.action), 'Invalid pointer action');
         requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button');
-        await page.mouse.move(request.x, request.y);
+        if (!positioned || (request.action !== 'down' && request.action !== 'up')) await page.mouse.move(request.x, request.y);
         const mouseOptions = { button: request.button || 'left', clickCount: boundedInteger(request.click_count, 1, 1, 3) };
         if (request.action === 'down' || request.action === 'click') state.buttons.add(mouseOptions.button);
         if (request.action === 'click') await page.mouse.click(request.x, request.y, mouseOptions);
         else if (request.action !== 'move') await page.mouse[request.action](mouseOptions);
         if (request.action === 'up' || request.action === 'click') state.buttons.delete(mouseOptions.button);
+        signal?.throwIfAborted();
+        if (revision === state.revision) { state.pointerX = request.x; state.pointerY = request.y; }
         break;
       }
       case 'touch': {
@@ -436,6 +447,7 @@ export class BrowserSession {
   async cdp(state) { state.cdp ||= await this.context.newCDPSession(state.page); return state.cdp; }
   async capture(request) {
     const state = this.target(request);
+    state.pointerX = state.pointerY = null;
     requireValue(request.full_page === undefined || typeof request.full_page === 'boolean', 'full_page must be a boolean');
     const revision = state.revision;
     const documentSize = () => boundedRead(state.page.evaluate(() => {

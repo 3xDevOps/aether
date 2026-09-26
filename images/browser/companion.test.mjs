@@ -138,6 +138,24 @@ test('physical input keeps live identity and the last observed title until obser
   assert.equal(navigated.page.title, 'Observed title', 'navigation must not retain the previous document title');
 });
 
+test('physical pointer targeting survives an intervening DOM click elsewhere', { timeout: 120000 }, async (t) => {
+  const { session, origin, call } = await liveCompanion(t, '<!doctype html><script>window.hits=[]</script><button style="position:absolute;left:20px;top:20px;width:100px;height:40px" onclick="window.hits.push(this.textContent)">A</button><button style="position:absolute;left:200px;top:20px;width:100px;height:40px" onclick="window.hits.push(this.textContent)">B</button>');
+  const { page } = await call('/command', { operation: 'open', url: origin, width: 640, height: 480 });
+  const state = session.pages.get(page.page_id);
+  await state.page.waitForLoadState('load');
+  const observed = await call('/command', { ...page, operation: 'snapshot' });
+  const other = observed.snapshot.nodes.find((node) => node.role === 'button' && node.name === 'B');
+  assert.ok(other);
+  await call('/command', { ...page, operation: 'pointer', action: 'move', x: 60, y: 40 });
+  await call('/command', { ...page, operation: 'pointer', action: 'down', x: 60, y: 40 });
+  await call('/command', { ...page, operation: 'pointer', action: 'up', x: 60, y: 40 });
+  await call('/command', { ...page, operation: 'click', node_id: other.node_id });
+  // No preceding physical move: the DOM click moved Playwright's pointer to B.
+  await call('/command', { ...page, operation: 'pointer', action: 'down', x: 60, y: 40 });
+  await call('/command', { ...page, operation: 'pointer', action: 'up', x: 60, y: 40 });
+  assert.deepEqual(await state.page.evaluate(() => window.hits), ['A', 'B', 'A']);
+});
+
 async function liveCompanion(t, html) {
   const app = http.createServer((request, response) => {
     response.setHeader('Content-Type', 'text/html');
