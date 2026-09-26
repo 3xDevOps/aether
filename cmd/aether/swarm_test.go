@@ -15,8 +15,23 @@ import (
 // it received, standing in for aether-server behind withControl.
 func fakeControl(t *testing.T, method string, result any, rpcErr *protocol.Error) (*protocol.Client, *json.RawMessage) {
 	t.Helper()
+	reply := &fakeReply{result: result, err: rpcErr}
+	return fakeControlMethods(t, map[string]*fakeReply{method: reply}), &reply.got
+}
+
+// fakeReply is one served method: what it answers and the params of the last
+// request it received.
+type fakeReply struct {
+	result any
+	err    *protocol.Error
+	got    json.RawMessage
+}
+
+// fakeControlMethods serves every method in replies; any other method is
+// answered with a method-not-found error, so a test proves which RPCs ran.
+func fakeControlMethods(t *testing.T, replies map[string]*fakeReply) *protocol.Client {
+	t.Helper()
 	server, client := net.Pipe()
-	var got json.RawMessage
 	go func() {
 		defer server.Close() //nolint:errcheck
 		r := bufio.NewReader(server)
@@ -30,15 +45,16 @@ func fakeControl(t *testing.T, method string, result any, rpcErr *protocol.Error
 				return
 			}
 			resp := protocol.Response{JSONRPC: "2.0", ID: req.ID}
+			reply, served := replies[req.Method]
 			switch {
-			case req.Method != method:
+			case !served:
 				resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "unexpected method " + req.Method}
-			case rpcErr != nil:
-				got = append(json.RawMessage(nil), req.Params...)
-				resp.Error = rpcErr
+			case reply.err != nil:
+				reply.got = append(json.RawMessage(nil), req.Params...)
+				resp.Error = reply.err
 			default:
-				got = append(json.RawMessage(nil), req.Params...)
-				resp.Result, _ = json.Marshal(result)
+				reply.got = append(json.RawMessage(nil), req.Params...)
+				resp.Result, _ = json.Marshal(reply.result)
 			}
 			out, _ := json.Marshal(resp)
 			if _, err := server.Write(append(out, '\n')); err != nil {
@@ -48,7 +64,7 @@ func fakeControl(t *testing.T, method string, result any, rpcErr *protocol.Error
 	}()
 	c := protocol.NewClient(client)
 	t.Cleanup(func() { _ = c.Close() })
-	return c, &got
+	return c
 }
 
 func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {

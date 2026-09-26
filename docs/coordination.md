@@ -365,8 +365,9 @@ mission; none of them takes a mission ID:
 `--idempotency-key`; unlike `send` and `ask --to`, the CLI never generates one
 for them. `--body-file` and `--summary-file` accept a path or `-` for standard
 input, and both bodies are capped at 4 KiB. `mission question ask` asks the
-accountable human, who answers in the dashboard; `ask --to <run-id>` asks a
-peer agent run, which answers with `reply`. They are separate mailboxes.
+accountable human, who answers on the Missions page or with
+`aether swarm answer`; `ask --to <run-id>` asks a peer agent run, which
+answers with `reply`. They are separate mailboxes.
 
 `mission plan show` returns the phase, plan version, integrator generation,
 open question count, and the feedback of the most recent request for changes,
@@ -388,7 +389,8 @@ without any human action, so the review always reads the latest draft.
 
 `mission.plan.decide` is the human boundary. It is not an agent command and is
 not reachable from the run socket; the accountable human or an admin approves,
-requests changes, or rejects from the dashboard. Approval accepts exactly the
+requests changes, or rejects from the Missions page or with
+`aether swarm approve`, `request-changes`, or `reject`. Approval accepts exactly the
 revisions the submitted round recorded, in one transaction, and moves the
 mission to `active`. `mission.cancel` is the same kind of human-only method.
 Rejecting and cancelling both move the mission to `rejected`, and the server

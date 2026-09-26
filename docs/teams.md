@@ -661,9 +661,42 @@ ID                          TASK                        STATE    RUN
 ```
 
 `show` prints the launch error, when there is one, after the integrator line.
-Answering questions, approving or sending back the plan, and cancelling the
-swarm are done in the dashboard's Missions page until the CLI gains those
-commands.
+
+The integrator's questions and its plan wait for you. `show` lists the
+question IDs and the plan version under review; the commands below act on
+them, as the dashboard's Missions page does. Each one reads the swarm, then
+sends one mutation with a fresh idempotency key against the plan version or
+integrator generation it read. A decision, `cancel`, and `replace-integrator`
+print the swarm's phase afterwards; `answer` prints the question ID. A server
+refusal is printed verbatim.
+
+```sh
+aether swarm answer 01m3bnfkwbqx7y9m98m351mxq2 \
+  --question 01m3bnh2v6xk7g8p1q4r9s0t2u "net/http, no framework"
+aether swarm approve 01m3bnfkwbqx7y9m98m351mxq2
+aether swarm request-changes 01m3bnfkwbqx7y9m98m351mxq2 "document the endpoint in its own task"
+aether swarm reject 01m3bnfkwbqx7y9m98m351mxq2 "wrong repository"
+aether swarm cancel 01m3bnfkwbqx7y9m98m351mxq2
+aether swarm replace-integrator 01m3bnfkwbqx7y9m98m351mxq2 --agent codex
+```
+
+```
+swarm 01m3bnfkwbqx7y9m98m351mxq2 active
+```
+
+`answer` takes the answer as its last argument, or `-` to read it from stdin,
+and refuses a question ID that is not on that swarm. `approve`,
+`request-changes`, and `reject` decide the plan version `show` reports, so a
+plan the integrator resubmitted in the meantime is not decided unread;
+`request-changes` requires feedback and `reject` accepts it. The server
+refuses `reject` on an amendment, refuses `cancel` once a plan is approved,
+and refuses every one of these from anyone but the accountable human or an
+admin; see [Mission identity and current
+authority](#mission-identity-and-current-authority). `replace-integrator`
+starts a new integrator run on the `--agent` harness in `tui` mode, under the
+current integrator's account or the one named by `--account`; both must be
+among the swarm's execution choices. It sends the integrator generation `show`
+reports and prints the new run ID after the phase.
 
 ### Mission identity and current authority
 

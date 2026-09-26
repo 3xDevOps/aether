@@ -17,14 +17,20 @@ import (
 func init() {
 	register(command{
 		name:  "swarm",
-		short: "create, list, and show swarms (missions with an integrator run)",
+		short: "create, follow, and decide swarms (missions with an integrator run)",
 		run:   runSwarm,
 	})
 }
 
 const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <harness> [--account <member-id>] [--worker <harness>[:tui|headless]]... [--max-concurrent N] [--max-attempts N] [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
-	"   or: aether swarm show <mission-id>"
+	"   or: aether swarm show <mission-id>\n" +
+	"   or: aether swarm answer <mission-id> --question <question-id> \"<answer>\"|-\n" +
+	"   or: aether swarm approve <mission-id>\n" +
+	"   or: aether swarm request-changes <mission-id> \"<feedback>\"\n" +
+	"   or: aether swarm reject <mission-id> [\"<feedback>\"]\n" +
+	"   or: aether swarm cancel <mission-id>\n" +
+	"   or: aether swarm replace-integrator <mission-id> --agent <harness> [--account <member-id>]"
 
 func runSwarm(args []string) error {
 	if len(args) == 0 {
@@ -37,6 +43,18 @@ func runSwarm(args []string) error {
 		return swarmList(args[1:])
 	case "show":
 		return swarmShow(args[1:])
+	case "answer":
+		return swarmAnswer(args[1:], os.Stdin)
+	case "approve":
+		return swarmDecide("approve", args[1:])
+	case "request-changes":
+		return swarmDecide("revise", args[1:])
+	case "reject":
+		return swarmDecide("reject", args[1:])
+	case "cancel":
+		return swarmCancel(args[1:])
+	case "replace-integrator":
+		return swarmReplaceIntegrator(args[1:])
 	}
 	return fmt.Errorf("unknown swarm command %q\n%s", args[0], swarmUsage)
 }
@@ -90,15 +108,9 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if err != nil || *agent == "" {
 		return swarmSpec{}, errors.New(swarmUsage)
 	}
-	if objective == "-" {
-		raw, readErr := io.ReadAll(stdin)
-		if readErr != nil {
-			return swarmSpec{}, fmt.Errorf("read objective from stdin: %w", readErr)
-		}
-		objective = strings.TrimSpace(string(raw))
-		if objective == "" {
-			return swarmSpec{}, errors.New("objective on stdin is empty")
-		}
+	objective, err = stdinText(objective, "objective", stdin)
+	if err != nil {
+		return swarmSpec{}, err
 	}
 	spec := swarmSpec{
 		objective: objective, agent: *agent, account: *account, workspace: *workspace,
@@ -115,6 +127,22 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 		return swarmSpec{}, err
 	}
 	return spec, nil
+}
+
+// stdinText returns value, or standard input when value is "-".
+func stdinText(value, what string, stdin io.Reader) (string, error) {
+	if value != "-" {
+		return value, nil
+	}
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return "", fmt.Errorf("read %s from stdin: %w", what, err)
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return "", fmt.Errorf("%s on stdin is empty", what)
+	}
+	return text, nil
 }
 
 // parseWorker reads one --worker value, harness[:mode]. The account is the
@@ -257,12 +285,18 @@ func swarmShow(args []string) error {
 		return errors.New("usage: aether swarm show <mission-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
-		var res protocol.MissionShowResult
-		if err := c.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: args[0]}, &res); err != nil {
+		res, err := showSwarm(c, args[0])
+		if err != nil {
 			return err
 		}
 		return renderSwarm(os.Stdout, res)
 	})
+}
+
+func showSwarm(c *protocol.Client, missionID string) (protocol.MissionShowResult, error) {
+	var res protocol.MissionShowResult
+	err := c.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &res)
+	return res, err
 }
 
 func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
