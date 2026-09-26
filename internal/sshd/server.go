@@ -160,9 +160,11 @@ type Server struct {
 	authorizationMu *sync.Mutex
 	handoffSeq      atomic.Uint64
 
-	// workspaceLifecycleMu drains finite RPCs and Git transports before a
-	// workspace deletion, including readers that can lazily create its repo.
-	workspaceLifecycleMu sync.RWMutex
+	// Workspace gates fence repository access and live overlays against
+	// deletion. Keep each gate stable even after deletion so queued readers
+	// cannot acquire a replacement lock and recreate removed resources.
+	workspaceLocksMu sync.Mutex
+	workspaceLocks   map[domain.WorkspaceID]*sync.RWMutex
 
 	mu    sync.Mutex
 	ln    net.Listener

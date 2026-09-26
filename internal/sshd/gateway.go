@@ -8,11 +8,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
-	registerMethod(protocol.MethodRunPatch, (*Server).runPatch)
+	registerGuarded(protocol.MethodRunPatch, permissions.View, runTarget, (*Server).runPatch)
 	registerMethod(protocol.MethodServerDisk, (*Server).serverDisk)
 }
 

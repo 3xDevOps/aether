@@ -162,10 +162,11 @@ Deletion never force-stops active work. Close or stop queued, provisioning,
 running, and needs-attention runs; wait for runtime cleanup and pending
 mission attempts or candidate verifications/delivery to settle; remove
 schedules first. A mission awaiting its initial integrator launch also blocks
-deletion. The error names the blocker. In-flight control or Git operations
-return `workspace operations are in progress; retry deletion when they
-finish`. If filesystem or runtime cleanup fails, the workspace remains so
-an admin can retry; data already removed is not restored.
+deletion. The error names the blocker. In-flight control, Git, or live-sync
+operations on that workspace return `workspace operations are in progress;
+retry deletion when they finish`. Unrelated Git transfers and live overlays
+do not block deletion. If filesystem or runtime cleanup fails, the workspace
+remains so an admin can retry; data already removed is not restored.
 
 Four settings belong to the workspace rather than to any run in it:
 

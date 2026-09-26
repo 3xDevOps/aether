@@ -55,10 +55,6 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 }
 
 func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if !s.authorizationMu.TryLock() {
-		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run or mission admission is in progress; retry workspace deletion when it finishes"}
-	}
-	defer s.authorizationMu.Unlock()
 	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
 		return nil, err
 	}
@@ -68,6 +64,18 @@ func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, pa
 	}
 	if p.WorkspaceID == "" {
 		return nil, invalidParams("workspace_id is required")
+	}
+	lock := s.workspaceLock(domain.WorkspaceID(p.WorkspaceID))
+	if !lock.TryLock() {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "workspace operations are in progress; retry deletion when they finish"}
+	}
+	defer lock.Unlock()
+	if !s.authorizationMu.TryLock() {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run or mission admission is in progress; retry workspace deletion when it finishes"}
+	}
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
+		return nil, err
 	}
 	if s.cfg.DeleteWorkspace == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace deletion is not configured"}

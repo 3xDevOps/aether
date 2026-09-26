@@ -134,10 +134,15 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 		return
 	}
 	defer s.releaseSyncChannel(member)
-	s.workspaceLifecycleMu.RLock()
-	defer s.workspaceLifecycleMu.RUnlock()
 
 	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(req.RunID))
+	if err == nil {
+		lock := s.workspaceLock(run.WorkspaceID)
+		lock.RLock()
+		defer lock.RUnlock()
+		// Deletion may have won after target discovery but before admission.
+		run, err = s.cfg.Store.GetRun(ctx, run.ID)
+	}
 	if err != nil {
 		e := rpcError(err)
 		_ = writeJSONLine(ch, protocol.SyncResponse{OK: false, Code: e.Code, Error: e.Message})

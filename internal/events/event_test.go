@@ -13,6 +13,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 	payloads := []Payload{
 		RunStatusPayload{From: domain.RunRunning, To: domain.RunFailed, Reason: "agent exited 1"},
 		RunDeletedPayload{},
+		WorkspaceDeletedPayload{},
 		RunTitlePayload{Title: "Fixing the login bug"},
 		RunProtectedPayload{Protected: true},
 		RunArchivedPayload{ArchivedAt: strPtr("2024-01-02T03:04:05Z"), DeletesAt: strPtr("2024-01-16T03:04:05Z")},

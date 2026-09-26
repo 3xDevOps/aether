@@ -164,6 +164,9 @@ func (s *Server) filesWrite(ctx context.Context, member domain.MemberID, params 
 		return nil, rpcError(err)
 	}
 	workspace := domain.WorkspaceID(p.WorkspaceID)
+	lock := s.workspaceLock(workspace)
+	lock.RLock()
+	defer lock.RUnlock()
 	ref := ""
 	var target permissions.Target
 	cap := permissions.Push
