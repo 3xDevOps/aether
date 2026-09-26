@@ -154,8 +154,11 @@ func runSnapshotQuery(where string) string {
 		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, '')
 		FROM runs
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
-		LEFT JOIN mission_attempts attempt ON attempt.run_id = runs.id
-		LEFT JOIN missions worker_mission ON worker_mission.id = attempt.mission_id
+		LEFT JOIN missions worker_mission ON worker_mission.id = (
+			SELECT MIN(attempt.mission_id) FROM mission_attempts attempt
+			WHERE attempt.run_id = runs.id
+			HAVING COUNT(DISTINCT attempt.mission_id) = 1
+		)
 		LEFT JOIN room_messages question
 			ON question.run_id = runs.id
 			AND question.kind = 'question'

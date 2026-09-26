@@ -301,10 +301,11 @@ its visible workers remain top-level rows marked **Subsession**.
 
 Relationships come from the run snapshot's `mission_id`, `mission_role`, and
 `integrator_run_id`, not task text or the currently opened mission page.
-`mission.changed` refreshes the affected workspace's run snapshots, including
-when another workspace is selected. Replacing an integrator moves its workers
-under the replacement and removes the old run's badge. Older servers that
-omit these fields retain the flat list.
+`mission.changed` coalesces background refreshes of those relationship fields,
+including when another workspace is selected, without blocking run-status
+events or overwriting newer run state. Replacing an integrator moves its
+workers under the replacement and removes the old run's badge. Older servers
+that omit these fields retain the flat list.
 
 Every rendered group header is a disclosure button with its run count. When
 grouped by **Status**, every status header toggles its own member rows; `Done`

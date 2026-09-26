@@ -38,8 +38,8 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 		t.Fatalf("reserve first worker: %v", err)
 	}
 	finished := createRun(attempt.RunID, domain.RunCompleted)
-	if err := db.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, ""); err != nil {
-		t.Fatalf("complete first worker: %v", err)
+	if updateErr := db.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, ""); updateErr != nil {
+		t.Fatalf("complete first worker: %v", updateErr)
 	}
 	retry, _, err := reserveMissionAttempt(t, db, mission, task, "retry-worker")
 	if err != nil {
@@ -47,11 +47,11 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 	}
 	worker := createRun(retry.RunID, domain.RunRunning)
 	for _, key := range []string{"question-one", "question-two"} {
-		if err := db.CreateRoomMessage(ctx, &RoomMessage{
+		if createErr := db.CreateRoomMessage(ctx, &RoomMessage{
 			WorkspaceID: workspace.ID, RunID: worker.ID, ActorID: member.ID,
 			Kind: RoomMessageQuestion, Body: "Can I proceed?", IdempotencyKey: key,
-		}); err != nil {
-			t.Fatalf("create worker question: %v", err)
+		}); createErr != nil {
+			t.Fatalf("create worker question: %v", createErr)
 		}
 	}
 
@@ -83,9 +83,9 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 	assertSnapshots := func() {
 		t.Helper()
 		for id := range want {
-			run, err := db.GetRun(ctx, id)
-			if err != nil {
-				t.Fatalf("GetRun %s: %v", id, err)
+			run, getErr := db.GetRun(ctx, id)
+			if getErr != nil {
+				t.Fatalf("GetRun %s: %v", id, getErr)
 			}
 			assertRun(run)
 		}
@@ -97,9 +97,9 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 			{"member", func() ([]*domain.Run, error) { return db.ListRunsByMember(ctx, member.ID) }},
 			{"active", func() ([]*domain.Run, error) { return db.ListActiveRuns(ctx) }},
 		} {
-			runs, err := list.get()
-			if err != nil {
-				t.Fatalf("list by %s: %v", list.name, err)
+			runs, listErr := list.get()
+			if listErr != nil {
+				t.Fatalf("list by %s: %v", list.name, listErr)
 			}
 			expectedCount := len(want)
 			if list.name == "active" {
@@ -127,4 +127,57 @@ func TestRunSnapshotsProjectMissionMembership(t *testing.T) {
 		want[worker.ID] = membership{mission.ID, "worker", current.ID}
 		assertSnapshots()
 	}
+}
+
+func TestRunSnapshotSharedAttempts(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID, 4, 4)
+	task := mustCreateMissionTask(t, db, mission.ID, "shared run")
+	worker := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	reserve := func(m *domain.Mission, task *domain.Task, key string) {
+		t.Helper()
+		_, _, err := db.ReserveAttempt(ctx, &domain.AttemptReservation{
+			MissionID: m.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
+			DispatchKey: key, Harness: "claude", Mode: domain.LaunchHeadless,
+			IntegratorGeneration: m.IntegratorGeneration, AssignedRunID: worker.ID,
+		})
+		if err != nil {
+			t.Fatalf("reserve shared run: %v", err)
+		}
+	}
+	reserve(mission, task, "first")
+	reserve(mission, task, "second")
+	if err := db.CreateRoomMessage(ctx, &RoomMessage{
+		WorkspaceID: workspace.ID, RunID: worker.ID, ActorID: member.ID,
+		Kind: RoomMessageQuestion, Body: "Proceed?", IdempotencyKey: "question",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertSnapshots := func(missionID domain.MissionID, role string) {
+		t.Helper()
+		listed, err := db.ListRunsByWorkspace(ctx, workspace.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		single, err := db.GetRun(ctx, worker.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, snapshot := range append(listed, single) {
+			if snapshot.UnansweredQuestions != 1 || snapshot.MissionID != missionID || snapshot.MissionRole != role {
+				t.Fatalf("shared run snapshot: questions=%d mission=%s role=%s", snapshot.UnansweredQuestions, snapshot.MissionID, snapshot.MissionRole)
+			}
+		}
+	}
+	assertSnapshots(mission.ID, "worker")
+	other := mustCreatePlanningMission(t, db, workspace.ID, member.ID, 4, 4, "other-mission")
+	if _, err := db.db.ExecContext(ctx, `UPDATE missions SET phase='active', plan_version=1 WHERE id=?`, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	otherTask := mustCreateMissionTask(t, db, other.ID, "conflicting ownership")
+	reserve(other, otherTask, "third")
+	assertSnapshots("", "")
 }

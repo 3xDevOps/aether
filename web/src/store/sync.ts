@@ -308,20 +308,6 @@ export async function applyEvent(
     await client.memberList().then(store.getState().setMembers).catch(ignore)
   }
 
-  if (ev.type === 'mission.changed' && ev.workspace_id) {
-    try {
-      const runs = await client.runList({ workspace_id: ev.workspace_id })
-      const state = store.getState()
-      state.setRuns([
-        ...Object.values(state.runs).filter((run) => run.workspace_id !== ev.workspace_id),
-        ...runs,
-      ])
-    } catch (err) {
-      store.getState().setUnreachable(classifyUnreachable(err, store))
-      return false
-    }
-  }
-
   // Mission events are scoped projection hints. Never let an event from a
   // background workspace refresh the mission currently visible in this tab.
   if (ev.type.startsWith('mission.') && ev.workspace_id) {
@@ -659,10 +645,62 @@ export function connect(store: RootStore, client: Api = api): () => void {
       })
   })
 
+  const missionRefreshes = new Set<string>()
+  let refreshingMissions: Promise<void> | undefined
+
+  const refreshMissionRuns = () => {
+    if (refreshingMissions || hydrating || signal.aborted || missionRefreshes.size === 0) return
+    refreshingMissions = (async () => {
+      while (missionRefreshes.size > 0 && !hydrating && !signal.aborted) {
+        const workspaceID = missionRefreshes.values().next().value as string
+        missionRefreshes.delete(workspaceID)
+        try {
+          const listed = await client.runList({ workspace_id: workspaceID })
+          if (signal.aborted) return
+          store.setState((state) => {
+            let runs = state.runs
+            for (const run of listed) {
+              const current = runs[run.id]
+              if (!current || current.workspace_id !== workspaceID) continue
+              if (
+                current.mission_id === run.mission_id &&
+                current.mission_role === run.mission_role &&
+                current.integrator_run_id === run.integrator_run_id
+              ) continue
+              if (runs === state.runs) runs = { ...runs }
+              // Status/title/delete events may have landed during this fetch.
+              runs[run.id] = {
+                ...current,
+                mission_id: run.mission_id,
+                mission_role: run.mission_role,
+                integrator_run_id: run.integrator_run_id,
+              }
+            }
+            return { runs }
+          })
+        } catch (err) {
+          if (signal.aborted) return
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          void load()
+          return
+        }
+      }
+    })().finally(() => {
+      refreshingMissions = undefined
+      refreshMissionRuns()
+    })
+  }
+
   const drain = async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
-      if (await applyEvent(store, ev, client)) continue
+      if (await applyEvent(store, ev, client)) {
+        if (ev.type === 'mission.changed' && ev.workspace_id) {
+          missionRefreshes.add(ev.workspace_id)
+          refreshMissionRuns()
+        }
+        continue
+      }
       // The event named something we could not fetch. A fresh snapshot is the
       // repair; the rest of the queue waits for it.
       void load()
@@ -678,6 +716,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted || hydrating || store.getState().streamDead) return
     hydrating = true
     await chain // let an event that is mid-flight finish first
+    await refreshingMissions
     const ok = await hydrate(store, client, signal)
     hydrating = false
     if (signal.aborted) return
@@ -689,6 +728,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       return
     }
     attempts = 0
+    refreshMissionRuns()
     pump()
   }
 
