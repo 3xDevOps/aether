@@ -440,6 +440,15 @@ func (d *DB) ListEvidenceStaging(ctx context.Context, before time.Time, limit in
 	return items, nil
 }
 
+func (d *DB) ListRunEvidenceStaging(ctx context.Context, run domain.RunID, limit int) ([]*EvidenceStaging, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT id, workspace_id, run_id, origin_kind, origin_id, creator_id, idempotency_key, expires_at, created_at
+		FROM evidence_staging WHERE run_id = ? ORDER BY id LIMIT ?`, run, normalizeCollaborationLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, scanEvidenceStaging)
+}
+
 func (d *DB) DeleteEvidenceStaging(ctx context.Context, id string) error {
 	if _, err := d.db.ExecContext(ctx, `DELETE FROM evidence_staging WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("store: delete evidence staging: %w", err)

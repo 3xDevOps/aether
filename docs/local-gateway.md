@@ -304,6 +304,18 @@ checkout, transcripts and run-owned database records. For an old run it
 removes the checkout and transcripts directly. The run's timeline remains as
 audit history.
 
+`workspace.delete` is admin-only and accepts `{"workspace_id":"..."}`,
+returning `{"ok":true}`. It permanently removes an inactive workspace and its
+server-side data, repository and mirror keys. It preserves member accounts,
+homes, local clones and upstream repositories. Revoke remote deploy keys
+separately. Active runs, pending runtime or mission work, configured schedules,
+active candidate verification and unfinished delivery block deletion; the
+error names the blocker. In-flight control or Git operations return `-32003`
+instead of waiting behind them. Cleanup errors leave the workspace available
+for retry but do not restore already removed data. Success publishes
+`workspace.deleted` with the workspace ID in the event envelope and `{}` as
+the payload.
+
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished run from the board
 and keeps its data, restorable any time: only a run in a final disposition
@@ -349,7 +361,7 @@ retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.status","link.switch","pull","pull.switch","repo.fast-forward",
           "repo.push","sync.start","sync.status","sync.stop",
-          "update.apply","update.check","update.status"],
+          "update.apply","update.check","update.status","workspace.selection"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -785,11 +797,23 @@ authority.
 | `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
+| `workspace.selection` | `{}` reads; `{"workspace_id":"..."}` saves; an empty ID clears | `{"workspace_id":"..."}` |
 
 `link.apply` saves the link and swaps the gateway connection in place, so
 subsequent API and WebSocket requests use the new server without a restart. If
 no SSH key is offered and the server requires one, it may create
 `~/.ssh/id_ed25519` and its `.pub` file.
+
+`workspace.selection` stores only the last selected workspace ID in
+`workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash
+keys the linked server address and authenticated member ID from `server.info`;
+different members and servers keep separate selections. Writes replace the
+file atomically with mode `0600`. The gateway token and same-origin checks
+apply. The dashboard reads the preference at startup and saves changes in
+order, so an ephemeral gateway port does not reset the selection. A deleted
+selection falls back to a remaining workspace, or clears when none remain.
+An unreadable preference produces a dashboard error toast but does not prevent
+the server snapshot from loading.
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without

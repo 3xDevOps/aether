@@ -344,6 +344,9 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 		if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, run); err != nil {
 			return fmt.Errorf("scheduler: delete run transcripts: %w", err)
 		}
+		if err := os.Remove(s.sidecarPath(run)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("scheduler: delete run sidecar: %w", err)
+		}
 		if err := s.cfg.Store.DeleteRun(cleanupCtx, run); err != nil {
 			return err
 		}

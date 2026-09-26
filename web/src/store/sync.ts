@@ -1,7 +1,9 @@
 // Hydration and live updates: one HTTP fetch fills the store, then the event
 // stream is the only thing that changes it.
 
+import { toast } from 'sonner'
 import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
+import { message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
@@ -87,21 +89,27 @@ export async function hydrate(
       // Reconnects retain drafts; a different authenticated owner must not.
       store.getState().resetFiles()
     }
+    if (!s.hydrated && capabilities?.local?.includes('workspace.selection')) {
+      try {
+        const saved = await client.localWorkspaceSelection()
+        if (signal?.aborted) return false
+        // A choice made while startup was fetching outranks the saved one.
+        if (store.getState().activeWorkspace === s.activeWorkspace && saved.workspace_id) {
+          s.setActiveWorkspace(saved.workspace_id)
+        }
+      } catch (err) {
+        if (signal?.aborted) return false
+        // Preferences are optional; report the gateway's error without
+        // turning a successful server snapshot into a connection failure.
+        toast.error(message(err))
+      }
+    }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
-    // Every scoped surface reads activeWorkspace, so it must name a
-    // workspace that exists: an unset one, or one deleted while we were
-    // away, falls back to the first by id rather than leaving the app
-    // pointed at nothing.
-    // Read after the fetches: `s` is the pre-await snapshot.
     const active = store.getState().activeWorkspace
-    if (!active || !workspaces.some((w) => w.id === active)) {
-      const first = [...workspaces].sort((a, b) => a.id.localeCompare(b.id))[0]
-      if (first) s.setActiveWorkspace(first.id)
-    }
     s.setMembers(members)
-    s.setRuns(runs)
+    s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
     s.seedPaused(
@@ -277,11 +285,16 @@ export async function applyEvent(
     store.getState().resetSeq()
     return false
   }
+  if (ev.type === 'workspace.deleted') {
+    // Record deletion before any fetch: every list writer must reject older
+    // snapshots, even while this event's own reconciliation is pending.
+    store.getState().removeWorkspace(ev.workspace_id)
+  }
 
   // Workspaces arrive only by fetch, so an event for one we do not know means
   // a teammate created it after we hydrated. Without this its runs would be
   // stored but rendered nowhere.
-  if (ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  if (ev.type !== 'workspace.deleted' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -352,6 +365,15 @@ export async function applyEvent(
   }
 
   switch (ev.type) {
+    case 'workspace.deleted': {
+      try {
+        store.getState().setWorkspaces(await client.workspaceListFull())
+      } catch (err) {
+        store.getState().setUnreachable(classifyUnreachable(err, store))
+        return false
+      }
+      break
+    }
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
       break
@@ -608,6 +630,20 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const queue: Event[] = []
   let chain: Promise<void> = Promise.resolve()
   let stopStream: () => void = () => {}
+  let selectionWrite = Promise.resolve()
+  const stopSelection = store.subscribe((state, previous) => {
+    if (!state.hydrated || !state.capabilities?.local?.includes('workspace.selection')) return
+    if (state.activeWorkspace === previous.activeWorkspace && previous.hydrated) return
+    const workspace = state.activeWorkspace
+    selectionWrite = selectionWrite
+      .then(() => client.localWorkspaceSelection(workspace))
+      .then(() => {})
+      .catch((err: unknown) => {
+        if (!signal.aborted) {
+          store.getState().setHydrated(true, err instanceof Error ? err.message : String(err))
+        }
+      })
+  })
 
   const drain = async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
@@ -742,6 +778,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   return () => {
     lifecycle.abort()
     stopWake()
+    stopSelection()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
   }

@@ -29,6 +29,8 @@ func newCandidateID() (string, error) {
 }
 
 func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.IntegrationPrepareParams) (protocol.Candidate, error) {
+	s.workspaceDeleteMu.RLock()
+	defer s.workspaceDeleteMu.RUnlock()
 	var zero protocol.Candidate
 	if s.store == nil || s.git == nil || s.evidence == nil {
 		return zero, ErrUnavailable

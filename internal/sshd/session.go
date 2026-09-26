@@ -167,6 +167,14 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 		return
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(wsID))
+	if err == nil {
+		lock := s.workspaceLock(ws.ID)
+		lock.RLock()
+		defer lock.RUnlock()
+		// Resolve before allocating a gate, then revalidate under it so a
+		// completed deletion cannot be followed by lazy repo creation.
+		ws, err = s.cfg.Store.GetWorkspace(ctx, ws.ID)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(ch.Stderr(), "aether: workspace %q: %v\n", wsID, err)
 		sendExitStatus(ch, 128)

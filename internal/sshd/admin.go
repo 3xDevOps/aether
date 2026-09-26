@@ -13,6 +13,7 @@ import (
 
 func init() {
 	registerMethod(protocol.MethodWorkspaceAdd, (*Server).workspaceAdd)
+	registerMethod(protocol.MethodWorkspaceDelete, (*Server).workspaceDelete)
 	registerMethod(protocol.MethodMemberInvite, (*Server).memberInvite)
 	registerMethod(protocol.MethodMemberRemove, (*Server).memberRemove)
 }
@@ -51,6 +52,38 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 		return nil, rpcError(err)
 	}
 	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
+}
+
+func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
+		return nil, err
+	}
+	p, perr := decodeParams[protocol.WorkspaceDeleteParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
+	}
+	lock := s.workspaceLock(domain.WorkspaceID(p.WorkspaceID))
+	if !lock.TryLock() {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "workspace operations are in progress; retry deletion when they finish"}
+	}
+	defer lock.Unlock()
+	if !s.authorizationMu.TryLock() {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run or mission admission is in progress; retry workspace deletion when it finishes"}
+	}
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
+		return nil, err
+	}
+	if s.cfg.DeleteWorkspace == nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace deletion is not configured"}
+	}
+	if err := s.cfg.DeleteWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID), member); err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.WorkspaceDeleteResult{OK: true}, nil
 }
 
 func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

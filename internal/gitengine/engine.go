@@ -173,6 +173,33 @@ func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (
 	return path, nil
 }
 
+// RemoveWorkspaceRepo removes all branches and private refs after the server
+// has fenced workspace admission and purged its run/candidate artifacts.
+func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) error {
+	repo, err := e.repoPath(ws)
+	if err != nil {
+		return err
+	}
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
+	e.repoMaintenanceMu.Lock()
+	defer e.repoMaintenanceMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(repo); err != nil {
+		return fmt.Errorf("gitengine: remove workspace repository: %w", err)
+	}
+	e.mu.Lock()
+	for run, info := range e.registry {
+		if info.workspace == ws {
+			delete(e.registry, run)
+		}
+	}
+	e.mu.Unlock()
+	return nil
+}
+
 // updateHook is installed as hooks/update in every workspace bare repo. Run
 // branches are server-owned artifacts: a client push may create or
 // fast-forward refs/heads/aether/run-* but never rewrite one. Deletions are
