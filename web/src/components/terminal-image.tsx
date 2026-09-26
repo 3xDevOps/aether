@@ -326,12 +326,14 @@ export function TerminalImageAction({ controller }: { controller: TerminalImageC
       type="button"
       variant="ghost"
       size="icon"
+      className="group-data-[expanded=true]/terminal-tools:w-full group-data-[expanded=true]/terminal-tools:justify-start group-data-[expanded=true]/terminal-tools:px-3"
       aria-label="Upload image to terminal"
       title="Upload image to terminal"
       disabled={!controller.canUpload}
       onClick={controller.openPicker}
     >
       <ImageUp />
+      <span className="hidden group-data-[expanded=true]/terminal-tools:inline">Upload image to terminal</span>
     </Button>
   )
 }

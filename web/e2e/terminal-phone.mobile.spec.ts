@@ -60,13 +60,21 @@ async function attach(
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('a phone follows a run terminal it cannot resize', async ({ page, aether }) => {
+test('a phone can reach and type into a desktop-sized agent without resizing it', async ({ page, aether }, testInfo) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
-  // An agent that outlives the test: the run has to stay steerable, and the
-  // seed repository's own script exits at once.
-  aether.installAgent(await memberID(alice), 'claude', 'sleep 600')
+  aether.installAgent(await memberID(alice), 'claude', `stty -echo
+IFS= read -r start
+printf '\\033[2J\\033[HPHONE-WELCOME\\033[42;1HPHONE-PROMPT> '
+while IFS= read -r input; do
+  if [ "$input" = alternate ]; then
+    printf '\\033[?1049h\\033[2J\\033[HPHONE-ALTERNATE'
+  else
+    printf '\\033[41;1HRECEIVED:%s' "$input"
+  fi
+  printf '\\033[42;1HPHONE-PROMPT> '
+done`)
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(
     'workspace.list',
   )
@@ -96,6 +104,7 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
     return { cols: probe.ack.cols, rows: probe.ack.rows }
   }
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
+  desktop.sendInput('start\r')
 
   await page.goto(alice.url)
   await page.getByRole('button', { name: 'Expand sidebar' }).tap()
@@ -126,30 +135,17 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
         pannable: host.scrollWidth > host.clientWidth,
       }
     })
-  const panState = (toEnd = false) =>
-    page.locator('.xterm:not([data-aether-frozen-view] *)').evaluate((el, panToEnd) => {
-      let owner = el.parentElement as HTMLElement | null
-      while (owner && owner !== document.body && owner.scrollWidth <= owner.clientWidth) {
-        owner = owner.parentElement
-      }
-      if (!owner || owner === document.body) throw new Error('terminal has no horizontal pan owner')
-      const maximum = owner.scrollWidth - owner.clientWidth
-      if (panToEnd) owner.scrollLeft = maximum
-      return {
-        left: owner.scrollLeft,
-        maximum,
-        top: owner.scrollTop,
-        overflowY: getComputedStyle(owner).overflowY,
-        pageTop: window.scrollY,
-      }
-    }, toEnd)
+  const host = page.locator('.xterm:not([data-aether-frozen-view] *)').locator('..')
+  const prompt = rows.filter({ hasText: 'PHONE-PROMPT>' })
+  const promptVisible = async () => {
+    const viewport = await host.boundingBox()
+    const row = await prompt.boundingBox()
+    return !!viewport && !!row && row.y >= viewport.y &&
+      row.y + row.height <= viewport.y + viewport.height
+  }
   expect(await grid()).toEqual({ cols: desktopCols, pannable: true })
-  const initialPan = await panState(true)
-  expect(initialPan.maximum).toBeGreaterThan(0)
-  expect(initialPan.left).toBe(initialPan.maximum)
-  expect(initialPan.top).toBe(0)
-  expect(initialPan.overflowY).toBe('hidden')
-  expect(initialPan.pageTop).toBe(0)
+  await expect(prompt).toHaveCount(1)
+  await expect.poll(promptVisible).toBe(true)
 
   // Taking over through Run Room is explicit because the desktop viewer
   // still owns the controller lease.
@@ -167,27 +163,60 @@ test('a phone follows a run terminal it cannot resize', async ({ page, aether })
   expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
   await expect(rows).toHaveCount(desktopRows)
 
-  // Esc is the key an agent TUI needs most and the one no phone keyboard
-  // has. It reaches the agent through the same path a keystroke takes.
-  await page
-    .getByRole('toolbar', { name: 'Terminal keys' })
-    .getByRole('button', { name: 'Esc' })
-    .tap()
-  const focusedPan = await panState()
-  expect(focusedPan.left).toBeGreaterThan(0)
-  expect(focusedPan.top).toBe(0)
-  expect(focusedPan.pageTop).toBe(0)
+  const cdp = await page.context().newCDPSession(page)
+  const drag = async (delta: number) => {
+    const box = await host.boundingBox()
+    if (!box) throw new Error('terminal pan surface is missing')
+    const start = box.y + box.height / 2 - delta / 2
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart', touchPoints: [{ x: box.x + 80, y: start, id: 1 }],
+    })
+    for (let step = 1; step <= 10; step++) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove', touchPoints: [{ x: box.x + 80, y: start + delta * step / 10, id: 1 }],
+      })
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+  try {
+    for (const buffer of ['normal', 'alternate']) {
+      if (buffer === 'alternate') {
+        await page.locator('.xterm-helper-textarea').pressSequentially('alternate')
+        await page.getByRole('toolbar', { name: 'Terminal keys' })
+          .getByRole('button', { name: 'Enter', exact: true }).tap()
+        await expect(rows.filter({ hasText: 'PHONE-ALTERNATE' })).toHaveCount(1)
+      }
+      await expect.poll(promptVisible).toBe(true)
+      const before = await host.evaluate((element) => element.scrollTop)
+      expect(before).toBeGreaterThan(40)
+      await drag(40)
+      await expect.poll(() => host.evaluate((element) => element.scrollTop)).toBeLessThan(before - 20)
+      await expect(page.getByLabel('Terminal scrollback', { exact: true })).toBeHidden()
+      await drag(-80)
+      await expect.poll(promptVisible).toBe(true)
 
-  // The soft keyboard shortens the layout, which is what would make a
-  // terminal that fitted its pane re-fit and resize the session with it.
-  const restore = await shrinkToKeyboardHeight(page)
-  await expect(rows).toHaveCount(desktopRows)
-  expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
-  const keyboardPan = await panState()
-  expect(keyboardPan.left).toBeGreaterThan(0)
-  expect(keyboardPan.top).toBe(0)
-  expect(keyboardPan.overflowY).toBe('hidden')
-  await restore()
+      const promptBox = await prompt.boundingBox()
+      if (!promptBox) throw new Error('terminal prompt is missing')
+      // xterm's screen owns touch events; its painted text rows do not.
+      await page.touchscreen.tap(promptBox.x + 30, promptBox.y + promptBox.height / 2)
+      await expect(page.locator('.xterm-helper-textarea')).toBeFocused()
+      const restore = await shrinkToKeyboardHeight(page)
+      await expect.poll(promptVisible).toBe(true)
+      await page.locator('.xterm-helper-textarea').pressSequentially(`phone-${buffer}`)
+      await page.getByRole('toolbar', { name: 'Terminal keys' })
+        .getByRole('button', { name: 'Enter', exact: true }).tap()
+      await expect(rows.filter({ hasText: `RECEIVED:phone-${buffer}` })).toHaveCount(1)
+      await expect.poll(promptVisible).toBe(true)
+      expect(await sessionGeometry()).toEqual({ cols: desktopCols, rows: desktopRows })
+      await testInfo.attach(`reachable ${buffer} prompt above keyboard`, {
+        body: await page.screenshot(), contentType: 'image/png',
+      })
+      await restore()
+    }
+  } finally {
+    await cdp.detach()
+  }
 
   // The other way round: the desktop viewer's window changes, and the phone
   // follows it there without reattaching.

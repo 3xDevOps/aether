@@ -242,7 +242,7 @@ export function MissionRoute({ params, client = api }: RouteProps & { client?: A
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
         title="Missions"
         subtitle="Bounded objectives coordinated by one integrator"
@@ -434,7 +434,7 @@ function MissionDetailView({
   ) : null
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader
         title={mission ? objectiveTitle(mission.objective) : 'Mission'}
         titleTooltip={mission?.objective}
@@ -804,7 +804,7 @@ function IntegratorReplacement({
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-scrim p-4">
-      <div role="dialog" aria-modal="true" aria-label="Replace integrator" className="w-full max-w-md border bg-popover p-4 shadow-overlay">
+      <div role="dialog" aria-modal="true" aria-label="Replace integrator" className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto border bg-popover p-4 shadow-overlay">
         <h2 className="text-base font-semibold">Replace integrator</h2>
         <p className="mt-1 text-xs text-muted-foreground">Pick an account and harness from this swarm&apos;s execution choices; the replacement runs interactive (tui). The current generation is pinned. Retry keeps the same idempotency key.</p>
         <div className="mt-3 grid gap-3">
