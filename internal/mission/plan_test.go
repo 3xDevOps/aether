@@ -9,10 +9,8 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -25,7 +23,6 @@ type planGateFixture struct {
 	canceller *recordingCanceller
 	launcher  *recordingLauncher
 	evidence  *mutableEvidenceReader
-	notices   *recordingInjector
 	// reads carries one signal per question read the service performs, so a
 	// test that must land a change after mission.plan.show has taken its
 	// snapshot can order the two instead of racing them.
@@ -88,88 +85,17 @@ func newPlanGateFixtureFor(t *testing.T, harnessName string, mode domain.LaunchM
 	launcher := &recordingLauncher{db: db}
 	evidence := &mutableEvidenceReader{}
 	reads := make(chan struct{}, 1)
-	notices := &recordingInjector{writes: make(chan injectedLine, 16)}
 	svc, err := New(Config{
 		Store: db, Missions: &planShowProbe{MissionStore: db, reads: reads},
 		Cancel: canceller, Runs: launcher, Evidence: evidence, AuthorizationMu: &sync.Mutex{},
-		RequireCoordination: func() error { return nil }, PTY: notices,
+		RequireCoordination: func() error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("new mission service: %v", err)
 	}
 	return &planGateFixture{
 		db: db, svc: svc, mission: m, workspace: workspace, member: member,
-		canceller: canceller, launcher: launcher, evidence: evidence, notices: notices, reads: reads,
-	}
-}
-
-// recordingInjector stands in for the PTY host: it hands every terminal
-// write to the test and fails each with err. Notices are delivered in the
-// background, so the test receives them rather than reading a slice.
-type recordingInjector struct {
-	mu     sync.Mutex
-	err    error
-	writes chan injectedLine
-}
-
-type injectedLine struct {
-	key                     ptyhost.SessionKey
-	actor, color, text, end string
-}
-
-func (r *recordingInjector) Inject(ctx context.Context, key ptyhost.SessionKey, actor, color, text, submit string) error {
-	select {
-	case r.writes <- injectedLine{key: key, actor: actor, color: color, text: text, end: submit}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.err
-}
-
-func (r *recordingInjector) fail(err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.err = err
-}
-
-// expect waits for the next terminal write and requires it to be the
-// integrator notice carrying text, ended with submit.
-func (f *planGateFixture) expect(t *testing.T, step, text, submit string) {
-	t.Helper()
-	f.notices.expect(t, step, f.mission.CurrentIntegratorRunID, text, submit)
-}
-
-func (f *planGateFixture) expectNone(t *testing.T, step string) {
-	t.Helper()
-	f.notices.expectNone(t, step)
-}
-
-// expect waits for the next terminal write and requires it to be the notice
-// carrying text into run's terminal, ended with submit.
-func (r *recordingInjector) expect(t *testing.T, step string, run domain.RunID, text, submit string) {
-	t.Helper()
-	want := injectedLine{key: ptyhost.RunSession(run), actor: "aether", text: "aether: " + text, end: submit}
-	select {
-	case got := <-r.writes:
-		if got != want {
-			t.Fatalf("%s wrote %+v to the integrator terminal, want %+v", step, got, want)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s wrote nothing to the integrator terminal, want %+v", step, want)
-	}
-}
-
-// expectNone requires that no terminal write arrives within a short window.
-// The notice runs in the background, so absence can only be bounded, not
-// proven; the window is far longer than a delivery against SQLite takes.
-func (r *recordingInjector) expectNone(t *testing.T, step string) {
-	t.Helper()
-	select {
-	case got := <-r.writes:
-		t.Fatalf("%s wrote %+v to the integrator terminal, want nothing", step, got)
-	case <-time.After(250 * time.Millisecond):
+		canceller: canceller, launcher: launcher, evidence: evidence, reads: reads,
 	}
 }
 
@@ -243,8 +169,9 @@ func (f *planGateFixture) submit(t *testing.T, round string, wantPhase domain.Mi
 
 // proposeAndSubmit walks the whole gate up to the human decision and returns
 // the submitted plan version.
-func (f *planGateFixture) proposeAndSubmit(t *testing.T, round string) uint64 {
+func (f *planGateFixture) proposeAndSubmit(t *testing.T) uint64 {
 	t.Helper()
+	const round = "1"
 	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
 		Body: "which checkout flow?", IdempotencyKey: "ask-" + round,
 	})
@@ -285,7 +212,7 @@ func TestPlanGateRefusesDispatchAndAcceptanceBeforeApproval(t *testing.T) {
 		IdempotencyKey: "accept-submission-in-planning",
 	})
 
-	f.proposeAndSubmit(t, "1")
+	f.proposeAndSubmit(t)
 
 	if err := f.workerStart(t); !errors.Is(err, store.ErrMissionPhase) {
 		t.Fatalf("worker.start in plan_review = %v, want ErrMissionPhase", err)
@@ -314,7 +241,7 @@ func TestPlanGateRefusesDispatchAndAcceptanceBeforeApproval(t *testing.T) {
 func TestPlanApproveActivatesAndReviseReturnsToPlanningWithFeedback(t *testing.T) {
 	ctx := context.Background()
 	f := newPlanGateFixture(t)
-	version := f.proposeAndSubmit(t, "1")
+	version := f.proposeAndSubmit(t)
 
 	revised, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
 		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
@@ -370,7 +297,7 @@ func TestPlanApproveActivatesAndReviseReturnsToPlanningWithFeedback(t *testing.T
 func TestPlanRejectCancelsIntegratorAndBlocksRelaunch(t *testing.T) {
 	ctx := context.Background()
 	f := newPlanGateFixture(t)
-	version := f.proposeAndSubmit(t, "1")
+	version := f.proposeAndSubmit(t)
 	if _, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
 		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
 		Decision: string(domain.MissionPlanReject), IdempotencyKey: "decide-reject-1",
@@ -602,123 +529,4 @@ func TestPlanRejectStaysAvailableAfterAccountableHumanLosesLaunch(t *testing.T) 
 	if m.Phase != domain.MissionPhaseRejected {
 		t.Fatalf("phase = %s, want rejected", m.Phase)
 	}
-}
-
-// TestPlanHumanActionsNoticeTheIntegratorTerminal covers the wake-up an idle
-// interactive integrator depends on: each answer and each plan decision types
-// exactly one aether: line into its terminal, and a replay types none.
-func TestPlanHumanActionsNoticeTheIntegratorTerminal(t *testing.T) {
-	ctx := context.Background()
-	f := newPlanGateFixture(t)
-	submit := harness.SubmitSequence("claude")
-
-	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
-		Body: "which checkout flow?", IdempotencyKey: "ask-1",
-	})
-	f.answerAll(t, "answer-1-")
-	f.expect(t, "answer", answerNotice, submit)
-	questions, err := f.db.ListMissionQuestions(ctx, f.mission.ID)
-	if err != nil || len(questions) != 1 {
-		t.Fatalf("list questions = %d, %v; want one", len(questions), err)
-	}
-	if _, replayErr := f.svc.AnswerQuestion(ctx, f.member.ID, protocol.MissionQuestionAnswerParams{
-		QuestionID: string(questions[0].ID), Answer: "use the existing flow", IdempotencyKey: "answer-1-" + string(questions[0].ID),
-	}); replayErr != nil {
-		t.Fatalf("replayed answer: %v", replayErr)
-	}
-	f.expectNone(t, "replayed answer")
-	f.mustCall(t, protocol.MethodTaskPropose, protocol.TaskProposeParams{
-		MissionID:      string(f.mission.ID),
-		Revision:       protocol.TaskRevision{Title: "plan task", Objective: "plan task"},
-		IdempotencyKey: "propose-1",
-	})
-	f.clarify(t, "1")
-	version := f.submit(t, "1", domain.MissionPhasePlanReview)
-
-	revise := protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
-		Decision: string(domain.MissionPlanRevise), Feedback: "split the migration out",
-		IdempotencyKey: "decide-revise-1",
-	}
-	if _, reviseErr := f.svc.DecidePlan(ctx, f.member.ID, revise); reviseErr != nil {
-		t.Fatalf("revise decision: %v", reviseErr)
-	}
-	f.expect(t, "revise", planDecisionNotice(domain.MissionPlanRevise), submit)
-	// The retry of a revise whose response was lost lands while the next
-	// version awaits review; telling the integrator its plan was sent back
-	// again would be false.
-	f.clarify(t, "2")
-	f.submit(t, "2", domain.MissionPhasePlanReview)
-	if _, replayErr := f.svc.DecidePlan(ctx, f.member.ID, revise); replayErr != nil {
-		t.Fatalf("replayed revise decision: %v", replayErr)
-	}
-	f.expectNone(t, "replayed revise")
-	if _, approveErr := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version + 1,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-approve-1",
-	}); approveErr != nil {
-		t.Fatalf("approve decision: %v", approveErr)
-	}
-	f.expect(t, "approve", planDecisionNotice(domain.MissionPlanApprove), submit)
-	f.expectNone(t, "after approve")
-}
-
-// TestPlanNoticeToleratesAMissingTerminal proves a notice attempt that finds no
-// live session fails nothing, and that the harness's own submit sequence ends
-// the line.
-func TestPlanNoticeToleratesAMissingTerminal(t *testing.T) {
-	ctx := context.Background()
-	f := newPlanGateFixtureFor(t, "opencode", domain.LaunchTUI)
-	f.notices.fail(ptyhost.ErrNoSession)
-	version := f.proposeAndSubmit(t, "1")
-	f.expect(t, "answer without a live terminal", answerNotice, "\r\r")
-	if _, err := f.svc.DecidePlan(ctx, f.member.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
-		Decision: string(domain.MissionPlanReject), IdempotencyKey: "decide-reject-1",
-	}); err != nil {
-		t.Fatalf("reject decision without a live terminal: %v", err)
-	}
-	f.expect(t, "reject without a live terminal", planDecisionNotice(domain.MissionPlanReject), "\r\r")
-}
-
-// TestPlanNoticeSkipsAHeadlessIntegrator: a headless harness never reads its
-// terminal, so it is not written to at all.
-func TestPlanNoticeSkipsAHeadlessIntegrator(t *testing.T) {
-	f := newPlanGateFixtureFor(t, "claude", domain.LaunchHeadless)
-	version := f.proposeAndSubmit(t, "headless")
-	f.expectNone(t, "answer to a headless integrator")
-	if _, err := f.svc.DecidePlan(context.Background(), f.member.ID, protocol.MissionPlanDecideParams{
-		MissionID: string(f.mission.ID), ExpectedPlanVersion: version,
-		Decision: string(domain.MissionPlanApprove), IdempotencyKey: "decide-approve-1",
-	}); err != nil {
-		t.Fatalf("approve decision: %v", err)
-	}
-	f.expectNone(t, "approval to a headless integrator")
-}
-
-// TestPlanNoticeSkipsAReplacedIntegrator: a notice whose integrator was
-// replaced after the human acted is dropped, not redirected.
-func TestPlanNoticeSkipsAReplacedIntegrator(t *testing.T) {
-	ctx := context.Background()
-	f := newPlanGateFixture(t)
-	retired := *f.mission
-	retired.CurrentIntegratorRunID = "retired-integrator"
-	if err := f.db.CreateRunWithID(ctx, &domain.Run{
-		ID: retired.CurrentIntegratorRunID, WorkspaceID: f.workspace.ID, MemberID: f.member.ID, Task: "integrator",
-		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunQueued,
-	}); err != nil {
-		t.Fatalf("create retired integrator run: %v", err)
-	}
-	if err := f.svc.deliverNotice(ctx, &retired, answerNotice); err != nil {
-		t.Fatalf("deliverNotice for a replaced integrator: %v", err)
-	}
-	select {
-	case got := <-f.notices.writes:
-		t.Fatalf("a notice for a replaced integrator wrote %+v", got)
-	default:
-	}
-	if err := f.svc.deliverNotice(ctx, f.mission, answerNotice); err != nil {
-		t.Fatalf("deliverNotice for the current integrator: %v", err)
-	}
-	f.expect(t, "notice for the current integrator", answerNotice, harness.SubmitSequence("claude"))
 }

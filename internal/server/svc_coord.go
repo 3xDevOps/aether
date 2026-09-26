@@ -32,7 +32,6 @@ func init() {
 			Mail:             mail,
 			Bus:              d.Bus,
 			Peers:            lazyRadar{ssh: d.SSH},
-			PTY:              d.PTY,
 			// The scheduler is the single writer of run statuses, so the
 			// agent's own status reports land on it.
 			Reports: d.Runs,

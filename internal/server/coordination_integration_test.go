@@ -71,14 +71,8 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 
 	e.assertRegistered(t, runA)
 	e.assertRegistered(t, runB)
-	e.assertNoticeOnly(t, runC)
+	e.assertUnregistered(t, runC)
 
-	// Every overlapping agent is told in its own terminal. The registered
-	// fixtures then manually invoke MCP; the taskless fixture only observes.
-	for _, att := range []*attachConn{attA, attB, attC} {
-		att.waitOutput(t, "aether injects")
-		att.waitOutput(t, "notice:aether: Overlap: run ")
-	}
 	attA.waitOutput(t, "assets:manual-mcp")
 	attB.waitOutput(t, "assets:manual-mcp")
 	attC.waitOutput(t, "assets:manual-mcp")
@@ -87,10 +81,7 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 	attA.waitOutput(t, "inbox:"+bodyB)
 	attB.waitOutput(t, "inbox:"+bodyA)
 
-	// The whole exchange is on the workspace timeline under the run where
-	// each server-originated notice or message happened.
-	waitEvent(t, sub, &seen, "run A's notice entry", coordNoticeNote(runA.ID, runB.ID))
-	waitEvent(t, sub, &seen, "run B's notice entry", coordNoticeNote(runB.ID, runA.ID))
+	// The exchange stays attributed to the original sending runs.
 	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, runB.ID))
 	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, runA.ID))
 
@@ -140,7 +131,6 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	}
 	// The radar still reacts, and it is the only coordination side effect.
 	waitOverlap(t, adaCtrl, runA.ID, runB.ID)
-	assertNoNotice(t, attA, attB)
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID)
 	drain(sub, &seen)
 	assertNoCoordNote(t, seen)
@@ -164,7 +154,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	srv = e.start(ctx, t, false)
 	sub, seen = srv.subscribe(ctx, t), nil
 	adaCtrl, adaClient = srv.control(t, e.ada.key)
-	attA2 := waitAttach(t, adaClient, runA.ID)
+	waitAttach(t, adaClient, runA.ID)
 
 	runC := e.launch(t, adaCtrl, taskC, "claude")
 	attC := openAttach(t, adaClient, runC.ID)
@@ -172,8 +162,7 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	e.assertRegistered(t, runC)
 	e.assertNoCoordination(t, runA)
 	e.assertNoCoordination(t, runB)
-	attA2.waitOutput(t, "notice:aether: Overlap: run ")
-	attC.waitOutput(t, "notice:aether: Overlap: run ")
+	waitOverlap(t, adaCtrl, runC.ID, runA.ID)
 
 	// On -> off. Run C's already-created container retains its read-only
 	// mounts, but the service unlinks the socket on recovery.
@@ -406,10 +395,10 @@ func (e *coordEnv) assertRegistered(t *testing.T, run protocol.Run) {
 	}
 }
 
-// assertNoticeOnly is a run whose fixture does not manually invoke MCP:
+// assertUnregistered is a run whose fixture does not manually invoke MCP:
 // ordinary coordination assets are still available, but no launch profile
 // registration is injected.
-func (e *coordEnv) assertNoticeOnly(t *testing.T, run protocol.Run) {
+func (e *coordEnv) assertUnregistered(t *testing.T, run protocol.Run) {
 	t.Helper()
 	c := e.container(t, run.ID)
 	if slices.Contains(c.spec.Command, "--mcp-config") {
@@ -541,12 +530,6 @@ func coordNote(run, to string) func(events.Event) bool {
 	return timelineNote(run, "coordination message to run "+to+": ")
 }
 
-// coordNoticeNote matches the server-originated timeline entry the overlap
-// notice leaves on the run it was delivered to.
-func coordNoticeNote(run, peer string) func(events.Event) bool {
-	return timelineNote(run, "coordination notice: run "+peer+" is also editing ")
-}
-
 func timelineNote(run, prefix string) func(events.Event) bool {
 	return func(e events.Event) bool {
 		p, ok := e.Payload.(events.TimelinePayload)
@@ -570,26 +553,13 @@ func drain(sub events.Subscription, seen *[]events.Event) {
 	}
 }
 
-// assertNoCoordNote covers both entries coordination writes - the notice
-// and the message - so the kill switch stays honest about either one.
+// assertNoCoordNote verifies the kill switch suppresses message audit entries.
 func assertNoCoordNote(t *testing.T, seen []events.Event) {
 	t.Helper()
 	for _, e := range seen {
 		p, ok := e.Payload.(events.TimelinePayload)
 		if ok && strings.HasPrefix(p.Message, "coordination ") {
 			t.Errorf("coordination reached the timeline with the kill switch off: %+v", p)
-		}
-	}
-}
-
-// assertNoNotice gives the injector a beat past the overlap the radar has
-// already reported, then insists nothing was said.
-func assertNoNotice(t *testing.T, atts ...*attachConn) {
-	t.Helper()
-	time.Sleep(2 * time.Second)
-	for _, att := range atts {
-		if out := att.output(); strings.Contains(out, "Overlap:") || strings.Contains(out, "notice:") {
-			t.Errorf("a notice was injected with coordination off: %q", out)
 		}
 	}
 }

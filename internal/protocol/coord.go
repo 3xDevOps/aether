@@ -11,13 +11,14 @@ const CoordWireVersion = "v3"
 // The coordination method set. The run.report method remains the harness
 // lifecycle hook; coord.report is the durable worker outcome report.
 const (
-	MethodCoordStatus = "coord.status"
-	MethodCoordSend   = "coord.send"
-	MethodCoordInbox  = "coord.inbox"
-	MethodCoordAsk    = "coord.ask"
-	MethodCoordReply  = "coord.reply"
-	MethodCoordReport = "coord.report"
-	MethodRunReport   = "run.report"
+	MethodCoordStatus     = "coord.status"
+	MethodCoordHookStatus = "coord.hook.status"
+	MethodCoordSend       = "coord.send"
+	MethodCoordInbox      = "coord.inbox"
+	MethodCoordAsk        = "coord.ask"
+	MethodCoordReply      = "coord.reply"
+	MethodCoordReport     = "coord.report"
+	MethodRunReport       = "run.report"
 )
 
 // Coordination caps, enforced by the server and published here so a bridge

@@ -81,7 +81,6 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	missionID := created.Mission.ID
 	integratorRun := created.Mission.CurrentIntegratorRunID
 	integratorSocket := waitMissionSocket(t, e.coordDir(integratorRun))
-	integratorTerm := openAttach(t, adaClient, integratorRun)
 
 	// A human retry after a lost response is idempotent and does not launch a
 	// second integrator. The list/show surfaces expose the same server-issued ID.
@@ -222,8 +221,15 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if answered.Question.AnsweredAt == nil || answered.Question.AnsweredByMemberID != string(e.ada.id) {
 		t.Fatalf("answered question = %+v, want an answer attributed to the accountable human", answered.Question)
 	}
-	// An integrator idle after asking is woken in its own terminal.
-	integratorTerm.waitOutput(t, "notice:aether: The accountable human answered a mission question.")
+	// The run reads the durable answer through its existing mission context.
+	var answeredPlan protocol.MissionPlanShowResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, &answeredPlan); err != nil {
+		t.Fatalf("mission.plan.show after answer: %v", err)
+	}
+	if len(answeredPlan.Questions) != 1 || answeredPlan.Questions[0].Answer != answered.Question.Answer ||
+		answeredPlan.Questions[0].AnsweredByMemberID != string(e.ada.id) {
+		t.Fatalf("integrator answer context = %+v, want the accountable human's answer", answeredPlan.Questions)
+	}
 	var clarified protocol.MissionClarificationCompleteResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionClarificationComplete,
 		protocol.MissionClarificationCompleteParams{IdempotencyKey: "mission-clarify-1"}, &clarified); err != nil {
@@ -251,7 +257,13 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if approved.Mission.Phase != string(domain.MissionPhaseActive) {
 		t.Fatalf("mission phase after approval = %q, want active", approved.Mission.Phase)
 	}
-	integratorTerm.waitOutput(t, "notice:aether: The plan was approved and the mission is active.")
+	var approvedPlan protocol.MissionPlanShowResult
+	if err := pacedCall(ctx, integratorSocket, protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, &approvedPlan); err != nil {
+		t.Fatalf("mission.plan.show after approval: %v", err)
+	}
+	if approvedPlan.Plan.Phase != string(domain.MissionPhaseActive) {
+		t.Fatalf("integrator plan phase = %q, want active", approvedPlan.Plan.Phase)
+	}
 	// Approval accepted both revisions; the integrator never accepted its own.
 	var readyTasks protocol.TaskListResult
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodTaskList, protocol.TaskListParams{MissionID: missionID}, &readyTasks); err != nil {

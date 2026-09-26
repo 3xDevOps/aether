@@ -349,6 +349,15 @@ workspace files, **Commit to <branch>** creates one commit on the base branch
 but does not push upstream; live-run writes modify the uncommitted checkout.
 Base saves require **Push** and run saves require **Steer**.
 
+### Agent coordination hooks
+
+Native hooks tell agents when coordination messages are waiting without typing
+into their terminals. Inside a run, `aether-internal skill` checks the hook
+configuration and prints installation instructions for missing hooks. See
+[harnesses.md](harnesses.md#incoming-coordination-hooks) for copyable files and
+setup, and [coordination.md](coordination.md#delivery-acknowledgement-and-retries)
+for delivery boundaries and acknowledgements.
+
 ### Connect GitHub
 
 Optional, and worth doing before the first run: connect GitHub once and your

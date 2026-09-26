@@ -3,9 +3,9 @@
 // for a human.
 //
 // The radar (internal/overlap) says runs A and B are both editing the
-// same file. This package injects one advisory notice into both agents'
-// terminals, gives each run a private unix socket under the server data
-// directory, and serves the versioned coordination methods.
+// same file. This package exposes that advisory state and a durable mailbox
+// through each run's private unix socket under the server data directory.
+// Native harness hooks discover pending context without writing to terminals.
 //
 // The same socket carries run.report, a harness lifecycle hook. Durable
 // worker outcomes use coord.report and remain available after the request
@@ -31,7 +31,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -96,17 +95,9 @@ type Peers interface {
 	Overlaps(ctx context.Context) ([]overlap.Entry, error)
 }
 
-// Injector writes an attributed banner into a run's terminal and its
-// transcript, ending the write with the run harness's submit sequence;
-// satisfied by *ptyhost.Host.
-type Injector interface {
-	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
-}
-
-// Config wires the service. Dir, Store, Mail, Bus, and Peers are
-// required; PTY may be nil, which degrades to no notices. RetainsContainer
-// may be nil; when set, it identifies terminal TUI runs whose retained
-// container still owns this coordination directory during recovery.
+// Config wires the service. Dir, Store, Mail, Bus, and Peers are required.
+// RetainsContainer may be nil; when set, it identifies terminal TUI runs whose
+// retained container still owns this coordination directory during recovery.
 type Config struct {
 	// Dir is the coordination state root, <data>/coord.
 	Dir string
@@ -125,8 +116,6 @@ type Config struct {
 	// authorization and owns mission task/worker methods and report
 	// validation/reconciliation; nil preserves ordinary coordination.
 	Mission MissionService
-	// PTY injects the overlap notice into a run's terminal.
-	PTY Injector
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
@@ -160,22 +149,20 @@ type Service struct {
 	stop     context.CancelFunc
 	sub      events.Subscription
 
-	mu               sync.Mutex
-	listeners        map[socketKey]*net.UnixListener
-	buckets          map[domain.RunID]*bucket
-	inboxBuckets     map[domain.RunID]*bucket
-	requestBuckets   map[domain.RunID]*bucket
-	inboxWaiters     map[domain.RunID]*inboxWaiter
-	reportLocks      map[domain.RunID]*sync.Mutex
-	reportPackets    map[string]protocol.EvidencePacket
-	noticed          map[domain.RunID]map[domain.RunID]bool
-	messageNoticed   map[domain.RunID]uint64
-	messageNoticeSeq uint64
-	runs             map[domain.RunID]*runLifecycle
-	reportCursor     store.CoordOutboxCursor
-	auditCursor      store.CoordOutboxCursor
-	closed           bool
-	wg               sync.WaitGroup
+	mu             sync.Mutex
+	listeners      map[socketKey]*net.UnixListener
+	buckets        map[domain.RunID]*bucket
+	inboxBuckets   map[domain.RunID]*bucket
+	requestBuckets map[domain.RunID]*bucket
+	hookBuckets    map[domain.RunID]*bucket
+	inboxWaiters   map[domain.RunID]*inboxWaiter
+	reportLocks    map[domain.RunID]*sync.Mutex
+	reportPackets  map[string]protocol.EvidencePacket
+	runs           map[domain.RunID]*runLifecycle
+	reportCursor   store.CoordOutboxCursor
+	auditCursor    store.CoordOutboxCursor
+	closed         bool
+	wg             sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -217,12 +204,11 @@ func New(cfg Config) (*Service, error) {
 		buckets:        make(map[domain.RunID]*bucket),
 		inboxBuckets:   make(map[domain.RunID]*bucket),
 		requestBuckets: make(map[domain.RunID]*bucket),
+		hookBuckets:    make(map[domain.RunID]*bucket),
 		inboxWaiters:   make(map[domain.RunID]*inboxWaiter),
 		reportLocks:    make(map[domain.RunID]*sync.Mutex),
 		reportPackets:  make(map[string]protocol.EvidencePacket),
 		runs:           make(map[domain.RunID]*runLifecycle),
-		noticed:        make(map[domain.RunID]map[domain.RunID]bool),
-		messageNoticed: make(map[domain.RunID]uint64),
 	}, nil
 }
 
@@ -296,15 +282,9 @@ func (s *Service) Close() error {
 	return errors.Join(errs...)
 }
 
-// consume folds the radar's overlap changes into the grace bookkeeping and
-// the notice injector.
-//
-// There is no replay machinery here because nothing depends on seeing
-// every event: the next change re-announces the whole set, authorization
-// always re-reads the live index, and a grace window runs from the last
-// instant the peers were seen overlapping, so discovering a clearing late
-// cannot hand out a window longer than the grace period. A dropped event
-// therefore costs at most one notice.
+// consume folds the radar's overlap changes into grace bookkeeping.
+// Authorization also re-reads the live index, so a dropped event cannot
+// extend a grace window beyond the last observed overlap.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	for e := range sub.Events() {
 		p, ok := e.Payload.(events.OverlapPayload)
@@ -316,7 +296,6 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 			current[peer.RunID] = peer.Files
 		}
 		s.radar.observe(e.RunID, current)
-		s.notify(ctx, e.RunID, p.With)
 		if ctx.Err() != nil {
 			return
 		}

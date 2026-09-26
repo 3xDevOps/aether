@@ -403,7 +403,6 @@ func (h *coordHarness) restart(t *testing.T, disabled bool, opts ...func(*Config
 		Mail:     h.db,
 		Bus:      h.bus,
 		Peers:    h.peers,
-		PTY:      h.pty,
 		Disabled: disabled,
 		now:      h.now,
 	}

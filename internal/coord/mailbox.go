@@ -35,7 +35,8 @@ const (
 )
 
 // requestBurst/refill bound transport work independently of mutation effects.
-// Every coordination method spends this budget, including idempotent retries.
+// Native hook status has its own equally bounded budget so frequent hooks
+// cannot starve explicit coordination (or vice versa).
 const (
 	requestBurst  = 30
 	requestRefill = time.Second
@@ -227,15 +228,23 @@ func missionRPCError(method string, err error) *protocol.Error {
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
-func (s *Service) transportAllowed(run domain.RunID) bool {
-	return s.spend(s.requestBuckets, run, requestBurst, requestRefill)
+func (s *Service) transportAllowed(run domain.RunID, hook bool) bool {
+	buckets := s.requestBuckets
+	if hook {
+		buckets = s.hookBuckets
+	}
+	return s.spend(buckets, run, requestBurst, requestRefill)
 }
 
-func transportRateError() *protocol.Error {
+func transportRateError(hook bool) *protocol.Error {
+	budget := "transport"
+	if hook {
+		budget = "hook"
+	}
 	return &protocol.Error{
 		Code: protocol.CodeConflict,
-		Message: fmt.Sprintf("coord: transport request rate limit exceeded (burst %d, 1 request per %ds)",
-			requestBurst, int(requestRefill.Seconds())),
+		Message: fmt.Sprintf("coord: %s request rate limit exceeded (burst %d, 1 request per %ds)",
+			budget, requestBurst, int(requestRefill.Seconds())),
 	}
 }
 
@@ -439,7 +448,6 @@ func (s *Service) Inbox(ctx context.Context, run domain.RunID, p protocol.CoordI
 			}
 		}
 	}
-	s.rearmMessageNotice(run)
 	out := make([]protocol.CoordMessage, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, protocol.CoordMessage{
@@ -616,6 +624,11 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			return protocol.CoordReportResult{}, missionRPCError(method, err)
 		}
 	}
+	if report.PublishedAt != nil {
+		if err := s.enqueueBlockedReport(ctx, report); err != nil {
+			return protocol.CoordReportResult{}, internalError(method, err)
+		}
+	}
 	if report.PublishedAt == nil {
 		if rpcErr := s.publishReportEvidence(ctx, report, packet); rpcErr != nil {
 			slog.Warn("coord: report publication deferred", "report_id", report.ID, "error", rpcErr)
@@ -675,10 +688,55 @@ func (s *Service) rememberReportPacket(id string, packet protocol.EvidencePacket
 	s.reportPackets[id] = packet
 }
 
-// publishReportEvidence appends the deterministic evidence event first, then
-// marks the durable outbox row published. A committed-but-returned-error
-// append is reconciled by the event bus's ID lookup on the next attempt.
+// enqueueBlockedReport preserves a worker's blocked reason in the current
+// integrator's ordinary inbox. Unlike terminal notices, this retains the
+// actual author and requires explicit acknowledgement. The report outbox
+// retries inbox-cap/storage failures without spending a peer or rate slot.
+func (s *Service) enqueueBlockedReport(ctx context.Context, report *store.CoordReport) error {
+	if s.cfg.Mission == nil || report.Outcome != store.CoordOutcomeBlocked {
+		return nil
+	}
+	assignment, err := s.cfg.Mission.Assignment(ctx, report.RunID)
+	if errors.Is(err, store.ErrMissionStale) {
+		// A superseded attempt is no longer actionable; its terminal state
+		// remains discoverable through the mission's worker list.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("blocked report assignment: %w", err)
+	}
+	if assignment.Role != "worker" || assignment.IntegratorRunID == "" {
+		return nil
+	}
+	target, err := s.cfg.Store.GetRun(ctx, domain.RunID(assignment.IntegratorRunID))
+	if err != nil {
+		return fmt.Errorf("blocked report integrator: %w", err)
+	}
+	if target == nil || target.WorkspaceID != report.WorkspaceID || target.ID == report.RunID {
+		return errors.New("blocked report integrator is outside the reporting worker's workspace")
+	}
+	msg := &store.RunMessage{
+		WorkspaceID: report.WorkspaceID, FromRun: report.RunID, ToRun: target.ID,
+		Kind: store.RunMessageKindMessage, Body: report.Summary, CorrelationID: report.ID,
+		IdempotencyKey: "coord-report-blocked:" + report.ID + ":" + string(target.ID),
+	}
+	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
+	if err != nil {
+		return fmt.Errorf("enqueue blocked report: %w", err)
+	}
+	if created {
+		s.wakeInbox(target.ID)
+	}
+	return nil
+}
+
+// publishReportEvidence persists any blocked-worker inbox message, then
+// appends deterministic projection events before marking the existing outbox
+// row published. A failed step is retried without duplicating prior commits.
 func (s *Service) publishReportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) error {
+	if err := s.enqueueBlockedReport(ctx, report); err != nil {
+		return err
+	}
 	workspaceID := domain.WorkspaceID(packet.WorkspaceID)
 	if workspaceID == "" {
 		workspaceID = report.WorkspaceID
@@ -989,8 +1047,8 @@ func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.R
 
 func (s *Service) sendMessage(ctx context.Context, method string, from, to domain.RunID, body string,
 	kind store.RunMessageKind, correlation, idempotency string, correlated bool) (*store.RunMessage, *protocol.Error) {
-	// The transport budget is charged by the public method before this
-	// helper. Retries still avoid radar refresh and mutation work here.
+	// The transport budget is charged at the authenticated socket boundary.
+	// Retries still avoid radar refresh and mutation work here.
 	if prior, err := s.cfg.Mail.GetRunMessageByIdempotency(ctx, from, idempotency); err == nil {
 		if !coordMessageMatches(prior, to, body, kind, correlation) {
 			return nil, &protocol.Error{
@@ -1025,7 +1083,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	}
 	if !correlated {
 		// A mission assignment adds peers; the radar's active/grace set
-		// stays reachable so a mission run can answer an overlap notice.
+		// stays reachable for coordination discovered through hook context.
 		authorized := false
 		if s.cfg.Mission != nil {
 			assignment, err := s.cfg.Mission.Assignment(ctx, from)
@@ -1095,9 +1153,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 				slog.Warn("coord: audit outbox lookup failed", "message_id", msg.ID, "error", aerr)
 			}
 		}
-		// The claim is taken before the waiter wakes, so a read that races
-		// the notice re-arms it rather than being suppressed by a late claim.
-		s.notifyMessage(target, msg)
+		// Wake readers only after the durable mailbox append has committed.
 		s.wakeInbox(msg.ToRun)
 	}
 	return msg, nil

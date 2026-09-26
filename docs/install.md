@@ -1047,7 +1047,8 @@ Three consequences worth knowing:
 - **Keep the path short.** Per-run coordination sockets live under
   `coord/<run-id>/coord3.sock`, and unix socket paths have a hard length limit
   (about 100 characters). A very deep data directory makes the server log
-  `coordination unavailable for this run` and fall back to the overlap notice.
+  `coordination unavailable for this run`; inbox commands and native hook
+  delivery then have no socket. There is no terminal-notice fallback.
   `/var/lib/aether` is nowhere near the limit.
 
 If you run agents you do not trust, put the data directory on a filesystem
