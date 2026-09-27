@@ -38,9 +38,12 @@ obsolete. Operational commands belong in the public guides, not this file.
   standard environment and browser companion passed there.
 - The actual companion smoke exercised a loopback app, DOM actions, popups,
   console, PNG/JPEG capture, a 240-column alternate-buffer terminal PNG with its
-  final column visible, and clean-session reset. All five companion behavior
-  tests passed, including stale DOM/frame invalidation, cached-title input,
-  static-frame replay, bounds, and held-input cleanup. Aborting a renderer with
+  final column visible, and clean-session reset. All six companion behavior
+  tests passed on the pointer-cache image, including stale DOM/frame
+  invalidation, cached-title input, physical targeting after a DOM click,
+  static-frame replay, bounds, and held-input cleanup. Known pointer positions
+  avoid redundant moves before button down/up without changing input expiry
+  or control fences. Aborting a renderer with
   Chromium virtual time paused closed its context and released the queue while
   preserving the app; the same probe failed against the previous image.
   The stalled render without caller cancellation returned `timeout` in
@@ -56,8 +59,14 @@ obsolete. Operational commands belong in the public guides, not this file.
   invalid sign-in, HMR, desktop/phone layouts, and alternate-screen TUI input,
   Unicode, queries, resize, and PNG capture. Its native image-read records
   match the three retained PNGs by SHA-256.
-- After headless cleanup, the actual dashboard displayed those retained
-  desktop, phone, and terminal images with their capture/revision boundaries.
+  That loop used the original companion and an explicit terminal-capture retry
+  after its first timeout; it is not proof of the later companion builds.
+- Genuine OpenCode completed the same CLI/web/TUI loop on the terminal-budget
+  companion. All three native image-read attachments match the retained PNG
+  bytes; its terminal screenshot succeeded once in 18.167 seconds. Earlier
+  timeout and vendor-crash attempts are not counted as this successful run.
+- After both headless runs completed, the actual dashboard displayed their
+  retained desktop, phone, and terminal images with capture/revision boundaries.
 - The actual mobile shared-browser scenario passed HMR, reconnect, handoff,
   accented text, Japanese IME, two touches, phone layout, and sign-out.
 - Actual detach, pause/resume, interactive harness exit, server restart,
@@ -96,21 +105,23 @@ obsolete. Operational commands belong in the public guides, not this file.
   The corrected continuously-reading client passed the actual Docker-backed
   server gateway integration in 30.620 seconds.
   Dashboard E2E recorded 60 passes, the expected conditional live-GitHub skip,
-  and two failures after reload: browser control and terminal-dock visibility.
-  Corrections and final-head CI remain required.
+  and two lifecycle-fixture failures: reacquiring control after closing a
+  popup and reopening the run after reload. The corrected shared-terminal
+  scenario passed with an actual 1394×124 PNG; final desktop/CI checks remain.
+- Reconciliation now avoids rewriting identical durable companion status.
+  Live container/health checks and changed-state durability are unchanged.
+  The final Go quality gates passed. An actual two-viewer broker smoke sent
+  60 physical pointer operations and observed `profile-delivery` in the real
+  Email textbox. That profiling-overlay smoke is not full desktop acceptance.
 
 ## Acceptance still in progress
 
-- A complete second native harness loop remains required. OpenCode's original
-  terminal PNG requests exceeded the 15-second HTTP deadline. Removing the
-  oversized initial viewport helped but did not fix the actual 164-column
-  dashboard capture. Rendering now has a 30-second whole-operation deadline,
-  caller cancellation, and transport margins. A later OpenCode attempt crashed
-  inside its bundled Bun 1.3.14 before reaching terminal capture; that attempt
-  is not accepted.
-- Final desktop and shared-terminal dashboard scenarios on the rebuilt
-  companion. Cached title reads remove observed physical-input delays without
-  weakening the one-second input expiry or control fences.
+- Final unchanged-cadence desktop acceptance, including reset/reacquisition.
+  One local run reached the final boundary; a subsequent run expired queued
+  input with two viewers. The local VM uses QEMU TCG software emulation.
+  Measured redundant journal syncs account for only 3–5% of slow intervals;
+  they are not the dominant delay. The corrected full scenario must pass on
+  the normal CI runner. Expiry and fencing remain unchanged.
 - Production hosted HTTPS/WhoIs acceptance awaits temporary tailnet-node
   authorization. Local-gateway tests do not substitute for that boundary.
 - Complete Docker integration, final merged quality gates, PR review/CI, merge,
