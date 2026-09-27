@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/edgeagent"
 	"github.com/3xDevOps/Aether/internal/edgeproto"
+	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -42,21 +44,85 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "aether link --claim "+id[:edgeproto.ClaimPrefixLength]+"-") {
+	if !strings.Contains(out.String(), "aether link --claim "+id+"-") {
 		t.Errorf("claim-code output lacks the link command:\n%s", out.String())
 	}
 
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
-	if err := edgeagent.OpenState(dir).Pin(pub); err != nil {
+	if err := openState(t, dir, edgeagent.DefaultURL).Pin(pub); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
 	if err := edgeStatus(&out, dir, edgeagent.DefaultURL, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "never connected"} {
+	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "never connected",
+		"https://" + id + ".<the edge's server domain>/"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("status lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func openState(t *testing.T, dataDir, edgeURL string) *edgeagent.State {
+	t.Helper()
+	s, err := edgeagent.OpenState(dataDir, edgeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// An upgraded server whose config never named edge-url must not start
+// dialing an edge: only setup, or an explicit flag or config key, turns it
+// on.
+func TestEdgeIsOffUnlessConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := serversetup.WriteConfig(path, map[string]string{"addr": ":2300"}); err != nil {
+		t.Fatal(err)
+	}
+	o, _, _, err := loadOptions("serve", []string{"--config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *o.edgeURL != "" {
+		t.Fatalf("edge-url = %q from a config without it, want empty", *o.edgeURL)
+	}
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	serveFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := installValues(fs)["edge-url"]; ok {
+		t.Fatalf("install without --edge-url wrote edge-url = %q", v)
+	}
+	fs = flag.NewFlagSet("install", flag.ContinueOnError)
+	serveFlags(fs)
+	if err := fs.Parse([]string{"--edge-url", edgeagent.DefaultURL}); err != nil {
+		t.Fatal(err)
+	}
+	if v := installValues(fs)["edge-url"]; v != edgeagent.DefaultURL {
+		t.Fatalf("install --edge-url wrote %q, want %s", v, edgeagent.DefaultURL)
+	}
+}
+
+func TestDashboardText(t *testing.T) {
+	const id = "aaaaaaaaaaaaaaaaaaaaaaaaaa"
+	known := edgeagent.Status{Connected: true, ServerDomain: "servers.example.test"}
+	for _, tc := range []struct {
+		status  edgeagent.Status
+		ran     bool
+		claimed bool
+		want    string
+	}{
+		{known, true, true, "https://" + id + ".servers.example.test/"},
+		{edgeagent.Status{ServerDomain: "servers.example.test"}, true, true, "https://" + id + ".servers.example.test/"},
+		{known, true, false, "https://" + id + ".servers.example.test/ once the server is claimed"},
+		{edgeagent.Status{Connected: true}, true, true, "none; this edge passes no dashboard through"},
+		{edgeagent.Status{}, false, false, "https://" + id + ".<the edge's server domain>/; aether-server edge status shows the address once the server connects"},
+	} {
+		if got := dashboardText(id, tc.status, tc.ran, tc.claimed); got != tc.want {
+			t.Errorf("dashboardText(%+v, ran %v, claimed %v) = %q, want %q", tc.status, tc.ran, tc.claimed, got, tc.want)
 		}
 	}
 }
@@ -69,7 +135,7 @@ func TestEdgeTrustNeedsConfirmation(t *testing.T) {
 	defer edge.Close()
 	dir := t.TempDir()
 	old, _, _ := ed25519.GenerateKey(rand.Reader)
-	state := edgeagent.OpenState(dir)
+	state := openState(t, dir, edge.URL)
 	if err := state.Pin(old); err != nil {
 		t.Fatal(err)
 	}

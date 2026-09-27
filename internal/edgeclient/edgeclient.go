@@ -239,29 +239,33 @@ func (c *Client) call(ctx context.Context, op, method, path, token string, in, o
 }
 
 // Servers lists the servers the signed-in account reaches, as a member or
-// as an invitee.
-func (c *Client) Servers(ctx context.Context) ([]edgeproto.ServerInfo, error) {
+// as an invitee, and the domain the edge passes their dashboards through
+// under, which is empty from an edge older than the field.
+func (c *Client) Servers(ctx context.Context) (servers []edgeproto.ServerInfo, serverDomain string, err error) {
 	s, err := c.session()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var resp edgeproto.ServersResponse
 	if err := c.call(ctx, "list servers", http.MethodGet, edgeproto.PathServers, s.Token, nil, &resp); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for _, info := range resp.Servers {
 		if !edgeproto.ValidServerID(info.ID) || !printable(info.Name) || !printable(info.Role) {
-			return nil, fmt.Errorf("list servers: %s sent a malformed server entry", c.host)
+			return nil, "", fmt.Errorf("list servers: %s sent a malformed server entry", c.host)
 		}
 	}
-	return resp.Servers, nil
+	if resp.ServerDomain != "" && !edgeproto.ValidServerDomain(resp.ServerDomain) {
+		return nil, "", fmt.Errorf("list servers: %s sent a malformed server domain %q", c.host, resp.ServerDomain)
+	}
+	return resp.Servers, resp.ServerDomain, nil
 }
 
 // Claim presents a claim code, as printed by aether-server setup, for the
 // signed-in account. The edge forwards it to the server, which compares
 // it; on success the account owns the server.
 func (c *Client) Claim(ctx context.Context, code string) (edgeproto.ClaimResponse, error) {
-	normalized, prefix, err := edgeproto.ParseClaimCode(code)
+	normalized, id, err := edgeproto.ParseClaimCode(code)
 	if err != nil {
 		return edgeproto.ClaimResponse{}, err
 	}
@@ -270,16 +274,15 @@ func (c *Client) Claim(ctx context.Context, code string) (edgeproto.ClaimRespons
 		return edgeproto.ClaimResponse{}, err
 	}
 	var resp edgeproto.ClaimResponse
-	err = c.call(ctx, "claim server "+prefix, http.MethodPost, edgeproto.PathClaim, s.Token,
+	err = c.call(ctx, "claim server "+id, http.MethodPost, edgeproto.PathClaim, s.Token,
 		edgeproto.ClaimRequest{Code: normalized}, &resp)
 	if err != nil {
 		return edgeproto.ClaimResponse{}, err
 	}
-	// The code names the first characters of the server id. A different
-	// id would pin this link to a server the code never named.
-	if !edgeproto.ValidServerID(resp.ServerID) || !strings.HasPrefix(resp.ServerID, prefix) || !printable(resp.Name) {
+	// Another id would pin this link to a server the code never named.
+	if resp.ServerID != id || !printable(resp.Name) {
 		return edgeproto.ClaimResponse{}, fmt.Errorf("claim server %s: %s answered with server %q, which the code does not name",
-			prefix, c.host, clean(resp.ServerID))
+			id, c.host, clean(resp.ServerID))
 	}
 	return resp, nil
 }

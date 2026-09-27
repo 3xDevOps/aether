@@ -58,3 +58,43 @@ func TestClientSecrets(t *testing.T) {
 		t.Error("--github-client-secret accepted")
 	}
 }
+
+func TestOriginMustNameAHost(t *testing.T) {
+	// The placeholder the environment file ships with.
+	_, err := parseOptions([]string{"--origin", "https://<edge-host>"}, envOf(nil))
+	if err == nil || !strings.Contains(err.Error(), `host "<edge-host>" is not a DNS name or an IP address`) {
+		t.Fatalf("placeholder origin: %v", err)
+	}
+}
+
+// TestOneProviderUnderTheUnit starts as packaging/systemd/aether-edge.service
+// does on an edge that offers GitHub only: both secret variables name a
+// credential, and SetCredential= leaves Google's a single newline.
+func TestOneProviderUnderTheUnit(t *testing.T) {
+	dir := t.TempDir()
+	github := filepath.Join(dir, "github-client-secret")
+	google := filepath.Join(dir, "google-client-secret")
+	if err := os.WriteFile(github, []byte("fake-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(google, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		"AETHER_EDGE_ORIGIN":                    "https://edge.example.test",
+		"AETHER_EDGE_GITHUB_CLIENT_ID":          "fake-id",
+		"AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE": github,
+		"AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE": google,
+	}
+	o, err := parseOptions(nil, envOf(env))
+	if err != nil || o.github == nil || o.github.ClientSecret != "fake-secret" || o.google != nil {
+		t.Fatalf("GitHub only: github %+v, google %+v, %v", o.github, o.google, err)
+	}
+
+	// A client id whose secret file is missing is a mistake, not a
+	// provider left out.
+	env["AETHER_EDGE_GOOGLE_CLIENT_ID"] = "fake-id"
+	if _, err := parseOptions(nil, envOf(env)); err == nil || !strings.Contains(err.Error(), google+", named by --google-client-secret-file, holds no secret") {
+		t.Fatalf("google id without a secret: %v", err)
+	}
+}

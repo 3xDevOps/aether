@@ -111,7 +111,10 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	state := edgeagent.OpenState(dataDir)
+	state, err := edgeagent.OpenState(dataDir, edgeURL)
+	if err != nil {
+		return err
+	}
 	pinned, err := state.PinnedKey()
 	if err != nil {
 		return err
@@ -153,11 +156,31 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, now time.Time) error {
 	default:
 		_, _ = fmt.Fprintf(tw, "connection\tdisconnected since %s: %s\n", status.Since.Local().Format(time.DateTime), status.Error)
 	}
+	_, _ = fmt.Fprintf(tw, "dashboard\t%s\n", dashboardText(id, status, ran, owner != nil))
 	return tw.Flush()
 }
 
+// dashboardText says where the dashboard through the edge is. Only the
+// edge knows the domain it passes dashboards through under, and the
+// server learns it when it connects.
+func dashboardText(id string, status edgeagent.Status, ran, claimed bool) string {
+	switch {
+	case status.ServerDomain != "" && claimed:
+		return "https://" + edgeproto.ServerHostname(id, status.ServerDomain) + "/"
+	case status.ServerDomain != "":
+		return "https://" + edgeproto.ServerHostname(id, status.ServerDomain) + "/ once the server is claimed"
+	case ran && status.Connected:
+		return "none; this edge passes no dashboard through"
+	default:
+		return "https://" + id + ".<the edge's server domain>/; aether-server edge status shows the address once the server connects"
+	}
+}
+
 func edgeClaimCode(w io.Writer, dataDir, edgeURL string) error {
-	state := edgeagent.OpenState(dataDir)
+	state, err := edgeagent.OpenState(dataDir, edgeURL)
+	if err != nil {
+		return err
+	}
 	owner, err := state.Owner()
 	if err != nil {
 		return err
@@ -184,7 +207,10 @@ func printClaimCode(w io.Writer, edgeURL, code string, expires time.Time) {
 }
 
 func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {
-	state := edgeagent.OpenState(dataDir)
+	state, err := edgeagent.OpenState(dataDir, edgeURL)
+	if err != nil {
+		return err
+	}
 	pinned, err := state.PinnedKey()
 	if err != nil {
 		return err

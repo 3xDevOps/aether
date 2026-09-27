@@ -42,7 +42,7 @@ type Config struct {
 	// EdgeURL is the edge to enroll with, https://host[:port].
 	EdgeURL string
 	// DataDir is the server data directory; the agent keeps its state in
-	// StateDir(DataDir).
+	// OpenState(DataDir, EdgeURL).
 	DataDir string
 	// HostKey is the server's SSH host key. It derives the server id and
 	// signs enrollment.
@@ -76,11 +76,17 @@ type Agent struct {
 	pingInterval, idleTimeout time.Duration
 	attachDeadline            time.Duration
 
-	slots chan struct{}
+	// SSH and the dashboard take connection slots from separate budgets:
+	// reaching the dashboard host name needs no sign-in, so filling its
+	// budget must not lock SSH out.
+	sshSlots, webSlots chan struct{}
 
 	// enrolled is closed at the first enrollment, once domain holds the
 	// server domain that enrollment's ready announced.
 	enrolled chan struct{}
+	// claimed is closed once the edge holds this server claimed: at an
+	// enrollment it reports claimed, or at a claim this server accepted.
+	claimed chan struct{}
 
 	mu      sync.Mutex
 	domain  string
@@ -100,6 +106,10 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.HostKey == nil || cfg.DataDir == "" {
 		return nil, errors.New("edgeagent: config requires HostKey and DataDir")
 	}
+	state, err := OpenState(cfg.DataDir, origin)
+	if err != nil {
+		return nil, err
+	}
 	// The hostname only labels the server for its owner at the edge.
 	name, _ := os.Hostname()
 	// Encoding a hello now turns a hostname the edge would refuse into a
@@ -113,15 +123,17 @@ func New(cfg Config) (*Agent, error) {
 		name:           name,
 		origin:         origin,
 		serverID:       edgeproto.ServerID(cfg.HostKey.PublicKey()),
-		state:          OpenState(cfg.DataDir),
+		state:          state,
 		web:            newWebListener(origin),
 		minBackoff:     edgeproto.ReconnectMinBackoff,
 		maxBackoff:     edgeproto.ReconnectMaxBackoff,
 		pingInterval:   edgeproto.PingInterval,
 		idleTimeout:    edgeproto.ControlIdleTimeout,
 		attachDeadline: edgeproto.AttachDeadline,
-		slots:          make(chan struct{}, edgeproto.MaxConnsPerServer),
+		sshSlots:       make(chan struct{}, edgeproto.MaxSSHConnsPerServer),
+		webSlots:       make(chan struct{}, edgeproto.MaxWebConnsPerServer),
 		enrolled:       make(chan struct{}),
+		claimed:        make(chan struct{}),
 		conns:          make(map[*relayConn]struct{}),
 		seen:           make(map[string]time.Time),
 		waiters:        make(map[string]chan edgeproto.WebRedeemResult),
@@ -152,8 +164,9 @@ func (a *Agent) ServerDomain(ctx context.Context) (string, error) {
 }
 
 // learnDomain keeps the server domain of the first enrollment: the
-// dashboard is served under that hostname until the server restarts.
-func (a *Agent) learnDomain(d string) {
+// dashboard is served under that hostname until the server restarts. It
+// returns the domain being served.
+func (a *Agent) learnDomain(d string) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	select {
@@ -165,6 +178,21 @@ func (a *Agent) learnDomain(d string) {
 	default:
 		a.domain = d
 		close(a.enrolled)
+	}
+	return a.domain
+}
+
+// Claimed is closed once the edge holds this server claimed. The edge
+// passes no dashboard connection through to an unclaimed server.
+func (a *Agent) Claimed() <-chan struct{} { return a.claimed }
+
+func (a *Agent) markClaimed() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	select {
+	case <-a.claimed:
+	default:
+		close(a.claimed)
 	}
 }
 
@@ -193,14 +221,16 @@ func (a *Agent) Run(ctx context.Context) {
 			down = time.Now()
 		}
 		a.state.writeStatus(Status{Edge: a.origin, Error: err.Error(), Since: down})
-		wait := a.minBackoff + rand.N(backoff-a.minBackoff+1)
+		// The window is never empty, so servers an edge restart dropped
+		// together do not redial together.
+		wait := a.minBackoff + rand.N(backoff)
 		slog.Warn("edge: control connection ended; reconnecting", "edge", a.origin, "error", err, "retry_in", wait.Round(time.Millisecond))
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
 		}
-		backoff = min(backoff*2, a.maxBackoff)
+		backoff = min(backoff*2, a.maxBackoff-a.minBackoff)
 	}
 }
 

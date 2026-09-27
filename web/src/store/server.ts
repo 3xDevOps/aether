@@ -21,12 +21,13 @@ import type { SliceCreator } from '@/store/slice'
  * edge, so either the server is not connected to the edge or the edge is
  * down; the browser cannot tell which.
  * `server`: the gateway answers but its SSH backend cannot reach
- * aether-server (it reports 503 "server unreachable: ..."). The next five
+ * aether-server (it reports 503 "server unreachable: ..."). The next seven
  * are that failure on a link through an edge, told apart by the client's
  * own error: `edge` could not be reached, `edge-server` said the server is
- * not connected to it, `signed-out` has no valid sign-in for this machine,
- * and the server refused this device as `device-revoked` or
- * `device-pending`. */
+ * not connected to it, `edge-refused` refused it for another reason,
+ * `signed-out` has no valid sign-in for this machine, `not-member` means
+ * the edge or the server no longer counts the account as a member, and the
+ * server refused this device as `device-revoked` or `device-pending`. */
 export type UnreachableKind =
   | 'network'
   | 'gateway'
@@ -35,7 +36,9 @@ export type UnreachableKind =
   | 'server'
   | 'edge'
   | 'edge-server'
+  | 'edge-refused'
   | 'signed-out'
+  | 'not-member'
   | 'device-revoked'
   | 'device-pending'
   | 'refused'

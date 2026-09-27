@@ -285,8 +285,8 @@ func TestClaimAPI(t *testing.T) {
 	var servers edgeproto.ServersResponse
 	h.apiCall(t, http.MethodGet, edgeproto.PathServers, tok.Token, nil, &servers)
 	want := edgeproto.ServerInfo{ID: id, Name: "workstation", Online: true, Role: "admin"}
-	if len(servers.Servers) != 1 || servers.Servers[0] != want {
-		t.Errorf("servers = %+v, want [%+v]", servers.Servers, want)
+	if len(servers.Servers) != 1 || servers.Servers[0] != want || servers.ServerDomain != testDomain {
+		t.Errorf("servers = %+v under %q, want [%+v] under %q", servers.Servers, servers.ServerDomain, want, testDomain)
 	}
 	if status, _ := h.apiCall(t, http.MethodPost, edgeproto.PathClaim, "", edgeproto.ClaimRequest{Code: code}, nil); status != http.StatusUnauthorized {
 		t.Errorf("claim without a token = %d, want 401", status)

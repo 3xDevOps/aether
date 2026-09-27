@@ -655,6 +655,18 @@ else. [edge.md](edge.md#what-the-edge-can-and-cannot-see) tabulates what an
 honest edge, a compromised edge, a stolen device token and a stolen claim
 code can and cannot do; the reasons follow.
 
+- **A server uses an edge only when its operator chose one.** `edge-url` is
+  empty unless the config file or a flag names an edge. `aether-server
+  setup` is the only command that sets it without being told: on a host
+  without tailscaled it turns on the project's edge and prints what that
+  edge sees and how to turn it off; with tailscaled it asks, defaulting to
+  no. An upgraded server whose config never named an edge stays off it and
+  discloses nothing.
+- **Each edge origin has its own pin and owner.** The server keeps the
+  pinned edge key, the recorded owner and the claim code per edge origin.
+  Pointing `edge-url` at another edge enrolls there unclaimed and pins that
+  edge's key on first contact; pointing it back finds the first edge's pin
+  again, so a changed key at a known origin is still refused.
 - **SSH is end to end.** The relay splices bytes between two outbound
   WebSockets and never holds a key that could decrypt them. Clients check
   the host key against the server id on every path, so an edge cannot pose
@@ -675,7 +687,12 @@ code can and cannot do; the reasons follow.
 - **Device approval is what stops a stolen account.** A member's first
   device is accepted; every later device key or browser waits until a
   device the member already uses, an admin, or `sudo aether-server device
-  approve <code>` on the server approves it. `sudo aether-server config set
+  approve <code>` on the server approves it. Only the new device shows its
+  approval code; `aether device list` and the dashboard's Devices view
+  never do, so approving proves the approver holds the new device or was
+  handed its code. Approve only a code read from a device you are holding.
+  A revoked device still counts as the member's device, so revoking every
+  device does not reopen the first-device window. `sudo aether-server config set
   edge-device-approval false` approves every new device on first contact.
   That costs the
   protection: anyone who signs in to the edge as a member's GitHub or Google
@@ -687,15 +704,33 @@ code can and cannot do; the reasons follow.
   collects it cannot use it in a handshake.
 - **Claims need the server's code.** The code is compared on the server,
   stored there only as a hash, and dies after 30 minutes or five attempts.
+  It carries the whole server id, so `aether link --claim` refuses an edge
+  answer naming any other server, and the edge forwards it only to that
+  server. The code passes through the edge, so a compromised edge that
+  receives it can claim the server for another account. The owner's link
+  then fails with `not a member of this server`, and `sudo aether-server
+  edge status` names the account that claimed it.
 - **The edge stores bearer secrets hashed** (device tokens, session
   cookies, device codes, web sign-in codes) and rate-limits sign-in, device
-  codes and claims per address, IPv6 per /64; device-code entry is also
-  limited per account. The address a relayed connection came from is for
+  codes and claims per address. An IPv6 address counts against its /64,
+  its /56 (4 times the budget) and its /48 (16 times), so one allocation
+  cannot spend more than its /48's share; a full limiter evicts the block
+  with the most budget left instead of refusing new addresses. Device-code
+  entry is also limited per account. The address a relayed connection came from is for
   logs and rate limits only, never for authentication.
-- **A GitHub login belongs to the account that holds it now.** Signing in
-  takes the login away from any other account that held it, so an account
-  whose owner renamed it on GitHub cannot match an invitation meant for the
-  login's new holder.
+- **Invitations match only a recently confirmed login or email.** The edge
+  learns an account's GitHub login and verified email only when that person
+  signs in with the provider in a browser. Signing in takes the login from
+  any other account that held it, but someone who renamed on GitHub, or
+  whose email moved to another account, keeps the old value until they
+  sign in again. So an invitation matches an account only within 24 hours
+  of its last sign-in: the edge refuses such an account with `your login
+  and email were last confirmed over 24 hours ago; open this edge in a
+  browser to confirm them, then retry`, any edge page opened later asks the
+  provider again, and the server checks the same age in the grant, which
+  carries when the provider last confirmed the account. Within those 24
+  hours an old login or email can still match. Members match by the
+  provider's immutable subject and are unaffected.
 - **The dashboard through the edge terminates TLS on the server.** The edge
   routes by SNI and never holds the server's certificate key. But the
   wildcard DNS name points at the edge, and a CA validates a host name by
@@ -708,16 +743,27 @@ code can and cannot do; the reasons follow.
   certificates of `<server id>.<server domain>` that your server did not
   request. SSH, and the CLI and `aether gui` that use it, are not exposed
   this way.
-- **The browser session is a cookie of the server, not of the edge.**
-  `__Host-aether_session` is HttpOnly, Secure, SameSite=Strict and bound to
-  exactly the server's hostname; the server stores only its hash, as a
-  browser device that is approved, listed and revoked like any other. A
-  revoked session or removed member is refused on the next request and loses
-  its live WebSockets within 3 seconds. The sign-in code the edge returns is
-  single-use, expires after 2 minutes, and is bound to that server and to the
-  PKCE verifier held in the `__Host-aether_signin` cookie, so a code
-  presented to another server, replayed, or opened in a browser without that
-  cookie is refused.
+- **Browser credentials are cookies of the server, not of the edge.** A
+  browser is a device, identified by `__Host-aether_device`; each sign-in on
+  it is a session, `__Host-aether_session`. Both are random, HttpOnly,
+  Secure, SameSite=Strict and bound to exactly the server's hostname, and
+  the server stores only their hashes. The browser device is approved,
+  listed and revoked like any other device. Signing out ends the session
+  and keeps the device, so signing in again on that browser needs no new
+  approval, while a device cookie presented for another member, or of a
+  revoked device, signs in as a new device. The device cookie therefore
+  carries the device's approval, as a device key does: revoke the browser
+  with `aether device revoke` when it is lost. Revoking the device refuses
+  all of its sessions. An ended session, a revoked device or a removed
+  member is refused on the next request and loses its live WebSockets
+  within 3 seconds. The edge's redirect back to the server is a cross-site
+  navigation that carries no Strict cookie, so `/auth/login` copies the
+  device cookie into the 10-minute `__Host-aether_signin` cookie
+  (SameSite=Lax) for the callback to read. The sign-in code the edge returns
+  is single-use, expires after 2 minutes, and is bound to that server and to
+  the PKCE verifier held in `__Host-aether_signin`, so a code presented to
+  another server, replayed, or opened in a browser without that cookie is
+  refused.
 - **State changes need an Origin.** With a cookie credential, a request
   without an `Origin` header is the one case the same-origin check cannot
   judge, so the edge dashboard refuses every non-GET request and WebSocket

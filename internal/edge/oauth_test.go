@@ -45,7 +45,8 @@ func TestSignInGitHub(t *testing.T) {
 	if session == nil || !session.Secure || !session.HttpOnly || session.SameSite != http.SameSiteLaxMode || session.Path != "/" {
 		t.Fatalf("session cookie = %+v, want __Host- cookie that is Secure, HttpOnly, SameSite=Lax, Path=/", session)
 	}
-	want := edgeproto.Account{Provider: "github", Subject: "4242", Login: "Octo-Cat", Email: "octo@example.test", Name: "Test User"}
+	want := edgeproto.Account{Provider: "github", Subject: "4242", Login: "Octo-Cat", Email: "octo@example.test", Name: "Test User",
+		IdentityAt: h.clock.Now()}
 	if got := sessionAccount(t, h, b); got != want {
 		t.Errorf("account = %+v, want %+v", got, want)
 	}

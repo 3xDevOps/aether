@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/3xDevOps/Aether/internal/edge/edgestore"
 	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
@@ -101,7 +103,7 @@ func (s *Service) signinPage(w http.ResponseWriter, r *http.Request) {
 	next := localPath(r.URL.Query().Get("next"))
 	_, ok, err := s.visitor(r)
 	if err != nil {
-		s.fail(w, nil, err)
+		s.fail(w, r, nil, err)
 		return
 	}
 	if ok {
@@ -119,11 +121,11 @@ func (s *Service) signinPage(w http.ResponseWriter, r *http.Request) {
 func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
 	p := s.provider(r.PathValue("provider"))
 	if p == nil {
-		s.fail(w, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
+		s.fail(w, r, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
 		return
 	}
-	if !s.signinLimit.allow(addrKey(r)) {
-		s.fail(w, nil, edgeproto.RefusalTooMany)
+	if !s.signinLimit.allow(addrKeys(r)...) {
+		s.fail(w, r, nil, edgeproto.RefusalTooMany)
 		return
 	}
 	st := signinState{
@@ -134,7 +136,7 @@ func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := json.Marshal(st)
 	if err != nil {
-		s.fail(w, nil, fmt.Errorf("encode sign-in state: %w", err))
+		s.fail(w, r, nil, fmt.Errorf("encode sign-in state: %w", err))
 		return
 	}
 	setCookie(w, signinCookie, base64.RawURLEncoding.EncodeToString(raw), int(signinTTL.Seconds()))
@@ -144,17 +146,17 @@ func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
 func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 	p := s.provider(r.PathValue("provider"))
 	if p == nil {
-		s.fail(w, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
+		s.fail(w, r, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
 		return
 	}
-	if !s.signinLimit.allow(addrKey(r)) {
-		s.fail(w, nil, edgeproto.RefusalTooMany)
+	if !s.signinLimit.allow(addrKeys(r)...) {
+		s.fail(w, r, nil, edgeproto.RefusalTooMany)
 		return
 	}
 	st, err := readSigninState(r)
 	setCookie(w, signinCookie, "", -1)
 	if err != nil {
-		s.fail(w, nil, err)
+		s.fail(w, r, nil, err)
 		return
 	}
 	q := r.URL.Query()
@@ -162,12 +164,12 @@ func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 	// browser's own sign-in can put its error text on an edge page.
 	if st.Provider != p.id || !edgeproto.ValidToken(st.State) ||
 		subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(st.State)) != 1 {
-		s.fail(w, nil, pageErr(http.StatusBadRequest,
+		s.fail(w, r, nil, pageErr(http.StatusBadRequest,
 			"the sign-in response does not belong to the sign-in this browser started; start again"))
 		return
 	}
 	if e := q.Get("error"); e != "" {
-		s.fail(w, nil, pageErr(http.StatusForbidden, "%s sign-in failed: %s %s", p.title,
+		s.fail(w, r, nil, pageErr(http.StatusForbidden, "%s sign-in failed: %s %s", p.title,
 			cleanName(e), cleanName(q.Get("error_description"))))
 		return
 	}
@@ -175,16 +177,23 @@ func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	tok, err := p.conf.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(st.Verifier))
 	if err != nil {
-		s.fail(w, nil, pageErr(http.StatusBadGateway, "%s sign-in: exchange code: %v", p.title, err))
+		s.fail(w, r, nil, pageErr(http.StatusBadGateway, "%s sign-in: exchange code: %v", p.title, err))
 		return
 	}
 	account, err := s.fetchAccount(ctx, p, tok.AccessToken)
 	if err != nil {
-		s.fail(w, nil, pageErr(http.StatusBadGateway, "%s sign-in: %v", p.title, err))
+		// An account the edge refuses keeps its 403: only a provider
+		// that failed to answer is a 502, and logged.
+		status := http.StatusBadGateway
+		var refused *statusError
+		if errors.As(err, &refused) {
+			status = refused.status
+		}
+		s.fail(w, r, nil, pageErr(status, "%s sign-in: %v", p.title, err))
 		return
 	}
 	if err := s.startSession(w, r, account); err != nil {
-		s.fail(w, nil, err)
+		s.fail(w, r, nil, err)
 		return
 	}
 	http.Redirect(w, r, localPath(st.Next), http.StatusSeeOther)
@@ -218,6 +227,9 @@ func (s *Service) startSession(w http.ResponseWriter, r *http.Request, account e
 		}
 	}
 	accountID, err := s.store.SignIn(ctx, account, now)
+	if errors.Is(err, edgestore.ErrAccountBlocked) {
+		return edgeproto.RefusalAccountBlocked
+	}
 	if err != nil {
 		return err
 	}
@@ -243,7 +255,7 @@ func (s *Service) fetchAccount(ctx context.Context, p *provider, accessToken str
 		return edgeproto.Account{}, err
 	}
 	if err := a.Validate(); err != nil {
-		return edgeproto.Account{}, fmt.Errorf("the provider returned an account this edge cannot use: %w", err)
+		return edgeproto.Account{}, pageErr(http.StatusForbidden, "the provider returned an account this edge cannot use: %v", err)
 	}
 	return a, nil
 }
@@ -260,10 +272,10 @@ func (s *Service) githubAccount(ctx context.Context, api, accessToken string) (e
 		return edgeproto.Account{}, err
 	}
 	if user.ID <= 0 {
-		return edgeproto.Account{}, fmt.Errorf("GitHub user id %d is not positive", user.ID)
+		return edgeproto.Account{}, pageErr(http.StatusForbidden, "GitHub user id %d is not positive", user.ID)
 	}
 	if !validGitHubLogin(user.Login) {
-		return edgeproto.Account{}, fmt.Errorf("GitHub login %q is not a valid login", user.Login)
+		return edgeproto.Account{}, pageErr(http.StatusForbidden, "GitHub login %q is not a valid login", user.Login)
 	}
 	var emails []struct {
 		Email    string `json:"email"`

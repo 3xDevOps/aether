@@ -40,10 +40,11 @@ func main() {
 	case "version":
 		fmt.Println("aether-edge", version.String())
 	case "serve":
-		if err := serve(os.Args[2:]); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "aether-edge:", err)
-			os.Exit(1)
-		}
+		exit(serve(os.Args[2:]))
+	case "servers":
+		exit(servers(os.Args[2:], os.Getenv, os.Stdout))
+	case "accounts":
+		exit(accounts(os.Args[2:], os.Getenv, os.Stdout))
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "aether-edge: unknown command %q\n", os.Args[1])
 		usage()
@@ -51,20 +52,30 @@ func main() {
 	}
 }
 
+func exit(err error) {
+	switch {
+	case err == nil, errors.Is(err, flag.ErrHelp):
+	case errors.Is(err, errUsage):
+		os.Exit(2)
+	default:
+		_, _ = fmt.Fprintln(os.Stderr, "aether-edge:", err)
+		os.Exit(1)
+	}
+}
+
 func usage() {
 	_, _ = fmt.Fprint(os.Stderr, `usage: aether-edge <command>
 
 commands:
-  serve    run the edge (aether-edge serve -h lists its options)
-  version  print the version
+  serve     run the edge (aether-edge serve -h lists its options)
+  servers   list, remove, block and unblock servers
+  accounts  list, block, unblock and delete accounts
+  version   print the version
 `)
 }
 
 func serve(args []string) error {
 	o, err := parseOptions(args, os.Getenv)
-	if errors.Is(err, flag.ErrHelp) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}

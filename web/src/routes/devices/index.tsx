@@ -1,7 +1,7 @@
 // Devices: the computers and browsers members reach this server through an
 // edge with. A member sees their own and an admin sees everyone's; both
-// approve a pending device by its code and revoke one. Every refusal is the
-// server's message, shown verbatim.
+// approve a pending device by the code it shows and revoke one. Every
+// refusal is the server's message, shown verbatim.
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -100,7 +100,9 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
           <p className="max-w-3xl text-[13px] leading-5 text-muted-foreground">
             A device is one computer running aether, or one browser, that reaches this server
             through an edge. A member&apos;s first device is accepted; later ones stay pending
-            until a device the member already uses, or an admin, approves them.
+            until a device the member already uses, or an admin, approves them. Approve with the
+            code the new device shows on its own screen: a pending device nobody is holding is
+            someone else signed in with the member&apos;s account, so revoke it instead.
           </p>
 
           <form
@@ -177,27 +179,9 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                         {device.fingerprint}
                       </p>
                     )}
-                    {device.approval_code && (
-                      <p className="text-xs text-muted-foreground">
-                        Approval code{' '}
-                        <span className="font-mono text-foreground select-all">
-                          {device.approval_code}
-                        </span>
-                      </p>
-                    )}
                   </div>
                   {device.status !== 'revoked' && (
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
-                      {device.approval_code && (
-                        <Button
-                          size="default"
-                          disabled={approving}
-                          aria-label={`Approve ${device.label}`}
-                          onClick={() => void approve(device.approval_code ?? '')}
-                        >
-                          Approve
-                        </Button>
-                      )}
                       <Button
                         size="default"
                         variant="ghost"

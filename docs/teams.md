@@ -68,14 +68,19 @@ teammate sees the server after signing in:
 ```sh
 aether login
 aether servers
-aether link my-server
+aether link <server id>     # the ID column of aether servers
 ```
 
 Their first connection, or their first dashboard sign-in at
 `https://<server id>.<server domain>` from a browser or phone, creates their
 member with the invited role, binds it to their account, and uses the
 invitation up. They are not pending: the invitation was the approval.
-Invitations expire after 7 days:
+An invitation matches a login or email only within 24 hours of the
+teammate's last GitHub or Google sign-in at the edge, because a login or
+email can move to someone else; past that, `aether servers` leaves it out
+and connecting is refused with `open this edge in a browser to confirm
+them`. Opening any edge page, including the one `aether login` shows,
+signs them in with the provider again. Invitations expire after 7 days:
 
 ```sh
 aether invite list
@@ -87,7 +92,7 @@ invite code described [below](#by-invite-code-fallback).
 
 #### Linking an existing member
 
-A member who joined by SSH key or tailnet names their edge account first:
+An admin who joined by SSH key or tailnet names their own edge account:
 
 ```sh
 aether member link --github dana
@@ -96,7 +101,15 @@ aether member link --email dana@example.com [--provider github|google]
 
 That account then connects through the edge as the same member. An admin
 does this before claiming, through the edge, a server that already has
-members.
+members. Only admins can link: nothing proves the caller holds the account
+they name. Any other member is invited by an admin with `aether invite
+--github` or `--email`, which creates a new member for that account.
+
+Demoting an admin (`aether member role <id> collaborator`) revokes the open
+invitations and links they created. The server pushes at most 1000 members
+and open invitations to the edge; past that, `aether invite` is refused
+with `the edge directory already holds <n> members and open invitations,
+the most an edge accepts; revoke an open invitation first`.
 
 #### Devices
 
@@ -114,8 +127,8 @@ or on the server:
 ```
 
 ```sh
-aether device list                 # yours; an admin sees every member's
-aether device approve <code>       # from a device you already use, or as an admin
+aether device list                 # yours; an admin sees every member's; never shows codes
+aether device approve <code>       # the code the new device shows; from a device you already use, or as an admin
 aether device revoke <device-id>
 sudo aether-server device approve <code>   # on the server
 ```

@@ -29,7 +29,7 @@ func validMessages(t *testing.T) []Message {
 		Open{ConnID: conn, Ticket: NewToken(), Kind: KindWeb},
 		OpenResult{ConnID: conn},
 		OpenResult{ConnID: conn, Error: "device is pending approval: run aether device approve fake"},
-		Claim{ID: conn, Code: "wqc4lsjv-abcdefghijklmnop", Grant: "payload.sig"},
+		Claim{ID: conn, Code: "wqc4lsjvabcdefghijklmnopqr-abcdefghijklmnop", Grant: "payload.sig"},
 		ClaimResult{ID: conn, Error: string(RefusalClaimWrong)},
 		Claimed{Owner: Account{Provider: ProviderGoogle, Subject: "fake-sub", Email: "owner@example.com"}},
 		Directory{Entries: []DirectoryEntry{
@@ -115,7 +115,7 @@ func TestDecodeControlRefusals(t *testing.T) {
 		{"open of unknown kind", `{"type":"open","conn_id":"` + conn + `","ticket":"` + NewToken() + `","kind":"claim","grant":"a.b"}`, false},
 		{"result with escape in error", `{"type":"open_result","conn_id":"` + conn + `","error":"\u001b[2J"}`, false},
 		{"claim with bad code", `{"type":"claim","id":"` + conn + `","code":"nope","grant":"a.b"}`, false},
-		{"claim without grant", `{"type":"claim","id":"` + conn + `","code":"wqc4lsjv-abcdefghijklmnop"}`, false},
+		{"claim without grant", `{"type":"claim","id":"` + conn + `","code":"wqc4lsjvabcdefghijklmnopqr-abcdefghijklmnop"}`, false},
 		{"claimed without owner", `{"type":"claimed","owner":{}}`, false},
 		{"directory with bad entry", `{"type":"directory","entries":[{"kind":"member","provider":"github","role":"admin"}]}`, false},
 		{"redeem with bad verifier", `{"type":"web_redeem","id":"` + conn + `","code":"` + NewToken() + `","verifier":"x"}`, false},

@@ -85,6 +85,11 @@ const (
 	RefusalClaimExpired   Refusal = "claim code expired"
 	RefusalClaimExhausted Refusal = "claim code has no attempts left"
 	RefusalClaimed        Refusal = "server is already claimed"
+	RefusalServerBlocked  Refusal = "server is blocked by this edge's operator"
+	RefusalAccountBlocked Refusal = "account is blocked by this edge's operator"
+	// RefusalIdentityStale refuses an account an invitation would admit
+	// but whose login and email are older than IdentityMaxAge.
+	RefusalIdentityStale Refusal = "your login and email were last confirmed over 24 hours ago; open this edge in a browser to confirm them, then retry"
 )
 
 func (r Refusal) Error() string { return string(r) }
@@ -95,7 +100,8 @@ func (r Refusal) Status() int {
 	switch r {
 	case RefusalTokenRequired, RefusalTokenRevoked:
 		return http.StatusUnauthorized
-	case RefusalNotMember, RefusalClaimWrong, RefusalClaimExpired, RefusalClaimExhausted:
+	case RefusalNotMember, RefusalClaimWrong, RefusalClaimExpired, RefusalClaimExhausted,
+		RefusalServerBlocked, RefusalAccountBlocked, RefusalIdentityStale:
 		return http.StatusForbidden
 	case RefusalUnknownServer:
 		return http.StatusNotFound
@@ -171,9 +177,13 @@ type ServerInfo struct {
 	Role   string `json:"role"`
 }
 
-// ServersResponse answers GET PathServers.
+// ServersResponse answers GET PathServers. ServerDomain is the domain the
+// edge passes dashboards through under: a server's dashboard is
+// https://ServerHostname(id, ServerDomain). An edge older than the field
+// leaves it out.
 type ServersResponse struct {
-	Servers []ServerInfo `json:"servers"`
+	Servers      []ServerInfo `json:"servers"`
+	ServerDomain string       `json:"server_domain,omitempty"`
 }
 
 // ClaimRequest is POST PathClaim: a claim code as the person typed it.

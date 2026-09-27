@@ -279,6 +279,57 @@ func TestRevocationClosesLiveSplices(t *testing.T) {
 	expectClosed(t, laptop)
 }
 
+func TestRevocationDuringConnect(t *testing.T) {
+	e := newEnv(t)
+	a := claimedAgent(t, e)
+	alice := account("1")
+	e.dir.addMember(a.id, alice)
+	_, token := e.addDevice(t, alice, "alice-laptop")
+
+	// The revocation lands after the relay checked the token and before
+	// it registered the connection.
+	admitting, release := make(chan struct{}), make(chan struct{})
+	e.dir.mu.Lock()
+	e.dir.admitHook = func() {
+		close(admitting)
+		<-release
+	}
+	e.dir.mu.Unlock()
+	type dialed struct {
+		status int
+		err    error
+	}
+	done := make(chan dialed, 1)
+	go func() {
+		ws, resp, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.ConnectPath(a.id), &websocket.DialOptions{
+			HTTPHeader: bearerHeader(token),
+		})
+		d := dialed{err: err}
+		if resp != nil {
+			d.status = resp.StatusCode
+		}
+		if ws != nil {
+			_ = ws.CloseNow()
+		}
+		done <- d
+	}()
+	<-admitting
+	e.dir.mu.Lock()
+	delete(e.dir.tokens, token)
+	e.dir.mu.Unlock()
+	e.r.RevokeDevice("alice-laptop")
+	close(release)
+
+	if d := <-done; d.err == nil || d.status != http.StatusUnauthorized {
+		t.Fatalf("connection racing its device's revocation: status %d, %v; want 401", d.status, d.err)
+	}
+	select {
+	case m := <-a.msgs:
+		t.Fatalf("the server received %T for a revoked device", m)
+	default:
+	}
+}
+
 func TestConnectionLimits(t *testing.T) {
 	e := newEnv(t)
 	a := claimedAgent(t, e)
@@ -293,7 +344,7 @@ func TestConnectionLimits(t *testing.T) {
 		t.Fatalf("device over its limit: %d %q", status, text)
 	}
 
-	for i := edgeproto.MaxConnsPerDevice; i < edgeproto.MaxConnsPerServer; i++ {
+	for i := edgeproto.MaxConnsPerDevice; i < edgeproto.MaxSSHConnsPerServer; i++ {
 		_, other := e.addDevice(t, acct, "dev-extra-"+strings.Repeat("x", i))
 		e.connect(t, a, other)
 	}
@@ -391,6 +442,50 @@ func TestThrottleIsEdgeWide(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
 		t.Fatalf("%d splices carried %d KiB in %s: more connections bought more throughput", splices, splices*size>>10, elapsed)
+	}
+}
+
+// TestThrottleIsFairAcrossServers floods one server with SSH and
+// dashboard splices once the budget is spent: a terminal on another
+// server still gets its turn within about one throttled read.
+func TestThrottleIsFairAcrossServers(t *testing.T) {
+	e := newEnvWith(t, 1, &fakeEgress{months: map[string]int64{}})
+	e.r.throttleRate = 32 << 10
+	e.r.count(1)
+	acct := account("1")
+	flooded, quiet := claimedAgent(t, e), claimedAgent(t, e)
+	e.dir.addMember(flooded.id, acct)
+	e.dir.addMember(quiet.id, acct)
+	flood := func(client, server net.Conn) {
+		go func() { _, _ = io.Copy(io.Discard, server) }()
+		go func() {
+			for {
+				if _, err := client.Write(make([]byte, 32<<10)); err != nil {
+					return
+				}
+			}
+		}()
+	}
+	_, flooder := e.addDevice(t, acct, "flooder")
+	for range 8 {
+		flood(e.connect(t, flooded, flooder))
+		c, server, err := e.r.openWeb(flooded.id, "192.0.2.1:50000")
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, peer := net.Pipe()
+		t.Cleanup(func() { _ = peer.Close() })
+		go e.r.splice(c, client, server)
+		flood(peer, flooded.nextData(t))
+	}
+
+	_, token := e.addDevice(t, acct, "terminal")
+	client, server := e.connect(t, quiet, token)
+	time.Sleep(500 * time.Millisecond)
+	start := time.Now()
+	roundTrip(t, client, server, "k")
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("a keystroke to another server took %s behind the flood", elapsed)
 	}
 }
 

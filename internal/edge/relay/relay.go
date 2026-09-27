@@ -34,9 +34,13 @@ type Directory interface {
 	// edgeproto.RefusalUnknownServer when serverID has no owner, and
 	// edgeproto.RefusalNotMember otherwise.
 	Admit(ctx context.Context, serverID string, account edgeproto.Account) error
-	// Claimed reports whether serverID has an owner, and records name,
-	// the name its hello announced, for a server that has one.
-	Claimed(ctx context.Context, serverID, name string) (bool, error)
+	// Enroll reports whether serverID has an owner, and records name,
+	// the name its hello announced, for a server that has one. It returns
+	// edgeproto.RefusalServerBlocked for a server id the operator
+	// blocked.
+	Enroll(ctx context.Context, serverID, name string) (claimed bool, err error)
+	// Claimed reports whether serverID has an owner.
+	Claimed(ctx context.Context, serverID string) (bool, error)
 	// ReplaceDirectory stores the directory a claimed server pushed.
 	ReplaceDirectory(ctx context.Context, serverID string, entries []edgeproto.DirectoryEntry) error
 	// RedeemWebCode redeems a web sign-in code serverID presented and
@@ -76,17 +80,23 @@ const (
 	handshakeTimeout = 10 * time.Second
 	writeTimeout     = 10 * time.Second
 	directoryTimeout = 10 * time.Second
-	egressFlushEvery = time.Minute
+	// directoryInterval is the least time between two stores of one
+	// server's directory. A store holds the edge database's write lock,
+	// which sign-ins and connections of every account also take, so no
+	// server may take it at will; a push in between waits, and only the
+	// latest waiting push is stored.
+	directoryInterval = 5 * time.Second
+	egressFlushEvery  = time.Minute
 	// throttledRate is the bytes per second every splice together may
 	// carry once the egress budget is spent: dozens of terminals, no bulk
 	// transfer, and at most about 650 GiB over a 31-day month.
 	throttledRate = 256 << 10
-	// throttledChunk bounds one throttled read, so a bulk transfer queues
-	// behind a terminal for at most throttledChunk/throttledRate.
+	// throttledChunk bounds one throttled read, and so how long a read of
+	// one server holds back another server's.
 	throttledChunk = 4 << 10
 	// maxUnclaimed bounds unclaimed registrations edge-wide. Each holds a
-	// control socket for up to UnclaimedTTL, and MaxUnclaimedPerAddress
-	// alone does not bound a sender with many IPv6 /64s.
+	// control socket for up to UnclaimedTTL, and the limits per address
+	// block do not bound a sender holding many blocks.
 	maxUnclaimed = 10000
 	// maxConnsPerAddress bounds the public listener's open connections
 	// from one edgeproto.RateLimitKey block. It sits far above what an
@@ -117,6 +127,7 @@ type Relay struct {
 	unclaimedTTL       time.Duration
 	pingInterval       time.Duration
 	idleTimeout        time.Duration
+	directoryInterval  time.Duration
 	throttleRate       int64
 	maxUnclaimed       int
 	maxConnsPerAddress int
@@ -126,13 +137,15 @@ type Relay struct {
 	servers map[string]*registration
 	conns   map[string]*relayConn
 	claims  map[string]*pendingClaim
+	// directories holds, per server id, the directory waiting to be
+	// stored.
+	directories map[string]*directoryWrite
 
 	addrMu    sync.Mutex
 	addrConns map[netip.Prefix]int
 
-	// throttleNext is when the next throttled read may be sent.
-	throttleMu   sync.Mutex
-	throttleNext time.Time
+	sshPace pacer
+	webPace pacer
 
 	egressMu    sync.Mutex
 	month       string
@@ -184,12 +197,14 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		unclaimedTTL:       edgeproto.UnclaimedTTL,
 		pingInterval:       edgeproto.PingInterval,
 		idleTimeout:        edgeproto.ControlIdleTimeout,
+		directoryInterval:  directoryInterval,
 		throttleRate:       throttledRate,
 		maxUnclaimed:       maxUnclaimed,
 		maxConnsPerAddress: maxConnsPerAddress,
 		servers:            map[string]*registration{},
 		conns:              map[string]*relayConn{},
 		claims:             map[string]*pendingClaim{},
+		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},
 		month:              month,
 		refusalsMap:        map[string]uint64{},

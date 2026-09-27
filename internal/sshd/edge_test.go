@@ -2,7 +2,9 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -29,7 +31,9 @@ func (relayedConn) RemoteAddr() net.Addr { return relayAddr{} }
 func (relayAddr) Network() string        { return "websocket" }
 func (relayAddr) String() string         { return "edge relay" }
 
-var octo = edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo", Name: "Octo Cat"}
+// octo's login was confirmed by GitHub as the tests start.
+var octo = edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo", Name: "Octo Cat",
+	IdentityAt: time.Now()}
 
 func grantFor(account edgeproto.Account, device ssh.Signer, label string) edgeproto.Grant {
 	now := time.Now().UTC()
@@ -241,7 +245,7 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	}
 	// The same verified email from another provider is another account,
 	// and the consumed invitation admits nobody else.
-	google := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-7", Email: "octo@example.com"}
+	google := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-7", Email: "octo@example.com", IdentityAt: time.Now()}
 	e.mustRefuseEdge(t, google, newSigner(t), "phone", "google account octo@example.com is not a member of this server")
 }
 
@@ -251,6 +255,18 @@ func TestEdgeExpiredInvitationRefused(t *testing.T) {
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "OCTO", Role: domain.RoleAdmin,
 		ExpiresAt: time.Now().Add(-time.Minute)})
 	e.mustRefuseEdge(t, octo, newSigner(t), "laptop", "not a member of this server")
+}
+
+// The server checks the identity's age itself: a login the provider has
+// not confirmed for a day may belong to someone else by now.
+func TestEdgeStaleIdentityMatchesNoInvitation(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
+	stale := octo
+	stale.IdentityAt = time.Now().Add(-edgeproto.IdentityMaxAge - time.Minute)
+	e.mustRefuseEdge(t, stale, newSigner(t), "laptop", "not a member of this server")
+	e.mustDialEdge(t, octo, newSigner(t), "laptop")
 }
 
 func TestEdgeSecondDevicePendingUntilApproved(t *testing.T) {
@@ -264,19 +280,19 @@ func TestEdgeSecondDevicePendingUntilApproved(t *testing.T) {
 	if err == nil {
 		t.Fatal("second device connected without approval")
 	}
-	var list protocol.MemberDeviceListResult
+	_, rest, _ := strings.Cut(banner, "aether device approve ")
+	code, _, _ := strings.Cut(rest, "\n")
+	if code == "" || !strings.Contains(banner, "sudo aether-server device approve "+code) {
+		t.Fatalf("pending banner = %q", banner)
+	}
+	// Only the new device shows its code, so approving it proves the
+	// approver saw that device: the list never carries it.
+	var list json.RawMessage
 	if err = first.Call(protocol.MethodMemberDeviceList, struct{}{}, &list); err != nil {
 		t.Fatalf("device list: %v", err)
 	}
-	var code string
-	for _, d := range list.Devices {
-		if d.Label == "phone" && d.Status == string(domain.DevicePending) {
-			code = d.ApprovalCode
-		}
-	}
-	if code == "" || !strings.Contains(banner, "aether device approve "+code) ||
-		!strings.Contains(banner, "sudo aether-server device approve "+code) {
-		t.Fatalf("pending banner = %q, devices %+v", banner, list.Devices)
+	if !strings.Contains(string(list), `"phone"`) || strings.Contains(string(list), code) {
+		t.Fatalf("device list %s: want the pending phone without its approval code", list)
 	}
 
 	// Another member may not approve it; its own member may.
@@ -405,30 +421,83 @@ func TestClaimByEdgeLinksAnExistingAdmin(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	e := newTestEnv(t, nil)
-	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada"}
-	bobKey, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
-	var link protocol.MemberInvitationResult
-	if err := controlAs(t, e, bobKey).Call(protocol.MethodMemberIdentityLink,
-		protocol.MemberIdentityLinkParams{Provider: "github", Login: "bob"}, &link); err != nil {
-		t.Fatalf("collaborator link: %v", err)
-	}
-	if link.Invitation.MemberID != string(bob.ID) {
-		t.Fatalf("link = %+v, want bound to the caller", link.Invitation)
-	}
-	bobAccount := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "4004", Login: "bob"}
-	if _, err := e.srv.ClaimByEdge(ctx, bobAccount); !errors.Is(err, edgeproto.RefusalClaimed) {
-		t.Fatalf("claim through a collaborator's link = %v, want refused", err)
-	}
+	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada", IdentityAt: time.Now()}
 	if _, err := e.srv.ClaimByEdge(ctx, ada); !errors.Is(err, edgeproto.RefusalClaimed) {
 		t.Fatalf("claim before the admin linked = %v, want refused", err)
 	}
+	var link protocol.MemberInvitationResult
 	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityLink,
-		protocol.MemberIdentityLinkParams{Provider: "github", Login: "ada"}, nil); err != nil {
+		protocol.MemberIdentityLinkParams{Provider: "github", Login: "ada"}, &link); err != nil {
 		t.Fatalf("admin link: %v", err)
+	}
+	if link.Invitation.MemberID != string(e.member.ID) {
+		t.Fatalf("link = %+v, want bound to the caller", link.Invitation)
 	}
 	m, err := e.srv.ClaimByEdge(ctx, ada)
 	if err != nil || m.ID != e.member.ID {
 		t.Fatalf("claim through the admin's link = %+v, %v; want %s", m, err, e.member.ID)
+	}
+}
+
+// Nothing proves a link's caller holds the account it names, so a member
+// who is not an admin cannot bind another person's account to their own
+// member ahead of that person's invitation.
+func TestMemberCannotLinkAnotherAccount(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	carolKey, _ := addMember(t, e, "Carol", domain.RoleViewer, false)
+	var pe *protocol.Error
+	err := controlAs(t, e, carolKey).Call(protocol.MethodMemberIdentityLink,
+		protocol.MemberIdentityLinkParams{Provider: "github", Login: "octo"}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+		t.Fatalf("viewer linking another account = %v, want CodeDenied", err)
+	}
+	if err := controlClient(t, e).Call(protocol.MethodMemberInvitationCreate,
+		protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "collaborator"}, nil); err != nil {
+		t.Fatalf("invitation.create: %v", err)
+	}
+	got := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
+	if got.DisplayName != "Octo Cat" || got.Role != string(domain.RoleCollaborator) {
+		t.Fatalf("octo joined as %+v, want a new collaborator from the admin's invitation", got)
+	}
+}
+
+// An invitation grants its role when accepted, so it goes when its creator
+// stops being an admin.
+func TestDemotedAdminsInvitationsAreRevoked(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	carolKey, carol := addMember(t, e, "Carol", domain.RoleAdmin, false)
+	if err := controlAs(t, e, carolKey).Call(protocol.MethodMemberInvitationCreate,
+		protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "admin"}, nil); err != nil {
+		t.Fatalf("invitation.create: %v", err)
+	}
+	if err := controlClient(t, e).Call(protocol.MethodMemberRole,
+		protocol.MemberRoleParams{MemberID: string(carol.ID), Role: string(domain.RoleViewer)}, nil); err != nil {
+		t.Fatalf("member.role: %v", err)
+	}
+	if entries, err := e.srv.EdgeDirectory(context.Background()); err != nil || len(entries) != 0 {
+		t.Fatalf("directory after demotion = %+v, %v; want no invitation", entries, err)
+	}
+	e.mustRefuseEdge(t, octo, newSigner(t), "laptop", "github account octo is not a member of this server")
+}
+
+// The edge accepts a bounded directory; an invitation past it is refused
+// when created instead of stopping every later directory push.
+func TestInvitationBeyondTheEdgeDirectoryIsRefused(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	for i := range edgeproto.MaxDirectoryEntries {
+		inviteAccount(t, e, domain.Invitation{Email: fmt.Sprintf("person%d@example.com", i), Role: domain.RoleViewer})
+	}
+	var pe *protocol.Error
+	err := controlClient(t, e).Call(protocol.MethodMemberInvitationCreate,
+		protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "collaborator"}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState || !strings.Contains(pe.Message, "the most an edge accepts") {
+		t.Fatalf("invitation past the directory limit = %v, want refused", err)
+	}
+	if entries, err := e.srv.EdgeDirectory(context.Background()); err != nil || len(entries) != edgeproto.MaxDirectoryEntries {
+		t.Fatalf("directory = %d entries, %v; want the full directory", len(entries), err)
 	}
 }
 

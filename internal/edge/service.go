@@ -58,10 +58,14 @@ type ServerLink interface {
 	Online(serverID string) bool
 	// Claim forwards a claim code, as a person typed it, for account on
 	// device to the one connected server whose id the code names, and
-	// waits for its answer. It returns that server's id and name once
-	// account owns it, an edgeproto.Refusal when the edge or the server
-	// refused, and another error when the server did not answer.
-	Claim(ctx context.Context, code string, account edgeproto.Account, device edgeproto.Device) (serverID, name string, err error)
+	// waits for its answer. When the server accepts, it calls record,
+	// and treats the server as claimed only once record succeeds. It
+	// returns that server's id and name once account owns it, an
+	// edgeproto.Refusal when the edge or the server refused, and another
+	// error, which says what to do next, when the server did not answer
+	// or record failed.
+	Claim(ctx context.Context, code string, account edgeproto.Account, device edgeproto.Device,
+		record func(ctx context.Context, serverID, name string) error) (serverID, name string, err error)
 	// Unenroll tells serverID, if connected, that its owner removed it,
 	// and closes its control channel.
 	Unenroll(serverID string)
@@ -114,13 +118,13 @@ func New(cfg Config) (*Service, error) {
 		serverDomain: cfg.ServerDomain,
 		now:          now,
 		client:       &http.Client{Timeout: providerTimeout},
-		signinLimit:  newLimiter[netip.Prefix](20, 6*time.Second, now),
-		startLimit:   newLimiter[netip.Prefix](10, 30*time.Second, now),
+		signinLimit:  newAddrLimiter(20, 6*time.Second, now),
+		startLimit:   newAddrLimiter(10, 30*time.Second, now),
 		// Four polls a second: twenty sign-ins at once behind one address.
-		pollLimit:        newLimiter[netip.Prefix](30, 250*time.Millisecond, now),
-		codeLimit:        newLimiter[netip.Prefix](10, 6*time.Second, now),
+		pollLimit:        newAddrLimiter(30, 250*time.Millisecond, now),
+		codeLimit:        newAddrLimiter(10, 6*time.Second, now),
 		codeAccountLimit: newLimiter[int64](10, time.Minute, now),
-		claimLimit:       newLimiter[netip.Prefix](5, time.Minute, now),
+		claimLimit:       newAddrLimiter(5, time.Minute, now),
 	}
 	if cfg.GitHub != nil {
 		s.providers = append(s.providers, githubProvider(*cfg.GitHub, origin))

@@ -32,9 +32,10 @@ Over the tailnet, no dashboard account, password, token, cookie or key is
 stored by the Android shell: the phone's Tailscale login identifies it to
 your server ([networking.md](networking.md#the-dashboard)). Through an edge
 ([edge.md](edge.md#dashboard-through-the-edge)), the WebView's cookie store
-holds your server's session cookie, which identifies this phone to your
-server until you sign out, it goes 30 days unused, or a member revokes it;
-the sign-in itself happens in the phone's browser. An app login in the
+holds two cookies of your server: a device cookie, which identifies this
+phone as the same device each time you sign in, and a session
+cookie, which keeps you signed in until you sign out or it goes 30 days
+unused. The sign-in itself happens in the phone's browser. An app login in the
 remote development browser is separate server-side state, as described
 below. Uninstalling the app deletes everything stored on the phone.
 None of it is backed up: the app opts out of Google's cloud backup and of
@@ -96,14 +97,16 @@ end to end, and dashboard TLS ends on your server.
 
 | What | Why | Kept |
 | --- | --- | --- |
-| Your account: provider (GitHub or Google), the provider's user id, email, login and display name | To sign you in and to match invitations | Until the edge's operator deletes it |
+| Your account: provider (GitHub or Google), the provider's user id, email, login, display name, and when you last signed in with the provider | To sign you in and to match invitations | Until the edge's operator deletes it with `aether-edge accounts delete` |
 | Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `aether logout` or the edge's Devices page |
 | Browser sessions at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
 | A pending sign-in from `aether login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
-| Each server you claim: its id, its host name, you as its owner | To route connections and show you your servers | Until the owner removes it |
+| Each server you claim: its id, its host name, you as its owner | To route connections and show you your servers | Until the owner removes it, or the edge's operator removes or blocks it |
 | Each server's directory: the provider, user id, login, email and role of its members and open invitations | To refuse strangers before they reach the server | Replaced every time the server sends it |
 | One-time dashboard sign-in codes, hashed | To finish a dashboard sign-in | 2 minutes, single use |
 | Bytes relayed per month, not per person | To enforce the operator's bandwidth budget | Indefinitely |
+| A server id the operator blocked, and when | To refuse that server | Until the operator unblocks it |
+| An account the operator blocked: provider, the provider's user id, and when | To refuse its sign-ins and claims | Until the operator unblocks it, also after the account is deleted |
 | The edge's log: server ids, error messages, and the IP addresses of refused connections and failed TLS handshakes | To operate and defend the edge | For the retention period its operator sets |
 
 Rate limits count requests per IP address, or per /64 for IPv6, in memory
@@ -114,8 +117,9 @@ server logs the IP address of each connection the edge relays to it
 connections.
 
 Revoking your devices removes them from the edge; the account record stays.
-To have it deleted, ask the edge's operator; for `edge.onaether.dev`, use
-the contact above.
+To have it deleted, ask the edge's operator, who runs
+`aether-edge accounts delete` ([edge.md](edge.md#operator-commands)); for
+`edge.onaether.dev`, use the contact above.
 
 ## Remote-development data
 

@@ -24,13 +24,22 @@ func ValidProvider(p string) bool {
 
 // Account is a person signed in to the edge. Subject is the provider's
 // immutable user id. Email is set only when the provider verified it.
-// Login is the GitHub login; Google accounts have none.
+// Login is the GitHub login; Google accounts have none. IdentityAt is
+// when the provider last reported Email and Login: the account's last
+// browser sign-in at the edge.
 type Account struct {
-	Provider string `json:"provider"`
-	Subject  string `json:"subject"`
-	Email    string `json:"email,omitempty"`
-	Login    string `json:"login,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Provider   string    `json:"provider"`
+	Subject    string    `json:"subject"`
+	Email      string    `json:"email,omitempty"`
+	Login      string    `json:"login,omitempty"`
+	Name       string    `json:"name,omitempty"`
+	IdentityAt time.Time `json:"identity_at,omitzero"`
+}
+
+// IdentityCurrent reports whether a's Email and Login are at most
+// IdentityMaxAge old at now.
+func (a Account) IdentityCurrent(now time.Time) bool {
+	return !a.IdentityAt.IsZero() && now.Sub(a.IdentityAt) <= IdentityMaxAge
 }
 
 // Validate checks an account's shape. Provider data that fails it, such as
@@ -156,13 +165,15 @@ func (e DirectoryEntry) Validate() error {
 // Members match by provider and subject only. Invitations match a GitHub
 // login or a verified email, case-insensitively in ASCII only, so that
 // Unicode case folding (the Kelvin sign folds to "k") cannot widen a
-// match. An expired invitation matches nothing.
+// match, and only while a.IdentityCurrent: an account that has not
+// signed in since its login or email moved to someone else still holds
+// the old one. An expired invitation matches nothing.
 func (e DirectoryEntry) Matches(a Account, now time.Time) bool {
 	switch e.Kind {
 	case EntryMember:
 		return e.Subject != "" && e.Provider == a.Provider && e.Subject == a.Subject
 	case EntryInvitation:
-		if !now.Before(e.ExpiresAt) {
+		if !now.Before(e.ExpiresAt) || !a.IdentityCurrent(now) {
 			return false
 		}
 		if e.Login != "" {

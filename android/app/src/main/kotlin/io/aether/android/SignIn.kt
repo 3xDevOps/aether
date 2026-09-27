@@ -62,9 +62,13 @@ fun isSignInLink(link: String): Boolean = SIGN_IN_LINK.containsMatchIn(link)
  * `aether://auth/callback?code=…&state=…` link returns from.
  *
  * The host is always the saved dashboard's, never one from the link. The code
- * is bound to the state cookie in this WebView and the verifier the server
- * holds, so a link another app intercepts is useless to it; the link is still
- * checked to be exactly what the edge sends, and never logged.
+ * is bound to the state cookie and the verifier of the browser that started
+ * the sign-in. For a sign-in this app started, that is this WebView, and a
+ * link another app intercepts is useless to it. For a sign-in an attacker
+ * started in their own browser and sent to a member as an edge link, it is
+ * the attacker's: another app that claims `aether://` can take the code and
+ * hand it to them. The link is checked to be exactly what the edge sends,
+ * and never logged.
  *
  * @throws SignInLinkError when the link is not exactly that, or [base] is not
  *   a dashboard reached through an edge.

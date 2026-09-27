@@ -22,23 +22,24 @@ const (
 	// creator or an admin.
 	MethodMemberInvitationRevoke = "member.invitation.revoke"
 	// MethodMemberIdentityLink names an edge account the caller signs in
-	// with, as an invitation bound to the caller's own member.
+	// with, as an invitation bound to the caller's own member: admin only.
 	MethodMemberIdentityLink = "member.identity.link"
 )
 
 // Device is the wire form of a member's device. Fingerprint is the SHA256
-// fingerprint of an ssh device's key; a browser device has none.
+// fingerprint of an ssh device's key; a browser device has none. It never
+// carries a pending device's approval code: only the new device shows it,
+// so approving with it proves the approver saw that device.
 type Device struct {
-	ID           string `json:"id"`
-	MemberID     string `json:"member_id"`
-	Kind         string `json:"kind"`
-	Label        string `json:"label"`
-	Status       string `json:"status"`
-	ApprovalCode string `json:"approval_code,omitempty"`
-	Fingerprint  string `json:"fingerprint,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	LastSeenAt   string `json:"last_seen_at,omitempty"`
-	ApprovedBy   string `json:"approved_by,omitempty"`
+	ID          string `json:"id"`
+	MemberID    string `json:"member_id"`
+	Kind        string `json:"kind"`
+	Label       string `json:"label"`
+	Status      string `json:"status"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	LastSeenAt  string `json:"last_seen_at,omitempty"`
+	ApprovedBy  string `json:"approved_by,omitempty"`
 }
 
 // MemberDeviceListResult is the result of member.device.list.

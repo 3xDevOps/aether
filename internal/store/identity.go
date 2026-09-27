@@ -13,7 +13,7 @@ import (
 // IdentityStore holds what edge access adds to membership: the edge
 // identities bound to members, the devices members reach the server
 // through, and invitations naming edge accounts. Removing a member removes
-// its identities, its devices (browser sessions included) and the
+// its identities, its devices with their browser sessions, and the
 // invitations it created or is linked by.
 type IdentityStore interface {
 	// GetMemberByIdentity returns the member bound to (provider, subject).
@@ -30,6 +30,9 @@ type IdentityStore interface {
 	ListInvitations(ctx context.Context) ([]*domain.Invitation, error)
 	// DeleteInvitation revokes an invitation not yet accepted.
 	DeleteInvitation(ctx context.Context, id domain.InvitationID) error
+	// DeleteInvitationsBy revokes every invitation creator made that is
+	// not yet accepted.
+	DeleteInvitationsBy(ctx context.Context, creator domain.MemberID) error
 	// AcceptInvitation binds identity to a member in one transaction and
 	// returns that member. When identity is already bound it returns its
 	// member and consumes nothing. Otherwise the invitation must be
@@ -53,9 +56,21 @@ type IdentityStore interface {
 	// ApproveDevice approves a pending device; ErrNotFound when it is not
 	// pending.
 	ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error
-	// RevokeDevice revokes a device that is not revoked yet.
+	// RevokeDevice revokes a device that is not revoked yet. A revoked
+	// device still counts as its member's device, and its browser
+	// sessions are refused with it.
 	RevokeDevice(ctx context.Context, id domain.DeviceID) error
 	TouchDevice(ctx context.Context, id domain.DeviceID, at time.Time) error
+
+	// CreateBrowserSession records a new session of the browser device
+	// s.Device.
+	CreateBrowserSession(ctx context.Context, s *domain.BrowserSession) error
+	GetBrowserSession(ctx context.Context, id domain.BrowserSessionID) (*domain.BrowserSession, error)
+	GetBrowserSessionByCredential(ctx context.Context, credential string) (*domain.BrowserSession, error)
+	// DeleteBrowserSession ends a session and leaves its device as it is.
+	DeleteBrowserSession(ctx context.Context, id domain.BrowserSessionID) error
+	// TouchBrowserSession records a use of the session and of its device.
+	TouchBrowserSession(ctx context.Context, id domain.BrowserSessionID, at time.Time) error
 }
 
 var _ IdentityStore = (*DB)(nil)
@@ -234,6 +249,14 @@ func (d *DB) ListInvitations(ctx context.Context) ([]*domain.Invitation, error) 
 func (d *DB) DeleteInvitation(ctx context.Context, id domain.InvitationID) error {
 	return d.execDelete(ctx, "delete invitation",
 		`DELETE FROM identity_invitations WHERE id = ? AND consumed_at IS NULL`, id)
+}
+
+func (d *DB) DeleteInvitationsBy(ctx context.Context, creator domain.MemberID) error {
+	if _, err := d.db.ExecContext(ctx,
+		`DELETE FROM identity_invitations WHERE created_by = ? AND consumed_at IS NULL`, creator); err != nil {
+		return fmt.Errorf("store: delete invitations by %s: %w", creator, err)
+	}
+	return nil
 }
 
 func (d *DB) AcceptInvitation(ctx context.Context, id domain.InvitationID, identity *domain.Identity, m *domain.Member, now time.Time) (*domain.Member, error) {

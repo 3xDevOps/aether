@@ -1,7 +1,8 @@
 // Package edgestore is the edge's SQLite store: accounts, browser sessions,
 // device authorizations, devices, claimed servers with their directories,
-// web sign-in codes and the relay's monthly egress. It stores bearer
-// secrets only as edgeproto.HashToken values.
+// web sign-in codes, the relay's monthly egress, and the servers and
+// accounts the operator blocked. It stores bearer secrets only as
+// edgeproto.HashToken values.
 package edgestore
 
 import (
@@ -21,6 +22,13 @@ var ErrNotFound = errors.New("edgestore: not found")
 
 // ErrConflict reports a row whose unique key is taken.
 var ErrConflict = errors.New("edgestore: already exists")
+
+// ErrServerBlocked and ErrAccountBlocked report a server id or an account
+// the edge's operator blocked.
+var (
+	ErrServerBlocked  = errors.New("edgestore: server is blocked")
+	ErrAccountBlocked = errors.New("edgestore: account is blocked")
+)
 
 // Store is the edge database.
 type Store struct {
@@ -136,6 +144,24 @@ CREATE TABLE egress (
 );
 `, `
 ALTER TABLE device_authorizations ADD COLUMN client_addr TEXT NOT NULL DEFAULT '';
+`, `
+CREATE TABLE blocked_servers (
+	id         TEXT PRIMARY KEY,
+	blocked_at INTEGER NOT NULL
+);
+
+CREATE TABLE blocked_accounts (
+	provider   TEXT NOT NULL,
+	subject    TEXT NOT NULL,
+	blocked_at INTEGER NOT NULL,
+	PRIMARY KEY (provider, subject)
+);
+`, `
+CREATE INDEX web_sessions_expiry ON web_sessions(expires_at);
+CREATE INDEX device_authorizations_expiry ON device_authorizations(expires_at);
+CREATE INDEX web_codes_expiry ON web_codes(expires_at);
+`, `
+ALTER TABLE accounts ADD COLUMN identity_at INTEGER NOT NULL DEFAULT 0;
 `}
 
 func migrate(db *sql.DB) error {

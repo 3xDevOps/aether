@@ -181,14 +181,16 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer close(s.done)
 	a.setSession(s)
 	defer a.setSession(nil)
-	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
-	a.learnDomain(ready.ServerDomain)
+	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start, ServerDomain: a.learnDomain(ready.ServerDomain)})
 	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State, "server_domain", ready.ServerDomain)
 
-	if ready.State == edgeproto.StateUnclaimed {
+	switch ready.State {
+	case edgeproto.StateUnclaimed:
 		if err = a.forgetOwner(); err != nil {
 			return time.Since(start), err
 		}
+	case edgeproto.StateClaimed:
+		a.markClaimed()
 	}
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()

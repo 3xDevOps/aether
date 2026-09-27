@@ -98,9 +98,11 @@ func GitRemote(repo, url string, stdout, stderr io.Writer) error {
 }
 
 // gitSSHCommand sets repo's core.sshCommand to aether edge-ssh when no
-// git config names one. An existing value, from any config file, is the
-// user's and is never overwritten: stdout gets the exact command that
-// would replace it instead.
+// git config names one, or when the value is an aether edge-ssh an
+// earlier binary wrote, whose path an upgrade or a move may have
+// removed. Any other existing value, from any config file, is the user's
+// and is never overwritten: stdout gets the exact command that would
+// replace it instead.
 func gitSSHCommand(repo string, stdout io.Writer) error {
 	want, err := cli.EdgeSSHCommand()
 	if err != nil {
@@ -114,6 +116,7 @@ func gitSSHCommand(repo string, stdout io.Writer) error {
 	switch {
 	case err == nil && current == want:
 		return nil
+	case err == nil && aetherEdgeSSH(current):
 	case err == nil:
 		_, err = fmt.Fprintf(stdout, "core.sshCommand is already %q; aether left it unchanged.\n"+
 			"git typed by hand reaches the edge link only through aether edge-ssh, which runs ssh unchanged for every other host:\n"+
@@ -129,4 +132,18 @@ func gitSSHCommand(repo string, stdout io.Writer) error {
 	}
 	_, err = fmt.Fprintf(stdout, "git core.sshCommand -> %s\n", want)
 	return err
+}
+
+// aetherEdgeSSH reports whether command is exactly what EdgeSSHCommand
+// returns for some binary named aether.
+func aetherEdgeSSH(command string) bool {
+	exe, ok := strings.CutSuffix(command, " edge-ssh")
+	if !ok {
+		return false
+	}
+	if len(exe) >= 2 && strings.HasPrefix(exe, "'") && strings.HasSuffix(exe, "'") {
+		exe = strings.ReplaceAll(exe[1:len(exe)-1], `'\''`, "'")
+	}
+	name := filepath.Base(exe)
+	return (name == "aether" || name == "aether.exe") && shellquote.Quote(exe)+" edge-ssh" == command
 }

@@ -42,6 +42,19 @@ func TestOrigin(t *testing.T) {
 		{"edge.example", "", true},
 		{"", "", true},
 		{"https://edge.example\x00x", "", true},
+		{"https://192.0.2.1:8443", "https://192.0.2.1:8443", false},
+		{"https://[2001:db8::1]", "https://[2001:db8::1]", false},
+		// Placeholders and other hosts no DNS name or address can be.
+		{"https://<edge-host>", "", true},
+		{"https://edge_host.example", "", true},
+		{"https://-edge.example", "", true},
+		{"https://edge..example", "", true},
+		{"https://edge.example.", "", true},
+		{"https://*.example", "", true},
+		{"https://[fe80::1%25eth0]", "", true},
+		{"https://edge.example:0", "", true},
+		{"https://edge.example:65536", "", true},
+		{"https://edge.example:", "", true},
 	}
 	for _, tt := range tests {
 		got, err := Origin(tt.raw)

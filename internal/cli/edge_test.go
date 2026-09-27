@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -221,6 +222,26 @@ func TestDialLinkedTriesAddressBeforeEdge(t *testing.T) {
 	}
 }
 
+func TestDialLinkedReportsDirectFailureWhenEdgeAnswers(t *testing.T) {
+	w := newEdgeWorld(t)
+	edge := w.edge(t, "")
+	w.signIn(t, edge.URL)
+	impostor := &edgeWorld{host: mustSigner(t), device: w.device}
+	addr := impostor.listen(t)
+	stderr := captureStderr(t)
+	conn, err := Dial(Config{Addr: addr, EdgeURL: edge.URL, ServerID: w.serverID()})
+	out := stderr()
+	if err != nil {
+		t.Fatalf("Dial with an impostor at the address: %v", err)
+	}
+	_ = conn.Close()
+	for _, want := range []string{addr, "not the linked server " + w.serverID(), "through " + edge.URL} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stderr %q lacks %q", out, want)
+		}
+	}
+}
+
 func TestDialLinkedReportsBothCauses(t *testing.T) {
 	w := newEdgeWorld(t)
 	edge := w.edge(t, edgeproto.RefusalNotConnected)
@@ -249,6 +270,29 @@ func TestDialLinkedRefusesWrongKeyOnBothPaths(t *testing.T) {
 	}
 	if n := strings.Count(err.Error(), "not the linked server "+other); n != 2 {
 		t.Fatalf("error %q names the refused key %d times, want once per path", err, n)
+	}
+}
+
+func TestEdgeSSHCommandNamesThePathEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs a privilege on Windows")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	link := filepath.Join(bin, "aether")
+	if err := os.Symlink(exe, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if got, err := EdgeSSHCommand(); err != nil || got != link+" edge-ssh" {
+		t.Fatalf("EdgeSSHCommand() = %q, %v; want the PATH entry %s, which survives an upgrade", got, err, link)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if got, err := EdgeSSHCommand(); err != nil || got != exe+" edge-ssh" {
+		t.Fatalf("EdgeSSHCommand() = %q, %v; want %s when PATH has no aether", got, err, exe)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -113,21 +114,17 @@ func (l *fakeLink) Online(serverID string) bool {
 	return ok
 }
 
-func (l *fakeLink) Claim(_ context.Context, code string, a edgeproto.Account, d edgeproto.Device) (string, string, error) {
-	normalized, prefix, err := edgeproto.ParseClaimCode(code)
+func (l *fakeLink) Claim(ctx context.Context, code string, a edgeproto.Account, d edgeproto.Device,
+	record func(ctx context.Context, serverID, name string) error) (string, string, error) {
+	normalized, id, err := edgeproto.ParseClaimCode(code)
 	if err != nil {
 		return "", "", edgeproto.RefusalClaimWrong
 	}
 	l.mu.Lock()
-	var id, name string
-	for sid, n := range l.servers {
-		if strings.HasPrefix(sid, prefix) {
-			id, name = sid, n
-		}
-	}
+	name, ok := l.servers[id]
 	claim := l.claim
 	l.mu.Unlock()
-	if id == "" {
+	if !ok {
 		return "", "", edgeproto.RefusalNotConnected
 	}
 	if claim == nil {
@@ -135,6 +132,9 @@ func (l *fakeLink) Claim(_ context.Context, code string, a edgeproto.Account, d 
 	}
 	if err := claim(normalized, a, d); err != nil {
 		return "", "", err
+	}
+	if err := record(ctx, id, name); err != nil {
+		return "", "", fmt.Errorf("fake link: record: %w", err)
 	}
 	return id, name, nil
 }
@@ -371,4 +371,68 @@ func testServerID(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return edgeproto.ServerID(key)
+}
+
+// lockedBuffer is a log destination the server's goroutines write to
+// while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestFailuresAreLogged checks that the operator learns of a request the
+// edge failed, and not of one the client got wrong.
+func TestFailuresAreLogged(t *testing.T) {
+	h := newHarness(t)
+	var logs lockedBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if status, _ := h.apiCall(t, http.MethodGet, edgeproto.PathServers, edgeproto.NewToken(), nil, nil); status != http.StatusUnauthorized {
+		t.Fatalf("unknown token: status %d", status)
+	}
+	h.setGitHubUser(7, "not a login", "someone@example.test", true)
+	b := h.browser(t)
+	resp, _ := b.get(t, "/signin/github")
+	code, state := h.provider.authorize(t, resp.Header.Get("Location"))
+	if resp, _ = b.get(t, "/signin/github/callback?"+url.Values{"code": {code}, "state": {state}}.Encode()); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("account the edge cannot use: %s", resp.Status)
+	}
+	if got := logs.String(); got != "" {
+		t.Fatalf("client errors were logged:\n%s", got)
+	}
+
+	if err := h.svc.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	status, text := h.apiCall(t, http.MethodGet, edgeproto.PathServers, edgeproto.NewToken(), nil, nil)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("closed database: status %d %q", status, text)
+	}
+	resp, _ = b.do(t, http.MethodGet, "/servers", nil, http.Header{"Cookie": {sessionCookie + "=" + edgeproto.NewToken()}})
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("closed database: page %s", resp.Status)
+	}
+	got := logs.String()
+	for _, want := range []string{
+		`level=ERROR msg="edge: request failed" method=GET route="GET /v1/servers" status=500 error="` + text + `"`,
+		`route="GET /servers" status=500`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log lacks %s:\n%s", want, got)
+		}
+	}
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+
+	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
 func init() {
@@ -29,7 +31,7 @@ func runServers(args []string) error {
 	if err != nil {
 		return err
 	}
-	servers, err := client.Servers(context.Background())
+	servers, serverDomain, err := client.Servers(context.Background())
 	if err != nil {
 		return err
 	}
@@ -38,13 +40,19 @@ func runServers(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tNAME\tROLE\tONLINE")
+	_, _ = fmt.Fprintln(tw, "ID\tNAME\tROLE\tONLINE\tDASHBOARD")
 	for _, s := range servers {
 		online := "no"
 		if s.Online {
 			online = "yes"
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.ID, s.Name, s.Role, online)
+		// An edge older than the server domain does not say where
+		// dashboards are.
+		dashboard := "-"
+		if serverDomain != "" {
+			dashboard = "https://" + edgeproto.ServerHostname(s.ID, serverDomain) + "/"
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Name, s.Role, online, dashboard)
 	}
 	return tw.Flush()
 }

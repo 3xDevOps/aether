@@ -135,10 +135,9 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		`JSON object of administrator-owned generic harness definitions`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	o.tailnetRequireKey = fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
-	edgeURL := edgeURLValue(edgeagent.DefaultURL)
-	o.edgeURL = &edgeURL
+	o.edgeURL = new(edgeURLValue)
 	fs.Var(o.edgeURL, "edge-url",
-		`edge that relays SSH and the dashboard for members without a direct or tailnet route ("" = off)`)
+		"edge that relays SSH and the dashboard for members without a direct or tailnet route (empty = off; aether-server setup offers "+edgeagent.DefaultURL+")")
 	o.edgeDeviceApproval = fs.Bool("edge-device-approval", true,
 		"hold a member's later edge devices pending until an existing device, an admin, or aether-server device approve on this host approves them")
 	o.edgeACMEDirectory = fs.String("edge-acme-directory", acme.LetsEncryptURL,

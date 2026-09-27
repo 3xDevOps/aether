@@ -948,10 +948,14 @@ connections are not required to carry a key, it asks one more question -
 `Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
 fresh config - which is how a phone on the tailnet reaches the dashboard
 ([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
-on the edge, the relay at `https://edge.onaether.dev` that lets clients and
-phones reach the server with a GitHub or Google sign-in
-([edge.md](edge.md)); with tailscaled it asks. With the edge on, setup ends
-by printing the server id and a claim code for `aether link --claim <code>`.
+on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
+that lets clients and phones reach the server with a GitHub or Google sign-in
+([edge.md](edge.md)), and prints what the edge can see and the command that
+turns it off; with tailscaled it asks, defaulting to no. Setup is the only
+thing that turns the edge on: `edge-url` is empty unless the config file or
+a flag names an edge, so an upgrade never enrolls an existing server. With
+the edge on, setup ends by printing the server id, the dashboard address,
+and a claim code for `aether link --claim <code>`.
 Answering `server` to the install script's question runs it for you; this
 is the same command by hand.
 
@@ -961,7 +965,8 @@ sudo aether-server setup
 
 For an unattended install, `aether-server install` writes the same files from
 flags instead of questions - any serve option below is accepted, and options
-you leave off keep tracking the binary's defaults across upgrades:
+you leave off keep tracking the binary's defaults across upgrades. The edge
+stays off unless you pass `--edge-url`:
 
 ```sh
 sudo aether-server install --addr :2222 --tailnet-auto-join
@@ -1012,7 +1017,7 @@ uses the default; negative values have the semantics in the table.
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
-| `--edge-url` | `https://edge.onaether.dev` | Edge the server enrolls with, for members without a direct or tailnet route; `""` turns it off. See [edge.md](edge.md). |
+| `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled. See [edge.md](edge.md). |
 | `--edge-device-approval` | on | Hold a member's later edge devices, browsers included, pending until approved. |
 | `--edge-acme-directory` | Let's Encrypt production | ACME directory that issues the certificate of the dashboard through the edge. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
@@ -1169,7 +1174,7 @@ automatic.
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
-| `edge/` | Edge enrollment: the pinned edge key, the owner, the claim code's hash, the connection status ([edge.md](edge.md#files)). |
+| `edge/` | Edge enrollment, one directory per edge origin (`https_edge.onaether.dev/`): the pinned edge key, the owner, the claim code's hash, the connection status and dashboard domain. `edge/certs/` holds the dashboard certificate ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |

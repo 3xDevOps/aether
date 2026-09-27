@@ -97,8 +97,8 @@ func memberRemove(id string) error {
 }
 
 // memberLink binds a GitHub or Google account at the edge to your own
-// member: that account connects through the edge as you, and when you are
-// an admin it can claim this server with a claim code.
+// member, which must be an admin: that account connects through the edge
+// as you and can claim this server with a claim code.
 func memberLink(args []string) error {
 	fs := flag.NewFlagSet("member link", flag.ExitOnError)
 	github := fs.String("github", "", "your GitHub login")
@@ -108,7 +108,7 @@ func memberLink(args []string) error {
 		return err
 	}
 	if (*github == "") == (*email == "") || fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether member link --github <login> | --email <address> [--provider github|google]")
+		return fmt.Errorf("usage: aether member link --github <login> | --email <address> [--provider github|google]\nadmins only; anyone else is invited by an admin with aether invite --github or --email")
 	}
 	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email, Provider: *provider}
 	if *github != "" && *provider == "" {

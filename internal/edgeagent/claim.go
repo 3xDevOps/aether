@@ -33,4 +33,5 @@ func (a *Agent) claim(ctx context.Context, s *session, m edgeproto.Claim) {
 	}
 	a.reply(s, edgeproto.ClaimResult{ID: m.ID})
 	a.reply(s, edgeproto.Claimed{Owner: g.Account})
+	a.markClaimed()
 }

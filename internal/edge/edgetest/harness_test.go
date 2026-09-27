@@ -532,6 +532,7 @@ func (noRuns) StopTerminal(context.Context, domain.MemberID) error { return nil 
 type serverNode struct {
 	id    string
 	dir   string
+	edge  string
 	addr  string
 	db    *store.DB
 	ssh   *sshd.Server
@@ -586,9 +587,9 @@ func (h *harness) newServer() *serverNode {
 		_ = bus.Close()
 		_ = db.Close()
 	})
-	s := &serverNode{id: agent.ServerID(), dir: dir, db: db, ssh: srv, agent: agent}
+	s := &serverNode{id: agent.ServerID(), dir: dir, edge: h.origin, db: db, ssh: srv, agent: agent}
 	eventually(t, "server enrolled", func() error {
-		st, ok, err := edgeagent.OpenState(dir).Status()
+		st, ok, err := s.state(t).Status()
 		switch {
 		case err != nil:
 			return err
@@ -601,11 +602,21 @@ func (h *harness) newServer() *serverNode {
 	return s
 }
 
+// state is the server's edge agent state with the harness's edge.
+func (s *serverNode) state(t *testing.T) *edgeagent.State {
+	t.Helper()
+	st, err := edgeagent.OpenState(s.dir, s.edge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
 // claimCode issues a claim code as `aether-server edge claim-code` does,
 // valid from issued for edgeproto.ClaimCodeTTL.
 func (s *serverNode) claimCode(t *testing.T, issued time.Time) string {
 	t.Helper()
-	code, _, err := edgeagent.OpenState(s.dir).IssueClaimCode(s.id, issued)
+	code, _, err := s.state(t).IssueClaimCode(s.id, issued)
 	if err != nil {
 		t.Fatal(err)
 	}

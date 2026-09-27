@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/3xDevOps/Aether/internal/edge"
+	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
 // options is the edge's configuration. Every option is a flag whose
@@ -52,7 +52,7 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		"development mode: serve plain HTTP on this loopback address instead of --listen, without certificates or browser passthrough")
 	fs.StringVar(&o.metricsListen, "metrics-listen", env("AETHER_EDGE_METRICS_LISTEN", "127.0.0.1:9464"),
 		"loopback address that serves /metrics")
-	fs.StringVar(&o.dataDir, "data", env("AETHER_EDGE_DATA", "/var/lib/aether-edge"),
+	fs.StringVar(&o.dataDir, "data", dataDirDefault(getenv),
 		"data directory: edge.db, the signing key edge_key and the ACME cache")
 	fs.StringVar(&o.origin, "origin", env("AETHER_EDGE_ORIGIN", ""),
 		"public URL of this edge, https://host[:port]")
@@ -94,6 +94,9 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	} else if !strings.HasPrefix(o.origin, "https://") {
 		return options{}, fmt.Errorf("--origin must be https://host[:port], not %q; for a local plain-HTTP edge use --dev-listen", o.origin)
 	}
+	if _, err = edgeproto.Origin(o.origin); err != nil {
+		return options{}, fmt.Errorf("--origin: %w", err)
+	}
 	if o.github, err = oauthApp("github", *githubID, getenv("AETHER_EDGE_GITHUB_CLIENT_SECRET"), *githubSecretFile); err != nil {
 		return options{}, err
 	}
@@ -101,6 +104,15 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		return options{}, err
 	}
 	return o, nil
+}
+
+// dataDirDefault is the default of --data: AETHER_EDGE_DATA, else the
+// unit's state directory.
+func dataDirDefault(getenv func(string) string) string {
+	if d := getenv("AETHER_EDGE_DATA"); d != "" {
+		return d
+	}
+	return "/var/lib/aether-edge"
 }
 
 // checkLoopback refuses an address that is not an IP loopback address and
@@ -118,7 +130,9 @@ func checkLoopback(flagName, addr string) error {
 }
 
 // oauthApp returns the provider's OAuth application, or nil when it has
-// no client id. The secret comes from env or from secretFile, not both.
+// neither a client id nor a secret. The secret comes from env or from
+// secretFile, not both. A secret file holding only white space holds no
+// secret: the systemd unit gives an unconfigured provider such a file.
 func oauthApp(provider, clientID, envSecret, secretFile string) (*edge.OAuthApp, error) {
 	upper := strings.ToUpper(provider)
 	if envSecret != "" && secretFile != "" {
@@ -136,6 +150,9 @@ func oauthApp(provider, clientID, envSecret, secretFile string) (*edge.OAuthApp,
 		return nil, nil
 	case clientID == "":
 		return nil, fmt.Errorf("a %s client secret is set but --%s-client-id is not", provider, provider)
+	case secret == "" && secretFile != "":
+		return nil, fmt.Errorf("--%s-client-id is set but %s, named by --%s-client-secret-file, holds no secret",
+			provider, secretFile, provider)
 	case secret == "":
 		return nil, fmt.Errorf("--%s-client-id is set but its secret is not; set AETHER_EDGE_%s_CLIENT_SECRET or --%s-client-secret-file",
 			provider, upper, provider)
@@ -156,9 +173,5 @@ func readSecretFile(path string) (string, error) {
 	if len(data) > maxSecretFileSize {
 		return "", fmt.Errorf("%s is larger than %d bytes", path, maxSecretFileSize)
 	}
-	secret := strings.TrimSpace(string(data))
-	if secret == "" {
-		return "", errors.New(path + " is empty")
-	}
-	return secret, nil
+	return strings.TrimSpace(string(data)), nil
 }

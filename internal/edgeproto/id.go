@@ -50,11 +50,16 @@ func HostKeyMatches(hostKey ssh.PublicKey, serverID string) bool {
 // two labels short enough that every "<server id>.<d>" is a valid
 // hostname.
 func ValidServerDomain(d string) bool {
-	labels := strings.Split(d, ".")
-	if len(d) > 253-ServerIDLength-1 || len(labels) < 2 {
+	return len(d) <= 253-ServerIDLength-1 && strings.Contains(d, ".") && validLowerDNSName(d)
+}
+
+// validLowerDNSName reports whether name is a DNS name of lowercase
+// letters, digits and hyphens, at most 253 bytes, without a trailing dot.
+func validLowerDNSName(name string) bool {
+	if name == "" || len(name) > 253 {
 		return false
 	}
-	for _, l := range labels {
+	for l := range strings.SplitSeq(name, ".") {
 		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
 			return false
 		}

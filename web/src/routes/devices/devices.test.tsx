@@ -25,7 +25,6 @@ const pendingPhone = device({
   kind: 'browser',
   label: 'Safari on iPhone',
   status: 'pending',
-  approval_code: 'ABCD-EFGH',
   fingerprint: undefined,
   last_seen_at: undefined,
 })
@@ -54,7 +53,6 @@ describe('devices view', () => {
     const phone = list.getByText('Safari on iPhone').closest('li')!
     expect(within(phone).getByText('Browser')).toBeDefined()
     expect(within(phone).getByText('pending')).toBeDefined()
-    expect(within(phone).getByText('ABCD-EFGH')).toBeDefined()
     // An admin reads whose device it is.
     expect(phone.textContent).toMatch(/Bob · added .+ · never seen/)
   })
@@ -74,7 +72,7 @@ describe('devices view', () => {
     const list = vi
       .fn()
       .mockResolvedValueOnce([pendingPhone])
-      .mockResolvedValue([{ ...pendingPhone, status: 'approved', approval_code: undefined }])
+      .mockResolvedValue([{ ...pendingPhone, status: 'approved' }])
     const client = fakeApi({
       memberDeviceList: list,
       memberDeviceApprove: vi.fn(async () => ({ ...pendingPhone, status: 'approved' as const })),
@@ -90,17 +88,13 @@ describe('devices view', () => {
     expect(list).toHaveBeenCalledTimes(2)
   })
 
-  it('approves a pending row with its own code', async () => {
+  it('approves only with a code typed from the new device, never from a row', async () => {
     seed()
-    const client = fakeApi({
-      memberDeviceList: vi.fn(async () => [pendingPhone]),
-      memberDeviceApprove: vi.fn(async () => ({ ...pendingPhone, status: 'approved' as const })),
-    })
+    const client = fakeApi({ memberDeviceList: vi.fn(async () => [pendingPhone]) })
     render(<DevicesRoute params={{}} client={client} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Approve Safari on iPhone' }))
-
-    await vi.waitFor(() => expect(client.memberDeviceApprove).toHaveBeenCalledWith('ABCD-EFGH'))
+    const phone = (await screen.findByText('Safari on iPhone')).closest('li')!
+    expect(within(phone).queryByRole('button', { name: /Approve/ })).toBeNull()
   })
 
   it('shows the server refusal of a code verbatim', async () => {

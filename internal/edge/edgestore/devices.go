@@ -193,10 +193,11 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	return d, nil
 }
 
-// UseDevice returns the device holding the token that hashes to tokenHash
-// and records its use at now.
+// UseDevice returns the device holding the token that hashes to tokenHash,
+// when its account is not blocked, and records its use at now.
 func (s *Store) UseDevice(ctx context.Context, tokenHash string, now time.Time) (Device, error) {
-	err := oneRow(s.db.ExecContext(ctx, `UPDATE devices SET last_used_at = ? WHERE token_hash = ?`, unix(now), tokenHash))
+	err := oneRow(s.db.ExecContext(ctx, `UPDATE devices SET last_used_at = ?
+		WHERE token_hash = ? AND `+notBlocked("devices.account_id"), unix(now), tokenHash))
 	if errors.Is(err, ErrNotFound) {
 		return Device{}, err
 	}

@@ -228,7 +228,7 @@ func (g *Gateway) localEdgeServers(r *http.Request, body []byte) (any, *protocol
 	if perr != nil {
 		return nil, perr
 	}
-	servers, err := client.Servers(r.Context())
+	servers, _, err := client.Servers(r.Context())
 	if err != nil {
 		return nil, edgeError(err)
 	}

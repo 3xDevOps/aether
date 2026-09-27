@@ -45,7 +45,9 @@ func (s *Service) api(h func(*http.Request) (any, error)) http.HandlerFunc {
 			if errors.Is(err, edgeproto.RefusalTokenRequired) || errors.Is(err, edgeproto.RefusalTokenRevoked) {
 				hdr.Set("WWW-Authenticate", "Bearer")
 			}
-			writeJSON(w, errorStatus(err), edgeproto.ErrorBody{Error: err.Error()})
+			status := errorStatus(err)
+			logFailure(r, status, err)
+			writeJSON(w, status, edgeproto.ErrorBody{Error: err.Error()})
 			return
 		}
 		if out == nil {
@@ -79,7 +81,7 @@ func deviceState(state string) error {
 }
 
 func (s *Service) apiDeviceStart(r *http.Request) (any, error) {
-	if !s.startLimit.allow(addrKey(r)) {
+	if !s.startLimit.allow(addrKeys(r)...) {
 		return nil, edgeproto.RefusalTooMany
 	}
 	var req edgeproto.DeviceStartRequest
@@ -124,7 +126,7 @@ func (s *Service) apiDeviceStart(r *http.Request) (any, error) {
 }
 
 func (s *Service) apiDeviceToken(r *http.Request) (any, error) {
-	if !s.pollLimit.allow(addrKey(r)) {
+	if !s.pollLimit.allow(addrKeys(r)...) {
 		return nil, edgeproto.RefusalTooMany
 	}
 	var req edgeproto.DeviceTokenRequest
@@ -194,7 +196,7 @@ func (s *Service) apiServers(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := edgeproto.ServersResponse{Servers: []edgeproto.ServerInfo{}}
+	out := edgeproto.ServersResponse{Servers: []edgeproto.ServerInfo{}, ServerDomain: s.serverDomain}
 	for _, row := range rows {
 		out.Servers = append(out.Servers, row.ServerInfo)
 	}
@@ -206,7 +208,7 @@ func (s *Service) apiClaim(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !s.claimLimit.allow(addrKey(r)) {
+	if !s.claimLimit.allow(addrKeys(r)...) {
 		return nil, edgeproto.RefusalTooMany
 	}
 	var req edgeproto.ClaimRequest

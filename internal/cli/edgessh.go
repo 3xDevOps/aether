@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -78,13 +79,28 @@ func ParseSSHArgs(args []string) (SSHArgs, error) {
 }
 
 // EdgeSSHCommand is the ssh command git runs to reach edge links: this
-// binary's edge-ssh, quoted for the shell git runs it with.
+// binary's edge-ssh, quoted for the shell git runs it with. The binary is
+// named by the PATH entry that leads to it when there is one: on Linux
+// os.Executable resolves symlinks, often to a versioned directory an
+// upgrade deletes, and core.sshCommand keeps this command for good.
 func EdgeSSHCommand() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("cli: resolve aether binary path: %w", err)
 	}
+	if onPath, err := exec.LookPath("aether"); err == nil && sameFile(onPath, exe) {
+		exe = onPath
+	}
 	return shellquote.Quote(exe) + " edge-ssh", nil
+}
+
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
 }
 
 // GitSSHEnv is what a git process whose remote is rawURL adds to its

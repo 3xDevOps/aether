@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -171,7 +172,9 @@ func TestRouterClosesOtherConnections(t *testing.T) {
 		})
 	}
 	m := e.r.Metrics()
-	if m.Refusals["unknown host"] != 3 || m.Refusals[string(edgeproto.RefusalNotConnected)] != 2 {
+	// A name whose server has no owner at the edge is unknown, connected
+	// or not.
+	if m.Refusals["unknown host"] != 3 || m.Refusals[string(edgeproto.RefusalUnknownServer)] != 2 {
 		t.Fatalf("refusals %v", m.Refusals)
 	}
 
@@ -220,6 +223,70 @@ func TestRouterLimitsConnectionsPerAddress(t *testing.T) {
 	}
 	_ = first.Close()
 	eventually(t, "closed connection gives back its slot", func() bool { return open(dial()) })
+}
+
+// TestDashboardBudgetIsApartFromSSH fills a server's dashboard budget
+// from several addresses, as anyone who knows its host name can without
+// signing in, and still reaches it over SSH.
+func TestDashboardBudgetIsApartFromSSH(t *testing.T) {
+	e := newEnv(t)
+	addr := serveRouter(t, e)
+	a := claimedAgent(t, e)
+	host := edgeproto.ServerHostname(a.id, testDomain)
+	// hold opens a dashboard connection from local and leaves its TLS
+	// handshake waiting on the server.
+	hold := func(local string) {
+		d := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(local)}, Timeout: 5 * time.Second}
+		raw, err := d.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = raw.Close() })
+		go func() { _ = tls.Client(raw, &tls.Config{ServerName: host}).Handshake() }()
+	}
+	refused := func(want uint64) {
+		t.Helper()
+		eventually(t, "dashboard connection refused", func() bool {
+			return e.r.Metrics().Refusals[string(edgeproto.RefusalConnLimit)] == want
+		})
+	}
+
+	for range edgeproto.MaxWebConnsPerAddress {
+		hold("127.0.0.1")
+		a.nextData(t)
+	}
+	hold("127.0.0.1")
+	refused(1)
+
+	for i := edgeproto.MaxWebConnsPerAddress; i < edgeproto.MaxWebConnsPerServer; i++ {
+		hold(fmt.Sprintf("127.0.0.%d", 2+i/edgeproto.MaxWebConnsPerAddress))
+		a.nextData(t)
+	}
+	hold("127.0.0.200")
+	refused(2)
+
+	acct := account("1")
+	e.dir.addMember(a.id, acct)
+	_, token := e.addDevice(t, acct, "dev-1")
+	e.connect(t, a, token)
+}
+
+func TestDashboardOfRemovedServerIsNotPassedThrough(t *testing.T) {
+	e := newEnv(t)
+	addr := serveRouter(t, e)
+	a := claimedAgent(t, e)
+	// The operator removes the server while its control channel stays up.
+	e.dir.mu.Lock()
+	delete(e.dir.owners, a.id)
+	e.dir.mu.Unlock()
+	host := edgeproto.ServerHostname(a.id, testDomain)
+	_, pool := selfSigned(t, host)
+	if _, err := dialTLS(t, addr, host, pool); err == nil {
+		t.Fatal("handshake with a removed server's dashboard succeeded")
+	}
+	if got := e.r.Metrics().Refusals[string(edgeproto.RefusalUnknownServer)]; got != 1 {
+		t.Fatalf("unknown-server refusals %d, want 1", got)
+	}
 }
 
 func TestPeekClientHelloIsBounded(t *testing.T) {

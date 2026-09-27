@@ -40,10 +40,10 @@ func deviceList() error {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "ID\tMEMBER\tKIND\tLABEL\tSTATUS\tAPPROVAL CODE\tKEY\tLAST SEEN")
+		_, _ = fmt.Fprintln(tw, "ID\tMEMBER\tKIND\tLABEL\tSTATUS\tKEY\tLAST SEEN")
 		for _, d := range res.Devices {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				d.ID, d.MemberID, d.Kind, d.Label, d.Status, d.ApprovalCode, d.Fingerprint, d.LastSeenAt)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				d.ID, d.MemberID, d.Kind, d.Label, d.Status, d.Fingerprint, d.LastSeenAt)
 		}
 		return tw.Flush()
 	})

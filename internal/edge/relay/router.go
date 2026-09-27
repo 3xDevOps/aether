@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -117,13 +118,29 @@ func (r *Relay) route(conn net.Conn) {
 		_ = conn.Close()
 		return
 	}
-	c, server, err := r.open(r.ctx, serverID, edgeproto.KindWeb, edgeproto.Account{}, edgeproto.Device{}, clientAddr(conn.RemoteAddr().String()))
+	c, server, err := r.openWeb(serverID, conn.RemoteAddr().String())
 	if err != nil {
 		r.refusal(err)
 		_ = conn.Close()
 		return
 	}
 	r.splice(c, replay, server)
+}
+
+// openWeb opens a dashboard passthrough to serverID. The store, not the
+// live registration, says whether serverID is still claimed: the
+// operator may have removed or blocked it while it stayed connected.
+func (r *Relay) openWeb(serverID, remote string) (*relayConn, net.Conn, error) {
+	ctx, cancel := context.WithTimeout(r.ctx, directoryTimeout)
+	claimed, err := r.dir.Claimed(ctx, serverID)
+	cancel()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !claimed {
+		return nil, nil, edgeproto.RefusalUnknownServer
+	}
+	return r.open(r.ctx, serverID, edgeproto.KindWeb, edgeproto.Account{}, edgeproto.Device{}, remote)
 }
 
 // peekClientHello reads a TLS ClientHello from conn, at most

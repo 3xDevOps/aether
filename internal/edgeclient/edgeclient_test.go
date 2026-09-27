@@ -201,6 +201,80 @@ func TestDeviceFlowRefusesForeignVerificationAddress(t *testing.T) {
 	}
 }
 
+func TestDeviceFlowPollsThroughTransientFailures(t *testing.T) {
+	edge := newFakeEdge(t)
+	var (
+		mu    sync.Mutex
+		polls int
+		key   string
+	)
+	edge.mux.HandleFunc("POST "+edgeproto.PathDeviceStart, func(w http.ResponseWriter, r *http.Request) {
+		var req edgeproto.DeviceStartRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		key = req.Key
+		writeJSON(w, http.StatusOK, edgeproto.DeviceStartResponse{
+			DeviceCode: "device-code", UserCode: "ABCD-EFGH", VerificationURI: edge.URL + "/device", Interval: 1,
+		})
+	})
+	edge.mux.HandleFunc("POST "+edgeproto.PathDeviceToken, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		polls++
+		n := polls
+		mu.Unlock()
+		switch n {
+		case 1:
+			// A proxy in front of a restarting edge: no version header.
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		case 2:
+			writeJSON(w, http.StatusServiceUnavailable, edgeproto.ErrorBody{Error: "restarting"})
+		case 3:
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+		default:
+			writeJSON(w, http.StatusOK, edgeproto.DeviceTokenResponse{
+				Token:   edgeproto.NewToken(),
+				Device:  edgeproto.Device{ID: "dev-1", Label: "laptop", Key: key},
+				Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+			})
+		}
+	})
+	c := newTestClient(t, edge)
+	l, err := c.StartLogin(context.Background(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.Wait(context.Background(), l)
+	if err != nil {
+		t.Fatalf("Wait = %v, want the sign-in collected after the edge came back", err)
+	}
+	if s.Account.Login != "octo" || polls != 4 {
+		t.Fatalf("session = %+v after %d polls, want octo after 4", s, polls)
+	}
+}
+
+func TestDeviceFlowExpiryNamesTheLastFailure(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.mux.HandleFunc("POST "+edgeproto.PathDeviceStart, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, edgeproto.DeviceStartResponse{
+			DeviceCode: "device-code", UserCode: "ABCD-EFGH", VerificationURI: edge.URL + "/device", ExpiresIn: 1, Interval: 1,
+		})
+	})
+	edge.mux.HandleFunc("POST "+edgeproto.PathDeviceToken, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream down", http.StatusBadGateway)
+	})
+	c := newTestClient(t, edge)
+	l, err := c.StartLogin(context.Background(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Wait(context.Background(), l)
+	if err == nil || !strings.Contains(err.Error(), "expired before it was confirmed") || !strings.Contains(err.Error(), "upstream down") {
+		t.Fatalf("Wait error = %v, want the expiry and the 502 that caused it", err)
+	}
+}
+
 func TestDeviceFlowRefusesTokenForAnotherKey(t *testing.T) {
 	other, err := EnsureDeviceKey(t.TempDir())
 	if err != nil {
@@ -349,7 +423,7 @@ func TestRefusalTextCannotDriveTheTerminal(t *testing.T) {
 	})
 	c := newTestClient(t, edge)
 	signIn(t, c)
-	_, err := c.Servers(context.Background())
+	_, _, err := c.Servers(context.Background())
 	if err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") {
 		t.Fatalf("Servers error = %q, want control characters replaced", err)
 	}
@@ -440,7 +514,7 @@ func TestRedirectDoesNotCarryTheToken(t *testing.T) {
 	})
 	c := newTestClient(t, edge)
 	signIn(t, c)
-	if _, err := c.Servers(context.Background()); err == nil {
+	if _, _, err := c.Servers(context.Background()); err == nil {
 		t.Fatal("Servers followed a redirect")
 	}
 	if _, err := c.Dial(context.Background(), testServerID); err == nil {
@@ -457,7 +531,7 @@ func TestNotSignedIn(t *testing.T) {
 	if _, err := c.Dial(context.Background(), testServerID); !errors.Is(err, ErrNotSignedIn) {
 		t.Fatalf("Dial error = %v, want ErrNotSignedIn", err)
 	}
-	if _, err := c.Servers(context.Background()); !errors.Is(err, ErrNotSignedIn) {
+	if _, _, err := c.Servers(context.Background()); !errors.Is(err, ErrNotSignedIn) {
 		t.Fatalf("Servers error = %v, want ErrNotSignedIn", err)
 	}
 }
@@ -508,8 +582,9 @@ func TestLogoutKeepsTokenWhenEdgeIsUnreachable(t *testing.T) {
 
 func TestClaimRefusesServerTheCodeDoesNotName(t *testing.T) {
 	edge := newFakeEdge(t)
+	// A host key ground to share all but the last character of the id.
 	edge.mux.HandleFunc("POST "+edgeproto.PathClaim, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, edgeproto.ClaimResponse{ServerID: "aaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "prod"})
+		writeJSON(w, http.StatusOK, edgeproto.ClaimResponse{ServerID: testServerID[:edgeproto.ServerIDLength-1] + "a", Name: "prod"})
 	})
 	c := newTestClient(t, edge)
 	signIn(t, c)
@@ -547,16 +622,24 @@ func TestClaimSendsNormalizedCode(t *testing.T) {
 }
 
 func TestServersRefusesMalformedEntries(t *testing.T) {
-	edge := newFakeEdge(t)
-	edge.mux.HandleFunc("GET "+edgeproto.PathServers, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, edgeproto.ServersResponse{Servers: []edgeproto.ServerInfo{
+	for what, resp := range map[string]edgeproto.ServersResponse{
+		"a name with control characters": {Servers: []edgeproto.ServerInfo{
 			{ID: testServerID, Name: "prod\x1b[2J", Role: "admin"},
-		}})
-	})
-	c := newTestClient(t, edge)
-	signIn(t, c)
-	if _, err := c.Servers(context.Background()); err == nil {
-		t.Fatal("Servers accepted a name with control characters")
+		}},
+		// aether servers prints https://<id>.<domain>/ for each server.
+		"a server domain that is not a DNS name": {ServerDomain: "example.test/@attacker.test", Servers: []edgeproto.ServerInfo{
+			{ID: testServerID, Name: "prod", Role: "admin"},
+		}},
+	} {
+		edge := newFakeEdge(t)
+		edge.mux.HandleFunc("GET "+edgeproto.PathServers, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, resp)
+		})
+		c := newTestClient(t, edge)
+		signIn(t, c)
+		if _, _, err := c.Servers(context.Background()); err == nil {
+			t.Errorf("Servers accepted %s", what)
+		}
 	}
 }
 
@@ -568,7 +651,7 @@ func TestOldEdgeIsRefused(t *testing.T) {
 	})
 	c := newTestClient(t, edge)
 	signIn(t, c)
-	if _, err := c.Servers(context.Background()); err == nil || !strings.Contains(err.Error(), "upgrade required") {
+	if _, _, err := c.Servers(context.Background()); err == nil || !strings.Contains(err.Error(), "upgrade required") {
 		t.Fatalf("Servers error = %v, want upgrade required", err)
 	}
 }

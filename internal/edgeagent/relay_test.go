@@ -214,15 +214,34 @@ func TestWebOpenReachesTheWebListener(t *testing.T) {
 	}
 }
 
+// A full dashboard budget refuses dashboard connections and leaves SSH
+// its own.
 func TestConnectionLimit(t *testing.T) {
 	edge, _, a, ec := enrolled(t)
-	for range edgeproto.MaxConnsPerServer {
-		a.slots <- struct{}{}
+	for range edgeproto.MaxWebConnsPerServer {
+		a.webSlots <- struct{}{}
+	}
+	edge.open(ec, edgeproto.NewConnID(), edgeproto.KindWeb, "")
+	if r := expect[edgeproto.OpenResult](t, ec); r.Error != string(edgeproto.RefusalConnLimit) {
+		t.Fatalf("web open beyond the limit: %+v", r)
 	}
 	connID := edgeproto.NewConnID()
-	edge.open(ec, connID, edgeproto.KindWeb, "")
+	edge.open(ec, connID, edgeproto.KindSSH, edge.grant(t, sshGrant(t, a.ServerID(), connID)))
+	if r := expect[edgeproto.OpenResult](t, ec); r.Error != "" {
+		t.Fatalf("ssh open with the web budget full: %+v", r)
+	}
+	// Nothing reads the edge side of this connection's data socket, so it
+	// closes, as a real edge's would, before Run is stopped: otherwise
+	// Run waits out a close handshake nobody answers.
+	data := edge.nextData(t)
+	t.Cleanup(func() { _ = data.CloseNow() })
+	for range edgeproto.MaxSSHConnsPerServer - 1 {
+		a.sshSlots <- struct{}{}
+	}
+	connID = edgeproto.NewConnID()
+	edge.open(ec, connID, edgeproto.KindSSH, edge.grant(t, sshGrant(t, a.ServerID(), connID)))
 	if r := expect[edgeproto.OpenResult](t, ec); r.Error != string(edgeproto.RefusalConnLimit) {
-		t.Fatalf("open beyond the limit: %+v", r)
+		t.Fatalf("ssh open beyond the limit: %+v", r)
 	}
 }
 

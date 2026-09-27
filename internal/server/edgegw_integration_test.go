@@ -14,14 +14,17 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/edge"
 	"github.com/3xDevOps/Aether/internal/edge/relay"
+	"github.com/3xDevOps/Aether/internal/edgeagent"
+	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
 // TestIntegrationEdgeDashboardFailuresKeepServerRunning starts a server
 // against a real edge whose ACME directory cannot issue: the server learns
-// the edge's server domain when it enrolls, the edge dashboard starts
-// issuance on its own, the failure is retried in the background, and the
-// server keeps serving SSH through an edge restart until it is stopped,
-// then stops cleanly.
+// the edge's server domain when it enrolls, asks the CA nothing while the
+// edge would refuse every validation because the server is unclaimed,
+// starts issuance once claimed, retries the failure in the background, and
+// keeps serving SSH through an edge restart until it is stopped, then
+// stops cleanly.
 func TestIntegrationEdgeDashboardFailuresKeepServerRunning(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -58,10 +61,11 @@ func TestIntegrationEdgeDashboardFailuresKeepServerRunning(t *testing.T) {
 	defer ca.Close()
 
 	rt, _, verifyNoLeaks := pickRuntime(t)
-	srv, err := New(ctx, Config{
+	cfg := Config{
 		DataDir: filepath.Join(t.TempDir(), "data"), Addr: "127.0.0.1:0", Runtime: rt,
 		EdgeURL: edgeSrv.URL, EdgeACMEDirectory: ca.URL,
-	})
+	}
+	srv, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -71,10 +75,34 @@ func TestIntegrationEdgeDashboardFailuresKeepServerRunning(t *testing.T) {
 	go func() { runDone <- srv.Run(runCtx) }()
 	addr := waitSSHAddr(t, srv)
 
+	state, err := edgeagent.OpenState(cfg.DataDir, edgeSrv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(20 * time.Second)
+	for st, _, _ := state.Status(); !st.Connected; st, _, _ = state.Status() {
+		if time.Now().After(deadline) {
+			t.Fatal("the server never enrolled")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(time.Second)
+	if n := asked.Load(); n != 0 {
+		t.Fatalf("the unclaimed server asked the CA %d times; the edge refuses every validation until it is claimed", n)
+	}
+	code, _, err := state.IssueClaimCode(srv.edge.ServerID(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo"}
+	if _, _, err := rl.Claim(ctx, code, owner, edgeproto.Device{ID: "dev-1", Label: "laptop"},
+		func(context.Context, string, string) error { return nil }); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	deadline = time.Now().Add(20 * time.Second)
 	for asked.Load() == 0 {
 		if time.Now().After(deadline) {
-			t.Fatal("certificate issuance never started after the server enrolled")
+			t.Fatal("certificate issuance never started after the server was claimed")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -142,8 +142,11 @@ by its id:
 ```sh
 aether login
 aether link --claim <code>     # the owner, with the code aether-server setup printed
-aether link <server name>      # anyone the owner invited with aether invite --github
+aether link <server id>        # anyone the owner invited, with the id from aether servers
 ```
+
+A bare name such as `my-server` is always an SSH address, as on a tailnet;
+only a server id goes through the edge.
 
 The server's host key is checked against its id on every connection, and
 each device holds its own key. Phones and browsers open the dashboard at

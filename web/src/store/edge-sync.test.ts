@@ -108,6 +108,36 @@ describe('connect on the edge gateway', () => {
     expect(store.getState().streamDead).toBe(true)
   })
 
+  it('asks for a sign-in when the socket of a live session is refused', async () => {
+    let signedIn = true
+    const capabilities = vi.fn(() =>
+      signedIn
+        ? Promise.resolve({ gateway: 'edge' as const, methods: ['*'], ws: ['events'] })
+        : Promise.reject(signInRefusal()),
+    )
+    const store = createRootStore()
+    const stop = connect(store, fakeApi({ capabilities }))
+
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(1))
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({ data: JSON.stringify({ ok: true }) })
+    await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+
+    // The gateway ends the session and refuses every later handshake before
+    // the upgrade: the browser sees a close and nothing else.
+    signedIn = false
+    first.onclose?.({ code: 1006 })
+
+    await vi.waitFor(() => expect(store.getState().edgeAccess).toEqual({ state: 'signed-out' }))
+    expect(store.getState().streamDead).toBe(true)
+    expect(store.getState().connection).toBe('offline')
+    const opened = StubSocket.opened.length
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    expect(StubSocket.opened).toHaveLength(opened)
+    stop()
+  })
+
   it('names a silent edge origin as the relay, not Tailscale', async () => {
     const store = createRootStore()
     store.getState().setCapabilities({ gateway: 'edge', methods: ['*'], ws: ['events'] })
@@ -150,6 +180,27 @@ describe('a local link through an edge', () => {
       'ssh: handshake failed: device "laptop" is waiting for approval. From a device this account already uses, or as an admin, run:\n  aether device approve ABCD-EFGH',
       'device-pending',
     ],
+    [
+      'the edge no longer counts the account as a member',
+      `connect to server ${serverID}: edge.example.test refused: not a member of this server (HTTP 403)`,
+      'not-member',
+    ],
+    [
+      'the server no longer counts the account as a member',
+      'ssh handshake with ' + `${serverID}.edge.aether.invalid: ssh: handshake failed: ssh: unable to authenticate\n  server said: octo is not a member of this server`,
+      'not-member',
+    ],
+    ...[
+      'unknown server',
+      "server is blocked by this edge's operator",
+      "account is blocked by this edge's operator",
+      'too many attempts',
+      'connection limit reached',
+    ].map((reason): [string, string, string] => [
+      `the edge refuses with "${reason}"`,
+      `connect to server ${serverID}: edge.example.test refused: ${reason} (HTTP 403)`,
+      'edge-refused',
+    ]),
     [
       'the edge does not answer',
       `connect to server ${serverID}: edge.example.test: dial tcp 192.0.2.10:443: connect: connection refused`,

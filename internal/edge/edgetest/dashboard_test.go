@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -248,7 +249,37 @@ func (b *browser) signInTo(d *dashboard) (*http.Response, string) {
 	if want := d.url(edgeproto.PathAuthCallback); !strings.HasPrefix(cb.String(), want+"?") {
 		b.h.t.Fatalf("the edge returned to %s, want %s", cb, want)
 	}
-	return b.get(cb.String())
+	return b.fromEdge(cb)
+}
+
+// fromEdge follows the edge's redirect back to the dashboard as a browser
+// does. The navigation is cross-site, so of the dashboard's cookies only
+// the SameSite=Lax sign-in cookie goes with it; the cookie jar ignores
+// SameSite and would send them all.
+func (b *browser) fromEdge(cb *url.URL) (*http.Response, string) {
+	t := b.h.t
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, cb.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range b.client.Jar.Cookies(cb) {
+		if c.Name == "__Host-aether_signin" {
+			req.AddCookie(c)
+		}
+	}
+	client := &http.Client{Transport: b.client.Transport, Timeout: waitTimeout, CheckRedirect: b.client.CheckRedirect}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test client
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.client.Jar.SetCookies(cb, resp.Cookies())
+	return resp, string(data)
 }
 
 func (b *browser) mustSignInTo(d *dashboard) {
@@ -545,6 +576,39 @@ func TestDashboardAppReturn(t *testing.T) {
 	b.mustCall(d, protocol.MethodMemberList, struct{}{}, nil)
 }
 
+// Logging out ends the browser's session, not its device: signing in
+// again on the same browser needs no new approval and adds no device.
+func TestDashboardSignOutKeepsTheDevice(t *testing.T) {
+	w := newWebHarness(t)
+	a := w.newServer()
+	b := w.browser(alice)
+	w.claimInBrowser(b, a)
+	d := w.serveDashboard(a)
+	b.mustSignInTo(d)
+	var before protocol.MemberDeviceListResult
+	b.mustCall(d, protocol.MethodMemberDeviceList, struct{}{}, &before)
+
+	resp, body, err := b.fetch(http.MethodPost, d.url("/auth/logout"), nil, http.Header{"Origin": {d.url("")}})
+	if err != nil || resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout: %v %v %s", err, resp, body)
+	}
+	if r := b.call(d, protocol.MethodMemberList, struct{}{}, nil); r.status != http.StatusUnauthorized {
+		t.Fatalf("API after logout: %d %s, want 401", r.status, r.body)
+	}
+	b.mustSignInTo(d)
+	var after protocol.MemberDeviceListResult
+	b.mustCall(d, protocol.MethodMemberDeviceList, struct{}{}, &after)
+	// Last seen moves with every sign-in.
+	for _, l := range []*protocol.MemberDeviceListResult{&before, &after} {
+		for i := range l.Devices {
+			l.Devices[i].LastSeenAt = ""
+		}
+	}
+	if !reflect.DeepEqual(after.Devices, before.Devices) {
+		t.Fatalf("devices after signing out and in again = %+v, want %+v", after.Devices, before.Devices)
+	}
+}
+
 // A member's second browser waits for approval from their first, and a
 // revoked browser loses its API access and live socket.
 func TestDashboardPendingBrowserAndRevocation(t *testing.T) {
@@ -557,8 +621,9 @@ func TestDashboardPendingBrowserAndRevocation(t *testing.T) {
 	firstEvents := first.events(d)
 
 	second := w.browser(alice)
-	resp, body := second.signInTo(d)
-	wantStatus(t, "second browser's callback", resp, body, http.StatusForbidden, "waiting for approval")
+	if resp, body := second.signInTo(d); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
+		t.Fatalf("second browser's callback: %s %q, want a redirect to the dashboard", resp.Status, body)
+	}
 	r := second.call(d, protocol.MethodMemberList, struct{}{}, nil)
 	var pending struct {
 		ApprovalCode string `json:"approval_code"`
@@ -571,12 +636,12 @@ func TestDashboardPendingBrowserAndRevocation(t *testing.T) {
 	first.mustCall(d, protocol.MethodMemberDeviceList, struct{}{}, &devices)
 	var secondID string
 	for _, dev := range devices.Devices {
-		if dev.ApprovalCode == pending.ApprovalCode {
+		if dev.Status == "pending" {
 			secondID = dev.ID
 		}
 	}
 	if secondID == "" {
-		t.Fatalf("no device with code %s in %+v", pending.ApprovalCode, devices.Devices)
+		t.Fatalf("no pending device in %+v", devices.Devices)
 	}
 	first.mustCall(d, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: pending.ApprovalCode}, nil)
 	second.mustCall(d, protocol.MethodMemberList, struct{}{}, nil)

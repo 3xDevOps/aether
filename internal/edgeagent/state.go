@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,7 +18,8 @@ import (
 )
 
 // StateDir is where the agent keeps its state under a server data
-// directory. The directory is 0700 and every file in it 0600.
+// directory: one directory per edge origin, beside the dashboard
+// certificates. Every directory is 0700 and every file 0600.
 func StateDir(dataDir string) string { return filepath.Join(dataDir, "edge") }
 
 const (
@@ -28,22 +30,38 @@ const (
 	lockFile   = "lock"
 )
 
-// State is the agent's persistent state: the pinned edge key, the owner,
-// the claim code and the agent's last status. The serve process and the
-// aether-server edge commands share it, so every method reads the files
-// afresh.
+// State is the agent's persistent state with one edge: the pinned edge
+// key, the owner, the claim code and the agent's last status. The serve
+// process and the aether-server edge commands share it, so every method
+// reads the files afresh.
 type State struct{ dir string }
 
-// OpenState returns the state under dataDir. Nothing is created until a
-// method writes.
-func OpenState(dataDir string) *State { return &State{dir: StateDir(dataDir)} }
+// OpenState returns the state for the edge at edgeURL under dataDir. Each
+// edge origin keeps its own, so a server moved to another edge enrolls
+// there unclaimed and pins that edge's key, and moving back finds the
+// first edge's pin and owner again. Nothing is created until a method
+// writes.
+func OpenState(dataDir, edgeURL string) (*State, error) {
+	origin, err := edgeproto.Origin(edgeURL)
+	if err != nil {
+		return nil, fmt.Errorf("edgeagent: %w", err)
+	}
+	// A scheme holds no "_" and a host no "://", so the name is unique
+	// per origin.
+	name := strings.Replace(origin, "://", "_", 1)
+	return &State{dir: filepath.Join(StateDir(dataDir), name)}, nil
+}
 
 // Status is what the agent last reported about its control connection.
+// ServerDomain is the domain the server's dashboard is served under, as
+// <server id>.<ServerDomain>, empty while unknown or when the edge passes
+// no dashboard through.
 type Status struct {
-	Edge      string    `json:"edge"`
-	Connected bool      `json:"connected"`
-	Error     string    `json:"error,omitempty"`
-	Since     time.Time `json:"since"`
+	Edge         string    `json:"edge"`
+	Connected    bool      `json:"connected"`
+	Error        string    `json:"error,omitempty"`
+	Since        time.Time `json:"since"`
+	ServerDomain string    `json:"server_domain,omitempty"`
 }
 
 // ClaimCode describes the current claim code. The code itself is shown
@@ -195,7 +213,14 @@ func (s *State) Status() (Status, bool, error) {
 	return st, ok, err
 }
 
+// writeStatus records st. Only an enrollment learns the server domain, so
+// a status written while disconnected keeps the last one.
 func (s *State) writeStatus(st Status) {
+	if !st.Connected {
+		if last, ok, err := s.Status(); err == nil && ok {
+			st.ServerDomain = last.ServerDomain
+		}
+	}
 	if err := s.write(statusFile, st); err != nil {
 		slog.Warn("edge: write status", "error", err)
 	}
@@ -256,14 +281,16 @@ func (s *State) remove(name string) error {
 	return nil
 }
 
-// mkdir creates the state directory 0700, and narrows an existing one: it
-// holds the pin that authenticates the edge.
+// mkdir creates the state directory and its parent 0700, and narrows
+// existing ones: they hold the pin that authenticates the edge.
 func (s *State) mkdir() error {
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return fmt.Errorf("edgeagent: %w", err)
 	}
-	if err := os.Chmod(s.dir, 0o700); err != nil {
-		return fmt.Errorf("edgeagent: %w", err)
+	for _, dir := range []string{filepath.Dir(s.dir), s.dir} {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("edgeagent: %w", err)
+		}
 	}
 	return nil
 }

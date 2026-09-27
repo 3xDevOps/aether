@@ -8,8 +8,15 @@ import (
 // Relay limits. No idle timeout applies to a spliced stream: an idle
 // terminal is legitimate.
 const (
-	// MaxConnsPerServer stays below sshd's relayed handshake budget.
-	MaxConnsPerServer      = 48
+	// MaxSSHConnsPerServer stays below sshd's relayed handshake budget.
+	MaxSSHConnsPerServer = 48
+	// MaxWebConnsPerServer is a budget apart from SSH's: reaching a
+	// server's dashboard host name needs no sign-in, so browsers, or
+	// anyone, filling it must not lock SSH out.
+	MaxWebConnsPerServer = 48
+	// MaxWebConnsPerAddress bounds one RateLimitKey block's dashboard
+	// connections to one server: a few browsers behind one NAT address.
+	MaxWebConnsPerAddress  = 16
 	MaxConnsPerDevice      = 16
 	MaxUnclaimedPerAddress = 3
 	// UnclaimedTTL is how long an unclaimed registration is kept.
@@ -29,11 +36,16 @@ const (
 const (
 	InvitationTTL = 7 * 24 * time.Hour
 	SessionIdle   = 30 * 24 * time.Hour
+	// IdentityMaxAge is how long after the provider last reported an
+	// account's login and email they match invitations. A login or email
+	// can move to another person, and the edge learns so only when one
+	// of them signs in.
+	IdentityMaxAge = 24 * time.Hour
 )
 
-// RateLimitKey is the address block sign-in and claim rate limits count
-// against: the address for IPv4, its /64 for IPv6. It is the zero Prefix
-// for the zero Addr.
+// RateLimitKey is the narrowest address block a limit counts against:
+// the address for IPv4, its /64 for IPv6. It is the zero Prefix for the
+// zero Addr.
 func RateLimitKey(addr netip.Addr) netip.Prefix {
 	addr = addr.Unmap()
 	bits := 64
@@ -42,4 +54,35 @@ func RateLimitKey(addr netip.Addr) netip.Prefix {
 	}
 	p, _ := addr.Prefix(bits) // bits never exceeds a valid addr.BitLen()
 	return p
+}
+
+// RateLimitKeys returns every block a limit counts addr against:
+// RateLimitKey(addr), and for IPv6 also its /56 and /48. One site
+// commonly holds a whole /56 or /48, and one free tunnel broker account
+// holds a /48: counted by /64 alone, each of its 65536 /64s would get a
+// budget of its own.
+func RateLimitKeys(addr netip.Addr) []netip.Prefix {
+	key := RateLimitKey(addr)
+	if !key.Addr().Is6() {
+		return []netip.Prefix{key}
+	}
+	p56, _ := key.Addr().Prefix(56)
+	p48, _ := key.Addr().Prefix(48)
+	return []netip.Prefix{key, p56, p48}
+}
+
+// RateLimitScale is how many times the budget of one RateLimitKey block
+// the block p gets: 4 for an IPv6 /56, 16 for an IPv6 /48, and 1
+// otherwise.
+func RateLimitScale(p netip.Prefix) int {
+	if !p.Addr().Is6() {
+		return 1
+	}
+	switch p.Bits() {
+	case 56:
+		return 4
+	case 48:
+		return 16
+	}
+	return 1
 }

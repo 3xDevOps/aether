@@ -36,9 +36,13 @@ func (d relayDirectory) Admit(ctx context.Context, serverID string, account edge
 	return err
 }
 
-func (d relayDirectory) Claimed(ctx context.Context, serverID, name string) (bool, error) {
+func (d relayDirectory) Enroll(ctx context.Context, serverID, name string) (bool, error) {
 	state, err := d.s.ServerConnected(ctx, serverID, name)
 	return state == edgeproto.StateClaimed, err
+}
+
+func (d relayDirectory) Claimed(ctx context.Context, serverID string) (bool, error) {
+	return d.s.store.Claimed(ctx, serverID)
 }
 
 func (d relayDirectory) ReplaceDirectory(ctx context.Context, serverID string, entries []edgeproto.DirectoryEntry) error {

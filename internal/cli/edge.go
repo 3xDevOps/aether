@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -38,7 +39,9 @@ func ServerIDFromEdgeHost(host string) (string, bool) {
 // server id on every path; nothing is trusted on first use and nothing is
 // written to known_hosts. The device key authenticates. With an address
 // the server is dialed there first, and with an edge as well the edge is
-// the fallback; when both fail the error carries both causes.
+// the fallback; when both fail the error carries both causes, and when
+// only the address fails its cause goes to stderr, because a host key
+// that is not the server's there means the address reaches another host.
 func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, error) {
 	if !edgeproto.ValidServerID(cfg.ServerID) {
 		return nil, fmt.Errorf("cli: %q is not a server id", cfg.ServerID)
@@ -63,8 +66,12 @@ func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, erro
 		directErr = err
 	}
 	client, edgeErr := dialEdge(ctx, dir, cfg, user, signer)
-	if edgeErr == nil || directErr == nil {
+	if directErr == nil {
 		return client, edgeErr
+	}
+	if edgeErr == nil {
+		fmt.Fprintf(os.Stderr, "aether: %v\naether: reached server %s through %s instead\n", directErr, cfg.ServerID, cfg.EdgeURL)
+		return client, nil
 	}
 	return nil, fmt.Errorf("cli: server %s is unreachable\n  direct: %w\n  edge: %w", cfg.ServerID, directErr, edgeErr)
 }

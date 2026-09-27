@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -104,7 +105,7 @@ func (s *Service) signedIn(h func(http.ResponseWriter, *http.Request, visitor) e
 	return func(w http.ResponseWriter, r *http.Request) {
 		v, ok, err := s.visitor(r)
 		if err != nil {
-			s.fail(w, nil, err)
+			s.fail(w, r, nil, err)
 			return
 		}
 		if !ok {
@@ -115,20 +116,27 @@ func (s *Service) signedIn(h func(http.ResponseWriter, *http.Request, visitor) e
 			http.Redirect(w, r, "/signin?"+url.Values{"next": {next}}.Encode(), http.StatusSeeOther)
 			return
 		}
+		// Invitations match the login and email only while the provider
+		// reported them recently, so a page opened after that asks the
+		// provider again. A form post is left alone: its page just did.
+		if r.Method == http.MethodGet && !v.Account.IdentityCurrent(s.now()) {
+			http.Redirect(w, r, "/signin/"+v.Account.Provider+"?"+url.Values{"next": {r.URL.RequestURI()}}.Encode(), http.StatusSeeOther)
+			return
+		}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, edgeproto.MaxRequestBodySize)
 			if err := r.ParseForm(); err != nil {
-				s.fail(w, &v, pageErr(http.StatusBadRequest, "read form: %v", err))
+				s.fail(w, r, &v, pageErr(http.StatusBadRequest, "read form: %v", err))
 				return
 			}
 			if !hmac.Equal([]byte(r.PostForm.Get("csrf")), []byte(v.csrf)) {
-				s.fail(w, &v, pageErr(http.StatusForbidden,
+				s.fail(w, r, &v, pageErr(http.StatusForbidden,
 					"this form did not come from this edge page or your session changed; reload the page and try again"))
 				return
 			}
 		}
 		if err := h(w, r, v); err != nil {
-			s.fail(w, &v, err)
+			s.fail(w, r, &v, err)
 		}
 	}
 }
@@ -177,6 +185,7 @@ func (s *Service) view(v *visitor, title string, data any) view {
 func (s *Service) render(w http.ResponseWriter, status int, name string, data view) {
 	var buf bytes.Buffer
 	if err := s.pages.ExecuteTemplate(&buf, name, data); err != nil {
+		slog.Error("edge: render page", "page", name, "error", err)
 		http.Error(w, "edge: render "+name+": "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -185,11 +194,26 @@ func (s *Service) render(w http.ResponseWriter, status int, name string, data vi
 	w.Write(buf.Bytes()) //nolint:errcheck // the client went away
 }
 
-func (s *Service) fail(w http.ResponseWriter, v *visitor, err error) {
+func (s *Service) fail(w http.ResponseWriter, r *http.Request, v *visitor, err error) {
 	status := errorStatus(err)
+	logFailure(r, status, err)
 	page := s.view(v, http.StatusText(status), nil)
 	page.Error = err.Error()
 	s.render(w, status, "error", page)
+}
+
+// logFailure logs a request the edge or its sign-in provider failed,
+// status 500 and above, for the operator. A lower status is the
+// client's to fix, and its text can name the person.
+func logFailure(r *http.Request, status int, err error) {
+	if status < http.StatusInternalServerError {
+		return
+	}
+	level := slog.LevelWarn
+	if status == http.StatusInternalServerError {
+		level = slog.LevelError
+	}
+	slog.Log(r.Context(), level, "edge: request failed", "method", r.Method, "route", r.Pattern, "status", status, "error", err)
 }
 
 // localPath returns next when it is a path on this edge, and "/servers"

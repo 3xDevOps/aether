@@ -96,9 +96,11 @@ type deviceConfirm struct {
 func (s *Service) deviceLookup(w http.ResponseWriter, r *http.Request, v visitor) error {
 	a, code, err := s.pendingDevice(r, v)
 	if err != nil {
+		status := errorStatus(err)
+		logFailure(r, status, err)
 		page := s.view(&v, "Sign in a device", nil)
 		page.Error = err.Error()
-		s.render(w, errorStatus(err), "device", page)
+		s.render(w, status, "device", page)
 		return nil
 	}
 	s.render(w, http.StatusOK, "device_confirm", s.view(&v, "Confirm this device", deviceConfirm{
@@ -113,7 +115,7 @@ func (s *Service) deviceLookup(w http.ResponseWriter, r *http.Request, v visitor
 }
 
 func (s *Service) pendingDevice(r *http.Request, v visitor) (edgestore.DeviceAuth, string, error) {
-	if !s.codeLimit.allow(addrKey(r)) || !s.codeAccountLimit.allow(v.AccountID) {
+	if !s.codeLimit.allow(addrKeys(r)...) || !s.codeAccountLimit.allow(v.AccountID) {
 		return edgestore.DeviceAuth{}, "", edgeproto.RefusalTooMany
 	}
 	code, ok := normalizeUserCode(r.PostForm.Get("user_code"))
@@ -190,14 +192,16 @@ func (s *Service) addServerPage(w http.ResponseWriter, r *http.Request, v visito
 func (s *Service) addServer(w http.ResponseWriter, r *http.Request, v visitor) error {
 	var res edgeproto.ClaimResponse
 	err := error(edgeproto.RefusalTooMany)
-	if s.claimLimit.allow(addrKey(r)) {
+	if s.claimLimit.allow(addrKeys(r)...) {
 		res, err = s.claim(r.Context(), r.PostForm.Get("code"), v.Account,
 			edgeproto.Device{ID: v.ID, Label: "browser"})
 	}
 	if err != nil {
+		status := errorStatus(err)
+		logFailure(r, status, err)
 		page := s.view(&v, "Add a server", nil)
 		page.Error = err.Error()
-		s.render(w, errorStatus(err), "add_server", page)
+		s.render(w, status, "add_server", page)
 		return nil
 	}
 	s.render(w, http.StatusOK, "claimed", s.view(&v, "Server added", res))
@@ -286,7 +290,7 @@ type authorizeView struct {
 func (s *Service) authorizePage(w http.ResponseWriter, r *http.Request) {
 	req, err := parseAuthorize(r.URL.Query())
 	if err != nil {
-		s.fail(w, nil, err)
+		s.fail(w, r, nil, err)
 		return
 	}
 	s.signedIn(func(w http.ResponseWriter, r *http.Request, v visitor) error {

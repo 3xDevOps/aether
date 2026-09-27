@@ -1002,8 +1002,6 @@ export interface Device {
   kind: 'ssh' | 'browser'
   label: string
   status: 'pending' | 'approved' | 'revoked'
-  /** Only while pending. */
-  approval_code?: string
   fingerprint?: string
   created_at: string
   last_seen_at?: string

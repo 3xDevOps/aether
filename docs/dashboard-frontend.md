@@ -2044,8 +2044,9 @@ Room tab count, and neither creates a second action inbox.
 
 `src/routes/devices/` lists the computers and browsers members reach the
 server with through an edge: the member's own, or every member's for an
-admin. It approves a pending device by its code and revokes one, showing the
-server's refusal verbatim. It is its own view, not part of Settings, because
+admin. It approves a pending device only by the code typed in from that
+device, which no row shows, and revokes one, showing the server's refusal
+verbatim. It is its own view, not part of Settings, because
 Settings is local-gateway only and the phone on the edge gateway needs it
 most; the sidebar and palette show it whenever the gateway serves
 `member.device.list`.

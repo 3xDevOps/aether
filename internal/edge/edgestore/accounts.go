@@ -12,16 +12,25 @@ import (
 
 // SignIn records a completed sign-in: it creates the account keyed by
 // (provider, subject), or refreshes the email, login and name the provider
-// just reported. A GitHub login names one account at a time, so another
+// just reported, which are then current as of now. A GitHub login names one account at a time, so another
 // account still holding it from before a rename loses it: only the
 // current holder matches an invitation for that login. It returns the
-// account id.
+// account id, or ErrAccountBlocked, recording nothing, for a blocked
+// account.
 func (s *Store) SignIn(ctx context.Context, a edgeproto.Account, now time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	var blocked bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocked_accounts WHERE provider = ? AND subject = ?)`,
+		a.Provider, a.Subject).Scan(&blocked); err != nil {
+		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
+	}
+	if blocked {
+		return 0, ErrAccountBlocked
+	}
 	if a.Login != "" {
 		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET login = ''
 			WHERE provider = ? AND lower(login) = lower(?) AND subject <> ?`,
@@ -30,12 +39,12 @@ func (s *Store) SignIn(ctx context.Context, a edgeproto.Account, now time.Time) 
 		}
 	}
 	var id int64
-	err = tx.QueryRowContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+	err = tx.QueryRowContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at, identity_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (provider, subject) DO UPDATE SET
-			email = excluded.email, login = excluded.login, name = excluded.name
+			email = excluded.email, login = excluded.login, name = excluded.name, identity_at = excluded.identity_at
 		RETURNING id`,
-		a.Provider, a.Subject, a.Email, a.Login, a.Name, unix(now)).Scan(&id)
+		a.Provider, a.Subject, a.Email, a.Login, a.Name, unix(now), unix(now)).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
 	}
@@ -45,27 +54,33 @@ func (s *Store) SignIn(ctx context.Context, a edgeproto.Account, now time.Time) 
 	return id, nil
 }
 
-// EnsureAccount returns the id of the account keyed by a's provider and
-// subject, creating it from a when it does not exist. An existing account
-// keeps what its own sign-ins recorded.
-func (s *Store) EnsureAccount(ctx context.Context, a edgeproto.Account, now time.Time) (int64, error) {
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (provider, subject) DO NOTHING`,
-		a.Provider, a.Subject, a.Email, a.Login, a.Name, unix(now)); err != nil {
-		return 0, fmt.Errorf("edgestore: ensure account: %w", err)
-	}
-	var id int64
-	if err := s.db.QueryRowContext(ctx, `SELECT id FROM accounts WHERE provider = ? AND subject = ?`,
-		a.Provider, a.Subject).Scan(&id); err != nil {
-		return 0, fmt.Errorf("edgestore: ensure account: %w", err)
-	}
-	return id, nil
+const accountCols = `a.id, a.provider, a.subject, a.email, a.login, a.name, a.identity_at`
+
+// notBlocked is an SQL condition, true when the account whose id is in
+// column col is not blocked.
+func notBlocked(col string) string {
+	return `NOT EXISTS (SELECT 1 FROM accounts ba JOIN blocked_accounts b
+		ON b.provider = ba.provider AND b.subject = ba.subject WHERE ba.id = ` + col + `)`
 }
 
-const accountCols = `a.id, a.provider, a.subject, a.email, a.login, a.name`
-
 func accountDest(id *int64, a *edgeproto.Account) []any {
-	return []any{id, &a.Provider, &a.Subject, &a.Email, &a.Login, &a.Name}
+	return []any{id, &a.Provider, &a.Subject, &a.Email, &a.Login, &a.Name, identityAt{&a.IdentityAt}}
+}
+
+// identityAt scans accounts.identity_at, where 0 is an account from
+// before the column: never confirmed.
+type identityAt struct{ t *time.Time }
+
+func (d identityAt) Scan(v any) error {
+	n, ok := v.(int64)
+	if !ok {
+		return fmt.Errorf("edgestore: identity_at is %T, want an integer", v)
+	}
+	*d.t = time.Time{}
+	if n != 0 {
+		*d.t = fromUnix(n)
+	}
+	return nil
 }
 
 // Session is a signed-in browser at the edge.
@@ -88,12 +103,12 @@ func (s *Store) CreateSession(ctx context.Context, id, tokenHash string, account
 	return nil
 }
 
-// UseSession returns the unexpired session stored under tokenHash and
-// moves its expiry to expires.
+// UseSession returns the unexpired session of an account that is not
+// blocked stored under tokenHash, and moves its expiry to expires.
 func (s *Store) UseSession(ctx context.Context, tokenHash string, now, expires time.Time) (Session, error) {
 	var sess Session
 	err := s.db.QueryRowContext(ctx, `UPDATE web_sessions SET expires_at = ?
-		WHERE token_hash = ? AND expires_at > ? RETURNING id, account_id`,
+		WHERE token_hash = ? AND expires_at > ? AND `+notBlocked("web_sessions.account_id")+` RETURNING id, account_id`,
 		unix(expires), tokenHash, unix(now)).Scan(&sess.ID, &sess.AccountID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound

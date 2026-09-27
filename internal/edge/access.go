@@ -17,9 +17,6 @@ import (
 // its server.
 const webCodeTTL = 2 * time.Minute
 
-// claimTimeout bounds the wait for a server's answer to a claim.
-const claimTimeout = 10 * time.Second
-
 // Client is the device and account behind a device token.
 type Client struct {
 	Device  edgeproto.Device
@@ -63,7 +60,9 @@ func (s *Service) deviceByToken(ctx context.Context, token string) (Client, int6
 // Admit reports the role account a has on the claimed server serverID: a
 // member entry's role, the admin role for the owner, or a live
 // invitation's role, in that order. It fails with
-// edgeproto.RefusalUnknownServer or edgeproto.RefusalNotMember.
+// edgeproto.RefusalUnknownServer, edgeproto.RefusalIdentityStale when only
+// an invitation could admit a and its identity is not current, or
+// edgeproto.RefusalNotMember.
 func (s *Service) Admit(ctx context.Context, serverID string, a edgeproto.Account) (string, error) {
 	acc, err := s.store.ServerAccess(ctx, serverID, a)
 	if errors.Is(err, edgestore.ErrNotFound) {
@@ -72,11 +71,17 @@ func (s *Service) Admit(ctx context.Context, serverID string, a edgeproto.Accoun
 	if err != nil {
 		return "", err
 	}
-	role, ok := roleOf(acc, a, s.now())
-	if !ok {
-		return "", edgeproto.RefusalNotMember
+	now := s.now()
+	role, ok := roleOf(acc, a, now)
+	if ok {
+		return role, nil
 	}
-	return role, nil
+	confirmed := a
+	confirmed.IdentityAt = now
+	if _, ok := roleOf(acc, confirmed, now); ok {
+		return "", edgeproto.RefusalIdentityStale
+	}
+	return "", edgeproto.RefusalNotMember
 }
 
 func roleOf(acc edgestore.Access, a edgeproto.Account, now time.Time) (string, bool) {
@@ -97,9 +102,17 @@ func roleOf(acc edgestore.Access, a edgeproto.Account, now time.Time) (string, b
 }
 
 // ServerConnected records the name an enrolled server announced and
-// returns its state for edgeproto.Ready.
+// returns its state for edgeproto.Ready, or edgeproto.RefusalServerBlocked
+// for a server id the operator blocked.
 func (s *Service) ServerConnected(ctx context.Context, serverID, name string) (string, error) {
-	err := s.store.RenameServer(ctx, serverID, name)
+	blocked, err := s.store.ServerBlocked(ctx, serverID)
+	if err != nil {
+		return "", err
+	}
+	if blocked {
+		return "", edgeproto.RefusalServerBlocked
+	}
+	err = s.store.RenameServer(ctx, serverID, name)
 	if errors.Is(err, edgestore.ErrNotFound) {
 		return edgeproto.StateUnclaimed, nil
 	}
@@ -110,7 +123,9 @@ func (s *Service) ServerConnected(ctx context.Context, serverID, name string) (s
 }
 
 // RecordClaim records owner as the owner of serverID after the server
-// accepted owner's claim code.
+// accepted owner's claim code. It records nothing, and fails with
+// edgeproto.RefusalServerBlocked or edgeproto.RefusalAccountBlocked, when
+// the operator blocked the server or the account in the meantime.
 func (s *Service) RecordClaim(ctx context.Context, serverID, name string, owner edgeproto.Account) error {
 	if !edgeproto.ValidServerID(serverID) {
 		return fmt.Errorf("edge: record claim: invalid server id %q", serverID)
@@ -118,12 +133,14 @@ func (s *Service) RecordClaim(ctx context.Context, serverID, name string, owner 
 	if err := owner.Validate(); err != nil {
 		return fmt.Errorf("edge: record claim: %w", err)
 	}
-	now := s.now()
-	ownerID, err := s.store.EnsureAccount(ctx, owner, now)
-	if err != nil {
-		return err
+	err := s.store.ClaimServer(ctx, serverID, name, owner, s.now())
+	switch {
+	case errors.Is(err, edgestore.ErrServerBlocked):
+		return edgeproto.RefusalServerBlocked
+	case errors.Is(err, edgestore.ErrAccountBlocked):
+		return edgeproto.RefusalAccountBlocked
 	}
-	return s.store.ClaimServer(ctx, serverID, name, ownerID, now)
+	return err
 }
 
 // RemoveServer forgets serverID and its directory, as when its operator
@@ -202,18 +219,15 @@ func (s *Service) claim(ctx context.Context, code string, a edgeproto.Account, d
 	if _, _, err := edgeproto.ParseClaimCode(code); err != nil {
 		return edgeproto.ClaimResponse{}, pageErr(http.StatusBadRequest, "%v", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, claimTimeout)
-	defer cancel()
-	id, name, err := s.link.Claim(ctx, code, a, d)
+	id, name, err := s.link.Claim(ctx, code, a, d, func(ctx context.Context, id, name string) error {
+		return s.RecordClaim(ctx, id, name, a)
+	})
 	var refusal edgeproto.Refusal
 	switch {
 	case errors.As(err, &refusal):
 		return edgeproto.ClaimResponse{}, refusal
 	case err != nil:
-		return edgeproto.ClaimResponse{}, pageErr(http.StatusGatewayTimeout, "claim: %v", err)
-	}
-	if err := s.RecordClaim(ctx, id, name, a); err != nil {
-		return edgeproto.ClaimResponse{}, err
+		return edgeproto.ClaimResponse{}, pageErr(http.StatusServiceUnavailable, "%v", err)
 	}
 	return edgeproto.ClaimResponse{ServerID: id, Name: name}, nil
 }

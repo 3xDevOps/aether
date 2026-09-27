@@ -35,10 +35,39 @@ func (s *Store) Server(ctx context.Context, id string) (Server, error) {
 	return srv, nil
 }
 
-// ClaimServer records ownerID as the owner of server id, keeping the
-// original claim time when the owner is unchanged.
-func (s *Store) ClaimServer(ctx context.Context, id, name string, ownerID int64, now time.Time) error {
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, owner_id, claimed_at) VALUES (?, ?, ?, ?)
+// ClaimServer records owner as the owner of server id, in one
+// transaction with creating owner's account when it has none; an existing
+// account keeps what its own sign-ins recorded. The original claim time
+// stays when the owner is unchanged. It fails with ErrServerBlocked or
+// ErrAccountBlocked, recording nothing, when the server id or the account
+// is blocked.
+func (s *Store) ClaimServer(ctx context.Context, id, name string, owner edgeproto.Account, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("edgestore: claim server: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	var serverBlocked, accountBlocked bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocked_servers WHERE id = ?),
+		EXISTS (SELECT 1 FROM blocked_accounts WHERE provider = ? AND subject = ?)`,
+		id, owner.Provider, owner.Subject).Scan(&serverBlocked, &accountBlocked); err != nil {
+		return fmt.Errorf("edgestore: claim server: %w", err)
+	}
+	switch {
+	case serverBlocked:
+		return ErrServerBlocked
+	case accountBlocked:
+		return ErrAccountBlocked
+	}
+	var ownerID int64
+	if err = tx.QueryRowContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (provider, subject) DO UPDATE SET provider = provider
+		RETURNING id`,
+		owner.Provider, owner.Subject, owner.Email, owner.Login, owner.Name, unix(now)).Scan(&ownerID); err != nil {
+		return fmt.Errorf("edgestore: claim server: owner account: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO servers (id, name, owner_id, claimed_at) VALUES (?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			name = excluded.name,
 			claimed_at = CASE WHEN owner_id = excluded.owner_id THEN claimed_at ELSE excluded.claimed_at END,
@@ -46,7 +75,19 @@ func (s *Store) ClaimServer(ctx context.Context, id, name string, ownerID int64,
 		id, name, ownerID, unix(now)); err != nil {
 		return fmt.Errorf("edgestore: claim server: %w", err)
 	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("edgestore: claim server: %w", err)
+	}
 	return nil
+}
+
+// Claimed reports whether server id has an owner.
+func (s *Store) Claimed(ctx context.Context, id string) (bool, error) {
+	var claimed bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM servers WHERE id = ?)`, id).Scan(&claimed); err != nil {
+		return false, fmt.Errorf("edgestore: read claim of %s: %w", id, err)
+	}
+	return claimed, nil
 }
 
 // RenameServer records the name a claimed server announced.
@@ -83,17 +124,23 @@ func (s *Store) ReplaceDirectory(ctx context.Context, serverID string, entries [
 	if err != nil {
 		return fmt.Errorf("edgestore: replace directory: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM directory_entries WHERE server_id = ?`, serverID); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM directory_entries WHERE server_id = ?`, serverID); err != nil {
 		return fmt.Errorf("edgestore: replace directory: %w", err)
 	}
+	// One prepared insert shortens the time this holds the database's
+	// write lock, which every sign-in and connection also needs.
+	insert, err := tx.PrepareContext(ctx, `INSERT INTO directory_entries
+		(server_id, kind, provider, subject, login, email, role, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("edgestore: replace directory: %w", err)
+	}
+	defer insert.Close() //nolint:errcheck // closed with the transaction
 	for _, e := range entries {
 		var expires int64
 		if !e.ExpiresAt.IsZero() {
 			expires = unix(e.ExpiresAt)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO directory_entries
-			(server_id, kind, provider, subject, login, email, role, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			serverID, e.Kind, e.Provider, e.Subject, e.Login, e.Email, e.Role, expires); err != nil {
+		if _, err := insert.ExecContext(ctx, serverID, e.Kind, e.Provider, e.Subject, e.Login, e.Email, e.Role, expires); err != nil {
 			return fmt.Errorf("edgestore: replace directory: %w", err)
 		}
 	}

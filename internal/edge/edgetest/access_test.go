@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/edge/edgestore"
 	"github.com/3xDevOps/Aether/internal/edgeproto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -72,7 +75,7 @@ func TestClaimAndAccess(t *testing.T) {
 	wantRefusal(t, "claim with an expired code", err, edgeproto.RefusalClaimExpired)
 
 	code := a.claimCode(t, time.Now())
-	wrong := code[:edgeproto.ClaimPrefixLength+1] + strings.Repeat("a", len(code)-edgeproto.ClaimPrefixLength-1)
+	wrong := code[:edgeproto.ServerIDLength+1] + strings.Repeat("a", len(code)-edgeproto.ServerIDLength-1)
 	for range edgeproto.ClaimCodeAttempts - 1 {
 		_, err = h.claim(al, wrong)
 		wantRefusal(t, "claim with a wrong code", err, edgeproto.RefusalClaimWrong)
@@ -89,9 +92,12 @@ func TestClaimAndAccess(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
-	servers, err := al.edge.Servers(ctx)
+	servers, domain, err := al.edge.Servers(ctx)
 	if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "admin" || !servers[0].Online {
 		t.Fatalf("alice's servers = %+v %v, want %s as admin, online", servers, err, a.id)
+	}
+	if domain != serverDomain {
+		t.Fatalf("server domain in the server list = %q, want %q", domain, serverDomain)
 	}
 
 	// A control RPC over the relay: the claim made alice the admin.
@@ -156,4 +162,30 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// A server the operator blocks, as `aether-edge servers block` does, is
+// refused at its next enrollment, and its status, which
+// `aether-server edge status` prints, says why.
+func TestBlockedServerStatusSaysWhy(t *testing.T) {
+	h := newHarness(t)
+	a := h.newServer()
+	h.claimServer(h.login(alice)[0], a)
+	st, err := edgestore.Open(filepath.Join(h.edgeDir, "edge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err = st.BlockServer(context.Background(), a.id, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.proxy.cutServers()
+	h.proxy.restoreServers()
+	eventually(t, "the server's status names the block", func() error {
+		status, _, err := a.state(t).Status()
+		if err == nil && (status.Connected || !strings.Contains(status.Error, string(edgeproto.RefusalServerBlocked))) {
+			err = fmt.Errorf("status %+v", status)
+		}
+		return err
+	})
 }

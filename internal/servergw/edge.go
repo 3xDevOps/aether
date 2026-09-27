@@ -28,8 +28,8 @@ const (
 	// touchInterval bounds how often a session's last use is written.
 	touchInterval = time.Minute
 	// revalidateInterval is how often the live WebSockets of each session
-	// are checked against its device, so a revoked session or a removed
-	// member loses them within that time.
+	// are checked against the session and its device, so an ended session,
+	// a revoked device or a removed member loses them within that time.
 	revalidateInterval = 3 * time.Second
 )
 
@@ -48,7 +48,7 @@ type EdgeAgent interface {
 type EdgeConfig struct {
 	// SSH serves members' calls. Required.
 	SSH *sshd.Server
-	// Store holds browser sessions as browser devices. Required.
+	// Store holds browser devices and their sessions. Required.
 	Store store.IdentityStore
 	// Agent is the server's edge agent. Required.
 	Agent EdgeAgent
@@ -95,7 +95,7 @@ type Edge struct {
 	cancel context.CancelFunc
 
 	mu   sync.Mutex
-	live map[domain.DeviceID]map[*liveSocket]struct{}
+	live map[domain.BrowserSessionID]map[*liveSocket]struct{}
 }
 
 // NewEdge builds the edge gateway. It binds nothing and issues nothing
@@ -128,7 +128,7 @@ func newEdge(cfg EdgeConfig, now func() time.Time, revalidate time.Duration) (*E
 		now:        now,
 		revalidate: revalidate,
 		ctx:        ctx, cancel: cancel,
-		live: make(map[domain.DeviceID]map[*liveSocket]struct{}),
+		live: make(map[domain.BrowserSessionID]map[*liveSocket]struct{}),
 	}
 	core, err := webgate.New(webgate.Config{
 		Authorize: e.authorize,
@@ -217,60 +217,77 @@ func (e *Edge) authorize(r *http.Request, handshake bool) (webgate.Backend, *web
 			Message: "request without an Origin header refused: the dashboard over the edge accepts changes only from its own pages",
 		}}
 	}
-	dev, refusal := e.session(r)
+	sess, dev, refusal := e.session(r)
 	if refusal != nil {
 		return nil, refusal
 	}
 	if l, ok := r.Context().Value(liveKey{}).(*liveSocket); ok && handshake {
-		e.track(dev.ID, l)
+		e.track(sess.ID, l)
 	}
 	return backend{local: e.ssh.Local(dev.Member)}, nil
 }
 
-// session looks the request's session up on every request, so a revoked
-// session or a removed member is refused at once.
-func (e *Edge) session(r *http.Request) (*domain.Device, *webgate.Refusal) {
+// session looks the request's session and its device up on every
+// request, so an ended session, a revoked device or a removed member is
+// refused at once.
+func (e *Edge) session(r *http.Request) (*domain.BrowserSession, *domain.Device, *webgate.Refusal) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || !edgeproto.ValidToken(c.Value) {
-		return nil, signIn("sign-in required")
+		return nil, nil, signIn("sign-in required")
 	}
-	dev, err := e.ids.GetDeviceByCredential(r.Context(), edgeproto.HashToken(c.Value))
+	sess, dev, err := e.load(r.Context(), func(ctx context.Context) (*domain.BrowserSession, error) {
+		return e.ids.GetBrowserSessionByCredential(ctx, edgeproto.HashToken(c.Value))
+	})
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, signIn("this browser's session no longer exists on this server")
+		return nil, nil, signIn("this browser's session no longer exists on this server")
 	}
 	if err != nil {
-		return nil, unavailable(fmt.Errorf("look up session: %w", err))
+		return nil, nil, unavailable(fmt.Errorf("look up session: %w", err))
 	}
 	now := e.now()
-	if refusal := e.check(dev, now); refusal != nil {
-		return nil, refusal
+	if refusal := e.check(sess, dev, now); refusal != nil {
+		return nil, nil, refusal
 	}
-	if now.Sub(lastUse(dev)) >= touchInterval {
-		if err := e.ids.TouchDevice(r.Context(), dev.ID, now.UTC()); err != nil {
-			return nil, unavailable(fmt.Errorf("record session use: %w", err))
+	if now.Sub(lastUse(sess)) >= touchInterval {
+		if err := e.ids.TouchBrowserSession(r.Context(), sess.ID, now.UTC()); err != nil {
+			return nil, nil, unavailable(fmt.Errorf("record session use: %w", err))
 		}
 	}
-	return dev, nil
+	return sess, dev, nil
 }
 
-// check refuses a session that is revoked, pending or idle too long.
-func (e *Edge) check(dev *domain.Device, now time.Time) *webgate.Refusal {
+// load reads a session with get, then its device.
+func (e *Edge) load(ctx context.Context, get func(context.Context) (*domain.BrowserSession, error)) (*domain.BrowserSession, *domain.Device, error) {
+	sess, err := get(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	dev, err := e.ids.GetDevice(ctx, sess.Device)
+	if err != nil {
+		return nil, nil, err
+	}
+	return sess, dev, nil
+}
+
+// check refuses a session whose device is revoked or pending, or that
+// went unused too long.
+func (e *Edge) check(sess *domain.BrowserSession, dev *domain.Device, now time.Time) *webgate.Refusal {
 	switch {
 	case dev.Status == domain.DeviceRevoked:
-		return signIn("this browser's session was revoked")
+		return signIn("this browser was revoked on this server")
 	case dev.Status == domain.DevicePending:
 		return pendingRefusal(dev)
-	case now.Sub(lastUse(dev)) > edgeproto.SessionIdle:
+	case now.Sub(lastUse(sess)) > edgeproto.SessionIdle:
 		return signIn(fmt.Sprintf("this browser's session expired after %d days without use", int(edgeproto.SessionIdle/(24*time.Hour))))
 	}
 	return nil
 }
 
-func lastUse(dev *domain.Device) time.Time {
-	if dev.LastSeenAt != nil {
-		return *dev.LastSeenAt
+func lastUse(sess *domain.BrowserSession) time.Time {
+	if sess.LastSeenAt != nil {
+		return *sess.LastSeenAt
 	}
-	return dev.CreatedAt
+	return sess.CreatedAt
 }
 
 // loginData is the refusal data that tells the dashboard where to send the
@@ -314,14 +331,14 @@ type liveKey struct{}
 
 // liveSocket is one WebSocket of a session; cancel ends it.
 type liveSocket struct {
-	cancel context.CancelFunc
-	device domain.DeviceID
+	cancel  context.CancelFunc
+	session domain.BrowserSessionID
 }
 
-func (e *Edge) track(id domain.DeviceID, l *liveSocket) {
+func (e *Edge) track(id domain.BrowserSessionID, l *liveSocket) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	l.device = id
+	l.session = id
 	if e.live[id] == nil {
 		e.live[id] = make(map[*liveSocket]struct{})
 	}
@@ -331,15 +348,15 @@ func (e *Edge) track(id domain.DeviceID, l *liveSocket) {
 func (e *Edge) untrack(l *liveSocket) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	set := e.live[l.device]
+	set := e.live[l.session]
 	delete(set, l)
 	if len(set) == 0 {
-		delete(e.live, l.device)
+		delete(e.live, l.session)
 	}
 }
 
 // end closes every live WebSocket of a session.
-func (e *Edge) end(id domain.DeviceID) {
+func (e *Edge) end(id domain.BrowserSessionID) {
 	e.mu.Lock()
 	set := e.live[id]
 	delete(e.live, id)
@@ -349,8 +366,8 @@ func (e *Edge) end(id domain.DeviceID) {
 	}
 }
 
-// revalidateLoop re-reads the device of every session with a live
-// WebSocket. Revocation by `aether device revoke` and member removal
+// revalidateLoop re-reads every session with a live WebSocket and its
+// device. Device revocation by `aether device revoke` and member removal
 // happen in sshd, which does not know these sockets.
 func (e *Edge) revalidateLoop() {
 	t := time.NewTicker(e.revalidate)
@@ -362,19 +379,21 @@ func (e *Edge) revalidateLoop() {
 		case <-t.C:
 		}
 		e.mu.Lock()
-		ids := make([]domain.DeviceID, 0, len(e.live))
+		ids := make([]domain.BrowserSessionID, 0, len(e.live))
 		for id := range e.live {
 			ids = append(ids, id)
 		}
 		e.mu.Unlock()
 		for _, id := range ids {
-			dev, err := e.ids.GetDevice(e.ctx, id)
+			sess, dev, err := e.load(e.ctx, func(ctx context.Context) (*domain.BrowserSession, error) {
+				return e.ids.GetBrowserSession(ctx, id)
+			})
 			switch {
 			case errors.Is(err, store.ErrNotFound):
 				e.end(id)
 			case err != nil:
-				slog.Warn("servergw: revalidate edge session", "device", id, "error", err)
-			case e.check(dev, e.now()) != nil:
+				slog.Warn("servergw: revalidate edge session", "session", id, "error", err)
+			case e.check(sess, dev, e.now()) != nil:
 				e.end(id)
 			}
 		}

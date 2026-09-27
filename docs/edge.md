@@ -13,8 +13,8 @@ Four terms recur below:
   providers with the same email are two accounts.
 - A **device** is one client install or one browser. A client install
   holds a device key (an Ed25519 key of its own, not your `~/.ssh` key) and
-  a device token from the edge; a browser holds a session cookie from the
-  server.
+  a device token from the edge; a browser holds a device cookie and a
+  session cookie from the server.
 - A **grant** is a statement the edge signs for one connection: "this
   account, on this device, is opening this connection to this server". It
   lives 60 seconds.
@@ -31,7 +31,7 @@ the server name in the TLS ClientHello.
 | Party | Can | Cannot |
 | --- | --- | --- |
 | Edge operator, honest | See server ids and host names, account identities, device labels, client IP addresses, timing and byte counts | Read or alter SSH or dashboard traffic |
-| Edge, compromised | Deny service. Forge a grant for any account. Obtain a certificate for a server's dashboard host name and intercept its browser sessions; the certificate is logged in Certificate Transparency | Read or alter SSH traffic. Impersonate a server to a client. Claim an unclaimed server. Add a device to a member who has one while device approval is on. Let in an account the server has not made a member |
+| Edge, compromised | Deny service. Forge a grant for any account. Obtain a certificate for a server's dashboard host name and intercept its browser sessions; the certificate is logged in Certificate Transparency | Read or alter SSH traffic. Impersonate a server to a client. Claim an unclaimed server without its claim code (a code you send through it, it can use for another account). Add a device to a member who has one while device approval is on. Let in an account the server has not made a member |
 | Holder of a stolen device token | Open a relayed connection to servers that account reaches | Authenticate to the server: the device key is also required |
 | Holder of a stolen claim code | Claim the server with a signed-in account before its owner does | Claim after the code was used, expired (30 minutes) or failed five times |
 
@@ -45,13 +45,16 @@ first use. [security.md](security.md#edge-remote-access) has the details.
 
 ### Turning it on
 
-`aether-server setup` asks about the edge. Without tailscaled it enables the
-edge and says so; with tailscaled it asks, defaulting to no. These config
-keys control it:
+The edge is off until you turn it on. `aether-server setup` is the one step
+that offers it: without tailscaled it enables `https://edge.onaether.dev`
+and prints what the edge can see; with tailscaled it asks, defaulting to
+no. Otherwise only `aether-server install --edge-url <url>` or the config
+key turns it on, so a config without `edge-url`, including one written
+before the edge existed, never dials an edge. These config keys control it:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `edge-url` | `https://edge.onaether.dev` | Edge to enroll with. `""` turns the edge off |
+| `edge-url` | empty (off) | Edge to enroll with. Empty turns the edge off |
 | `edge-device-approval` | `true` | Hold a member's second and later devices, browsers included, pending until approved |
 | `edge-acme-directory` | Let's Encrypt production | ACME directory that issues the [dashboard](#dashboard-through-the-edge) certificate |
 
@@ -66,14 +69,17 @@ never stops the server: direct and tailnet paths and running work are
 untouched. The agent honours `HTTPS_PROXY` from
 `/etc/aether/aether-server.env`.
 
-The server keeps one pinned edge key and one owner, whichever edge they came
-from. To move an enrolled server to another edge:
+The server keeps the pinned edge key and the owner apart for each edge
+([Files](#files)). Pointing `edge-url` at another edge starts clean there:
+the server pins that edge's key when it first connects and enrolls
+unclaimed. Pointing it back finds the first edge's pin and owner again. To
+move an enrolled server to another edge:
 
 ```sh
-sudo aether-server edge leave                 # unenroll at the old edge, forget the owner
+sudo aether-server edge leave                 # unenroll at the old edge, forget its owner
 sudo aether-server config set edge-url https://<edge-host>
-sudo aether-server edge trust                 # pin the new edge's key; type yes
 sudo systemctl restart aether-server
+sudo aether-server edge status                # compare the edge key with the one the edge's operator publishes
 sudo aether-server edge claim-code
 ```
 
@@ -85,31 +91,45 @@ new host key is a new server, which must be claimed again and linked again
 by every client.
 
 Until an account claims it, the edge carries nothing for a server. Setup
-prints the edge, the server id and a **claim code**,
-`<first 8 characters of the id>-<secret>`, valid for 30 minutes and five
-attempts:
+prints the edge, the server id and a **claim code**, `<server id>-<secret>`,
+valid for 30 minutes and five attempts:
 
 ```
 edge: https://edge.onaether.dev
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
+dashboard: https://<server id>.<the edge's server domain>/; aether-server edge status shows the address once the server connects
 claim code: <code> (valid until 3:04PM, 5 attempts)
 claim this server with:
   aether link --claim <code>
 or enter it at https://edge.onaether.dev/servers/add
 ```
 
-Start the server first: the edge forwards the claim to the connected server,
-which compares the code itself and makes the claiming account its admin. The
-edge holds no copy of the code. A server that already has members is claimed
+Start the server first: the edge forwards the claim to the connected server
+the code names, which compares the code itself and makes the claiming
+account its admin. The edge stores no copy of the code, but the code passes
+through it. `aether link --claim` refuses an answer naming any other server
+id than the code's. A server that already has members is claimed
 by an admin who first links their edge account
 ([teams.md](teams.md#linking-an-existing-member)).
+
+The edge treats the server as claimed only once it has recorded the owner.
+When the server may have accepted a claim the edge could not record, because
+recording failed or the server's answer did not arrive within 10 seconds,
+the edge disconnects the server and answers:
+
+```
+the claim of server <server id> did not complete: <reason>. The edge disconnected the server so that it drops this claim when it reconnects; then claim it again, with a new code from `sudo aether-server edge claim-code` if this one is refused
+```
+
+On reconnecting, the edge reports the server unclaimed and the server drops
+the owner it recorded. The same account then claims it again.
 
 ### Commands
 
 | Command | Does |
 | --- | --- |
-| `sudo aether-server edge status` | Edge, server id, pinned edge key, owner, claim code state, connection state |
+| `sudo aether-server edge status` | Edge, server id, pinned edge key, owner, claim code state, connection state, dashboard address |
 | `sudo aether-server edge claim-code` | Issue a new claim code, replacing the old one |
 | `sudo aether-server edge trust` | Fetch the edge's current signing key and pin it after you type `yes` |
 | `sudo aether-server edge leave` | Unenroll at the edge, forget the owner, set `edge-url ""` |
@@ -126,17 +146,27 @@ edge key changed: pinned SHA256:<old>, edge presents SHA256:<new>; if the edge o
 Run `edge trust` only after the edge's operator has confirmed the new
 fingerprint.
 
+A server id the edge's operator blocked is refused at every enrollment. The
+server keeps retrying, and `edge status` shows the edge's reason:
+
+```
+connection  disconnected since <time>: read ready: failed to get reader: received close frame: status = StatusPolicyViolation and reason = "server is blocked by this edge's operator"
+```
+
 ### Files
 
-`<data>/edge/` is mode 0700 and every file in it 0600:
+`<data>/edge/` holds one directory for each edge the server has used,
+named after the edge's origin with `://` replaced by `_`, such as
+`<data>/edge/https_edge.onaether.dev/`. Every directory is mode 0700 and
+every file 0600:
 
-| File | Holds |
+| Path under `<data>/edge/` | Holds |
 | --- | --- |
-| `edge_key.json` | The pinned edge signing key |
-| `owner.json` | The account that claimed the server |
-| `claim.json` | The claim code's SHA-256 hash, expiry and attempts left; never the code |
-| `status.json` | Last connection state, for `edge status` |
-| `lock` | Serializes claim attempts between the server and the commands |
+| `<origin>/edge_key.json` | The pinned edge signing key |
+| `<origin>/owner.json` | The account that claimed the server at that edge |
+| `<origin>/claim.json` | The claim code's SHA-256 hash, expiry and attempts left; never the code |
+| `<origin>/status.json` | Last connection state and the edge's server domain, for `edge status` |
+| `<origin>/lock` | Serializes claim attempts between the server and the commands |
 | `certs/` | The dashboard certificate, its key and the ACME account key |
 
 ## Client side
@@ -145,7 +175,7 @@ fingerprint.
 
 ```sh
 aether login              # prints a URL and a code; confirm the code in the browser
-aether servers            # servers your account reaches, with your role
+aether servers            # servers your account reaches, with your role and dashboard address
 aether logout             # revokes this device's token at the edge
 ```
 
@@ -166,13 +196,20 @@ device key.
 
 ```sh
 aether link --claim <code>               # claim a new server and link it
-aether link <server name | server id>    # link a server your account reaches
-aether link <id> --addr host:2222        # also try this SSH address first
+aether link <server id>                  # link a server from aether servers
+aether link <server id> --addr host:2222 # also try this SSH address first
 ```
+
+Only a 26-character server id goes through the edge. Any other argument,
+including a bare name such as `my-server`, is an SSH address and never
+reaches the edge: server names are chosen by each server's admin, and
+`aether servers` also lists servers you are only invited to.
 
 A link through the edge stores the server id and the edge URL. With
 `--addr`, the client dials that address first (3-second timeout) and falls
-back to the edge; when both fail the error names both causes. On either
+back to the edge; when both fail the error names both causes. When only
+the address fails, its error goes to stderr followed by `aether: reached
+server <id> through <edge> instead`. On either
 path the host key must derive the server id, and nothing is read from or
 written to `known_hosts`. The device key authenticates on both paths: a
 server accepts it directly once the device has connected through the edge
@@ -185,8 +222,12 @@ A linked repository's `aether` remote uses the logical host
 processes set `GIT_SSH_COMMAND` to `aether edge-ssh`. For `git push aether`
 typed by hand, `aether link` sets the repository's `core.sshCommand` to the
 same command, which handles edge hosts itself and runs the system `ssh`
-unchanged for every other host. An existing `core.sshCommand` is never
-overwritten; `aether link` prints the line to add instead.
+unchanged for every other host. The command names `aether` by its `PATH`
+entry when that entry is the running binary, so an upgrade that moves the
+real file does not break it. An existing `core.sshCommand` is overwritten
+only when it is exactly `<path to aether> edge-ssh` from an earlier link;
+any other value is left alone and `aether link` prints the line to add
+instead.
 
 The sync daemon takes the same link: `aether daemon install --server-id <id>
 --edge-url <url> [--server host:port]`.
@@ -198,8 +239,12 @@ in [teams.md](teams.md#through-an-edge).
 
 ## Dashboard through the edge
 
-A browser reaches the dashboard at `https://<server id>.<server domain>`.
-The server learns the server domain from the edge when it enrolls, then
+A browser reaches the dashboard at `https://<server id>.<server domain>/`.
+`aether servers` prints that address in its `DASHBOARD` column, and
+`aether-server edge status` on its `dashboard` line. The edge's server list,
+`GET /v1/servers`, carries the domain as `server_domain`; an edge older
+than that field leaves it out, and `aether servers` prints `-`. The server
+learns the server domain from the edge when it enrolls, then
 serves the dashboard on connections the edge passes through, with a
 certificate for exactly that host name. The server logs both parts when it
 connects:
@@ -214,7 +259,9 @@ through it still works. If the edge later announces a different domain,
 restart `aether-server` to serve the dashboard there.
 
 The certificate is issued with TLS-ALPN-01 through the same passthrough,
-starting at the first enrollment once the server is claimed, and cached in
+starting once the server is claimed: at an enrollment the edge answers as
+claimed, or when a claim succeeds. An unclaimed server requests nothing
+from the CA. The certificate is cached in
 `<data>/edge/certs/`. A failed issuance is retried after 1 minute, doubling
 to 1 hour. Until it succeeds, browser handshakes are refused; SSH is never
 affected.
@@ -223,8 +270,9 @@ Signing in:
 
 1. Without a session, every `/api/v1` call answers 401 and the dashboard
    links to `/auth/login`.
-2. `/auth/login` sets `__Host-aether_signin` (a fresh state and PKCE
-   verifier, 10 minutes) and redirects to `<edge>/authorize`.
+2. `/auth/login` sets `__Host-aether_signin` (SameSite=Lax, 10 minutes)
+   holding a fresh state, a PKCE verifier and the browser's device token
+   if it has one, and redirects to `<edge>/authorize`.
 3. The edge signs you in, checks the server's directory, shows the server's
    name and id, and on **Continue** returns to
    `https://<server id>.<server domain>/auth/callback` with a one-time code.
@@ -233,22 +281,33 @@ Signing in:
 4. The server checks the state against its cookie, redeems the code with
    the verifier over its control connection, maps the account to a member
    (accepting an open invitation, as SSH does) and sets
-   `__Host-aether_session` (HttpOnly, Secure, SameSite=Strict).
+   `__Host-aether_device` and `__Host-aether_session` (both HttpOnly,
+   Secure, SameSite=Strict).
 
-The session is a browser device of that member: the server stores only its
-SHA-256 hash, `aether device list` shows it, and `aether device revoke`
-ends it. It expires after 30 days without use. A second browser of a member
-waits for approval like any later device, and the dashboard shows the
-approval commands. **Sign out** (`POST /auth/logout`) revokes the session
-and closes its live connections. A revoked browser still counts as one of
-the member's devices, so with `edge-device-approval` on, the next browser
-sign-in after signing out waits for approval.
+`__Host-aether_device` makes the browser a device of that member:
+`aether device list` shows it and `aether device revoke` revokes it. The
+edge's redirect to the callback is cross-site, so the browser does not send
+this Strict cookie there; the device token rides in the Lax sign-in cookie
+instead. `__Host-aether_session` is one sign-in on that device and expires
+after 30 days without use. The server stores only the SHA-256 hash of
+either. A second browser of a member waits for approval like any later
+device, and the dashboard shows the approval commands. Signing in again on
+the same browser continues on its device and needs no new approval; a
+device cookie of another member, or of a revoked device, gets a new device.
+**Sign out** (`POST /auth/logout`) ends the session and closes its live
+connections; the device and its approval stay. Revoking the device ends
+every session on it.
 
 The Android app opens step 3 in the system browser, because Google refuses
 OAuth inside a WebView. The edge then returns to `aether://auth/callback`,
 and the app loads the server's callback in its WebView, which holds the
-state cookie. Another app that intercepts the link cannot use the code
-without that cookie and the verifier.
+state cookie. For a sign-in the app started, another app that intercepts
+the link cannot use the code without that cookie and the verifier. For a
+sign-in someone else started and sent you as an edge link, the cookie and
+verifier are theirs: if you confirm it, an app on your phone that claims
+`aether://` can hand them the code, and they are signed in as you.
+Confirm only a sign-in you started; the edge's confirmation page names the
+server and says it returns to the Aether app.
 
 ## Running an edge
 
@@ -382,8 +441,10 @@ sudo curl -fsSL -o /etc/aether-edge/aether-edge.env "$src/edge/aether-edge.env.e
 sudo chmod 0600 /etc/aether-edge/aether-edge.env
 ```
 
-The secrets go in root-only files. Each command reads the secret from the
-terminal, so it lands in no shell history; paste it, then press Ctrl-D:
+The secrets go in root-only files, one for each provider you offer; set
+only those providers' client ids in the environment file. Each command
+reads the secret from the terminal, so it lands in no shell history; paste
+it, then press Ctrl-D:
 
 ```sh
 sudo sh -c 'umask 077 && cat > /etc/aether-edge/github-client-secret'
@@ -396,11 +457,17 @@ a read-only system, no home directories, private `/tmp` and devices, and
 `/var/lib/aether-edge` as its only writable path. It passes each secret file
 with `LoadCredential=`: systemd reads the file as root and gives the
 service a private copy, and the unit points
-`AETHER_EDGE_*_CLIENT_SECRET_FILE` at it. A missing secret file fails the
-start, so on an edge with one provider delete the other provider's
-`LoadCredential=` and `Environment=` lines from the installed unit. It
-restarts the edge 5 seconds after any exit, allows 1048576 open files, and
-gives a stop 30 seconds.
+`AETHER_EDGE_*_CLIENT_SECRET_FILE` at it. For a provider without a file,
+the unit's `SetCredential=` supplies a single newline instead, which the
+edge reads as no secret, so an edge offering one provider runs the unit
+unchanged. A client id whose secret file is missing still fails the start:
+
+```
+aether-edge: --google-client-id is set but /run/credentials/aether-edge.service/google-client-secret, named by --google-client-secret-file, holds no secret
+```
+
+The unit restarts the edge 5 seconds after any exit, allows 1048576 open
+files, and gives a stop 30 seconds.
 
 ### Configuration
 
@@ -429,8 +496,10 @@ is the whole configuration. Replace every `<...>` in it.
 Client secrets are never flags, because a flag's value shows in the process
 list. They come from `AETHER_EDGE_GITHUB_CLIENT_SECRET` and
 `AETHER_EDGE_GOOGLE_CLIENT_SECRET`, or from the files the `*-secret-file`
-options name; setting both for one provider is refused. Without the unit,
-keep either in a root-only file.
+options name; setting both for one provider is refused. A secret file that
+holds only white space holds no secret. A provider is offered when it has
+both a client id and a secret. Without the unit, keep either in a root-only
+file.
 
 The edge checks its options before it binds anything. Among the errors:
 
@@ -439,6 +508,7 @@ aether-edge: edge: no sign-in provider is configured; configure a GitHub or Goog
 aether-edge: --github-client-id is set but its secret is not; set AETHER_EDGE_GITHUB_CLIENT_SECRET or --github-client-secret-file
 aether-edge: --egress-budget "10G" is not a byte count
 aether-edge: --origin must be https://host[:port], not "edge.example.com"; for a local plain-HTTP edge use --dev-listen
+aether-edge: --origin: edgeproto: edge url "https://<edge-host>": host "<edge-host>" is not a DNS name or an IP address
 ```
 
 `--dev-listen 127.0.0.1:8080 --origin http://127.0.0.1:8080` serves plain
@@ -546,7 +616,11 @@ The edge logs to standard error, which the unit sends to the journal:
 `journalctl -u aether-edge`. Entries carry server ids and, for refused
 enrollments (`relay: enrollment refused client=<address>`) and failed TLS
 handshakes (`http: TLS handshake error from <address>:<port>`), client IP
-addresses. Client addresses are personal data. journald keeps entries until
+addresses. A page or API request that fails on the edge's side, such as a
+database error, or at the sign-in provider logs
+`edge: request failed route=<route> status=<5xx> error=<error>`; refusals
+the client can fix, such as a revoked token or a wrong code, are not
+logged. Client addresses are personal data. journald keeps entries until
 its size limits push them out, which can be months on a quiet host, so set a
 retention period and state it in your privacy notice:
 
@@ -566,7 +640,7 @@ The data directory, `/var/lib/aether-edge`:
 
 | Path | Holds |
 | --- | --- |
-| `edge.db` (with `edge.db-wal`, `edge.db-shm`) | Accounts, edge sessions, devices, claimed servers and their directories, egress counters. Bearer secrets are stored only as SHA-256 hashes |
+| `edge.db` (with `edge.db-wal`, `edge.db-shm`) | Accounts, edge sessions, devices, claimed servers and their directories, egress counters, blocked server ids and accounts. Bearer secrets are stored only as SHA-256 hashes |
 | `edge_key` | The Ed25519 key grants are signed with, OpenSSH format, 0600. The edge refuses to start if group or others can read it: `edge: signing key <path> has mode 0644; run chmod 600 <path>` |
 | `acme/` | The edge host's certificate, its key and the ACME account key |
 
@@ -628,6 +702,56 @@ backoff, and keeps SSH through the edge. Before inviting more than a few
 dozen new servers a week, request a higher limit for `<server-domain>` with
 the form linked from <https://letsencrypt.org/docs/rate-limits/>.
 
+### Operator commands
+
+Run them as the edge's user. They refuse any other user than the owner of
+`edge.db`, because SQLite creates its `-wal` and `-shm` files as whoever
+opens the database, and a root-owned one would lock the edge out.
+`--data` (default `AETHER_EDGE_DATA`, else `/var/lib/aether-edge`) names the
+data directory; flags go before the argument.
+
+```sh
+sudo -u aether-edge aether-edge servers list
+sudo -u aether-edge aether-edge servers remove <server id>
+sudo -u aether-edge aether-edge servers block <server id>
+sudo -u aether-edge aether-edge servers unblock <server id>
+sudo -u aether-edge aether-edge accounts list
+sudo -u aether-edge aether-edge accounts block github:<user id>
+sudo -u aether-edge aether-edge accounts unblock github:<user id>
+sudo -u aether-edge aether-edge accounts delete google:<subject>
+```
+
+An account is `<provider>:<subject>`, the provider's immutable user id, as
+the `ACCOUNT` column of `accounts list` prints it; `servers list` names each
+owner the same way.
+
+| Command | Effect |
+| --- | --- |
+| `servers remove` | Forgets the server's claim and directory. New SSH and dashboard connections are refused. The server learns it is unclaimed the next time it connects, drops its owner, and can be claimed again with a new code |
+| `servers block` | Does what `remove` does, and refuses the server id at enrollment with `server is blocked by this edge's operator` |
+| `servers unblock` | The id can enroll and be claimed again |
+| `accounts block` | Deletes the account's edge sessions, device tokens and pending device sign-ins, and refuses its sign-ins with `account is blocked by this edge's operator`. An account that never signed in can be blocked too. Servers it owns stay claimed and their members keep access |
+| `accounts unblock` | The account can sign in again; its devices sign in anew |
+| `accounts delete` | Deletes the account with its sessions, devices, the servers it owns (claim and directory) and the entries of other servers' directories that name it: its memberships, and invitations to its login or email. A block stays, holding only the provider and subject |
+
+The commands are safe while the edge runs: each change is one SQLite
+transaction, and the edge reads blocks and claims from the database at
+every enrollment, sign-in, connection and dashboard passthrough.
+Connections already open, and a removed server's control connection, stay
+up until they end or the edge restarts; `sudo systemctl restart aether-edge`
+ends them, with every other relayed connection.
+
+A server id is derived from a host key anyone can generate, so blocking an
+id stops that one server; its operator can enroll another under a new key.
+Likewise a blocked person can sign in with another GitHub or Google account.
+
+For a deletion request, `accounts delete` is the whole edge side. A server
+sends its directory again whenever it changes, so a membership or invitation
+of the person comes back until an admin of that server removes it there
+(`aether member remove`, `aether invite revoke`). The edge's log keeps what
+it logged for its [retention period](#logs). A server the account owned
+keeps running; its admins claim it again with a new code.
+
 ### Abuse
 
 Anyone who signs in can claim a server, and a claimed server's dashboard
@@ -639,19 +763,19 @@ abuse contact, and act on a report in two steps:
    `<server id>.<server-domain>`. A name that exists is no longer covered by
    the wildcard, so it gets no address; browsers holding it cached stop
    within the record's old TTL.
-2. **Unenroll the server.** The edge has no ban list and no operator
-   command. Remove the server's row while the edge is stopped:
+2. **Block the server**, and its owner if the report warrants it
+   ([Operator commands](#operator-commands)):
 
    ```sh
-   sudo systemctl stop aether-edge
-   sudo -u aether-edge sqlite3 /var/lib/aether-edge/edge.db "PRAGMA foreign_keys=ON; DELETE FROM servers WHERE id = '<server id>';"
-   sudo systemctl start aether-edge
+   sudo -u aether-edge aether-edge servers list
+   sudo -u aether-edge aether-edge servers block <server id>
+   sudo -u aether-edge aether-edge accounts block <owner account>
    ```
 
-   The server reconnects unclaimed and the edge carries nothing for it.
-   Stopping the edge drops every relayed connection for a few seconds. Its
-   operator can claim it again with a new code; the DNS record keeps its
-   dashboard name dark.
+   The edge passes nothing more through to that server and refuses its id
+   when it next enrolls. Its operator can start a new server with a new host
+   key, a new id and a new dashboard name; blocking the owner stops that
+   account from claiming one.
 
 ### Egress budget
 
@@ -660,7 +784,11 @@ per UTC calendar month. It does not count TLS and WebSocket framing, the
 edge's own pages and API, or certificate traffic, so a provider meters more
 than `aether_edge_egress_month_bytes` shows. Once the month's count reaches
 the budget, every relayed connection together is paced to 256 KiB/s until
-the next month; nothing is cut off. At that rate a 31-day month adds at most
+the next month; nothing is cut off. SSH and dashboard passthrough each get
+half, so passthrough, which needs no sign-in, cannot slow SSH. Within each
+half, servers take turns one read of at most 4 KiB at a time: a read waits
+behind at most one read of each other busy server, however many
+connections that server holds. At that rate a 31-day month adds at most
 about 650 GiB after the budget is spent, and a crash loses up to one minute
 of counting. So for a provider ceiling of C bytes a month, set the budget
 below C minus 700 GiB (751619276800 bytes), with margin for framing. The
@@ -670,15 +798,19 @@ count survives restarts and resets at the month boundary.
 
 | Limit | Value |
 | --- | --- |
-| Concurrent relayed connections per server | 48, SSH and dashboard together |
+| Concurrent SSH connections per server | 48 |
+| Concurrent dashboard connections per server | 48, a budget apart from SSH's |
+| Concurrent dashboard connections per server from one client address (IPv6 per /64) | 16 |
 | Connections per device | 16 |
-| Unclaimed servers per client address (IPv6 per /64) | 3, each dropped after 30 minutes |
+| Unclaimed servers per client address | 3, each dropped after 30 minutes; for IPv6, 3 per /64, 12 per /56 and 48 per /48 |
 | Unclaimed servers per edge | 10000 |
 | Open connections to `:443` per client address (IPv6 per /64) | 1024 |
 | Server attaching a connection | 10 seconds, then `server did not attach` |
 | TLS ClientHello read | 5 seconds, 16 KiB |
-| Sign-in, device codes and claims | rate-limited per address; IPv6 per /64. Device-code entry is also limited per account, and device-token polling per address |
+| Sign-in, device codes and claims | rate-limited per address. An IPv6 address counts against its /64, its /56 with 4 times the budget, and its /48 with 16 times; a request passes only when all three have budget left. Device-code entry is also limited per account, and device-token polling per address. Each limit remembers 65536 address blocks; past that, a new block replaces the one with the most budget left among 64 sampled |
+| Directory stores per server | 1 per 5 seconds; a push in between waits, and only the latest waiting push is stored |
 | Grant lifetime | 60 seconds, 30 seconds of clock skew allowed |
+| Login and email matching invitations | 24 hours after the account's last provider sign-in; an edge page opened later signs in with the provider again |
 
 No idle timeout applies to a relayed stream: an idle terminal is legitimate.
 
@@ -689,7 +821,8 @@ No idle timeout applies to a relayed stream: an idle terminal is legitimate.
 | Edge down | Servers keep running and retry. Links with `--addr` use it; others fail with the edge's error |
 | Edge restart | Relayed connections drop; servers and clients reconnect; runs are unaffected |
 | Server offline | `503 server is not connected to the edge` |
-| OAuth provider down | No new sign-ins; existing device tokens and dashboard sessions keep working |
+| Claim did not complete | The edge disconnects the server; after it reconnects, claim it again ([Server id and claiming](#server-id-and-claiming)) |
+| OAuth provider down | No new sign-ins; existing device tokens and dashboard sessions keep working, but invitations stop matching accounts whose last sign-in is over 24 hours old, and edge pages opened after that fail at the provider |
 | Host key lost or rotated | New server id: claim again and link again |
 | Edge signing key lost | Every server refuses the edge until `aether-server edge trust` |
 | Dashboard certificate not issued | Dashboard through the edge unavailable; SSH unaffected; retried with backoff |

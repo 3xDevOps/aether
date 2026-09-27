@@ -25,7 +25,7 @@ func waitRole(t *testing.T, c *client, serverID, role string) {
 	eventually(t, fmt.Sprintf("%s's role on %s to be %q", c.user.Login, serverID, role), func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 		defer cancel()
-		servers, err := c.edge.Servers(ctx)
+		servers, _, err := c.edge.Servers(ctx)
 		if err != nil {
 			return err
 		}
@@ -130,6 +130,38 @@ func TestInvitations(t *testing.T) {
 		t.Fatalf("expired invitation at the server: %v, want the server's own refusal", err)
 	}
 	call[struct{}](t, ctl, protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: id})
+}
+
+// A server that already has members is claimed by an admin who linked
+// their account. The directory the server pushes as it accepts the claim
+// reaches the edge before the edge records the claim, and must not be
+// lost: bob's open invitation is in it.
+func TestClaimKeepsTheDirectoryPushedWithIt(t *testing.T) {
+	h := newHarness(t)
+	a := h.newServer()
+	cs := h.login(alice, bob)
+	al, bo := cs[0], cs[1]
+	ctx := context.Background()
+	admin := &domain.Member{DisplayName: "Admin", Color: "#3cb44b", Role: domain.RoleAdmin,
+		PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey()))}
+	if err := a.db.CreateMember(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(time.Hour)
+	for _, inv := range []*domain.Invitation{
+		{Provider: edgeproto.ProviderGitHub, Login: al.user.Login, Member: admin.ID, CreatedBy: admin.ID, ExpiresAt: expires},
+		{Provider: edgeproto.ProviderGitHub, Login: bo.user.Login, Role: domain.RoleCollaborator, CreatedBy: admin.ID, ExpiresAt: expires},
+	} {
+		if err := a.db.CreateInvitation(ctx, inv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.claimServer(al, a)
+	waitRole(t, bo, a.id, "collaborator")
+	info := call[protocol.ServerInfoResult](t, h.control(bo, a), protocol.MethodServerInfo, struct{}{})
+	if info.Member.Role != string(domain.RoleCollaborator) {
+		t.Fatalf("bob joined as %+v", info.Member)
+	}
 }
 
 // closedWithin reports whether sc closes within waitTimeout.

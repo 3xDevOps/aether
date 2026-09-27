@@ -75,7 +75,7 @@ func TestEdgeSSHHandlesEdgeHostsItself(t *testing.T) {
 }
 
 func TestParseLinkArgsEdgeForms(t *testing.T) {
-	opts, err := parseLinkArgs([]string{"--claim", "wqc4lsjv-abcdefghijklmnop", "--addr", "tailnet-host"})
+	opts, err := parseLinkArgs([]string{"--claim", testServerID + "-abcdefghijklmnop", "--addr", "tailnet-host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,24 +93,55 @@ func TestParseLinkArgsEdgeForms(t *testing.T) {
 	}
 }
 
-func TestPickServer(t *testing.T) {
-	servers := []edgeproto.ServerInfo{
-		{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "prod", Role: "admin"},
-		{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbb", Name: "box", Role: "member"},
-		{ID: "cccccccccccccccccccccccccc", Name: "box", Role: "viewer"},
+func TestLinkResolvesOnlyServerIDsOnTheEdge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("openBrowser calls ShellExecute, which PATH cannot stub")
 	}
-	if id, err := pickServer(servers, "prod"); err != nil || id != servers[0].ID {
-		t.Fatalf("pickServer(prod) = %q, %v", id, err)
+	testhome.Isolate(t)
+	t.Setenv("PATH", t.TempDir())
+	mux := http.NewServeMux()
+	edge := httptest.NewServer(mux)
+	t.Cleanup(edge.Close)
+	var key string
+	mux.HandleFunc("POST "+edgeproto.PathDeviceStart, func(w http.ResponseWriter, r *http.Request) {
+		var req edgeproto.DeviceStartRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		key = req.Key
+		_ = json.NewEncoder(w).Encode(edgeproto.DeviceStartResponse{
+			DeviceCode: "device-code", UserCode: "WXYZ-1234", VerificationURI: edge.URL + "/device", Interval: 1,
+		})
+	})
+	mux.HandleFunc("POST "+edgeproto.PathDeviceToken, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(edgeproto.DeviceTokenResponse{
+			Token:   edgeproto.NewToken(),
+			Device:  edgeproto.Device{ID: "dev-1", Label: "ci", Key: key},
+			Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+		})
+	})
+	// A stranger's server, named like the person's tailnet host, that
+	// the account is only invited to.
+	mux.HandleFunc("GET "+edgeproto.PathServers, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(edgeproto.ServersResponse{Servers: []edgeproto.ServerInfo{
+			{ID: testServerID, Name: "devbox", Online: true, Role: "member"},
+		}})
+	})
+	if _, err := captureStdout(t, func() error { return runLogin([]string{"--edge", edge.URL, "--label", "ci"}) }); err != nil {
+		t.Fatal(err)
 	}
-	if id, err := pickServer(servers, servers[2].ID); err != nil || id != servers[2].ID {
-		t.Fatalf("pickServer(id) = %q, %v", id, err)
+	for _, addr := range []string{"devbox", "localhost"} {
+		got, err := edgeLinkOptions(linkOptions{addr: addr})
+		if err != nil || got != (cli.LinkOptions{}) {
+			t.Fatalf("edgeLinkOptions(%s) = %+v, %v; want the SSH address", addr, got, err)
+		}
 	}
-	if id, err := pickServer(servers, "laptop"); err != nil || id != "" {
-		t.Fatalf("pickServer(laptop) = %q, %v; want no match", id, err)
+	got, err := edgeLinkOptions(linkOptions{addr: testServerID, direct: "devbox"})
+	want := cli.LinkOptions{Addr: "devbox", EdgeURL: edge.URL, ServerID: testServerID}
+	if err != nil || got != want {
+		t.Fatalf("edgeLinkOptions(id) = %+v, %v; want %+v", got, err, want)
 	}
-	_, err := pickServer(servers, "box")
-	if err == nil || !strings.Contains(err.Error(), servers[1].ID) || !strings.Contains(err.Error(), servers[2].ID) {
-		t.Fatalf("pickServer(box) = %v, want both ids listed", err)
+	edge.Close()
+	if got, err := edgeLinkOptions(linkOptions{addr: "devbox"}); err != nil || got != (cli.LinkOptions{}) {
+		t.Fatalf("edgeLinkOptions(devbox) with the edge down = %+v, %v; want the SSH address", got, err)
 	}
 }
 
@@ -147,7 +178,7 @@ func TestLoginNeverPrintsTheToken(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(edgeproto.ErrorBody{Error: string(edgeproto.RefusalTokenRevoked)})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(edgeproto.ServersResponse{Servers: []edgeproto.ServerInfo{
+		_ = json.NewEncoder(w).Encode(edgeproto.ServersResponse{ServerDomain: "servers.example.test", Servers: []edgeproto.ServerInfo{
 			{ID: testServerID, Name: "prod", Online: true, Role: "admin"},
 		}})
 	})
@@ -164,7 +195,8 @@ func TestLoginNeverPrintsTheToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(listed, testServerID) || !strings.Contains(listed, "prod") || !strings.Contains(listed, "yes") {
+	if !strings.Contains(listed, testServerID) || !strings.Contains(listed, "prod") || !strings.Contains(listed, "yes") ||
+		!strings.Contains(listed, "https://"+testServerID+".servers.example.test/") {
 		t.Fatalf("servers output %q", listed)
 	}
 	if strings.Contains(out+listed, token) {

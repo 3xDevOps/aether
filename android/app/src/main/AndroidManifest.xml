@@ -55,8 +55,10 @@
                     android:scheme="aether" />
             </intent-filter>
             <!-- The edge's return from a sign-in opened in the browser. Any
-                 app can claim this link too; the code in it is bound to the
-                 state cookie in this WebView, so it is useless elsewhere. -->
+                 app can claim this link too. The code in it is bound to the
+                 state cookie of the browser that started the sign-in: this
+                 WebView for a sign-in started here, but the attacker's for
+                 one an attacker started and sent to a member. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

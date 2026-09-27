@@ -132,6 +132,28 @@ function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
     }
   }
 
+  if (kind === 'edge-refused') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Refused by the edge',
+      title: 'The edge refused to connect this computer to your server',
+      description:
+        "The edge answered and refused the connection, so nothing was asked of the server. The details below carry the edge's reason.",
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'not-member') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Not a member',
+      title: 'You are not a member of this server',
+      description:
+        'The edge or the server no longer counts your account as a member: an admin removed it, or revoked its invitation. Ask an admin of the server to invite you again, then retry.',
+      action: 'Retry connection',
+    }
+  }
+
   if (kind === 'signed-out') {
     return {
       icon: LogIn,

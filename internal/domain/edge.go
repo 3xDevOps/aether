@@ -24,8 +24,8 @@ const (
 	// DeviceSSH is a client install; its credential is its device key as
 	// an authorized_keys line.
 	DeviceSSH DeviceKind = "ssh"
-	// DeviceBrowser is one browser's dashboard session; its credential is
-	// the hash of the session token.
+	// DeviceBrowser is one browser; its credential is the hash of the
+	// token in the browser's device cookie, which outlives sign-out.
 	DeviceBrowser DeviceKind = "browser"
 )
 
@@ -53,6 +53,20 @@ type Device struct {
 	// ApprovedBy is the member who approved a device that needed approval;
 	// empty for a member's first device.
 	ApprovedBy MemberID
+}
+
+// BrowserSessionID identifies a BrowserSession.
+type BrowserSessionID string
+
+// BrowserSession is one sign-in of a browser device. Signing out ends the
+// session and keeps the device with its approval. Credential is the hash
+// of the session token.
+type BrowserSession struct {
+	ID         BrowserSessionID
+	Device     DeviceID
+	Credential string
+	CreatedAt  time.Time
+	LastSeenAt *time.Time
 }
 
 // InvitationID identifies an Invitation.

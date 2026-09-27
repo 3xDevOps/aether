@@ -83,33 +83,49 @@ func (c *Client) onEdge(raw string) bool {
 }
 
 // Wait polls the edge until the person confirms or refuses the sign-in,
-// or its code expires, and stores the device token it receives.
+// or its code expires, and stores the device token it receives. A poll
+// that does not reach the edge, or that a 5xx answers, is retried: the
+// edge keeps the pending sign-in, and the person may already have
+// confirmed it.
 func (c *Client) Wait(ctx context.Context, l *Login) (Session, error) {
 	ctx, cancel := context.WithDeadline(ctx, l.deadline)
 	defer cancel()
 	interval := l.interval
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
+	var lastErr error
 	for {
 		select {
 		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return Session{}, fmt.Errorf("sign in: code %s expired before it was confirmed; run aether login again", l.UserCode)
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return Session{}, ctx.Err()
 			}
-			return Session{}, ctx.Err()
+			if lastErr != nil {
+				return Session{}, fmt.Errorf("sign in: code %s expired before it was confirmed; run aether login again; the last poll failed: %w", l.UserCode, lastErr)
+			}
+			return Session{}, fmt.Errorf("sign in: code %s expired before it was confirmed; run aether login again", l.UserCode)
 		case <-timer.C:
 		}
 		var resp edgeproto.DeviceTokenResponse
 		err := c.call(ctx, "sign in", http.MethodPost, edgeproto.PathDeviceToken, "",
 			edgeproto.DeviceTokenRequest{DeviceCode: l.deviceCode}, &resp)
-		var refused *RefusedError
+		var (
+			refused   *RefusedError
+			transport *url.Error
+		)
 		switch {
 		case err == nil:
 			return c.store(l, resp)
+		case ctx.Err() != nil:
+			// The poll failed because the wait ended; the select says why.
+		case errors.As(err, &transport) || (errors.As(err, &refused) && refused.Status >= http.StatusInternalServerError):
+			lastErr = err
 		case !errors.As(err, &refused) || refused.Status != http.StatusBadRequest:
 			return Session{}, err
 		case refused.Message == edgeproto.DevicePending:
+			lastErr = nil
 		case refused.Message == edgeproto.DeviceSlowDown:
+			lastErr = nil
 			interval += slowDownStep * pollUnit
 		case refused.Message == edgeproto.DeviceDenied:
 			return Session{}, fmt.Errorf("sign in: code %s was refused at %s", l.UserCode, c.host)

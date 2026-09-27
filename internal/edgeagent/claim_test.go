@@ -12,6 +12,16 @@ import (
 
 var testOwner = edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo"}
 
+// openState opens the state for edgeURL under dataDir.
+func openState(t *testing.T, dataDir, edgeURL string) *State {
+	t.Helper()
+	s, err := OpenState(dataDir, edgeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func issue(t *testing.T, s *State, at time.Time) string {
 	t.Helper()
 	code, _, err := s.IssueClaimCode(edgeproto.ServerID(newHostKey(t).PublicKey()), at)
@@ -30,7 +40,7 @@ func wrongCode(code string) string {
 }
 
 func TestClaimCodeAllowsFiveAttempts(t *testing.T) {
-	s := OpenState(t.TempDir())
+	s := openState(t, t.TempDir(), "https://edge.example.test")
 	now := time.Now()
 	code := issue(t, s, now)
 	claims := 0
@@ -57,7 +67,7 @@ func TestClaimCodeAllowsFiveAttempts(t *testing.T) {
 }
 
 func TestClaimCodeExpires(t *testing.T) {
-	s := OpenState(t.TempDir())
+	s := openState(t, t.TempDir(), "https://edge.example.test")
 	issued := time.Now()
 	code := issue(t, s, issued)
 	late := issued.Add(edgeproto.ClaimCodeTTL + time.Second)
@@ -71,14 +81,14 @@ func TestClaimCodeExpires(t *testing.T) {
 
 func TestClaimCodeIsUsedOnce(t *testing.T) {
 	dir := t.TempDir()
-	s := OpenState(dir)
+	s := openState(t, dir, "https://edge.example.test")
 	now := time.Now()
 	code := issue(t, s, now)
 	raw, err := os.ReadFile(s.path(claimFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), code[edgeproto.ClaimPrefixLength+1:]) {
+	if strings.Contains(string(raw), code[edgeproto.ServerIDLength+1:]) {
 		t.Fatal("the claim code's secret is stored in the clear")
 	}
 	if err := s.attemptClaim("  "+strings.ToUpper(code)+"\n", testOwner, now, func() error { return nil }); err != nil {
@@ -96,7 +106,7 @@ func TestClaimCodeIsUsedOnce(t *testing.T) {
 }
 
 func TestFailedClaimKeepsTheCodeButSpendsTheAttempt(t *testing.T) {
-	s := OpenState(t.TempDir())
+	s := openState(t, t.TempDir(), "https://edge.example.test")
 	now := time.Now()
 	code := issue(t, s, now)
 	boom := errors.New("store is read-only")
@@ -114,6 +124,11 @@ func TestFailedClaimKeepsTheCodeButSpendsTheAttempt(t *testing.T) {
 
 func TestClaimOverTheEdge(t *testing.T) {
 	edge, sshd, a, ec := enrolled(t)
+	select {
+	case <-a.Claimed():
+		t.Fatal("Claimed signalled while the edge reports the server unclaimed")
+	default:
+	}
 	code := issueFor(t, a)
 	claimGrant := func(id string) string {
 		now := time.Now()
@@ -142,6 +157,11 @@ func TestClaimOverTheEdge(t *testing.T) {
 	}
 	if got := <-sshd.claimed; got != testOwner {
 		t.Fatalf("ClaimByEdge(%+v)", got)
+	}
+	select {
+	case <-a.Claimed():
+	case <-time.After(waitFor):
+		t.Fatal("Claimed not signalled after an accepted claim")
 	}
 }
 

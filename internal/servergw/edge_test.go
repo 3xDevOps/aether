@@ -205,11 +205,15 @@ func (env *edgeEnv) client() *http.Client {
 
 func (env *edgeEnv) origin() string { return env.web.URL }
 
-// login runs GET /auth/login and returns the response, the state cookie
-// and the authorize URL it redirected to.
-func (env *edgeEnv) login(query string) (*http.Response, *http.Cookie, *url.URL) {
+// login runs GET /auth/login with cookies and returns the response, the
+// state cookie and the authorize URL it redirected to.
+func (env *edgeEnv) login(query string, cookies ...*http.Cookie) (*http.Response, *http.Cookie, *url.URL) {
 	env.t.Helper()
-	resp, err := env.client().Get(env.web.URL + "/auth/login" + query)
+	req, _ := http.NewRequest(http.MethodGet, env.web.URL+"/auth/login"+query, nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	resp, err := env.client().Do(req)
 	if err != nil {
 		env.t.Fatal(err)
 	}
@@ -240,11 +244,13 @@ func (env *edgeEnv) callback(state, code string, cookies ...*http.Cookie) (*http
 	return resp, string(body)
 }
 
-// signIn runs the whole browser sign-in for account and returns the
-// callback's response and body.
-func (env *edgeEnv) signIn(account edgeproto.Account) (*http.Response, string) {
+// signIn runs the whole browser sign-in for account, with the browser's
+// device cookie when it has one, and returns the callback's response and
+// body. Like a browser following the edge's cross-site redirect, the
+// callback carries no Strict cookie.
+func (env *edgeEnv) signIn(account edgeproto.Account, device ...*http.Cookie) (*http.Response, string) {
 	env.t.Helper()
-	_, state, loc := env.login("")
+	_, state, loc := env.login("", device...)
 	if state == nil {
 		env.t.Fatal("login set no state cookie")
 	}
@@ -285,9 +291,15 @@ func (env *edgeEnv) call(origin string, session *http.Cookie) (int, webgate.Erro
 	return resp.StatusCode, body
 }
 
+// device returns the browser device of the session with token.
 func (env *edgeEnv) device(token string) *domain.Device {
 	env.t.Helper()
-	dev, err := env.db.GetDeviceByCredential(context.Background(), edgeproto.HashToken(token))
+	ctx := context.Background()
+	sess, err := env.db.GetBrowserSessionByCredential(ctx, edgeproto.HashToken(token))
+	if err != nil {
+		env.t.Fatal(err)
+	}
+	dev, err := env.db.GetDevice(ctx, sess.Device)
 	if err != nil {
 		env.t.Fatal(err)
 	}
@@ -378,11 +390,18 @@ func TestEdgeSignIn(t *testing.T) {
 	if got, want := setCookieLine(resp, sessionCookie), sessionCookie+"="+session.Value+"; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Strict"; got != want {
 		t.Errorf("session cookie:\n got %s\nwant %s", got, want)
 	}
+	device := cookieNamed(resp, deviceCookie)
+	if device == nil || !edgeproto.ValidToken(device.Value) || device.Value == session.Value {
+		t.Fatal("callback set no device cookie of its own")
+	}
+	if got, want := setCookieLine(resp, deviceCookie), deviceCookie+"="+device.Value+"; Path=/; Max-Age=34560000; HttpOnly; Secure; SameSite=Strict"; got != want {
+		t.Errorf("device cookie:\n got %s\nwant %s", got, want)
+	}
 	if got, want := setCookieLine(resp, signinCookie), signinCookie+"=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"; got != want {
 		t.Errorf("state cookie not cleared:\n got %s\nwant %s", got, want)
 	}
 	dev := env.device(session.Value)
-	if dev.Kind != domain.DeviceBrowser || dev.Status != domain.DeviceApproved || dev.Credential == session.Value {
+	if dev.Kind != domain.DeviceBrowser || dev.Status != domain.DeviceApproved || dev.Credential != edgeproto.HashToken(device.Value) {
 		t.Fatalf("browser device %+v", dev)
 	}
 
@@ -479,17 +498,12 @@ func TestEdgePendingBrowser(t *testing.T) {
 
 	resp, body := env.signIn(ada)
 	session := cookieNamed(resp, sessionCookie)
-	if resp.StatusCode != http.StatusForbidden || session == nil {
-		t.Fatalf("pending sign-in: %d %s, want 403 with a session cookie", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" || session == nil {
+		t.Fatalf("pending sign-in: %d %s, want a redirect to / with a session cookie", resp.StatusCode, body)
 	}
 	dev := env.device(session.Value)
 	if dev.Status != domain.DevicePending {
 		t.Fatalf("browser device is %s, want pending", dev.Status)
-	}
-	for _, want := range []string{"aether device approve " + dev.ApprovalCode, "sudo aether-server device approve " + dev.ApprovalCode} {
-		if !strings.Contains(body, want) {
-			t.Errorf("pending page %q lacks %q", body, want)
-		}
 	}
 	status, refusal := env.call(env.origin(), session)
 	if status != http.StatusForbidden || refusal.Error == nil || string(refusal.Error.Data) != `{"approval_code":"`+dev.ApprovalCode+`"}` ||
@@ -597,11 +611,103 @@ func TestEdgeRevokedSessionLosesRequestsAndSockets(t *testing.T) {
 			setCookieLine(resp, sessionCookie) != sessionCookie+"=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict" {
 			t.Fatalf("logout: %d %q", resp.StatusCode, resp.Header.Values("Set-Cookie"))
 		}
-		if dev := env.device(session.Value); dev.Status != domain.DeviceRevoked {
-			t.Fatalf("after logout the browser device is %s", dev.Status)
-		}
 		waitClosed(t, ctx, ws)
+		if status, body := env.call(env.origin(), session); status != http.StatusUnauthorized || !strings.Contains(body.Error.Message, "no longer exists") {
+			t.Fatalf("session after logout: %d %+v, want 401", status, body.Error)
+		}
 	})
+}
+
+// A browser is one device across sign-ins: signing out ends the session
+// only, so a member whose one device is a phone can sign out and back in
+// without an approval nobody is left to give.
+func TestEdgeSignOutKeepsTheBrowserDevice(t *testing.T) {
+	env := newEdgeEnv(t, EdgeConfig{})
+	env.member(ada)
+	ctx := context.Background()
+	resp, body := env.signIn(ada)
+	session, device := cookieNamed(resp, sessionCookie), cookieNamed(resp, deviceCookie)
+	if resp.StatusCode != http.StatusSeeOther || session == nil || device == nil {
+		t.Fatalf("first sign-in: %d %s", resp.StatusCode, body)
+	}
+	phone := env.device(session.Value)
+
+	logout, _ := http.NewRequest(http.MethodPost, env.web.URL+"/auth/logout", nil)
+	logout.AddCookie(session)
+	logout.AddCookie(device)
+	logout.Header.Set("Origin", env.origin())
+	resp, err := http.DefaultClient.Do(logout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || setCookieLine(resp, deviceCookie) != "" {
+		t.Fatalf("logout: %d %q, want the device cookie left alone", resp.StatusCode, resp.Header.Values("Set-Cookie"))
+	}
+	if dev, err := env.db.GetDevice(ctx, phone.ID); err != nil || dev.Status != domain.DeviceApproved {
+		t.Fatalf("device after sign-out = %+v, %v; want it approved", dev, err)
+	}
+
+	resp, body = env.signIn(ada, device)
+	again := cookieNamed(resp, sessionCookie)
+	if resp.StatusCode != http.StatusSeeOther || again == nil {
+		t.Fatalf("sign-in after sign-out: %d %s, want accepted without approval", resp.StatusCode, body)
+	}
+	if dev := env.device(again.Value); dev.ID != phone.ID {
+		t.Fatalf("sign-in after sign-out made device %s, want %s", dev.ID, phone.ID)
+	}
+	if c := cookieNamed(resp, deviceCookie); c == nil || c.Value != device.Value {
+		t.Fatal("sign-in on a known device replaced its device cookie")
+	}
+	if status, _ := env.call(env.origin(), session); status != http.StatusUnauthorized {
+		t.Fatalf("the signed-out session: %d, want 401", status)
+	}
+
+	// Signing in again while signed in stays on the same device.
+	resp, body = env.signIn(ada, device)
+	if c := cookieNamed(resp, sessionCookie); resp.StatusCode != http.StatusSeeOther || c == nil || env.device(c.Value).ID != phone.ID {
+		t.Fatalf("second sign-in while signed in: %d %s, want the same device", resp.StatusCode, body)
+	}
+	if devs, _ := env.db.ListDevices(ctx, phone.Member); len(devs) != 1 {
+		t.Fatalf("devices of the member = %+v, want the one browser", devs)
+	}
+}
+
+// A device cookie carries no approval to another member, and a revoked
+// device stays revoked: both sign in as a new device.
+func TestEdgeDeviceCookieOfAnotherMemberOrRevokedIsANewDevice(t *testing.T) {
+	env := newEdgeEnv(t, EdgeConfig{})
+	env.member(ada)
+	env.member(grace)
+	ctx := context.Background()
+	resp, _ := env.signIn(ada)
+	adaDevice := env.device(cookieNamed(resp, sessionCookie).Value)
+	device := cookieNamed(resp, deviceCookie)
+
+	resp, body := env.signIn(grace, device)
+	session := cookieNamed(resp, sessionCookie)
+	if resp.StatusCode != http.StatusSeeOther || session == nil {
+		t.Fatalf("grace on ada's browser: %d %s", resp.StatusCode, body)
+	}
+	graceDevice := env.device(session.Value)
+	if graceDevice.ID == adaDevice.ID || graceDevice.Member == adaDevice.Member {
+		t.Fatalf("grace signed in on ada's device %+v", graceDevice)
+	}
+	if c := cookieNamed(resp, deviceCookie); c == nil || c.Value == device.Value {
+		t.Fatal("grace's device reuses ada's device cookie")
+	}
+
+	if err := env.db.RevokeDevice(ctx, adaDevice.ID); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = env.signIn(ada, device)
+	session = cookieNamed(resp, sessionCookie)
+	if resp.StatusCode != http.StatusSeeOther || session == nil {
+		t.Fatalf("sign-in on a revoked device: %d %s, want a new pending device", resp.StatusCode, body)
+	}
+	if dev := env.device(session.Value); dev.ID == adaDevice.ID || dev.Status != domain.DevicePending {
+		t.Fatalf("sign-in on a revoked device continued on %+v", dev)
+	}
 }
 
 func TestEdgeSessionIdleExpiryAndTouch(t *testing.T) {

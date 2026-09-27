@@ -23,11 +23,15 @@ import (
 const testDomain = "servers.example.test"
 
 type fakeDir struct {
-	mu         sync.Mutex
-	tokens     map[string]tokenEntry
-	owners     map[string]bool
-	members    map[string][]edgeproto.Account
-	dirs       map[string][]edgeproto.DirectoryEntry
+	mu        sync.Mutex
+	tokens    map[string]tokenEntry
+	owners    map[string]bool
+	blocked   map[string]bool
+	members   map[string][]edgeproto.Account
+	dirs      map[string][]edgeproto.DirectoryEntry
+	dirWrites int
+	// admitHook, when set, runs once at the start of the next Admit.
+	admitHook  func()
 	webCodes   map[string]string
 	unenrolled []string
 }
@@ -51,6 +55,13 @@ func (d *fakeDir) Authenticate(_ context.Context, token string) (edgeproto.Accou
 // the relay itself must still refuse.
 func (d *fakeDir) Admit(_ context.Context, serverID string, a edgeproto.Account) error {
 	d.mu.Lock()
+	hook := d.admitHook
+	d.admitHook = nil
+	d.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	d.mu.Lock()
 	defer d.mu.Unlock()
 	members, ok := d.members[serverID]
 	if !ok {
@@ -64,7 +75,16 @@ func (d *fakeDir) Admit(_ context.Context, serverID string, a edgeproto.Account)
 	return edgeproto.RefusalNotMember
 }
 
-func (d *fakeDir) Claimed(_ context.Context, serverID, _ string) (bool, error) {
+func (d *fakeDir) Enroll(_ context.Context, serverID, _ string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.blocked[serverID] {
+		return false, edgeproto.RefusalServerBlocked
+	}
+	return d.owners[serverID], nil
+}
+
+func (d *fakeDir) Claimed(_ context.Context, serverID string) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.owners[serverID], nil
@@ -74,6 +94,7 @@ func (d *fakeDir) ReplaceDirectory(_ context.Context, serverID string, entries [
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dirs[serverID] = entries
+	d.dirWrites++
 	return nil
 }
 
@@ -92,6 +113,20 @@ func (d *fakeDir) Unenroll(_ context.Context, serverID string) error {
 	defer d.mu.Unlock()
 	d.unenrolled = append(d.unenrolled, serverID)
 	return nil
+}
+
+// record is the Service's claim recording: it makes the server owned.
+func (e *env) record(_ context.Context, serverID, _ string) error {
+	e.dir.mu.Lock()
+	defer e.dir.mu.Unlock()
+	e.dir.owners[serverID] = true
+	return nil
+}
+
+func (e *env) owned(serverID string) bool {
+	e.dir.mu.Lock()
+	defer e.dir.mu.Unlock()
+	return e.dir.owners[serverID]
 }
 
 func (d *fakeDir) addMember(serverID string, a edgeproto.Account) {
@@ -146,6 +181,7 @@ func newEnvWith(t *testing.T, budget int64, egress *fakeEgress) *env {
 		dir: &fakeDir{
 			tokens:   map[string]tokenEntry{},
 			owners:   map[string]bool{},
+			blocked:  map[string]bool{},
 			members:  map[string][]edgeproto.Account{},
 			dirs:     map[string][]edgeproto.DirectoryEntry{},
 			webCodes: map[string]string{},

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
 // copyBufferSize bounds what a splice holds per direction: it reads again
@@ -31,17 +34,17 @@ func (r *Relay) splice(c *relayConn, client, server net.Conn) {
 	})
 	done := make(chan struct{})
 	go func() {
-		r.pipe(c.ctx, server, client)
+		r.pipe(c, server, client)
 		c.cancel(errSpliceDone)
 		close(done)
 	}()
-	r.pipe(c.ctx, client, server)
+	r.pipe(c, client, server)
 	c.cancel(errSpliceDone)
 	<-done
 	r.drop(c)
 }
 
-func (r *Relay) pipe(ctx context.Context, dst, src net.Conn) {
+func (r *Relay) pipe(c *relayConn, dst, src net.Conn) {
 	buf := make([]byte, copyBufferSize)
 	for {
 		throttled := r.throttled()
@@ -51,7 +54,7 @@ func (r *Relay) pipe(ctx context.Context, dst, src net.Conn) {
 		}
 		n, err := src.Read(p)
 		if n > 0 {
-			if throttled && !sleep(ctx, r.throttleWait(n)) {
+			if throttled && !r.throttle(c, n) {
 				return
 			}
 			if _, werr := dst.Write(p[:n]); werr != nil {
@@ -65,19 +68,46 @@ func (r *Relay) pipe(ctx context.Context, dst, src net.Conn) {
 	}
 }
 
-// throttleWait reserves n bytes of the throttled rate and returns how long
-// to wait before sending them. Every splice draws on the one rate, so
-// opening more connections does not raise it.
-func (r *Relay) throttleWait(n int) time.Duration {
-	r.throttleMu.Lock()
-	defer r.throttleMu.Unlock()
+// pacer spreads reads over a rate: each read is sent after the ones
+// reserved before it.
+type pacer struct {
+	mu   sync.Mutex
+	next time.Time
+}
+
+// reserve reserves n bytes at rate bytes per second and returns how long
+// to wait before sending them.
+func (p *pacer) reserve(n int, rate int64) time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	now := time.Now()
-	if r.throttleNext.Before(now) {
-		r.throttleNext = now
+	if p.next.Before(now) {
+		p.next = now
 	}
-	wait := r.throttleNext.Sub(now)
-	r.throttleNext = r.throttleNext.Add(time.Duration(n) * time.Second / time.Duration(r.throttleRate))
+	wait := p.next.Sub(now)
+	p.next = p.next.Add(time.Duration(n) * time.Second / time.Duration(rate))
 	return wait
+}
+
+// throttle waits until n bytes of c may be sent at the throttled rate and
+// reports false when c ended first. SSH and dashboard passthrough each
+// get half the rate, so passthrough, which needs no sign-in, cannot slow
+// SSH. Within each, a server's connections take one turn at a time, so a
+// read waits behind at most one read per other server, however many
+// connections that server holds. Opening more connections does not raise
+// the rate.
+func (r *Relay) throttle(c *relayConn, n int) bool {
+	turn, pace := c.reg.sshTurn, &r.sshPace
+	if c.kind == edgeproto.KindWeb {
+		turn, pace = c.reg.webTurn, &r.webPace
+	}
+	select {
+	case turn <- struct{}{}:
+	case <-c.ctx.Done():
+		return false
+	}
+	defer func() { <-turn }()
+	return sleep(c.ctx, pace.reserve(n, r.throttleRate/2))
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

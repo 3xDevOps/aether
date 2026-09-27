@@ -65,7 +65,7 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 	_ = sc.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
-	servers, err := al.edge.Servers(ctx)
+	servers, _, err := al.edge.Servers(ctx)
 	if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "admin" {
 		t.Fatalf("servers after the restart = %+v %v", servers, err)
 	}

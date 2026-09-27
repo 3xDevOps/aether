@@ -156,7 +156,8 @@ func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	if values["edge-url"] != edgeagent.DefaultURL {
 		t.Errorf("edge-url = %q, want %s without Tailscale", values["edge-url"], edgeagent.DefaultURL)
 	}
-	for _, want := range []string{"Tailscale is not installed", "client IP addresses", `aether-server config set edge-url ""`} {
+	for _, want := range []string{"Tailscale is not installed", "run by the Aether project", "host name, host key and IP address",
+		"client IP addresses", `aether-server config set edge-url ""`} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("setup does not say %q:\n%s", want, out.String())
 		}

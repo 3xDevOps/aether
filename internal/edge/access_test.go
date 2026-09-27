@@ -3,6 +3,7 @@ package edge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -21,12 +22,14 @@ func TestAdmissionMatrix(t *testing.T) {
 	now := h.clock.Now()
 	owner := edgeproto.Account{Provider: "github", Subject: "1", Login: "owner"}
 	member := edgeproto.Account{Provider: "google", Subject: "g-2", Email: "member@example.test"}
-	loginInvitee := edgeproto.Account{Provider: "github", Subject: "3", Login: "Invitee"}
-	emailInvitee := edgeproto.Account{Provider: "google", Subject: "g-4", Email: "Invited@Example.test"}
-	unverified := edgeproto.Account{Provider: "google", Subject: "g-5"}
-	kelvin := edgeproto.Account{Provider: "github", Subject: "6", Login: "Kelvin"}
-	sameSubjectOtherProvider := edgeproto.Account{Provider: "google", Subject: "1"}
-	expiredInvitee := edgeproto.Account{Provider: "github", Subject: "7", Login: "late"}
+	loginInvitee := edgeproto.Account{Provider: "github", Subject: "3", Login: "Invitee", IdentityAt: now}
+	emailInvitee := edgeproto.Account{Provider: "google", Subject: "g-4", Email: "Invited@Example.test", IdentityAt: now}
+	staleInvitee := loginInvitee
+	staleInvitee.IdentityAt = now.Add(-edgeproto.IdentityMaxAge - time.Second)
+	unverified := edgeproto.Account{Provider: "google", Subject: "g-5", IdentityAt: now}
+	kelvin := edgeproto.Account{Provider: "github", Subject: "6", Login: "Kelvin", IdentityAt: now}
+	sameSubjectOtherProvider := edgeproto.Account{Provider: "google", Subject: "1", IdentityAt: now}
+	expiredInvitee := edgeproto.Account{Provider: "github", Subject: "7", Login: "late", IdentityAt: now}
 
 	id := testServerID(t)
 	other := testServerID(t)
@@ -61,6 +64,7 @@ func TestAdmissionMatrix(t *testing.T) {
 		{"member", id, member, "collaborator", nil},
 		{"login invitation, any ASCII case", id, loginInvitee, "viewer", nil},
 		{"email invitation, verified email", id, emailInvitee, "collaborator", nil},
+		{"login invitation, login not confirmed for a day", id, staleInvitee, "", edgeproto.RefusalIdentityStale},
 		{"account without a verified email", id, unverified, "", edgeproto.RefusalNotMember},
 		{"Kelvin sign does not fold to k", id, kelvin, "", edgeproto.RefusalNotMember},
 		{"same subject, other provider", id, sameSubjectOtherProvider, "", edgeproto.RefusalNotMember},
@@ -86,6 +90,72 @@ func TestAdmissionMatrix(t *testing.T) {
 	}
 }
 
+// Alice signed in while she held the GitHub login "alice", then renamed,
+// and Bob took the login without signing in to this edge. An invitation
+// for "alice" is meant for Bob: a day after GitHub last confirmed Alice's
+// login, her device token no longer matches it, and her next edge page
+// asks GitHub again.
+func TestStaleLoginMatchesNoInvitation(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.setGitHubUser(1, "alice", "alice@example.test", true)
+	b := h.browser(t)
+	b.signIn(t, edgeproto.ProviderGitHub)
+	start := startDevice(t, h)
+	b.post(t, "/device/confirm", url.Values{"user_code": {start.UserCode}, "decision": {"approve"}})
+	tok, status, msg := pollDevice(t, h, start.DeviceCode)
+	if status != http.StatusOK {
+		t.Fatalf("poll = %d %s", status, msg)
+	}
+	id := testServerID(t)
+	if err := h.svc.RecordClaim(ctx, id, "bobs-box", edgeproto.Account{Provider: "github", Subject: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.svc.ReplaceDirectory(ctx, id, edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{
+		{Kind: edgeproto.EntryInvitation, Provider: "github", Login: "alice", Role: "admin",
+			ExpiresAt: h.clock.Now().Add(edgeproto.InvitationTTL)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	dir := relayDirectory{h.svc}
+	listed := func() []edgeproto.ServerInfo {
+		t.Helper()
+		var servers edgeproto.ServersResponse
+		if status, msg := h.apiCall(t, http.MethodGet, edgeproto.PathServers, tok.Token, nil, &servers); status != http.StatusOK {
+			t.Fatalf("servers = %d %s", status, msg)
+		}
+		return servers.Servers
+	}
+	admit := func() error {
+		t.Helper()
+		a, _, err := dir.Authenticate(ctx, tok.Token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir.Admit(ctx, id, a)
+	}
+
+	if got := listed(); len(got) != 1 || admit() != nil {
+		t.Fatalf("within a day of the sign-in: servers %+v", got)
+	}
+	h.clock.Advance(edgeproto.IdentityMaxAge + time.Minute)
+	if got := listed(); len(got) != 0 {
+		t.Fatalf("a day later, the invitation for alice still lists for the account that held the login: %+v", got)
+	}
+	if err := admit(); !errors.Is(err, edgeproto.RefusalIdentityStale) {
+		t.Fatalf("a day later, Admit = %v, want %q", err, edgeproto.RefusalIdentityStale)
+	}
+	resp, _ := b.get(t, "/servers")
+	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusSeeOther || loc != "/signin/github?next=%2Fservers" {
+		t.Fatalf("an edge page a day later: %s to %q, want GitHub asked again", resp.Status, loc)
+	}
+	h.setGitHubUser(1, "alice-old", "alice@example.test", true)
+	b.signIn(t, edgeproto.ProviderGitHub)
+	if err := admit(); !errors.Is(err, edgeproto.RefusalNotMember) {
+		t.Fatalf("after GitHub reports the new login, Admit = %v, want %q", err, edgeproto.RefusalNotMember)
+	}
+}
+
 func TestClaim(t *testing.T) {
 	h := newHarness(t)
 	b := signedInBrowser(t, h)
@@ -96,13 +166,13 @@ func TestClaim(t *testing.T) {
 	}
 	h.link.servers = map[string]string{id: "workstation", testServerID(t): "other"}
 	h.link.claim = func(presented string, a edgeproto.Account, d edgeproto.Device) error {
-		if a.Login != "owner" || d.Key != "" || !edgeproto.ClaimCodeEqual(code, presented) {
+		if a.Login != "owner" || d.Key != "" || presented != code {
 			return edgeproto.RefusalClaimWrong
 		}
 		return nil
 	}
 
-	resp, page := b.post(t, "/servers/add", url.Values{"code": {code[:9] + "aaaaaaaaaaaaaaaa"}})
+	resp, page := b.post(t, "/servers/add", url.Values{"code": {id + "-aaaaaaaaaaaaaaaa"}})
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(page, string(edgeproto.RefusalClaimWrong)) {
 		t.Errorf("wrong claim code: %s\n%s", resp.Status, page)
 	}
@@ -112,6 +182,70 @@ func TestClaim(t *testing.T) {
 	}
 	if _, page = b.get(t, "/servers"); !strings.Contains(page, id) || !strings.Contains(page, "online") {
 		t.Errorf("claimed server missing from the servers page:\n%s", page)
+	}
+}
+
+func TestClaimOfBlockedServerIsNotRecorded(t *testing.T) {
+	h := newHarness(t)
+	b := signedInBrowser(t, h)
+	id := testServerID(t)
+	code, err := edgeproto.NewClaimCode(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.link.servers = map[string]string{id: "workstation"}
+	h.link.claim = func(string, edgeproto.Account, edgeproto.Device) error { return nil }
+	// The operator blocks the server while it is connected, unclaimed.
+	if err := h.svc.store.BlockServer(context.Background(), id, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	resp, page := b.post(t, "/servers/add", url.Values{"code": {code}})
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(page, "server is blocked by this edge&#39;s operator") {
+		t.Fatalf("claim of a blocked server: %s\n%s", resp.Status, page)
+	}
+	if _, err := h.svc.Admit(context.Background(), id, edgeproto.Account{Provider: "github", Subject: "1"}); !errors.Is(err, edgeproto.RefusalUnknownServer) {
+		t.Fatalf("blocked server admits its claimant: %v", err)
+	}
+	if _, err := h.svc.ServerConnected(context.Background(), id, "workstation"); !errors.Is(err, edgeproto.RefusalServerBlocked) {
+		t.Fatalf("blocked server enrolls: %v", err)
+	}
+}
+
+func TestBlockedAccount(t *testing.T) {
+	h := newHarness(t)
+	b := signedInBrowser(t, h)
+	start := startDevice(t, h)
+	b.post(t, "/device/confirm", url.Values{"user_code": {start.UserCode}, "decision": {"approve"}})
+	tok, status, msg := pollDevice(t, h, start.DeviceCode)
+	if status != http.StatusOK {
+		t.Fatalf("poll = %d %s", status, msg)
+	}
+	ctx := context.Background()
+	if err := h.svc.store.BlockAccount(ctx, edgeproto.ProviderGitHub, "1", h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if status, msg := h.apiCall(t, http.MethodGet, edgeproto.PathServers, tok.Token, nil, nil); status != http.StatusUnauthorized {
+		t.Errorf("device token of a blocked account: %d %q", status, msg)
+	}
+	if resp, _ := b.get(t, "/servers"); resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("session of a blocked account: %s, want a redirect to sign in", resp.Status)
+	}
+	signIn := func() (*http.Response, string) {
+		resp, _ := b.get(t, "/signin/github")
+		code, state := h.provider.authorize(t, resp.Header.Get("Location"))
+		return b.get(t, "/signin/github/callback?"+url.Values{"code": {code}, "state": {state}}.Encode())
+	}
+	if resp, page := signIn(); resp.StatusCode != http.StatusForbidden ||
+		!strings.Contains(page, "account is blocked by this edge&#39;s operator") {
+		t.Fatalf("sign-in of a blocked account: %s\n%s", resp.Status, page)
+	}
+
+	if err := h.svc.store.UnblockAccount(ctx, edgeproto.ProviderGitHub, "1"); err != nil {
+		t.Fatal(err)
+	}
+	if resp, page := signIn(); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("sign-in after unblock: %s\n%s", resp.Status, page)
 	}
 }
 
@@ -342,23 +476,60 @@ func TestEdgeKeyPersists(t *testing.T) {
 	}
 }
 
+func limitReq(addr string) []netip.Prefix {
+	return addrKeys(&http.Request{RemoteAddr: netip.AddrPortFrom(netip.MustParseAddr(addr), 1234).String()})
+}
+
 func TestLimiterGroupsIPv6By64(t *testing.T) {
 	clock := &fakeClock{t: time.Unix(0, 0)}
-	l := newLimiter[netip.Prefix](2, time.Minute, clock.Now)
-	req := func(addr string) netip.Prefix {
-		return addrKey(&http.Request{RemoteAddr: netip.AddrPortFrom(netip.MustParseAddr(addr), 1234).String()})
-	}
-	if !l.allow(req("2001:db8::1")) || !l.allow(req("2001:db8::ffff:2")) {
+	l := newAddrLimiter(2, time.Minute, clock.Now)
+	if !l.allow(limitReq("2001:db8::1")...) || !l.allow(limitReq("2001:db8::ffff:2")...) {
 		t.Fatal("first two requests refused")
 	}
-	if l.allow(req("2001:db8::3")) {
+	if l.allow(limitReq("2001:db8::3")...) {
 		t.Error("third request from the same /64 allowed")
 	}
-	if !l.allow(req("2001:db8:0:1::1")) || !l.allow(req("192.0.2.1")) {
+	if !l.allow(limitReq("2001:db8:0:1::1")...) || !l.allow(limitReq("192.0.2.1")...) {
 		t.Error("other blocks share the /64's budget")
 	}
 	clock.Advance(time.Minute)
-	if !l.allow(req("2001:db8::4")) {
+	if !l.allow(limitReq("2001:db8::4")...) {
 		t.Error("budget did not refill")
+	}
+}
+
+// TestLimiterCountsIPv6Sites spreads requests over the /64s of one /48,
+// as anyone holding a routed /48 can: together they get the /48's budget,
+// and the rest of the Internet keeps its own.
+func TestLimiterCountsIPv6Sites(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(0, 0)}
+	l := newAddrLimiter(2, time.Minute, clock.Now)
+	allowed := 0
+	for i := range 1000 {
+		if l.allow(limitReq(fmt.Sprintf("2001:db8:1:%x::1", i))...) {
+			allowed++
+		}
+	}
+	if want := 2 * edgeproto.RateLimitScale(netip.MustParsePrefix("2001:db8:1::/48")); allowed != want {
+		t.Errorf("1000 /64s of one /48 got %d requests, want the /48's %d", allowed, want)
+	}
+	if !l.allow(limitReq("2001:db8:2::1")...) || !l.allow(limitReq("192.0.2.1")...) {
+		t.Error("another /48 or an IPv4 address shares the exhausted /48's budget")
+	}
+}
+
+// TestLimiterFullTableAdmitsNewAddresses fills the limiter with limited
+// addresses: a new address is still served, and the table stays bounded.
+func TestLimiterFullTableAdmitsNewAddresses(t *testing.T) {
+	clock := &fakeClock{t: time.Unix(0, 0)}
+	l := newAddrLimiter(10, 30*time.Second, clock.Now)
+	for i := range maxTracked {
+		l.allow(limitReq(netip.AddrFrom4([4]byte{10, 0, byte(i >> 8), byte(i)}).String())...)
+	}
+	if !l.allow(limitReq("198.51.100.7")...) {
+		t.Error("a new address was refused because the table is full")
+	}
+	if n := len(l.buckets); n > maxTracked {
+		t.Errorf("limiter tracks %d keys, bound %d", n, maxTracked)
 	}
 }

@@ -461,11 +461,11 @@ func newEdgeAgent(cfg Config, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
 }
 
 // serveEdgeDashboard serves the dashboard through the edge from the
-// agent's first enrollment until ctx is done, and returns the gateway's
-// close error. The hostname is <server id>.<server domain>, and only the
-// edge knows the domain. Nothing here stops the server: an edge that
-// passes no dashboard through, or a gateway that cannot be built, is
-// logged and leaves SSH through the edge working.
+// first time the edge holds the server claimed until ctx is done, and
+// returns the gateway's close error. The hostname is <server id>.<server
+// domain>, and only the edge knows the domain. Nothing here stops the
+// server: an edge that passes no dashboard through, or a gateway that
+// cannot be built, is logged and leaves SSH through the edge working.
 func (s *Server) serveEdgeDashboard(ctx context.Context) error {
 	domain, err := s.edge.ServerDomain(ctx)
 	if err != nil {
@@ -474,6 +474,14 @@ func (s *Server) serveEdgeDashboard(ctx context.Context) error {
 	}
 	if domain == "" {
 		slog.Warn("server: the edge passes no dashboard through; the dashboard is not served through it", "edge", s.edgeWeb.EdgeURL)
+		return nil
+	}
+	// The edge passes nothing through to an unclaimed server, so issuing
+	// earlier only fails validations, which the CA rate-limits, and grows
+	// the retry backoff that then holds the dashboard down after the claim.
+	select {
+	case <-s.edge.Claimed():
+	case <-ctx.Done():
 		return nil
 	}
 	cfg := s.edgeWeb

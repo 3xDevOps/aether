@@ -8,13 +8,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/edgeclient"
 	"github.com/3xDevOps/Aether/internal/edgeproto"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -39,8 +37,8 @@ func absolutePath(path string) (string, error) {
 
 // linkOptions is one parsed `aether link` command line. key is the resolved
 // --key path, "auto", or empty (inherit the saved key). addr is the
-// positional argument: an address, or a server name or id from the
-// account's list. claim, edge and direct belong to edge links.
+// positional argument: an address or a server id. claim, edge and direct
+// belong to edge links.
 type linkOptions struct {
 	addr      string
 	repo      string
@@ -53,7 +51,7 @@ type linkOptions struct {
 	direct    string
 }
 
-const linkUsage = "usage: aether link <addr | server name | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
+const linkUsage = "usage: aether link <addr | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
 	"       aether link --claim <code> [--edge] [--addr] [--name] [--repo] [--workspace]"
 
 func parseLinkArgs(args []string) (linkOptions, error) {
@@ -118,7 +116,7 @@ func runLink(args []string) error {
 	}
 	if linkOpts.ServerID == "" {
 		if opts.direct != "" || opts.edge != "" {
-			return fmt.Errorf("link: --edge and --addr apply to edge links, and %s is not a server on your edge account; see aether servers", opts.addr)
+			return fmt.Errorf("link: --edge and --addr apply to edge links, and %s is not a server id; aether servers lists them", opts.addr)
 		}
 		linkOpts = cli.LinkOptions{Addr: opts.addr, Key: opts.key, Invite: opts.invite, Name: opts.name}
 	}
@@ -187,11 +185,11 @@ func runLink(args []string) error {
 	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, cfg.Repo)
 }
 
-// edgeLinkOptions resolves an edge link: a claim, or a server name or id
-// from the signed-in account's list. The zero value means opts.addr is an
-// address, linked as before: so is anything that looks like one, anything
-// with --invite or --key, and any argument when this machine is not
-// signed in.
+// edgeLinkOptions resolves an edge link: a claim, or a server id. The zero
+// value means opts.addr is an address, and so is every server name: a
+// server's name is whatever its admin chose, and any admin can invite any
+// account, so a bare host name such as a tailnet name must never resolve
+// to a server the edge lists.
 func edgeLinkOptions(opts linkOptions) (cli.LinkOptions, error) {
 	ctx := context.Background()
 	if opts.claim != "" {
@@ -206,52 +204,14 @@ func edgeLinkOptions(opts linkOptions) (cli.LinkOptions, error) {
 		fmt.Printf("claimed %s (%s) on %s\n", claimed.Name, claimed.ServerID, client.Host())
 		return cli.LinkOptions{Addr: opts.direct, Name: opts.name, EdgeURL: client.URL(), ServerID: claimed.ServerID}, nil
 	}
-	if opts.invite != "" || opts.key != "" || strings.ContainsAny(opts.addr, ".:[]@") {
+	if opts.invite != "" || opts.key != "" || !edgeproto.ValidServerID(opts.addr) {
 		return cli.LinkOptions{}, nil
 	}
 	client, err := edgeClient(opts.edge)
 	if err != nil {
 		return cli.LinkOptions{}, err
 	}
-	servers, err := client.Servers(ctx)
-	if errors.Is(err, edgeclient.ErrNotSignedIn) {
-		return cli.LinkOptions{}, nil
-	}
-	if err != nil {
-		return cli.LinkOptions{}, fmt.Errorf("%w\nto link %s as an SSH address instead, run: aether link %s:2222", err, opts.addr, opts.addr)
-	}
-	id, err := pickServer(servers, opts.addr)
-	if err != nil || id == "" {
-		return cli.LinkOptions{}, err
-	}
-	return cli.LinkOptions{Addr: opts.direct, Name: opts.name, EdgeURL: client.URL(), ServerID: id}, nil
-}
-
-// pickServer finds ref among servers by id, then by name. No match is ""
-// without an error. A name several servers share is an error that lists
-// them by id, so the person picks one instead of Aether guessing.
-func pickServer(servers []edgeproto.ServerInfo, ref string) (string, error) {
-	var named []edgeproto.ServerInfo
-	for _, s := range servers {
-		if s.ID == ref {
-			return s.ID, nil
-		}
-		if s.Name == ref {
-			named = append(named, s)
-		}
-	}
-	switch len(named) {
-	case 0:
-		return "", nil
-	case 1:
-		return named[0].ID, nil
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d servers are named %s; link one by id:", len(named), ref)
-	for _, s := range named {
-		fmt.Fprintf(&b, "\n  aether link %s    (role %s)", s.ID, s.Role)
-	}
-	return "", errors.New(b.String())
+	return cli.LinkOptions{Addr: opts.direct, Name: opts.name, EdgeURL: client.URL(), ServerID: opts.addr}, nil
 }
 
 // linkTarget names what a link reaches, for the confirmation line.

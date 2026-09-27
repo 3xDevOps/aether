@@ -1280,7 +1280,7 @@ ALTER TABLE evidence_packets ADD COLUMN verification_notes TEXT NOT NULL DEFAULT
 	// tables now reference members ON DELETE CASCADE, and DROP TABLE fires
 	// those cascades, so this version runs with foreign keys off (see
 	// foreignKeysOffMigrations). Invitations and devices go with the member
-	// who created or owns them.
+	// who created or owns them, and browser sessions with their device.
 	`
 CREATE TABLE members_migrate AS
 	SELECT id, display_name, public_key, tailnet_login, pending, color, role, created_at,
@@ -1336,6 +1336,15 @@ CREATE TABLE member_devices (
 CREATE INDEX idx_member_devices_member ON member_devices(member_id);
 CREATE UNIQUE INDEX idx_member_devices_approval_code
 	ON member_devices(approval_code) WHERE approval_code <> '';
+
+CREATE TABLE browser_sessions (
+	id           TEXT PRIMARY KEY,
+	device_id    TEXT NOT NULL REFERENCES member_devices(id) ON DELETE CASCADE,
+	credential   TEXT NOT NULL UNIQUE,
+	created_at   INTEGER NOT NULL,
+	last_seen_at INTEGER
+);
+CREATE INDEX idx_browser_sessions_device ON browser_sessions(device_id);
 
 CREATE TABLE identity_invitations (
 	id          TEXT PRIMARY KEY,

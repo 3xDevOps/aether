@@ -70,6 +70,18 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 		}
 	}
 	was := m.Role
+	// An invitation grants its role when accepted, and only admins create
+	// them, so a demoted admin's open invitations go with the role.
+	// createInvitation and acceptInvitation hold registerMu too.
+	if was == domain.RoleAdmin {
+		ids, perr := s.rpcIdentityStore()
+		if perr != nil {
+			return nil, perr
+		}
+		if err := ids.DeleteInvitationsBy(ctx, m.ID); err != nil {
+			return nil, rpcError(err)
+		}
+	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {
 		var listErr error

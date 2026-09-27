@@ -61,6 +61,45 @@ func TestGitRemoteNeverOverwritesSSHCommand(t *testing.T) {
 	}
 }
 
+func TestGitRemoteReplacesAnEarlierAetherSSHCommand(t *testing.T) {
+	requireGit(t)
+	testhome.Isolate(t)
+	want, err := cli.EdgeSSHCommand()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, earlier := range []string{
+		"/home/linuxbrew/.linuxbrew/Cellar/aether/1.4.0/bin/aether edge-ssh",
+		"'/opt/old builds/aether' edge-ssh",
+	} {
+		repo := t.TempDir()
+		git(t, repo, "init")
+		git(t, repo, "config", "core.sshCommand", earlier)
+		if err := GitRemote(repo, cli.GitURL("aether", cli.EdgeHost(testServerID), "ws_1"), &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		if got := git(t, repo, "config", "--get", "core.sshCommand"); got != want {
+			t.Fatalf("core.sshCommand = %q after relinking over %q, want %q", got, earlier, want)
+		}
+	}
+	for _, own := range []string{
+		"/usr/bin/aether edge-ssh -v",
+		"/usr/bin/aether edge-ssh; ssh",
+		"/usr/bin/aetherx edge-ssh",
+		"'/usr/bin/aether' edge-ssh",
+	} {
+		repo := t.TempDir()
+		git(t, repo, "init")
+		git(t, repo, "config", "core.sshCommand", own)
+		if err := GitRemote(repo, cli.GitURL("aether", cli.EdgeHost(testServerID), "ws_1"), &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		if got := git(t, repo, "config", "--get", "core.sshCommand"); got != own {
+			t.Fatalf("core.sshCommand = %q, want the user's %q kept", got, own)
+		}
+	}
+}
+
 func TestGitRemoteLeavesSSHCommandAloneForDirectLinks(t *testing.T) {
 	requireGit(t)
 	testhome.Isolate(t)

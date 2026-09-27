@@ -33,6 +33,7 @@ type fakeEdge struct {
 	priv     ed25519.PrivateKey
 	pub      ed25519.PublicKey
 	state    string
+	domain   string
 	controls chan *edgeControl
 	data     chan *websocket.Conn
 
@@ -105,7 +106,7 @@ func (e *fakeEdge) control(w http.ResponseWriter, r *http.Request) {
 		e.t.Errorf("enrollment signature: %v", err)
 		return
 	}
-	writeMsg(e.t, c, edgeproto.Ready{ServerID: id, State: e.state, EdgeKey: e.pub})
+	writeMsg(e.t, c, edgeproto.Ready{ServerID: id, State: e.state, EdgeKey: e.pub, ServerDomain: e.domain})
 	ec := &edgeControl{t: e.t, c: c, serverID: id, msgs: make(chan edgeproto.Message, 64)}
 	select {
 	case e.controls <- ec:
@@ -334,7 +335,7 @@ func TestEnrollPinsEdgeKeyPrivately(t *testing.T) {
 	if err != nil || !pinned.Equal(edge.pub) {
 		t.Fatalf("pinned %x, %v; want the edge key", pinned, err)
 	}
-	for path, want := range map[string]os.FileMode{StateDir(dir): 0o700, a.state.path(pinFile): 0o600} {
+	for path, want := range map[string]os.FileMode{StateDir(dir): 0o700, a.state.dir: 0o700, a.state.path(pinFile): 0o600} {
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
@@ -349,7 +350,7 @@ func TestChangedEdgeKeyIsRefused(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
 	old, _, _ := ed25519.GenerateKey(rand.Reader)
-	if err := OpenState(dir).Pin(old); err != nil {
+	if err := openState(t, dir, edge.srv.URL).Pin(old); err != nil {
 		t.Fatal(err)
 	}
 	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
@@ -366,6 +367,74 @@ func TestChangedEdgeKeyIsRefused(t *testing.T) {
 	}
 	if pinned, _ := a.state.PinnedKey(); !pinned.Equal(old) {
 		t.Error("a changed edge key replaced the pin")
+	}
+}
+
+// Changing edge-url must not meet the previous edge's pin or owner, and
+// returning to that edge must find both again.
+func TestPinAndOwnerBelongToTheirEdge(t *testing.T) {
+	first, second := newFakeEdge(t), newFakeEdge(t)
+	first.state = edgeproto.StateClaimed
+	dir := t.TempDir()
+	owner := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}
+	if err := openState(t, dir, first.srv.URL).write(ownerFile, owner); err != nil {
+		t.Fatal(err)
+	}
+	enroll := func(edge *fakeEdge) *Agent {
+		t.Helper()
+		a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
+		stop, _ := run(t, a)
+		edge.nextControl(t)
+		waitStatus(t, a.state, func(st Status) bool { return st.Connected })
+		stop()
+		return a
+	}
+	enroll(first)
+	a := enroll(second)
+	if pinned, err := a.state.PinnedKey(); err != nil || !pinned.Equal(second.pub) {
+		t.Fatalf("pin at the second edge = %x, %v; want its own key", pinned, err)
+	}
+	if got, err := a.state.Owner(); got != nil || err != nil {
+		t.Fatalf("owner at the second edge = %+v, %v; want none", got, err)
+	}
+	a = enroll(first)
+	if pinned, err := a.state.PinnedKey(); err != nil || !pinned.Equal(first.pub) {
+		t.Fatalf("pin back at the first edge = %x, %v; want its key", pinned, err)
+	}
+	if got, err := a.state.Owner(); err != nil || got == nil || *got != owner {
+		t.Fatalf("owner back at the first edge = %+v, %v; want %+v", got, err, owner)
+	}
+}
+
+// The edge passes no dashboard through to an unclaimed server, so the
+// dashboard waits for Claimed; an edge that reports the server claimed
+// signals it at enrollment.
+func TestClaimedAtAClaimedEnrollment(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.state = edgeproto.StateClaimed
+	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
+	run(t, a)
+	expect[edgeproto.Directory](t, edge.nextControl(t))
+	select {
+	case <-a.Claimed():
+	default:
+		t.Fatal("Claimed not signalled after the edge reported the server claimed")
+	}
+}
+
+// The dashboard address outlives the connection that announced it, so
+// aether-server edge status can print it while the server is offline.
+func TestStatusKeepsTheServerDomain(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.domain = "servers.example.test"
+	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
+	stop, _ := run(t, a)
+	edge.nextControl(t)
+	waitStatus(t, a.state, func(st Status) bool { return st.Connected && st.ServerDomain == edge.domain })
+	stop()
+	st, _, err := a.state.Status()
+	if err != nil || st.Connected || st.ServerDomain != edge.domain {
+		t.Fatalf("status after stop = %+v, %v; want disconnected with %s", st, err, edge.domain)
 	}
 }
 
@@ -394,6 +463,45 @@ func TestReconnectsAfterEdgeDropsAndOnDrain(t *testing.T) {
 	_ = edge.nextControl(t).c.CloseNow()
 	edge.nextControl(t).send(edgeproto.Drain{})
 	edge.nextControl(t)
+}
+
+// Servers an edge restart drops together must not redial in step: even
+// the first wait, before any backoff has grown, is spread.
+func TestFirstRedialIsJittered(t *testing.T) {
+	const agents = 8
+	firstGaps := make(chan time.Duration, agents)
+	for range agents {
+		var (
+			mu    sync.Mutex
+			dials []time.Time
+		)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			dials = append(dials, time.Now())
+			if len(dials) == 2 {
+				firstGaps <- dials[1].Sub(dials[0])
+			}
+			mu.Unlock()
+			http.Error(w, "draining", http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(srv.Close)
+		a := newAgent(t, srv.URL, t.TempDir(), newFakeSSH())
+		a.minBackoff, a.maxBackoff = 100*time.Millisecond, time.Second
+		run(t, a)
+	}
+	var gaps []time.Duration
+	for range agents {
+		select {
+		case gap := <-firstGaps:
+			if gap >= 125*time.Millisecond {
+				return
+			}
+			gaps = append(gaps, gap)
+		case <-time.After(waitFor):
+			t.Fatal("an agent did not redial")
+		}
+	}
+	t.Fatalf("first redials came %v after the failure; want them spread over [100ms, 200ms)", gaps)
 }
 
 func TestSilentEdgeIsDroppedAndRedialed(t *testing.T) {
@@ -460,7 +568,7 @@ func TestDirectoryPushedOnChange(t *testing.T) {
 func TestOwnerForgottenWhenTheEdgeHasNone(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
-	state := OpenState(dir)
+	state := openState(t, dir, edge.srv.URL)
 	owner := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-1", Email: "owner@example.com"}
 	if err := state.write(ownerFile, owner); err != nil {
 		t.Fatal(err)
@@ -487,7 +595,7 @@ func TestOwnerForgottenWhenTheEdgeHasNone(t *testing.T) {
 func TestUnenrollForgetsTheOwner(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
-	state := OpenState(dir)
+	state := openState(t, dir, edge.srv.URL)
 	if err := state.write(ownerFile, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +612,7 @@ func TestUnenrollForgetsTheOwner(t *testing.T) {
 func TestLeaveUnenrollsAndForgetsTheOwner(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
-	state := OpenState(dir)
+	state := openState(t, dir, edge.srv.URL)
 	if err := state.write(ownerFile, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}); err != nil {
 		t.Fatal(err)
 	}

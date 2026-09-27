@@ -72,9 +72,9 @@ func setup(args []string) error {
 }
 
 // reportEdge prints what a person needs to reach the server through the
-// edge the written config names: the server id, the pinned edge key, and
-// a claim code while the server has no owner. It reads the config back
-// because an existing file is kept without --force.
+// edge the written config names: the server id, the pinned edge key, the
+// dashboard address, and a claim code while the server has no owner. It
+// reads the config back because an existing file is kept without --force.
 func reportEdge(w io.Writer, configPath string) error {
 	values, err := serversetup.Load(configPath)
 	if err != nil {
@@ -94,7 +94,10 @@ func reportEdge(w io.Writer, configPath string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(w, "\nedge: %s\nserver id: %s\n", edgeURL, id)
-	state := edgeagent.OpenState(dataDir)
+	state, err := edgeagent.OpenState(dataDir, edgeURL)
+	if err != nil {
+		return err
+	}
 	pinned, err := state.PinnedKey()
 	if err != nil {
 		return err
@@ -108,6 +111,11 @@ func reportEdge(w io.Writer, configPath string) error {
 	if err != nil {
 		return err
 	}
+	status, ran, err := state.Status()
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "dashboard: %s\n", dashboardText(id, status, ran, owner != nil))
 	if owner != nil {
 		_, _ = fmt.Fprintf(w, "owner: %s\n", describeAccount(*owner))
 		return nil
@@ -189,10 +197,11 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string, tailnet bool
 	return values, nil
 }
 
-// askEdge sets edge-url. Without tailscaled the edge is the only route a
-// laptop or phone has to the server, so it is on and setup says so; with
-// tailscaled it is offered. An edge-url the operator already set is kept
-// or offered as the answer.
+// askEdge sets edge-url, the one place the edge is turned on. Without
+// tailscaled the edge is the only route a laptop or phone has to the
+// server, so it is on and setup says what that discloses; with tailscaled
+// it is offered, off unless the config already has it on. An edge-url the
+// operator already set is kept or offered as the answer.
 func askEdge(p *prompter, current map[string]string, tailnet bool, values map[string]string) {
 	configured, set := current["edge-url"]
 	if set && configured == "" && !tailnet {
@@ -204,14 +213,20 @@ func askEdge(p *prompter, current map[string]string, tailnet bool, values map[st
 	if edgeURL == "" {
 		edgeURL = edgeagent.DefaultURL
 	}
-	if tailnet {
-		_, _ = fmt.Fprintf(p.w, "\nThe server can also be reached through the edge at %s, for devices\nthat are not on your tailnet.\n", edgeURL)
-	} else {
-		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so this server will be reached through the edge at\n%s.\n", edgeURL)
+	operator := ""
+	if edgeURL == edgeagent.DefaultURL {
+		operator = ", run by the Aether project"
 	}
-	_, _ = fmt.Fprintln(p.w, "SSH runs end to end through the edge and the dashboard's TLS ends on this server,")
-	_, _ = fmt.Fprintln(p.w, "so the edge cannot read either; it sees this server's id, who signs in, device")
-	_, _ = fmt.Fprintln(p.w, "names, client IP addresses, and when and how much traffic flows.")
+	if tailnet {
+		_, _ = fmt.Fprintf(p.w, "\nDevices that are not on your tailnet can reach this server through the edge at\n%s%s.\n", edgeURL, operator)
+	} else {
+		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so setup turns on the edge at %s%s.\n", edgeURL, operator)
+	}
+	_, _ = fmt.Fprintln(p.w, "The edge is a relay: this server and your devices both dial out to it, so")
+	_, _ = fmt.Fprintln(p.w, "neither needs an open port. SSH runs end to end through it and the dashboard's")
+	_, _ = fmt.Fprintln(p.w, "TLS ends on this server, so the edge cannot read either. It sees this server's")
+	_, _ = fmt.Fprintln(p.w, "host name, host key and IP address, who signs in, device names,")
+	_, _ = fmt.Fprintln(p.w, "client IP addresses, and when and how much traffic flows.")
 	if !tailnet {
 		_, _ = fmt.Fprintln(p.w, `Turn it off with: aether-server config set edge-url ""`)
 		values["edge-url"] = edgeURL

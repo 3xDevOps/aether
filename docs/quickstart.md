@@ -72,16 +72,19 @@ and whether to use the edge (Enter accepts each default) - then prints:
 systemctl daemon-reload && systemctl enable --now aether-server
 ```
 
-On a host without tailscaled, setup turns on the **edge**: a relay at
-`https://edge.onaether.dev` that the server and your machine both dial out
-to, so neither needs an open port ([edge.md](edge.md)). With the edge on,
-setup then prints the server's id and a **claim code**, which makes whoever
-uses it first the server's admin:
+On a host without tailscaled, setup turns on the **edge**: a relay the Aether
+project runs at `https://edge.onaether.dev` that the server and your machine
+both dial out to, so neither needs an open port ([edge.md](edge.md)). Setup
+prints what the edge can see and `aether-server config set edge-url ""`,
+which turns it off. With the edge on, setup then prints the server's id,
+where its dashboard will be, and a **claim code**, which makes whoever uses
+it first the server's admin:
 
 ```
 edge: https://edge.onaether.dev
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
+dashboard: https://<server id>.<the edge's server domain>/; aether-server edge status shows the address once the server connects
 claim code: <code> (valid until 3:04PM, 5 attempts)
 claim this server with:
   aether link --claim <code>
@@ -91,8 +94,12 @@ or enter it at https://edge.onaether.dev/servers/add
 Run the activation line and the server is live on `:2222`. The SSH port is
 the only thing it listens on unless you answered the dashboard question; the
 edge connection is outbound. The claim code lasts 30 minutes;
-`sudo aether-server edge claim-code` prints a new one. Change any option
-later with `aether-server config set <key> <value>`, then restart.
+`sudo aether-server edge claim-code` prints a new one. The edge names its
+dashboard domain when the server first connects; from then on
+`sudo aether-server edge status` prints the full dashboard address,
+`https://<server id>.<server domain>/`, the address a phone opens. Change
+any option later with `aether-server config set <key> <value>`, then
+restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
 Ctrl-C. [install.md](install.md) covers unattended installs, running

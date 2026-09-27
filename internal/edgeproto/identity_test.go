@@ -93,9 +93,14 @@ func TestDirectoryEntryMatches(t *testing.T) {
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	live, expired := now.Add(time.Hour), now
 
-	gh := Account{Provider: ProviderGitHub, Subject: "1001", Login: "Octo-Fake", Email: "Octo@Example.com"}
-	google := Account{Provider: ProviderGoogle, Subject: "1001", Email: "octo@example.com"}
-	noEmail := Account{Provider: ProviderGitHub, Subject: "2002", Login: "other"}
+	confirmed := now.Add(-IdentityMaxAge)
+	gh := Account{Provider: ProviderGitHub, Subject: "1001", Login: "Octo-Fake", Email: "Octo@Example.com", IdentityAt: confirmed}
+	google := Account{Provider: ProviderGoogle, Subject: "1001", Email: "octo@example.com", IdentityAt: confirmed}
+	noEmail := Account{Provider: ProviderGitHub, Subject: "2002", Login: "other", IdentityAt: confirmed}
+	stale := func(a Account) Account {
+		a.IdentityAt = now.Add(-IdentityMaxAge - time.Second)
+		return a
+	}
 
 	member := DirectoryEntry{Kind: EntryMember, Provider: ProviderGitHub, Subject: "1001", Role: "admin"}
 	loginInv := DirectoryEntry{Kind: EntryInvitation, Provider: ProviderGitHub, Login: "octo-fake", Role: "viewer", ExpiresAt: live}
@@ -113,9 +118,9 @@ func TestDirectoryEntryMatches(t *testing.T) {
 	}{
 		{"member by subject", member, gh, true},
 		{"member, same subject other provider", member, google, false},
-		{"member, other subject same email", member, Account{Provider: ProviderGitHub, Subject: "3003", Email: gh.Email, Login: gh.Login}, false},
+		{"member, other subject same email", member, Account{Provider: ProviderGitHub, Subject: "3003", Email: gh.Email, Login: gh.Login, IdentityAt: confirmed}, false},
 		{"login invitation, case-insensitive", loginInv, gh, true},
-		{"login invitation, google account", loginInv, Account{Provider: ProviderGoogle, Subject: "9", Email: "x@example.com"}, false},
+		{"login invitation, google account", loginInv, Account{Provider: ProviderGoogle, Subject: "9", Email: "x@example.com", IdentityAt: confirmed}, false},
 		{"login invitation, other login", loginInv, noEmail, false},
 		{"login invitation expired", DirectoryEntry{Kind: EntryInvitation, Provider: ProviderGitHub, Login: "octo-fake", Role: "viewer", ExpiresAt: expired}, gh, false},
 		{"email invitation, github, case-insensitive", emailInv, gh, true},
@@ -123,11 +128,17 @@ func TestDirectoryEntryMatches(t *testing.T) {
 		{"email invitation, account without verified email", emailInv, noEmail, false},
 		{"google email invitation, github account", googleEmailInv, gh, false},
 		{"google email invitation, google account", googleEmailInv, google, true},
-		{"kelvin sign does not fold to k", kelvinInv, Account{Provider: ProviderGoogle, Subject: "5", Email: "keith@example.com"}, false},
-		{"kelvin sign login does not fold to k", kelvinLogin, Account{Provider: ProviderGitHub, Subject: "5", Login: "keith"}, false},
+		{"kelvin sign does not fold to k", kelvinInv, Account{Provider: ProviderGoogle, Subject: "5", Email: "keith@example.com", IdentityAt: confirmed}, false},
+		{"kelvin sign login does not fold to k", kelvinLogin, Account{Provider: ProviderGitHub, Subject: "5", Login: "keith", IdentityAt: confirmed}, false},
 		{"invitation with nothing to match", emptyEmailInv, noEmail, false},
 		{"email invitation expired", DirectoryEntry{Kind: EntryInvitation, Email: "octo@example.com", Role: "viewer", ExpiresAt: expired}, google, false},
 		{"unknown kind", DirectoryEntry{Kind: "owner", Provider: ProviderGitHub, Subject: "1001"}, gh, false},
+		// A login or email the provider has not confirmed for a day may
+		// belong to someone else by now; a member matches by subject.
+		{"login invitation, stale identity", loginInv, stale(gh), false},
+		{"email invitation, stale identity", emailInv, stale(google), false},
+		{"email invitation, never confirmed", emailInv, Account{Provider: ProviderGoogle, Subject: "1001", Email: "octo@example.com"}, false},
+		{"member, stale identity", member, stale(gh), true},
 	}
 	for _, tt := range tests {
 		if got := tt.e.Matches(tt.a, now); got != tt.want {

@@ -32,14 +32,18 @@ func (a *Agent) open(s *session, m edgeproto.Open) {
 		}
 		grant = g
 	}
+	slots := a.sshSlots
+	if m.Kind == edgeproto.KindWeb {
+		slots = a.webSlots
+	}
 	select {
-	case a.slots <- struct{}{}:
+	case slots <- struct{}{}:
 	default:
 		a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID, Error: string(edgeproto.RefusalConnLimit)})
 		return
 	}
 	a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID})
-	go a.attach(m, grant)
+	go a.attach(m, grant, slots)
 }
 
 func (a *Agent) reply(s *session, m edgeproto.Message) {
@@ -49,16 +53,16 @@ func (a *Agent) reply(s *session, m edgeproto.Message) {
 }
 
 // attach dials the data socket of one open and hands the connection to
-// sshd or to the web listener. It holds the slot open took until the
-// connection closes.
-func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
+// sshd or to the web listener. It holds the slot open took from slots
+// until the connection closes.
+func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant, slots chan struct{}) {
 	a.mu.Lock()
 	ctx := a.runCtx
 	a.mu.Unlock()
 	header := http.Header{"Authorization": {"Bearer " + m.Ticket}}
 	c, cancel, err := dial(ctx, a.origin+edgeproto.DataPath(m.ConnID), header, a.attachDeadline)
 	if err != nil {
-		<-a.slots
+		<-slots
 		slog.Warn("edge: attach data socket", "conn", m.ConnID, "error", err)
 		return
 	}
@@ -72,7 +76,7 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
 		a.mu.Lock()
 		delete(a.conns, rc)
 		a.mu.Unlock()
-		<-a.slots
+		<-slots
 	}
 	a.mu.Lock()
 	a.conns[rc] = struct{}{}

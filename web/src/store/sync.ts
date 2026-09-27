@@ -61,8 +61,9 @@ function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | 
  * Which part of an edge link failed, from the "server unreachable" error
  * the local gateway passes on. The client's error keeps the edge's refusal
  * and the server's SSH banner in their own words, and a failure to reach the
- * edge at all names the edge host followed by the transport error. Null
- * when the link is not through an edge or the error is none of these.
+ * edge at all names the edge host followed by the transport error. Any
+ * other refusal the edge words itself is `edge-refused`. Null when the link
+ * is not through an edge or the error is none of these.
  */
 function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
   const edge = store.getState().linkStatus?.edge_url
@@ -73,6 +74,9 @@ function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
   }
   if (detail.includes('was revoked on this server')) return 'device-revoked'
   if (detail.includes('is waiting for approval')) return 'device-pending'
+  // The edge's refusal and the server's SSH banner word it the same way.
+  if (detail.includes('not a member of this server')) return 'not-member'
+  if (detail.includes(`${edgeHost(edge)} refused: `)) return 'edge-refused'
   if (detail.includes(`${edgeHost(edge)}: `)) return 'edge'
   return null
 }
@@ -791,6 +795,28 @@ export function connect(store: RootStore, client: Api = api): () => void {
     pump()
   }
 
+  // The edge gateway refuses the socket of a session that ended - signed
+  // out, revoked, idled out - before the upgrade, so the browser sees only a
+  // close. A plain request carries the refusal the socket cannot.
+  let checkingAccess = false
+  const checkEdgeAccess = () => {
+    if (checkingAccess || signal.aborted || store.getState().capabilities?.gateway !== 'edge') return
+    checkingAccess = true
+    client
+      .capabilities()
+      .then(ignore, (err: unknown) => {
+        const access = edgeAccess(err)
+        if (!access || signal.aborted) return
+        stopStream()
+        store.getState().setEdgeAccess(access)
+        store.getState().setStreamDead()
+        store.getState().setConnection('offline')
+      })
+      .finally(() => {
+        checkingAccess = false
+      })
+  }
+
   const startStream = () => {
     stopStream = connectEvents({
       onEvent: (ev) => {
@@ -810,7 +836,10 @@ export function connect(store: RootStore, client: Api = api): () => void {
           // this one, so it stays.
           store.getState().setHydrated(false, 'the server is unreachable')
         }
-        if (state !== 'live') return
+        if (state !== 'live') {
+          if (subscribed) checkEdgeAccess()
+          return
+        }
         // The subscription is installed. Hydrate behind it on the first connect,
         // and again on a reconnect that has no cursor to replay from - or one
         // that came while the server was replacing its own binaries, because

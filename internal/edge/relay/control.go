@@ -31,6 +31,9 @@ type registration struct {
 	ws     *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelCauseFunc
+	// sshTurn and webTurn hold the one throttled read each kind of this
+	// server's connections may have waiting.
+	sshTurn, webTurn chan struct{}
 	// claimed is guarded by Relay.mu.
 	claimed bool
 }
@@ -127,12 +130,17 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if err != nil {
 		return nil, err
 	}
-	claimed, err := r.dir.Claimed(ctx, id, hello.Name)
+	claimed, err := r.dir.Enroll(ctx, id, hello.Name)
+	var refusal edgeproto.Refusal
+	if errors.As(err, &refusal) {
+		return nil, refusal
+	}
 	if err != nil {
 		return nil, fmt.Errorf("relay: claim state of %s: %w", id, err)
 	}
 
-	reg := &registration{id: id, name: hello.Name, addr: addr, ws: ws, claimed: claimed}
+	reg := &registration{id: id, name: hello.Name, addr: addr, ws: ws, claimed: claimed,
+		sshTurn: make(chan struct{}, 1), webTurn: make(chan struct{}, 1)}
 	reg.ctx, reg.cancel = context.WithCancelCause(r.ctx)
 	r.mu.Lock()
 	if r.closing {
@@ -140,14 +148,9 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, errDraining
 	}
 	if !claimed {
-		fromAddr, total := r.unclaimedLocked(addr, id)
-		if fromAddr >= edgeproto.MaxUnclaimedPerAddress {
+		if err := r.admitUnclaimedLocked(addr, id); err != nil {
 			r.mu.Unlock()
-			return nil, fmt.Errorf("relay: %d unclaimed servers are already connected from %s; claim one first", edgeproto.MaxUnclaimedPerAddress, addr)
-		}
-		if total >= r.maxUnclaimed {
-			r.mu.Unlock()
-			return nil, fmt.Errorf("relay: this edge already holds its limit of %d unclaimed servers", r.maxUnclaimed)
+			return nil, err
 		}
 	}
 	old := r.servers[id]
@@ -168,20 +171,34 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	return reg, nil
 }
 
-// unclaimedLocked counts the unclaimed registrations from addr and in
-// total, other than one for serverID, which a new registration would
-// replace.
-func (r *Relay) unclaimedLocked(addr netip.Prefix, serverID string) (fromAddr, total int) {
+// admitUnclaimedLocked refuses one more unclaimed registration from the
+// client block addr when a block it lies in (edgeproto.RateLimitKeys), or
+// the edge, holds its limit. A registration for serverID does not count:
+// the new one would replace it.
+func (r *Relay) admitUnclaimedLocked(addr netip.Prefix, serverID string) error {
+	blocks := edgeproto.RateLimitKeys(addr.Addr())
+	inBlock := make([]int, len(blocks))
+	total := 0
 	for id, reg := range r.servers {
 		if id == serverID || reg.claimed {
 			continue
 		}
 		total++
-		if reg.addr == addr {
-			fromAddr++
+		for i, b := range blocks {
+			if b.Contains(reg.addr.Addr()) {
+				inBlock[i]++
+			}
 		}
 	}
-	return fromAddr, total
+	for i, b := range blocks {
+		if limit := edgeproto.MaxUnclaimedPerAddress * edgeproto.RateLimitScale(b); inBlock[i] >= limit {
+			return fmt.Errorf("relay: %d unclaimed servers are already connected from %s; claim one first", limit, b)
+		}
+	}
+	if total >= r.maxUnclaimed {
+		return fmt.Errorf("relay: this edge already holds its limit of %d unclaimed servers", r.maxUnclaimed)
+	}
+	return nil
 }
 
 func (r *Relay) unregister(reg *registration, cause error) {
@@ -275,7 +292,8 @@ func (r *Relay) handle(reg *registration, m edgeproto.Message) error {
 		}
 		return nil
 	case edgeproto.Directory:
-		return r.replaceDirectory(reg, m)
+		r.replaceDirectory(reg, m)
+		return nil
 	case edgeproto.WebRedeem:
 		return r.redeem(reg, m)
 	case edgeproto.Claimed:
@@ -294,13 +312,67 @@ func (r *Relay) claimed(reg *registration) bool {
 	return reg.claimed
 }
 
-func (r *Relay) replaceDirectory(reg *registration, m edgeproto.Directory) error {
-	if !r.claimed(reg) {
-		return nil
+// directoryWrite is a claimed server's latest directory push waiting to
+// be stored.
+type directoryWrite struct {
+	reg     *registration
+	entries []edgeproto.DirectoryEntry
+	pending bool
+}
+
+func (r *Relay) replaceDirectory(reg *registration, m edgeproto.Directory) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if reg.claimed {
+		r.queueDirectoryLocked(reg, m.Entries)
+		return
 	}
+	for _, p := range r.claims {
+		if p.serverID == reg.id {
+			p.directory, p.hasDirectory = m.Entries, true
+		}
+	}
+}
+
+func (r *Relay) queueDirectoryLocked(reg *registration, entries []edgeproto.DirectoryEntry) {
+	w := r.directories[reg.id]
+	if w == nil {
+		w = &directoryWrite{}
+		r.directories[reg.id] = w
+		go r.storeDirectories(reg.id, w)
+	}
+	w.reg, w.entries, w.pending = reg, entries, true
+}
+
+// storeDirectories stores serverID's latest pushed directory at most once
+// per directoryInterval, and ends after an interval with no push. It is
+// keyed by server id, not by control channel, so reconnecting does not
+// skip the wait.
+func (r *Relay) storeDirectories(serverID string, w *directoryWrite) {
+	for {
+		r.mu.Lock()
+		if !w.pending {
+			delete(r.directories, serverID)
+			r.mu.Unlock()
+			return
+		}
+		reg, entries := w.reg, w.entries
+		w.pending, w.entries = false, nil
+		r.mu.Unlock()
+		if err := r.storeDirectory(reg, entries); err != nil && reg.ctx.Err() == nil {
+			slog.Warn("relay: directory not stored; closing the control channel", "server", serverID, "error", err)
+			reg.cancel(err)
+		}
+		if !sleep(r.ctx, r.directoryInterval) {
+			return
+		}
+	}
+}
+
+func (r *Relay) storeDirectory(reg *registration, entries []edgeproto.DirectoryEntry) error {
 	ctx, cancel := context.WithTimeout(reg.ctx, directoryTimeout)
 	defer cancel()
-	if err := r.dir.ReplaceDirectory(ctx, reg.id, m.Entries); err != nil {
+	if err := r.dir.ReplaceDirectory(ctx, reg.id, entries); err != nil {
 		return fmt.Errorf("relay: store directory of %s: %w", reg.id, err)
 	}
 	now := time.Now()
@@ -308,7 +380,7 @@ func (r *Relay) replaceDirectory(reg *registration, m edgeproto.Directory) error
 		if c.serverID != reg.id || c.kind != edgeproto.KindSSH {
 			return false
 		}
-		for _, e := range m.Entries {
+		for _, e := range entries {
 			if e.Matches(c.account, now) {
 				return false
 			}

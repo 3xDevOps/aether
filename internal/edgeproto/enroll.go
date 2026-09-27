@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -27,6 +28,9 @@ func Origin(rawURL string) (string, error) {
 		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return "", fmt.Errorf("edgeproto: edge url %q must be https://host[:port]", rawURL)
 	}
+	if err := validHost(u); err != nil {
+		return "", fmt.Errorf("edgeproto: edge url %q: %w", rawURL, err)
+	}
 	switch u.Scheme {
 	case "https":
 	case "http":
@@ -37,6 +41,28 @@ func Origin(rawURL string) (string, error) {
 		return "", fmt.Errorf("edgeproto: edge url %q must use https", rawURL)
 	}
 	return u.Scheme + "://" + strings.ToLower(u.Host), nil
+}
+
+// validHost accepts a DNS name, an IPv4 address or an IPv6 address
+// without a zone, and a port from 1 to 65535 when one is given. A
+// placeholder such as "<edge-host>" left in a configuration is not a host.
+func validHost(u *url.URL) error {
+	host := u.Hostname()
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if addr.Zone() != "" {
+			return fmt.Errorf("host %q has an IPv6 zone", host)
+		}
+	} else if !validLowerDNSName(strings.ToLower(host)) {
+		return fmt.Errorf("host %q is not a DNS name or an IP address", host)
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("port %q is not a port number from 1 to 65535", p)
+		}
+	} else if strings.HasSuffix(u.Host, ":") {
+		return errors.New("port after the colon is empty")
+	}
+	return nil
 }
 
 func isLoopback(host string) bool {
