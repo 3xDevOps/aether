@@ -12,6 +12,7 @@ export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, ph
   await fixture.waitText(phone ? 'Viewport 390' : 'Viewport 1280')
   await expect(page.getByText(/Live frame ·/)).toBeVisible()
   await expect(page.getByText(/You control this browser/)).toBeVisible()
+  if (phone) await page.getByRole('button', { name: 'Expand browser', exact: true }).click()
 
   await clickRemote(page, 80, 125, phone)
   await typeRemote(page, 'test@example.invalid', phone)
@@ -32,6 +33,7 @@ export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, ph
   await fixture.waitText('Updated without logout')
   await fixture.waitText('Signed in as test@example.invalid')
   expect((await fixture.currentPage()).page_revision).toBe(signedIn.page_revision)
+  if (phone) await page.getByRole('button', { name: 'Restore browser controls', exact: true }).click()
   await page.getByRole('button', { name: 'Hide browser', exact: true }).click()
   await page.getByRole('tab', { name: 'Browser', exact: true }).click()
   await expect(page.getByText(/Live frame ·/)).toBeVisible()
@@ -46,6 +48,7 @@ export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, ph
   await page.getByRole('button', { name: 'Reload page', exact: true }).click()
   await fixture.waitText('Signed in as test@example.invalid')
   await expect(page.getByText(/Live frame ·/)).toBeVisible()
+  if (phone) await page.getByRole('button', { name: 'Expand browser', exact: true }).click()
 }
 
 export async function shareWithAgent(page: Page, fixture: BrowserFixture): Promise<void> {

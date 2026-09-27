@@ -35,7 +35,7 @@ it('drops the old input backlog and ignores its late refusal after a new control
   let reject!: (reason: Error) => void
   const pending = new Promise<DevBrowserActionResult>((_resolve, fail) => { reject = fail })
   vi.mocked(api.devBrowserAction).mockReturnValueOnce(pending)
-  const props = { runID: 'run_1', page, control: { control_session_id: 'tab', control_generation: 7 }, connection: 0, onError: vi.fn(), onPage: vi.fn() }
+  const props = { runID: 'run_1', page, control: { control_session_id: 'tab', control_generation: 7 }, connection: 0, expanded: false, onExpandedChange: vi.fn(), onError: vi.fn(), onPage: vi.fn() }
   const view = render(<BrowserSurface {...props} />)
   await act(async () => {
     const socket = StubSocket.last()

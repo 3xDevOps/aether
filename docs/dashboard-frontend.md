@@ -1764,6 +1764,12 @@ hardware-bound login flows and identity providers which reject automated
 Chromium remain limitations; use test accounts rather than importing a
 personal browser profile.
 
+**Expand** fills the run pane with the selected page, hiding the run header
+and navigation/capture controls. **Restore** brings those controls back.
+Neither action reconnects the stream, changes the remote viewport, or
+reacquires control. The current controller and errors remain visible, and
+**Keyboard** remains available for phone input.
+
 The stream accepts one bounded binary frame per WebSocket message (16 KiB
 metadata and 2 MiB image maximum). It keeps one pending compressed image and
 one decode, closes decoded bitmaps after painting, and never builds an image

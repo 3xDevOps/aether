@@ -11,6 +11,8 @@ interface BrowserSurfaceProps {
   page: DevBrowserPage
   control: DevControlFence | null
   connection: number
+  expanded: boolean
+  onExpandedChange: (expanded: boolean) => void
   onError: (error: string) => void
   onPage: (page: DevBrowserPage) => void
 }
@@ -304,7 +306,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
       <span role="status">{live ? `Live frame · ${dimensions}` : 'Waiting for browser frame'}</span>
       <Button size="sm" variant="outline" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
-      <span>{props.control ? 'Click or touch the page. Keyboard opens phone input.' : 'Watch only — acquire control to interact.'}</span>
+      <Button size="sm" variant="outline" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
+      <span>{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only — restore browser controls to acquire control.' : 'Watch only — acquire control to interact.'}</span>
     </div>
     <div className="relative min-h-48 flex-1 overflow-hidden bg-black">
       <canvas ref={canvas} aria-label="Shared browser page" tabIndex={props.control ? 0 : -1}
