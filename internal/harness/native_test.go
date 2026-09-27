@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,9 @@ func TestNativeExtensionDiscoveryOptOut(t *testing.T) {
 }
 
 func TestOpenCodeNativeLauncherPreservesProcessContract(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the native launcher runs in Linux containers, not on Windows clients")
+	}
 	for _, version := range []string{"1.18.32", "1.18.33", "2.0.18", "2.0.19", "3.0.0"} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
