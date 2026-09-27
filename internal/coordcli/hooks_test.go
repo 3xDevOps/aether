@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -64,7 +65,13 @@ func hookRun(t *testing.T, mission coord.MissionService, files []string, unread 
 		{RunID: runs[0].ID, With: []overlap.Peer{{RunID: runs[1].ID, Files: files}}},
 		{RunID: runs[1].ID, With: []overlap.Peer{{RunID: runs[0].ID, Files: files}}},
 	}
-	service, err := coord.New(coord.Config{Dir: filepath.Join(dir, "coord"), Store: db, Mail: db, Bus: bus, Peers: peers, Mission: mission})
+	admission := control.New(control.Config{})
+	service, err := coord.New(coord.Config{
+		Dir: filepath.Join(dir, "coord"), Store: db, Mail: db, Bus: bus, Peers: peers, Mission: mission,
+		WakeAdmission: func(_ context.Context, run domain.RunID, dispatch func() error) error {
+			return admission.Admit(string(run), dispatch)
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

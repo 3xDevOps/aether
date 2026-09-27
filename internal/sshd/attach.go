@@ -604,7 +604,21 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 						if err := checkSteer(ctx, s.cfg.Store, member, run.ID); err != nil {
 							return err
 						}
-						return applyControlReady(false)
+						if err := applyControlReady(false); err != nil {
+							return err
+						}
+						if mission := s.cfg.Services.MissionControl; mission != nil {
+							if err := mission.Takeover(ctx, run.ID, member); err != nil {
+								// Acquire has not changed the lease yet. Restore
+								// this stream's prior readiness on a failed hold.
+								rollbackErr := applyControlReady(controlLease == nil)
+								if rollbackErr != nil {
+									revoke(rollbackErr)
+								}
+								return errors.Join(err, rollbackErr)
+							}
+						}
+						return nil
 					},
 				)
 				if err != nil {
@@ -647,6 +661,9 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 					controlLease = nil
 					controlFence = nil
 					recordRevoked(lease, control.ErrStale)
+					if readyErr := applyControlReady(true); readyErr != nil {
+						revoke(readyErr)
+					}
 				}
 				leaseMu.Unlock()
 				if needFence {
@@ -675,7 +692,21 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			}
 			leaseMu.Lock()
 			err := s.cfg.Control.ReleaseAdmitted(req.RunID, member, req.ControlSessionID, ctl.ControlGeneration, func() error {
-				return applyControlReady(true)
+				if err := applyControlReady(true); err != nil {
+					return err
+				}
+				if mission := s.cfg.Services.MissionControl; mission != nil {
+					if err := mission.Release(ctx, run.ID, member); err != nil {
+						// ReleaseAdmitted keeps the lease on failure; keep
+						// its live writer ready too, or close it fail-closed.
+						rollbackErr := applyControlReady(false)
+						if rollbackErr != nil {
+							revoke(rollbackErr)
+						}
+						return errors.Join(err, rollbackErr)
+					}
+				}
+				return nil
 			})
 			if err != nil {
 				record.Code, record.Error = attachControlError(err)

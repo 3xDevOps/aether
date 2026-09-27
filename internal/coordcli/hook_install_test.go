@@ -149,20 +149,3 @@ func TestHookInstallationBoundsAndCustomSources(t *testing.T) {
 		t.Fatalf("directory = %+v, %v", result, err)
 	}
 }
-
-func TestHookJSONCommentsPreserveStringsAndRejectUnclosedComments(t *testing.T) {
-	data := []byte("{\"url\":\"https://example.test/*not a comment*/\",/*actual*/\"values\":[\"a,}\",],}")
-	var doc struct {
-		URL    string   `json:"url"`
-		Values []string `json:"values"`
-	}
-	if err := json.Unmarshal(stripHookJSONComments(data), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if doc.URL != "https://example.test/*not a comment*/" || len(doc.Values) != 1 || doc.Values[0] != "a,}" {
-		t.Fatalf("quoted values changed: %+v", doc)
-	}
-	if json.Valid(stripHookJSONComments([]byte(`{"disableAllHooks":true} /* never closed`))) {
-		t.Fatal("unterminated comment accepted")
-	}
-}

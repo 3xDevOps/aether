@@ -354,3 +354,73 @@ func TestReconcileRecordsAWorkerThatEndedWithoutAReport(t *testing.T) {
 		})
 	}
 }
+
+type reportAdmissionCanceller struct {
+	authorizationMu *sync.Mutex
+}
+
+func (c reportAdmissionCanceller) CancelMission(context.Context, domain.RunID) error {
+	if !c.authorizationMu.TryLock() {
+		return errors.New("report cancellation retained mission authorization")
+	}
+	c.authorizationMu.Unlock()
+	return nil
+}
+
+func TestReconcileReportDefersContendedTerminalTransition(t *testing.T) {
+	for _, outcome := range []store.CoordOutcome{store.CoordOutcomeSuccess, store.CoordOutcomeFailure} {
+		t.Run(string(outcome), func(t *testing.T) {
+			ctx := context.Background()
+			f, report := setupReconcileReport(t, outcome)
+			report.IdempotencyKey = "contended-report"
+			if _, err := f.db.ReserveCoordReport(ctx, report); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.db.FinalizeCoordReport(ctx, report); err != nil {
+				t.Fatal(err)
+			}
+			before, err := f.db.GetAttempt(ctx, f.attempt.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mu := f.svc.cfg.AuthorizationMu
+			mu.Lock()
+			unlock := sync.OnceFunc(mu.Unlock)
+			defer unlock()
+			done := make(chan error, 1)
+			go func() { done <- f.svc.ReconcileReport(ctx, f.attempt.RunID, report, f.packet) }()
+			select {
+			case reportErr := <-done:
+				if !errors.Is(reportErr, store.ErrConflict) {
+					t.Fatalf("contended report = %v, want retryable conflict", reportErr)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("report waited on authorization while retaining its caller's run reference")
+			}
+			current, err := f.db.GetAttempt(ctx, f.attempt.ID)
+			if err != nil || current.State != before.State {
+				t.Fatalf("contended report changed attempt: %+v, %v", current, err)
+			}
+			if len(f.canceller.runs) != 0 {
+				t.Fatal("contended report cancelled a still-admitted worker")
+			}
+			pending, err := f.db.ListPendingCoordReportPublications(ctx, 10)
+			if err != nil || len(pending) != 1 || pending[0].ReportID != report.ID {
+				t.Fatalf("contended report lost its durable retry: %+v, %v", pending, err)
+			}
+			unlock()
+			f.svc.cfg.Cancel = reportAdmissionCanceller{authorizationMu: mu}
+			if err = f.svc.ReconcileReport(ctx, f.attempt.RunID, report, f.packet); err != nil {
+				t.Fatalf("retry after admission release: %v", err)
+			}
+			want := domain.AttemptSubmitted
+			if outcome == store.CoordOutcomeFailure {
+				want = domain.AttemptFailed
+			}
+			current, err = f.db.GetAttempt(ctx, f.attempt.ID)
+			if err != nil || current.State != want {
+				t.Fatalf("retried report state = %+v, %v; want %s", current, err, want)
+			}
+		})
+	}
+}

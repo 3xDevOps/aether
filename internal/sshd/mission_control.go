@@ -18,7 +18,8 @@ import (
 // and invoking its callback; callers must not pre-lock that worker.
 type MissionControl interface {
 	Takeover(context.Context, domain.RunID, domain.MemberID) error
-	// Release clears the durable hold after a successful PTY replacement.
+	// Release clears the durable hold after a successful read-only PTY
+	// replacement or in-stream control readiness transition.
 	// It deliberately has no generation argument because attach release
 	// admission already identifies the live human lease.
 	Release(context.Context, domain.RunID, domain.MemberID) error

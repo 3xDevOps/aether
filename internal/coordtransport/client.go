@@ -28,6 +28,10 @@ func callTimeout(method string, params any) time.Duration {
 	switch method {
 	case protocol.MethodCoordReport:
 		timeout = callReportTimeout
+	case protocol.MethodCoordHookStatus:
+		if params != nil {
+			timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
+		}
 	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
 	}
@@ -40,7 +44,7 @@ func callTimeout(method string, params any) time.Duration {
 // longPoll reports whether the server may hold the request open for the
 // caller's wait_seconds, which is what exempts it from the deadline ceiling.
 func longPoll(method string) bool {
-	return method == protocol.MethodCoordInbox || method == protocol.MethodMissionPlanShow
+	return method == protocol.MethodCoordInbox || method == protocol.MethodCoordHookStatus || method == protocol.MethodMissionPlanShow
 }
 
 // pollWaitSeconds clamps the caller's wait to the same bound the server
@@ -51,6 +55,12 @@ func pollWaitSeconds(params any) int {
 	case protocol.CoordInboxParams:
 		wait = p.WaitSeconds
 	case *protocol.CoordInboxParams:
+		if p != nil {
+			wait = p.WaitSeconds
+		}
+	case protocol.CoordHookStatusParams:
+		wait = p.WaitSeconds
+	case *protocol.CoordHookStatusParams:
 		if p != nil {
 			wait = p.WaitSeconds
 		}
