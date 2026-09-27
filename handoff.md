@@ -2,9 +2,10 @@
 
 The product contract is
 [the remote-development plan](docs/plans/2026-09-25-remote-development.md).
-The implementation is on `feat/remote-development`; final acceptance is in
-progress. The old uncommitted-package inventory and compile failures are
-obsolete. Operational commands belong in the public guides, not this file.
+The implementation is in [PR #247](https://github.com/3xDevOps/aether/pull/247).
+Hosted and native-harness acceptance is recorded below. Operational commands
+belong in the public guides; current CI, review and publication evidence belongs
+on the PR and release.
 
 ## Delivered surfaces
 
@@ -56,9 +57,9 @@ obsolete. Operational commands belong in the public guides, not this file.
   privileged or unconfined fallback was used.
 - Genuine OMP completed the edit/run/observe/correct loop through its registered
   harness: CLI exit codes and file effects before any browser launch, valid and
-  invalid sign-in, HMR, desktop/phone layouts, and alternate-screen TUI input,
-  Unicode, queries, resize, and PNG capture. Its native image-read records
-  match the three retained PNGs by SHA-256.
+  invalid sign-in, custom module replacement, desktop/phone layouts, and
+  alternate-screen TUI input, Unicode, queries, resize, and PNG capture.
+  Its native image-read records match the three retained PNGs by SHA-256.
   That loop used the original companion and an explicit terminal-capture retry
   after its first timeout; it is not proof of the later companion builds.
 - Genuine OpenCode completed the same CLI/web/TUI loop on the terminal-budget
@@ -67,8 +68,10 @@ obsolete. Operational commands belong in the public guides, not this file.
   timeout and vendor-crash attempts are not counted as this successful run.
 - After both headless runs completed, the actual dashboard displayed their
   retained desktop, phone, and terminal images with capture/revision boundaries.
-- The actual mobile shared-browser scenario passed HMR, reconnect, handoff,
-  accented text, Japanese IME, two touches, phone layout, and sign-out.
+- Those earlier web loops used SSE notifications and cache-busted ES-module
+  imports, not a framework HMR server. The automated mobile fixture also uses
+  this mechanism; it covered reconnect, handoff, accented text, Japanese IME,
+  two touches and sign-out. Genuine Vite interoperability was verified separately.
 - Actual detach, pause/resume, interactive harness exit, server restart,
   close/relaunch, whole-companion failure, deletion, and worker completion
   preserved the documented ownership and explicit-restart boundaries.
@@ -98,41 +101,90 @@ obsolete. Operational commands belong in the public guides, not this file.
   member-account credential removal. The uncertain-create case discarded the
   response to one successful real POST; read-only reconciliation found that
   exact PR without another create.
-- PR #247's second CI run passed native amd64/arm64 harness and companion
-  smoke, Windows, release builds, and all but one server integration test.
-  The remaining server failure began with an obsolete websocket assertion;
-  a cold-launch check also exposed a test client that stopped answering pings.
-  The corrected continuously-reading client passed the actual Docker-backed
-  server gateway integration in 30.620 seconds.
-  Dashboard E2E recorded 60 passes, the expected conditional live-GitHub skip,
-  and two lifecycle-fixture failures: reacquiring control after closing a
-  popup and reopening the run after reload. The corrected shared-terminal
-  scenario passed with an actual 1394×124 PNG; final desktop/CI checks remain.
-- Reconciliation now avoids rewriting identical durable companion status.
-  Live container/health checks and changed-state durability are unchanged.
-  The final Go quality gates passed. An actual two-viewer broker smoke sent
-  60 physical pointer operations and observed `profile-delivery` in the real
-  Email textbox. That profiling-overlay smoke is not full desktop acceptance.
+- [CI on `c43117d`](https://github.com/3xDevOps/aether/actions/runs/36281303442)
+  passed every job, including all Docker integration shards, native amd64/arm64
+  companion/harness checks, Windows and release builds. Dashboard E2E recorded
+  62 passes, no failures or flaky cases, and one conditional live-GitHub skip.
+  The unchanged-cadence desktop scenario passed reset/reacquisition. Its
+  [visual report](https://github.com/3xDevOps/aether/actions/runs/36281303442/artifacts/10919117238)
+  includes the inspected desktop/phone surfaces and 1394×124 terminal capture.
+- After integrating main's native wake support, CI on `fdd138c` passed every
+  job except one phone assertion: 61 dashboard scenarios passed; one was
+  skipped. A complete 390×844 frame correctly letterboxed in Pixel 7's shorter
+  available area, but the test required a width ratio above 0.9. The incidental
+  ratio assertion was removed; interaction, identity, overflow and full-surface
+  evidence checks remain, with unchanged input expiry, fences and cadence.
+- Greptile found that rejected native OpenCode prompts left unread IDs marked
+  notified. Request-owned reservations now roll back on rejection without
+  erasing accepted IDs or a newer reservation. Both API generations passed
+  rejection/recovery, delayed acceptance, Stop and stale-rejection regressions.
+  All 79 native-hook tests and the integrated Go quality gates passed.
+  Packaged receivers also passed an injected HTTP 503→202 smoke with real
+  helper subprocesses: later human completion retried the unread message,
+  then acceptance coalesced it. This is component, not vendor-model, evidence.
+- Reconciliation avoids rewriting identical durable companion status without
+  caching live health or authority. A separate two-viewer profiling smoke
+  delivered 60 physical pointer operations and text observed in the app;
+  the normal CI desktop scenario supplies the end-to-end proof.
 
-## Acceptance still in progress
+## Hosted and framework-HMR acceptance
 
-- Final unchanged-cadence desktop acceptance, including reset/reacquisition.
-  One local run reached the final boundary; a subsequent run expired queued
-  input with two viewers. The local VM uses QEMU TCG software emulation.
-  Measured redundant journal syncs account for only 3–5% of slow intervals;
-  they are not the dominant delay. The corrected full scenario must pass on
-  the normal CI runner. Expiry and fencing remain unchanged.
-- Production hosted HTTPS/WhoIs acceptance awaits temporary tailnet-node
-  authorization. Local-gateway tests do not substitute for that boundary.
-- Complete Docker integration, final merged quality gates, PR review/CI, merge,
-  and a new tag plus published release. Release CI must prove public pulls of
-  both companion architectures before downloadable binaries are published.
+- Actual hosted HTTPS and Tailscale WhoIs worked through ordinary untagged
+  devices, without a browser bearer token, local gateway or client checkout.
+  Native OpenCode built the synthetic app in the run. Hosted interaction
+  exercised invalid credentials with a fresh HTTP 401 and visible error,
+  normalized valid sign-in, saved Unicode text and sign-out.
+- The initial hosted app polled heading configuration; that was not counted as
+  HMR. Native OpenCode migrated it to Vite 8.3.1 middleware with a real HMR
+  WebSocket and an explicit `import.meta.hot.accept` dependency boundary.
+  A bounded official `opencode run` edited only the heading module and exited 0.
+  The live app changed without reload, navigation, restart or state restoration:
+  authentication, distinct saved/unsaved notes, page identity/revision and the
+  app process/start time remained unchanged.
+- OpenCode's bundled Bun crashed twice in the longer interactive sessions,
+  including after the Vite migration. Those attempts are not clean passes.
+  The first explicit continuation reached readiness; the final bounded native
+  session supplied the successful module edit.
+- Actual hosted phone operation used a 390×844 remote viewport and a 390px
+  coarse-touch client. Expand/Restore and reconnect preserved page identity and
+  the unsaved draft; native touch logout succeeded. The full phone surface was
+  visually inspected. This is Chromium touch emulation, not physical Safari.
+  A server upgrade preserved the browser/app; managed terminals honestly
+  reported unavailable rather than silently reattaching or restarting.
+- Hosted native Git reviewed and committed exactly nine selected source paths,
+  pushed to the explicit fork and created the exact upstream/head/base PR once.
+  The accepted workspace base did not change. No client clone was involved.
+  The fixture PR was closed after acceptance.
+- A separately imported workspace ran genuine OMP 18.3.2 headlessly against
+  that Vite app. `npm ci` and the run exited 0. Native terminal output recorded
+  Vite's `hmr update /app.js` after a one-line dependency edit. Authentication,
+  saved/unsaved Unicode notes, session/page/revision, app PID/start time and
+  terminal incarnation stayed unchanged. Invalid login and final logout were
+  verified against actual application state.
+- OMP natively read both retained captures: 1280×800 desktop and 390×844 phone.
+  The phone tool image matches the retained PNG byte-for-byte; the desktop
+  reader produced a WebP preview, not identical PNG bytes. Both original images
+  and the native desktop preview were visually inspected; the dashboard loaded
+  both retained images after headless cleanup. One pre-HMR resource 404 lacked
+  a URL and remains unexplained; no error-free-run claim is made.
+
+## Merge and release gates
+
+Require current-head CI and Greptile review; an earlier green head is not a
+substitute. Local QEMU TCG input-expiry failures were not bypassed by extending
+TTL, changing fences or weakening interaction cadence.
+
+After merge, publish a new tag and a normal GitHub Release. Release CI must
+prove anonymous pulls of both companion architectures before publishing
+downloadable binaries. A successful local image build is not publication proof.
 
 The plan's section 10 remains the acceptance checklist. Temporary credentials,
 model profiles, transcripts, VM state, and test-repository state stay outside
-source. Disposable repositories contain only synthetic fixtures and must be
-deleted after acceptance. Do not replace missing proof with mocks, a launch
-probe, a successful build, HTTP 200, or a transcript tail.
+source. The two disposable repositories contain only synthetic fixtures.
+Delete them after acceptance with authorization for repository deletion;
+repository admin rights alone do not grant a classic token's `delete_repo`
+scope. Do not replace missing proof with mocks, a launch probe, a successful
+build, HTTP 200, or a transcript tail.
 
 ## Operational guides
 

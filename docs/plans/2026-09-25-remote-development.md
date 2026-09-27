@@ -1,9 +1,9 @@
 # Remote development and agent self-verification
 
-**Status:** Implemented on `feat/remote-development`; final acceptance is in
-progress. Operational guides describe the implemented commands and boundaries.
-Actual verification and remaining release gates are recorded in
-[handoff.md](../../handoff.md).
+**Status:** Implemented in [PR #247](https://github.com/3xDevOps/aether/pull/247).
+Operational guides describe the implemented surfaces and prerequisites.
+[handoff.md](../../handoff.md) records observed acceptance, vendor limitations
+and the CI/review/publication gates; the PR and release carry current results.
 
 **Goal:** A developer can implement, run, inspect, correct, and publish a change
 entirely through Aether. An agent can observe and operate the application it
@@ -458,6 +458,32 @@ slice. The full release gate includes `make fmt-check`, `make vet`, `make lint`,
 `make test`, `make test-scripts`, `make public-audit`, `make test-integration`,
 `make test-e2e`, and the dashboard typecheck/tests where affected. Record actual
 manual/harness evidence separately from automated-suite results.
+
+### Recorded end-to-end acceptance
+
+On stock headless Ubuntu with Docker and no host browser/display server,
+genuine OMP and OpenCode completed CLI, web and viewerless alternate-screen
+TUI loops. Native image reads and retained dashboard presentation were checked
+separately from text reports. Real lifecycle, control revocation, isolation,
+resource bounds, sandbox refusal and Git/GitHub failure cases were exercised.
+
+The hosted path used real HTTPS and Tailscale WhoIs, without a local gateway
+or client checkout. Native OpenCode implemented a Vite app; actual desktop and
+phone input exercised invalid/valid login, saved and unsaved Unicode notes,
+logout and reconnect. A native module edit preserved live state, page identity
+and the app process. Hosted selected-path commit, explicit fork push and exact
+PR creation completed without adopting a new mirror base.
+
+A separate native OMP run proved Vite 8.3.1 HMR with actual terminal update
+output and unchanged authentication, saved/draft state, page revision and
+process identity. Its desktop and phone captures remained viewable after
+headless cleanup. Earlier custom ES-module fixtures and configuration polling
+are not substituted for that framework interoperability check.
+
+See the handoff for the two OpenCode/Bun crashes, explicit recovery, image
+format distinctions, unexplained resource 404 and remaining external
+authorization/publication prerequisites. CI and manual evidence are distinct;
+none of these records relaxes the release gate above.
 
 ## 11. Explicit exclusions
 
