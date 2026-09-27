@@ -43,7 +43,13 @@ export class LinkStep extends Step {
     super(page, 'Link')
   }
 
+  /** Swaps the edge sign-in for the address form. */
+  byAddress(): Locator {
+    return this.button('Link by address')
+  }
+
   async link(addr: string, options: { invite?: string; name?: string } = {}): Promise<void> {
+    await this.byAddress().click()
     await this.section.getByLabel('Server address').fill(addr)
     if (options.invite) await this.section.getByLabel('Invite code').fill(options.invite)
     if (options.name) await this.section.getByLabel('Your name').fill(options.name)

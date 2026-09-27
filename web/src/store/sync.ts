@@ -688,7 +688,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
   let stopStream: () => void = () => {}
   let selectionWrite = Promise.resolve()
   const stopSelection = store.subscribe((state, previous) => {
-    if (!state.hydrated || !state.capabilities?.local?.includes('workspace.selection')) return
+    // The gateway keys the selection by the server's answer, so an unlinked
+    // gateway, hydrated only for onboarding, has nowhere to save it.
+    if (!state.hydrated || !state.info || !state.capabilities?.local?.includes('workspace.selection')) return
     if (state.activeWorkspace === previous.activeWorkspace && previous.hydrated) return
     const workspace = state.activeWorkspace
     selectionWrite = selectionWrite

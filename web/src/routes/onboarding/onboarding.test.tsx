@@ -219,7 +219,7 @@ describe('onboarding wizard', () => {
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
 
-    expect(await screen.findByLabelText('Server address')).toBeDefined()
+    fireEvent.click(await screen.findByRole('button', { name: 'Link by address' }))
     fireEvent.change(screen.getByLabelText('Server address'), {
       target: { value: 'host:2222' },
     })
@@ -317,7 +317,7 @@ describe('onboarding wizard', () => {
     })
     seed()
     render(<OnboardingRoute params={{}} client={client} />)
-    expect(await screen.findByLabelText('Server address')).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Link by address' })).toBeDefined()
 
     status = {
       server_configured: true,

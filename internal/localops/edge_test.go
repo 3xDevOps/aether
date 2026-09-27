@@ -11,6 +11,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/syncd"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
@@ -56,7 +57,7 @@ func TestGitRemoteNeverOverwritesSSHCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "config core.sshCommand ") || !strings.Contains(out.String(), want) {
+	if !strings.Contains(out.String(), "config core.sshCommand "+shellquote.Quote(want)+"\n") {
 		t.Fatalf("output %q lacks the command to set it", out.String())
 	}
 }

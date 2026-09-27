@@ -1592,7 +1592,7 @@ describe('connect', () => {
         gateway: 'local',
         methods: ['*'],
         ws: ['events', 'attach'],
-        local: ['link.status'],
+        local: ['link.status', 'workspace.selection'],
       })),
       localLinkStatus: vi.fn(async () => ({
         server_configured: false,
@@ -1609,6 +1609,8 @@ describe('connect', () => {
     expect(store.getState().route.name).toBe('onboarding')
     expect(store.getState().linkStatus?.server_configured).toBe(false)
     expect(client.serverInfo).not.toHaveBeenCalled()
+    expect(client.localWorkspaceSelection).not.toHaveBeenCalled()
+    expect(store.getState().hydrationError).toBeNull()
     expect(StubSocket.opened).toHaveLength(0)
     stop()
   })

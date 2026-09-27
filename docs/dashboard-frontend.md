@@ -2240,7 +2240,10 @@ The Link step first offers signing in to an edge
 (`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
 through the local gateway, which keeps the device token, shows the code
 while it polls `edge.status`, then links a server the account reaches or
-claims a new one with the code `aether-server setup` printed. The Link step
+claims a new one with the code `aether-server setup` printed. **Link by
+address** swaps the sign-in for the address form, for a tailnet or SSH
+server, and **Sign in instead** swaps it back; showing one at a time keeps
+the address field above a phone's soft keyboard. The Link step
 distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
 focus, so a separate `aether link` command appears without restarting the GUI.

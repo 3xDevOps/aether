@@ -67,6 +67,7 @@ export function LinkStep({
   const [linking, setLinking] = useState(false)
   const [success, setSuccess] = useState<LinkApplyResult | null>(null)
   const [edgeLinked, setEdgeLinked] = useState<EdgeLinkResult | null>(null)
+  const [byAddress, setByAddress] = useState(false)
 
   const check = useCallback(async () => {
     setStatusError(null)
@@ -114,6 +115,7 @@ export function LinkStep({
   const loading = useDelayed(status === null && statusError === null)
   const serverConfigured = status?.server_configured === true
   const linked = success !== null || edgeLinked !== null
+  const choosing = status !== null && !serverConfigured && !linked
 
   return (
     <section
@@ -174,24 +176,33 @@ export function LinkStep({
           </Button>
         </div>
       )}
-      {status && !serverConfigured && !linked && (
-        <EdgeSignIn client={client} onLinked={(result) => void linkedThroughEdge(result)} />
+      {choosing && !byAddress && (
+        <>
+          <EdgeSignIn client={client} onLinked={(result) => void linkedThroughEdge(result)} />
+          <div className="min-w-0 max-w-2xl space-y-3 border-t border-border/70 pt-4 text-sm">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Tailscale or a direct address</h3>
+              <p className="text-[13px] leading-5 text-muted-foreground">
+                For a server on your tailnet, or one this computer reaches over SSH.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setByAddress(true)}>
+              Link by address
+            </Button>
+          </div>
+        </>
       )}
-      {status && !serverConfigured && !linked && (
+      {/* The form replaces the sign-in rather than following it, so on a
+          phone its fields sit high enough to stay above a soft keyboard. */}
+      {choosing && byAddress && (
         <form
-          className="min-w-0 max-w-2xl space-y-4 border-t border-border/70 pt-4 text-sm"
+          className="min-w-0 max-w-2xl space-y-4 text-sm"
           aria-label="Link server"
           onSubmit={(e) => {
             e.preventDefault()
             void link()
           }}
         >
-          <div className="space-y-1">
-            <h3 className="text-sm font-semibold">Tailscale or a direct address</h3>
-            <p className="text-[13px] leading-5 text-muted-foreground">
-              For a server on your tailnet, or one this computer reaches over SSH.
-            </p>
-          </div>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <Label className="block min-w-0 space-y-1">
               Server address
@@ -227,13 +238,17 @@ export function LinkStep({
             />
           </Label>
           <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" size="sm" disabled={linking || !address.trim()}>
+              {linking ? 'Linking...' : 'Link'}
+            </Button>
             <Button
-              type="submit"
+              type="button"
               size="sm"
               variant="outline"
-              disabled={linking || !address.trim()}
+              disabled={linking}
+              onClick={() => setByAddress(false)}
             >
-              {linking ? 'Linking...' : 'Link'}
+              Sign in instead
             </Button>
             {linkError && <p className="text-sm text-state-failed">{linkError}</p>}
           </div>

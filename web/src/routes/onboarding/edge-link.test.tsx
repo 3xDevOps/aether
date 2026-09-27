@@ -63,16 +63,25 @@ afterEach(() => {
 })
 
 describe('onboarding link through an edge', () => {
-  it('offers sign-in first and keeps the address form for Tailscale or a direct address', async () => {
+  it('offers sign-in first and swaps it for the address form on request', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi({ localLinkStatus: vi.fn(async () => unlinked) })} />)
 
     const signIn = await screen.findByRole('button', { name: 'Sign in' })
-    const form = screen.getByRole('form', { name: 'Link server' })
-    expect(within(form).getByText('Tailscale or a direct address')).toBeDefined()
-    expect(within(form).getByLabelText('Server address')).toBeDefined()
+    const byAddress = screen.getByRole('button', { name: 'Link by address' })
+    expect(screen.getByText('Tailscale or a direct address')).toBeDefined()
     // Sign-in comes first in reading order.
-    expect(signIn.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(signIn.compareDocumentPosition(byAddress) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('form', { name: 'Link server' })).toBeNull()
+
+    fireEvent.click(byAddress)
+    const form = screen.getByRole('form', { name: 'Link server' })
+    expect(within(form).getByLabelText('Server address')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Sign in instead' }))
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(screen.queryByRole('form', { name: 'Link server' })).toBeNull()
   })
 
   it('shows the code, opens the browser, and waits for the gateway to report the sign-in', async () => {
