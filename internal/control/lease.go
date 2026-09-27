@@ -22,6 +22,8 @@ var (
 	// ErrOccupied means another session currently controls the run. Taking
 	// over an occupied run requires force=true.
 	ErrOccupied = errors.New("control: run is already controlled")
+	// ErrAdmissionBusy means another action owns the run's admission boundary.
+	ErrAdmissionBusy = errors.New("control: run admission is busy")
 	// ErrStale means that the lease no longer names the current authority.
 	ErrStale = errors.New("control: stale lease")
 	// ErrInvalid is returned for an empty run or member identifier.
@@ -211,6 +213,24 @@ func (s *Service) Admit(run string, fn func() error) error {
 	return s.AdmitSnapshot(run, func(Snapshot, bool) error {
 		return fn()
 	})
+}
+
+// TryAdmit is Admit without waiting for an in-flight action. Optional actions
+// that retain cleanup resources must defer rather than block their own cleanup.
+func (s *Service) TryAdmit(run string, fn func() error) error {
+	if err := s.validateRun(run); err != nil {
+		return err
+	}
+	if fn == nil {
+		return ErrInvalid
+	}
+	state := s.stateFor(domain.RunID(run), true)
+	if !state.mu.TryLock() {
+		return ErrAdmissionBusy
+	}
+	defer state.mu.Unlock()
+	s.expireLocked(state, s.now())
+	return fn()
 }
 
 // AdmitSnapshot is Admit with the current controller snapshot supplied while

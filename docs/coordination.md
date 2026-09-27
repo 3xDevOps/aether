@@ -76,9 +76,17 @@ line. The base coordination method set is:
 | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
 
 The six advertised coordination methods are unchanged. Native hooks use
-`coord.hook.status`, an internal read-only endpoint with the same result and
-authorization as `coord.status`, but a separate request budget. It is not an
-additional agent capability or MCP tool.
+`coord.hook.status`, an internal endpoint with a separate request budget, not
+an additional agent capability or MCP tool. Absent or null parameters retain
+the ordinary read-only result and authorization of `coord.status`. A params
+object opts into bounded observation: `wait_seconds` is 0–30 (zero when
+omitted on the wire), and `seen_message_ids` is at most 100 opaque message
+IDs. The result adds optional `wait_supported`, `unread_message_ids`, and
+`wake_admitted` fields; false/empty values may be omitted on the wire.
+Observer mode never returns bodies or acknowledgement tokens and never
+consumes the inbox. An admitted wake response is an input action; ordinary
+status is not. The CLI helper supplies its own 30-second default and always
+emits all four of its documented result fields.
 
 Mission-assigned runs additionally receive assignment-scoped `task.*` and `worker.*` methods
 published by `coord.status`; the current integrator also receives exactly
@@ -161,11 +169,25 @@ not mean that a peer has read the message or understood it. A timed-out
 request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
-Aether does not type automated coordination messages into terminals. Install
-the [copyable native hooks](harnesses.md#incoming-coordination-hooks) for your
-harness. At its supported lifecycle boundaries, a hook checks `coord.hook.status`
-and adds a trusted instruction to read the inbox when messages are pending.
-It never acknowledges a batch or promotes a peer's message body into system
+Aether does not type automated coordination messages into terminals. There
+are three ways to notice mail:
+
+1. **An active inbox wait wins.** An agent expecting a reply should use
+   `aether-internal inbox --wait 30`. The current tool call receives the
+   original attributed message and acknowledgement token; a native observer
+   must not start an extra turn for that arrival.
+2. **A native wake can resume a live idle harness.** The loaded pi, OMP, and
+   version-matched OpenCode integrations observe unread IDs with bounded
+   helper waits and use their native session APIs for a follow-up. The
+   server admits that wake only for the current eligible TUI run.
+3. **A boundary hook supplies context at the next native event.** Claude
+   Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI command hooks do not
+   watch an already-idle session. Mail arriving after their last hook waits
+   for the next supported boundary or explicit inbox read.
+
+See [per-harness setup and limits](harnesses.md#incoming-coordination-hooks).
+All integrations add only a trusted instruction to read the inbox. They
+never acknowledge a batch or promote a peer's body into system/developer
 instructions. The agent reads the original, attributed payload through `inbox`.
 
 Hooks also direct agents with overlapping edits to `status`. Integrators get
@@ -179,15 +201,51 @@ complete report summary, and `correlation_id` is the report ID. This message
 uses the same durable delivery and explicit acknowledgement as peer messages.
 If the inbox is full, the existing report-publication retry retains the work.
 
-Delivery is boundary-driven. Mail arriving after the harness becomes idle
-waits for its next supported hook or an explicit inbox read. Hooks do not
-start exited headless runs. Missing, disabled, untrusted, or failed hooks do
-not lose mail; inspect the real harness error and read the inbox manually.
-Human terminal input and steering are unchanged.
+Wake admission rechecks live run and mission authority, including protection,
+human takeover, current assignment/revision/generation, and submitted or
+settled attempts. A held run keeps its mail. Releasing a hold allows a later
+bounded observer response to admit still-unread mail; it does not restart an
+agent. The admitted response is dispatched inside the same per-run control
+boundary as human input, with a write bound of at most three seconds, not
+while holding control through the long wait. A hold committed first prevents
+dispatch; input already accepted before a later hold may still be processed.
+
+Mission revision and generation changes are serialized with the complete
+wake-frame dispatch as well; checking authority once before writing is not
+enough. Inbox-consumer registration is also ordered against that final write:
+an earlier registered consumer keeps priority, but a consumer registered
+after an admitted frame cannot revoke the already-accepted wake.
+Mission/control admission is nonblocking for this optional action: if either
+boundary is busy, wake is suppressed rather than queued behind its holder.
+The receiver updates observed IDs without adding notified IDs, so a later
+bounded observation can reconsider mail without losing or acknowledging it.
+
+This includes changing an attached read-only mirror to **Write**: the
+interactive control grant commits the mission takeover hold only after the
+live terminal is ready, inside the same admission boundary. An explicit
+release (`Write=false` on the interactive control stream) clears the hold
+only after read-only readiness succeeds. A failed transition retains the
+previous lease and hold; readiness is restored or the stream fails closed.
+Disconnecting or letting the control lease expire does **not** clear the
+durable mission hold, so it cannot silently re-enable native wake.
+
+Native integrations also honor the owning session's Stop/abort and cancel
+stale helper results on shutdown or session replacement. They do not override
+approval waits. See the harness-specific resume behavior before relying on
+automatic wake after a Stop.
+
+Missing, disabled, untrusted, unsupported, or failed integrations do not lose
+mail. Inspect the real harness error and read the inbox explicitly. There is
+no silent PTY fallback, attachment to an arbitrary running TUI, or automatic
+restart of an exited or closed run. Headless runs may use supported boundary
+hooks while alive, but do not receive native idle wake.
 
 Accepted messages, questions, and replies retain their originating run in the
-workspace timeline. Timeline acceptance and hook execution do not prove that
-the recipient read or handled an item; there is no terminal-delivery stamp.
+workspace timeline. **Durable acceptance**, **an admitted wake**, and
+**explicit acknowledgement** are different events: neither a send receipt,
+hook execution, nor native API acceptance proves model receipt or processing.
+Only the agent's later `inbox --ack` acknowledges the returned batch; there is
+no terminal-delivery stamp.
 
 ## `aether-internal` CLI
 
@@ -308,7 +366,8 @@ The files are embedded in the mounted binary, so installation needs no download.
 Exporting a file needs no socket. Merge JSON hook entries rather than replacing
 existing settings; copy extensions only after checking the destination.
 See [harness installation](harnesses.md#incoming-coordination-hooks) for each
-destination and the generic skeleton.
+destination, and [authoring an integration](harness-integration.md) for an
+unsupported harness.
 
 The supplied files invoke `aether-internal hook <harness> <event>`. Command hooks
 read native JSON on stdin and write that harness's native JSON response.
@@ -321,6 +380,30 @@ Stop hooks request at most one continuation for pending mail or an integrator's
 final mission refresh, even with an empty inbox. Native repeat-stop guards
 prevent a continuation loop; ordinary and worker runs with empty inboxes do
 not get a forced refresh.
+
+Native receivers additionally use one bounded observation per invocation:
+
+```sh
+printf '%s\n' '{"seen_message_ids":[],"wait_seconds":30}' |
+  /usr/local/bin/aether-internal hook generic wake
+```
+
+`wake` is available for `pi`, `omp`, `opencode`, and `generic`; omitted
+`wait_seconds` defaults to 30. Its JSON result has `wait_supported`,
+`unread_message_ids`, `wake_admitted`, and `context`. Context is an inbox-only
+instruction and is empty unless admission succeeded. This helper observes;
+it does not itself call a native API or start a model turn.
+
+The receiver sends its last observed unread-ID set as `seen_message_ids`,
+even when that response did not admit a wake. It separately remembers IDs
+already notified through the native API and prunes them when they leave the
+unread set. Only admitted IDs not yet notified cause a follow-up. Thus mail
+held by protection can wake after release, while the same unacknowledged
+batch cannot cause endless turns. A session/process restart may produce one
+duplicate hint; durable inbox delivery and explicit acknowledgement are
+unchanged. An unsupported server is an error to stop on, not a reason to
+retry immediately. See the [helper contract](harness-integration.md#optional-native-idle-wake)
+for error handling and lifecycle requirements.
 
 ### Send a message
 
@@ -348,9 +431,10 @@ when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.
 
-Native hooks announce pending messages at supported lifecycle boundaries in
-interactive or headless runs where the harness supports that event. Check
-the inbox before waiting or reporting even when hooks are installed.
+Use this bounded wait while actively coordinating instead of keeping a model
+turn alive to poll. The active inbox waiter takes priority over native wake
+observers. Check the inbox before waiting or reporting even when integrations
+are installed; a hint is not a read or an acknowledgement.
 
 ### The mission plan gate
 
@@ -717,11 +801,12 @@ Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
 
-Every report is also typed into the integrator's terminal as one `aether:`
-line naming the worker run, task, and attempt and the
-`worker inspect --attempt-id` command to run next; a blocked report names
-`inbox` as well. The integrator waits for workers with `inbox --wait 30`
-instead of polling `worker list`.
+Reports publish durable timeline/evidence records, not terminal keystrokes.
+The integrator reads `worker list` and `worker inspect --attempt-id` for
+attempt outcomes; a blocked worker's report is additionally forwarded to its
+ordinary inbox with the worker's attribution. Use `inbox --wait 30` while
+actively coordinating, then refresh durable mission/worker state before
+waiting again or declaring completion.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to
@@ -742,6 +827,14 @@ Transient failures remain eligible for service-lifetime retries; permanent
 event conflicts are quarantined with their error visible for operators. A
 caller may therefore receive an internal or unavailable error after capture
 while the finalized report remains retryable under its original idempotency key.
+
+If a finalized terminal report cannot acquire mission-transition authority
+because that boundary is busy, the direct `coord.report` call returns
+`CodeConflict` (`-32003`), not a successful reconciliation. The finalized
+report remains durably pending and the existing outbox retry revisits it.
+An explicit caller retry must reuse the same idempotency key and inputs;
+do not create another report or add a tight retry loop. This contention case
+is distinct from a conflict caused by reusing a key with different inputs.
 
 The shipped CLI and MCP bridge allow the full two-minute evidence-capture
 budget plus a small framing margin (and still honor an earlier caller

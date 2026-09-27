@@ -41,6 +41,7 @@ func init() {
 			Evidence:        coordEvidenceCapture{service: d.Evidence},
 			EvidencePackets: d.Store,
 			Mission:         lazyMission{ssh: d.SSH},
+			WakeAdmission:   newCoordWakeAdmission(d),
 		})
 		if err != nil {
 			return nil, err

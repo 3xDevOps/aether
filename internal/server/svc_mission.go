@@ -160,9 +160,13 @@ func (l lazyMission) Assignment(ctx context.Context, run domain.RunID) (protocol
 	if err != nil {
 		return protocol.CoordMissionAssignment{}, err
 	}
-	return s.(interface {
+	authority, ok := s.(interface {
 		Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error)
-	}).Assignment(ctx, run)
+	})
+	if !ok {
+		return protocol.CoordMissionAssignment{}, errors.New("mission: assignment authority is unavailable")
+	}
+	return authority.Assignment(ctx, run)
 }
 func (l lazyMission) Peers(ctx context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
 	s, err := l.service()

@@ -42,18 +42,32 @@ func (m missionControlService) ReleaseHold(ctx context.Context, workerRun domain
 // admission lock. Callers must not pre-lock workerRun; the integrator run is
 // validated by MissionState inside this same boundary.
 func (m missionControlService) AdmitInput(ctx context.Context, integratorRun, workerRun domain.RunID, generation uint64, fn func() error) error {
+	return m.admitInput(ctx, integratorRun, workerRun, generation, fn, false)
+}
+
+// TryAdmitInput preserves worker authority checks without letting an optional
+// wake wait behind a cancellation that may synchronously release its run.
+func (m missionControlService) TryAdmitInput(ctx context.Context, integratorRun, workerRun domain.RunID, generation uint64, fn func() error) error {
+	return m.admitInput(ctx, integratorRun, workerRun, generation, fn, true)
+}
+
+func (m missionControlService) admitInput(ctx context.Context, integratorRun, workerRun domain.RunID, generation uint64, fn func() error, try bool) error {
 	if fn == nil {
 		return errors.New("mission control: nil input callback")
 	}
 	if m.control == nil {
 		return errors.New("mission control: shared control service is unavailable")
 	}
-	return m.control.Admit(string(workerRun), func() error {
+	check := func() error {
 		if err := m.store.CheckIntegratorInput(ctx, integratorRun, workerRun, generation); err != nil {
 			return err
 		}
 		return fn()
-	})
+	}
+	if try {
+		return m.control.TryAdmit(string(workerRun), check)
+	}
+	return m.control.Admit(string(workerRun), check)
 }
 
 var _ sshd.MissionControl = missionControlService{}

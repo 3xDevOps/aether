@@ -238,11 +238,13 @@ func (s *Service) transportAllowed(run domain.RunID, hook bool) bool {
 
 func transportRateError(hook bool) *protocol.Error {
 	budget := "transport"
+	code := protocol.CodeConflict
 	if hook {
 		budget = "hook"
+		code = protocol.CodeUnavailable
 	}
 	return &protocol.Error{
-		Code: protocol.CodeConflict,
+		Code: code,
 		Message: fmt.Sprintf("coord: %s request rate limit exceeded (burst %d, 1 request per %ds)",
 			budget, requestBurst, int(requestRefill.Seconds())),
 	}
@@ -1193,8 +1195,20 @@ type inboxWaiter struct {
 }
 
 func (s *Service) waiter(run domain.RunID) chan struct{} {
+	admission := s.inboxAdmissionLock(run)
+	admission.Lock()
+	defer admission.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.inboxConsumers[run]++
+	for waiter := range s.hookWaiters[run] {
+		waiter.consumer = true
+	}
+	if state := s.runs[run]; s.closed || (state != nil && state.closing) {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
 	if waiter := s.inboxWaiters[run]; waiter != nil {
 		waiter.refs++
 		return waiter.ch
@@ -1207,6 +1221,10 @@ func (s *Service) waiter(run domain.RunID) chan struct{} {
 func (s *Service) releaseWaiter(run domain.RunID, ch chan struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.inboxConsumers[run]--
+	if s.inboxConsumers[run] <= 0 {
+		delete(s.inboxConsumers, run)
+	}
 	waiter := s.inboxWaiters[run]
 	if waiter == nil || waiter.ch != ch {
 		return
@@ -1220,6 +1238,10 @@ func (s *Service) releaseWaiter(run domain.RunID, ch chan struct{}) {
 func (s *Service) wakeInbox(run domain.RunID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for waiter := range s.hookWaiters[run] {
+		waiter.consumer = waiter.consumer || s.inboxConsumers[run] > 0
+		waiter.signal()
+	}
 	if waiter := s.inboxWaiters[run]; waiter != nil {
 		close(waiter.ch)
 		delete(s.inboxWaiters, run)

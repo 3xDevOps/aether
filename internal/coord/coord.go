@@ -116,6 +116,9 @@ type Config struct {
 	// authorization and owns mission task/worker methods and report
 	// validation/reconciliation; nil preserves ordinary coordination.
 	Mission MissionService
+	// WakeAdmission orders the final native wake frame with human control.
+	// An absent seam disables native dispatch without affecting legacy hooks.
+	WakeAdmission WakeAdmission
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
@@ -156,6 +159,8 @@ type Service struct {
 	requestBuckets map[domain.RunID]*bucket
 	hookBuckets    map[domain.RunID]*bucket
 	inboxWaiters   map[domain.RunID]*inboxWaiter
+	hookWaiters    map[domain.RunID]map[*hookWaiter]struct{}
+	inboxConsumers map[domain.RunID]int
 	reportLocks    map[domain.RunID]*sync.Mutex
 	reportPackets  map[string]protocol.EvidencePacket
 	runs           map[domain.RunID]*runLifecycle
@@ -176,6 +181,9 @@ type runLifecycle struct {
 	closing    bool
 	done       chan struct{}
 	doneClosed bool
+	// Serializes Inbox registration with the final native wake frame, never
+	// the mailbox query or long poll. Callers retain a run reference.
+	inboxAdmission sync.Mutex
 }
 
 // New builds the service; call Start to recover listeners and begin
@@ -206,6 +214,8 @@ func New(cfg Config) (*Service, error) {
 		requestBuckets: make(map[domain.RunID]*bucket),
 		hookBuckets:    make(map[domain.RunID]*bucket),
 		inboxWaiters:   make(map[domain.RunID]*inboxWaiter),
+		hookWaiters:    make(map[domain.RunID]map[*hookWaiter]struct{}),
+		inboxConsumers: make(map[domain.RunID]int),
 		reportLocks:    make(map[domain.RunID]*sync.Mutex),
 		reportPackets:  make(map[string]protocol.EvidencePacket),
 		runs:           make(map[domain.RunID]*runLifecycle),
@@ -349,6 +359,7 @@ func (s *Service) closeRun(run domain.RunID) <-chan struct{} {
 		s.runs[run] = state
 	}
 	state.closing = true
+	s.cancelHookWaitersLocked(run)
 	if state.refs == 0 && !state.doneClosed {
 		close(state.done)
 		state.doneClosed = true
@@ -364,6 +375,12 @@ func (s *Service) isRunClosing(run domain.RunID) bool {
 	defer s.mu.Unlock()
 	state := s.runs[run]
 	return s.closed || (state != nil && state.closing)
+}
+
+func (s *Service) inboxAdmissionLock(run domain.RunID) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &s.runs[run].inboxAdmission
 }
 
 func (s *Service) reportLock(run domain.RunID) *sync.Mutex {

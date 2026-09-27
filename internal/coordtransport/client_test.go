@@ -19,6 +19,12 @@ func TestCallTimeoutCoversLongPollWait(t *testing.T) {
 		{"plan show clamps above the server bound", protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{WaitSeconds: 300}, 30*time.Second + callMargin},
 		{"plan show without a wait", protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{}, callMargin},
 		{"inbox is unchanged", protocol.MethodCoordInbox, protocol.CoordInboxParams{WaitSeconds: 30}, 30*time.Second + callMargin},
+		{"hook waits", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: 30}, 30*time.Second + callMargin},
+		{"hook pointer params", protocol.MethodCoordHookStatus, &protocol.CoordHookStatusParams{WaitSeconds: 30}, 30*time.Second + callMargin},
+		{"hook clamps excessive wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: 300}, 30*time.Second + callMargin},
+		{"hook clamps negative wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: -1}, callMargin},
+		{"hook immediate wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{}, callMargin},
+		{"ordinary hook status is unchanged", protocol.MethodCoordHookStatus, nil, callDefaultTimeout},
 		{"other methods keep the default", protocol.MethodCoordStatus, nil, callDefaultTimeout},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

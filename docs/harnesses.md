@@ -52,7 +52,7 @@ window has passed without a new measurement.
 | `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes |
 | `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes |
 | `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (`OPENCODE_CONFIG_CONTENT`) | HTTP TUI API | no |
+| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no |
 | `custom` | deployment-supplied | - | - | - | - | - | PTY | no |
 
@@ -99,14 +99,13 @@ reporting" below.
 The **Launch env** column is what the server sets in the run container
 because the CLI will not start without it. It is applied after the
 workspace's own variables, so a workspace cannot leave the agent unable to
-run. See the launch table below for why `claude` needs one. A reporter that
-rides in the environment rather than on the command line (`opencode`) is
-not in this column: it is set on interactive runs alone and is dropped by
-the same things that drop the reporter, so it lives under "Status
-reporting".
+run. See the launch table below for why `claude` needs one. Optional reporter
+environment (OpenCode V1's `OPENCODE_CONFIG_CONTENT`) is not a required
+**Launch env** value; see "Status reporting" for its interactive-only scope.
 
-Either way, a variable the server sets itself replaces a workspace
-environment variable of the same name rather than merging with it.
+Fixed launch values replace workspace values of the same name. Native
+OpenCode coordination has version-specific merge/discovery behavior,
+described under [managed loading](#managed-native-loading).
 
 - **TUI.** Container PID 1 supervises the harness and opens a login shell after
   any normal harness exit. Exiting that shell opens another, so the run and
@@ -144,12 +143,34 @@ override is still the registered CLI. See [failure-handling.md](failure-handling
 
 ## Incoming coordination hooks
 
-Incoming messages use the existing run mailbox and native harness hooks, not
-terminal keystrokes. These copyable integrations are separate from the
-automatic **status reporters** below: a reporter tells Aether what the agent
-is doing; an inbox hook tells the agent to read pending messages.
+Coordination uses the durable run mailbox, not terminal keystrokes. An
+**inbox integration** tells the agent to read mail; a **status reporter**
+tells Aether what the agent is doing. They are separate even when both load
+through the same native extension/plugin mechanism.
 
-Inside the run, inspect installation and print the files from the mounted CLI:
+| Integration | Launch profile | Mail at next boundary | Native idle wake | Copyable asset |
+| --- | --- | --- | --- | --- |
+| Claude Code | `claude` | yes | no | `claude.json` |
+| Codex | `codex` | yes | no | `codex.json` |
+| Native pi | `pi` | yes | yes, owning session only | `pi.ts` |
+| OMP | `omp` | yes | yes, main agent only | `omp.ts` |
+| OpenCode V1 | `opencode` | yes | yes, selected root only | `opencode-v1.js` |
+| OpenCode V2 | `opencode` | yes, V2 API only | yes, selected root only | `opencode-v2.js` |
+| Copilot CLI | custom definition required | yes | no | `copilot.json` |
+| Gemini CLI | custom definition required | yes | no | `gemini.json` |
+| Cursor CLI | custom definition required | yes | no | `cursor.json` |
+| Fake | scheduler test profile | explicit inbox only | no | none |
+| Other/custom | deployment/member definition | adapter required | native API required | `generic.sh` |
+
+“Yes” requires the matching integration to be loaded and executing in the
+owning live session. It is not a promise that a copied file, a registry
+profile, or a status reporter activates inbox delivery. Native idle wake is
+for eligible TUI runs, not a way to restart headless or exited processes.
+
+### Installation and activation
+
+Inside the run, inspect configuration and export the asset for **only the
+current harness**:
 
 ```sh
 aether-internal skill
@@ -157,30 +178,14 @@ aether-internal hook file
 aether-internal hook file claude.json
 ```
 
-| Harness | File to export | Default installation destination |
-| --- | --- | --- |
-| Claude Code | `claude.json` | Merge into `~/.claude/settings.json` |
-| Codex | `codex.json` | Merge into `~/.codex/hooks.json` |
-| oh-my-pi | `omp.ts` | `~/.omp/agent/extensions/aether.ts` |
-| OpenCode V1 | `opencode-v1.js` | `~/.config/opencode/plugins/aether.js` |
-| OpenCode V2 | `opencode-v2.js` | `.opencode/plugins/aether.js`; use only the V2 API |
-| GitHub Copilot CLI | `copilot.json` | Merge into `~/.copilot/hooks/aether.json` |
-| Gemini CLI | `gemini.json` | Merge into `~/.gemini/settings.json` |
-| Cursor CLI | `cursor.json` | Merge into `~/.cursor/hooks.json` |
-| Native pi | `pi.ts` | `~/.pi/agent/extensions/aether.ts` |
-| Unlisted harness | `generic.sh` | Adapt to its documented context hook |
-
-Hook files do not add built-in launch profiles for additional CLIs. Use a
-deployment-defined harness where the registry has no profile.
-
-For JSON, append missing Aether entries to each `hooks` event array, preserving
-all unrelated settings and hooks. Do not install duplicates at both user and
-project scope. Copilot and Cursor snippets include `version: 1`; resolve a
-different existing version rather than overwriting it. The commands call
-`/usr/local/bin/aether-internal` directly; no extra shell script, `jq`, or
-Python is needed.
-
-For a new OMP extension installation:
+For JSON, append missing Aether entries to each `hooks` event array; preserve
+unrelated settings and hooks. Do not install duplicates at user and project
+scope. Copilot and Cursor snippets use `version: 1`; resolve an existing
+version conflict rather than overwriting it. Commands invoke
+`/usr/local/bin/aether-internal` directly, without `jq` or another script.
+For TypeScript/JavaScript, export the matching file to the destination below
+only if absent; inspect/diff an existing file before editing. No executable
+bit is needed. For example, a new manual OMP installation is:
 
 ```sh
 mkdir -p "$HOME/.omp/agent/extensions"
@@ -188,69 +193,321 @@ test ! -e "$HOME/.omp/agent/extensions/aether.ts" &&
   aether-internal hook file omp.ts > "$HOME/.omp/agent/extensions/aether.ts"
 ```
 
-If the destination exists, inspect it before editing. TypeScript/JavaScript
-extensions need no executable bit. If adapting `generic.sh` as an executable
-command, copy it to the selected harness's hook directory, run `chmod +x` on
-that file, and adapt its plain context output to the native response format.
-The skeleton has no background loop and does not acknowledge mail.
+Do not add a manual copy merely because a managed run-scoped extension is
+absent from the checker’s fixed paths. `skill` is read-only: **configured
+means present on disk, not loaded, trusted, or executed**. It checks standard
+user and current-directory project paths, not every ancestor, package,
+explicit CLI path, or runtime override. Restart/reload as below, inspect the
+native load errors, and verify a real event in the intended root session.
+Never edit trust records or remove an intentional disable setting to make
+the checker green.
 
-`skill` resolves documented environment roots, including `CLAUDE_CONFIG_DIR`,
-`CODEX_HOME`, `COPILOT_HOME`, and `PI_CODING_AGENT_DIR`. `GEMINI_CLI_HOME` names
-the **parent** of `.gemini`. OMP profiles change the agent directory; confirm
-it with `omp config path`. The checker also looks in the current directory's
-project configuration; it does not infer CLI-only overrides or scan every
-ancestor/package. Cursor custom configuration variables do not establish a
-documented relocation rule for `hooks.json`; verify those in the running CLI.
+### Managed native loading
 
-Restart the harness after installation. Native pi also supports `/reload`.
-Review Codex's exact hook definitions in `/hooks`; installation and project
-trust do not grant hook trust. Use the harness's normal trust UI, preserve
-managed policy and intentional disable settings, and inspect real load errors.
-Gemini's `/hooks list` shows loaded registrations. `skill` is read-only and
-reports disk configuration, not runtime activation.
+For the shipped `pi`, `omp`, and `opencode` profiles, Aether stages native
+mailbox assets for **coordinated, task-bearing TUI launches**. Taskless,
+headless, disabled-coordination, and custom/overridden argv launches do not
+get this automatic mailbox installation. Manual integrations remain usable
+where the harness supports them; a boundary hook in a headless process does
+not grant it idle wake.
 
-### Delivery boundaries and supported APIs
+For pi, the server stages `/run/aether/aether.ts` and adds
+`-e /run/aether/aether.ts`. For OMP it stages that same filename but adds
+`-e /run/aether`, using the native directory loader. Both retain the
+separate `/run/aether/status.ts` reporter. Managed loading skips
+`--no-extensions` / `-ne` and does not change persistent user/project
+configuration. Duplicate manual/managed copies share one receiver rather
+than starting independent watchers.
 
-- Claude Code: `SessionStart`, `UserPromptSubmit`, `PostToolBatch`, `Stop`.
-- Codex: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`.
-- Copilot CLI: `sessionStart`, `postToolUse`, `agentStop`. Config-file
-  `userPromptSubmitted` output is not used for context delivery.
-- Gemini CLI: `BeforeAgent`, `AfterTool`, `AfterAgent`.
-- Cursor CLI: `sessionStart`, `postToolUse`, `stop`. Older `--print` releases,
-  including 2026.08.11-e8db854, omit `stop`; verify the installed version.
-  Another stop hook can supersede its `followup_message`.
-- Native pi and OMP: the main session's per-model `context` event.
-- OpenCode: a per-model context hook, bound to the first explicitly prompted
-  root session for that plugin lifetime. Child and sibling sessions do not
-  take over the run's mailbox; restart the plugin host to select another root.
+Pi's explicit-file loader would otherwise bypass resource exclusions, so
+the managed copy reads settings through pi's public `SettingsManager`.
+**Any** negative `!` or `-` extension selector in global/project settings or
+a package's extension selectors conservatively disables automatic mailbox
+loading, with a warning; unreadable settings also fail closed. A separately
+loaded, explicitly authorized manual copy is unaffected. OMP instead uses
+its native `disabledExtensions` directory filter, described below.
 
-The extension contracts target native pi 0.87.1, OMP 18.3.1, OpenCode
-V1 1.18.32, and OpenCode V2 2.0.18 (`@opencode/cli` with `@opencode/plugin`).
-Do not load both OpenCode files or assume V1/V2 compatibility. Pi binds the
-first native session and follows its new/resume/fork lifecycle; OMP uses its
-existing main agent registry. Independent multi-root SDK hosts are not supported.
-Command-hook contracts follow the current vendor references:
-[Claude](https://code.claude.com/docs/en/hooks),
-[Codex](https://learn.chatgpt.com/docs/hooks),
-[Copilot](https://docs.github.com/en/copilot/reference/hooks-reference),
-[Gemini](https://geminicli.com/docs/hooks/reference/), and
-[Cursor](https://cursor.com/docs/hooks). Older harness releases may lack
-these events or context outputs.
+OpenCode's managed wrapper preserves the original argument boundaries:
 
-Hooks add only trusted Aether guidance, never peer bodies at system/developer
-priority. The agent reads `aether-internal inbox`, processes the attributed
-messages, and explicitly acknowledges the returned token. Empty mail produces
-no inbox hint; active overlap and integrator refresh guidance can still appear.
-Printing context is not acknowledgement.
+```sh
+/bin/sh /run/aether/opencode-native-launch.sh /run/aether \
+  opencode --prompt="<task>"
+```
 
-There is no idle watcher: mail waits for the next supported native boundary.
-Stop hooks can request one continuation for pending mail or an integrator's
-final mission refresh, even with an empty inbox. Native repeat-stop guards
-prevent loops and do not override an aborted Cursor turn. Automatic status
-checks have their own bounded request allowance; they cannot consume the
-capacity needed by explicit inbox, status, send, or report commands.
-Hooks cannot restart exited headless runs. Without working hooks, read the
-inbox explicitly. See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries).
+The wrapper checks the installed `opencode --version`: major 1 selects V1,
+major 2 selects V2, and another major refuses managed startup with an error.
+A custom launch definition remains the explicit alternative. The API targets
+below are specific releases, not a guarantee for every future release in
+those majors.
+
+- **V1:** `/run/aether/opencode-native-v1.json` merges the workspace's inline
+  config with file URLs for `/run/aether/opencode-v1.js` and
+  `/run/aether/opencode-status.js`, preserving unrelated fields and plugin
+  entries. The wrapper supplies it through `OPENCODE_CONFIG_CONTENT`.
+- **V2:** the wrapper adds `--standalone`, selecting a private TUI-owned
+  server rather than the member home's detached service. This keeps server
+  and receiver lifetime tied to this run and avoids cross-container service
+  registration collisions. The server stages `opencode-v2.js` and
+  `opencode-status-v2.js` in `/run/aether` and mounts them read-only at
+  `/.opencode/plugins/aether-mailbox-<run-id>/index.js` and
+  `/.opencode/plugins/aether-status-<run-id>/index.js`. Native ancestor
+  discovery loads these packages before user enable/disable directives.
+  `OPENCODE_CONFIG_CONTENT` remains unchanged. The stable plugin IDs are
+  `aether-mailbox` and `aether-status`, regardless of the run-specific directory.
+
+`OPENCODE_PURE=1` or `OPENCODE_PURE=true` (case-insensitive `true`)
+suppresses managed OpenCode mailbox and status additions; `0` and `false`
+do not. V2's native
+`plugins: ["-aether-mailbox"]` disables only mailbox automation;
+`"-aether-status"` disables its reporter and `"-*"` disables all discovered
+plugins. Preserve these choices. Aether writes neither the worktree nor
+member configuration and does not mount over an existing user plugin path.
+
+### Claude Code inbox integration
+
+Export `claude.json`; merge into `~/.claude/settings.json` (or
+`$CLAUDE_CONFIG_DIR/settings.json`). Project alternatives are
+`.claude/settings.json` and `.claude/settings.local.json`.
+Restart Claude Code and review `/hooks` in its normal workspace-trust UI.
+Honor `disableAllHooks`, `allowManagedHooksOnly`, and managed settings such
+as `/etc/claude-code/managed-settings.json`.
+
+The supported events are `SessionStart`, `UserPromptSubmit`, `PostToolBatch`,
+and `Stop` from the current [Claude hook API](https://code.claude.com/docs/en/hooks).
+Older releases may lack these events or context outputs. Child-agent events
+do not take ownership of the run mailbox. Stop may request one continuation
+for pending mail or an integrator refresh; it is not an idle watcher. The
+built-in `--settings` status reporter alone is not this inbox installation.
+
+### Codex inbox integration
+
+Export `codex.json`; merge into `~/.codex/hooks.json` (or
+`$CODEX_HOME/hooks.json`), alternatively `.codex/hooks.json`.
+Restart Codex, then use `/hooks` to review and trust the **exact hook
+definitions**; repeat after changing them. Project trust is not hook trust.
+Honor managed policy and `features.hooks` / `features.codex_hooks` controls
+in the applicable `config.toml`.
+
+Supported events are `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and
+`Stop`, filtered against child-agent events. The built-in `notify` reporter
+only reports turn completion: it neither installs these hooks nor wakes
+later-idle Codex. Use a version implementing the current
+[Codex hook contract](https://learn.chatgpt.com/docs/hooks).
+
+### Native pi inbox integration
+
+The native API target is **pi 0.87.1**. For manual installation, export
+`pi.ts` to `~/.pi/agent/extensions/aether.ts`, or
+`$PI_CODING_AGENT_DIR/extensions/aether.ts`; the project alternative is
+`.pi/extensions/aether.ts`. Restart pi or use `/reload`, inspect extension
+load errors, and preserve configured extension/resource exclusions and
+`--no-extensions`.
+
+The extension adds guidance at the per-model `context` event. Native wake
+uses `sendMessage` with `triggerTurn: true` and `deliverAs: "followUp"`, but
+**does not proactively queue during busy work**. Pi suspends the idle wake
+receiver for an active turn; context hooks continue, and new mail stays
+durable and unnotified. Successful native `agent_settled` plus `isIdle`
+rearms a fresh helper snapshot and admission before dispatch, rather than
+restarting a wake helper after every model call. This avoids leaving a
+custom hint queued through a retry or compaction Stop; a successful
+automatic retry still rearms wake normally.
+
+Pi owns one root session and follows its new/resume/fork lifecycle, not
+independent multi-root SDK hosts. Stop/abort, failed native settlement, or
+compaction abort pauses wake until an accepted non-extension user message
+(not merely an input callback) or an explicit session replacement. The
+configured interrupt key is observed without consuming it. UI prompts
+suspend observation until resolved; extension continuations do not undo Stop.
+
+### OMP inbox integration
+
+The native API target is **OMP 18.3.1**. Export `omp.ts` to
+`~/.omp/agent/extensions/aether.ts`, or `.omp/extensions/aether.ts` for the
+project. A profile can change the user destination: run `omp config path`
+and use its active agent directory, not a guessed default. The checker
+accounts for `OMP_PROFILE` / `PI_PROFILE` and `PI_CODING_AGENT_DIR`; CLI
+`--profile`, `--config`, and `-e` overrides require checking the live launch.
+Restart OMP after installation.
+
+Only the main agent handles `context` and native wake. Admitted notices use
+`sendMessage` with `triggerTurn: true` and `deliverAs: "followUp"`, allowing
+the native queue to preserve busy-turn ordering. Stop/abort cancels the
+receiver until actual non-extension input starts a turn or an explicit
+session switch/branch replaces it. Tool-approval prompts suspend observation
+until resolved.
+
+Honor `--no-extensions` and
+`disabledExtensions: [extension-module:aether]`. On OMP 18.3.1, directory
+loading (`-e /run/aether`) applies that disabled-module filter; explicit-file
+loading (`-e /run/aether/aether.ts`) bypasses it and must not be used to
+circumvent the user's choice.
+
+### OpenCode V1 inbox integration
+
+The V1 API target is **OpenCode 1.18.32**. Check `opencode --version`, then
+export **only** `opencode-v1.js` to
+`~/.config/opencode/plugins/aether.js` (or
+`$XDG_CONFIG_HOME/opencode/plugins/aether.js`); a project alternative is
+`.opencode/plugins/aether.js`. An explicit `OPENCODE_CONFIG_DIR` may supply
+another plugin directory. Restart OpenCode and inspect plugin load errors.
+
+The plugin binds the first explicitly prompted root session. Child sessions
+are ignored; prompting a different root retires the receiver until the
+plugin host restarts, rather than transferring the mailbox. The context
+hook supplies a trusted inbox instruction. Native wake uses
+`client.session.promptAsync` with a synthetic text part, **only after a
+successful turn completes and the root is idle**. Mail arriving during busy
+work stays durable until a fresh helper admission at that boundary. V1's
+prompt API joins active work; it is not a next-turn queue and has no Aether
+`followUp` argument.
+
+Stop or error pauses wake until the next explicit prompt in the same root.
+An unclassified idle event (for example, shell/setup cancellation) does not
+rearm wake; a successful model completion is required. Preserve
+an intentional `OPENCODE_PURE=1` or `true`, which disables external plugins
+(`0` and `false` do not). Do not load the V2 file.
+
+### OpenCode V2 inbox integration
+
+The V2 API target is **OpenCode 2.0.18** (`@opencode/cli`). Check
+`opencode --version`; export **only** `opencode-v2.js` to
+`.opencode/plugins/aether-mailbox/index.js`. The user alternative is
+`~/.config/opencode/plugins/aether-mailbox/index.js` under the active XDG
+config root. The asset default-exports the native `{id, setup}` definition
+and uses only Node built-ins; neither a `package.json` nor an
+`@opencode/plugin` runtime installation is needed. Restart the V2 plugin
+host and inspect load errors. For a manual Aether launch, use
+`opencode --standalone` to keep its server owned by the run's TUI, not a
+detached service shared through the member home.
+Its stable ID is `aether-mailbox`, so honor native
+`"plugins": ["-aether-mailbox"]` or `["-*"]` disable directives.
+`OPENCODE_CONFIG_DIR` relocation is unverified for V2; do not infer it from
+V1's behavior.
+
+V2 also supports legacy auto-discovered `plugins/aether.js` files in these
+roots; [its pinned loader distinguishes these from explicitly configured
+local plugins](https://github.com/anomalyco/opencode/blob/v2.0.18/packages/core/src/plugin/module.ts),
+which use directory packages. Inspect any existing flat file before adding
+the recommended package. The first exported `aether-mailbox` ID wins, so an
+older manual V2 copy can shadow the managed integration without running a
+second receiver. Update or migrate an authorized existing copy rather than
+installing both. A V1 asset at that filename is not a V2 integration.
+
+**V2 startup caveat:** in 2.0.18, an initial task passed with `--prompt` can
+remain prefilled in the composer instead of submitting. If the TUI is ready
+and that task has not started, press Enter once to submit it. This is human
+submission of the initial prompt, not mailbox delivery: Aether does not
+auto-press Enter or add a PTY workaround. Later admitted mailbox wake uses
+the native session API after the owning root has completed a turn.
+
+V2 uses `ctx.session.hook` for prompt/context and `ctx.session.prompt` with
+`delivery: "queue"` for the trusted wake text. Despite that queue API, this
+integration **defers busy mail until successful completion and settlement**:
+V2 reports interruption after cleanup, too late to safely enqueue during a
+human Stop. It rechecks the root outcome and obtains fresh helper admission
+before dispatch; it does not steer active work.
+
+The first explicitly prompted root owns the receiver. Children are ignored;
+prompting another root retires it until plugin-host restart. Stop/error
+pauses wake until the next explicit prompt in the same root; deleting,
+archiving, or moving the root ends its ownership. Do not load both versioned
+files. A V1 status reporter or V1-compatible argv does not establish V2
+plugin activation. Preserve plugin disable/trust policy and verify a real
+session event.
+
+### Copilot CLI inbox integration
+
+Copilot CLI is integration-only, not a built-in launch profile. Export
+`copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
+`$COPILOT_HOME/hooks/aether.json`), alternatively
+`.github/hooks/aether.json`. Quit and restart in the intended trusted
+repository. Honor `disableAllHooks`, `allowManagedHooksOnly`, enterprise
+policy, and session trust; `--config-dir` may require a different destination.
+
+Supported events are `sessionStart`, `postToolUse`, and `agentStop`, using
+the current [Copilot hook API](https://docs.github.com/en/copilot/reference/hooks-reference).
+Config-file `userPromptSubmitted` output is not used for context delivery.
+There is no later-idle wake.
+
+### Gemini CLI inbox integration
+
+Gemini CLI is integration-only. Export `gemini.json`; merge into
+`~/.gemini/settings.json`, or `.gemini/settings.json` for the project.
+`GEMINI_CLI_HOME` is the **parent** of `.gemini`, not that directory itself.
+Fully exit and restart Gemini, then inspect `/hooks list`.
+
+The supported events are `BeforeAgent`, `AfterTool`, and `AfterAgent` in
+the current [Gemini hook API](https://geminicli.com/docs/hooks/reference/).
+Honor folder trust, system settings, `hooksConfig.enabled`, and
+`hooksConfig.disabled` (the hook name is `aether-inbox`). An intentional
+disable is not permission to run `/hooks enable` automatically. These are
+boundary hooks, not an idle receiver.
+
+### Cursor CLI inbox integration
+
+Cursor CLI is integration-only. Export `cursor.json`; merge into
+`~/.cursor/hooks.json` or `.cursor/hooks.json`. Use `/quit` or `/exit`,
+restart in the intended workspace, respect workspace trust, and inspect
+`/logs` while exercising an interactive boundary. `CURSOR_CONFIG_DIR` and
+`XDG_CONFIG_HOME` do not establish a documented relocation rule for
+`hooks.json`; verify custom paths in the running CLI.
+
+Events are `sessionStart`, `postToolUse`, and `stop` in the current
+[Cursor hook API](https://cursor.com/docs/hooks). Older `--print` releases,
+including **2026.08.11-e8db854**, omit `stop`; headless parity is not
+guaranteed. Another stop hook can supersede `followup_message`. Aborted
+turns and repeated stop continuations do not receive another Aether
+continuation. There is no later-idle wake.
+
+### Fake inbox support
+
+`fake` is a deterministic scheduler/test harness, not a vendor integration.
+It can exercise the run-mounted CLI when coordination is enabled, but has
+no shipped context hook, status reporter, trust UI, or native wake API.
+It must read and acknowledge the inbox explicitly.
+
+### Custom and unlisted harnesses
+
+A launch definition only supplies argv; it does not prove a CLI has loaded
+an inbox integration. Export `generic.sh` for a plain-stdout native context
+boundary, or adapt its output with the host's documented serializer. There
+is no universal destination or activation command. Native idle wake requires
+a real session API and lifecycle/Stop integration; do not emulate it with
+PTY input. Follow the [unsupported-harness authoring guide](harness-integration.md)
+for runnable examples and the complete contract.
+
+### Shared delivery and wake limits
+
+While actively coordinating, use `aether-internal inbox --wait 30`; an active
+inbox waiter has priority over native observers. Native wake carries only a
+trusted inbox pointer, never peer text at system/developer priority. The
+agent reads attributed bodies through `inbox`, processes the batch, and
+explicitly acknowledges its returned token. Sending, hinting, and native
+API acceptance are not acknowledgement or proof the model read anything.
+
+Protection and human takeover suppress new wake admission without losing
+mail. Current run/mission authority is checked again when the server
+dispatches the admitted response, not from a cached eligibility flag.
+A wake already accepted before a later hold may still be processed. Native
+receivers cancel stale session generations and respect Stop/abort and
+approval waits; none starts a dead process or attaches to an arbitrary TUI.
+Without a loaded working integration, use explicit inbox reads; there is no
+silent terminal fallback.
+
+Native receiver errors appear in the harness warning UI or stderr. Only
+recoverable helper/transport failures get bounded backoff; unsupported
+protocols and permanent errors stop observation rather than spinning.
+After exhausting retries, pi/OMP require a reload/restart; OpenCode pauses
+until another explicit same-root prompt. Fix the underlying error first.
+Reloading does not erase or acknowledge durable mail.
+
+Command stop hooks may request one continuation for pending mail or an
+integrator's final mission refresh, even with an empty inbox. Native
+repeat-stop guards prevent loops. Automatic hook checks have a separate
+bounded allowance, so they cannot consume explicit coordination capacity.
+See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries)
+for acceptance, acknowledgement, and retries.
 
 ## Status reporting
 
@@ -262,7 +519,8 @@ events. Aether points each one at the staged server binary inside the
 container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
 and where that mechanism needs a file, the file is written into the run's
-coordination directory. The interactive launch of each is:
+coordination directory. The status-only argument additions are shown below;
+task-bearing native launches also use [managed loading](#managed-native-loading):
 
 ```
 claude --dangerously-skip-permissions "<task>" \
@@ -275,13 +533,18 @@ pi "<task>" -e /run/aether/status.ts
 omp --auto-approve "<task>" -e /run/aether/status.ts
 ```
 
-`opencode` has no flag for a plugin, so its launch command is untouched and
-the plugin is named in the environment:
+OpenCode's reporter-only/taskless profile uses V1's
+`OPENCODE_CONFIG_CONTENT` plugin mechanism:
 
+```sh
+OPENCODE_CONFIG_CONTENT='{"plugin":["file:///run/aether/opencode-status.js"]}' opencode
 ```
-OPENCODE_CONFIG_CONTENT={"plugin":["file:///run/aether/opencode-status.js"]}
-opencode --prompt="<task>"
-```
+
+Task-bearing managed launches instead select a version-matched V1 or V2
+status plugin alongside the mailbox plugin. V2 translates native execution,
+permission, and form events into the same canonical reporter commands.
+Taskless launch wiring is not a V2 activation guarantee; use a matching
+manual integration/custom launch and inspect the actual plugin host.
 
 Every one of them ends up running the same command inside the container:
 
@@ -339,7 +602,7 @@ on silence alone and parks at `needs-attention` after `--stall-threshold`
 with a reason that leads with `stalled:`. See
 [failure-handling.md](failure-handling.md).
 
-Four things turn the reporter off:
+The following disable or exclude automatic reporting:
 
 - **Headless runs.** `--mode headless` never gets the reporter: the agent
   exits when it is done and never waits for anyone.
@@ -349,30 +612,34 @@ Four things turn the reporter off:
   shipped harness drops the status arguments, status environment, and
   taskless discovery mechanism - nothing checks the overridden command is
   still that CLI.
-- **`OPENCODE_PURE` in the workspace environment.** opencode loads no
-  external plugin at all when that variable is set, Aether's included, and
-  Aether does not take it away from you. The run launches and works
-  normally; it reports nothing, and is judged on silence like a harness
-  with no reporter.
+- **Truthy `OPENCODE_PURE` in the workspace environment.** `1` or
+  case-insensitive `true` disables OpenCode's external plugins, Aether's
+  included; `0` and `false` do not. Aether preserves the member's choice.
+  With plugins disabled, the run still launches but reports nothing and is
+  judged on silence like a harness with no reporter.
+- **V2 plugin directives.** `plugins: ["-aether-status"]` excludes the
+  managed V2 reporter without excluding the mailbox; `["-*"]` excludes both.
 
-The asset files are server-written, read-only, and live in `/run/aether`,
-never in the worktree or the member's persistent configuration. Each applies for that
-launch alone and merges over what the member already has: `--settings`
-layers one settings document over Claude Code's own, `-e` loads one more pi
-extension beside the ones you already have, `-c` overrides your
-`~/.codex/config.toml` `notify` for this run alone - so if you use `notify`
-for something of your own, it keeps working everywhere except in an Aether
-run - and `OPENCODE_CONFIG_CONTENT` is merged into opencode's config with
-the plugin lists concatenated, so the member's own plugins still load.
+Assets are server-written and read-only, staged in `/run/aether`; managed V2
+also receives the run-specific discovery mounts described above. None is
+written into the worktree or member's persistent configuration.
+`--settings` layers over Claude Code's settings; `-e` adds a pi/OMP status
+extension; `-c` overrides Codex's `notify` for this launch only, so a member's
+own notify command still works outside that Aether run.
 
-What merges is opencode's own config, not a second value of that variable:
-an interactive `opencode` run reserves `OPENCODE_CONFIG_CONTENT` for the
-plugin, and a workspace environment variable of that name is replaced
-rather than combined. Inline config a workspace needs on every run goes in
-a file the workspace names with `OPENCODE_CONFIG`, which Aether never
-sets.
+OpenCode config handling depends on the launch. A task-bearing managed V1
+launch preserves existing inline fields/plugins and adds its two plugins;
+V2 keeps that environment value unchanged and uses native discovery.
+The older reporter-only/taskless profile still reserves
+`OPENCODE_CONFIG_CONTENT`, replacing a workspace value rather than merging
+it. For configuration needed in both paths, use a file named by
+`OPENCODE_CONFIG`, which Aether does not set. Do not assume V1 and V2 plugin
+configuration schemas are interchangeable.
 
 ## Steering delivery
+
+Human/member steering is separate from automated mailbox wake. The latter
+uses the native APIs above and never falls back to this PTY path.
 
 `run.inject` writes a message, then the harness's submit sequence, to the
 run agent's PTY. Most TUIs send the message on one Enter (`\r`); `opencode`
@@ -767,10 +1034,11 @@ matches those bytes. No path automatically synchronizes later local changes.
 
 ## Adding a harness
 
-The registry is one map entry: argv templates for both modes, credential
-paths, profile root, denylist, API key passthrough, the taskless discovery
-mechanism, and the status reporter - what the harness can report, which is
-what declares a reporter at all, plus the arguments or environment variables
-that point the harness at it and any asset files those name. An adapter is a
-separate, optional file. Both are covered in
-[adapters.md](adapters.md).
+The registry defines argv templates for both modes, credential/configuration
+roots, denylist, API-key passthrough, taskless discovery, and status reporting.
+An output adapter is optional; see [adapters.md](adapters.md).
+Inbox support is a separate capability: follow the
+[harness integration guide](harness-integration.md) for the durable CLI,
+boundary adapter, and optional native receiver. Only a version-matched
+native implementation should opt a shipped profile into managed mailbox
+loading; a custom argv override must not inherit that assumption.

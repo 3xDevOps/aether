@@ -32,6 +32,8 @@ const (
 	CoordMaxUnread = 100
 	// CoordMaxInboxWaitSeconds bounds one server-side long poll.
 	CoordMaxInboxWaitSeconds = 30
+	// CoordMaxMessageIDBytes bounds opaque observer message identities.
+	CoordMaxMessageIDBytes = 256
 	// CoordMaxSummaryBytes bounds a durable outcome summary.
 	CoordMaxSummaryBytes = 4 << 10
 	// CoordMaxEvidenceRefs bounds the number of evidence references in one
@@ -121,19 +123,46 @@ type CoordPeer struct {
 // CoordStatusResult is the result of coord.status: who the caller is,
 // exactly the peers it may message, and how many messages are waiting.
 type CoordStatusResult struct {
-	WireVersion    string                  `json:"wire_version"`
-	RunID          string                  `json:"run_id"`
-	WorkspaceID    string                  `json:"workspace_id"`
-	MemberID       string                  `json:"member_id"`
-	Task           string                  `json:"task,omitempty"`
-	TaskBytes      int                     `json:"task_bytes,omitempty"`
-	TaskTruncated  bool                    `json:"task_truncated,omitempty"`
-	Assignment     *CoordMissionAssignment `json:"assignment,omitempty"`
-	Peers          []CoordPeer             `json:"peers"`
-	PeerTotal      int                     `json:"peer_total,omitempty"`
-	PeersTruncated bool                    `json:"peers_truncated,omitempty"`
-	Unread         int                     `json:"unread"`
-	Capabilities   []string                `json:"capabilities"`
+	WireVersion      string                  `json:"wire_version"`
+	RunID            string                  `json:"run_id"`
+	WorkspaceID      string                  `json:"workspace_id"`
+	MemberID         string                  `json:"member_id"`
+	Task             string                  `json:"task,omitempty"`
+	TaskBytes        int                     `json:"task_bytes,omitempty"`
+	TaskTruncated    bool                    `json:"task_truncated,omitempty"`
+	Assignment       *CoordMissionAssignment `json:"assignment,omitempty"`
+	Peers            []CoordPeer             `json:"peers"`
+	PeerTotal        int                     `json:"peer_total,omitempty"`
+	PeersTruncated   bool                    `json:"peers_truncated,omitempty"`
+	Unread           int                     `json:"unread"`
+	Capabilities     []string                `json:"capabilities"`
+	WaitSupported    bool                    `json:"wait_supported,omitempty"`
+	UnreadMessageIDs []string                `json:"unread_message_ids,omitempty"`
+	WakeAdmitted     bool                    `json:"wake_admitted,omitempty"`
+}
+
+// CoordHookStatusParams opts a native hook into one bounded, non-consuming
+// mailbox observation. SeenMessageIDs is the observed set, not notified mail.
+type CoordHookStatusParams struct {
+	WaitSeconds    int      `json:"wait_seconds"`
+	SeenMessageIDs []string `json:"seen_message_ids"`
+}
+
+// ValidCoordMessageID accepts bounded opaque identities without interpreting
+// their ordering or coupling callers to the store's ID generator.
+func ValidCoordMessageID(id string) bool {
+	if len(id) == 0 || len(id) > CoordMaxMessageIDBytes {
+		return false
+	}
+	for i := range len(id) {
+		c := id[i]
+		valid := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !valid {
+			return false
+		}
+	}
+	return true
 }
 
 // CoordSendParams are the params of coord.send. The sender is the socket,

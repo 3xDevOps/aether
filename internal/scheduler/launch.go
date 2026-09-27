@@ -8,6 +8,7 @@ import (
 	"maps"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
@@ -372,6 +373,14 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if ownErr := s.applyRunOwnership(ws, run, plan.Mounts, plan.User); ownErr != nil {
 		return fmt.Errorf("apply run ownership: %w", ownErr)
 	}
+	var native harness.NativeLaunch
+	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
+		run.Mode == domain.LaunchTUI && run.Task != "" {
+		native, err = profile.PrepareNativeLaunch(coordtransport.MountDir, argv, plan.Env)
+		if err != nil {
+			return fmt.Errorf("prepare native coordination: %w", err)
+		}
+	}
 	// Recorded before coordination is provisioned, because the co-author
 	// list written there already leaves this address out: the agent's own
 	// commits carry it, so telling the agent to credit it would make it
@@ -382,7 +391,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	// Coordination assets are Aether-owned container surfaces and are appended
 	// after the environment plan's validated workspace mounts. Staging errors
 	// are provisioning errors: never create a container that lacks the CLI.
-	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile)
+	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile, native)
 	if coordErr != nil {
 		return coordErr
 	}
@@ -391,10 +400,12 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 		ensureCoordinationCLIPath(plan.Env)
 	}
 	argv = append(argv, coordArgs...)
+	argv = native.Command(argv)
 	// Last, so the server's value wins over the workspace's for the same
 	// reason Profile.Env's does: what the server needs the container to
 	// have is not a preference.
 	maps.Copy(plan.Env, coordEnv)
+	maps.Copy(plan.Env, native.Env)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)

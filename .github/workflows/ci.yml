@@ -157,6 +157,8 @@ jobs:
         run: go test -race -run '^$' $UNIT_SHARDED
       - name: Shell script tests
         run: make test-scripts
+      - name: Native hook lifecycle tests
+        run: make test-native-hooks
       - name: Build binaries
         run: make build
       # Every Linux job shares this Go cache key, and actions/cache/save
