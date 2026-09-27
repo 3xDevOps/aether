@@ -24,12 +24,18 @@ type PullResult struct {
 
 // PullCommand builds the fetch that lands a run branch in repo under
 // refs/remotes/aether/<branch>. Pull performs the follow-up branch operation.
+// addr is the link's cli.Config.GitHost, so an edge link fetches through
+// aether edge-ssh.
 func PullCommand(repo, user, addr string, coords protocol.RunPullResult) (string, *exec.Cmd, error) {
 	if coords.Branch == "" {
 		return "", nil, errors.New("run has no branch")
 	}
 	url := cli.GitURL(user, addr, coords.WorkspaceID)
-	return coords.Branch, fetchCommand(repo, url, coords.Branch), nil
+	cmd, err := fetchCommand(repo, url, coords.Branch)
+	if err != nil {
+		return "", nil, err
+	}
+	return coords.Branch, cmd, nil
 }
 
 // Pull fetches a run branch, creates or updates its local branch, and reports
@@ -236,7 +242,11 @@ func worktreeDirty(repo string) (bool, error) {
 // pullFetch is the fetch-only seam used by tests and by Pull.
 func pullFetch(repo, url, branch string) (ref, output string, err error) {
 	ref = "refs/remotes/aether/" + branch
-	out, err := fetchCommand(repo, url, branch).CombinedOutput()
+	cmd, err := fetchCommand(repo, url, branch)
+	if err != nil {
+		return ref, "", err
+	}
+	out, err := cmd.CombinedOutput()
 	output = string(out)
 	if err != nil {
 		return ref, output, fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(output))
@@ -246,7 +256,15 @@ func pullFetch(repo, url, branch string) (ref, output string, err error) {
 
 // fetchCommand is the one fetch both surfaces run: no tags, one refspec
 // landing the run branch under the aether remote-tracking namespace.
-func fetchCommand(repo, url, branch string) *exec.Cmd {
+func fetchCommand(repo, url, branch string) (*exec.Cmd, error) {
+	env, err := cli.GitSSHEnv(url)
+	if err != nil {
+		return nil, err
+	}
 	refspec := "+refs/heads/" + branch + ":refs/remotes/aether/" + branch
-	return exec.Command("git", "-C", repo, "fetch", "--no-tags", url, refspec)
+	cmd := exec.Command("git", "-C", repo, "fetch", "--no-tags", url, refspec)
+	if env != nil {
+		cmd.Env = append(cmd.Environ(), env...)
+	}
+	return cmd, nil
 }

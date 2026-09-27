@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 // LinkRepo points repo's `aether` git remote at the workspace and saves
@@ -36,7 +37,7 @@ func LinkRepo(cfg cli.Config, repo, workspaceID string) (cli.Config, string, err
 	if out, gerr := exec.Command("git", "-C", abs, "rev-parse", "--git-dir").CombinedOutput(); gerr != nil {
 		return cfg, "", fmt.Errorf("localops: %s is not a git repository: %s", abs, strings.TrimSpace(string(out)))
 	}
-	url := cli.GitURL(cfg.User, cfg.Addr, workspaceID)
+	url := cli.GitURL(cfg.User, cfg.GitHost(), workspaceID)
 	var buf bytes.Buffer
 	if err := GitRemote(abs, url, &buf, &buf); err != nil {
 		return cfg, "", fmt.Errorf("localops: set git remote: %w: %s", err, strings.TrimSpace(buf.String()))
@@ -71,7 +72,9 @@ func OriginURL(repo string) (string, error) {
 
 // GitRemote adds the `aether` remote to repo pointing at url, or updates
 // it when it already exists. Git's own output goes to stdout/stderr so
-// the CLI can stream it and the gateway can capture it.
+// the CLI can stream it and the gateway can capture it. For a url on an
+// edge link's logical host it also points core.sshCommand at aether
+// edge-ssh, so git typed by hand reaches the server too.
 func GitRemote(repo, url string, stdout, stderr io.Writer) error {
 	names, err := remotes(repo)
 	if err != nil {
@@ -84,5 +87,46 @@ func GitRemote(repo, url string, stdout, stderr io.Writer) error {
 	cmd := exec.Command("git", args...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	return cmd.Run()
+	if err = cmd.Run(); err != nil {
+		return err
+	}
+	env, err := cli.GitSSHEnv(url)
+	if err != nil || env == nil {
+		return err
+	}
+	return gitSSHCommand(repo, stdout)
+}
+
+// gitSSHCommand sets repo's core.sshCommand to aether edge-ssh when no
+// git config names one. An existing value, from any config file, is the
+// user's and is never overwritten: stdout gets the exact command that
+// would replace it instead.
+func gitSSHCommand(repo string, stdout io.Writer) error {
+	want, err := cli.EdgeSSHCommand()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "config", "--get", "core.sshCommand").CombinedOutput()
+	current := strings.TrimSpace(string(out))
+	var exit *exec.ExitError
+	switch {
+	case err == nil && current == want:
+		return nil
+	case err == nil:
+		_, err = fmt.Fprintf(stdout, "core.sshCommand is already %q; aether left it unchanged.\n"+
+			"git typed by hand reaches the edge link only through aether edge-ssh, which runs ssh unchanged for every other host:\n"+
+			"  git -C %s config core.sshCommand %s\n", current, shellquote.Quote(repo), shellquote.Quote(want))
+		return err
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		// Exit status 1 is git's answer for an unset key.
+	default:
+		return fmt.Errorf("git config --get core.sshCommand: %w: %s", err, current)
+	}
+	if out, err = exec.CommandContext(ctx, "git", "-C", repo, "config", "--local", "core.sshCommand", want).CombinedOutput(); err != nil {
+		return fmt.Errorf("git config core.sshCommand: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	_, err = fmt.Fprintf(stdout, "git core.sshCommand -> %s\n", want)
+	return err
 }

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
@@ -1272,7 +1274,88 @@ CREATE INDEX idx_mission_attempts_run ON mission_attempts(run_id, mission_id);
 ALTER TABLE evidence_packets ADD COLUMN captures TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE evidence_packets ADD COLUMN verification_notes TEXT NOT NULL DEFAULT '';
 `,
+	// v45: edge identities. A member may now have neither a public key nor
+	// a tailnet login when an edge identity names it, which the members
+	// CHECK cannot express, so the table is rebuilt the v2 way. Several
+	// tables now reference members ON DELETE CASCADE, and DROP TABLE fires
+	// those cascades, so this version runs with foreign keys off (see
+	// foreignKeysOffMigrations). Invitations and devices go with the member
+	// who created or owns them.
+	`
+CREATE TABLE members_migrate AS
+	SELECT id, display_name, public_key, tailnet_login, pending, color, role, created_at,
+	       image, git_name, git_email
+	FROM members;
+DROP TABLE members;
+CREATE TABLE members (
+	id            TEXT PRIMARY KEY,
+	display_name  TEXT NOT NULL,
+	public_key    TEXT NOT NULL DEFAULT '',
+	tailnet_login TEXT NOT NULL DEFAULT '',
+	pending       INTEGER NOT NULL DEFAULT 0,
+	color         TEXT NOT NULL,
+	role          TEXT NOT NULL,
+	created_at    INTEGER NOT NULL,
+	image         TEXT NOT NULL DEFAULT '',
+	git_name      TEXT NOT NULL DEFAULT '',
+	git_email     TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at,
+                     image, git_name, git_email)
+	SELECT id, display_name, public_key, tailnet_login, pending, color, role, created_at,
+	       image, git_name, git_email
+	FROM members_migrate;
+DROP TABLE members_migrate;
+CREATE UNIQUE INDEX idx_members_public_key ON members(public_key) WHERE public_key <> '';
+CREATE UNIQUE INDEX idx_members_tailnet_login ON members(tailnet_login) WHERE tailnet_login <> '';
+
+CREATE TABLE member_identities (
+	provider   TEXT NOT NULL,
+	subject    TEXT NOT NULL,
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	email      TEXT NOT NULL DEFAULT '',
+	login      TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (provider, subject)
+);
+CREATE INDEX idx_member_identities_member ON member_identities(member_id);
+
+CREATE TABLE member_devices (
+	id            TEXT PRIMARY KEY,
+	member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	kind          TEXT NOT NULL CHECK (kind IN ('ssh', 'browser')),
+	credential    TEXT NOT NULL UNIQUE,
+	label         TEXT NOT NULL,
+	status        TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'revoked')),
+	approval_code TEXT NOT NULL DEFAULT '',
+	created_at    INTEGER NOT NULL,
+	last_seen_at  INTEGER,
+	approved_by   TEXT NOT NULL DEFAULT '',
+	CHECK ((status = 'pending') = (approval_code <> ''))
+);
+CREATE INDEX idx_member_devices_member ON member_devices(member_id);
+CREATE UNIQUE INDEX idx_member_devices_approval_code
+	ON member_devices(approval_code) WHERE approval_code <> '';
+
+CREATE TABLE identity_invitations (
+	id          TEXT PRIMARY KEY,
+	provider    TEXT NOT NULL,
+	login       TEXT NOT NULL,
+	email       TEXT NOT NULL,
+	role        TEXT NOT NULL,
+	member_id   TEXT REFERENCES members(id) ON DELETE CASCADE,
+	created_by  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	consumed_at INTEGER,
+	CHECK ((login = '') <> (email = ''))
+);
+`,
 }
+
+// foreignKeysOffMigrations are the versions that drop a table other tables
+// reference with ON DELETE CASCADE. See applyMigration.
+var foreignKeysOffMigrations = map[int]bool{45: true}
 
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so
@@ -1330,8 +1413,32 @@ func migrateOnce(db *sql.DB) error {
 // claims the version row (acquiring the write lock before any DDL). When a
 // concurrent opener already applied this version, the claim inserts zero
 // rows and the DDL is skipped, so racing Opens on one file all succeed.
+//
+// A version in foreignKeysOffMigrations runs on one pinned connection with
+// foreign keys off, because SQLite ignores that pragma inside a
+// transaction and DROP TABLE would otherwise fire ON DELETE CASCADE into
+// every referencing table. PRAGMA foreign_key_check must come back empty
+// before it commits.
 func applyMigration(db *sql.DB, version int) error {
-	tx, err := db.Begin()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin migration %d: %w", version, err)
+	}
+	defer conn.Close() //nolint:errcheck // returns the connection to the pool
+	fkOff := foreignKeysOffMigrations[version]
+	if fkOff {
+		if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("store: migration %d: disable foreign keys: %w", version, err)
+		}
+		defer func() {
+			if _, restoreErr := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); restoreErr != nil {
+				// Never hand a connection without foreign keys back to the pool.
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin migration %d: %w", version, err)
 	}
@@ -1355,8 +1462,33 @@ func applyMigration(db *sql.DB, version int) error {
 	if _, err := tx.Exec(migrations[version-1]); err != nil {
 		return fmt.Errorf("store: apply migration %d: %w", version, err)
 	}
+	if fkOff {
+		if err := checkForeignKeys(tx); err != nil {
+			return fmt.Errorf("store: migration %d: %w", version, err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: commit migration %d: %w", version, err)
 	}
 	return nil
+}
+
+func checkForeignKeys(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("foreign key check: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	if rows.Next() {
+		var (
+			table, parent string
+			rowid         sql.NullInt64
+			fk            int
+		)
+		if err := rows.Scan(&table, &rowid, &parent, &fk); err != nil {
+			return fmt.Errorf("foreign key check: %w", err)
+		}
+		return fmt.Errorf("foreign key check: %s row %d references a missing %s row", table, rowid.Int64, parent)
+	}
+	return rows.Err()
 }

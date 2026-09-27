@@ -55,9 +55,10 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
 # shards the unit tests by setting TEST_PKGS or TEST_SKIP.
 TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
 
-# Release matrix. The server is Linux-only by design (see the v1 cut-line);
-# the CLI additionally ships for macOS and Windows clients.
+# Release matrix. The server and the edge are Linux-only by design (see the
+# v1 cut-line); the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
+EDGE_PLATFORMS   := linux/amd64 linux/arm64
 CLI_PLATFORMS    := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 # Windows release inputs. The client's PE carries a VERSIONINFO resource, an
@@ -139,7 +140,7 @@ endif
 all: build
 
 build: dashboard
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(DIST)/ ./cmd/aether-server ./cmd/aether
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(DIST)/ ./cmd/aether-server ./cmd/aether ./cmd/aether-edge
 
 browser-image:
 	docker build --tag '$(BROWSER_IMAGE)' --file images/browser/Dockerfile .
@@ -294,6 +295,14 @@ release: dashboard
 		name=aether-server-$$os-$$arch; out=$(DIST)/$$name; \
 		echo "building $$out"; \
 		( CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-server \
+			>"$$job_dir/$$name.log" 2>&1 ) & \
+		pids="$$pids $$!"; jobs="$$jobs $$name"; \
+	done; \
+	for platform in $(EDGE_PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		name=aether-edge-$$os-$$arch; out=$(DIST)/$$name; \
+		echo "building $$out"; \
+		( CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-edge \
 			>"$$job_dir/$$name.log" 2>&1 ) & \
 		pids="$$pids $$!"; jobs="$$jobs $$name"; \
 	done; \

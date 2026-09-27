@@ -10,7 +10,10 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/3xDevOps/Aether/internal/edgeagent"
+	"github.com/3xDevOps/Aether/internal/edgeproto"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"golang.org/x/term"
@@ -62,7 +65,59 @@ func setup(args []string) error {
 		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
 		return nil
 	}
-	return writeAndReport(os.Stdout, *unitPath, *configPath, values, *force)
+	if err := writeAndReport(os.Stdout, *unitPath, *configPath, values, *force); err != nil {
+		return err
+	}
+	return reportEdge(os.Stdout, *configPath)
+}
+
+// reportEdge prints what a person needs to reach the server through the
+// edge the written config names: the server id, the pinned edge key, and
+// a claim code while the server has no owner. It reads the config back
+// because an existing file is kept without --force.
+func reportEdge(w io.Writer, configPath string) error {
+	values, err := serversetup.Load(configPath)
+	if err != nil {
+		return err
+	}
+	fs := serveFlagSet()
+	if _, err = serversetup.Apply(fs, values); err != nil {
+		return err
+	}
+	edgeURL := fs.Lookup("edge-url").Value.String()
+	if edgeURL == "" {
+		return nil
+	}
+	dataDir := fs.Lookup("data-dir").Value.String()
+	id, err := serverID(dataDir)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "\nedge: %s\nserver id: %s\n", edgeURL, id)
+	state := edgeagent.OpenState(dataDir)
+	pinned, err := state.PinnedKey()
+	if err != nil {
+		return err
+	}
+	if pinned != nil {
+		_, _ = fmt.Fprintf(w, "edge key: %s\n", edgeproto.EdgeKeyFingerprint(pinned))
+	} else {
+		_, _ = fmt.Fprintln(w, "edge key: pinned when the server first connects; `aether-server edge status` shows it")
+	}
+	owner, err := state.Owner()
+	if err != nil {
+		return err
+	}
+	if owner != nil {
+		_, _ = fmt.Fprintf(w, "owner: %s\n", describeAccount(*owner))
+		return nil
+	}
+	code, expires, err := state.IssueClaimCode(id, time.Now())
+	if err != nil {
+		return err
+	}
+	printClaimCode(w, edgeURL, code, expires)
+	return nil
 }
 
 // askServerOptions walks the operator through the handful of options a
@@ -122,6 +177,8 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string, tailnet bool
 		values["web-port"] = p.ask("web-port", "Dashboard HTTPS port on the tailnet (0 = off)", webDefault)
 	}
 
+	askEdge(p, current, tailnet, values)
+
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -130,6 +187,40 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string, tailnet bool
 		return nil, p.err
 	}
 	return values, nil
+}
+
+// askEdge sets edge-url. Without tailscaled the edge is the only route a
+// laptop or phone has to the server, so it is on and setup says so; with
+// tailscaled it is offered. An edge-url the operator already set is kept
+// or offered as the answer.
+func askEdge(p *prompter, current map[string]string, tailnet bool, values map[string]string) {
+	configured, set := current["edge-url"]
+	if set && configured == "" && !tailnet {
+		_, _ = fmt.Fprintf(p.w, "\nThe edge is off (edge-url is empty) and Tailscale is not installed, so members\nreach this server only by SSH to %s.\n", values["addr"])
+		values["edge-url"] = ""
+		return
+	}
+	edgeURL := configured
+	if edgeURL == "" {
+		edgeURL = edgeagent.DefaultURL
+	}
+	if tailnet {
+		_, _ = fmt.Fprintf(p.w, "\nThe server can also be reached through the edge at %s, for devices\nthat are not on your tailnet.\n", edgeURL)
+	} else {
+		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so this server will be reached through the edge at\n%s.\n", edgeURL)
+	}
+	_, _ = fmt.Fprintln(p.w, "SSH runs end to end through the edge and the dashboard's TLS ends on this server,")
+	_, _ = fmt.Fprintln(p.w, "so the edge cannot read either; it sees this server's id, who signs in, device")
+	_, _ = fmt.Fprintln(p.w, "names, client IP addresses, and when and how much traffic flows.")
+	if !tailnet {
+		_, _ = fmt.Fprintln(p.w, `Turn it off with: aether-server config set edge-url ""`)
+		values["edge-url"] = edgeURL
+		return
+	}
+	values["edge-url"] = ""
+	if p.confirm("Reach this server through the edge too", configured != "") {
+		values["edge-url"] = edgeURL
+	}
 }
 
 // prompter reads answers off one line-oriented stream, latching the first

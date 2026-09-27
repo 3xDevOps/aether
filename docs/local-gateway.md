@@ -416,7 +416,8 @@ retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal"],
- "local":["daemon.install","daemon.status","env.harnesses","forward.start",
+ "local":["daemon.install","daemon.status","edge.claim","edge.link","edge.login",
+          "edge.logout","edge.servers","edge.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.status","link.switch","pull","pull.switch","repo.fast-forward",
           "repo.push","sync.start","sync.status","sync.stop",
@@ -836,7 +837,13 @@ authority.
 | Verb | Request | Response |
 | --- | --- | --- |
 | `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
-| `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
+| `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","edge_url":"...","server_id":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`edge_url` and `server_id` are present only on an edge link; `links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
+| `edge.login` | `{"edge":"https://...","label":"..."}` (both optional) | `{"state":"pending","edge":"https://edge.onaether.dev","user_code":"...","verification_uri":"https://edge.onaether.dev/device"}` |
+| `edge.status` | `{}` | `{"edges":[{"edge":"https://...","account":{"provider":"github","subject":"...","login":"...","email":"...","name":"..."},"device":{"id":"...","label":"...","key":"ssh-ed25519 ..."},"error":"..."}],"login":{"state":"pending"\|"signed_in"\|"failed","edge":"...","user_code":"...","verification_uri":"...","account":{...},"error":"..."}}` (`login` only once `edge.login` ran in this process; an entry's `error` replaces its `account` and `device` when its stored sign-in cannot be read) |
+| `edge.servers` | `{"edge":"https://..."}` (optional) | `{"edge":"https://...","servers":[{"id":"...","name":"...","online":bool,"role":"admin"}]}` |
+| `edge.link` | `{"server_id":"...","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `server_id` optional) | `{"server_id":"...","edge":"https://...","addr":"...","user":"aether","member":{...}}` |
+| `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link`, plus `"server_name":"..."` |
+| `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
@@ -862,6 +869,50 @@ authority.
 subsequent API and WebSocket requests use the new server without a restart. If
 no SSH key is offered and the server requires one, it may create
 `~/.ssh/id_ed25519` and its `.pub` file.
+
+The `edge.*` verbs let the onboarding wizard reach a server through an
+[edge](edge.md) without a terminal. Each does what the command beside it
+does, with the same files in the config directory:
+
+| Verb | Command |
+| --- | --- |
+| `edge.login` | `aether login` |
+| `edge.servers` | `aether servers` |
+| `edge.link` | `aether link <server id>` |
+| `edge.claim` | `aether link --claim <code>` |
+| `edge.logout` | `aether logout` |
+
+- `edge` names the edge. Without it a verb uses the one edge this machine is
+  signed in to, else `https://edge.onaether.dev`. An address that is not
+  `https://host[:port]`, or `http://` on loopback, answers `-32602`.
+- `edge.login` answers once the edge has registered the sign-in. The person
+  opens `verification_uri` and confirms `user_code`; the gateway polls the
+  edge in the background and `edge.status` reports `pending`, then
+  `signed_in` or `failed` with the client's own error. `label` names the
+  device on the edge's Devices page and defaults to the host name. A second
+  `edge.login` replaces one still pending. The device code the gateway polls
+  with and the device token it receives are never in an answer; the token
+  goes only to `edge-tokens.json`, mode `0600`.
+- `edge.link` and `edge.claim` save the link and swap the gateway connection
+  in place, as `link.apply` does. `server_id` must be a server id, and the
+  server's SSH host key is checked against it before anything is sent.
+  `addr` is an SSH address tried before the edge. A claim that succeeds when
+  the link then fails answers `-32002` naming the claimed server, so the
+  wizard can retry with `edge.link`.
+- `edge.logout` revokes the device token at the edge and forgets it, and
+  drops a pending `edge.login` for that edge.
+- Errors carry the client's own message. Not signed in, or an edge refusal
+  with a `4xx` status such as a revoked token or a wrong claim code, answers
+  `-32002`. An edge that cannot be reached or answers `5xx` answers `-32004`.
+
+The member's devices and edge invitations are control-channel methods, so
+the dashboard calls them through `POST /api/v1/<method>` like any other:
+`member.device.list`, `member.device.approve` (`{"code":"..."}`),
+`member.device.revoke` (`{"device_id":"..."}`),
+`member.invitation.create`, `member.invitation.list`,
+`member.invitation.revoke` (`{"invitation_id":"..."}`) and
+`member.identity.link`. Their shapes are in `internal/protocol/identity.go`,
+and [edge.md](edge.md) describes what each does.
 
 `workspace.selection` stores only the last selected workspace ID in
 `workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash

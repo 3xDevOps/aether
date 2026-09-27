@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -8,20 +9,21 @@ import (
 	"golang.org/x/term"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
+	"github.com/3xDevOps/Aether/internal/edgeproto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, set the git identity of, change the role of, or remove members",
+		short: "list, approve, color, set the git identity of, change the role of, link an edge account to, or remove members",
 		run:   runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|git|role|remove>")
+		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|remove>")
 	}
 	switch args[0] {
 	case "list":
@@ -42,6 +44,8 @@ func runMember(args []string) error {
 		return memberGit(args[1:])
 	case "role":
 		return memberRole(args[1:])
+	case "link":
+		return memberLink(args[1:])
 	default:
 		return fmt.Errorf("unknown member command %q", args[0])
 	}
@@ -88,6 +92,35 @@ func memberRemove(id string) error {
 			return err
 		}
 		fmt.Printf("removed %s\n", id)
+		return nil
+	})
+}
+
+// memberLink binds a GitHub or Google account at the edge to your own
+// member: that account connects through the edge as you, and when you are
+// an admin it can claim this server with a claim code.
+func memberLink(args []string) error {
+	fs := flag.NewFlagSet("member link", flag.ExitOnError)
+	github := fs.String("github", "", "your GitHub login")
+	email := fs.String("email", "", "your provider-verified email")
+	provider := fs.String("provider", "", `with --email: accept only "github" or "google" (default either)`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if (*github == "") == (*email == "") || fs.NArg() != 0 {
+		return fmt.Errorf("usage: aether member link --github <login> | --email <address> [--provider github|google]")
+	}
+	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email, Provider: *provider}
+	if *github != "" && *provider == "" {
+		params.Provider = edgeproto.ProviderGitHub
+	}
+	return withControl(func(c *protocol.Client) error {
+		var res protocol.MemberInvitationResult
+		if err := c.Call(protocol.MethodMemberIdentityLink, params, &res); err != nil {
+			return err
+		}
+		fmt.Printf("%s can link to member %s until %s: sign in with aether login and connect through the edge\n",
+			inviteeOf(res.Invitation), res.Invitation.MemberID, res.Invitation.ExpiresAt)
 		return nil
 	})
 }

@@ -1,0 +1,31 @@
+{{define "device"}}{{template "top" .}}
+<p>Enter the code that <code>aether login</code> printed in your terminal.</p>
+<form method="post" action="/device">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Code <input name="user_code" autocomplete="off" autocapitalize="characters" spellcheck="false" required maxlength="16"></label>
+<button>Continue</button>
+</form>
+{{template "bottom" .}}{{end}}
+
+{{define "device_confirm"}}{{template "top" .}}
+{{with .Data}}
+<p class="warning">Confirm only if you started this sign-in yourself, just now, and your terminal shows code <strong>{{.UserCode}}</strong>. If someone sent you this code, deny it: approving gives that device access to your servers as you.</p>
+<dl>
+<dt>Code</dt><dd>{{.UserCode}}</dd>
+<dt>Device</dt><dd>{{.Label}}</dd>
+<dt>Device key</dt><dd><code>{{.Fingerprint}}</code></dd>
+<dt>Started</dt><dd>{{.Started}} ago</dd>
+</dl>
+{{end}}
+<form method="post" action="/device/confirm">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="user_code" value="{{.Data.UserCode}}">
+<button name="decision" value="approve">Approve this device</button>
+<button name="decision" value="deny">Deny</button>
+</form>
+{{template "bottom" .}}{{end}}
+
+{{define "device_done"}}{{template "top" .}}
+{{if .Data.Approved}}<p>{{.Data.Label}} is signed in. Return to your terminal.</p>
+{{else}}<p>The sign-in for {{.Data.Label}} was denied. The device gets no token.</p>{{end}}
+{{template "bottom" .}}{{end}}

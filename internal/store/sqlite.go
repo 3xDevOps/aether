@@ -523,10 +523,24 @@ func (d *DB) ListHarnessDefinitions(ctx context.Context, member domain.MemberID)
 // Members
 
 func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
+	if m.PublicKey == "" && m.TailnetLogin == "" {
+		return errors.New("store: create member: a public key or a tailnet login is required")
+	}
+	return insertMember(ctx, d.db, m)
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// insertMember inserts m with whatever identity it has; a caller creating
+// a member with neither key nor tailnet login inserts its edge identity in
+// the same transaction.
+func insertMember(ctx context.Context, q execer, m *domain.Member) error {
 	if !m.Role.Valid() {
 		return fmt.Errorf("store: create member: invalid role %q", m.Role)
 	}
-	key, err := normalizeMemberKey(m.PublicKey, m.TailnetLogin, "create member")
+	key, err := normalizeMemberKey(m.PublicKey, "create member")
 	if err != nil {
 		return err
 	}
@@ -538,7 +552,7 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 	if err != nil {
 		return fmt.Errorf("store: create member: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
+	if _, err := q.ExecContext(ctx,
 		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image, git_name, git_email)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt, m.Image,
@@ -550,13 +564,9 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 	return nil
 }
 
-// normalizeMemberKey canonicalizes the public key when present and
-// enforces that at least one identity (key or tailnet login) exists.
-func normalizeMemberKey(publicKey, tailnetLogin, op string) (string, error) {
+// normalizeMemberKey canonicalizes the public key when present.
+func normalizeMemberKey(publicKey, op string) (string, error) {
 	if publicKey == "" {
-		if tailnetLogin == "" {
-			return "", fmt.Errorf("store: %s: a public key or a tailnet login is required", op)
-		}
 		return "", nil
 	}
 	key, err := normalizePublicKey(publicKey)
@@ -668,15 +678,21 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 	if !m.Role.Valid() {
 		return fmt.Errorf("store: update member: invalid role %q", m.Role)
 	}
-	key, err := normalizeMemberKey(m.PublicKey, m.TailnetLogin, "update member")
+	key, err := normalizeMemberKey(m.PublicKey, "update member")
 	if err != nil {
 		return err
 	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE members SET display_name = ?, public_key = ?, tailnet_login = ?, pending = ?,
 		 color = ?, role = ?
-		 WHERE id = ?`,
-		m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, m.ID))
+		 WHERE id = ? AND (? <> '' OR ? <> ''
+		   OR EXISTS (SELECT 1 FROM member_identities WHERE member_id = members.id))`,
+		m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, m.ID, key, m.TailnetLogin))
+	if errors.Is(err, ErrNotFound) {
+		if _, gerr := d.GetMember(ctx, m.ID); gerr == nil {
+			return errors.New("store: update member: a public key, a tailnet login or an edge identity is required")
+		}
+	}
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			err = fmt.Errorf("store: update member: %w", mapConstraint(err, ErrNotFound))

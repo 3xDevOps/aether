@@ -423,6 +423,29 @@ runs it under `bun` against a recording stand-in for the server binary, so
 a turn's reports are proven to come out in order and to end exactly once.
 Those tests skip where `bun` is not installed.
 
+## The edge suite
+
+`internal/edge/edgetest` runs edge remote access end to end in one process,
+under plain `make test`: a real edge (sign-in service and relay, development
+mode) against a fake GitHub, real servers (sshd over a real store, with the
+edge agent), and the real client dialer. A proxy in front of the edge
+records the control channels and injects messages into them, which is how
+the tests play a compromised edge. [edge.md](edge.md) describes the edge.
+
+| Test | Proves |
+| --- | --- |
+| `TestClaimAndAccess` | Expired, wrong and exhausted claim codes refused; a claim, then a control RPC over the relay; the owner of one server refused on another; no token and an unknown token refused; a key other than the grant's device key refused; a second device pending until approved |
+| `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected and wrong-connection grants; `aether-server edge trust` fetches the signing key |
+| `TestEnrollmentSignatureIsNotAHostSignature` | A server posing with a captured enrollment signature fails the client's handshake |
+| `TestInvitations` | Invitations by login and email, revoked and expired ones refused, and an edge that still lists an expired one overruled by the server |
+| `TestRevocationClosesLiveConnections` | Member removal, device revocation and `aether logout` each close a live connection |
+| `TestEdgeRestartAndDirectFallback` | A clean edge stop drops relayed connections, the server re-enrolls after the restart, and a link with an address uses it while the edge is down |
+| `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again with a new code |
+
+Every request reaches the edge from 127.0.0.1, so the suite runs its tests
+one at a time and moves the edge's clock forward to refill the per-address
+rate limits.
+
 ## The dashboard end-to-end suite
 
 `web/e2e/` drives the dashboard the way a person does: a Chromium browser on

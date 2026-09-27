@@ -192,6 +192,8 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			}
 		}
 	}
+	s.closeMemberConns(id)
+	s.notifyDirectory()
 	if s.cfg.Homes != nil {
 		if err := s.cfg.Homes.Remove(id); err != nil {
 			slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)

@@ -15,7 +15,7 @@ build and development server.
 
 ```sh
 make dashboard         # build the static dashboard export in web/dist
-make build             # dashboard, then the Go server and CLI into dist/
+make build             # dashboard, then the Go server, CLI and edge into dist/
 cd web && bun run dev  # development server
 ```
 
@@ -408,12 +408,15 @@ Every release publishes bare binaries plus `checksums.txt`:
 
 ```
 aether-server-linux-amd64   aether-server-linux-arm64
+aether-edge-linux-amd64     aether-edge-linux-arm64
 aether-linux-amd64          aether-linux-arm64
 aether-darwin-amd64         aether-darwin-arm64
 aether-windows-amd64.exe    aether-windows-arm64.exe
 ```
 
-`aether-server` is Linux-only. The Windows and macOS assets are the client.
+`aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
+are the client. `aether-edge` is only for running your own edge
+([edge.md](edge.md)); servers and clients do not need it.
 
 **Linux and macOS.** Download the one you want, check it against
 `checksums.txt`, `chmod +x`, and drop it on your `PATH` under the name
@@ -1144,7 +1147,8 @@ automatic.
 | Path | Contents |
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
-| `ssh/` | The server's SSH host key. |
+| `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
+| `edge/` | Edge enrollment: the pinned edge key, the owner, the claim code's hash, the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |

@@ -41,6 +41,30 @@ approval step entirely, for teams whose tailnet already is the team.
 Full detail on tailnet identity, tagged nodes, and revocation is in
 [networking.md](networking.md).
 
+### Through an edge
+
+For servers enrolled with an edge ([edge.md](edge.md)). An admin invites the
+teammate's GitHub login, or an email their provider has verified:
+
+```sh
+aether invite --github dana --role collaborator
+aether invite --email dana@example.com --role viewer
+```
+
+The teammate signs in and links; their first connection makes them a member
+with that role:
+
+```sh
+aether login
+aether servers
+aether link my-server
+```
+
+Invitations expire after 7 days; `aether invite list` and
+`aether invite revoke <id>` manage them. Each device a member adds after
+their first waits for `aether device approve <code>`, run from a device they
+already use or by an admin.
+
 ### By invite code (fallback)
 
 For people connecting from outside a tailnet. An admin mints a one-time code:

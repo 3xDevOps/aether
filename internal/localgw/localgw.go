@@ -280,6 +280,7 @@ func (g *Gateway) Close() error {
 	built := make(chan struct{})
 	go func() {
 		g.builds.Wait()
+		g.local.edge.waits.Wait()
 		close(built)
 	}()
 	drain, stop := context.WithTimeout(context.Background(), closeTimeout)

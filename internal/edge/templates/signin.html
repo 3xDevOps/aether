@@ -1,0 +1,6 @@
+{{define "signin"}}{{template "top" .}}
+<p>Sign in to reach your Aether servers, claim a new one, or approve a device.</p>
+<ul class="providers">
+{{range .Data}}<li><a class="button" href="{{.URL}}">Sign in with {{.Title}}</a></li>
+{{end}}</ul>
+{{template "bottom" .}}{{end}}

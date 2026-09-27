@@ -15,6 +15,10 @@ type LinkOptions struct {
 	Invite string
 	Name   string
 	Key    string
+	// EdgeURL and ServerID link a server through an edge; Addr is then
+	// optional.
+	EdgeURL  string
+	ServerID string
 }
 
 // LinkResult is an unsaved link and its live server connection.
@@ -89,54 +93,27 @@ func linkConfig(cfg, prev Config, name string) Config {
 		AutoKey:    cfg.Key == "",
 		Repo:       cfg.Repo,
 		KnownHosts: cfg.KnownHosts,
+		EdgeURL:    cfg.EdgeURL,
+		ServerID:   cfg.ServerID,
 	})
 }
 
 // Link dials and verifies a server, returning the config to save and the
 // live connection. The caller owns the connection and must close it or adopt it.
+// With a server id the link goes through DialLinked: no SSH key is
+// resolved or generated, and Addr, when set, is the direct address tried
+// before the edge.
 func Link(opts LinkOptions, prev Config) (LinkResult, error) {
-	cfg := Config{Addr: normalizeAddr(opts.Addr), User: "aether"}
-	key, err := linkKey(opts.Key, prev, opts.Name)
-	if err != nil {
-		return LinkResult{}, err
-	}
-	cfg.Key = key
-
-	auth := ResolveAuth(cfg)
-	offered := auth.Offered()
-	auth.Close()
-	keyGenerated := ""
-	ensure := func() error {
-		path, created, ensureErr := EnsureIdentity()
-		if ensureErr != nil {
-			return ensureErr
-		}
-		if created {
-			keyGenerated = path
-		}
-		return nil
-	}
-	// Only automatic key discovery (cfg.Key == "") can pick up a generated
-	// key. Invite redemption needs it before the dial; a plain link only
-	// retries after an auth failure so a keyless tailnet server never gets
-	// one generated.
-	generate := !offered && cfg.Key == ""
-	if generate && opts.Invite != "" {
-		if err = ensure(); err != nil {
-			return LinkResult{}, err
-		}
-	}
-	var conn *Conn
-	if opts.Invite != "" {
-		conn, err = DialInvite(cfg, opts.Invite, opts.Name)
+	cfg := Config{Addr: normalizeAddr(opts.Addr), User: "aether", EdgeURL: opts.EdgeURL, ServerID: opts.ServerID}
+	var (
+		conn         *Conn
+		keyGenerated string
+		err          error
+	)
+	if cfg.ServerID != "" {
+		conn, err = Dial(cfg)
 	} else {
-		conn, err = Dial(cfg)
-	}
-	if err != nil && opts.Invite == "" && generate && isAuthFailure(err) {
-		if err = ensure(); err != nil {
-			return LinkResult{}, err
-		}
-		conn, err = Dial(cfg)
+		conn, keyGenerated, err = linkDial(opts, prev, &cfg)
 	}
 	if err != nil {
 		return LinkResult{}, err
@@ -157,4 +134,52 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		return LinkResult{}, fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
+}
+
+// linkDial dials a server linked by address, choosing its key and
+// generating ~/.ssh/id_ed25519 when nothing else can authenticate.
+func linkDial(opts LinkOptions, prev Config, cfg *Config) (*Conn, string, error) {
+	key, err := linkKey(opts.Key, prev, opts.Name)
+	if err != nil {
+		return nil, "", err
+	}
+	cfg.Key = key
+
+	auth := ResolveAuth(*cfg)
+	offered := auth.Offered()
+	auth.Close()
+	keyGenerated := ""
+	ensure := func() error {
+		path, created, ensureErr := EnsureIdentity()
+		if ensureErr != nil {
+			return ensureErr
+		}
+		if created {
+			keyGenerated = path
+		}
+		return nil
+	}
+	// Only automatic key discovery (cfg.Key == "") can pick up a generated
+	// key. Invite redemption needs it before the dial; a plain link only
+	// retries after an auth failure so a keyless tailnet server never gets
+	// one generated.
+	generate := !offered && cfg.Key == ""
+	if generate && opts.Invite != "" {
+		if err = ensure(); err != nil {
+			return nil, "", err
+		}
+	}
+	var conn *Conn
+	if opts.Invite != "" {
+		conn, err = DialInvite(*cfg, opts.Invite, opts.Name)
+	} else {
+		conn, err = Dial(*cfg)
+	}
+	if err != nil && opts.Invite == "" && generate && isAuthFailure(err) {
+		if err = ensure(); err != nil {
+			return nil, "", err
+		}
+		conn, err = Dial(*cfg)
+	}
+	return conn, keyGenerated, err
 }

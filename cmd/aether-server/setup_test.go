@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/edgeagent"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 )
 
@@ -101,7 +102,7 @@ func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 
 func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+	values, err := askServerOptions(&out, answers("", "", "", "", "", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 	}
 
 	out.Reset()
-	values, err = askServerOptions(&out, answers("", "", "", "", "8443", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+	values, err = askServerOptions(&out, answers("", "", "", "", "8443", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 		input   []string
 	}{
 		"no tailscaled":       {false, []string{"", "", "", "", "yes"}},
-		"tailnet-require-key": {true, []string{"", "", "", "true", "yes"}},
+		"tailnet-require-key": {true, []string{"", "", "", "true", "", "yes"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -143,5 +144,49 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 				t.Errorf("dashboard prompt shown where it cannot start:\n%s", out.String())
 			}
 		})
+	}
+}
+
+func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
+	var out bytes.Buffer
+	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["edge-url"] != edgeagent.DefaultURL {
+		t.Errorf("edge-url = %q, want %s without Tailscale", values["edge-url"], edgeagent.DefaultURL)
+	}
+	for _, want := range []string{"Tailscale is not installed", "client IP addresses", `aether-server config set edge-url ""`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("setup does not say %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestAskServerOptionsKeepsTheEdgeOffWhenConfigured(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := serversetup.WriteConfig(path, map[string]string{"edge-url": ""}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := values["edge-url"]; !ok || v != "" {
+		t.Errorf("edge-url = %q, %v; want it kept off", v, ok)
+	}
+}
+
+func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
+	for answer, want := range map[string]string{"": "", "yes": edgeagent.DefaultURL} {
+		var out bytes.Buffer
+		values, err := askServerOptions(&out, answers("", "", "", "", "", answer, "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if values["edge-url"] != want {
+			t.Errorf("answer %q: edge-url = %q, want %q", answer, values["edge-url"], want)
+		}
 	}
 }

@@ -20,6 +20,7 @@ require (
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0
+	golang.org/x/oauth2 v0.35.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	google.golang.org/protobuf v1.36.11
@@ -118,7 +119,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

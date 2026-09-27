@@ -635,6 +635,42 @@ an HTTP loopback address. It binds the matching local callback port before
 opening the authorization page, then forwards that port only to the terminal
 where the link appeared. Other links keep the normal browser behavior.
 
+## Edge remote access
+
+The edge ([edge.md](edge.md)) is a trusted identity broker, not a trusted
+authority. The server believes it about who signed in, and about nothing
+else:
+
+- **SSH is end to end.** The relay splices bytes between two outbound
+  WebSockets and never holds a key that could decrypt them. Clients check
+  the host key against the server id on every path, so an edge cannot pose
+  as a server.
+- **Grants are checked by the server.** Each relayed connection carries a
+  grant signed by the edge key the server pinned at enrollment. The server
+  checks the signature, its own id, the connection id and a 60-second
+  lifetime, and refuses a connection id it has seen. The key the client
+  offers must be the grant's device key, so a stolen device token alone
+  authenticates nothing.
+- **Membership stays on the server.** The server maps the account to a
+  member itself and checks the device. A compromised edge can forge a grant
+  for any account, but that account gets in only as a member or through an
+  open invitation the server holds. With `edge-device-approval` on, it
+  cannot add a device to a member who already has one.
+- **Enrollment signatures cannot become host signatures.** The host key
+  signs `aether-edge-enroll-v1\x00`, the edge origin, the server id and a
+  nonce. That message is longer than any SSH exchange hash, so an edge that
+  collects it cannot use it in a handshake.
+- **Claims need the server's code.** The code is compared on the server,
+  stored there only as a hash, and dies after 30 minutes or five attempts.
+- **The edge stores bearer secrets hashed** (device tokens, session
+  cookies, device codes, web sign-in codes) and rate-limits sign-in, device
+  codes and claims per address, IPv6 per /64. The address a relayed
+  connection came from is for logs and rate limits only, never for
+  authentication.
+
+What the edge operator does see: server ids, account identities, device
+labels, client addresses, timing and byte counts.
+
 ## Conflict coordination
 
 When two runs edit the same file, each container may receive a run-scoped unix

@@ -1,0 +1,100 @@
+package edgestore
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/edgeproto"
+)
+
+// SignIn records a completed sign-in: it creates the account keyed by
+// (provider, subject), or refreshes the email, login and name the provider
+// just reported. It returns the account id.
+func (s *Store) SignIn(ctx context.Context, a edgeproto.Account, now time.Time) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (provider, subject) DO UPDATE SET
+			email = excluded.email, login = excluded.login, name = excluded.name
+		RETURNING id`,
+		a.Provider, a.Subject, a.Email, a.Login, a.Name, unix(now)).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
+	}
+	return id, nil
+}
+
+// EnsureAccount returns the id of the account keyed by a's provider and
+// subject, creating it from a when it does not exist. An existing account
+// keeps what its own sign-ins recorded.
+func (s *Store) EnsureAccount(ctx context.Context, a edgeproto.Account, now time.Time) (int64, error) {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (provider, subject) DO NOTHING`,
+		a.Provider, a.Subject, a.Email, a.Login, a.Name, unix(now)); err != nil {
+		return 0, fmt.Errorf("edgestore: ensure account: %w", err)
+	}
+	var id int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM accounts WHERE provider = ? AND subject = ?`,
+		a.Provider, a.Subject).Scan(&id); err != nil {
+		return 0, fmt.Errorf("edgestore: ensure account: %w", err)
+	}
+	return id, nil
+}
+
+const accountCols = `a.id, a.provider, a.subject, a.email, a.login, a.name`
+
+func accountDest(id *int64, a *edgeproto.Account) []any {
+	return []any{id, &a.Provider, &a.Subject, &a.Email, &a.Login, &a.Name}
+}
+
+// Session is a signed-in browser at the edge.
+type Session struct {
+	ID        string
+	AccountID int64
+	Account   edgeproto.Account
+}
+
+// CreateSession stores a session under the hash of its cookie token and
+// drops expired sessions.
+func (s *Store) CreateSession(ctx context.Context, id, tokenHash string, accountID int64, now, expires time.Time) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM web_sessions WHERE expires_at <= ?`, unix(now)); err != nil {
+		return fmt.Errorf("edgestore: drop expired sessions: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO web_sessions (id, token_hash, account_id, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?)`, id, tokenHash, accountID, unix(now), unix(expires)); err != nil {
+		return fmt.Errorf("edgestore: create session: %w", err)
+	}
+	return nil
+}
+
+// UseSession returns the unexpired session stored under tokenHash and
+// moves its expiry to expires.
+func (s *Store) UseSession(ctx context.Context, tokenHash string, now, expires time.Time) (Session, error) {
+	var sess Session
+	err := s.db.QueryRowContext(ctx, `UPDATE web_sessions SET expires_at = ?
+		WHERE token_hash = ? AND expires_at > ? RETURNING id, account_id`,
+		unix(expires), tokenHash, unix(now)).Scan(&sess.ID, &sess.AccountID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, ErrNotFound
+	}
+	if err != nil {
+		return Session{}, fmt.Errorf("edgestore: use session: %w", err)
+	}
+	var id int64
+	if err := s.db.QueryRowContext(ctx, `SELECT `+accountCols+` FROM accounts a WHERE a.id = ?`,
+		sess.AccountID).Scan(accountDest(&id, &sess.Account)...); err != nil {
+		return Session{}, fmt.Errorf("edgestore: use session: %w", err)
+	}
+	return sess, nil
+}
+
+// DeleteSession signs a session out.
+func (s *Store) DeleteSession(ctx context.Context, id string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM web_sessions WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("edgestore: delete session: %w", err)
+	}
+	return nil
+}

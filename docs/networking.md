@@ -9,7 +9,9 @@ one listens on the host's tailnet addresses only - see
 
 How you make that port reachable is up to you. Tailscale is the recommended
 answer, and it is also the recommended identity layer, because it removes SSH
-key management entirely.
+key management entirely. When neither side can reach the other, an **edge**
+relays the SSH connection instead: server and client both dial out to it, and
+you sign in with GitHub or Google - see [Through an edge](#through-an-edge).
 
 ---
 
@@ -124,6 +126,24 @@ attached are unaffected.
 The server's user must be able to read `/var/run/tailscale/tailscaled.sock`.
 Running as root (the shipped systemd unit) always can; for an unprivileged
 server user, `sudo tailscale set --operator=<user>`.
+
+---
+
+## Through an edge
+
+An edge is a relay both the server and your client dial out to, so neither
+needs an open port. SSH still runs end to end: the edge splices bytes and
+cannot read them. You sign in once and link the server by its id:
+
+```sh
+aether login
+aether link --claim <code>     # the owner, with the code aether-server setup printed
+aether link <server name>      # anyone the owner invited with aether invite --github
+```
+
+The server's host key is checked against its id on every connection, and
+each device holds its own key. [edge.md](edge.md) covers claiming,
+invitations, device approval, what the edge can see, and running your own.
 
 ---
 
@@ -352,8 +372,7 @@ tailnet that is not ready says exactly what to enable on the first start.
 ## Other tunnels
 
 The reachability seam inside the server covers announcement and address
-discovery - Tailscale first-class, plain host/port always available - and
-leaves room for a tunnel adapter later. **Aether ships no relay infrastructure
-of its own** and does not plan to. Anything that gets a TCP port from your
-laptop to the server box works today; only Tailscale gets the keyless identity
-integration.
+discovery - Tailscale first-class, plain host/port always available, and the
+edge for servers nothing can dial. Anything else that gets a TCP port from
+your laptop to the server box works too; Tailscale and the edge are the paths
+with identity built in.
