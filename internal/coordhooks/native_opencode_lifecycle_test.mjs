@@ -27,6 +27,7 @@ async function harness(version) {
   let cleanup
   let waitGate
   let getGate
+  let promptGate
   let eventWaiter
   const events = []
   const sandbox = vm.createContext({
@@ -99,16 +100,24 @@ async function harness(version) {
     async wait() { if (waitGate) await waitGate.promise },
     async hook(name, fn) { hooks.set(name, fn) },
     async prompt(input) {
+      const gate = promptGate
+      promptGate = undefined
+      if (gate?.before) await gate.promise
       await hooks.get('prompt')({ sessionID: input.sessionID, messageID: `msg_${randomUUID()}`, metadata: input.metadata })
       prompts.push(input)
       statuses[input.sessionID] = { type: 'busy' }
       await emit('session.execution.started', { sessionID: input.sessionID })
+      if (gate && !gate.before) await gate.promise
     },
     async promptAsync(input) {
+      const gate = promptGate
+      promptGate = undefined
+      if (gate?.before) await gate.promise
       await adapter['chat.message']({ sessionID: input.path.id, messageID: `msg_${randomUUID()}` }, { parts: input.body.parts })
       prompts.push(input)
       statuses[input.path.id] = { type: 'busy' }
       await emit('session.status', { sessionID: input.path.id, status: { type: 'busy' } })
+      if (gate && !gate.before) await gate.promise
     },
   }
   const ctx = {
@@ -138,6 +147,7 @@ async function harness(version) {
     get cleanup() { return cleanup },
     blockGet() { getGate = deferred(); return getGate },
     blockSettlement() { waitGate = deferred(); return waitGate },
+    blockPrompt(before = true) { promptGate = { ...deferred(), before }; return promptGate },
     pending(command = 'wake') { return calls.filter(call => call.command === command && !call.done) },
     async prompt(id = 'root') {
       const event = { sessionID: id, messageID: `msg_human_${randomUUID()}` }
@@ -203,6 +213,120 @@ for (const version of [1, 2]) {
     const prompt = h.prompts[1]
     assert.equal(version === 1 ? prompt.path.id : prompt.sessionID, 'root')
     assert.equal(version === 1 ? prompt.body.parts[0].text : prompt.text, 'Read aether-internal inbox.')
+  })
+
+  test(`V${version} rejected wake retains unread mail until a later human turn completes`, async t => {
+    const h = await harness(version)
+    t.after(() => h.cleanup())
+    await h.prompt()
+    await h.success()
+    reply(h.pending()[0], ['accepted-mail'])
+    await flush()
+    await h.success()
+    const gate = h.blockPrompt()
+    reply(h.pending()[0], ['accepted-mail', 'rejected-mail'])
+    await flush()
+    gate.reject(new Error('native prompt rejected'))
+    await flush()
+    assert.equal(h.prompts.length, 1)
+    assert.equal(h.pending().length, 0, 'rejection must not blindly retry the native mutation')
+    await h.success()
+    assert.equal(h.pending().length, 0, 'idle alone must not undo the rejection pause')
+    await h.prompt()
+    await h.success()
+    reply(h.pending()[0], ['accepted-mail', 'rejected-mail'])
+    await flush()
+    assert.equal(h.prompts.length, 2, 'the same rejected unread message must get a new accepted wake')
+    await h.success()
+    reply(h.pending()[0], ['accepted-mail', 'rejected-mail'])
+    await flush()
+    assert.equal(h.prompts.length, 2, 'accepted recovery must coalesce unchanged unread mail')
+  })
+
+  test(`V${version} rejected mixed batch preserves earlier accepted notification`, async t => {
+    const h = await harness(version)
+    t.after(() => h.cleanup())
+    await h.prompt()
+    await h.success()
+    reply(h.pending()[0], ['accepted-mail'])
+    await flush()
+    await h.success()
+    const gate = h.blockPrompt()
+    reply(h.pending()[0], ['accepted-mail', 'rejected-mail'])
+    await flush()
+    gate.reject(new Error('native prompt rejected'))
+    await flush()
+    await h.prompt()
+    await h.success()
+    reply(h.pending()[0], ['accepted-mail'])
+    await flush()
+    assert.equal(h.prompts.length, 1, 'rollback must not clear notifications accepted by an earlier request')
+  })
+
+  test(`V${version} reserves unread mail while native acceptance trails lifecycle completion`, async t => {
+    const h = await harness(version)
+    t.after(() => h.cleanup())
+    await h.prompt()
+    await h.success()
+    const gate = h.blockPrompt(false)
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    await h.success()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    assert.equal(h.prompts.length, 1, 'pending acceptance must suppress duplicate delivery')
+    gate.resolve()
+    await flush()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    assert.equal(h.prompts.length, 1, 'acceptance after busy changed the epoch must retain coalescing')
+    reply(h.pending()[0], ['mail-a', 'mail-b'])
+    await flush()
+    assert.equal(h.prompts.length, 2, 'new mail must still wake after the pending request settles')
+  })
+
+  test(`V${version} Stop fences a pending prompt and preserves its unread mail`, async t => {
+    const h = await harness(version)
+    t.after(() => h.cleanup())
+    await h.prompt()
+    await h.success()
+    const gate = h.blockPrompt()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    await h.stop()
+    gate.resolve()
+    await flush()
+    await h.success()
+    assert.equal(h.prompts.length, 0, 'a cancelled epoch must reject late native prompt admission')
+    assert.equal(h.pending().length, 0, 'late rejection must not clear the Stop pause')
+    await h.prompt()
+    await h.success()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    assert.equal(h.prompts.length, 1, 'cancelled prompt must not suppress recovery after human input')
+  })
+
+  test(`V${version} late rejection cannot erase a newer accepted notification`, async t => {
+    const h = await harness(version)
+    t.after(() => h.cleanup())
+    await h.prompt()
+    await h.success()
+    const gate = h.blockPrompt()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    await h.prompt()
+    await h.success()
+    reply(h.pending()[0], [])
+    await flush()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    assert.equal(h.prompts.length, 1)
+    gate.reject(new Error('older native prompt rejected'))
+    await flush()
+    await h.success()
+    reply(h.pending()[0], ['mail-a'])
+    await flush()
+    assert.equal(h.prompts.length, 1, 'rollback must only release reservations owned by the rejected request')
   })
 
   test(`V${version} cancels Stop and stale helper replies until explicit root input`, async t => {

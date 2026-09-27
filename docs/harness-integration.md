@@ -145,10 +145,9 @@ Maintain two in-memory sets per owning session:
 - **Observed IDs:** the last supported response's current unread set. Send
   this as `seen_message_ids` on the next wait, even if wake was suppressed.
   Compare membership, not count or lexical order.
-- **Notified IDs:** unread IDs handed to the native follow-up API. Prune IDs
+- **Notified IDs:** unread IDs accepted by the native follow-up API. Prune IDs
   absent from each new unread set. A helper response alone is not
-  notification, and a synchronously rejected native call must not mark IDs
-  notified.
+  notification, and a rejected native call must not leave IDs marked notified.
 
 For every supported response, update observed IDs and prune notified IDs.
 Dispatch one coalesced trusted hint only when `wake_admitted` is true and at
@@ -168,6 +167,15 @@ native activity—OMP context/agent/approval boundaries or pi successful idle
 settlement/manual compaction—can request fresh helper/server admission for
 the same unread IDs. Stop still requires accepted human input to resume.
 Normal return is SDK acceptance, not proof of model receipt or acknowledgement.
+
+OpenCode's asynchronous prompt APIs reserve newly eligible IDs before awaiting
+acceptance: native busy/completion events can arrive before the promise settles.
+A rejection releases only that request's reservations, never previously accepted
+IDs or a newer request's reservation. The receiver remains fail-closed on a
+current request's failure; a later human prompt and successful completion can
+obtain fresh admission for the same unread mail. Stop, root ownership, and
+generation checks still fence delayed prompt hooks. There is no immediate
+native-prompt retry.
 
 This distinction matters when mail arrives during protection or takeover:
 the receiver observes it without notifying. An unchanged set can later be
