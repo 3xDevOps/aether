@@ -143,9 +143,10 @@ Maintain two in-memory sets per owning session:
 - **Observed IDs:** the last supported response's current unread set. Send
   this as `seen_message_ids` on the next wait, even if wake was suppressed.
   Compare membership, not count or lexical order.
-- **Notified IDs:** unread IDs for which this receiver invoked the native
-  follow-up API. Prune IDs absent from each new unread set. Add new IDs only
-  when invoking the native API, never merely because the server returned them.
+- **Notified IDs:** unread IDs handed to the native follow-up API. Prune IDs
+  absent from each new unread set. A helper response alone is not
+  notification, and a synchronously rejected native call must not mark IDs
+  notified.
 
 For every supported response, update observed IDs and prune notified IDs.
 Dispatch one coalesced trusted hint only when `wake_admitted` is true and at
@@ -153,6 +154,18 @@ least one current ID has not been notified. Recheck the session generation
 and Stop/approval state immediately before the native call. If local state
 prevents dispatch, do not mark those IDs notified. Let the next bounded wait
 reconsider them when the host resumes.
+
+For pi/OMP's synchronous `sendMessage`, reserve coalescing/readiness state
+before the call because it can invoke lifecycle callbacks reentrantly.
+Commit the captured ID set only after normal return and while the original
+root/session still owns it. A throw rolls back only the reservation still
+owned by that generation, preserving any newer Stop or session transition;
+surface the error and end that receiver pass without a permanent helper-fatal
+halt. Do not blindly resend or apply a native-send retry timer. Later eligible
+native activity—OMP context/agent/approval boundaries or pi successful idle
+settlement/manual compaction—can request fresh helper/server admission for
+the same unread IDs. Stop still requires accepted human input to resume.
+Normal return is SDK acceptance, not proof of model receipt or acknowledgement.
 
 This distinction matters when mail arrives during protection or takeover:
 the receiver observes it without notifying. An unchanged set can later be

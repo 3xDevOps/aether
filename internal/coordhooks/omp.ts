@@ -147,13 +147,27 @@ export default function (omp: ExtensionAPI) {
         if (!reply.wake_admitted || !reply.context || scope.queued ||
             !scope.observed.some(id => !scope.notified.has(id))) continue
         if (main?.session?.agent.isAborting) { pause(); return }
+        const dispatchIDs = scope.observed
+        const dispatchManager = scope.manager
+        const dispatchSessionID = scope.sessionID
+        const dispatchMain = main
         scope.queued = true
-        for (const id of scope.observed) scope.notified.add(id)
         // A trusted hidden pointer only. The native follow-up queue owns busy
         // ordering; this never types into the terminal or acknowledges mail.
-        omp.sendMessage({ customType: WAKE_TYPE, content: reply.context, attribution: 'agent', display: false }, {
-          triggerTurn: true, deliverAs: 'followUp',
-        })
+        try {
+          omp.sendMessage({ customType: WAKE_TYPE, content: reply.context, attribution: 'agent', display: false }, {
+            triggerTurn: true, deliverAs: 'followUp',
+          })
+        } catch (error) {
+          // Leave rejected IDs eligible, but do not blindly retry native input.
+          // A later lifecycle boundary must obtain fresh helper admission.
+          if (owns() && generation === epoch && !signal.aborted) scope.queued = false
+          report(error)
+          return
+        }
+        if (owns() && main === dispatchMain && scope.manager === dispatchManager && scope.sessionID === dispatchSessionID) {
+          for (const id of dispatchIDs) scope.notified.add(id)
+        }
       } catch (error) {
         if (!owns() || generation !== epoch || signal.aborted) return
         report(error)

@@ -497,10 +497,12 @@ silent terminal fallback.
 
 Native receiver errors appear in the harness warning UI or stderr. Only
 recoverable helper/transport failures get bounded backoff; unsupported
-protocols and permanent errors stop observation rather than spinning.
-After exhausting retries, pi/OMP require a reload/restart; OpenCode pauses
-until another explicit same-root prompt. Fix the underlying error first.
-Reloading does not erase or acknowledge durable mail.
+protocols and nonretryable helper errors stop observation rather than spinning.
+After exhausting helper retries, pi/OMP require a reload/restart; OpenCode
+pauses until another explicit same-root prompt. Native synchronous send
+rejection instead permits [lifecycle-driven recovery with fresh admission](harness-integration.md#keep-observation-and-notification-separate),
+without marking the rejected IDs notified or blindly resending. Fix the
+underlying error first; reloading never erases or acknowledges durable mail.
 
 Command stop hooks may request one continuation for pending mail or an
 integrator's final mission refresh, even with an empty inbox. Native

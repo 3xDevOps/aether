@@ -183,12 +183,28 @@ export default function (pi: ExtensionAPI) {
         if (context?.signal?.aborted) { pause(); return }
         // Do not leave a custom hint queued through pi's retry/compaction Stop:
         // defer busy mail until successful settlement and fresh helper admission.
+        const dispatchIDs = scope.observed
+        const dispatchManager = scope.manager
+        const dispatchSessionID = scope.sessionID
         scope.queued = true
         ready = false
-        for (const id of scope.observed) scope.notified.add(id)
-        pi.sendMessage({ customType: WAKE_TYPE, content: reply.context, display: false }, {
-          triggerTurn: true, deliverAs: 'followUp',
-        })
+        try {
+          pi.sendMessage({ customType: WAKE_TYPE, content: reply.context, display: false }, {
+            triggerTurn: true, deliverAs: 'followUp',
+          })
+        } catch (error) {
+          // A synchronous rejection is not helper failure or accepted delivery.
+          // Preserve any newer Stop/session transition made by native callbacks.
+          if (owns() && generation === epoch && !signal.aborted) {
+            scope.queued = false
+            ready = true
+          }
+          report(error)
+          return // Eligible native lifecycle activity may request fresh admission.
+        }
+        if (owns() && scope.manager === dispatchManager && scope.sessionID === dispatchSessionID) {
+          for (const id of dispatchIDs) scope.notified.add(id)
+        }
       } catch (error) {
         if (!owns() || generation !== epoch || signal.aborted) return
         report(error)

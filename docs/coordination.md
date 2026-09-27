@@ -396,8 +396,9 @@ it does not itself call a native API or start a model turn.
 
 The receiver sends its last observed unread-ID set as `seen_message_ids`,
 even when that response did not admit a wake. It separately remembers IDs
-already notified through the native API and prunes them when they leave the
-unread set. Only admitted IDs not yet notified cause a follow-up. Thus mail
+handed to the native API and prunes them when they leave the unread set;
+synchronous native rejection is not notification. Only admitted IDs not yet
+notified cause a follow-up. Thus mail
 held by protection can wake after release, while the same unacknowledged
 batch cannot cause endless turns. A session/process restart may produce one
 duplicate hint; durable inbox delivery and explicit acknowledgement are

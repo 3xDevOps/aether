@@ -26,6 +26,7 @@ async function fixture(harness, inheritedOwner, settings = {}) {
   let sessionID = 'root'
   let sessionFile = '/root.jsonl'
   let signal
+  let sendFailures = settings.sendFailures ?? 0
   const manager = { getSessionId: () => sessionID, getSessionFile: () => sessionFile }
   const ctx = {
     sessionManager: manager, hasUI: true, mode: 'tui',
@@ -47,7 +48,13 @@ async function fixture(harness, inheritedOwner, settings = {}) {
       if (!handlers.has(name)) handlers.set(name, [])
       handlers.get(name).push(handler)
     },
-    sendMessage: (message, options) => sent.push({ message, options }),
+    sendMessage: (message, options) => {
+      if (sendFailures > 0) {
+        sendFailures--
+        throw Object.assign(new Error('native input rejected'), { code: settings.sendFailureCode })
+      }
+      sent.push({ message, options })
+    },
     pi: { MAIN_AGENT_ID: 'Main', AgentRegistry: { global: () => ({ get: () => main }) } },
   }
   function execFile(_file, args, _options, callback) {
@@ -609,3 +616,114 @@ test('pi: successful manual compaction requires cleanup and a fresh idle admissi
   assert.equal(f.sent.length, 1)
   await f.close()
 })
+
+for (const harness of ['omp', 'pi']) {
+  test(`${harness}: synchronous send rejection preserves the same unread ID and later wake eligibility`, async () => {
+    const f = await fixture(harness, undefined, { sendFailures: 1 })
+    await f.begin()
+    await f.reply(['rejected-mail'])
+    assert.equal(f.sent.length, 0)
+    assert.equal(f.pending(), undefined, 'a rejected native call must not cause a blind retry')
+    assert.equal(f.timers.size, 0)
+    assert.match(f.errors.at(-1), /native input rejected/)
+
+    // Accepted human work does not itself consume or acknowledge this mail.
+    await f.humanStart()
+    await f.finishTurn()
+    assert.ok(f.pending(), 'eligible same-root lifecycle must reopen the receiver after rejection')
+    assert.deepEqual(f.pending().input.seen_message_ids, ['rejected-mail'])
+    await f.reply(['rejected-mail'], false)
+    assert.equal(f.sent.length, 0, 'recovery cannot reuse the earlier admitted helper frame')
+    await f.reply(['rejected-mail'])
+    assert.equal(f.sent.length, 1, 'rejected IDs remain unnotified until native acceptance')
+    await f.emit('message_start', { message: { role: 'custom', ...f.sent[0].message } })
+    await f.finishTurn()
+    await f.reply(['rejected-mail'])
+    assert.equal(f.sent.length, 1, 'an accepted unread ID is still deduplicated')
+    await f.reply(['later-mail'])
+    assert.equal(f.sent.length, 2, 'the same root can also receive subsequent mail')
+    await f.close()
+  })
+
+  test(`${harness}: Stop wins over rollback of a rejected native send`, async () => {
+    // A native rejection must not inherit helper exit1 retry behavior.
+    const f = await fixture(harness, undefined, { sendFailures: 1, sendFailureCode: 1 })
+    const send = f.api.sendMessage
+    f.api.sendMessage = (message, options) => {
+      // Reentrant native cancellation can invalidate the reservation before
+      // sendMessage returns or throws. Rollback must not undo that Stop.
+      for (const handler of f.handlers.get('message_end') ?? []) {
+        handler({ type: 'message_end', message: { role: 'assistant', stopReason: 'aborted' } }, f.ctx)
+      }
+      send(message, options)
+    }
+    await f.begin()
+    await f.reply(['stopped-rejection'])
+    f.api.sendMessage = send
+    assert.equal(f.sent.length, 0)
+    assert.equal(f.pending(), undefined)
+    assert.equal(f.timers.size, 0, 'native failure is separate from helper retry classification')
+    await f.finishTurn()
+    assert.equal(f.pending(), undefined, 'successful callbacks alone cannot undo Stop')
+    await f.humanStart('extension')
+    await f.finishTurn()
+    assert.equal(f.pending(), undefined, 'extension input is not human resumption')
+    await f.humanStart()
+    await f.finishTurn()
+    await f.reply(['stopped-rejection'])
+    assert.equal(f.sent.length, 1)
+    await f.close()
+  })
+
+  test(`${harness}: native start reentrancy does not lose deduplication after acceptance`, async () => {
+    const f = await fixture(harness)
+    const send = f.api.sendMessage
+    f.api.sendMessage = (message, options) => {
+      // Pi can synchronously begin agent_start while its void native action
+      // accepts the message; that cancels the old observer generation.
+      for (const handler of f.handlers.get('agent_start') ?? []) {
+        handler({ type: 'agent_start' }, f.ctx)
+      }
+      for (const handler of f.handlers.get('message_start') ?? []) {
+        handler({ type: 'message_start', message: { role: 'custom', ...message } }, f.ctx)
+      }
+      send(message, options)
+    }
+    await f.begin()
+    await f.reply(['accepted-mail'])
+    assert.equal(f.sent.length, 1)
+    await f.finishTurn()
+    await f.reply(['accepted-mail'])
+    assert.equal(f.sent.length, 1, 'normal native return commits IDs despite observer-generation changes')
+    await f.reply(['new-mail'])
+    assert.equal(f.sent.length, 2)
+    await f.close()
+  })
+
+  test(`${harness}: accepted send cannot mark its IDs notified in a reentrant replacement session`, async () => {
+    const f = await fixture(harness)
+    f.setSession('root', undefined)
+    const send = f.api.sendMessage
+    let replacement = true
+    f.api.sendMessage = (message, options) => {
+      send(message, options)
+      if (!replacement) return
+      replacement = false
+      for (const handler of f.handlers.get('session_shutdown') ?? []) {
+        handler({ type: 'session_shutdown', reason: 'fork', targetSessionFile: undefined }, f.ctx)
+      }
+      // In-memory pi forks and OMP switches can mutate the existing manager.
+      f.setSession('forked', undefined)
+      const event = harness === 'omp' ? 'session_switch' : 'session_start'
+      for (const handler of f.handlers.get(event) ?? []) {
+        handler({ type: event, reason: 'fork', previousSessionFile: undefined }, f.ctx)
+      }
+    }
+    await f.begin()
+    await f.reply(['shared-unread-mail'])
+    assert.equal(f.sent.length, 1)
+    await f.reply(['shared-unread-mail'])
+    assert.equal(f.sent.length, 2, 'the successor session must not inherit its predecessor acceptance')
+    await f.close()
+  })
+}
