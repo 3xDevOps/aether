@@ -5,7 +5,7 @@
 
 import { Copy } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { message } from '@/lib/format'
+import { linkTarget, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -119,7 +119,7 @@ function LinkCard({ client }: { client: Api }) {
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Server
             </dt>
-            <dd className="font-mono">{link?.addr}</dd>
+            <dd className="break-all font-mono">{link && linkTarget(link)}</dd>
           </div>
           <div className="space-y-1">
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

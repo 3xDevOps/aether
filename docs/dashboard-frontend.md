@@ -692,7 +692,15 @@ Removal also repairs the selection and open route before any refresh awaits.
   reason. A fetch that got no answer at all is `gateway` only on the desktop
   origin, where that process can be restarted; on the server gateway it is
   `tailnet`, because the page came over the tailnet and there is no local
-  process to blame and no wifi advice to give. The capabilities probe records
+  process to blame and no wifi advice to give, and on the edge gateway it is
+  `relay`, which names both the edge and the server's edge connection and
+  gives `sudo aether-server edge status`. A local gateway linked through an
+  edge classifies the client's own error text: `edge` (the edge did not
+  answer), `edge-server` (the server is not connected to it), `signed-out`
+  (no valid device token; gives the `aether login --edge` command),
+  `device-revoked` and `device-pending`. `src/store/edge-sync.test.ts` pins
+  the wording those classes match, so a change in `internal/edgeclient` or
+  the sshd banners fails there. The capabilities probe records
   which gateway serves the page before hydration runs, so the first failure
   is classified too. The gateway's message appears in an initially open
   "Technical details" disclosure, and the page suppresses the toast that
@@ -708,6 +716,15 @@ Removal also repairs the selection and open route before any refresh awaits.
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
+- **The edge gateway's refusals replace the shell with a page of their
+  own** (`src/components/edge-access.tsx`). A `401` whose `data.login` is
+  `/auth/login` shows **Sign in**, a plain link to `/auth/login`, so the
+  navigation is top-level and the Android app can hand it to the phone's
+  browser. A `403` carrying `data.approval_code` shows the code, both approve
+  commands, **Check again** and **Sign out**. Both shapes are in
+  [local-gateway.md](local-gateway.md#get-apiv1capabilities); hydration stops
+  retrying once either arrives. **Sign out** also sits in the status bar's
+  details on the edge gateway only; it posts `/auth/logout` and reloads `/`.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
@@ -2023,6 +2040,21 @@ Room tab count, and neither creates a second action inbox.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
   `server.info`, which is what fills the status bar's disk gauge.
 
+## Devices and invitations
+
+`src/routes/devices/` lists the computers and browsers members reach the
+server with through an edge: the member's own, or every member's for an
+admin. It approves a pending device by its code and revokes one, showing the
+server's refusal verbatim. It is its own view, not part of Settings, because
+Settings is local-gateway only and the phone on the edge gateway needs it
+most; the sidebar and palette show it whenever the gateway serves
+`member.device.list`.
+
+The Members view carries an admin-only **Invitations** section
+(`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
+an email, a role, and revoke. Its button reads **Invite account**, so it is
+not confused with **Invite**, which mints one-time codes for SSH-key joins.
+
 ## Manage workspaces
 
 `src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
@@ -2203,7 +2235,12 @@ here when `onboarded` is false. The server-hosted gateway has no local link
 state and opens at the board. Completing the final step or navigating
 elsewhere marks the UI onboarded and clears that wizard state.
 
-The Link step distinguishes no configured server, a server with no repository,
+The Link step first offers signing in to an edge
+(`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
+through the local gateway, which keeps the device token, shows the code
+while it polls `edge.status`, then links a server the account reaches or
+claims a new one with the code `aether-server setup` printed. The Link step
+distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
 focus, so a separate `aether link` command appears without restarting the GUI.
 

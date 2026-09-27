@@ -10,12 +10,9 @@ You can use its authenticated hosted dashboard/API from another machine with
 no local project clone or toolchain. Administrators can seed a repository with
 [remote import](#remote-only-import-no-local-clone) instead of a local push.
 The local-client path below is also available on Linux, macOS, or Windows.
-That path needs git for local linking/pushing and, unless both machines are on
-a tailnet (see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
-`~/.ssh/id_ed25519` and your ssh-agent. For a key somewhere else, pass
-`aether link --key <path>`; for a passphrase-protected one, `ssh-add` it
-first. Windows paths and the OpenSSH agent service are in
-[install.md](install.md#the-windows-client).
+That path needs git for local linking/pushing. How your machine reaches the
+server is [step 3](#3-link-from-your-machine): through an edge with a GitHub
+or Google sign-in, over a tailnet, or by SSH address with a key.
 
 ---
 
@@ -69,16 +66,33 @@ sudo aether-server setup
 
 It asks for the listen address, data directory, and tailnet policy - plus, on
 a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
-(Enter accepts each default) - then prints:
+and whether to use the edge (Enter accepts each default) - then prints:
 
 ```sh
 systemctl daemon-reload && systemctl enable --now aether-server
 ```
 
-Run that and the server is live on `:2222`. The SSH host key is generated on
-first start, and the SSH port is the only thing exposed unless you answered the
-dashboard question. Change any option later with
-`aether-server config set <key> <value>`, then restart.
+On a host without tailscaled, setup turns on the **edge**: a relay at
+`https://edge.onaether.dev` that the server and your machine both dial out
+to, so neither needs an open port ([edge.md](edge.md)). With the edge on,
+setup then prints the server's id and a **claim code**, which makes whoever
+uses it first the server's admin:
+
+```
+edge: https://edge.onaether.dev
+server id: <server id>
+edge key: pinned when the server first connects; `aether-server edge status` shows it
+claim code: <code> (valid until 3:04PM, 5 attempts)
+claim this server with:
+  aether link --claim <code>
+or enter it at https://edge.onaether.dev/servers/add
+```
+
+Run the activation line and the server is live on `:2222`. The SSH port is
+the only thing it listens on unless you answered the dashboard question; the
+edge connection is outbound. The claim code lasts 30 minutes;
+`sudo aether-server edge claim-code` prints a new one. Change any option
+later with `aether-server config set <key> <value>`, then restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
 Ctrl-C. [install.md](install.md) covers unattended installs, running
@@ -86,38 +100,68 @@ unprivileged, and every serve option.
 
 ## 3. Link from your machine
 
+**Through the edge**, with the claim code from step 2:
+
+```sh
+aether login
+aether link --claim <code>
+```
+
+`aether login` prints an address and a short code; open it, sign in with
+GitHub or Google, and confirm the code:
+
+```
+open https://edge.onaether.dev/device and enter the code <user code>
+waiting for you to confirm the code...
+signed in to edge.onaether.dev as <login> (github); this device is "<host name>"
+claimed <server name> (<server id>) on edge.onaether.dev
+linked to server <server id> through edge.onaether.dev as <your name> (admin)
+```
+
+This machine now holds its own device key; no SSH key is involved. The
+server's host key is checked against the server id on every connection, so
+nothing is written to `known_hosts`.
+
+**By address**, over a tailnet or to a reachable SSH port:
+
 ```sh
 aether link <server-host>:2222
 ```
-
-Output:
 
 ```
 linked to <server-host>:2222 as admin (admin)
 ```
 
-**The first identity to link a fresh server becomes the admin.** That is the
-whole account setup - there is no signup, no password, no config file to edit.
-The link is saved to `~/.config/aether/config.json`, or
-`%AppData%\aether\config.json` on Windows. (Joining over a tailnet,
-the display name comes from your tailnet login instead of the literal
-`admin`; the role is the same. Change any display color with
-`aether member color <#rrggbb>`.)
+**The first identity to link a fresh server becomes the admin**, and
+through the edge the claim code decides who that is. That is the whole
+account setup - there is no password and no config file to edit. The link is
+saved to `~/.config/aether/config.json`, or `%AppData%\aether\config.json`
+on Windows. (Joining over a tailnet, the display name comes from your
+tailnet login instead of the literal `admin`; the role is the same. Change
+any display color with `aether member color <#rrggbb>`.)
 
-How you were identified depends on the network:
+How you were identified by address depends on the network:
 
 - **On a tailnet:** Tailscale already knows who you are and the server asks it.
   No SSH key, no invite code, nothing to copy. See
   [networking.md](networking.md).
 - **Anywhere else:** your SSH public key (`~/.ssh/id_ed25519`, or any key in
-  your ssh-agent) is registered as the admin's key. Generate one first with
-  `ssh-keygen -t ed25519` if you do not have one. On Windows that is
-  `%USERPROFILE%\.ssh\id_ed25519` and the OpenSSH agent service; `ssh-keygen`
-  ships with Windows OpenSSH.
+  your ssh-agent) is registered as the admin's key. With no key to offer,
+  `aether link` creates `~/.ssh/id_ed25519` itself. For a key somewhere else,
+  pass `--key <path>`; for a passphrase-protected one, `ssh-add` it first. On
+  Windows the path is `%USERPROFILE%\.ssh\id_ed25519` with the OpenSSH agent
+  service ([install.md](install.md#the-windows-client)).
 
-On first contact `aether` records the server's host key in `~/.ssh/known_hosts`
-(`%USERPROFILE%\.ssh\known_hosts` on Windows) and prints its fingerprint.
-Compare that against what the server printed if you care to.
+On first contact by address `aether` records the server's host key in
+`~/.ssh/known_hosts` (`%USERPROFILE%\.ssh\known_hosts` on Windows) and
+prints its fingerprint. Compare that against what the server printed if you
+care to.
+
+**On a phone**, through the edge, open
+`https://<server id>.<server domain>` in the browser or the
+[Android app](install.md#android-app) and tap **Sign in**. The server logs
+the server domain when it connects to the edge
+([edge.md](edge.md#dashboard-through-the-edge)).
 
 Then tell Aether who to put on your commits:
 
@@ -151,7 +195,7 @@ them too; see [environments.md](environments.md).
 Now point your local clone at it and seed the repo:
 
 ```sh
-aether link <server-host>:2222 --repo ~/code/myproject
+aether link <server-host>:2222 --repo ~/code/myproject   # or: aether link <server id> --repo ...
 cd ~/code/myproject
 git push -u aether main
 ```
@@ -797,6 +841,11 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `parse ssh key <path>` | The file at that path is not an SSH private key (a public key, or a truncated file). Pass the private key with `aether link <addr> --key <path>`. |
 | `link --key: stat <path>` / `ssh key <path>: open <path>: no such file` | The key path you chose is not there. A chosen key is never skipped in favor of the agent, so re-link with the right `--key`. Re-linking without `--key` keeps the saved one; to go back to `~/.ssh/id_ed25519`, delete the `key` line from `~/.config/aether/config.json`. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
+| `not signed in` from `aether link --claim` or `aether servers` | This machine has no edge sign-in. Run `aether login`. |
+| `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new code, valid 30 minutes. |
+| `server is not connected to the edge` | The server is stopped or cannot reach the edge. On the server, `sudo aether-server edge status` shows the last connection error. |
+| `not a member of this server` | Your edge account has no membership or open invitation there. An admin runs `aether invite --github <your-login>` ([teams.md](teams.md#through-an-edge)). |
+| `device "<label>" is waiting for approval` | Your account already has a device on this server. Run the `aether device approve <code>` the message prints from that device, or ask an admin. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |

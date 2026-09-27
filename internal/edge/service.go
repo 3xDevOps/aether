@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/edge/edgestore"
@@ -82,10 +82,14 @@ type Service struct {
 	pages        *template.Template
 	client       *http.Client
 
-	signinLimit *limiter
-	startLimit  *limiter
-	codeLimit   *limiter
-	claimLimit  *limiter
+	signinLimit *limiter[netip.Prefix]
+	startLimit  *limiter[netip.Prefix]
+	pollLimit   *limiter[netip.Prefix]
+	codeLimit   *limiter[netip.Prefix]
+	// codeAccountLimit also counts user-code entries per account, so
+	// guesses spread over many address blocks still meet one limit.
+	codeAccountLimit *limiter[int64]
+	claimLimit       *limiter[netip.Prefix]
 }
 
 // New opens the edge's store and signing key in cfg.DataDir, creating both
@@ -95,7 +99,7 @@ func New(cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edge: %w", err)
 	}
-	if !validDomain(cfg.ServerDomain) {
+	if !edgeproto.ValidServerDomain(cfg.ServerDomain) {
 		return nil, fmt.Errorf("edge: server domain %q is not a lowercase DNS name such as servers.example.com", cfg.ServerDomain)
 	}
 	if cfg.DataDir == "" {
@@ -110,10 +114,13 @@ func New(cfg Config) (*Service, error) {
 		serverDomain: cfg.ServerDomain,
 		now:          now,
 		client:       &http.Client{Timeout: providerTimeout},
-		signinLimit:  newLimiter(20, 6*time.Second, now),
-		startLimit:   newLimiter(10, 30*time.Second, now),
-		codeLimit:    newLimiter(10, 6*time.Second, now),
-		claimLimit:   newLimiter(5, time.Minute, now),
+		signinLimit:  newLimiter[netip.Prefix](20, 6*time.Second, now),
+		startLimit:   newLimiter[netip.Prefix](10, 30*time.Second, now),
+		// Four polls a second: twenty sign-ins at once behind one address.
+		pollLimit:        newLimiter[netip.Prefix](30, 250*time.Millisecond, now),
+		codeLimit:        newLimiter[netip.Prefix](10, 6*time.Second, now),
+		codeAccountLimit: newLimiter[int64](10, time.Minute, now),
+		claimLimit:       newLimiter[netip.Prefix](5, time.Minute, now),
 	}
 	if cfg.GitHub != nil {
 		s.providers = append(s.providers, githubProvider(*cfg.GitHub, origin))
@@ -179,24 +186,4 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST "+edgeproto.PathClaim, s.api(s.apiClaim))
 	mux.HandleFunc("GET "+edgeproto.PathEdgeKey, s.api(s.apiEdgeKey))
 	return mux
-}
-
-// validDomain accepts a lowercase DNS name with at least two labels.
-func validDomain(d string) bool {
-	labels := strings.Split(d, ".")
-	if len(d) > 253 || len(labels) < 2 {
-		return false
-	}
-	for _, l := range labels {
-		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
-			return false
-		}
-		for i := 0; i < len(l); i++ {
-			c := l[i]
-			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
-				return false
-			}
-		}
-	}
-	return true
 }

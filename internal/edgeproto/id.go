@@ -46,6 +46,28 @@ func HostKeyMatches(hostKey ssh.PublicKey, serverID string) bool {
 	return subtle.ConstantTimeCompare([]byte(ServerID(hostKey)), []byte(serverID)) == 1
 }
 
+// ValidServerDomain reports whether d is a lowercase DNS name of at least
+// two labels short enough that every "<server id>.<d>" is a valid
+// hostname.
+func ValidServerDomain(d string) bool {
+	labels := strings.Split(d, ".")
+	if len(d) > 253-ServerIDLength-1 || len(labels) < 2 {
+		return false
+	}
+	for _, l := range labels {
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(l); i++ {
+			c := l[i]
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // ServerHostname is the dashboard hostname of a server under the edge's
 // server domain.
 func ServerHostname(serverID, domain string) string {

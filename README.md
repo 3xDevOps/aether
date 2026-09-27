@@ -89,7 +89,9 @@ while you sleep.**
 machine, bound to loopback and carried over the same SSH connection as the
 CLI. On a tailnet, the server can optionally host the dashboard over HTTPS with
 `--web-port`; Tailscale WhoIs identifies each request, so a phone needs no
-install or token. The server-hosted surface has no machine-local verbs or
+install or token. Without a tailnet, a phone or browser signs in with GitHub or
+Google through an edge relay and reaches the server's own HTTPS dashboard
+([edge.md](docs/edge.md)). The server-hosted surface has no machine-local verbs or
 onboarding wizard; use local `aether gui` for the one-time directory picker and
 other local filesystem or repository actions.
 
@@ -129,7 +131,8 @@ See [per-harness setup and limits](docs/harnesses.md) and
 | [Quickstart](docs/quickstart.md) | Zero to a finished run in ten minutes. |
 | [Install](docs/install.md) | The install script, systemd, upgrades, data layout. |
 | [Environments](docs/environments.md) | Member images, saving, resetting, and persistence. |
-| [Networking](docs/networking.md) | Tailscale-first keyless setup, plus LAN and VPN. |
+| [Networking](docs/networking.md) | Tailscale, the edge relay, and plain LAN or VPN. |
+| [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub or Google sign-in, and running your own edge. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
 | [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
 | [Harness integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |

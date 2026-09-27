@@ -42,6 +42,7 @@ import type { Member } from '@/lib/types'
 import { cn, field, focusRing } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { MemberAvatar } from '@/routes/board/member-avatar'
+import { InvitationsSection } from '@/routes/members/invitations'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import { onlineMembers } from '@/store/presence'
@@ -364,6 +365,10 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
               </table>
             </div>
           </section>
+
+          {isAdmin && caps.hasMethod('member.invitation.list') && (
+            <InvitationsSection client={client} />
+          )}
 
           {self &&
             caps.hasMethod('account.share') &&

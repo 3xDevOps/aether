@@ -5,7 +5,8 @@ reach the server's SSH port.** Git transport, the control channel, event
 streams, PTY attach and the dashboard forward all multiplex over that one
 connection. The server opens no HTTP port unless you set `web-port`, and that
 one listens on the host's tailnet addresses only - see
-[The dashboard](#the-dashboard).
+[The dashboard](#the-dashboard). Through an edge the server opens no port at
+all: it dials out.
 
 How you make that port reachable is up to you. Tailscale is the recommended
 answer, and it is also the recommended identity layer, because it removes SSH
@@ -132,8 +133,11 @@ server user, `sudo tailscale set --operator=<user>`.
 ## Through an edge
 
 An edge is a relay both the server and your client dial out to, so neither
-needs an open port. SSH still runs end to end: the edge splices bytes and
-cannot read them. You sign in once and link the server by its id:
+needs an open port, a tailnet or a copied SSH key. The project runs one at
+`https://edge.onaether.dev`, and `aether-server setup` turns it on when the
+host has no tailscaled. SSH still runs end to end: the edge splices bytes and
+cannot read them. You sign in once with GitHub or Google and link the server
+by its id:
 
 ```sh
 aether login
@@ -142,8 +146,11 @@ aether link <server name>      # anyone the owner invited with aether invite --g
 ```
 
 The server's host key is checked against its id on every connection, and
-each device holds its own key. [edge.md](edge.md) covers claiming,
-invitations, device approval, what the edge can see, and running your own.
+each device holds its own key. Phones and browsers open the dashboard at
+`https://<server id>.<server domain>` and sign in there; the server, not the
+edge, terminates that TLS. [edge.md](edge.md) covers claiming, the
+dashboard, what the edge can see, and running your own; invitations and
+device approval are in [teams.md](teams.md#through-an-edge).
 
 ---
 
@@ -155,12 +162,14 @@ invite codes instead.
 ### The admin
 
 ```sh
-ssh-keygen -t ed25519          # if you do not already have a key
 aether link 192.168.1.50:2222
 ```
 
 The first key to link a fresh server is registered as the admin. The CLI uses
 `~/.ssh/id_ed25519` by default and also offers any key loaded in your ssh-agent.
+With no key to offer (no `id_ed25519`, `id_ecdsa` or `id_rsa` in `~/.ssh` and
+none in the agent), `aether link` creates `~/.ssh/id_ed25519` and its `.pub`
+itself.
 For a key at another path:
 
 ```sh
@@ -331,8 +340,8 @@ refused here too. `--tailnet-require-key` and `web-port` are mutually
 exclusive: HTTP cannot present a key, so a server set to require one refuses
 to start with the dashboard on.
 
-Key-only and invite-code servers - anything with no tailscaled - have no
-phone dashboard in this release. `aether gui` is the whole story there.
+A server with no tailscaled serves phones through an edge instead
+([edge.md](edge.md#dashboard-through-the-edge)).
 
 ### Where it refuses
 

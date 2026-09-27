@@ -139,9 +139,16 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		r.mu.Unlock()
 		return nil, errDraining
 	}
-	if !claimed && r.unclaimedFromLocked(addr, id) >= edgeproto.MaxUnclaimedPerAddress {
-		r.mu.Unlock()
-		return nil, fmt.Errorf("relay: %d unclaimed servers are already connected from %s; claim one first", edgeproto.MaxUnclaimedPerAddress, addr)
+	if !claimed {
+		fromAddr, total := r.unclaimedLocked(addr, id)
+		if fromAddr >= edgeproto.MaxUnclaimedPerAddress {
+			r.mu.Unlock()
+			return nil, fmt.Errorf("relay: %d unclaimed servers are already connected from %s; claim one first", edgeproto.MaxUnclaimedPerAddress, addr)
+		}
+		if total >= r.maxUnclaimed {
+			r.mu.Unlock()
+			return nil, fmt.Errorf("relay: this edge already holds its limit of %d unclaimed servers", r.maxUnclaimed)
+		}
 	}
 	old := r.servers[id]
 	r.servers[id] = reg
@@ -154,23 +161,27 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if claimed {
 		state = edgeproto.StateClaimed
 	}
-	if err := reg.send(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub}); err != nil {
+	if err := reg.send(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub, ServerDomain: r.domain}); err != nil {
 		r.unregister(reg, err)
 		return nil, err
 	}
 	return reg, nil
 }
 
-// unclaimedFromLocked counts the unclaimed registrations from addr other
-// than one for serverID, which a new registration would replace.
-func (r *Relay) unclaimedFromLocked(addr netip.Prefix, serverID string) int {
-	n := 0
+// unclaimedLocked counts the unclaimed registrations from addr and in
+// total, other than one for serverID, which a new registration would
+// replace.
+func (r *Relay) unclaimedLocked(addr netip.Prefix, serverID string) (fromAddr, total int) {
 	for id, reg := range r.servers {
-		if id != serverID && !reg.claimed && reg.addr == addr {
-			n++
+		if id == serverID || reg.claimed {
+			continue
+		}
+		total++
+		if reg.addr == addr {
+			fromAddr++
 		}
 	}
-	return n
+	return fromAddr, total
 }
 
 func (r *Relay) unregister(reg *registration, cause error) {

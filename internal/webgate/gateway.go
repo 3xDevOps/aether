@@ -35,12 +35,19 @@ type Config struct {
 	// it was holding. Zero means the defaults.
 	PingInterval time.Duration
 	PingTimeout  time.Duration
+	// Wrap, when set, wraps the handler Serve's listeners answer with, for
+	// a composer's own headers or request context.
+	Wrap func(http.Handler) http.Handler
 }
 
 const (
 	// httpReadHeaderTimeout bounds how long a client may dribble request
 	// headers.
 	httpReadHeaderTimeout = 10 * time.Second
+	// httpIdleTimeout closes a keep-alive connection that sends no next
+	// request. Through an edge, every open connection holds one of the
+	// relayed-connection slots the server shares with SSH.
+	httpIdleTimeout = 30 * time.Second
 	// closeTimeout bounds the graceful drain in Close.
 	closeTimeout = 5 * time.Second
 )
@@ -142,7 +149,11 @@ func New(cfg Config) (*Gateway, error) {
 			static.ServeHTTP(w, r)
 		}
 	}))
-	g.srv = &http.Server{Handler: g, ReadHeaderTimeout: httpReadHeaderTimeout}
+	var handler http.Handler = g
+	if cfg.Wrap != nil {
+		handler = cfg.Wrap(g)
+	}
+	g.srv = &http.Server{Handler: handler, ReadHeaderTimeout: httpReadHeaderTimeout, IdleTimeout: httpIdleTimeout}
 	return g, nil
 }
 
@@ -158,7 +169,7 @@ func New(cfg Config) (*Gateway, error) {
 // request an Origin names that is not this host is refused before any
 // identity is resolved.
 func (g *Gateway) Authorize(w http.ResponseWriter, r *http.Request, handshake bool) (Backend, bool) {
-	if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r.Host) {
+	if origin := r.Header.Get("Origin"); origin != "" && !SameOrigin(origin, r.Host) {
 		(&Refusal{
 			Status: http.StatusForbidden,
 			Error:  &protocol.Error{Code: protocol.CodeDenied, Message: "cross-origin request refused"},
@@ -173,9 +184,9 @@ func (g *Gateway) Authorize(w http.ResponseWriter, r *http.Request, handshake bo
 	return backend, true
 }
 
-// sameOrigin reports whether an Origin header names host, the same rule
+// SameOrigin reports whether an Origin header names host, the same rule
 // coder/websocket applies to a handshake.
-func sameOrigin(origin, host string) bool {
+func SameOrigin(origin, host string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
 		return false

@@ -1,4 +1,15 @@
-import { CircleAlert, KeyRound, RefreshCw, ServerOff, ShieldOff, Unplug, WifiOff } from 'lucide-react'
+import {
+  CircleAlert,
+  CloudOff,
+  Hourglass,
+  KeyRound,
+  LogIn,
+  RefreshCw,
+  ServerOff,
+  ShieldOff,
+  Unplug,
+  WifiOff,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +22,8 @@ type ConnectionErrorProps = {
   kind: UnreachableKind | null
   dead: boolean
   error: string | null
+  /** The edge of the local gateway's link, when it runs through one. */
+  edge?: string
   onRetry: () => void
 }
 
@@ -38,7 +51,7 @@ function Cmd({ children }: { children: string }) {
  * never be described as one they can, which is why `gateway` is the desktop
  * origin only.
  */
-function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
+function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
   if (dead) {
     return {
       icon: KeyRound,
@@ -72,6 +85,87 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
       title: 'Cannot reach your server over the tailnet',
       description:
         'The dashboard comes from your server, and this phone got no answer from it. Check that Tailscale is connected here and that the server host is running, then retry.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'relay') {
+    return {
+      icon: WifiOff,
+      eyebrow: 'No answer through the edge',
+      title: 'Cannot reach your server through the edge',
+      description: (
+        <>
+          The dashboard comes from your server through an edge relay, and this browser got no
+          answer. Either the server is not connected to the edge or the edge is down. On the
+          server host, <Cmd>sudo aether-server edge status</Cmd> shows its edge connection.
+        </>
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'edge') {
+    return {
+      icon: CloudOff,
+      eyebrow: 'Edge unreachable',
+      title: 'Cannot reach the edge',
+      description:
+        'This computer reaches your server through an edge relay, and the edge did not answer, so nothing was asked of the server. The details below name the edge and the error. Check this computer can reach it, then retry.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'edge-server') {
+    return {
+      icon: ServerOff,
+      eyebrow: 'Server not on the edge',
+      title: 'Your server is not connected to the edge',
+      description: (
+        <>
+          The edge answered, and your server holds no connection to it: the server is stopped,
+          offline, or failing to reach the edge. On the server host,{' '}
+          <Cmd>sudo aether-server edge status</Cmd> shows why.
+        </>
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'signed-out') {
+    return {
+      icon: LogIn,
+      eyebrow: 'Signed out',
+      title: 'This computer is signed out of the edge',
+      description: (
+        <>
+          The edge holds no valid sign-in for this computer: it signed out, or its sign-in was
+          revoked on the edge&apos;s Devices page. Run{' '}
+          <Cmd>{edge ? `aether login --edge ${edge}` : 'aether login'}</Cmd>, then retry.
+        </>
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'device-revoked') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Device revoked',
+      title: 'The server revoked this device',
+      description:
+        "This computer's device key was revoked on the server, which now refuses it on every path. A member or admin of the server revoked it; the details below carry the server's words.",
+      action: null,
+    }
+  }
+
+  if (kind === 'device-pending') {
+    return {
+      icon: Hourglass,
+      eyebrow: 'Waiting for approval',
+      title: 'This computer is waiting for approval',
+      description:
+        "The server holds a member's second and later devices until they are approved. From a device you already use, or as an admin, run the approve command in the details below, then retry.",
       action: 'Retry connection',
     }
   }
@@ -135,20 +229,32 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
 }
 
 /**
- * The whole window when the app has no data to show. It replaces the shell
- * rather than sitting inside it: an empty sidebar and an empty board around
- * a toast tell the user nothing about what broke or what to do next.
+ * A whole-window page in place of the shell: an icon, a title, one
+ * paragraph, and whatever the reader can do about it. The connection error
+ * and the edge gateway's sign-in and approval pages share it.
  */
-export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorProps) {
-  const content = copyFor({ kind, dead, error, onRetry })
-  const Icon = content.icon
-
+export function StatusPage({
+  icon: Icon,
+  eyebrow,
+  title,
+  description,
+  role,
+  children,
+}: {
+  icon: typeof ServerOff
+  eyebrow: string
+  title: string
+  description: ReactNode
+  /** `alert` for a failure; a page the reader is expected to meet has none. */
+  role?: 'alert'
+  children?: ReactNode
+}) {
   return (
     <main className="flex h-full min-h-0 min-w-0 overflow-y-auto bg-background p-3 sm:p-4">
       <section
-        role="alert"
-        aria-labelledby="connection-error-title"
-        aria-describedby="connection-error-description"
+        role={role}
+        aria-labelledby="status-page-title"
+        aria-describedby="status-page-description"
         className="m-auto grid min-w-0 w-full max-w-[720px] overflow-hidden border border-border bg-card"
       >
         <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 border-b border-border bg-sidebar px-3 py-3 sm:px-4">
@@ -156,41 +262,61 @@ export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorP
             <Icon className="size-4" aria-hidden />
           </div>
           <div className="min-w-0">
-            <p className="mb-0.5 text-xs font-medium text-muted-foreground">{content.eyebrow}</p>
-            <h1 id="connection-error-title" className="text-base font-semibold leading-5">
-              {content.title}
+            <p className="mb-0.5 text-xs font-medium text-muted-foreground">{eyebrow}</p>
+            <h1 id="status-page-title" className="text-base font-semibold leading-5">
+              {title}
             </h1>
           </div>
         </header>
 
         <div className="min-w-0 space-y-3 px-3 py-3 sm:px-4">
-          <p id="connection-error-description" className="max-w-[68ch] text-[13px] leading-5 text-muted-foreground">
-            {content.description}
+          <p id="status-page-description" className="max-w-[68ch] text-[13px] leading-5 text-muted-foreground">
+            {description}
           </p>
-
-          {content.action && (
-            <div>
-              <Button type="button" size="sm" onClick={onRetry}>
-                <RefreshCw aria-hidden />
-                {content.action}
-              </Button>
-            </div>
-          )}
-
-          {/* Keep the exact raw failure visible and selectable. The bounded
-              block owns its scroll so it cannot push retry out of reach. */}
-          {error && (
-            <Collapsible defaultOpen className="min-w-0 border border-border bg-background text-xs">
-              <CollapsibleTrigger className="px-2 text-muted-foreground hover:text-foreground">
-                Technical details
-              </CollapsibleTrigger>
-              <CollapsibleContent className="min-w-0 border-t border-border px-2 py-2">
-                <pre className="max-h-[min(14rem,35vh)] overflow-auto whitespace-pre-wrap break-words font-mono leading-5 text-foreground select-text">{error}</pre>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
+          {children}
         </div>
       </section>
     </main>
+  )
+}
+
+/**
+ * The whole window when the app has no data to show. It replaces the shell
+ * rather than sitting inside it: an empty sidebar and an empty board around
+ * a toast tell the user nothing about what broke or what to do next.
+ */
+export function ConnectionError({ kind, dead, error, edge, onRetry }: ConnectionErrorProps) {
+  const content = copyFor({ kind, dead, error, edge, onRetry })
+
+  return (
+    <StatusPage
+      role="alert"
+      icon={content.icon}
+      eyebrow={content.eyebrow}
+      title={content.title}
+      description={content.description}
+    >
+      {content.action && (
+        <div>
+          <Button type="button" size="sm" onClick={onRetry}>
+            <RefreshCw aria-hidden />
+            {content.action}
+          </Button>
+        </div>
+      )}
+
+      {/* Keep the exact raw failure visible and selectable. The bounded
+          block owns its scroll so it cannot push retry out of reach. */}
+      {error && (
+        <Collapsible defaultOpen className="min-w-0 border border-border bg-background text-xs">
+          <CollapsibleTrigger className="px-2 text-muted-foreground hover:text-foreground">
+            Technical details
+          </CollapsibleTrigger>
+          <CollapsibleContent className="min-w-0 border-t border-border px-2 py-2">
+            <pre className="max-h-[min(14rem,35vh)] overflow-auto whitespace-pre-wrap break-words font-mono leading-5 text-foreground select-text">{error}</pre>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </StatusPage>
   )
 }

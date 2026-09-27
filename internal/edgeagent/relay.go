@@ -1,6 +1,7 @@
 package edgeagent
 
 import (
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -85,7 +86,7 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
 	slog.Info("edge: relayed connection", "conn", m.ConnID, "kind", m.Kind, "client", m.ClientAddr,
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 	if m.Kind == edgeproto.KindWeb {
-		a.web.deliver(rc, a.attachDeadline)
+		a.web.deliver(webConn(rc), a.attachDeadline)
 		return
 	}
 	a.cfg.SSH.ServeEdgeConn(ctx, rc, grant)
@@ -127,6 +128,25 @@ func (rc *relayConn) Close() error {
 	err := rc.Conn.Close()
 	rc.once.Do(rc.release)
 	return err
+}
+
+// webConn gives a passed-through dashboard connection the deadline
+// behaviour net/http relies on. The WebSocket net.Conn closes itself when a
+// read deadline passes during a read, and net/http sets a past read
+// deadline to stop its background read after every response and on every
+// hijack: each connection would end after one request, and each dashboard
+// WebSocket at its upgrade. A net.Pipe end interrupts only the read.
+func webConn(rc net.Conn) net.Conn {
+	gateway, relay := net.Pipe()
+	go func() {
+		_, _ = io.Copy(relay, rc)
+		_ = relay.Close()
+	}()
+	go func() {
+		_, _ = io.Copy(rc, relay)
+		_ = rc.Close()
+	}()
+	return gateway
 }
 
 // webListener hands passed-through dashboard connections to the gateway.

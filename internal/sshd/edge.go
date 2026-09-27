@@ -179,6 +179,18 @@ func pendingDeviceBanner(dev *domain.Device) string {
 		dev.Label, dev.ApprovalCode, dev.ApprovalCode)
 }
 
+// EdgeMember returns the member bound to an account the edge signed in,
+// exactly as a relayed SSH connection is mapped: an unbound account
+// matching an open invitation becomes that invitation's member. An account
+// that is neither is refused with edgeproto.RefusalNotMember.
+func (s *Server) EdgeMember(ctx context.Context, account edgeproto.Account) (*domain.Member, error) {
+	ids, err := s.identityStore()
+	if err != nil {
+		return nil, err
+	}
+	return s.edgeMember(ctx, ids, account)
+}
+
 // edgeMember returns the member bound to account. An unbound account
 // matching an open invitation becomes that invitation's member.
 func (s *Server) edgeMember(ctx context.Context, ids store.IdentityStore, account edgeproto.Account) (*domain.Member, error) {

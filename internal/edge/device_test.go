@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
@@ -59,7 +60,8 @@ func TestDeviceFlow(t *testing.T) {
 
 	resp, page := b.post(t, "/device", url.Values{"user_code": {strings.ToLower(start.UserCode)}})
 	if resp.StatusCode != http.StatusOK || !strings.Contains(page, "laptop") || !strings.Contains(page, "SHA256:") ||
-		!strings.Contains(page, "Confirm only if you started this sign-in yourself") {
+		!strings.Contains(page, "Confirm only if you started this sign-in yourself") ||
+		!strings.Contains(page, "<dt>Requested from</dt><dd><code>127.0.0.1</code> (the address of this browser)") {
 		t.Fatalf("confirm page: %s\n%s", resp.Status, page)
 	}
 	resp, page = b.post(t, "/device/confirm", url.Values{"user_code": {start.UserCode}, "decision": {"approve"}})
@@ -148,6 +150,33 @@ func TestUserCodeEntryIsRateLimited(t *testing.T) {
 	}
 	if last.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("11th code entry: %s, want 429", last.Status)
+	}
+}
+
+func TestUserCodeEntryIsLimitedPerAccount(t *testing.T) {
+	h := newHarness(t)
+	b := signedInBrowser(t, h)
+	for range 10 {
+		b.post(t, "/device", url.Values{"user_code": {"BCDF-GHJK"}})
+	}
+	// The address block has earned five entries back; the account has
+	// not earned one.
+	h.clock.Advance(30 * time.Second)
+	if resp, _ := b.post(t, "/device", url.Values{"user_code": {"BCDF-GHJK"}}); resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("code entry over the account's limit: %s, want 429", resp.Status)
+	}
+}
+
+func TestDeviceTokenPollingIsRateLimited(t *testing.T) {
+	h := newHarness(t)
+	code := edgeproto.NewToken()
+	for range 30 {
+		if _, status, msg := pollDevice(t, h, code); status != http.StatusBadRequest {
+			t.Fatalf("poll within the limit = %d %q", status, msg)
+		}
+	}
+	if _, status, msg := pollDevice(t, h, code); status != http.StatusTooManyRequests || msg != string(edgeproto.RefusalTooMany) {
+		t.Fatalf("poll over the limit = %d %q, want 429", status, msg)
 	}
 }
 

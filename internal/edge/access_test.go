@@ -344,9 +344,9 @@ func TestEdgeKeyPersists(t *testing.T) {
 
 func TestLimiterGroupsIPv6By64(t *testing.T) {
 	clock := &fakeClock{t: time.Unix(0, 0)}
-	l := newLimiter(2, time.Minute, clock.Now)
-	req := func(addr string) *http.Request {
-		return &http.Request{RemoteAddr: netip.AddrPortFrom(netip.MustParseAddr(addr), 1234).String()}
+	l := newLimiter[netip.Prefix](2, time.Minute, clock.Now)
+	req := func(addr string) netip.Prefix {
+		return addrKey(&http.Request{RemoteAddr: netip.AddrPortFrom(netip.MustParseAddr(addr), 1234).String()})
 	}
 	if !l.allow(req("2001:db8::1")) || !l.allow(req("2001:db8::ffff:2")) {
 		t.Fatal("first two requests refused")

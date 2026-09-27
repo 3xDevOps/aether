@@ -66,11 +66,14 @@ func (h Hello) PublicKey() (ssh.PublicKey, error) {
 }
 
 // Ready (edge to server) confirms enrollment. EdgeKey is the key grants are
-// signed with; the server pins it.
+// signed with; the server pins it. ServerDomain is the domain the edge
+// passes dashboards through under, as <server id>.<ServerDomain>; an edge
+// that does not send it passes no dashboard through.
 type Ready struct {
-	ServerID string            `json:"server_id"`
-	State    string            `json:"state"`
-	EdgeKey  ed25519.PublicKey `json:"edge_key"`
+	ServerID     string            `json:"server_id"`
+	State        string            `json:"state"`
+	EdgeKey      ed25519.PublicKey `json:"edge_key"`
+	ServerDomain string            `json:"server_domain,omitempty"`
 }
 
 // Open (edge to server) asks the server to attach a data socket for one
@@ -214,6 +217,8 @@ func (m Ready) validate() error {
 		return fmt.Errorf("unknown server state %q", m.State)
 	case len(m.EdgeKey) != ed25519.PublicKeySize:
 		return fmt.Errorf("edge key is %d bytes, want %d", len(m.EdgeKey), ed25519.PublicKeySize)
+	case m.ServerDomain != "" && !ValidServerDomain(m.ServerDomain):
+		return fmt.Errorf("server domain %q is not a lowercase DNS name", m.ServerDomain)
 	}
 	return nil
 }

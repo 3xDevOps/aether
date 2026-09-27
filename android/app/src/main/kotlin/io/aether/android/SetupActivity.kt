@@ -13,12 +13,18 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 /**
- * The first-run and settings screen: one field for the server's tailnet name.
+ * The first-run and settings screen: one field for the dashboard's address,
+ * the server's tailnet name or its address through an edge.
  *
  * Reached on first launch, from the launcher's "Server address" shortcut, and
  * from the button a failed load shows.
  */
 class SetupActivity : ComponentActivity() {
+    companion object {
+        /** Set when a sign-in return arrived before any address was saved. */
+        const val EXTRA_SIGN_IN_WITHOUT_SERVER = "io.aether.android.SIGN_IN_WITHOUT_SERVER"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.enableEdgeToEdge(window)
@@ -41,6 +47,10 @@ class SetupActivity : ComponentActivity() {
         val address = findViewById<EditText>(R.id.address)
         val error = findViewById<TextView>(R.id.error)
         storedDashboardUrl()?.let { address.setText(it) }
+        if (intent.getBooleanExtra(EXTRA_SIGN_IN_WITHOUT_SERVER, false)) {
+            error.setText(R.string.setup_sign_in_without_server)
+            error.visibility = View.VISIBLE
+        }
 
         fun submit() {
             val url =

@@ -2,8 +2,15 @@
 // stream is the only thing that changes it.
 
 import { toast } from 'sonner'
-import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import {
+  api,
+  ApiError,
+  pendingApprovalCode,
+  signInRequired,
+  takeRequestedRun,
+  type Api,
+} from '@/lib/api'
+import { edgeHost, message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
@@ -20,7 +27,7 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import { pausedFromTimeline } from '@/store/board'
-import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
+import { serverUpdateApplying, type EdgeAccess, type UnreachableKind } from '@/store/server'
 
 /**
  * Names the hop that failed. The local gateway reports a dead transport as
@@ -37,14 +44,45 @@ import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | null {
   if (err instanceof ApiError && err.status === 503) {
     if (err.message.includes('network unreachable')) return 'network'
-    if (err.message.includes('server unreachable')) return 'server'
+    if (err.message.includes('server unreachable')) return edgeHop(err.message, store) ?? 'server'
   }
   if (err instanceof TypeError) {
     // An unknown gateway is the desktop one: it is the only surface that can
     // fail before the descriptor is read, since the probe seeds it.
-    return store.getState().capabilities?.gateway === 'server' ? 'tailnet' : 'gateway'
+    const gateway = store.getState().capabilities?.gateway
+    if (gateway === 'server') return 'tailnet'
+    if (gateway === 'edge') return 'relay'
+    return 'gateway'
   }
   return null
+}
+
+/**
+ * Which part of an edge link failed, from the "server unreachable" error
+ * the local gateway passes on. The client's error keeps the edge's refusal
+ * and the server's SSH banner in their own words, and a failure to reach the
+ * edge at all names the edge host followed by the transport error. Null
+ * when the link is not through an edge or the error is none of these.
+ */
+function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
+  const edge = store.getState().linkStatus?.edge_url
+  if (!edge) return null
+  if (detail.includes('server is not connected to the edge')) return 'edge-server'
+  if (detail.includes('device token revoked') || detail.includes('not signed in')) {
+    return 'signed-out'
+  }
+  if (detail.includes('was revoked on this server')) return 'device-revoked'
+  if (detail.includes('is waiting for approval')) return 'device-pending'
+  if (detail.includes(`${edgeHost(edge)}: `)) return 'edge'
+  return null
+}
+
+/** What the edge gateway's refusal says about this browser, or null when
+ * the failure is not one. */
+function edgeAccess(err: unknown): EdgeAccess | null {
+  if (signInRequired(err)) return { state: 'signed-out' }
+  const approvalCode = pendingApprovalCode(err)
+  return approvalCode === null ? null : { state: 'pending', approvalCode }
 }
 
 
@@ -168,6 +206,14 @@ export async function hydrate(
     return true
   } catch (err) {
     if (signal?.aborted) return false
+    // A session that idled out or a browser device revoked mid-session:
+    // every retry would be refused the same way until the person acts.
+    const access = edgeAccess(err)
+    if (access) {
+      s.setEdgeAccess(access)
+      s.setStreamDead()
+      return false
+    }
     // A failed re-hydration keeps the data we already have; only the error
     // is new. Once the token is known dead, the recorded recovery hint is
     // more useful than this raw failure, so it stays.
@@ -559,18 +605,20 @@ type Probe =
   | { unlinked: { capabilities: GatewayCapabilities; status: LinkStatus } }
   | { rejected: string }
   | { refused: ApiError }
+  | { access: EdgeAccess }
 
 /**
- * Reads the capabilities descriptor before anything else, because two
+ * Reads the capabilities descriptor before anything else, because some
  * answers change what the app does next: a local gateway with no server
- * configured goes to onboarding, and a 401 means the gateway rejected the
- * credential. The 401 matters most on a phone, where the token lives in
- * per-tab session storage: without this the WebSocket upgrade would be
- * rejected the same way, the socket would retry forever, and the app would
- * blame an unreachable server. A 403 or 503 is the gateway refusing this
- * caller outright - a tagged tailnet node, a WhoIs outage - whose reason
- * only an HTTP body carries, so it is recorded before the stream's own
- * failure can only say "unreachable".
+ * configured goes to onboarding, the edge gateway's 401 naming its sign-in
+ * path or 403 carrying an approval code gets a page instead of a stream, and
+ * any other 401 means the gateway rejected the credential. The 401 matters
+ * most on a phone, where the token lives in per-tab session storage: without
+ * this the WebSocket upgrade would be rejected the same way, the socket would
+ * retry forever, and the app would blame an unreachable server. Any other
+ * 403, or a 503, is the gateway refusing this caller outright - a tagged
+ * tailnet node, a WhoIs outage - whose reason only an HTTP body carries, so
+ * it is recorded before the stream's own failure can only say "unreachable".
  */
 async function probeGateway(
   store: RootStore,
@@ -581,6 +629,8 @@ async function probeGateway(
   try {
     capabilities = await client.capabilities()
   } catch (err) {
+    const access = edgeAccess(err)
+    if (access) return { access }
     if (err instanceof ApiError && err.status === 401) return { rejected: err.message }
     if (err instanceof ApiError && (err.status === 403 || err.status === 503)) return { refused: err }
     return null
@@ -593,6 +643,10 @@ async function probeGateway(
   try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
+    if (signal.aborted) return null
+    // A failure before hydration succeeds is classified by whether the link
+    // runs through an edge, so the link has to be known first.
+    store.getState().setLinkStatus(status)
     return status.server_configured ? null : { unlinked: { capabilities, status } }
   } catch {
     return null
@@ -775,7 +829,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // machine's own network, or the SSH tunnel to aether-server. Either
         // way the gateway itself is fine.
         const s = store.getState()
-        s.setUnreachable(kind)
+        s.setUnreachable(kind === 'server' ? edgeHop(detail, store) ?? kind : kind)
         // A refused subscribe never goes live, so hydration never runs and
         // nothing else will ever record what happened. Keep an error already
         // recorded: a dead token is more precise than a dead hop.
@@ -801,6 +855,13 @@ export function connect(store: RootStore, client: Api = api): () => void {
 
   void probeGateway(store, client, signal).then((probe) => {
     if (signal.aborted) return
+    if (probe && 'access' in probe) {
+      // The edge gateway serves this browser nothing until the person signs
+      // in or has the device approved; the stream would only be refused.
+      store.getState().setEdgeAccess(probe.access)
+      store.getState().setConnection('offline')
+      return
+    }
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
       // stream is never opened. The flag is what makes the panes and the

@@ -2,10 +2,12 @@ package edge
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
@@ -106,6 +108,38 @@ func TestSignInNextStaysOnEdge(t *testing.T) {
 	}
 	if got := localPath("/authorize?server=x&state=y"); got != "/authorize?server=x&state=y" {
 		t.Errorf("localPath kept %q", got)
+	}
+}
+
+func TestGitHubLoginBelongsToItsCurrentHolder(t *testing.T) {
+	h := newHarness(t)
+	id := testServerID(t)
+	if err := h.svc.RecordClaim(context.Background(), id, "srv", edgeproto.Account{Provider: "github", Subject: "999"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.svc.ReplaceDirectory(context.Background(), id, edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{{
+		Kind: edgeproto.EntryInvitation, Provider: edgeproto.ProviderGitHub, Login: "octo", Role: "viewer",
+		ExpiresAt: h.clock.Now().Add(time.Hour),
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	h.setGitHubUser(1, "octo", "first@example.test", true)
+	first := h.browser(t)
+	first.signIn(t, edgeproto.ProviderGitHub)
+	// The first account renamed itself on GitHub and another took "OCTO".
+	h.setGitHubUser(2, "OCTO", "second@example.test", true)
+	second := h.browser(t)
+	second.signIn(t, edgeproto.ProviderGitHub)
+
+	if _, err := h.svc.Admit(context.Background(), id, sessionAccount(t, h, second)); err != nil {
+		t.Errorf("current holder of the login: %v", err)
+	}
+	stale := sessionAccount(t, h, first)
+	if stale.Login != "" {
+		t.Errorf("previous holder still carries login %q", stale.Login)
+	}
+	if _, err := h.svc.Admit(context.Background(), id, stale); !errors.Is(err, edgeproto.RefusalNotMember) {
+		t.Errorf("previous holder of the login: %v, want %v", err, edgeproto.RefusalNotMember)
 	}
 }
 

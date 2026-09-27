@@ -86,6 +86,21 @@ func TestValidServerID(t *testing.T) {
 	}
 }
 
+func TestValidServerDomain(t *testing.T) {
+	longest := strings.Repeat(strings.Repeat("a", 62)+".", 3) + strings.Repeat("a", 253-ServerIDLength-1-3*63)
+	for _, d := range []string{"servers.example.com", "a-1.b2.test", longest} {
+		if !ValidServerDomain(d) {
+			t.Errorf("ValidServerDomain(%q) = false", d)
+		}
+	}
+	for _, d := range []string{"", "localhost", "Servers.example.com", "servers.example.com.", "-a.example.com",
+		"a_b.example.com", "https://servers.example.com", "servers.example.com:443", longest + "a"} {
+		if ValidServerDomain(d) {
+			t.Errorf("ValidServerDomain(%q) = true", d)
+		}
+	}
+}
+
 func TestServerIDFromHostname(t *testing.T) {
 	const id = "wqc4lsjvzdzrwq3k5dabdtajwj"
 	if got := ServerHostname(id, "Servers.Example"); got != id+".servers.example" {

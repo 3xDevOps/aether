@@ -24,11 +24,14 @@ type DeviceAuth struct {
 	UserCodeHash string
 	Label        string
 	Key          string
-	Status       string
-	AccountID    int64
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	LastPollAt   time.Time
+	// ClientAddr is the address the request came from, shown to the
+	// person who confirms it.
+	ClientAddr string
+	Status     string
+	AccountID  int64
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	LastPollAt time.Time
 }
 
 // CreateDeviceAuth stores a pending authorization and drops expired ones.
@@ -38,21 +41,21 @@ func (s *Store) CreateDeviceAuth(ctx context.Context, a DeviceAuth) error {
 		return fmt.Errorf("edgestore: drop expired device authorizations: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO device_authorizations
-		(code_hash, user_code_hash, label, public_key, status, created_at, expires_at, last_poll_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-		a.CodeHash, a.UserCodeHash, a.Label, a.Key, AuthPending, unix(a.CreatedAt), unix(a.ExpiresAt)); err != nil {
+		(code_hash, user_code_hash, label, public_key, client_addr, status, created_at, expires_at, last_poll_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		a.CodeHash, a.UserCodeHash, a.Label, a.Key, a.ClientAddr, AuthPending, unix(a.CreatedAt), unix(a.ExpiresAt)); err != nil {
 		return fmt.Errorf("edgestore: create device authorization: %w", conflict(err))
 	}
 	return nil
 }
 
-const deviceAuthCols = `code_hash, user_code_hash, label, public_key, status, COALESCE(account_id, 0),
+const deviceAuthCols = `code_hash, user_code_hash, label, public_key, client_addr, status, COALESCE(account_id, 0),
 	created_at, expires_at, last_poll_at`
 
 func scanDeviceAuth(row *sql.Row) (DeviceAuth, error) {
 	var a DeviceAuth
 	var created, expires, polled int64
-	err := row.Scan(&a.CodeHash, &a.UserCodeHash, &a.Label, &a.Key, &a.Status, &a.AccountID,
+	err := row.Scan(&a.CodeHash, &a.UserCodeHash, &a.Label, &a.Key, &a.ClientAddr, &a.Status, &a.AccountID,
 		&created, &expires, &polled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeviceAuth{}, ErrNotFound

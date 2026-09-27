@@ -1,4 +1,4 @@
-import type { BudgetState } from '@/lib/types'
+import type { BudgetState, LinkStatus } from '@/lib/types'
 
 const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 
@@ -58,6 +58,20 @@ export function deletesInLabel(iso: string, now = Date.now()): string {
  */
 export function bareVersion(version: string): string {
   return version.replace(/^v/, '')
+}
+
+/** The host of an edge URL, as the client's own errors name it. */
+export function edgeHost(edge: string): string {
+  return new URL(edge).host
+}
+
+/**
+ * What a local link points at: its SSH address, or for a link through an
+ * edge with none, the server id and the edge.
+ */
+export function linkTarget(link: Pick<LinkStatus, 'addr' | 'server_id' | 'edge_url'>): string {
+  if (link.addr || !link.server_id || !link.edge_url) return link.addr
+  return `${link.server_id} through ${edgeHost(link.edge_url)}`
 }
 
 /** An error's text, whatever the throw site handed us. */

@@ -44,20 +44,40 @@ func (r *Relay) splice(c *relayConn, client, server net.Conn) {
 func (r *Relay) pipe(ctx context.Context, dst, src net.Conn) {
 	buf := make([]byte, copyBufferSize)
 	for {
-		n, err := src.Read(buf)
+		throttled := r.throttled()
+		p := buf
+		if throttled {
+			p = buf[:throttledChunk]
+		}
+		n, err := src.Read(p)
 		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
+			if throttled && !sleep(ctx, r.throttleWait(n)) {
+				return
+			}
+			if _, werr := dst.Write(p[:n]); werr != nil {
 				return
 			}
 			r.count(n)
-			if r.throttled() && !sleep(ctx, time.Duration(n)*time.Second/time.Duration(r.throttleRate)) {
-				return
-			}
 		}
 		if err != nil {
 			return
 		}
 	}
+}
+
+// throttleWait reserves n bytes of the throttled rate and returns how long
+// to wait before sending them. Every splice draws on the one rate, so
+// opening more connections does not raise it.
+func (r *Relay) throttleWait(n int) time.Duration {
+	r.throttleMu.Lock()
+	defer r.throttleMu.Unlock()
+	now := time.Now()
+	if r.throttleNext.Before(now) {
+		r.throttleNext = now
+	}
+	wait := r.throttleNext.Sub(now)
+	r.throttleNext = r.throttleNext.Add(time.Duration(n) * time.Second / time.Duration(r.throttleRate))
+	return wait
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

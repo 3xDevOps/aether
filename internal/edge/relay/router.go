@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +25,9 @@ func (r *Relay) Listener() net.Listener { return r.local }
 // by the SNI of its ClientHello, without terminating TLS: the edge host
 // goes to Listener, "<server id>.<server domain>" is passed through to
 // that server if it is claimed and connected, and anything else is
-// closed. It returns when ln is closed.
+// closed. An address block (edgeproto.RateLimitKey) holds at most
+// maxConnsPerAddress open connections; one more is closed at once. It
+// returns when ln is closed.
 func (r *Relay) Serve(ln net.Listener) error {
 	var backoff time.Duration
 	for {
@@ -40,8 +43,53 @@ func (r *Relay) Serve(ln net.Listener) error {
 			continue
 		}
 		backoff = 0
-		go r.route(conn)
+		key := addrKey(conn.RemoteAddr())
+		if !r.takeAddrSlot(key) {
+			r.countRefusal("too many connections from one address")
+			_ = conn.Close()
+			continue
+		}
+		go r.route(&addrConn{Conn: conn, release: func() { r.releaseAddrSlot(key) }})
 	}
+}
+
+func addrKey(a net.Addr) netip.Prefix {
+	ap, _ := netip.ParseAddrPort(a.String()) // an unparsable address counts as the zero block
+	return edgeproto.RateLimitKey(ap.Addr())
+}
+
+// takeAddrSlot counts one more open connection from key, or reports false
+// when key is at maxConnsPerAddress.
+func (r *Relay) takeAddrSlot(key netip.Prefix) bool {
+	r.addrMu.Lock()
+	defer r.addrMu.Unlock()
+	if r.addrConns[key] >= r.maxConnsPerAddress {
+		return false
+	}
+	r.addrConns[key]++
+	return true
+}
+
+func (r *Relay) releaseAddrSlot(key netip.Prefix) {
+	r.addrMu.Lock()
+	defer r.addrMu.Unlock()
+	if r.addrConns[key]--; r.addrConns[key] <= 0 {
+		delete(r.addrConns, key)
+	}
+}
+
+// addrConn gives back its address's slot when it is closed, by the
+// router, a splice, or the edge's HTTPS server.
+type addrConn struct {
+	net.Conn
+	release func()
+	once    sync.Once
+}
+
+func (c *addrConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.release)
+	return err
 }
 
 func (r *Relay) route(conn net.Conn) {

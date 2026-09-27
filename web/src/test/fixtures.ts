@@ -650,6 +650,14 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       git_email: email,
     })),
     memberRole: vi.fn(async () => bob),
+    // No edge devices or invitations unless a test says so.
+    memberDeviceList: vi.fn(async () => []),
+    memberDeviceApprove: vi.fn(async () => needsOverride('memberDeviceApprove')),
+    memberDeviceRevoke: vi.fn(async () => needsOverride('memberDeviceRevoke')),
+    memberInvitationList: vi.fn(async () => []),
+    memberInvitationCreate: vi.fn(async () => needsOverride('memberInvitationCreate')),
+    memberInvitationRevoke: vi.fn(async () => needsOverride('memberInvitationRevoke')),
+    signOut: vi.fn(async () => {}),
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceDelete: vi.fn(async () => ({ ok: true as const })),
@@ -740,6 +748,12 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     localLinkSwitch: vi.fn(async (name: string) => {
       throw new Error(`restart aether gui --server ${name} to switch servers`)
     }),
+    // Signed in to no edge.
+    localEdgeStatus: vi.fn(async () => ({ edges: [] })),
+    localEdgeLogin: vi.fn(async () => needsOverride('localEdgeLogin')),
+    localEdgeServers: vi.fn(async () => needsOverride('localEdgeServers')),
+    localEdgeLink: vi.fn(async () => needsOverride('localEdgeLink')),
+    localEdgeClaim: vi.fn(async () => needsOverride('localEdgeClaim')),
     localPull: vi.fn(async () => ({
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',

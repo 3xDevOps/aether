@@ -43,16 +43,27 @@ Full detail on tailnet identity, tagged nodes, and revocation is in
 
 ### Through an edge
 
-For servers enrolled with an edge ([edge.md](edge.md)). An admin invites the
-teammate's GitHub login, or an email their provider has verified:
+For servers enrolled with an edge ([edge.md](edge.md)), the relay that lets
+people sign in with GitHub or Google instead of sharing a network or an SSH
+key. An admin invites the teammate's GitHub login, or an email their
+provider has verified:
 
 ```sh
 aether invite --github dana --role collaborator
 aether invite --email dana@example.com --role viewer
+aether invite --email dana@example.com --provider google --role viewer
 ```
 
-The teammate signs in and links; their first connection makes them a member
-with that role:
+```
+invited <account> as collaborator until <expiry> (invitation <invitation-id>)
+they sign in with aether login, then find this server in aether servers
+```
+
+No code changes hands. `--role` is `viewer`, `collaborator` (the default)
+or `admin`. `--provider` limits an email invitation to accounts of that
+provider; without it either provider's verified address matches. The
+invitation is in the directory the server pushes to the edge, so the
+teammate sees the server after signing in:
 
 ```sh
 aether login
@@ -60,10 +71,70 @@ aether servers
 aether link my-server
 ```
 
-Invitations expire after 7 days; `aether invite list` and
-`aether invite revoke <id>` manage them. Each device a member adds after
-their first waits for `aether device approve <code>`, run from a device they
-already use or by an admin.
+Their first connection, or their first dashboard sign-in at
+`https://<server id>.<server domain>` from a browser or phone, creates their
+member with the invited role, binds it to their account, and uses the
+invitation up. They are not pending: the invitation was the approval.
+Invitations expire after 7 days:
+
+```sh
+aether invite list
+aether invite revoke <invitation-id>
+```
+
+Without `--github` or `--email`, `aether invite` still mints the one-time
+invite code described [below](#by-invite-code-fallback).
+
+#### Linking an existing member
+
+A member who joined by SSH key or tailnet names their edge account first:
+
+```sh
+aether member link --github dana
+aether member link --email dana@example.com [--provider github|google]
+```
+
+That account then connects through the edge as the same member. An admin
+does this before claiming, through the edge, a server that already has
+members.
+
+#### Devices
+
+Each client install and each browser is a **device** with its own
+credential: a device key for the CLI, a session cookie for a browser. A
+member's first device is accepted. With `edge-device-approval` on, the
+server default, every later device or browser waits, and is refused with
+the command that approves it:
+
+```
+device "dana-laptop" is waiting for approval. From a device this account already uses, or as an admin, run:
+  aether device approve <code>
+or on the server:
+  sudo aether-server device approve <code>
+```
+
+```sh
+aether device list                 # yours; an admin sees every member's
+aether device approve <code>       # from a device you already use, or as an admin
+aether device revoke <device-id>
+sudo aether-server device approve <code>   # on the server
+```
+
+Approval means a stolen edge account, or a compromised edge, cannot add a
+device to a member who already has one. `sudo aether-server config set
+edge-device-approval false` and a restart approve every new device on first
+contact, which gives that protection up: whoever can sign in as a member's
+account then connects as that member. Devices already pending stay pending.
+
+#### Revocation
+
+| Revoke | Command | Effect |
+| --- | --- | --- |
+| A member | `aether member remove <id>` | Identity and devices deleted, directory updated, live connections closed |
+| A device or browser | `aether device revoke <id>` | That device key or browser session refused on every path; its connections closed |
+| A device token | `aether logout`, or the edge's Devices page | No further relayed connections; live ones closed |
+| An invitation | `aether invite revoke <id>` | Removed from the directory |
+| A server | `sudo aether-server edge leave`, or the edge's Servers page | Unenrolled; members keep direct and tailnet access |
 
 ### By invite code (fallback)
 

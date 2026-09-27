@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -76,10 +77,22 @@ const (
 	writeTimeout     = 10 * time.Second
 	directoryTimeout = 10 * time.Second
 	egressFlushEvery = time.Minute
-	// throttledRate is the bytes per second each direction of a splice
-	// may carry once the egress budget is spent: enough for a terminal,
-	// not for bulk transfer.
-	throttledRate = 32 << 10
+	// throttledRate is the bytes per second every splice together may
+	// carry once the egress budget is spent: dozens of terminals, no bulk
+	// transfer, and at most about 650 GiB over a 31-day month.
+	throttledRate = 256 << 10
+	// throttledChunk bounds one throttled read, so a bulk transfer queues
+	// behind a terminal for at most throttledChunk/throttledRate.
+	throttledChunk = 4 << 10
+	// maxUnclaimed bounds unclaimed registrations edge-wide. Each holds a
+	// control socket for up to UnclaimedTTL, and MaxUnclaimedPerAddress
+	// alone does not bound a sender with many IPv6 /64s.
+	maxUnclaimed = 10000
+	// maxConnsPerAddress bounds the public listener's open connections
+	// from one edgeproto.RateLimitKey block. It sits far above what an
+	// office behind one NAT address holds: MaxConnsPerDevice SSH streams
+	// per install, plus browsers.
+	maxConnsPerAddress = 1024
 )
 
 // Relay is the edge relay. Register its HTTP endpoints on the edge's mux,
@@ -99,18 +112,27 @@ type Relay struct {
 	stop     context.CancelFunc
 	flushed  chan struct{}
 
-	// Durations and rates that tests shorten.
-	attachDeadline time.Duration
-	unclaimedTTL   time.Duration
-	pingInterval   time.Duration
-	idleTimeout    time.Duration
-	throttleRate   int64
+	// Durations, rates and limits that tests shorten.
+	attachDeadline     time.Duration
+	unclaimedTTL       time.Duration
+	pingInterval       time.Duration
+	idleTimeout        time.Duration
+	throttleRate       int64
+	maxUnclaimed       int
+	maxConnsPerAddress int
 
 	mu      sync.Mutex
 	closing bool
 	servers map[string]*registration
 	conns   map[string]*relayConn
 	claims  map[string]*pendingClaim
+
+	addrMu    sync.Mutex
+	addrConns map[netip.Prefix]int
+
+	// throttleNext is when the next throttled read may be sent.
+	throttleMu   sync.Mutex
+	throttleNext time.Time
 
 	egressMu    sync.Mutex
 	month       string
@@ -132,8 +154,9 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		return nil, fmt.Errorf("relay: parse origin: %w", err)
 	}
 	switch {
-	case cfg.ServerDomain == "":
-		return nil, errors.New("relay: server domain is required")
+	case !edgeproto.ValidServerDomain(cfg.ServerDomain):
+		// Every ready carries it, and a ready that does not validate is never sent.
+		return nil, fmt.Errorf("relay: server domain %q is not a lowercase DNS name such as servers.example.com", cfg.ServerDomain)
 	case len(cfg.EdgeKey) != ed25519.PrivateKeySize:
 		return nil, fmt.Errorf("relay: edge key is %d bytes, want %d", len(cfg.EdgeKey), ed25519.PrivateKeySize)
 	case cfg.Directory == nil || cfg.Egress == nil:
@@ -147,26 +170,29 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		return nil, fmt.Errorf("relay: load egress for %s: %w", month, err)
 	}
 	r := &Relay{
-		origin:         origin,
-		edgeHost:       strings.ToLower(u.Hostname()),
-		domain:         strings.ToLower(cfg.ServerDomain),
-		key:            cfg.EdgeKey,
-		pub:            cfg.EdgeKey.Public().(ed25519.PublicKey),
-		dir:            cfg.Directory,
-		store:          cfg.Egress,
-		budget:         cfg.EgressBudget,
-		local:          newLocalListener(),
-		flushed:        make(chan struct{}),
-		attachDeadline: edgeproto.AttachDeadline,
-		unclaimedTTL:   edgeproto.UnclaimedTTL,
-		pingInterval:   edgeproto.PingInterval,
-		idleTimeout:    edgeproto.ControlIdleTimeout,
-		throttleRate:   throttledRate,
-		servers:        map[string]*registration{},
-		conns:          map[string]*relayConn{},
-		claims:         map[string]*pendingClaim{},
-		month:          month,
-		refusalsMap:    map[string]uint64{},
+		origin:             origin,
+		edgeHost:           strings.ToLower(u.Hostname()),
+		domain:             cfg.ServerDomain,
+		key:                cfg.EdgeKey,
+		pub:                cfg.EdgeKey.Public().(ed25519.PublicKey),
+		dir:                cfg.Directory,
+		store:              cfg.Egress,
+		budget:             cfg.EgressBudget,
+		local:              newLocalListener(),
+		flushed:            make(chan struct{}),
+		attachDeadline:     edgeproto.AttachDeadline,
+		unclaimedTTL:       edgeproto.UnclaimedTTL,
+		pingInterval:       edgeproto.PingInterval,
+		idleTimeout:        edgeproto.ControlIdleTimeout,
+		throttleRate:       throttledRate,
+		maxUnclaimed:       maxUnclaimed,
+		maxConnsPerAddress: maxConnsPerAddress,
+		servers:            map[string]*registration{},
+		conns:              map[string]*relayConn{},
+		claims:             map[string]*pendingClaim{},
+		addrConns:          map[netip.Prefix]int{},
+		month:              month,
+		refusalsMap:        map[string]uint64{},
 	}
 	r.monthBytes.Store(used)
 	r.ctx, r.stop = context.WithCancel(context.Background())

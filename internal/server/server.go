@@ -103,6 +103,9 @@ type Config struct {
 	// device the member already uses, an admin, or the machine's
 	// administrator approves them.
 	EdgeDeviceAutoApprove bool
+	// EdgeACMEDirectory is the ACME directory the edge dashboard's
+	// certificate is issued from; empty is Let's Encrypt.
+	EdgeACMEDirectory string
 	// CoordinationDisabled turns the conflict coordination kill switch off.
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
@@ -162,6 +165,9 @@ type Server struct {
 	adapters *adapter.Manager
 	ssh      *sshd.Server
 	edge     *edgeagent.Agent
+	// edgeWeb configures the dashboard gateway through the edge. Run
+	// builds it once the agent has learned the edge's server domain.
+	edgeWeb  servergw.EdgeConfig
 	web      *servergw.Gateway
 	tailnet  servergw.Tailnet
 	services []namedService
@@ -414,6 +420,13 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		if s.edge, err = newEdgeAgent(cfg, s.ssh); err != nil {
 			return nil, err
 		}
+		s.edgeWeb = servergw.EdgeConfig{
+			SSH: s.ssh, Store: s.db, Agent: s.edge,
+			EdgeURL:           cfg.EdgeURL,
+			DeviceAutoApprove: cfg.EdgeDeviceAutoApprove,
+			CertDir:           filepath.Join(edgeagent.StateDir(cfg.DataDir), "certs"),
+			ACMEDirectory:     cfg.EdgeACMEDirectory,
+		}
 	}
 	if cfg.WebPort != 0 {
 		if cfg.WebPort < 0 || cfg.WebPort > 65535 {
@@ -445,6 +458,37 @@ func newEdgeAgent(cfg Config, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
 		return nil, err
 	}
 	return edgeagent.New(edgeagent.Config{EdgeURL: cfg.EdgeURL, DataDir: cfg.DataDir, HostKey: hostKey, SSH: sshSrv})
+}
+
+// serveEdgeDashboard serves the dashboard through the edge from the
+// agent's first enrollment until ctx is done, and returns the gateway's
+// close error. The hostname is <server id>.<server domain>, and only the
+// edge knows the domain. Nothing here stops the server: an edge that
+// passes no dashboard through, or a gateway that cannot be built, is
+// logged and leaves SSH through the edge working.
+func (s *Server) serveEdgeDashboard(ctx context.Context) error {
+	domain, err := s.edge.ServerDomain(ctx)
+	if err != nil {
+		// Stopped before the first enrollment.
+		return nil
+	}
+	if domain == "" {
+		slog.Warn("server: the edge passes no dashboard through; the dashboard is not served through it", "edge", s.edgeWeb.EdgeURL)
+		return nil
+	}
+	cfg := s.edgeWeb
+	cfg.ServerDomain = domain
+	gw, err := servergw.NewEdge(cfg)
+	if err != nil {
+		slog.Error("server: the dashboard is not served through the edge", "error", err)
+		return nil
+	}
+	// The gateway's Done is never watched: an edge outage or a
+	// certificate failure leaves the server running.
+	gw.Start()
+	slog.Info("server: dashboard through the edge", "url", "https://"+gw.Host()+"/")
+	<-ctx.Done()
+	return gw.Close()
 }
 
 // WebURL is the address the dashboard is served at, empty when the
@@ -500,14 +544,22 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 3)
 	var wg sync.WaitGroup
 	wg.Add(2)
+	stopAgent := func() {}
+	edgeWebDone := make(chan error, 1)
 	if s.edge != nil {
 		// The agent never ends the server: it retries an unreachable
-		// edge until runCtx is done.
+		// edge until it is stopped. It stops after the edge gateway has
+		// closed, because it closes the listener that gateway serves on.
+		var agentCtx context.Context
+		agentCtx, stopAgent = context.WithCancel(context.WithoutCancel(runCtx))
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.edge.Run(runCtx)
+			s.edge.Run(agentCtx)
 		}()
+		go func() { edgeWebDone <- s.serveEdgeDashboard(runCtx) }()
+	} else {
+		edgeWebDone <- nil
 	}
 	if s.web != nil {
 		wg.Add(1)
@@ -536,9 +588,11 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}()
 	<-runCtx.Done()
+	edgeWebErr := <-edgeWebDone
+	stopAgent()
 	wg.Wait()
 
-	closeErr := s.Close()
+	closeErr := errors.Join(edgeWebErr, s.Close())
 	select {
 	case err := <-errc:
 		return errors.Join(err, closeErr)

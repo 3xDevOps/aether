@@ -78,7 +78,12 @@ type Agent struct {
 
 	slots chan struct{}
 
+	// enrolled is closed at the first enrollment, once domain holds the
+	// server domain that enrollment's ready announced.
+	enrolled chan struct{}
+
 	mu      sync.Mutex
+	domain  string
 	runCtx  context.Context
 	sess    *session
 	conns   map[*relayConn]struct{}
@@ -116,6 +121,7 @@ func New(cfg Config) (*Agent, error) {
 		idleTimeout:    edgeproto.ControlIdleTimeout,
 		attachDeadline: edgeproto.AttachDeadline,
 		slots:          make(chan struct{}, edgeproto.MaxConnsPerServer),
+		enrolled:       make(chan struct{}),
 		conns:          make(map[*relayConn]struct{}),
 		seen:           make(map[string]time.Time),
 		waiters:        make(map[string]chan edgeproto.WebRedeemResult),
@@ -129,6 +135,38 @@ func (a *Agent) ServerID() string { return a.serverID }
 // Accept blocks through edge outages and fails only after Run has returned
 // or the listener was closed.
 func (a *Agent) WebListener() net.Listener { return a.web }
+
+// ServerDomain waits for the first enrollment and returns the domain the
+// edge passes this server's dashboard through under, as
+// <server id>.<domain>. It is empty when the edge passes no dashboard
+// through.
+func (a *Agent) ServerDomain(ctx context.Context) (string, error) {
+	select {
+	case <-a.enrolled:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.domain, nil
+}
+
+// learnDomain keeps the server domain of the first enrollment: the
+// dashboard is served under that hostname until the server restarts.
+func (a *Agent) learnDomain(d string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	select {
+	case <-a.enrolled:
+		if d != a.domain {
+			slog.Warn("edge: the edge now passes dashboards through under another domain; restart aether-server to serve the dashboard there",
+				"edge", a.origin, "serving", a.domain, "announced", d)
+		}
+	default:
+		a.domain = d
+		close(a.enrolled)
+	}
+}
 
 // Run keeps the control connection until ctx is done, reconnecting with
 // jittered exponential backoff. It never gives up: an unreachable or

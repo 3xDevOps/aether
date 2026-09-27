@@ -145,6 +145,32 @@ func TestClaimOverTheEdge(t *testing.T) {
 	}
 }
 
+func TestReplayedClaimIsRefused(t *testing.T) {
+	edge, _, a, ec := enrolled(t)
+	code := issueFor(t, a)
+	wrong := code[:len(code)-1] + "a"
+	if wrong == code {
+		wrong = code[:len(code)-1] + "b"
+	}
+	id := edgeproto.NewConnID()
+	now := time.Now()
+	claim := edgeproto.Claim{ID: id, Code: wrong, Grant: edge.grant(t, edgeproto.Grant{
+		ServerID: a.ServerID(), ConnID: id, Kind: edgeproto.KindClaim, Account: testOwner,
+		DeviceID: "dev-1", IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+	})}
+	ec.send(claim)
+	if r := expect[edgeproto.ClaimResult](t, ec); r.Error != string(edgeproto.RefusalClaimWrong) {
+		t.Fatalf("first attempt: %+v", r)
+	}
+	ec.send(claim)
+	if r := expect[edgeproto.ClaimResult](t, ec); !strings.Contains(r.Error, "already used") {
+		t.Fatalf("replayed claim: %+v, want a refusal before the code is checked", r)
+	}
+	if c, _, _ := a.state.ClaimCode(); c.AttemptsLeft != edgeproto.ClaimCodeAttempts-1 {
+		t.Fatalf("a replayed claim spent an attempt: %+v", c)
+	}
+}
+
 func issueFor(t *testing.T, a *Agent) string {
 	t.Helper()
 	code, _, err := a.state.IssueClaimCode(a.ServerID(), time.Now())

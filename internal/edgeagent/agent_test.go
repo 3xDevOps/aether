@@ -323,6 +323,13 @@ func TestEnrollPinsEdgeKeyPrivately(t *testing.T) {
 		t.Fatalf("edge derived %s, agent is %s", ec.serverID, a.ServerID())
 	}
 	expect[edgeproto.Directory](t, ec)
+	// This edge's ready carries no server domain, as an edge that passes
+	// no dashboard through sends it.
+	ctx, cancel := context.WithTimeout(context.Background(), waitFor)
+	defer cancel()
+	if d, err := a.ServerDomain(ctx); d != "" || err != nil {
+		t.Fatalf("ServerDomain = %q, %v; want none", d, err)
+	}
 	pinned, err := a.state.PinnedKey()
 	if err != nil || !pinned.Equal(edge.pub) {
 		t.Fatalf("pinned %x, %v; want the edge key", pinned, err)

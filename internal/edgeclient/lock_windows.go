@@ -1,0 +1,20 @@
+//go:build windows
+
+package edgeclient
+
+import (
+	"os"
+
+	"golang.org/x/sys/windows"
+)
+
+// lockFile waits for an exclusive lock on the first byte of f and returns
+// its release.
+func lockFile(f *os.File) (func(), error) {
+	h := windows.Handle(f.Fd())
+	ol := new(windows.Overlapped)
+	if err := windows.LockFileEx(h, windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, ol); err != nil {
+		return nil, err
+	}
+	return func() { _ = windows.UnlockFileEx(h, 0, 1, 0, ol) }, nil
+}

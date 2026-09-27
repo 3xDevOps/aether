@@ -427,10 +427,19 @@ Those tests skip where `bun` is not installed.
 
 `internal/edge/edgetest` runs edge remote access end to end in one process,
 under plain `make test`: a real edge (sign-in service and relay, development
-mode) against a fake GitHub, real servers (sshd over a real store, with the
-edge agent), and the real client dialer. A proxy in front of the edge
-records the control channels and injects messages into them, which is how
-the tests play a compromised edge. [edge.md](edge.md) describes the edge.
+mode, plus its SNI router on a listener of its own) against a fake GitHub,
+real servers (sshd over a real store, with the edge agent and the edge
+dashboard gateway, whose certificate a test CA signs), the real client
+dialer, and a browser played by an HTTP client with a cookie jar that sends
+every `*.servers.example.test` name to the router. A proxy in front of the
+edge records the control channels and injects messages into them, which is
+how the tests play a compromised edge. [edge.md](edge.md) describes the
+edge. It needs no Docker and no network:
+
+```sh
+go test -race ./internal/edge/edgetest/
+go test -race -run 'TestDashboard' ./internal/edge/edgetest/   # the browser path only
+```
 
 | Test | Proves |
 | --- | --- |
@@ -441,10 +450,26 @@ the tests play a compromised edge. [edge.md](edge.md) describes the edge.
 | `TestRevocationClosesLiveConnections` | Member removal, device revocation and `aether logout` each close a live connection |
 | `TestEdgeRestartAndDirectFallback` | A clean edge stop drops relayed connections, the server re-enrolls after the restart, and a link with an address uses it while the edge is down |
 | `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again with a new code |
+| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone, then reaches it over that link |
+| `TestDashboardSignIn` | 401 naming `/auth/login` before sign-in; the full sign-in round trip; the state cookie cleared; an authenticated call and capabilities `edge`; a POST without `Origin` refused; logout closing the live WebSocket and the next call answering 401 |
+| `TestDashboardPassthroughBySNI` | The browser's handshake completes with the server's own certificate; an unknown id, an unclaimed server, `www.<domain>` and a foreign name are closed |
+| `TestDashboardSessionIsBoundToItsServer` | A member of A refused at B; A's code refused at B; A's session cookie refused at B; a replayed code refused; a state mismatch refused |
+| `TestDashboardAppReturn` | `return=app` produces `aether://auth/callback`; the link opened without the state cookie gets no session; the WebView holding the cookie is signed in |
+| `TestDashboardPendingBrowserAndRevocation` | A second browser gets 403 with its approval code; approving it; revoking it closes its WebSocket while the first browser's stays open |
+| `TestDashboardInvitationAndMemberRemoval` | An invited account's first browser sign-in joins with the invited role; `member.remove` closes its WebSocket |
 
 Every request reaches the edge from 127.0.0.1, so the suite runs its tests
 one at a time and moves the edge's clock forward to refill the per-address
 rate limits.
+
+One integration test covers the server's side against a real in-process
+edge whose ACME directory cannot issue: the server learns the server domain,
+starts issuance, keeps retrying in the background, keeps SSH through the
+edge working across an edge restart, and stops cleanly. It needs no Docker:
+
+```sh
+go test -race -tags integration -run TestIntegrationEdgeDashboardFailuresKeepServerRunning ./internal/server/
+```
 
 ## The dashboard end-to-end suite
 

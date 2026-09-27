@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/acme"
+
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	"github.com/3xDevOps/Aether/internal/edgeagent"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -101,6 +103,7 @@ type serveOptions struct {
 	tailnetRequireKey    *bool
 	edgeURL              *edgeURLValue
 	edgeDeviceApproval   *bool
+	edgeACMEDirectory    *string
 	conflictCoordination *bool
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
@@ -138,6 +141,8 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		`edge that relays SSH and the dashboard for members without a direct or tailnet route ("" = off)`)
 	o.edgeDeviceApproval = fs.Bool("edge-device-approval", true,
 		"hold a member's later edge devices pending until an existing device, an admin, or aether-server device approve on this host approves them")
+	o.edgeACMEDirectory = fs.String("edge-acme-directory", acme.LetsEncryptURL,
+		"ACME directory that issues the certificate of the dashboard through the edge")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
@@ -184,6 +189,7 @@ func serve(args []string) error {
 
 		EdgeURL:               string(*o.edgeURL),
 		EdgeDeviceAutoApprove: !*o.edgeDeviceApproval,
+		EdgeACMEDirectory:     *o.edgeACMEDirectory,
 
 		CoordinationDisabled: !*o.conflictCoordination,
 		// The one place a process is granted the right to replace itself

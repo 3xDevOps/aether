@@ -134,6 +134,8 @@ CREATE TABLE egress (
 	month TEXT PRIMARY KEY,
 	bytes INTEGER NOT NULL
 );
+`, `
+ALTER TABLE device_authorizations ADD COLUMN client_addr TEXT NOT NULL DEFAULT '';
 `}
 
 func migrate(db *sql.DB) error {

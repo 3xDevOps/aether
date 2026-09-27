@@ -15,6 +15,7 @@
 <dt>Device</dt><dd>{{.Label}}</dd>
 <dt>Device key</dt><dd><code>{{.Fingerprint}}</code></dd>
 <dt>Started</dt><dd>{{.Started}} ago</dd>
+<dt>Requested from</dt><dd><code>{{.From}}</code>{{if eq .From .Here}} (the address of this browser){{else}} (this browser is at <code>{{.Here}}</code>){{end}}</dd>
 </dl>
 {{end}}
 <form method="post" action="/device/confirm">

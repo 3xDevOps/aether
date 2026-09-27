@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Toaster, toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
+import { EdgeAccessPage } from '@/components/edge-access'
 import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
 import { TitleBar } from '@/components/shell/title-bar'
@@ -18,6 +19,8 @@ export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
   const unreachable = useStore((s) => s.unreachable)
+  const edgeAccess = useStore((s) => s.edgeAccess)
+  const edge = useStore((s) => s.linkStatus?.edge_url)
   const hydrated = useStore((s) => s.hydrated)
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
   const epoch = useStore((s) => s.connectionEpoch)
@@ -46,8 +49,10 @@ export function App() {
   // Nothing has loaded and the failure is total: the page below says what
   // broke and how to fix it, and there is no shell left to toast over. An
   // in-app update makes the gateway exit and come back on purpose, so that
-  // is not this failure even when it briefly looks like one.
-  const blocked = !hydrated && hydrationError !== null && !gatewayRestarting
+  // is not this failure even when it briefly looks like one. An edge gateway
+  // waiting on a sign-in or an approval blocks the same way, even mid-session.
+  const blocked =
+    edgeAccess !== null || (!hydrated && hydrationError !== null && !gatewayRestarting)
 
   useEffect(() => {
     if (!hydrationError || blocked) return
@@ -72,11 +77,14 @@ export function App() {
       <div className="flex min-w-0 h-full flex-col">
         <TitleBar commandPaletteDisabled={blocked} />
         <div className="min-h-0 min-w-0 flex-1">
-          {blocked ? (
+          {edgeAccess ? (
+            <EdgeAccessPage access={edgeAccess} onRetry={retry} />
+          ) : blocked ? (
             <ConnectionError
               kind={unreachable}
               dead={streamDead}
               error={hydrationError}
+              edge={edge}
               onRetry={retry}
             />
           ) : (

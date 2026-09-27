@@ -447,6 +447,8 @@ export interface DiskUsage {
  * allowlist" on the client.
  */
 export interface GatewayCapabilities {
+  /** `local` for `aether gui`, `server` over the tailnet, `edge` through an
+   * edge relay. */
   gateway: string
   methods: string[]
   ws: string[]
@@ -943,6 +945,83 @@ export interface LinkStatus {
   links?: { name: string; addr: string; repo?: string }[]
   /** The profile this gateway runs on; absent on the top-level link. */
   active?: string
+  /** The edge and server id of a link through an edge; absent otherwise. */
+  edge_url?: string
+  server_id?: string
+}
+
+/** An account signed in at an edge, as the edge reported it. */
+export interface EdgeAccount {
+  provider: string
+  subject: string
+  login?: string
+  email?: string
+  name?: string
+}
+
+/** edge.login, and edge.status's `login`: the sign-in this gateway runs. */
+export interface EdgeLogin {
+  state: 'pending' | 'signed_in' | 'failed'
+  edge: string
+  user_code: string
+  verification_uri: string
+  account?: EdgeAccount
+  error?: string
+}
+
+/** edge.status: every edge this machine is signed in to. */
+export interface EdgeStatus {
+  edges: { edge: string; account?: EdgeAccount; error?: string }[]
+  login?: EdgeLogin
+}
+
+/** A server the signed-in account reaches through the edge. */
+export interface EdgeServer {
+  id: string
+  name: string
+  online: boolean
+  role: string
+}
+
+/** edge.link and edge.claim: the link just saved. */
+export interface EdgeLinkResult {
+  server_id: string
+  /** Answered by edge.claim; the Link step adds it for edge.link. */
+  server_name?: string
+  edge: string
+  addr?: string
+  user: string
+  member: { id: string; display_name: string; role: string }
+}
+
+/** member.device.list: a credential a member reaches the server through an
+ * edge with. */
+export interface Device {
+  id: string
+  member_id: string
+  kind: 'ssh' | 'browser'
+  label: string
+  status: 'pending' | 'approved' | 'revoked'
+  /** Only while pending. */
+  approval_code?: string
+  fingerprint?: string
+  created_at: string
+  last_seen_at?: string
+  approved_by?: string
+}
+
+/** member.invitation.list: an edge account that may join. `member_id` is
+ * set on an identity link, which binds an existing member and has no role. */
+export interface Invitation {
+  id: string
+  provider?: string
+  login?: string
+  email?: string
+  role?: Member['role']
+  member_id?: string
+  created_by: string
+  created_at: string
+  expires_at: string
 }
 
 /** link.apply: the server identity linked to this local gateway. */

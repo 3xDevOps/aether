@@ -415,7 +415,7 @@ retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","terminal"],
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
  "local":["daemon.install","daemon.status","edge.claim","edge.link","edge.login",
           "edge.logout","edge.servers","edge.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
@@ -429,9 +429,25 @@ The server gateway answers the same shape with no `local` field because it
 cannot run verbs on the browser's machine:
 
 ```json
-{"gateway":"server","methods":["*"],"ws":["events","attach","terminal"],
+{"gateway":"server","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
+
+The dashboard served through an edge
+([edge.md](edge.md#dashboard-through-the-edge)) answers `"gateway":"edge"`
+and is otherwise the server gateway. It identifies every request by its
+`__Host-aether_session` cookie and refuses in two shapes the SPA reads:
+
+```text
+401 {"error":{"code":-32001,"message":"sign-in required; sign in at /auth/login","data":{"login":"/auth/login"}}}
+403 {"error":{"code":-32001,"message":"This browser is waiting for approval with code ABCD-EFGH. ...","data":{"approval_code":"ABCD-EFGH"}}}
+```
+
+The 401 covers no session and a revoked or expired one, each with its own
+message; the SPA shows its sign-in page when `data.login` is `/auth/login`.
+The 403 is a browser waiting for approval; the SPA shows the code and the
+approval commands from `message`. **Sign out** posts to `/auth/logout`, which
+answers 204.
 
 `methods` is `["*"]` because both transports dispatch every control-channel
 method; `ws` lists the WebSocket surfaces served; `local` is the sorted
@@ -1236,7 +1252,9 @@ per-process token as `Authorization: Bearer` or `?token=` - browsers cannot set
 headers on a WebSocket handshake. A missing or stale local token is refused
 with `401` before the upgrade, so it never becomes a socket; the dashboard's
 capabilities probe catches that case ahead of the stream. The server gateway
-carries no token: WhoIs identifies the request's source address instead.
+carries no token: WhoIs identifies the request's source address instead. The
+edge gateway takes its session cookie, and refuses a handshake without an
+`Origin` naming its own host.
 
 Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires

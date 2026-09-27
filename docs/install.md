@@ -720,11 +720,17 @@ link replaces this sentence the day the listing goes live. What the app stores
 and sends is in [privacy.md](privacy.md); the licences it ships under are in
 [notices.md](notices.md).
 
-The app holds no logic and no credential. It is a WebView locked to one HTTPS
-origin, so identity stays the phone's own tailnet login, resolved by the server
-on every request ([networking.md](networking.md#the-dashboard)). Two things
-have to be true first: the server has `web-port` set, and the phone is signed
-in to the same tailnet.
+The app is a WebView locked to one HTTPS origin, reached one of two ways:
+
+- **Over the tailnet.** Identity is the phone's own tailnet login, resolved
+  by the server on every request
+  ([networking.md](networking.md#the-dashboard)); the app holds no
+  credential. The server has `web-port` set, and the phone is signed in to
+  the same tailnet.
+- **Through the edge**, at `<server id>.<server domain>`
+  ([edge.md](edge.md#dashboard-through-the-edge)). You sign in with your edge
+  account in the phone's browser, and the WebView keeps the server's session
+  cookie.
 
 1. Open the release page in the phone's browser and download
    `aether-android.apk`. Check it against its line in `checksums.txt` if you
@@ -732,11 +738,15 @@ in to the same tailnet.
 2. Android asks once for permission to install apps from that browser. Allow
    it, then open the downloaded file.
 3. The first screen asks for the server name. Type its MagicDNS name, for
-   example `my-server.tailnet-name.ts.net`. A pasted
+   example `my-server.tailnet-name.ts.net`, or its edge name,
+   `<server id>.<server domain>`. A pasted
    `https://my-server.tailnet-name.ts.net/` works too, and a port other than
    443 goes on the end: `my-server.tailnet-name.ts.net:8443`. `http://` is
    refused rather than upgraded.
-4. The dashboard opens at the board, already identified. There is no sign-in.
+4. Over the tailnet, the dashboard opens at the board, already identified.
+   Through the edge, **Sign in** opens the edge in the phone's browser; after
+   **Continue** the browser hands `aether://auth/callback` back to the app,
+   which finishes the sign-in on the server.
 
 To change the address later, long-press the app icon and pick **Server
 address**. An address that does not resolve leaves the WebView's own error page
@@ -780,7 +790,8 @@ Building the APK from a checkout is in
   [environment-home.md](environment-home.md#connect-github). `aether github
   connect` refuses rather than generating a key it could not sign with.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
-  reachable and the recommended identity layer. See
+  reachable and the recommended identity layer. Without it, outbound HTTPS to
+  the edge is enough: nothing needs to reach the server. See
   [networking.md](networking.md).
 
 A standard headless Ubuntu server is sufficient. No desktop login, display
@@ -936,8 +947,13 @@ starts the service. On a host that already runs tailscaled, and where tailnet
 connections are not required to carry a key, it asks one more question -
 `Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
 fresh config - which is how a phone on the tailnet reaches the dashboard
-([networking.md](networking.md#the-dashboard)). Answering `server` to the
-install script's question runs it for you; this is the same command by hand.
+([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
+on the edge, the relay at `https://edge.onaether.dev` that lets clients and
+phones reach the server with a GitHub or Google sign-in
+([edge.md](edge.md)); with tailscaled it asks. With the edge on, setup ends
+by printing the server id and a claim code for `aether link --claim <code>`.
+Answering `server` to the install script's question runs it for you; this
+is the same command by hand.
 
 ```sh
 sudo aether-server setup
@@ -996,6 +1012,9 @@ uses the default; negative values have the semantics in the table.
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
+| `--edge-url` | `https://edge.onaether.dev` | Edge the server enrolls with, for members without a direct or tailnet route; `""` turns it off. See [edge.md](edge.md). |
+| `--edge-device-approval` | on | Hold a member's later edge devices, browsers included, pending until approved. |
+| `--edge-acme-directory` | Let's Encrypt production | ACME directory that issues the certificate of the dashboard through the edge. |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -1016,13 +1035,15 @@ swarms need conflict coordination; the server was started with --conflict-coordi
 
 Three things happen on the first start and never need attention again:
 
-1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`.
-   Clients record its fingerprint on first link and print it. Do not delete it:
-   clients that already trust it refuse to connect until you clear the entry
-   from their `known_hosts`.
+1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`
+   (by setup already, when the edge is on). Clients record its fingerprint on
+   first link and print it, and the edge derives the server id from it. Do
+   not delete it: clients that already trust it refuse to connect until you
+   clear the entry from their `known_hosts`, and at the edge a new key is a
+   new server that must be claimed and linked again.
 2. **The first identity to link becomes the admin** - the SSH key, or the
-   tailnet login, of whoever runs `aether link` first. There is no other
-   account creation step.
+   tailnet login, of whoever runs `aether link` first, or the edge account
+   that uses the claim code. There is no other account creation step.
 3. **The SQLite store and the git repo root** are created under the data
    directory.
 
@@ -1204,6 +1225,9 @@ install end to end.
 ### Server
 
 ```sh
+# 0. With the edge on: unenroll, so the edge stops listing the server.
+sudo aether-server edge leave
+
 # 1. Stop the service.
 sudo systemctl disable --now aether-server
 sudo rm -f /etc/systemd/system/aether-server.service

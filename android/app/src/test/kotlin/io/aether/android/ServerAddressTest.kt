@@ -32,6 +32,14 @@ class ServerAddressTest {
     }
 
     @Test
+    fun anEdgeAddressIsAcceptedAsItIs() {
+        assertEquals(
+            "https://abcdefghijklmnopqrstuvwxyz.servers.example.test/",
+            dashboardUrl("abcdefghijklmnopqrstuvwxyz.servers.example.test"),
+        )
+    }
+
+    @Test
     fun anExplicitPortIsKept() {
         assertEquals("https://my-server.ts.net:8443/", dashboardUrl("my-server.ts.net:8443"))
         assertEquals("https://my-server.ts.net:8443/", dashboardUrl("https://my-server.ts.net:8443"))

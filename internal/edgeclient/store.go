@@ -7,13 +7,16 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/edgeproto"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 // Files in the Aether config directory.
@@ -24,7 +27,14 @@ const (
 	// TokensFile holds the device token of every edge this machine is
 	// signed in to, mode 0600.
 	TokensFile = "edge-tokens.json"
+	// lockFileName is the lock that serializes changes to the device key
+	// and TokensFile between aether processes, such as two sign-ins at
+	// once.
+	lockFileName = "edge.lock"
 )
+
+// maxFileSize bounds what is read of the device key and TokensFile.
+const maxFileSize = 1 << 20
 
 // Session is what a sign-in left on this machine, without the token.
 type Session struct {
@@ -47,7 +57,7 @@ func deviceKeyPath(dir string) string { return filepath.Join(dir, deviceKeyFile)
 // DeviceSigner loads this machine's device key.
 func DeviceSigner(dir string) (ssh.Signer, error) {
 	path := deviceKeyPath(dir)
-	raw, err := os.ReadFile(path)
+	raw, err := readPrivate(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("no device key at %s; sign in with: aether login", path)
 	}
@@ -68,11 +78,13 @@ func DeviceSigner(dir string) (ssh.Signer, error) {
 // use. An existing key is never rewritten: the server knows the device by
 // it.
 func EnsureDeviceKey(dir string) (ssh.Signer, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create config dir: %w", err)
+	// Under the lock a concurrent sign-in waits for this key to be
+	// written instead of reading it half written.
+	unlock, err := lock(dir)
+	if err != nil {
+		return nil, err
 	}
-	// O_EXCL makes two concurrent sign-ins agree on one key instead of
-	// the second replacing the first.
+	defer unlock()
 	file, err := os.OpenFile(deviceKeyPath(dir), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return DeviceSigner(dir)
@@ -104,7 +116,7 @@ func tokensPath(dir string) string { return filepath.Join(dir, TokensFile) }
 
 func readTokens(dir string) (tokensFile, error) {
 	var f tokensFile
-	raw, err := os.ReadFile(tokensPath(dir))
+	raw, err := readPrivate(tokensPath(dir))
 	if errors.Is(err, os.ErrNotExist) {
 		return tokensFile{Edges: map[string]stored{}}, nil
 	}
@@ -120,12 +132,25 @@ func readTokens(dir string) (tokensFile, error) {
 	return f, nil
 }
 
+// updateTokens applies change to TokensFile under the lock, so that two
+// processes changing it at once both keep their change.
+func updateTokens(dir string, change func(tokensFile)) error {
+	unlock, err := lock(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	f, err := readTokens(dir)
+	if err != nil {
+		return err
+	}
+	change(f)
+	return writeTokens(dir, f)
+}
+
 // writeTokens replaces TokensFile atomically: a crash leaves the old file
 // or the new one, never a torn token.
 func writeTokens(dir string, f tokensFile) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
@@ -188,4 +213,55 @@ func SignedIn(dir string) ([]string, error) {
 	}
 	sort.Strings(origins)
 	return origins, nil
+}
+
+// readPrivate reads a file that holds a credential. Like OpenSSH, it
+// refuses one that other users can open, and names the command that fixes
+// it; Windows has no such mode bits.
+func readPrivate(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if runtime.GOOS != "windows" {
+		info, serr := f.Stat()
+		if serr != nil {
+			return nil, serr
+		}
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			return nil, fmt.Errorf("%s has mode %04o, open to other users; run: chmod 600 %s",
+				path, mode, shellquote.Quote(path))
+		}
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxFileSize {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxFileSize)
+	}
+	return raw, nil
+}
+
+// lock takes the lock that serializes changes to the files in dir, and
+// returns its release. The operating system drops it if the process dies.
+func lock(dir string) (func(), error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create config dir: %w", err)
+	}
+	path := filepath.Join(dir, lockFileName)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open lock: %w", err)
+	}
+	unlock, err := lockFile(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("lock %s: %w", path, err)
+	}
+	return func() {
+		unlock()
+		_ = f.Close()
+	}, nil
 }

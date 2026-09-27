@@ -31,12 +31,14 @@ import androidx.core.view.WindowInsetsCompat
 import java.io.ByteArrayInputStream
 
 /**
- * The whole shell: one WebView on the dashboard the server hosts on the
- * tailnet.
+ * The whole shell: one WebView on the dashboard the server hosts, on the
+ * tailnet or through an edge.
  *
- * It holds no credential and no logic. Identity is this phone's tailnet
- * login, resolved per request by the server (docs/security.md), so the
- * WebView is a browser locked to one HTTPS origin and nothing more.
+ * It holds no logic and no credential of its own. On a tailnet, identity is
+ * this phone's tailnet login, resolved per request by the server. Through an
+ * edge, the dashboard signs in and the server's session cookie lives in the
+ * WebView's cookie store like any browser's (docs/security.md). Either way
+ * the WebView is a browser locked to one HTTPS origin and nothing more.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
@@ -98,11 +100,12 @@ class MainActivity : ComponentActivity() {
         // an empty window on the way to the setup form. A deep link that
         // arrives before an address is set is dropped here - setup is a
         // separate Activity, and carrying the link through it would have to
-        // survive the member abandoning that screen. Tapping the link again
-        // after setup works.
+        // survive the member abandoning that screen. Tapping a run link again
+        // after setup works. A sign-in return cannot be tapped again, so the
+        // setup screen says it was dropped.
         val base = storedDashboardUrl()
         if (base == null) {
-            openSetup()
+            openSetup(signInWithoutServer = intent?.dataString?.let(::isSignInLink) == true)
             finish()
             return
         }
@@ -220,6 +223,15 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest,
                 ): Boolean {
                     val target = request.url
+                    // The redirect to the edge that this load answers with
+                    // comes back through here, off the dashboard's origin,
+                    // and goes to the browser below.
+                    if (request.isForMainFrame) {
+                        appSignInUrl(loaded, target.toString())?.let {
+                            view.loadUrl(it)
+                            return true
+                        }
+                    }
                     // Multiple windows are unsupported, so `target=_blank`
                     // and `window.open` arrive here as top-level navigations
                     // too.
@@ -326,15 +338,16 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Point the WebView at the dashboard at [base], or at the run an
-     * `aether://run/<id>` link names.
+     * Point the WebView at the dashboard at [base], at the run an
+     * `aether://run/<id>` link names, or at the sign-in an
+     * `aether://auth/callback` link completes.
      */
     private fun open(base: String, intent: Intent?) {
         // From here the new address is what every gate judges against, so
         // whatever the old one still has in flight stops before its commit
         // can be read as an escape off the dashboard.
         if (base != loaded) web.stopLoading()
-        val link = intent?.dataString?.let { deepLinkUrl(base, it) }
+        val link = intent?.dataString?.let { linkUrl(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -354,8 +367,22 @@ class MainActivity : ComponentActivity() {
         if (platformBackgroundsUs) back.isEnabled = web.canGoBack()
     }
 
-    private fun openSetup() {
-        startActivity(Intent(this, SetupActivity::class.java))
+    /** The dashboard address [link] opens, or null when it opens none. */
+    private fun linkUrl(base: String, link: String): String? {
+        if (!isSignInLink(link)) return deepLinkUrl(base, link)
+        return try {
+            signInReturnUrl(base, link)
+        } catch (e: SignInLinkError) {
+            Toast.makeText(this, getString(e.reason, *e.detail), Toast.LENGTH_LONG).show()
+            null
+        }
+    }
+
+    private fun openSetup(signInWithoutServer: Boolean = false) {
+        startActivity(
+            Intent(this, SetupActivity::class.java)
+                .putExtra(SetupActivity.EXTRA_SIGN_IN_WITHOUT_SERVER, signInWithoutServer),
+        )
     }
 
     private fun openExternally(target: Uri) {

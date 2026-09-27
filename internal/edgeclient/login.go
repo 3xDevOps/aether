@@ -135,13 +135,8 @@ func (c *Client) store(l *Login, resp edgeproto.DeviceTokenResponse) (Session, e
 	if resp.Device.Key != l.key || resp.Device.ID == "" || !printable(resp.Device.ID) || !printable(resp.Device.Label) {
 		return Session{}, fmt.Errorf("sign in: %s answered for a different device", c.host)
 	}
-	f, err := readTokens(c.dir)
-	if err != nil {
-		return Session{}, err
-	}
 	s := stored{Token: resp.Token, Session: Session{Device: resp.Device, Account: resp.Account}}
-	f.Edges[c.origin] = s
-	if err := writeTokens(c.dir, f); err != nil {
+	if err := updateTokens(c.dir, func(f tokensFile) { f.Edges[c.origin] = s }); err != nil {
 		return Session{}, err
 	}
 	return s.Session, nil
@@ -160,10 +155,5 @@ func (c *Client) Logout(ctx context.Context) error {
 	if err != nil && (!errors.As(err, &refused) || refused.Status != http.StatusUnauthorized) {
 		return fmt.Errorf("%w; the token is still valid and kept in %s so you can retry", err, tokensPath(c.dir))
 	}
-	f, err := readTokens(c.dir)
-	if err != nil {
-		return err
-	}
-	delete(f.Edges, c.origin)
-	return writeTokens(c.dir, f)
+	return updateTokens(c.dir, func(f tokensFile) { delete(f.Edges, c.origin) })
 }

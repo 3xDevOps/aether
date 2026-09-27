@@ -4,8 +4,9 @@
 
      The backup agent walks each domain separately and matches a manifest
      exclude by exact canonical path, so an exclude on the root domain prunes
-     only the root walk: shared_prefs, where the server name lives, has its
-     own walk and needs its own line. Every domain is named here so a file
+     only the root walk: that walk holds app_webview, where the WebView keeps
+     its cookies, an edge dashboard's session among them, while shared_prefs,
+     where the server name lives, has its own walk and needs its own line. Every domain is named here so a file
      the app has not written yet is excluded too. See docs/privacy.md. -->
 <data-extraction-rules>
     <cloud-backup>

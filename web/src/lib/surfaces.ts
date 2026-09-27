@@ -8,6 +8,7 @@ import {
   FolderTree,
   History,
   ListTodo,
+  MonitorSmartphone,
   Settings,
   ShieldQuestion,
   SlidersHorizontal,
@@ -37,6 +38,8 @@ export function surfaces(cap: Capability): Surface[] {
     list.push({ name: 'timeline', label: 'Activity', Icon: History })
   if (cap.hasMethod('member.list'))
     list.push({ name: 'members', label: 'Members', Icon: Users })
+  if (cap.hasMethod('member.device.list'))
+    list.push({ name: 'devices', label: 'Devices', Icon: MonitorSmartphone })
   if (cap.hasMethod('workspace.add'))
     list.push({ name: 'workspaces', label: 'Manage workspaces', Icon: FolderGit2 })
   if (cap.hasMethod('template.save'))

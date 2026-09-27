@@ -244,6 +244,77 @@ func TestDeviceKeyIsNeverReplaced(t *testing.T) {
 	}
 }
 
+func TestFilesOpenToOtherUsersAreRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX mode bits")
+	}
+	c := newTestClient(t, newFakeEdge(t))
+	signIn(t, c)
+	for name, read := range map[string]func() error{
+		deviceKeyFile: func() error { _, err := DeviceSigner(c.dir); return err },
+		TokensFile:    func() error { _, err := c.Session(); return err },
+	} {
+		path := filepath.Join(c.dir, name)
+		for _, mode := range []os.FileMode{0o640, 0o604, 0o620} {
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatal(err)
+			}
+			err := read()
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("mode %04o", mode)) ||
+				!strings.Contains(err.Error(), "run: chmod 600 "+path) {
+				t.Errorf("%s at mode %04o: %v, want a refusal naming chmod 600 %s", name, mode, err, path)
+			}
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := read(); err != nil {
+			t.Errorf("%s at mode 0600: %v", name, err)
+		}
+	}
+}
+
+func TestConcurrentSignInsKeepEveryToken(t *testing.T) {
+	dir := t.TempDir()
+	const n = 16
+	keys := make(chan string, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			c, err := New(dir, fmt.Sprintf("https://edge%d.example.test", i))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			signer, err := EnsureDeviceKey(dir)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			key := edgeproto.DeviceKeyLine(signer.PublicKey())
+			keys <- key
+			if _, err := c.store(&Login{key: key}, edgeproto.DeviceTokenResponse{
+				Token:   edgeproto.NewToken(),
+				Device:  edgeproto.Device{ID: fmt.Sprint("dev-", i), Label: "laptop", Key: key},
+				Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1", Login: "octo"},
+			}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	close(keys)
+	first := <-keys
+	for key := range keys {
+		if key != first {
+			t.Fatal("concurrent sign-ins created different device keys")
+		}
+	}
+	if origins, err := SignedIn(dir); err != nil || len(origins) != n {
+		t.Fatalf("after %d concurrent sign-ins %d tokens are stored (%v)", n, len(origins), err)
+	}
+}
+
 func TestDialRefusalCarriesEdgeMessageAndHost(t *testing.T) {
 	for _, refusal := range []edgeproto.Refusal{
 		edgeproto.RefusalTokenRevoked, edgeproto.RefusalNotMember,

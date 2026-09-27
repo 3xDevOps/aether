@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -181,12 +182,36 @@ func TestWebOpenReachesTheWebListener(t *testing.T) {
 		accepted <- c
 	}()
 	c := <-accepted
+	// net/http stops its background read on every hijack and after every
+	// response with a read deadline in the past: that interrupts the read
+	// and leaves the connection open.
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := c.Read(make([]byte, 1))
+		readErr <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if err := c.SetReadDeadline(time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-readErr; !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read under a past deadline: %v, want a timeout", err)
+	}
+	if err := c.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
 	go func() { _, _ = io.Copy(c, c) }()
 	echo(t, data)
 	if c.RemoteAddr().String() == "192.0.2.10:4242" {
 		t.Error("the edge-asserted client address became the connection's RemoteAddr")
 	}
+	// Closing the gateway's end closes the data socket.
 	_ = c.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), waitFor)
+	defer cancel()
+	if _, _, err := data.Read(ctx); err == nil || ctx.Err() != nil {
+		t.Fatalf("data socket after the gateway closed its connection: %v", err)
+	}
 }
 
 func TestConnectionLimit(t *testing.T) {
@@ -198,6 +223,41 @@ func TestConnectionLimit(t *testing.T) {
 	edge.open(ec, connID, edgeproto.KindWeb, "")
 	if r := expect[edgeproto.OpenResult](t, ec); r.Error != string(edgeproto.RefusalConnLimit) {
 		t.Fatalf("open beyond the limit: %+v", r)
+	}
+}
+
+func TestWebGrantIsNotReplayable(t *testing.T) {
+	edge, _, a, ec := enrolled(t)
+	redeem := func(answer func(req edgeproto.WebRedeem)) error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := a.RedeemWebCode(context.Background(), edgeproto.NewToken(), edgeproto.NewVerifier())
+			done <- err
+		}()
+		answer(expect[edgeproto.WebRedeem](t, ec))
+		return <-done
+	}
+	var first edgeproto.WebRedeemResult
+	if err := redeem(func(req edgeproto.WebRedeem) {
+		now := time.Now()
+		first = edgeproto.WebRedeemResult{ID: req.ID, Grant: edge.grant(t, edgeproto.Grant{
+			ServerID: a.ServerID(), ConnID: req.ID, Kind: edgeproto.KindWeb,
+			Account:  edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-7"},
+			DeviceID: "browser-1", IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+		})}
+		ec.send(first)
+		// The same answer again finds no request waiting for it.
+		ec.send(first)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Answering a later redemption with the first grant is refused: every
+	// redemption names a fresh id.
+	err := redeem(func(req edgeproto.WebRedeem) {
+		ec.send(edgeproto.WebRedeemResult{ID: req.ID, Grant: first.Grant})
+	})
+	if !errors.Is(err, edgeproto.ErrGrantConn) {
+		t.Fatalf("replayed web grant: %v, want ErrGrantConn", err)
 	}
 }
 

@@ -79,7 +79,7 @@ func deviceState(state string) error {
 }
 
 func (s *Service) apiDeviceStart(r *http.Request) (any, error) {
-	if !s.startLimit.allow(r) {
+	if !s.startLimit.allow(addrKey(r)) {
 		return nil, edgeproto.RefusalTooMany
 	}
 	var req edgeproto.DeviceStartRequest
@@ -102,6 +102,7 @@ func (s *Service) apiDeviceStart(r *http.Request) (any, error) {
 			UserCodeHash: edgeproto.HashToken(code),
 			Label:        req.Label,
 			Key:          edgeproto.DeviceKeyLine(key),
+			ClientAddr:   clientAddr(r).String(),
 			CreatedAt:    now,
 			ExpiresAt:    now.Add(deviceCodeTTL),
 		})
@@ -123,6 +124,9 @@ func (s *Service) apiDeviceStart(r *http.Request) (any, error) {
 }
 
 func (s *Service) apiDeviceToken(r *http.Request) (any, error) {
+	if !s.pollLimit.allow(addrKey(r)) {
+		return nil, edgeproto.RefusalTooMany
+	}
 	var req edgeproto.DeviceTokenRequest
 	if err := decodeJSON(r, &req); err != nil {
 		return nil, err
@@ -202,7 +206,7 @@ func (s *Service) apiClaim(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !s.claimLimit.allow(r) {
+	if !s.claimLimit.allow(addrKey(r)) {
 		return nil, edgeproto.RefusalTooMany
 	}
 	var req edgeproto.ClaimRequest

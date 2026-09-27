@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -186,6 +187,39 @@ func TestRouterClosesOtherConnections(t *testing.T) {
 			t.Fatalf("read %d bytes from a non-TLS connection", n)
 		}
 	})
+}
+
+func TestRouterLimitsConnectionsPerAddress(t *testing.T) {
+	e := newEnv(t)
+	e.r.maxConnsPerAddress = 2
+	addr := serveRouter(t, e)
+	dial := func() net.Conn {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		return c
+	}
+	// open reports whether the router kept c open for a moment.
+	open := func(c net.Conn) bool {
+		_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_, err := c.Read(make([]byte, 1))
+		var ne net.Error
+		return errors.As(err, &ne) && ne.Timeout()
+	}
+	first, second := dial(), dial()
+	if !open(first) || !open(second) {
+		t.Fatal("connections under the limit were closed")
+	}
+	if open(dial()) {
+		t.Fatal("a third connection from one address was kept open")
+	}
+	if got := e.r.Metrics().Refusals["too many connections from one address"]; got != 1 {
+		t.Fatalf("refusals counted %d, want 1", got)
+	}
+	_ = first.Close()
+	eventually(t, "closed connection gives back its slot", func() bool { return open(dial()) })
 }
 
 func TestPeekClientHelloIsBounded(t *testing.T) {

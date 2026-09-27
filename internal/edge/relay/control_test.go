@@ -147,6 +147,20 @@ func TestUnclaimedRegistrationsPerAddress(t *testing.T) {
 	claimedAgent(t, e)
 }
 
+func TestUnclaimedRegistrationsEdgeWide(t *testing.T) {
+	e := newEnv(t)
+	e.r.maxUnclaimed = 2
+	for range 2 {
+		enroll(t, e, newSigner(t))
+	}
+	ws := dialControl(t, e)
+	send(t, ws, helloFor(t, newSigner(t), e.origin, challenge(t, ws).Nonce))
+	if err := waitClosed(t, ws); !strings.Contains(err.Error(), "limit of 2 unclaimed servers") {
+		t.Fatalf("unclaimed server over the edge-wide limit: %v", err)
+	}
+	claimedAgent(t, e)
+}
+
 func TestUnclaimedRegistrationExpires(t *testing.T) {
 	e := newEnv(t)
 	e.r.unclaimedTTL = 100 * time.Millisecond

@@ -36,6 +36,7 @@
 {{define "authorize"}}{{template "top" .}}
 {{with .Data}}
 <p>Sign in to the dashboard of <strong>{{.Name}}</strong> as {{template "account" $.Account}}.</p>
+<p class="warning">Continue only if you just opened this dashboard yourself{{if .App}} in the Aether app{{end}}.</p>
 <dl>
 <dt>Server id</dt><dd><code>{{.Server}}</code></dd>
 <dt>Returns to</dt><dd>{{if .App}}the Aether app{{else}}<code>https://{{.Hostname}}</code>{{end}}</dd>

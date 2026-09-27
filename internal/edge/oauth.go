@@ -122,7 +122,7 @@ func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
 		return
 	}
-	if !s.signinLimit.allow(r) {
+	if !s.signinLimit.allow(addrKey(r)) {
 		s.fail(w, nil, edgeproto.RefusalTooMany)
 		return
 	}
@@ -147,7 +147,7 @@ func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
 		return
 	}
-	if !s.signinLimit.allow(r) {
+	if !s.signinLimit.allow(addrKey(r)) {
 		s.fail(w, nil, edgeproto.RefusalTooMany)
 		return
 	}

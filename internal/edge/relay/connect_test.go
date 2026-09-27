@@ -353,6 +353,70 @@ func TestEgressBudgetThrottlesAndPersists(t *testing.T) {
 	}
 }
 
+func TestThrottleIsEdgeWide(t *testing.T) {
+	e := newEnvWith(t, 1, &fakeEgress{months: map[string]int64{}})
+	e.r.throttleRate = 64 << 10
+	e.r.count(1)
+	a := claimedAgent(t, e)
+	acct := account("1")
+	e.dir.addMember(a.id, acct)
+	_, token := e.addDevice(t, acct, "dev-1")
+
+	// Four splices each carry 16 KiB. Throttled one by one they would
+	// finish together in a quarter second; sharing 64 KiB/s they need
+	// about a second.
+	const splices, size = 4, 16 << 10
+	var clients, servers []net.Conn
+	for range splices {
+		c, s := e.connect(t, a, token)
+		clients, servers = append(clients, c), append(servers, s)
+	}
+	start := time.Now()
+	errs := make(chan error, splices)
+	for i := range splices {
+		go func() {
+			if _, err := clients[i].Write(make([]byte, size)); err != nil {
+				errs <- err
+				return
+			}
+			_ = servers[i].SetReadDeadline(time.Now().Add(10 * time.Second))
+			_, err := io.ReadFull(servers[i], make([]byte, size))
+			errs <- err
+		}()
+	}
+	for range splices {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
+		t.Fatalf("%d splices carried %d KiB in %s: more connections bought more throughput", splices, splices*size>>10, elapsed)
+	}
+}
+
+func TestEgressResetsAtTheMonthBoundary(t *testing.T) {
+	now := time.Now().UTC()
+	thisMonth := monthOf(now)
+	store := &fakeEgress{months: map[string]int64{thisMonth: 100}}
+	e := newEnvWith(t, 100, store)
+	if !e.r.Metrics().Throttled {
+		t.Fatal("not throttled with the month's budget spent")
+	}
+	e.r.count(10)
+	nextMonth := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	if err := e.r.flushEgress(t.Context(), nextMonth); err != nil {
+		t.Fatal(err)
+	}
+	if m := e.r.Metrics(); m.EgressThisMonth != 0 || m.Throttled {
+		t.Fatalf("after the month changed: %+v, want a fresh budget", m)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if got := store.months[thisMonth]; got != 110 {
+		t.Fatalf("%s saved %d bytes, want the 10 counted before the boundary added to 100", thisMonth, got)
+	}
+}
+
 func TestWebSocketCompressionIsOff(t *testing.T) {
 	e := newEnv(t)
 	_, resp, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.PathServerControl, &websocket.DialOptions{

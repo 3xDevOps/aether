@@ -14,8 +14,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
-// User codes are 8 letters without vowels, shown as XXXX-XXXX: 20^8 codes,
-// guessed only through the rate-limited confirmation form.
+// User codes are 8 letters without vowels, shown as XXXX-XXXX: 20^8, about
+// 2.6e10, codes. They are entered only through the confirmation form,
+// which a signed-in account may use about 20 times in a code's 10-minute
+// life, so an account guessing codes finds one of a thousand live ones
+// with odds below one in a million.
 const (
 	userCodeAlphabet = "BCDFGHJKLMNPQRSTVWXZ"
 	userCodeLength   = 8
@@ -83,12 +86,15 @@ type deviceConfirm struct {
 	Label       string
 	Fingerprint string
 	Started     time.Duration
+	// From is the address the sign-in came from; Here is the address of
+	// the browser confirming it.
+	From, Here string
 }
 
 // deviceLookup finds the pending authorization for a typed user code and
 // asks the person to confirm it.
 func (s *Service) deviceLookup(w http.ResponseWriter, r *http.Request, v visitor) error {
-	a, code, err := s.pendingDevice(r)
+	a, code, err := s.pendingDevice(r, v)
 	if err != nil {
 		page := s.view(&v, "Sign in a device", nil)
 		page.Error = err.Error()
@@ -100,12 +106,14 @@ func (s *Service) deviceLookup(w http.ResponseWriter, r *http.Request, v visitor
 		Label:       a.Label,
 		Fingerprint: keyFingerprint(a.Key),
 		Started:     s.now().Sub(a.CreatedAt).Round(time.Second),
+		From:        a.ClientAddr,
+		Here:        clientAddr(r).String(),
 	}))
 	return nil
 }
 
-func (s *Service) pendingDevice(r *http.Request) (edgestore.DeviceAuth, string, error) {
-	if !s.codeLimit.allow(r) {
+func (s *Service) pendingDevice(r *http.Request, v visitor) (edgestore.DeviceAuth, string, error) {
+	if !s.codeLimit.allow(addrKey(r)) || !s.codeAccountLimit.allow(v.AccountID) {
 		return edgestore.DeviceAuth{}, "", edgeproto.RefusalTooMany
 	}
 	code, ok := normalizeUserCode(r.PostForm.Get("user_code"))
@@ -122,7 +130,7 @@ func (s *Service) pendingDevice(r *http.Request) (edgestore.DeviceAuth, string, 
 }
 
 func (s *Service) deviceDecide(w http.ResponseWriter, r *http.Request, v visitor) error {
-	a, code, err := s.pendingDevice(r)
+	a, code, err := s.pendingDevice(r, v)
 	if err != nil {
 		return err
 	}
@@ -182,7 +190,7 @@ func (s *Service) addServerPage(w http.ResponseWriter, r *http.Request, v visito
 func (s *Service) addServer(w http.ResponseWriter, r *http.Request, v visitor) error {
 	var res edgeproto.ClaimResponse
 	err := error(edgeproto.RefusalTooMany)
-	if s.claimLimit.allow(r) {
+	if s.claimLimit.allow(addrKey(r)) {
 		res, err = s.claim(r.Context(), r.PostForm.Get("code"), v.Account,
 			edgeproto.Device{ID: v.ID, Label: "browser"})
 	}

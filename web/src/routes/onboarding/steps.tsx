@@ -4,7 +4,7 @@
 // gateway whenever this route is entered or refocused.
 
 import { type ReactNode, useCallback, useEffect, useState } from 'react'
-import { message } from '@/lib/format'
+import { edgeHost, linkTarget, message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,10 +21,12 @@ import type { Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
 import type {
   AgentInfo,
+  EdgeLinkResult,
   LinkApplyResult,
   LinkStatus,
   Workspace,
 } from '@/lib/types'
+import { EdgeSignIn } from '@/routes/onboarding/edge-link'
 import { useStore } from '@/store'
 import { onboardingStepIndex } from '@/store/ui'
 import type { Capability } from '@/store/hooks'
@@ -44,9 +46,9 @@ export const pane =
   'max-h-64 min-w-0 overflow-x-auto overflow-y-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words'
 
 /**
- * The Link step: link this machine to a server. The gateway's local link
- * status determines whether the in-app link form or the linked summary is
- * shown.
+ * The Link step: link this machine to a server, through an edge sign-in or
+ * by address. The gateway's local link status determines whether those two
+ * choices or the linked summary are shown.
  */
 export function LinkStep({
   client,
@@ -64,6 +66,7 @@ export function LinkStep({
   const [name, setName] = useState('')
   const [linking, setLinking] = useState(false)
   const [success, setSuccess] = useState<LinkApplyResult | null>(null)
+  const [edgeLinked, setEdgeLinked] = useState<EdgeLinkResult | null>(null)
 
   const check = useCallback(async () => {
     setStatusError(null)
@@ -102,8 +105,15 @@ export function LinkStep({
     }
   }
 
+  const linkedThroughEdge = async (result: EdgeLinkResult) => {
+    setEdgeLinked(result)
+    useStore.getState().reconnect()
+    await check()
+  }
+
   const loading = useDelayed(status === null && statusError === null)
   const serverConfigured = status?.server_configured === true
+  const linked = success !== null || edgeLinked !== null
 
   return (
     <section
@@ -146,15 +156,42 @@ export function LinkStep({
           </Button>
         </div>
       )}
-      {status && !serverConfigured && !success && (
+      {edgeLinked && (
+        <div className="space-y-3 border-t border-state-done/30 bg-state-done/5 py-3 text-sm">
+          <p className="font-medium text-state-done">Server linked</p>
+          <p>
+            Linked to{' '}
+            <span className="font-mono">{edgeLinked.server_name ?? edgeLinked.server_id}</span>{' '}
+            through <span className="font-mono">{edgeHost(edgeLinked.edge)}</span> as{' '}
+            <span className="font-medium">{edgeLinked.member.display_name}</span> (
+            {edgeLinked.member.role}).
+          </p>
+          <Button
+            size="sm"
+            onClick={() => onNext(onboardingStepIndex('Git identity'))}
+          >
+            Continue
+          </Button>
+        </div>
+      )}
+      {status && !serverConfigured && !linked && (
+        <EdgeSignIn client={client} onLinked={(result) => void linkedThroughEdge(result)} />
+      )}
+      {status && !serverConfigured && !linked && (
         <form
-          className="min-w-0 max-w-2xl space-y-4 text-sm"
+          className="min-w-0 max-w-2xl space-y-4 border-t border-border/70 pt-4 text-sm"
           aria-label="Link server"
           onSubmit={(e) => {
             e.preventDefault()
             void link()
           }}
         >
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold">Tailscale or a direct address</h3>
+            <p className="text-[13px] leading-5 text-muted-foreground">
+              For a server on your tailnet, or one this computer reaches over SSH.
+            </p>
+          </div>
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             <Label className="block min-w-0 space-y-1">
               Server address
@@ -190,18 +227,23 @@ export function LinkStep({
             />
           </Label>
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" size="sm" disabled={linking || !address.trim()}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              disabled={linking || !address.trim()}
+            >
               {linking ? 'Linking...' : 'Link'}
             </Button>
             {linkError && <p className="text-sm text-state-failed">{linkError}</p>}
           </div>
         </form>
       )}
-      {status && serverConfigured && !status.linked && !success && (
+      {status && serverConfigured && !status.linked && !linked && (
         <div className="space-y-3 border-t border-border/70 bg-muted/30 px-3 py-3 text-sm">
           <p className="font-medium">Server is ready</p>
           <p>
-            Connected to <span className="font-mono">{status.addr}</span> as{' '}
+            Connected to <span className="font-mono">{linkTarget(status)}</span> as{' '}
             <span className="font-medium">{status.user}</span>.
           </p>
           <p className="text-muted-foreground">
@@ -215,11 +257,11 @@ export function LinkStep({
           </Button>
         </div>
       )}
-      {status && serverConfigured && status.linked && !success && (
+      {status && serverConfigured && status.linked && !linked && (
         <div className="space-y-3 border-t border-state-done/30 bg-state-done/5 py-3">
           <p className="text-sm font-medium text-state-done">Already linked</p>
           <p className="text-sm">
-            Linked to <span className="font-mono">{status.addr}</span> as{' '}
+            Linked to <span className="font-mono">{linkTarget(status)}</span> as{' '}
             <span className="font-medium">{status.user}</span>, with{' '}
             <span className="font-mono">{status.repo}</span>.
           </p>

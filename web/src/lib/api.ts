@@ -14,7 +14,12 @@ import type {
   ConfigRoot,
   DaemonInstallResult,
   DaemonStatusResult,
+  Device,
   DiskUsage,
+  EdgeLinkResult,
+  EdgeLogin,
+  EdgeServer,
+  EdgeStatus,
   EnvHarnessesResult,
   EnvSaveResult,
   EvidenceGetResult,
@@ -25,6 +30,7 @@ import type {
   GitHubConnectResult,
   GitHubProbeResult,
   GitIdentity,
+  Invitation,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
@@ -244,6 +250,30 @@ export class ApiError extends Error {
   }
 }
 
+/** Where the edge gateway starts a browser sign-in. */
+export const loginPath = '/auth/login'
+
+/**
+ * Whether the edge gateway refused a call because this browser has no
+ * session. Its 401 names the sign-in path in the error's data; the local
+ * gateway's 401 for an expired token does not, and means something else.
+ */
+export function signInRequired(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 401) return false
+  const data = err.data as { login?: unknown } | undefined
+  return data?.login === loginPath
+}
+
+/**
+ * The approval code of this browser when the edge gateway refused a call
+ * because the browser is a device still waiting for approval, else null.
+ */
+export function pendingApprovalCode(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 403) return null
+  const code = (err.data as { approval_code?: unknown } | undefined)?.approval_code
+  return typeof code === 'string' && code !== '' ? code : null
+}
+
 // Every request carries a token, loopback included: `aether gui` mints one
 // and opens a tokened URL. Keep the token out of the address bar once we have
 // it.
@@ -400,6 +430,15 @@ async function failure(
     // Not every failure has a JSON body (a proxy 502, for instance).
   }
   return { message: `${res.status} ${res.statusText}` }
+}
+
+/** Ends this browser's session on the edge gateway. */
+async function signOut(): Promise<void> {
+  const res = await fetch('/auth/logout', { method: 'POST' })
+  if (!res.ok) {
+    const err = await failure(res)
+    throw new ApiError(res.status, `sign out: ${err.message}`, err.code, err.data)
+  }
 }
 
 /** WebSocket URL for a gateway path, carrying the bearer token when set. */
@@ -698,6 +737,23 @@ export const api = {
     call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
       (r) => r.member,
     ),
+  memberDeviceList: () =>
+    call<{ devices: Device[] }>('member.device.list').then((r) => r.devices),
+  memberDeviceApprove: (code: string) =>
+    call<{ device: Device }>('member.device.approve', { code }).then((r) => r.device),
+  memberDeviceRevoke: (deviceID: string) =>
+    call<{ device: Device }>('member.device.revoke', { device_id: deviceID }).then(
+      (r) => r.device,
+    ),
+  memberInvitationList: () =>
+    call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
+  memberInvitationCreate: (params: { login?: string; email?: string; role: Member['role'] }) =>
+    call<{ invitation: Invitation }>('member.invitation.create', params).then(
+      (r) => r.invitation,
+    ),
+  memberInvitationRevoke: (invitationID: string) =>
+    call<unknown>('member.invitation.revoke', { invitation_id: invitationID }),
+  signOut,
   workspaceAdd: (params: {
     name: string
     base_branch?: string
@@ -843,6 +899,15 @@ export const api = {
   // link.switch never succeeds: the gateway's SSH identity is fixed at
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
+  /** Starts a sign-in at the edge; edge.status reports how it ends. */
+  localEdgeLogin: () => local<EdgeLogin>('edge.login'),
+  localEdgeStatus: () => local<EdgeStatus>('edge.status'),
+  localEdgeServers: (edge: string) =>
+    local<{ edge: string; servers: EdgeServer[] }>('edge.servers', { edge }),
+  localEdgeLink: (serverID: string, edge: string) =>
+    local<EdgeLinkResult>('edge.link', { server_id: serverID, edge }),
+  localEdgeClaim: (code: string, edge: string) =>
+    local<EdgeLinkResult>('edge.claim', { code, edge }),
   /** This machine's own git identity, for prefilling the one the server
    * stores. */
   localGitIdentity: () => local<GitIdentity>('git.identity'),

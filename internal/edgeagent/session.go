@@ -182,7 +182,8 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	a.setSession(s)
 	defer a.setSession(nil)
 	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
-	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
+	a.learnDomain(ready.ServerDomain)
+	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State, "server_domain", ready.ServerDomain)
 
 	if ready.State == edgeproto.StateUnclaimed {
 		if err = a.forgetOwner(); err != nil {

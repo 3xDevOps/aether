@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { SignOutButton } from '@/components/edge-access'
 import { Slot } from '@/components/slots'
 import {
   Collapsible,
@@ -36,14 +37,21 @@ const connectionDot: Record<ConnectionState, string> = {
 
 // Which hop is down decides what an operator does next: a dead local
 // network needs wifi or a VPN back, a dead gateway origin needs its process
-// restarted, a phone off the tailnet needs Tailscale or the server host, and
-// a dead SSH hop needs the server or the tunnel looked at while the gateway
-// keeps retrying on its own.
+// restarted, a phone off the tailnet needs Tailscale or the server host, a
+// link through an edge needs whichever of the edge, the server's edge
+// connection, the sign-in or the device failed, and a dead SSH hop needs the
+// server or the tunnel looked at while the gateway keeps retrying on its own.
 const unreachableLabel: Record<UnreachableKind, string> = {
   network: 'this computer is offline - reconnect to wifi or your VPN',
   gateway: 'dashboard gateway is gone - restart aether gui',
   tailnet: 'no answer from your server - check Tailscale and the server host',
+  relay: "no answer through the edge - check the server's edge connection",
   server: 'server unreachable over SSH - check the server and network; retrying',
+  edge: 'edge unreachable - check this computer can reach it; retrying',
+  'edge-server': 'server not connected to the edge - check aether-server edge status',
+  'signed-out': 'signed out of the edge - run aether login',
+  'device-revoked': 'this device was revoked on the server',
+  'device-pending': 'this device is waiting for approval - run aether device approve',
   refused: 'the gateway refused this device - it is not identified as a member',
   identity: 'the server cannot identify this device - check tailscaled on the server host',
 }
@@ -393,6 +401,7 @@ export function StatusBar() {
                   {info.member.display_name}
                 </span>
               )}
+              <SignOutButton />
               {disk && disk.total_bytes > 0 && (
                 <span
                   className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:shrink xl:truncate xl:whitespace-nowrap"

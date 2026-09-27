@@ -33,7 +33,8 @@ Every type below is **collected, not shared**, **required** (the app does not
 work without it), **not processed ephemerally** (the server keeps run
 records), and used for **App functionality** only. Nothing is used for
 analytics, advertising, personalization, fraud prevention, or account
-management.
+management. The one exception is Device or other IDs, which is **optional**:
+only a dashboard reached through an edge sets it.
 
 | Category | Type | What it is |
 | --- | --- | --- |
@@ -42,6 +43,7 @@ management.
 | App activity | App interactions | Whether you are online and which runs you have open, shown to your teammates (`aether who`) |
 | Photos and videos | Photos | An image the member picks to paste into a terminal; on a phone the picker opens the gallery. It is the dashboard's only upload reachable from the phone: the onboarding profile import exists only on the local `aether gui` gateway |
 | Files and docs | Files and docs | The contents of files edited in the dashboard's Files editor |
+| Device or other IDs | Device or other IDs | The session cookie a dashboard reached through an edge sets after sign-in. The member's server issues it, records the browser as a device beside it, and receives it back with every request; the WebView keeps it until it expires, the server revokes it, or the app is uninstalled. A dashboard on a tailnet sets none |
 
 **Not shared** holds because of Play's user-initiated exemption,
 "Transferring user data to a third party based on a specific user-initiated
@@ -50,13 +52,22 @@ employer running the server is a third party, but the member types that
 server's name and every transmission above is something they typed, picked or
 tapped.
 
+Through an edge, the connection to the member's server passes the edge's
+relay, which the project runs at `edge.onaether.dev` and anyone can run
+themselves. The relay sees the phone's address, the server id, timing and
+byte counts. The content is encrypted end to end to the server: the edge
+could read it only by misissuing a certificate for the server's host name,
+which Certificate Transparency logs record
+([docs/security.md](../../docs/security.md#edge-remote-access)).
+
 Not collected, so leave unticked: Location, Personal info (the app sends no
-name, email or ID; the server learns the tailnet login from Tailscale, not
-from the app), Financial info, Health and fitness, Messages (the app has no
-messaging feature; what a member writes goes to an agent, and is declared
+name, email or ID; the server learns the tailnet login from Tailscale, or,
+through an edge, the GitHub or Google account from the edge, whose sign-in
+runs in the phone's browser, outside the app), Financial info, Health and
+fitness, Messages (the app has no messaging feature; what a member writes goes to an agent, and is declared
 above as user-generated content that their teammates can also see), Videos,
 Audio, Calendar, Contacts, Web browsing, App info and performance (no crash
-logs or diagnostics leave the phone), Device or other IDs.
+logs or diagnostics leave the phone).
 
 ## Other declarations on the same page
 
@@ -70,4 +81,4 @@ logs or diagnostics leave the phone), Device or other IDs.
 | Government app | No |
 | Financial features | None |
 | Health | None |
-| Account deletion | Not applicable: the app creates no accounts |
+| Account deletion | Not applicable: the app creates no accounts. A sign-in through an edge creates an account at that edge, in the phone's browser; the edge's operator holds it ([docs/edge.md](../../docs/edge.md)) |

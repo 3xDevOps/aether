@@ -12,16 +12,34 @@ import (
 
 // SignIn records a completed sign-in: it creates the account keyed by
 // (provider, subject), or refreshes the email, login and name the provider
-// just reported. It returns the account id.
+// just reported. A GitHub login names one account at a time, so another
+// account still holding it from before a rename loses it: only the
+// current holder matches an invitation for that login. It returns the
+// account id.
 func (s *Store) SignIn(ctx context.Context, a edgeproto.Account, now time.Time) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	if a.Login != "" {
+		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET login = ''
+			WHERE provider = ? AND lower(login) = lower(?) AND subject <> ?`,
+			a.Provider, a.Login, a.Subject); err != nil {
+			return 0, fmt.Errorf("edgestore: record sign-in: release login %s: %w", a.Login, err)
+		}
+	}
 	var id int64
-	err := s.db.QueryRowContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
+	err = tx.QueryRowContext(ctx, `INSERT INTO accounts (provider, subject, email, login, name, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (provider, subject) DO UPDATE SET
 			email = excluded.email, login = excluded.login, name = excluded.name
 		RETURNING id`,
 		a.Provider, a.Subject, a.Email, a.Login, a.Name, unix(now)).Scan(&id)
 	if err != nil {
+		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
 		return 0, fmt.Errorf("edgestore: record sign-in: %w", err)
 	}
 	return id, nil
