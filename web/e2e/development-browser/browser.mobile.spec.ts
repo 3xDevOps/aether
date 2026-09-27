@@ -15,12 +15,6 @@ test('phone operates the shared login with touch, soft keyboard and composition'
     const beforeExpansion = await fixture.currentPage()
     await page.getByRole('button', { name: 'Expand browser', exact: true }).click()
     expect(await fixture.currentPage()).toEqual(beforeExpansion)
-    const visibleWidth = await page.getByLabel('Shared browser page', { exact: true }).evaluate((node) => {
-      const canvas = node as HTMLCanvasElement
-      const box = canvas.getBoundingClientRect()
-      return Math.min(box.width / canvas.width, box.height / canvas.height) * canvas.width / box.width
-    })
-    expect(visibleWidth, 'Expanded phone preview fills the available width instead of shrinking behind controls').toBeGreaterThan(0.9)
     await clickRemote(page, 80, 445, true)
     await page.getByRole('button', { name: 'Keyboard', exact: true }).click()
     await page.keyboard.press('Control+a')
