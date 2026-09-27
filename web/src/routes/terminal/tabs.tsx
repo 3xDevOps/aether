@@ -9,6 +9,7 @@ import type { Route } from '@/store/ui'
 export const runTabs = [
   { route: 'run', label: 'Overview' },
   { route: 'terminal', label: 'Terminal' },
+  { route: 'browser', label: 'Browser' },
   { route: 'diff', label: 'Diff' },
   { route: 'events', label: 'Events' },
 ]

@@ -1,6 +1,10 @@
 // Wire types. These mirror internal/protocol/wire.go and internal/events;
 // field names are the JSON names the server sends.
 
+import type { DevArtifact } from '@/lib/development-types'
+export * from '@/lib/development-types'
+export * from '@/lib/run-repository-types'
+
 export type RunStatus =
   | 'queued'
   | 'provisioning'
@@ -579,6 +583,7 @@ export interface RoomDecideResult {
 export type RoomDeliveryReceipt = 'sent' | 'not_sent' | 'uncertain'
 
 export type EvidenceTrigger = 'finish' | 'handoff' | 'report'
+export type EvidencePacketAvailability = 'available' | 'expired'
 
 export interface ChangedFileFact {
   path: string
@@ -603,9 +608,13 @@ export interface EvidencePacket {
   objective: string
   captured_at: string
   expires_at?: string
+  availability: EvidencePacketAvailability
+  expired_at?: string
   event_boundary: number
   base_revision?: string
   retained_revision?: string
+  captures?: DevArtifact[]
+  verification_notes?: string
   changed_files?: ChangedFileFact[]
   sources?: EvidenceSourceFact[]
   related_room_message_ids?: string[]

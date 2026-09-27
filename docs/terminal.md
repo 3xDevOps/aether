@@ -51,12 +51,12 @@ that archive.
 
 ## Run control and the Run Room
 
-A run has one controller session at a time. A member needs the run's **Steer**
-permission to acquire it. Viewing, presence, and run ownership by themselves do
-not grant input access. A writable dashboard terminal, `aether attach`, or run
-shell must acquire the controller lease; read-only attaches may coexist. A
+The **primary harness terminal** has one controller session at a time. A member
+needs the run's **Steer** permission to acquire it. Viewing, presence, and run
+ownership by themselves do not grant input access. A writable primary terminal
+or `aether attach` must acquire that lease; read-only attaches may coexist. A
 second tab or connection from the same member is a different session, not a
-second writer.
+second writer. Development terminals have separate, surface-scoped leases.
 
 On a desktop, the owner's first run-terminal attach asks for control
 automatically. The server grants it only when the run is unoccupied. Other
@@ -68,9 +68,9 @@ controller. Open the Run Room and confirm **Take control** to perform an
 occupied takeover. The confirmation names the current controller; takeover ends
 that writable session and notifies it.
 
-A run shell that cannot acquire the occupied lease remains connected as a
-read-only mirror. Its terminal input and mobile key bar stay disabled; use the
-dock's **Take shell control** action for an explicit takeover.
+The development shell dock does not compete for the primary harness lease.
+Each shell has its own controller, named in the dock, and starts as a watcher.
+Use **Take shell control** for an explicit acquisition or confirmed takeover.
 
 Control is tied to the logical terminal session. When a controller disconnects,
 the server holds its lease for a **15-second reconnect window**. The same tab or
@@ -181,6 +181,56 @@ parsing replay, but the replay gate mutes those terminal-generated replies along
 with user input until the final replay callback; they do not reach the server.
 The CLI is raw and has no xterm parser, so the announced replay and input
 discard rules above remain in force.
+
+## Shared development terminals
+
+The run's existing dock lists the server's authoritative development terminals,
+including command terminals started by an agent. `+` / **Open shell** calls
+`dev.terminal.start`; displaying, selecting, reconnecting or showing a hidden
+terminal never starts a process. There can be at most four running development
+terminals. The server assigns each a stable `terminal_id` and an `incarnation`;
+every attachment and mutation names that exact incarnation. An ended or replaced
+process is never implicitly rerun.
+
+Tabs show the process state, and the active panel shows its exit status/reason
+when available. **Hide terminal**, closing a dock tab, collapsing the dock,
+switching views, and disconnecting only detach the viewer. The process keeps
+running in the run container. **Show** reopens a hidden terminal; the same compact
+replay, focus handling and phone panning are used as in the existing dock.
+**Stop terminal** is different: the current controller must explicitly confirm
+stopping the named process. Ended terminals remain discoverable until the server
+replaces them; starting a new one is always a separate action.
+
+The dock shows the current terminal controller (member or run agent).
+**Take shell control** acquires only that terminal's lease; occupied takeover
+requires confirmation and fences the previously observed generation.
+**Release shell control** releases only that surface lease. It does **not**
+release primary harness control or clear any durable mission hold. Use the
+mission/Run Room's authorized hold-release action for that separate decision.
+Input, paste, mouse sequences, resizing and stop all use the acknowledged
+surface control session and generation. Failed mutations are shown and are not
+automatically retried.
+
+All development attaches follow the shared grid, including desktop watchers.
+Only a confirmed writer sends an explicit fenced resize after acquisition;
+phones continue following the acknowledged grid even while controlling input.
+The attach header carries `incarnation`; its ACK must name the same
+`terminal_id`/`incarnation` and advertise `server_owned_responder`.
+The server answers PTY protocol queries exactly once. The dashboard suppresses
+xterm's query responders through parser handlers (including mixed OSC color
+queries/setters), not by guessing which outgoing bytes are replies. Rendering,
+alternate-screen state, Unicode, keyboard, paste and mouse input remain active;
+output parsing is not a reason to discard user input. This policy applies only
+to development terminals; primary harness replay gating is unchanged.
+
+**Screenshot** calls the terminal screenshot API and captures the server's
+actual emulator state, without needing a connected viewer. Its total budget is
+90 seconds, including first companion startup; rendering itself is bounded to
+30 seconds. Cancelling the request closes only its isolated renderer, not the
+app's browser session. Open the existing **Evidence** drawer to inspect and
+select transient captures and explicitly retain them with verification notes.
+Taking a screenshot alone does not retain it as durable evidence.
+
 
 The Agents setup step uses the same dock and types the install command for you.
 Complete the vendor login there, then return to the wizard. Its **I've

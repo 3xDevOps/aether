@@ -37,6 +37,14 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if perr != nil {
 		return nil, perr
 	}
+	w, err := s.createWorkspace(ctx, p, "")
+	if err != nil {
+		return nil, err
+	}
+	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
+}
+
+func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddParams, origin string) (*domain.Workspace, *protocol.Error) {
 	if p.Name == "" || !p.Environment.Valid() {
 		return nil, invalidParams("name and valid environment are required")
 	}
@@ -44,14 +52,14 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if base == "" {
 		base = domain.DefaultBaseBranch
 	}
-	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Environment: domain.WorkspaceEnvironment{
+	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Origin: origin, Environment: domain.WorkspaceEnvironment{
 		Variables:   p.Environment.Variables,
 		SetupPolicy: domain.SetupPolicy{Script: p.Environment.SetupPolicy.Script},
 	}}
 	if err := s.cfg.Store.CreateWorkspace(ctx, w); err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
+	return w, nil
 }
 
 func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

@@ -326,7 +326,6 @@ func TestHookStatusPreservesReadOnlyStatusAuthorization(t *testing.T) {
 	}{
 		{"unknown-run", "missing", protocol.CodeNotFound, func() {}},
 		{"closing-run", a, protocol.CodeUnavailable, func() { h.svc.closeRun(a) }},
-		{"disabled", b, protocol.CodeUnavailable, func() { h.svc.cfg.Disabled = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.set()
@@ -336,5 +335,24 @@ func TestHookStatusPreservesReadOnlyStatusAuthorization(t *testing.T) {
 				t.Fatalf("authorization differs: ordinary %+v, hook %+v, want code %d", ordinary.Error, hook.Error, tc.code)
 			}
 		})
+	}
+	h.svc.cfg.Disabled = true
+	for _, method := range []string{protocol.MethodCoordStatus, protocol.MethodCoordHookStatus} {
+		response := request(b, method)
+		if response.Error != nil {
+			t.Fatalf("disabled coordination hid authenticated discovery: %v", response.Error)
+		}
+		var discovery protocol.CoordStatusResult
+		if err := json.Unmarshal(response.Result, &discovery); err != nil {
+			t.Fatal(err)
+		}
+		if discovery.RunID != string(b) || discovery.Assignment != nil || len(discovery.Peers) != 0 || discovery.Unread != 0 {
+			t.Fatalf("disabled coordination leaked mailbox or mission state: %+v", discovery)
+		}
+		for _, capability := range discovery.Capabilities {
+			if capability != protocol.MethodCoordStatus {
+				t.Fatalf("disabled coordination advertised unauthorized capability: %s", capability)
+			}
+		}
 	}
 }

@@ -8,6 +8,17 @@ vi.mock('@xterm/xterm', () => {
     rows = 24
     options: { fontSize: number; theme?: unknown }
     private input: HTMLTextAreaElement | null = null
+    parser = {
+      registerCsiHandler: () => ({ dispose() {} }),
+      registerDcsHandler: () => ({ dispose() {} }),
+      registerOscHandler: () => ({ dispose() {} }),
+    }
+    _core = { _inputHandler: {
+      setOrReportIndexedColor: () => false,
+      setOrReportFgColor: () => false,
+      setOrReportBgColor: () => false,
+      setOrReportCursorColor: () => false,
+    } }
 
     constructor(options: { fontSize?: number } = {}) {
       this.options = { fontSize: options.fontSize ?? 12 }
@@ -28,6 +39,10 @@ vi.mock('@xterm/xterm', () => {
     attachCustomKeyEventHandler() {}
 
     onData() {
+      return { dispose() {} }
+    }
+
+    onBinary() {
       return { dispose() {} }
     }
 

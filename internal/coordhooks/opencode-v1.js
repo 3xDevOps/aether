@@ -31,7 +31,7 @@ export default async function ({ client, directory }) {
   const state = {
     version: 1,
     root: previous?.root,
-    notified: previous?.notified ?? new Set(),
+    notified: previous?.notified ?? new Map(),
     paused: previous?.paused ?? false,
     retired: previous?.retired ?? false,
     busy: previous?.busy ?? true,
@@ -102,7 +102,7 @@ export default async function ({ client, directory }) {
         }
         observed = result.unread_message_ids ?? []
         const unread = new Set(observed)
-        for (const id of state.notified) if (!unread.has(id)) state.notified.delete(id)
+        for (const id of state.notified.keys()) if (!unread.has(id)) state.notified.delete(id)
         waitSeconds = 30
         if (!result.wake_admitted || !result.context || !observed.some(id => !state.notified.has(id))) continue
         // Events are the primary idle boundary; the live status read closes
@@ -116,19 +116,27 @@ export default async function ({ client, directory }) {
         }
         await client.session.get({ path: { id: state.root }, signal: controller.signal, throwOnError: true })
         if (!valid()) return
-        wakeToken = randomUUID()
+        const token = wakeToken = randomUUID()
         wakeGeneration = epoch
-        for (const id of observed) state.notified.add(id)
+        const dispatchIDs = observed.filter(id => !state.notified.has(id))
+        // Reserve before awaiting: native lifecycle events can restart polling
+        // before acceptance settles. A rejection releases only this request.
+        for (const id of dispatchIDs) state.notified.set(id, token)
         state.busy = true
         state.completed = false
         // promptAsync accepts a request, not model receipt. The trusted pointer
         // is an ordinary synthetic user part; no peer body is promoted.
-        await client.session.promptAsync({
-          path: { id: state.root },
-          body: { parts: [{ type: 'text', text: result.context, synthetic: true, metadata: { aetherMailbox: wakeToken } }] },
-          signal: controller.signal,
-          throwOnError: true,
-        })
+        try {
+          await client.session.promptAsync({
+            path: { id: state.root },
+            body: { parts: [{ type: 'text', text: result.context, synthetic: true, metadata: { aetherMailbox: token } }] },
+            signal: controller.signal,
+            throwOnError: true,
+          })
+        } catch (error) {
+          for (const id of dispatchIDs) if (state.notified.get(id) === token) state.notified.delete(id)
+          throw error
+        }
         return
       }
     })().catch(error => {

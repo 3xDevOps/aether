@@ -30,13 +30,76 @@ function adaptiveScrollback(cols: number, rows: number, requested: number): numb
   return Math.max(0, Math.min(requested, available))
 }
 
+/**
+ * Suppress query responders at the parser, never at onData: that event also
+ * carries real keyboard, paste and mouse input. Rendering commands fall through.
+ */
+function installServerResponder(terminal: Terminal, ownsResponses: () => boolean) {
+  const parser = terminal.parser
+  const registrations = [
+    ...[
+      { final: 'c' },
+      { prefix: '>', final: 'c' },
+      { final: 'n' },
+      { prefix: '?', final: 'n' },
+      { intermediates: '$', final: 'p' },
+      { prefix: '?', intermediates: '$', final: 'p' },
+    ].map((id) => parser.registerCsiHandler(id, ownsResponses)),
+    parser.registerCsiHandler({ final: 't' }, (params) =>
+      ownsResponses() && [14, 16, 18, 20, 21].includes(Number(params[0]))),
+    parser.registerDcsHandler({ intermediates: '$', final: 'q' }, ownsResponses),
+  ]
+  // OSC permits setters and queries in a single command. The public parser API
+  // cannot delegate a modified payload synchronously. Use the pinned xterm
+  // InputHandler only for these four color setters, preserving its color parser
+  // and event ordering rather than implementing a second palette/emulator.
+  interface ColorInputHandler {
+    setOrReportIndexedColor(data: string): boolean
+    setOrReportFgColor(data: string): boolean
+    setOrReportBgColor(data: string): boolean
+    setOrReportCursorColor(data: string): boolean
+  }
+  // xterm's pinned implementation exposes InputHandler through its core.
+  const internal = terminal as unknown as { _core: { _inputHandler: ColorInputHandler } }
+  const input = internal._core._inputHandler
+  registrations.push(parser.registerOscHandler(4, (data) => {
+    if (!ownsResponses()) return false
+    const slots = data.split(';')
+    const setters: string[] = []
+    for (let index = 0; index + 1 < slots.length; index += 2) {
+      if (slots[index + 1] !== '?') setters.push(slots[index], slots[index + 1])
+    }
+    if (setters.length) input.setOrReportIndexedColor(setters.join(';'))
+    return true
+  }))
+  const setters = [
+    input.setOrReportFgColor.bind(input),
+    input.setOrReportBgColor.bind(input),
+    input.setOrReportCursorColor.bind(input),
+  ]
+  setters.forEach((set, index) => {
+    registrations.push(parser.registerOscHandler(10 + index, (data) => {
+      if (!ownsResponses()) return false
+      // Empty slots are invalid colors (no-op), and keep following setters at
+      // their original foreground/background/cursor offsets.
+      set(data.split(';').map((slot) => slot === '?' ? '' : slot).join(';'))
+      return true
+    }))
+  })
+  return () => registrations.forEach((registration) => registration.dispose())
+}
+
 export interface XtermOptions {
   enabled?: boolean
   /** Follow the shared PTY without contributing this pane's size. */
   follow?: boolean
+  /** Read synchronously by parser hooks; set from the attach ACK before replay. */
+  serverOwnedResponder?: () => boolean
   /** Maximum number of rows retained in xterm's normal scrollback. */
   scrollback?: number
   onData?: (data: string) => void
+  /** Legacy mouse reports contain raw bytes, not UTF-8 text. */
+  onBinary?: (data: string) => void
   onResize?: (cols: number, rows: number) => void
   /** Called synchronously before a terminal hyperlink opens. Return true to handle. */
   onLink?: (uri: string) => boolean
@@ -80,6 +143,8 @@ export interface XtermController {
   cancelStructuralReplay?: (generation: number) => void | Promise<void>
   /** Restore compatible viewport intent after every ordered replay operation. */
   finishStructuralReplay?: (generation: number) => void | Promise<void>
+  /** Changes protocol ownership synchronously, before any queued output parses. */
+  setServerOwnedResponder?: (owned: boolean) => void
 }
 type BufferType = 'normal' | 'alternate'
 
@@ -238,14 +303,17 @@ function paint(host: HTMLDivElement, terminal: Terminal): void {
 export function useXterm({
   enabled = true,
   follow = false,
+  serverOwnedResponder,
   scrollback = maxTerminalScrollback,
   onData,
+  onBinary,
   onResize,
   onLink,
   onBeforeDispose,
 }: XtermOptions = {}): XtermController {
   const [host, setHost] = useState<HTMLDivElement | null>(null)
   const onDataRef = useRef(onData)
+  const onBinaryRef = useRef(onBinary)
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
   const onBeforeDisposeRef = useRef(onBeforeDispose)
@@ -261,6 +329,12 @@ export function useXterm({
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const ctrlArmedRef = useRef(false)
   const followRef = useRef(follow)
+  const responderOption = useRef(serverOwnedResponder)
+  responderOption.current = serverOwnedResponder
+  const serverOwned = useRef(false)
+  const setServerOwnedResponder = useCallback((owned: boolean) => {
+    serverOwned.current = owned
+  }, [])
   const serverSize = useRef<{ cols: number; rows: number } | null>(null)
   const requestedSize = useRef(standardGeometry)
   const resizeRef = useRef<(() => void) | null>(null)
@@ -269,6 +343,7 @@ export function useXterm({
   const structuralReplay = useRef<StructuralReplay | null>(null)
   followRef.current = follow
   onDataRef.current = onData
+  onBinaryRef.current = onBinary
   onResizeRef.current = onResize
   onLinkRef.current = onLink
   onBeforeDisposeRef.current = onBeforeDispose
@@ -426,6 +501,7 @@ export function useXterm({
       window.open(uri, '_blank', 'noopener,noreferrer')
     }
     const created = new Terminal({
+      allowProposedApi: true,
       // Read rather than watched: rebuilding the terminal on a zoom step
       // would throw its scrollback away, so the size is applied below.
       fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
@@ -435,6 +511,9 @@ export function useXterm({
       cursorBlink: false,
       linkHandler: { activate: (_event, uri) => openLink(uri) },
     })
+    const disposeResponder = installServerResponder(
+      created, () => serverOwned.current || responderOption.current?.() === true,
+    )
 
     let active = true
     let teardown: (() => void) | null = null
@@ -529,6 +608,7 @@ export function useXterm({
         armCtrl(false)
         onDataRef.current?.(held)
       })
+      const binary = created.onBinary((data) => onBinaryRef.current?.(data))
       const observer = new ResizeObserver(resize)
       observer.observe(host)
       teardown = () => {
@@ -538,6 +618,7 @@ export function useXterm({
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
+        binary.dispose()
         resizeRef.current = null
       }
     })
@@ -552,6 +633,7 @@ export function useXterm({
         armCtrl(false)
         cancelFontWait()
         teardown?.()
+        disposeResponder()
         created.dispose()
         setTerminal(null)
         setSearch(null)
@@ -595,5 +677,6 @@ export function useXterm({
     beginStructuralReplay,
     cancelStructuralReplay,
     finishStructuralReplay,
+    setServerOwnedResponder,
   }
 }

@@ -146,6 +146,109 @@ git config --global --unset gpg.format
 `aether env reset` does none of this - it forgets the saved image and never
 touches the home.
 
+## Remote development and browser isolation
+
+Development terminals, the shared app browser and transient captures require
+**Steer**, including reads and captures: an app session can already be
+authenticated. Ordinary permission to view a run is not permission to inspect
+that app session. The server also rechecks access to the run's backing account.
+Local SSH gateways and the server-hosted dashboard use the same checks.
+
+Explicitly retaining selected captures crosses a sharing boundary: retained
+bytes and verification notes become ordinary workspace evidence, readable with
+**View** under the packet's existing scope and expiry, without live Steer or
+backing-account access. Retain only reviewed content before headless completion
+or other cleanup. Capture bytes and observation metadata are immutable; the
+packet's later retained Git revision does not establish capture-time Git state.
+Notes are at most 4096 UTF-8 bytes; retained plus staged captures are bounded to
+64 files and 128 MiB per run, with at most 8 MiB per capture.
+
+Retention re-resolves current authority after taking the per-run evidence lock
+and before opening each selected source. Immediately before publishing the
+packet it rechecks under the shared `authorizationMu` admission gate, which
+also serializes account, membership, role and workspace-policy changes. A busy
+gate refuses publication with a visible retry-retention conflict and rolls
+back staged work; it never silently retries. After an uncertain result, inspect
+evidence and retry explicitly with the same key and exact request if needed.
+
+A human member and a run agent are distinct principals. The agent's identity
+comes from its run socket, not a member ID in a request. Each app terminal
+and browser session has its own writer lease and resource incarnation;
+commands carry that lease's generation. A human can explicitly take over,
+which fences stale writes. An agent cannot force a takeover. Taking an app
+surface does not take the primary harness terminal or release its mission
+hold; primary-terminal control and mission dispatch retain their own rules.
+Held browser keys, buttons and touches are cleared server-side when the
+controller releases, loses authority or disconnects, and before replacement
+control is admitted. A cleanup failure fences new control rather than handing
+the next controller potentially held input. A disconnected observer is not a
+controller release.
+
+This is shared-input ownership, **not a restricted execution sandbox**.
+An app terminal executes in the live run container, under the selected
+account's ordinary home, credentials, filesystem, and network authority.
+An agent or human can still execute native tools outside the managed surface.
+Taking a writer lease does not suspend every process already running there.
+
+The Chromium companion has a different policy from the agent container above:
+
+- It runs as UID/GID `1000:1000`, with a read-only root filesystem, all
+  capabilities dropped, `no-new-privileges`, private IPC and 256 MiB shared
+  memory, bounded memory/CPU, and a private temporary filesystem.
+- Chromium runs genuinely headless with its namespace and seccomp sandboxes
+  enabled. A scoped seccomp profile permits the required user-namespace
+  operations; Docker's stock AppArmor policy remains in place. There is no
+  privileged, unconfined, `--no-sandbox`, Xvfb, or host-display fallback.
+- Its only bind mount is a private control directory. It cannot mount the
+  checkout, member home, signing keys, harness credentials, or Docker socket.
+  It joins the run's network namespace, never host networking; this lets it
+  reach the app's loopback ports without exposing a browser port on the host.
+- Playwright controls Chromium through a debugging **pipe**, not a CDP TCP
+  listener. The server brokers typed commands and bounded frames over a Unix
+  socket; clients do not receive unrestricted CDP access.
+
+This separation protects member files from browser code; it does not make
+pages safe to publish. An app test login may contain cookies, tokens,
+customer data, or other secrets. The browser shares the run's network reach.
+Use dedicated test accounts, never paste production credentials for recording,
+and inspect every selected capture before sharing it. Console warnings/errors,
+failed requests, page URLs, and visible page or terminal content can also
+contain secrets. There is no automatic public pull-request image upload.
+See [privacy.md](privacy.md#remote-development-data) for retention and
+[install.md](install.md#headless-browser-companion) for deployment failures.
+
+### Managed selected-path Git commits
+
+These commits execute Git inside the live run environment, using its native
+identity and signing configuration and the run's coauthor trailers. Publication
+uses one native `git update-ref --stdin` prepared transaction, with a single
+dereferencing `update HEAD NEW OLD`. Git compares the branch's object ID with
+the expected old value as a native compare-and-swap. After Git acknowledges
+`prepare`, Aether verifies symbolic `HEAD` still names the expected branch
+while Git holds both the `HEAD` and branch locks, then commits or aborts within
+that transaction. A changed branch or HEAD fails closed; Aether does not
+emulate the guarantee with its own lock or update whichever branch is current
+later. Stock Ubuntu 24.04 Git 2.43 supports this primitive; it does not require
+a special Git build or new host upgrade prerequisite.
+
+The selected-path index is isolated while constructing the commit: only the
+explicitly selected paths enter the commit, and unrelated staging is preserved.
+This is not a snapshot lock over files being edited concurrently: selected
+content can change while Git reads it. Updating the selected entries in the live
+index after publication is a separate step. A result with `committed=true`
+and `index_updated=false` means the commit exists but index reconciliation
+failed; inspect the reported error and repository status rather than blindly
+retrying the commit.
+
+The native `commit-tree` path deliberately does **not** run commit hooks
+(`hooks_run=false`). Use `git commit` in the run terminal when commit hooks
+are required. Native `reference-transaction` hooks are not disabled or replaced;
+their preparation veto remains effective. Custom environments without the
+required native transaction support fail closed, preserving native stderr and
+reporting missing protocol acknowledgements rather than falling back to an
+unchecked update. Other repository reads remain available. See
+[install.md](install.md#git-inside-run-environments) for exact diagnostics.
+
 ## Workspace source mirrors
 
 A workspace without a mirror is **local-only**. A configured mirror is an

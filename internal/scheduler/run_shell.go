@@ -6,29 +6,21 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 var (
-	// ErrInvalidRunShellTab identifies a tab name that cannot be used in the
-	// run-shell session key or shell client URL.
 	ErrInvalidRunShellTab = errors.New("scheduler: invalid run shell tab")
-	// ErrRunShellTabLimit identifies the per-run shell tab resource limit.
-	ErrRunShellTabLimit = errors.New("scheduler: at most 4 shell tabs per run")
+	ErrRunShellTabLimit   = errors.New("scheduler: at most 4 shell tabs per run")
 )
 
 var runShellTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
-const runShellRecoveryWait = 5 * time.Second
-
-// EnsureRunShellTab starts an interactive shell process in a running or
-// stalled-but-live run container unless that tab already has a live PTY
-// session.
+// EnsureRunShellTab adopts a dashboard shell. An ended or recovered execution
+// is never restarted by attaching; replacement requires an explicit start.
 func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab string, cols, rows uint) error {
 	reservation, err := s.EnsureRunShellTabReserved(ctx, run, tab, cols, rows)
 	if err != nil {
@@ -38,121 +30,56 @@ func (s *Scheduler) EnsureRunShellTab(ctx context.Context, run domain.RunID, tab
 	return nil
 }
 
-// EnsureRunShellTabReserved admits one shell-tab attach and returns an
-// ownership token. A caller must Adopt after its attach is accepted or
-// Rollback when authorization/attachment is refused. Concurrent reservations
-// share the same pending shell state; the shell is stopped only when every
-// pending creator rolls back without an adoption.
+// EnsureRunShellTabReserved shares the development-terminal registry, limit,
+// process identity, and PTY key. Only an unadopted creation can be rolled back.
 func (s *Scheduler) EnsureRunShellTabReserved(ctx context.Context, run domain.RunID, tab string, cols, rows uint) (ptyhost.ShellTabReservation, error) {
 	if !runShellTabName.MatchString(tab) {
 		return nil, fmt.Errorf("%w: %q must match ^[a-z0-9-]{1,32}$", ErrInvalidRunShellTab, tab)
 	}
-
-	s.mu.Lock()
-	lock := s.runShellLocks[run]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		s.runShellLocks[run] = lock
-	}
-	s.mu.Unlock()
+	lock := s.lockForShell(run)
 	lock.Lock()
 	defer lock.Unlock()
-
-	var containerID runtime.ID
-	deadline := time.NewTimer(runShellRecoveryWait)
-	defer deadline.Stop()
-	retry := time.NewTicker(50 * time.Millisecond)
-	defer retry.Stop()
-	for {
-		s.mu.Lock()
-		entry := s.runs[run]
-		switch {
-		case entry == nil:
-			s.mu.Unlock()
-			stored, err := s.cfg.Store.GetRun(ctx, run)
-			if err != nil {
-				if errors.Is(err, store.ErrNotFound) {
-					return nil, fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
-				}
-				return nil, fmt.Errorf("scheduler: find run shell %s: %w", run, err)
-			}
-			if stored.Status != domain.RunRunning && stored.Status != domain.RunNeedsAttention {
-				return nil, fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
-			}
-			sc, sidecarErr := s.readSidecar(run)
-			if sidecarErr == nil && !sc.Paused && !sc.ExitObserved && sc.ContainerID != "" {
-				containerID = runtime.ID(sc.ContainerID)
-				goto live
-			}
-		case (entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention) ||
-			entry.paused || entry.containerID == "":
-			s.mu.Unlock()
-			return nil, fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
-		default:
-			containerID = entry.containerID
-			s.mu.Unlock()
-			goto live
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-deadline.C:
-			return nil, fmt.Errorf("%w: run %s has no live container", ptyhost.ErrNoSession, run)
-		case <-retry.C:
-		}
+	live, err := s.ResolveLiveRun(ctx, run, false)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ptyhost.ErrNoSession, err)
 	}
-
-live:
+	set, err := s.loadRunTerminalsLocked(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if prepareErr := s.prepareRunTerminalsLocked(set, live.ContainerID); prepareErr != nil {
+		return nil, prepareErr
+	}
 	key := ptyhost.RunShellSession(run, tab)
-	active := s.cfg.PTY.ActiveSessions(string(ptyhost.RunShellSession(run, "")))
-	for _, current := range active {
-		if current == key {
-			s.runShellReservationMu.Lock()
-			state := s.runShellReservations[string(key)]
-			if state != nil {
-				state.pending++
-			}
-			s.runShellReservationMu.Unlock()
-			generation := s.cfg.PTY.SessionGeneration(key)
-			if generation == 0 {
-				return nil, fmt.Errorf("%w: shell %s was replaced during reservation", ptyhost.ErrSessionReplaced, key)
-			}
-			if state != nil {
-				return &shellTabReservation{s: s, run: run, key: string(key), generation: generation, state: state}, nil
-			}
-			return &shellTabReservation{s: s, run: run, generation: generation}, nil
+	terminal := set.Terminals[tab]
+	if terminal == nil {
+		terminal, err = s.startRunTerminalLocked(ctx, run, set, live, protocol.DevTerminalStartParams{Name: tab, Cols: cols, Rows: rows})
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(active) >= 4 {
-		return nil, ErrRunShellTabLimit
-	}
-
-	bash := []string{"/bin/bash", "-l"}
-	att, err := s.cfg.Runtime.ExecTTY(ctx, containerID, bash, s.cfg.WorktreeMount, cols, rows)
-	if err != nil {
-		var exitErr *runtime.ExecExitError
-		if errors.As(err, &exitErr) && (exitErr.Code == 126 || exitErr.Code == 127) {
-			att, err = s.cfg.Runtime.ExecTTY(ctx, containerID, []string{"/bin/sh", "-l"}, s.cfg.WorktreeMount, cols, rows)
+		s.runShellReservationMu.Lock()
+		if s.runShellReservations == nil {
+			s.runShellReservations = make(map[string]*shellTabState)
 		}
+		s.runShellReservations[string(key)] = &shellTabState{}
+		s.runShellReservationMu.Unlock()
 	}
-	if err != nil {
-		return nil, fmt.Errorf("scheduler: start run shell: %w", err)
+	if terminal.Generation == 0 || s.cfg.PTY.SessionGeneration(key) != terminal.Generation {
+		return nil, fmt.Errorf("%w: terminal has no reattachable PTY; use explicit stop/start", ptyhost.ErrSessionReplaced)
 	}
-	if err := s.cfg.PTY.StartSession(ctx, key, att); err != nil {
-		_ = att.Close()
-		return nil, fmt.Errorf("scheduler: start run shell session: %w", err)
+	if err := s.refreshRunTerminalLocked(ctx, run, set, terminal); err != nil {
+		return nil, err
 	}
-	generation := s.cfg.PTY.SessionGeneration(key)
-	if generation == 0 {
-		_ = s.cfg.PTY.StopSession(context.WithoutCancel(ctx), key)
-		return nil, fmt.Errorf("%w: shell %s has no generation", ptyhost.ErrSessionReplaced, key)
+	if terminal.State.Exited || terminal.Unavailable != "" {
+		return nil, fmt.Errorf("%w: terminal ended or unavailable; use explicit start to replace a proved exited process", ptyhost.ErrSessionEnded)
 	}
-	state := &shellTabState{pending: 1}
 	s.runShellReservationMu.Lock()
-	s.runShellReservations[string(key)] = state
+	state := s.runShellReservations[string(key)]
+	if state != nil {
+		state.pending++
+	}
 	s.runShellReservationMu.Unlock()
-	return &shellTabReservation{s: s, run: run, key: string(key), generation: generation, state: state}, nil
+	return &shellTabReservation{s: s, run: run, key: string(key), generation: terminal.Generation, state: state}, nil
 }
 
 type shellTabState struct {
@@ -170,9 +97,7 @@ type shellTabReservation struct {
 	done       bool
 }
 
-func (r *shellTabReservation) Generation() uint64 {
-	return r.generation
-}
+func (r *shellTabReservation) Generation() uint64 { return r.generation }
 
 func (r *shellTabReservation) Adopt() {
 	r.mu.Lock()
@@ -212,42 +137,64 @@ func (r *shellTabReservation) Rollback(ctx context.Context) error {
 	lock.Lock()
 	defer lock.Unlock()
 	r.s.runShellReservationMu.Lock()
-	if r.s.runShellReservations[r.key] != r.state {
+	if r.s.runShellReservations[r.key] != r.state || r.state.adopted {
 		r.s.runShellReservationMu.Unlock()
 		return nil
 	}
-	if r.state.adopted {
-		r.s.runShellReservationMu.Unlock()
-		return nil
-	}
-	if r.state.pending > 0 {
-		r.state.pending--
-	}
+	r.state.pending--
 	if r.state.pending > 0 {
 		r.s.runShellReservationMu.Unlock()
 		return nil
 	}
 	delete(r.s.runShellReservations, r.key)
 	r.s.runShellReservationMu.Unlock()
-	return r.s.cfg.PTY.StopSession(ctx, ptyhost.SessionKey(r.key))
+	set, err := r.s.loadRunTerminalsLocked(ctx, r.run)
+	if err != nil {
+		return err
+	}
+	for id, terminal := range set.Terminals {
+		if string(ptyhost.RunShellSession(r.run, id)) != r.key || terminal.Generation != r.generation {
+			continue
+		}
+		if err := r.s.stopRunTerminalLocked(ctx, r.run, set, terminal, r.s.cfg.StopGrace); err != nil {
+			return err
+		}
+		_ = r.s.cfg.PTY.StopSession(ctx, ptyhost.SessionKey(r.key))
+		delete(set.Terminals, id)
+		return r.s.persistRunTerminalsLocked(r.run, set)
+	}
+	return nil
 }
 
 func (s *Scheduler) lockForShell(run domain.RunID) *sync.Mutex {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runShellLocks == nil {
+		s.runShellLocks = make(map[domain.RunID]*sync.Mutex)
+	}
 	lock := s.runShellLocks[run]
 	if lock == nil {
 		lock = &sync.Mutex{}
 		s.runShellLocks[run] = lock
 	}
-	s.mu.Unlock()
 	return lock
 }
 
-// StopRunShellTab removes one persistent shell tab. It is reserved for
-// lifecycle cleanup; attach admission uses an ownership token instead.
+// StopRunShellTab is lifecycle-only. Detaching a viewer must not call it.
 func (s *Scheduler) StopRunShellTab(ctx context.Context, run domain.RunID, tab string) error {
 	if !runShellTabName.MatchString(tab) {
-		return fmt.Errorf("%w: %q must match ^[a-z0-9-]{1,32}$", ErrInvalidRunShellTab, tab)
+		return fmt.Errorf("%w: %q", ErrInvalidRunShellTab, tab)
 	}
-	return s.cfg.PTY.StopSession(ctx, ptyhost.RunShellSession(run, tab))
+	lock := s.lockForShell(run)
+	lock.Lock()
+	defer lock.Unlock()
+	set, err := s.loadRunTerminalsLocked(ctx, run)
+	if err != nil {
+		return err
+	}
+	terminal := set.Terminals[tab]
+	if terminal == nil {
+		return ptyhost.ErrNoSession
+	}
+	return s.stopRunTerminalLocked(ctx, run, set, terminal, s.cfg.StopGrace)
 }

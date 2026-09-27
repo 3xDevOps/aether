@@ -119,6 +119,8 @@ func New(cfg Config) (*Gateway, error) {
 	g.HandleFunc("GET /ws/events", g.handleEvents)
 	g.HandleFunc("GET /ws/attach/{run}", g.handleAttach)
 	g.HandleFunc("GET /ws/terminal", g.handleTerminal)
+	g.HandleFunc("GET /ws/dev/browser/{run}", g.handleDevelopmentBrowser)
+	g.HandleFunc("GET /api/v1/dev/{run}/artifacts/{artifact}", g.handleDevelopmentArtifact)
 	static := StaticHandler(cfg.Static)
 	g.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// An /api or /ws request that misses every method-qualified

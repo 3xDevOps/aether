@@ -14,13 +14,16 @@ The standard image is published with each release:
 ghcr.io/3xdevops/aether-standard:<tag>
 ```
 
-Its contents are pinned in `images/standard/Dockerfile`: Ubuntu 24.04 with
-bash, build-essential, certificates, curl, findutils, Git, the GitHub CLI,
-grep, jq, the OpenSSH client, pkg-config, Python 3 with venv, ripgrep, sudo,
-unzip, Go, Node and npm via fnm, uv, and Rust via rustup. The server selects
-this image through `--standard-image`; the default is the image matching the
-server build. Teams that need a shared baseline can publish their own image
-and point `--standard-image` at it.
+The standard image is based on Ubuntu 24.04; its packages and toolchains are
+defined in [`images/standard/Dockerfile`](../images/standard/Dockerfile).
+It includes bash, build-essential, certificates, curl, findutils, Ubuntu's
+distribution Git, the GitHub CLI, GnuPG, grep, jq, the OpenSSH client, pkg-config,
+Python 3 with venv, ripgrep, sudo, unzip, Go, Node and npm via fnm, uv, and Rust
+via rustup. Git uses the normal Ubuntu package, not a custom source build,
+on both amd64 and arm64. The server selects this image through
+`--standard-image`; the default is the image matching the server build.
+Teams that need a shared baseline can publish their own image and point
+`--standard-image` at it.
 
 The image ships `gh` and `ssh-keygen` for GitHub's sake: connecting GitHub
 in the environment terminal and signing commits inside a run need them, so
@@ -28,6 +31,50 @@ nothing has to be installed first. A team publishing its own standard image
 should keep both, and keep gh at 2.81.0 or newer: that release added
 `gh auth status --json`, which is how the server reads a member's login
 back.
+
+### Git in run environments
+
+Managed commits use native `git update-ref --stdin` prepared transactions
+inside the run container. Stock Ubuntu 24.04 Git 2.43 supports this primitive;
+no custom Git build or new Ubuntu host upgrade prerequisite is needed.
+Publication sends one dereferencing `update HEAD NEW OLD`: Git checks the
+expected old object ID as a native compare-and-swap. After Git acknowledges
+`prepare`, Aether verifies that symbolic `HEAD` still names the expected
+branch while Git holds both the `HEAD` and branch locks, then commits or
+aborts that same transaction. Custom environments lacking the required native
+transaction support fail closed, without an unchecked branch-update fallback.
+This is a capability requirement, not a claimed minimum Git version for every
+environment; unrelated repository reads do not depend on this transaction.
+
+Managed commits use a separate selected-path index, `git commit-tree`, and
+atomic reference publication. They preserve native author/committer identity,
+configured signing, and Aether's coauthor trailers, but **do not run commit
+hooks** (`hooks_run=false`). Native `reference-transaction` hooks remain in
+effect and can veto preparation. When a repository requires commit hooks, run
+native `git commit` in that run's terminal instead; the managed commit action
+is not a commit-hook-enforcing substitute.
+
+A saved member image takes precedence over an updated standard image. Updating
+the server alone therefore does not replace the software in saved environments
+or existing run containers. If a custom image lacks the required native Git
+support, choose one of these paths:
+
+- Update the server's standard image pin as described below, then use
+  **Reset to standard** or `aether env reset`. Reset discards the saved image's
+  container-installed customizations; preserve anything needed first. Open a
+  new environment terminal and start a **new run**.
+- To retain customizations, install your distribution's Git package with
+  native prepared-transaction support in the environment terminal, then
+  `aether env save` and start a **new run**. Ubuntu 24.04's stock Git supports
+  the required primitive; a special source installer is not needed.
+
+For a custom standard image, rebuild it with the required native Git support
+and repoint `--standard-image`; saved member images still need one of the
+two paths above. See [install.md](install.md#git-inside-run-environments) for
+native transaction failure diagnostics.
+An already-running container keeps its old software after either save or reset.
+
+### Updating the standard image
 
 Docker pulls a tag it does not already hold, so the standard image is
 refreshed only when the tag changes. Each release uses its own tag, and

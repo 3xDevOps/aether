@@ -61,6 +61,18 @@ func newAttachConn(ch subsystemConn, r *bufio.Reader, ack any, framed bool, befo
 	}
 }
 
+// SetTerminalResponder advertises server query ownership before replay. Clients
+// suppress emulator-generated protocol replies, not keyboard or mouse input.
+func (c *attachConn) SetTerminalResponder(serverOwned bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.sent {
+		if ack, ok := c.ack.(*protocol.AttachResponse); ok {
+			ack.ServerOwnedResponder = serverOwned
+		}
+	}
+}
+
 // SetGeometry takes the session's PTY size from the host. Before the ack
 // goes out it is what the ack reports; afterwards framed clients receive an
 // ordered geometry record. Interactive records also carry the exact terminal

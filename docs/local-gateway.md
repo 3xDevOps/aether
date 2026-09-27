@@ -66,12 +66,19 @@ than retrying a credential the gateway has already rejected. Open the URL
 
 `run` is the other query parameter the dashboard reads on first load, and it
 leaves the address bar the same way. `?run=<run_id>` opens that run's
-terminal as soon as the first hydration has the runs; a run the member cannot
-see is ignored and the board stays. This is how both shells deliver an
+terminal as soon as the first hydration has the runs, even when the local
+gateway has no project clone. An authorized run link takes precedence over
+optional local onboarding. A run the member cannot see is ignored.
+This is how both shells deliver an
 `aether://run/<id>` deep link - the desktop shell (`desktop/main.js`) and the
 Android app (`android/`) append it to the dashboard URL and load that -
 and removing it is what stops a reload, or the re-hydration a reconnect runs,
 from reopening a run the member has since left.
+
+Once a server is configured, local-repository onboarding is only an initial
+landing page. Choosing **Manage workspaces** during startup keeps that route;
+reconnecting does not send it back to onboarding. Remote import needs no local
+clone.
 
 ### Agent OAuth logins
 
@@ -133,16 +140,16 @@ in-process backend for the member identified by Tailscale WhoIs. This keeps
 the API and stream behavior independent of whether the browser is local or on
 the tailnet.
 
-For the local backend, when a call fails on transport (a server restart or a
-dropped network), it redials once and retries once before surfacing `-32004`
-(unavailable). `config.import` is not replayed: a lost response may follow
-committed writes, so the failed attempt surfaces immediately. A subsequent
-request can reconnect without replaying the import. A failure the server itself
-answered passes through untouched as that `protocol.Error`. Streams get the
-same treatment with a guard: a channel
-that fails to open triggers a redial only when a keepalive shows the
-connection is actually gone, because tearing down a healthy connection would
-kill every live stream riding on it.
+For the local backend, a replay-safe call that fails on transport (a server
+restart or dropped network) redials once and retries once before surfacing
+`-32004` (unavailable). `config.import`, `workspace.import`, `dev.*`, `run.git.*`
+and `run.pr.*` are not replayed: a lost response may follow committed writes,
+so uncertainty surfaces immediately. A subsequent explicit request can
+reconnect. A server refusal passes through untouched as that `protocol.Error`;
+in particular, busy retention admission requires an explicit retry, not
+automatic replay. Streams have a separate guard: a channel that fails to open
+triggers a redial only when a keepalive shows the connection is actually gone,
+because tearing down a healthy connection would kill its other live streams.
 
 Every `-32004` carries a message prefix that says who has to fix it, and both
 map to HTTP 503 as before. `network unreachable: ` means this machine could
@@ -175,6 +182,8 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
+| `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
+| `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
 | `POST` | `/local/v1/<verb>` | client-machine verbs, on `aether gui` only |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -187,6 +196,45 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. File and configuration exceptions are listed below.
+
+### Development streams and retained captures
+
+Development control calls use the existing `POST /api/v1/dev.*` RPC routes.
+Transient capture downloads, browser observation and development-terminal
+attaches require **Steer** and access to the run's backing account. Adding
+`evidence_packet_id` to the existing artifact route selects the immutable
+retained copy instead: the server checks packet/run/artifact identity and
+existing evidence **View** permission and expiry, including during transfer.
+This broader access is why retention must be deliberate. Downloads stream
+bytes with the recorded content type and length, `Cache-Control: no-store`
+and attachment headers; they do not return base64 in a control response.
+
+`/ws/dev/browser/<run_id>` accepts a JSON page target (`session_id`, `page_id`,
+`page_revision`) and returns a JSON acknowledgement or refusal. Each following
+binary message is one complete frame: two big-endian 32-bit lengths, JSON
+metadata (at most 16 KiB), then image bytes (at most 2 MiB). Metadata carries
+run/session/page/revision/viewport identity and image dimensions; clients must
+honor these fences. Input goes through `dev.browser.action`, never this stream.
+Late subscribers receive the latest complete frame of the active stream;
+slow viewers skip obsolete frames rather than building an image backlog.
+
+The existing `/ws/attach/<run_id>?shell=<terminal_id>` attaches to the shared
+development terminal, including one started by an agent. Retain the
+acknowledgement's `terminal_id` and `incarnation`; reconnect with the incarnation
+to avoid attaching to an explicit replacement. `server_owned_responder: true`
+means the server answers terminal queries; viewers must not send competing
+device replies. Writer ownership is fenced by surface, incarnation,
+`control_session_id` and `control_generation`. Viewer attach does not resize
+the app; resize and stop require explicit control. Development control changes
+use `dev.control.*` and reconnect, not interactive primary-harness attach.
+
+Cancellation and authority revocation stop source work and close download
+readers before waiting for SSH status or close messages. A stalled SSH close
+has a bounded grace period before the underlying transport is aborted; this
+can end sibling streams on that connection. Responsive peers retain their
+other channels. HTTP downloads also have bounded writes and abort on
+interrupted/short sources rather than returning a successful truncated capture.
+These transport bounds do not automatically replay a development mutation.
 
 ### Terminal history
 

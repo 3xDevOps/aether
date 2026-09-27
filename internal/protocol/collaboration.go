@@ -131,6 +131,8 @@ type EvidencePacket struct {
 	RetainedRevision      string                     `json:"retained_revision,omitempty"`
 	ChangedFiles          []ChangedFileFact          `json:"changed_files,omitempty"`
 	Sources               []EvidenceSourceFact       `json:"sources,omitempty"`
+	Captures              []DevArtifact              `json:"captures,omitempty"`
+	VerificationNotes     string                     `json:"verification_notes,omitempty"`
 	RelatedRoomMessageIDs []string                   `json:"related_room_message_ids,omitempty"`
 	UnresolvedFacts       []string                   `json:"unresolved_facts,omitempty"`
 	NextAction            string                     `json:"next_action,omitempty"`
@@ -354,11 +356,23 @@ func EvidencePacketFromStore(p *store.EvidencePacket) EvidencePacket {
 		ExpiredAt: collaborationTimePtr(p.ExpiredAt), EventBoundary: p.EventBoundary,
 		BaseRevision: p.BaseRevision, RetainedRevision: p.RetainedRevision,
 		ChangedFiles: changed, Sources: sources,
+		Captures: cloneDevelopmentArtifacts(p.Captures), VerificationNotes: p.VerificationNotes,
 		RelatedRoomMessageIDs: append([]string(nil), p.RelatedRoomMessageIDs...),
 		UnresolvedFacts:       append([]string(nil), p.UnresolvedFacts...), NextAction: p.NextAction,
 		Provenance: p.Provenance, IdempotencyKey: p.IdempotencyKey,
 		CreatedAt: collaborationTime(p.CreatedAt), UpdatedAt: collaborationTime(p.UpdatedAt),
 	}
+}
+
+func cloneDevelopmentArtifacts(in []DevArtifact) []DevArtifact {
+	out := append([]DevArtifact(nil), in...)
+	for i := range out {
+		if out[i].Dirty != nil {
+			dirty := *out[i].Dirty
+			out[i].Dirty = &dirty
+		}
+	}
+	return out
 }
 func RoomMessagePageFromStore(page *store.RoomMessagePage) RoomMessageListResult {
 	if page == nil {

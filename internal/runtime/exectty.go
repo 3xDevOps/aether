@@ -18,6 +18,7 @@ type execAttachment struct {
 	resp client.HijackedResponse
 
 	stdout    *streamBuffer
+	done      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -27,10 +28,11 @@ func newExecAttachment(cli *client.Client, id string, resp client.HijackedRespon
 		id:     id,
 		resp:   resp,
 		stdout: newStreamBuffer(),
+		done:   make(chan struct{}),
 	}
 	go func() {
 		_, err := io.Copy(a.stdout, resp.Reader)
-		a.stdout.CloseWithError(err)
+		a.finish(err)
 	}()
 	return a
 }
@@ -47,11 +49,27 @@ func (a *execAttachment) Resize(ctx context.Context, cols, rows uint) error {
 }
 
 func (a *execAttachment) Close() error {
+	a.finish(nil)
+	return nil
+}
+
+// finish preserves unread output and closes the transport exactly once, whether
+// the remote side reaches EOF or a caller detaches concurrently with the pump.
+func (a *execAttachment) finish(err error) {
 	a.closeOnce.Do(func() {
-		a.stdout.CloseWithError(nil)
+		a.stdout.CloseWithError(err)
+		close(a.done)
 		a.resp.Close()
 	})
-	return nil
+}
+
+func (a *execAttachment) connected() bool {
+	select {
+	case <-a.done:
+		return false
+	default:
+		return true
+	}
 }
 
 // emptyReader gives each Stderr call an independent empty stream.

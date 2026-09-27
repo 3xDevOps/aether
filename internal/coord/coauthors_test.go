@@ -16,8 +16,8 @@ import (
 // catches the rewrite has to see one whole list or the other, never a
 // missing path: an ENOENT there would silently cost the branch its
 // trailers.
-func TestWriteCoAuthorsIsAtomic(t *testing.T) {
-	h := newHarness(t, 1)
+func TestWriteCoAuthorsIsAtomicWithCoordinationDisabled(t *testing.T) {
+	h := newHarness(t, 1, func(c *Config) { c.Disabled = true })
 	run := h.runs[0].ID
 	if _, err := h.svc.Provision(context.Background(), run, nil); err != nil {
 		t.Fatalf("Provision: %v", err)

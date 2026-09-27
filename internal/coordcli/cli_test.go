@@ -161,9 +161,6 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 					!strings.Contains(raw, "Task revision: 7\n") || !strings.Contains(raw, "Attempt ID: attempt-current\n") {
 					t.Fatalf("worker cannot discover its full assignment: %s", raw)
 				}
-				if !strings.Contains(raw, "Check the inbox after reading the task, before each commit, and before reporting; sibling workers are listed by status.\n") {
-					t.Fatalf("worker skill lacks its inbox checkpoints: %s", raw)
-				}
 			}
 			if role == "integrator" {
 				if at := strings.Index(raw, integratorRole); at < 0 || at > strings.Index(raw, "Phase: ") {

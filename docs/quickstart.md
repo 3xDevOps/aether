@@ -2,13 +2,16 @@
 
 Zero to a finished agent run in about ten minutes, solo.
 
-Two machines are involved, though they can be the same one:
+The standard deployment is a **headless Ubuntu server** with Docker and git.
+Agents, repository fetches, builds, and run tools execute there; the server
+does not need a desktop session.
 
-- **the server box** - a Linux machine with Docker and git. Agents run here.
-- **your machine** - Linux, macOS, or Windows. Where you type.
-
-Your machine needs git and, unless both machines are on a tailnet
-(see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
+You can use its authenticated hosted dashboard/API from another machine with
+no local project clone or toolchain. Administrators can seed a repository with
+[remote import](#remote-only-import-no-local-clone) instead of a local push.
+The local-client path below is also available on Linux, macOS, or Windows.
+That path needs git for local linking/pushing and, unless both machines are on
+a tailnet (see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
 `~/.ssh/id_ed25519` and your ssh-agent. For a key somewhere else, pass
 `aether link --key <path>`; for a passphrase-protected one, `ssh-add` it
 first. Windows paths and the OpenSSH agent service are in
@@ -130,7 +133,7 @@ wizard asks for the same two fields in its **Git identity** step, right after
 Link, prefilled from this machine's `git config user.name` and `user.email`.
 `aether member git` with no flags shows what is set.
 
-## 4. Create a workspace and push your repo
+## 4. Create a workspace
 
 A **workspace** is the repo plus a server-owned scope for runs and shells.
 Creating one is an admin operation. Every container for a member starts from
@@ -200,11 +203,109 @@ commits, and nothing here force-pushes. See
 
 For optional source-mirror setup, see [the detailed instructions](#optional-configure-source-control).
 
+### Remote-only import (no local clone)
+
+In the authenticated dashboard, open the command palette (**Ctrl/Cmd+K**),
+choose **Manage workspaces**, then **Import repository** as an administrator.
+Enter **Workspace name**, **Source URL** and **Source / base branch**.
+Set **Checkout Origin (optional)** to your writable repository
+or leave it blank; it is never inferred from the source. Choose **Public HTTPS**
+or **Read-only deploy key** under **Source authentication**. Generic SSH sources
+also need verified **Pinned known_hosts** contents.
+
+Click **Import repository**, then inspect **Import outcome**: the retained
+workspace ID, source state, observed candidate, generation and accepted base.
+Click **Continue to Source control** to use the existing **Workspace Source**
+dialog. For deploy-key sources, copy the generated key, install it read-only
+at the source, then **Verify** / **Refresh**; do not reconfigure after installing
+the key. Review the observed SHA and generation, click **Adopt candidate**,
+and confirm the adoption. A fetched initial candidate is not automatically
+accepted. The same flow remains available under **Workspace → Source control**.
+
+If import creates the workspace but configuration or fetch fails, the dialog
+keeps **Created: yes**, the workspace ID and the real error. Repair or refresh
+that retained workspace in Source control rather than importing a duplicate.
+If the response is lost, close the dialog and inspect the refreshed workspace
+list before considering another import.
+
+The administrator endpoint is also `workspace.import`, available through the
+SSH control channel or `POST /api/v1/workspace.import` on either authenticated
+gateway. Collaborators cannot import workspaces. The commands below use the
+server-hosted HTTPS gateway from the administrator's tailnet device; set
+`AETHER_URL` to the dashboard URL printed by server setup. Authentication is
+the existing Tailscale identity, not a GitHub token.
+
+```sh
+export AETHER_URL='https://your-server.your-tailnet.ts.net:8443'
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.import" \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"myproject","environment":{},"source_url":"https://github.com/acme/myproject.git","base_branch":"main","origin":"https://github.com/my-account/myproject.git","auth":"public"}'
+```
+
+The server creates the workspace and its bare repository, configures the
+existing read-only mirror, and fetches immediately. No client clone, hidden
+push, or server restart is needed. In the response, retain `workspace.id`
+and inspect `mirror.observed_commit`, `mirror.generation`, and `mirror.status`.
+The first candidate remains **pending** with no `accepted_commit`: fetching
+is not approval. After reviewing the candidate, explicitly adopt the returned
+generation on that same workspace:
+
+```sh
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.adopt" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>","generation":1}'
+```
+
+Replace `1` with the actual returned generation. Adoption supplies the base
+for new runs. Later upstream rewrites never silently replace an accepted base;
+they require another explicit adoption through the existing mirror flow.
+
+For a private repository, send `"auth":"deploy-key"` instead. Import returns
+**pending** and `mirror.public_key` without attempting a fetch before you have
+installed that key. Add it to the source repository as a **read-only deploy
+key** (on GitHub: **Settings > Deploy keys > Add deploy key**, leave **Allow
+write access** off). Generic SSH sources also require pinned `known_hosts`
+contents in the request, as described below. Then verify and inspect the
+candidate before adopting:
+
+```sh
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.refresh" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>"}'
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.status" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>"}'
+```
+
+Use refresh, not configure, after installing the key; reconfiguration rotates
+the key and generation. Public authentication only accepts credential-free
+HTTPS; deploy-key authentication follows the same source and host-trust rules
+as ordinary mirror configuration.
+
+**Partial success matters:** after workspace creation the import response
+keeps `created:true`, `workspace.id`, the available mirror/key state, and an
+`error` string if configuration or fetch failed. An HTTP success alone does
+not mean the source fetched. Missing branches and empty upstream repositories
+return fetch failures, not an invented initial commit. Keep the workspace and
+repair its mirror with `workspace.mirror.configure` or
+`workspace.mirror.refresh`; do not submit another import. If the connection
+drops before the response arrives, inspect `workspace.list` before deciding
+whether creation is needed.
+
+The explicit `origin` is the checkout's push destination; it is **not** derived
+from `source_url`. Set it to `""` to leave the workspace without an external
+push destination. GitHub SSH origins are normalized to HTTPS just as with
+`workspace.origin`. Mirror deploy keys only read source: they neither grant
+push permission nor configure run-account GitHub authentication. Publishing
+uses the selected run account's native Git/`gh` credentials, independently of
+the mirror and of local repository linking.
+
 ### Optional: configure source control
 
 An administrator can make the workspace's base a read-only mirror of an
-upstream branch. Configure it from the CLI or local dashboard only after the
-initial workspace push or after reconciling the two repositories:
+upstream branch. Configure it from the CLI or local dashboard after a local
+push, or on a fresh workspace without one. A fresh repository's first fetched
+candidate needs explicit adoption as in [remote import](#remote-only-import-no-local-clone):
 
 ```sh
 # Public GitHub or any public HTTPS repository:
@@ -483,7 +584,59 @@ aether inject <run-id> "also update the README"
 The message appears in the transcript as a banner in your member color, and
 everyone watching sees who said it.
 
-## 8. Pull the result
+## 8. Review and publish the result
+
+### Remote-only: commit, push and open a PR
+
+Open the run's **Diff** tab and expand **Native changes & publish**. The
+existing **Land**, candidate review and interval timeline remain separate:
+a GitHub PR is not an internal candidate proposal.
+
+1. Inspect **Run checkout**: the native branch and HEAD, **Selected run
+   account**, **GitHub identity** (or its real authentication error), and
+   changed, staged and untracked paths. Connect GitHub in that account's
+   environment first; mirror deploy keys do not provide push credentials.
+2. Check exact paths, then click **Review selected paths**. The view shows
+   worktree and staged diffs separately, with content previews for selected
+   untracked files. Enter a **Commit message** and click **Commit selected
+   paths**. This commits those paths' current worktree contents, not only
+   their staged hunks; unselected staged paths are preserved. Native identity
+   and signing apply, but commit hooks do not run.
+3. Inspect **Commit outcome** and native diagnostics. **Committed: yes** with
+   **Index updated: no** means the commit exists but index reconciliation
+   failed: inspect the checkout instead of repeating the commit. A branch/HEAD
+   mismatch requires **Refresh native status** and a fresh review.
+4. Under **Push branch**, choose **Push remote**, its exact **Writable push
+   URL**, and **Push head branch**. Check the account/branch/HEAD/destination
+   review box, then **Push reviewed branch**. Add any missing fork remote using
+   native Git in the run terminal first. Push is non-force and does not switch
+   branches or change workspace Origin, source mirror or accepted base.
+5. Under **GitHub pull request**, explicitly enter **PR repository
+   (owner/name)** and **PR base branch**, separately from **PR head repository
+   (owner/name)** and **PR head branch**. For a fork, the PR repository is the
+   upstream and the head repository is your fork; neither choice reconfigures
+   the mirror or Origin. Click **Discover existing PR** to find that exact
+   head/base, including PRs created using native `gh`.
+6. If no PR exists, review the returned GitHub identity and exact target, enter
+   **PR title** / **PR description**, optionally check **Draft PR**, check the
+   identity/target review box, and click **Create reviewed PR**. If creation is
+   uncertain, use **Reconcile PR read-only** rather than repeating creation.
+   A PR failure never erases a successful **Pushed: yes** outcome.
+7. Click **Refresh PR feedback** for typed checks, comments, reviews and inline
+   feedback (including file/line and commit context). Check only the feedback
+   you want to send, then **Send selected feedback to Run Room**. This creates
+   a normal moderated steering request; its receipt is not proof of delivery
+   unless it says sent. Open the run terminal and **Run Room** to inspect the
+   durable message and delivery state.
+
+Native status is read when this view opens and after explicit actions; GitHub
+discovery and feedback refresh are explicit. No background PR watcher, automatic
+merge, force push, branch switch or automatic mutation retry is performed.
+GitHub discovery, creation and feedback need a working native `gh`, network
+access, and the selected account's permissions on the explicit upstream/fork.
+Review and merge on GitHub according to your repository's policy.
+
+### Optional: pull into a local clone
 
 When the TUI agent exits, the run stays alive in a login shell. Start another
 installed agent in the same checkout if needed; exiting that shell opens another
@@ -562,7 +715,7 @@ does not fetch a mirror source or forward a checkout's `origin` into the
 workspace. In a mirrored workspace, a base push attempt is rejected because
 the mirror owns that branch; use `aether workspace mirror refresh` and, when
 needed, explicit `aether workspace mirror adopt` instead. `aether pull` remains
-the review path in every mode.
+available when you prefer reviewing in a local clone.
 
 ```sh
 aether daemon install --server <server-host>:2222 --repo ~/code/myproject

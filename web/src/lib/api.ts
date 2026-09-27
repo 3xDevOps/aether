@@ -98,6 +98,86 @@ import type {
   IntegrationVerifyParams,
   IntegrationVerifyResult,
 } from '@/lib/integration-types'
+import type {
+  DevArtifactDeleteParams,
+  DevArtifactDeleteResult,
+  DevArtifactDownloadRequest,
+  DevArtifactGetParams,
+  DevArtifactGetResult,
+  DevArtifactListParams,
+  DevArtifactListResult,
+  DevArtifactRetainParams,
+  DevArtifactRetainResult,
+  DevBrowserActionParams,
+  DevBrowserActionResult,
+  DevBrowserCloseParams,
+  DevBrowserCloseResult,
+  DevBrowserConsoleParams,
+  DevBrowserConsoleResult,
+  DevBrowserNavigateParams,
+  DevBrowserNavigateResult,
+  DevBrowserNetworkParams,
+  DevBrowserNetworkResult,
+  DevBrowserOpenParams,
+  DevBrowserOpenResult,
+  DevBrowserPagesParams,
+  DevBrowserPagesResult,
+  DevBrowserResetParams,
+  DevBrowserResetResult,
+  DevBrowserScreenshotParams,
+  DevBrowserScreenshotResult,
+  DevBrowserSnapshotParams,
+  DevBrowserSnapshotResult,
+  DevBrowserStatusParams,
+  DevBrowserStatusResult,
+  DevBrowserStreamRequest,
+  DevBrowserViewportParams,
+  DevBrowserViewportResult,
+  DevBrowserWaitParams,
+  DevBrowserWaitResult,
+  DevControlAcquireParams,
+  DevControlAcquireResult,
+  DevControlReleaseParams,
+  DevControlReleaseResult,
+  DevControlStatusParams,
+  DevControlStatusResult,
+  DevTerminalInputParams,
+  DevTerminalInputResult,
+  DevTerminalListParams,
+  DevTerminalListResult,
+  DevTerminalOutputParams,
+  DevTerminalOutputResult,
+  DevTerminalResizeParams,
+  DevTerminalResizeResult,
+  DevTerminalScreenParams,
+  DevTerminalScreenResult,
+  DevTerminalScreenshotParams,
+  DevTerminalScreenshotResult,
+  DevTerminalStartParams,
+  DevTerminalStartResult,
+  DevTerminalStopParams,
+  DevTerminalStopResult,
+  DevTerminalWaitParams,
+  DevTerminalWaitResult,
+} from '@/lib/development-types'
+import type {
+  RunGitCommitParams,
+  RunGitCommitResult,
+  RunGitDiffParams,
+  RunGitDiffResult,
+  RunGitPushParams,
+  RunGitPushResult,
+  RunGitStatusParams,
+  RunGitStatusResult,
+  RunPRCreateParams,
+  RunPRCreateResult,
+  RunPRFeedbackParams,
+  RunPRFeedbackResult,
+  RunPRStatusParams,
+  RunPRStatusResult,
+  WorkspaceImportParams,
+  WorkspaceImportResult,
+} from '@/lib/run-repository-types'
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
@@ -219,16 +299,29 @@ async function call<T>(method: string, params: unknown = {}, signal?: AbortSigna
   return (await res.json()) as T
 }
 
-async function get<T>(path: string): Promise<T> {
+async function getResponse(path: string, signal?: AbortSignal): Promise<Response> {
   const token = bearer()
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
+    signal,
   })
   if (!res.ok) {
     const err = await failure(res)
     throw new ApiError(res.status, `${path}: ${err.message}`, err.code, err.data)
   }
-  return (await res.json()) as T
+  return res
+}
+
+async function get<T>(path: string): Promise<T> {
+  return (await (await getResponse(path)).json()) as T
+}
+
+async function downloadArtifact(params: DevArtifactDownloadRequest, signal?: AbortSignal): Promise<Blob> {
+  const path = `/dev/${encodeURIComponent(params.run_id)}/artifacts/${encodeURIComponent(params.artifact_id)}`
+  const query = params.evidence_packet_id
+    ? `?${new URLSearchParams({ evidence_packet_id: params.evidence_packet_id }).toString()}`
+    : ''
+  return (await getResponse(path + query, signal)).blob()
 }
 
 
@@ -318,6 +411,11 @@ export function socketURL(path: string): string {
   return url.toString()
 }
 
+/** Send params as the first JSON message; subsequent browser frames are binary. */
+export function browserStreamURL(params: DevBrowserStreamRequest): string {
+  return socketURL(`/ws/dev/browser/${encodeURIComponent(params.run_id)}`)
+}
+
 
 // Only what the SPA actually calls; the team-feature methods land with the
 // tickets that use them.
@@ -344,6 +442,82 @@ export const api = {
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
+  runGitStatus: (params: RunGitStatusParams) =>
+    call<RunGitStatusResult>('run.git.status', params),
+  runGitDiff: (params: RunGitDiffParams) =>
+    call<RunGitDiffResult>('run.git.diff', params),
+  runGitCommit: (params: RunGitCommitParams) =>
+    call<RunGitCommitResult>('run.git.commit', params),
+  runGitPush: (params: RunGitPushParams) =>
+    call<RunGitPushResult>('run.git.push', params),
+  runPRStatus: (params: RunPRStatusParams) =>
+    call<RunPRStatusResult>('run.pr.status', params),
+  runPRCreate: (params: RunPRCreateParams) =>
+    call<RunPRCreateResult>('run.pr.create', params),
+  runPRFeedback: (params: RunPRFeedbackParams) =>
+    call<RunPRFeedbackResult>('run.pr.feedback', params),
+  workspaceImport: (params: WorkspaceImportParams) =>
+    call<WorkspaceImportResult>('workspace.import', params),
+  devTerminalList: (params: DevTerminalListParams) =>
+    call<DevTerminalListResult>('dev.terminal.list', params),
+  devTerminalStart: (params: DevTerminalStartParams) =>
+    call<DevTerminalStartResult>('dev.terminal.start', params),
+  devTerminalOutput: (params: DevTerminalOutputParams) =>
+    call<DevTerminalOutputResult>('dev.terminal.output', params),
+  devTerminalScreen: (params: DevTerminalScreenParams) =>
+    call<DevTerminalScreenResult>('dev.terminal.screen', params),
+  devTerminalScreenshot: (params: DevTerminalScreenshotParams) =>
+    call<DevTerminalScreenshotResult>('dev.terminal.screenshot', params),
+  devTerminalInput: (params: DevTerminalInputParams) =>
+    call<DevTerminalInputResult>('dev.terminal.input', params),
+  devTerminalResize: (params: DevTerminalResizeParams) =>
+    call<DevTerminalResizeResult>('dev.terminal.resize', params),
+  devTerminalWait: (params: DevTerminalWaitParams) =>
+    call<DevTerminalWaitResult>('dev.terminal.wait', params),
+  devTerminalStop: (params: DevTerminalStopParams) =>
+    call<DevTerminalStopResult>('dev.terminal.stop', params),
+  devBrowserStatus: (params: DevBrowserStatusParams) =>
+    call<DevBrowserStatusResult>('dev.browser.status', params),
+  devBrowserOpen: (params: DevBrowserOpenParams) =>
+    call<DevBrowserOpenResult>('dev.browser.open', params),
+  devBrowserPages: (params: DevBrowserPagesParams) =>
+    call<DevBrowserPagesResult>('dev.browser.pages', params),
+  devBrowserNavigate: (params: DevBrowserNavigateParams) =>
+    call<DevBrowserNavigateResult>('dev.browser.navigate', params),
+  devBrowserSnapshot: (params: DevBrowserSnapshotParams) =>
+    call<DevBrowserSnapshotResult>('dev.browser.snapshot', params),
+  devBrowserAction: (params: DevBrowserActionParams) =>
+    call<DevBrowserActionResult>('dev.browser.action', params),
+  devBrowserScreenshot: (params: DevBrowserScreenshotParams) =>
+    call<DevBrowserScreenshotResult>('dev.browser.screenshot', params),
+  devBrowserViewport: (params: DevBrowserViewportParams) =>
+    call<DevBrowserViewportResult>('dev.browser.viewport', params),
+  devBrowserWait: (params: DevBrowserWaitParams) =>
+    call<DevBrowserWaitResult>('dev.browser.wait', params),
+  devBrowserConsole: (params: DevBrowserConsoleParams) =>
+    call<DevBrowserConsoleResult>('dev.browser.console', params),
+  devBrowserNetwork: (params: DevBrowserNetworkParams) =>
+    call<DevBrowserNetworkResult>('dev.browser.network', params),
+  devBrowserReset: (params: DevBrowserResetParams) =>
+    call<DevBrowserResetResult>('dev.browser.reset', params),
+  devBrowserClose: (params: DevBrowserCloseParams) =>
+    call<DevBrowserCloseResult>('dev.browser.close', params),
+  devControlStatus: (params: DevControlStatusParams) =>
+    call<DevControlStatusResult>('dev.control.status', params),
+  devControlAcquire: (params: DevControlAcquireParams) =>
+    call<DevControlAcquireResult>('dev.control.acquire', params),
+  devControlRelease: (params: DevControlReleaseParams) =>
+    call<DevControlReleaseResult>('dev.control.release', params),
+  devArtifactList: (params: DevArtifactListParams) =>
+    call<DevArtifactListResult>('dev.artifact.list', params),
+  devArtifactGet: (params: DevArtifactGetParams) =>
+    call<DevArtifactGetResult>('dev.artifact.get', params),
+  devArtifactDelete: (params: DevArtifactDeleteParams) =>
+    call<DevArtifactDeleteResult>('dev.artifact.delete', params),
+  devArtifactRetain: (params: DevArtifactRetainParams) =>
+    call<DevArtifactRetainResult>('dev.artifact.retain', params),
+  devArtifactDownload: (params: DevArtifactDownloadRequest, signal?: AbortSignal) =>
+    downloadArtifact(params, signal),
   missionCreate: (params: {
     workspace_id: string
     objective: string

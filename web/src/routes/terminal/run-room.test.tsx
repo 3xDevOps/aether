@@ -513,11 +513,11 @@ describe('Run Room', () => {
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     const packets = await screen.findAllByRole('button', { name: /report capture/ })
     fireEvent.click(packets[0])
-    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Patch' }))
     await waitFor(() => expect(client.runEvidencePatch).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('button', { name: 'Back to packets' }))
     fireEvent.click((await screen.findAllByRole('button', { name: /report capture/ }))[1])
-    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Patch' }))
     await waitFor(() => expect(client.runEvidencePatch).toHaveBeenCalledTimes(2))
     await act(async () => {
       first.resolve({ packet: packetA, patch: 'patch A', truncated: false })
@@ -545,7 +545,7 @@ describe('Run Room', () => {
     mount({}, { client })
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
-    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Patch' }))
     expect(await screen.findByText('stable patch')).toBeDefined()
 
     const event: Event = {
@@ -619,7 +619,7 @@ describe('Run Room', () => {
     mount({}, { client })
     fireEvent.click(screen.getByRole('button', { name: /Evidence/ }))
     fireEvent.click(await screen.findByRole('button', { name: /report capture/ }))
-    fireEvent.click(screen.getByRole('tab', { name: 'Patch' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Patch' }))
     expect(await screen.findByText('diff --git a/src/app.ts')).toBeDefined()
     fireEvent.click(screen.getByRole('tab', { name: 'Transcript' }))
     expect(await screen.findByText('agent output')).toBeDefined()

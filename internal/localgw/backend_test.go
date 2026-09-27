@@ -214,6 +214,10 @@ func TestSSHBackendTransportFailureRetryPolicy(t *testing.T) {
 		wantError bool
 	}{
 		{name: "config_import_no_replay", method: protocol.MethodConfigImport, wantCalls: 1, wantError: true},
+		{name: "workspace_import_no_replay", method: protocol.MethodWorkspaceImport, wantCalls: 1, wantError: true},
+		{name: "development_start_no_replay", method: protocol.MethodDevTerminalStart, wantCalls: 1, wantError: true},
+		{name: "git_commit_no_replay", method: protocol.MethodRunGitCommit, wantCalls: 1, wantError: true},
+		{name: "pr_create_no_replay", method: protocol.MethodRunPRCreate, wantCalls: 1, wantError: true},
 		{name: "server_info_reconnects", method: protocol.MethodServerInfo, wantCalls: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

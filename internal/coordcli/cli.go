@@ -131,6 +131,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 			return fail(cfg.Out, protocol.CodeInvalidParams, "integration requires a subcommand")
 		}
 		result, err = integrationCommand(ctx, cfg.Socket, args[1], args[2:], cfg.In)
+	case "terminal", "browser", "control", "artifact":
+		result, err = developmentCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In)
 	default:
 		return fail(cfg.Out, protocol.CodeMethodNotFound, "unknown command: "+args[0])
 	}
@@ -147,7 +149,7 @@ const topUsage = `usage: aether-internal <command> [options]
 
 Commands:
   status    inspect this run and its authorized peers
-  skill     print the coordination workflow and live assignment
+  skill     print live assignment or a terminal/browser/git workflow topic
   hook      run a native inbox hook or print a copyable integration file
   send      send a durable message to an authorized peer
   inbox     read the at-least-once inbox
@@ -158,6 +160,10 @@ Commands:
   worker    inspect and manage mission worker attempts
   integration run the five integrator candidate operations
   report    submit a durable outcome with evidence references
+  terminal  run, observe and interact with development PTYs
+  browser   operate the isolated headless browser companion
+  control   inspect, acquire and release development surface control
+  artifact  inspect, retain and delete private capture artifacts
 
 Run "aether-internal <command> --help" for command options.
 `
@@ -169,11 +175,11 @@ var commandUsages = map[string]string{
 Print this run's identity, assignment, authorized peers, unread count, and capabilities
 in the v3 JSON envelope. --json is optional; output is always JSON.
 `,
-	"skill": `usage: aether-internal skill
+	"skill": `usage: aether-internal skill [terminal|browser|git]
 
-Print the coordination workflow, live assignment, and read-only hook installation
-checks. Missing integrations include commands to obtain copyable hook files.
-Outside a coordinated run this prints general guidance without claiming identity.
+Print the live assignment, conditional development topics, and read-only hook
+installation checks with copyable integrations. Without a socket, print only
+short capability-neutral discovery; no tools or authority are implied.
 `,
 	"send": `usage: aether-internal send --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
 
@@ -256,6 +262,9 @@ are explicit identities for retry-safe starts and retries.
 Submit one durable outcome. Success/failure are terminal worker outcomes;
 blocked is a nonterminal observation, not a way to wait for a peer or human.
 A summary file of "-" reads standard input.
+When live capabilities advertise artifact retain, deliberately retain reviewed
+captures before a terminal report can clean up the run; pass its packet_id as
+--evidence-ref. A transient capture handle is not a durable evidence reference.
 `,
 	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
 
@@ -328,6 +337,9 @@ not a patch, so a revision without depends_on drops earlier dependencies.
 
 func writeHelp(out io.Writer, command string) (int, error) {
 	text, ok := commandUsages[command]
+	if !ok {
+		text, ok = developmentHelp(command)
+	}
 	if command == "" {
 		text, ok = topUsage, true
 	}
@@ -367,20 +379,33 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 	if err := parseFlags(fs, args); err != nil {
 		return fail(out, protocol.CodeInvalidParams, err.Error())
 	}
-	if fs.NArg() != 0 {
-		return fail(out, protocol.CodeInvalidParams, "skill takes no arguments")
+	if fs.NArg() > 1 {
+		return fail(out, protocol.CodeInvalidParams, "skill accepts at most one topic: terminal, browser, git")
+	}
+	topic := ""
+	if fs.NArg() == 1 {
+		topic = fs.Arg(0)
+		if topic != "terminal" && topic != "browser" && topic != "git" {
+			return fail(out, protocol.CodeInvalidParams, "unknown skill topic: "+topic)
+		}
+	}
+	write := func(status *protocol.CoordStatusResult) (int, error) {
+		if topic != "" {
+			return writeDevelopmentSkill(out, status, topic)
+		}
+		return writeSkill(out, status)
 	}
 	if socket == "" {
-		return writeSkill(out, nil)
+		return write(nil)
 	}
 	var status protocol.CoordStatusResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
 		if errorCode(err) == protocol.CodeUnavailable {
-			return writeSkill(out, nil)
+			return write(nil)
 		}
 		return fail(out, errorCode(err), err.Error())
 	}
-	return writeSkill(out, &status)
+	return write(&status)
 }
 
 const skillBootstrap = `Inspect current state and messages:
@@ -406,6 +431,8 @@ Read the inbox once more before a terminal report:
 Success and failure are terminal worker outcomes: success submits the attempt
 and stops the worker; failure ends it without a task result. Report success
 only after finishing with required evidence, failure only if irrecoverable.
+Verify the changed behavior and collect required screenshots/evidence BEFORE
+reporting: a terminal worker report can clean up its development resources.
 Blocked is a nonterminal durable observation, not a submission or a way to wait.
 Do not report while idle or waiting on a peer or human. After a terminal
 report, take no new work.
@@ -431,6 +458,10 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 		if _, err := io.WriteString(out, "Role: unassigned (no coordination socket)\nNo live run identity or assignment; no mission authority. State commands need the mounted socket.\n"); err != nil {
 			return ExitFailure, fmt.Errorf("write skill availability: %w", err)
 		}
+		if _, err := io.WriteString(out, generalDiscovery); err != nil {
+			return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
+		}
+		return ExitOK, nil
 	} else {
 		assignment := status.Assignment
 		role := "ordinary"
@@ -491,8 +522,15 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 			return ExitFailure, fmt.Errorf("write skill task summary: %w", err)
 		}
 	}
-	if _, err := io.WriteString(out, skillBootstrap+skillWorkflow); err != nil {
-		return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
+	if err := writeDevelopmentEntrypoints(out, status); err != nil {
+		return ExitFailure, fmt.Errorf("write development entrypoints: %w", err)
+	}
+	if hasSkillCapability(status, protocol.MethodCoordInbox) || status.Assignment != nil {
+		if _, err := io.WriteString(out, skillBootstrap+skillWorkflow); err != nil {
+			return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
+		}
+	} else if _, err := io.WriteString(out, "Use aether-internal status for current authority and --help for syntax.\nNo coordination mailbox or mission commands are implied by a run socket.\n"); err != nil {
+		return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
 	}
 	if err := writeHookInstallation(out); err != nil {
 		return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)

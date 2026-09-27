@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Dock } from '@/components/dock'
 import { TerminalPane } from '@/components/terminal-pane'
 import { type XtermController, useXterm } from '@/components/xterm-host'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import type { DevController, DevControlFence, DevTerminalTarget } from '@/lib/types'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
 import { type ConnectionState } from '@/lib/stream'
 import {
   type AttachDataKind,
   type Attachment,
+  type AttachTerminalIdentity,
   type ControlMetadata,
   connectAttach,
   replayGate,
@@ -27,12 +31,12 @@ import {
 
 const maxShellTabs = 4
 const shellRefusal = 'You can view this run but not open a shell in it'
-const shellControlMoved = 'Read-only shell. Another session controls this run.'
 const emptyReplay = new Uint8Array()
 
 interface ShellAttachmentIdentity {
   runID: string
   tab: string
+  incarnation: string
 }
 
 interface StructuralReplayState {
@@ -46,15 +50,61 @@ export function RunDock({ runID }: { runID: string }) {
   const run = useStore((s) => s.runs[runID])
   const dock = useStore((s) => s.shellDocks[runID] ?? initialRunShellDock)
   const runDockHeight = useStore((s) => s.runDockHeight)
-  const openShellTab = useStore((s) => s.openShellTab)
+  const syncShellTerminals = useStore((s) => s.syncShellTerminals)
   const closeShellTab = useStore((s) => s.closeShellTab)
   const selectShellTab = useStore((s) => s.selectShellTab)
   const setDockCollapsed = useStore((s) => s.setDockCollapsed)
   const setRunDockHeight = useStore((s) => s.setRunDockHeight)
   const setShellRefused = useStore((s) => s.setShellRefused)
-  const removeShellTab = useStore((s) => s.removeShellTab)
 
   const activeTab = dock.activeTab
+  const activeProcess = dock.terminals.find((item) => item.terminal_id === activeTab)
+  const incarnation = activeProcess?.incarnation
+  const processRunning = activeProcess?.process.state === 'running'
+  const [error, setError] = useState<string | null>(null)
+  const [captureMessage, setCaptureMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [owner, setOwner] = useState<DevController | null>(null)
+  const [confirmation, setConfirmation] = useState<'take' | 'stop' | null>(null)
+  const takeoverGeneration = useRef(0)
+  const refreshRevision = useRef(0)
+  const refresh = useCallback(async () => {
+    const revision = ++refreshRevision.current
+    const result = await api.devTerminalList({ run_id: runID })
+    if (refreshRevision.current === revision) syncShellTerminals(runID, result.terminals)
+  }, [runID, syncShellTerminals])
+  const reportError = useCallback((cause: unknown) => {
+    setError(cause instanceof Error ? cause.message : String(cause))
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    let timer: number | undefined
+    const poll = async () => {
+      if (document.visibilityState === 'visible') {
+        try { await refresh() } catch (cause) { if (!cancelled) reportError(cause) }
+      }
+      if (!cancelled) timer = window.setTimeout(poll, 2000)
+    }
+    void poll()
+    return () => { cancelled = true; refreshRevision.current++; clearTimeout(timer) }
+  }, [refresh, reportError])
+  useEffect(() => {
+    setOwner(null)
+    if (!activeTab || !incarnation) return
+    let cancelled = false
+    let timer: number | undefined
+    const poll = async () => {
+      try {
+        const result = await api.devControlStatus({
+          run_id: runID, surface: { kind: 'terminal', id: activeTab, incarnation },
+        })
+        if (!cancelled) setOwner(result.controller)
+      } catch (cause) { if (!cancelled) reportError(cause) }
+      if (!cancelled) timer = window.setTimeout(poll, 2000)
+    }
+    void poll()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [activeTab, incarnation, runID, reportError])
   const paused = useStore((s) => s.pausedRuns[runID] ?? run?.paused)
   const pauseKnown = paused !== undefined
   const canOpenShell =
@@ -72,7 +122,46 @@ export function RunDock({ runID }: { runID: string }) {
   const fullReplaySettlingGenerationRef = useRef<number | null>(null)
   const writeRequested = useRef<Record<string, boolean>>({})
   const controlHeld = useRef<Record<string, boolean>>({})
+  const sessions = useRef<Record<string, string>>({})
   const [controlState, setControlState] = useState<{ key: string; held: boolean } | null>(null)
+  const activeControlKey = activeTab && incarnation ? `${runID}:${activeTab}:${incarnation}` : ''
+  const activeHasControl = controlState?.key === activeControlKey && controlState.held
+  const writes = useRef(Promise.resolve())
+  const writeGeneration = useRef(0)
+  const lastMouseButton = useRef('left')
+  const currentFence = useCallback(() => {
+    if (!activeTab || !incarnation || !controlHeld.current[activeControlKey]) return null
+    const metadata = getShellSocket(runID, activeTab)?.controlMetadata?.()
+    if (!metadata?.has_control) return null
+    return {
+      run_id: runID, terminal_id: activeTab, incarnation,
+      control_session_id: metadata.control_session_id,
+      control_generation: metadata.control_generation,
+    }
+  }, [activeTab, incarnation, activeControlKey, runID])
+  const enqueueWrite = useCallback((operation: () => Promise<unknown>, fence: DevTerminalTarget & DevControlFence) => {
+    const attachment = attachmentGenerationRef.current
+    const generation = writeGeneration.current
+    const key = `${fence.run_id}:${fence.terminal_id}:${fence.incarnation}`
+    writes.current = writes.current.then(async () => {
+      const current = currentAttachmentRef.current
+      const metadata = getShellSocket(fence.run_id, fence.terminal_id)?.controlMetadata?.()
+      if (writeGeneration.current !== generation || attachmentGenerationRef.current !== attachment || current?.runID !== fence.run_id ||
+        current.tab !== fence.terminal_id || current.incarnation !== fence.incarnation ||
+        !controlHeld.current[key] || !metadata?.has_control ||
+        metadata.control_session_id !== fence.control_session_id || metadata.control_generation !== fence.control_generation) return
+      await operation()
+    }).catch((cause) => {
+      if (writeGeneration.current !== generation) return
+      writeGeneration.current++
+      reportError(cause)
+    })
+  }, [reportError])
+  const resizeTerminal = useCallback((cols: number, rows: number) => {
+    const fence = currentFence()
+    if (!fence) return
+    enqueueWrite(() => api.devTerminalResize({ ...fence, cols, rows }), fence)
+  }, [currentFence, enqueueWrite])
   const gate = useRef(
     replayGate(
       (chunk, done) => terminalRef.current?.write(chunk, done),
@@ -142,27 +231,66 @@ export function RunDock({ runID }: { runID: string }) {
     enabled:
       canOpenShell &&
       activeTab !== null &&
+      processRunning &&
       !dock.collapsed &&
       dock.refusedMessage === null,
-    follow: phone,
+    follow: phone || !activeHasControl,
     onData: (data) => {
-      if (!activeTab) return
+      if (!activeTab || gate.current.muted()) return
       const current = currentAttachmentRef.current
-      const key = `${runID}:${activeTab}`
+      const key = activeControlKey
       if (
         current?.runID !== runID ||
         current.tab !== activeTab ||
         controlHeld.current[key] !== true ||
-        fullReplaySettlingGenerationRef.current !== null ||
-        gate.current.muted()
+        current.incarnation !== incarnation
       ) return
-      getShellSocket(runID, activeTab)?.send(data)
+      const fence = currentFence()
+      if (!fence) return
+      // Bound UTF-8 payloads without splitting surrogate pairs. Queued input
+      // remains tied to this attachment and its acknowledged control fence.
+      for (let offset = 0; offset < data.length;) {
+        let end = Math.min(offset + 2048, data.length)
+        const last = data.charCodeAt(end - 1)
+        if (end < data.length && last >= 0xd800 && last < 0xdc00) end--
+        const text = data.slice(offset, end)
+        enqueueWrite(() => api.devTerminalInput({ ...fence, kind: 'text', text }), fence)
+        offset = end
+      }
+    },
+    onBinary: (data) => {
+      if (gate.current.muted()) return
+      const fence = currentFence()
+      if (!fence) return
+      // xterm's DEFAULT mouse encoder emits exactly CSI M plus three bytes.
+      // Decode that documented input event so the server can re-encode it;
+      // sending this binary string as UTF-8 text corrupts coordinates >= 95.
+      if (data.length !== 6 || !data.startsWith('\x1b[M')) {
+        setError('Unsupported binary terminal input')
+        return
+      }
+      const code = data.charCodeAt(3) - 32
+      const button = ['left', 'middle', 'right', 'none'][code & 3]
+      const action = code & 64 ? 'wheel' : code & 32 ? 'move' : button === 'none' ? 'release' : 'press'
+      if (action === 'press') lastMouseButton.current = button
+      const modifiers = [
+        ...(code & 4 ? ['shift'] : []), ...(code & 8 ? ['alt'] : []), ...(code & 16 ? ['ctrl'] : []),
+      ]
+      const mouseButton = action === 'release' ? lastMouseButton.current : button
+      enqueueWrite(() => api.devTerminalInput({
+        ...fence, kind: 'mouse', modifiers,
+        mouse: {
+          action, button: mouseButton,
+          x: data.charCodeAt(4) - 33, y: data.charCodeAt(5) - 33,
+          ...(action === 'wheel' ? { delta: code & 1 ? 1 : -1 } : {}),
+        },
+      }), fence)
     },
     onResize: (cols, rows) => {
       if (!activeTab) return
       const current = currentAttachmentRef.current
       if (current?.runID !== runID || current.tab !== activeTab) return
-      getShellSocket(runID, activeTab)?.resize(cols, rows)
+      resizeTerminal(cols, rows)
     },
   })
   controllerRef.current = controller
@@ -172,10 +300,12 @@ export function RunDock({ runID }: { runID: string }) {
   currentAttachmentRef.current =
     canOpenShell &&
     activeTab !== null &&
+    incarnation !== undefined &&
+    processRunning &&
     !dock.collapsed &&
     dock.refusedMessage === null &&
     terminal
-      ? { runID, tab: activeTab }
+      ? { runID, tab: activeTab, incarnation }
       : null
   // The socket can outlive this dock, but its old callback must not keep a
   // disposed xterm reachable during the gap before a remount rebinds it.
@@ -192,22 +322,21 @@ export function RunDock({ runID }: { runID: string }) {
   }, [activeTab, setFindOpen])
 
   useEffect(() => {
-    if (!canOpenShell || !activeTab || !terminal || dock.refusedMessage !== null) return
+    if (!canOpenShell || !activeTab || !incarnation || !processRunning || !terminal || dock.collapsed || dock.refusedMessage !== null) return
 
     const socketKey = activeTab
-    const identity: ShellAttachmentIdentity = { runID, tab: socketKey }
-    const controlKey = `${runID}:${socketKey}`
+    const identity: ShellAttachmentIdentity = { runID, tab: socketKey, incarnation }
+    const controlKey = `${runID}:${socketKey}:${incarnation}`
     const attachmentGeneration = ++attachmentGenerationRef.current
     let replayAccepted = false
-    if (writeRequested.current[controlKey] === undefined) {
-      writeRequested.current[controlKey] = true
-    }
+    if (writeRequested.current[controlKey] === undefined) writeRequested.current[controlKey] = false
     const isCurrent = () => {
       const current = currentAttachmentRef.current
       return (
         attachmentGenerationRef.current === attachmentGeneration &&
         current?.runID === identity.runID &&
         current.tab === identity.tab
+        && current.incarnation === identity.incarnation
       )
     }
     const cancelStructuralReplay = () => {
@@ -234,12 +363,13 @@ export function RunDock({ runID }: { runID: string }) {
     const handlers = {
       onData: (chunk: Uint8Array, kind: AttachDataKind, settled?: () => void) =>
         emitShellSocketData(runID, socketKey, chunk, kind, settled),
-      onAttached: (_write: boolean, size: { cols: number; rows: number }, resumed = false) => {
+      onAttached: (_write: boolean, size: { cols: number; rows: number }, resumed = false, acknowledged?: AttachTerminalIdentity) => {
         // Reattach replay restores the tab's full history, so a tab switch
         // may remount its xterm instead of preserving old instances. A
         // background tab reconnecting must never wipe the active tab or
         // unmute its replay.
         if (isCurrent()) {
+          controllerRef.current?.setServerOwnedResponder?.(acknowledged?.server_owned_responder === true)
           setAttachedIdentity(identity)
           replayAccepted = true
           if (resumed) {
@@ -280,6 +410,11 @@ export function RunDock({ runID }: { runID: string }) {
       onState: (connection: ConnectionState) => {
         if (isCurrent()) {
           if (connection !== 'live') setAttachedIdentity(null)
+          if (connection !== 'live') {
+            writeGeneration.current++
+            controlHeld.current[controlKey] = false
+            setControlState({ key: controlKey, held: false })
+          }
         }
       },
       // The server's message names the actual limit (steer, tab cap,
@@ -288,21 +423,32 @@ export function RunDock({ runID }: { runID: string }) {
       onRefused: refuse,
       onControl: (metadata: ControlMetadata) => {
         controlHeld.current[controlKey] = metadata.has_control
+        sessions.current[controlKey] = metadata.control_session_id
         if (isCurrent()) setControlState({ key: controlKey, held: metadata.has_control })
       },
       onControlLost: () => {
+        writeGeneration.current++
         writeRequested.current[controlKey] = false
         controlHeld.current[controlKey] = false
         if (isCurrent()) setControlState({ key: controlKey, held: false })
       },
-      onWriteDenied: () => refuse(shellRefusal),
+      onControlResult: (result: { ok: boolean; error?: string }) => {
+        if (!result.ok && result.error && isCurrent()) setError(result.error)
+      },
+      onWriteDenied: (message?: string) => refuse(message ?? shellRefusal),
       onExit: () => {
         clearAttached()
-        removeShellTab(runID, socketKey)
+        controlHeld.current[controlKey] = false
+        if (isCurrent()) setControlState({ key: controlKey, held: false })
+        void refresh().catch(reportError)
       },
       geometry: () => isCurrent() ? geometry() : standardGeometry,
-      wantsWrite: () => writeRequested.current[controlKey] !== false,
-      follows: () => phone,
+      wantsWrite: () => writeRequested.current[controlKey] === true,
+      // Geometry is always an explicit fenced mutation, never an attach side effect.
+      follows: () => true,
+      screen: () => true,
+      developmentTerminal: () => ({ terminal_id: socketKey, incarnation }),
+      takeoverGeneration: () => takeoverGeneration.current,
       onGeometry: (cols: number, rows: number) => {
         if (isCurrent()) setGeometry(cols, rows)
       },
@@ -310,7 +456,7 @@ export function RunDock({ runID }: { runID: string }) {
     const existing = getShellSocket(runID, socketKey)
     let attachment: Attachment | null = existing ?? null
     if (!attachment) {
-      attachment = connectAttach(() => api.attachShellSocket(runID, socketKey), handlers)
+      attachment = connectAttach(() => api.attachShellSocket(runID, socketKey), handlers, sessions.current[controlKey])
       registerShellSocket(runID, socketKey, attachment)
     } else {
       attachment.rebind(handlers)
@@ -319,7 +465,11 @@ export function RunDock({ runID }: { runID: string }) {
     clearAttached()
     const unsubscribe = subscribeShellSocket(runID, socketKey, gate.current.write)
     return () => {
+      writeGeneration.current++
       unsubscribe()
+      // Hiding a viewer detaches its transport, never its server process.
+      unregisterShellSocket(runID, socketKey)
+      controlHeld.current[controlKey] = false
       clearAttached()
       cancelStructuralReplay()
       if (attachmentGenerationRef.current === attachmentGeneration) {
@@ -329,39 +479,95 @@ export function RunDock({ runID }: { runID: string }) {
     }
   }, [
     activeTab,
+    incarnation,
+    processRunning,
+    dock.collapsed,
     geometry,
     setGeometry,
     canOpenShell,
     dock.refusedMessage,
     phone,
-    removeShellTab,
+    refresh,
+    reportError,
     runID,
     setShellRefused,
     terminal,
   ])
 
-  const tabs = canOpenShell ? dock.tabs.map((tab) => ({ id: tab, label: tab })) : []
+  const tabs = canOpenShell ? dock.tabs.map((tab) => {
+    const item = dock.terminals.find((item) => item.terminal_id === tab)!
+    return { id: tab, label: `${item.name || tab} · ${item.process.state}` }
+  }) : []
   // The header strip stays live while the dock is collapsed, so a tab control
   // has to open the dock it belongs to; otherwise it would add a tab with no
   // terminal mounted to attach it.
-  const open = () => {
+  const open = async () => {
     setDockCollapsed(runID, false)
-    const opened = openShellTab(runID)
-    if (opened) focusTerminal()
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await api.devTerminalStart({ run_id: runID })
+      // Invalidate an older in-flight list before publishing the created process.
+      refreshRevision.current++
+      const current = useStore.getState().shellDocks[runID]?.terminals ?? []
+      syncShellTerminals(runID, [...current.filter((item) => item.terminal_id !== result.terminal.terminal_id), result.terminal])
+      selectShellTab(runID, result.terminal.terminal_id)
+      focusTerminal()
+    } catch (cause) { reportError(cause) } finally { setBusy(false) }
   }
-
-  const activeControlKey = activeTab ? `${runID}:${activeTab}` : ''
-  const activeHasControl =
-    controlState?.key === activeControlKey
-      ? controlState.held
-      : controlHeld.current[activeControlKey] === true
   const takeShellControl = () => {
-    if (!activeTab) return
+    if (!activeTab || !processRunning) return
+    setError(null)
+    takeoverGeneration.current = owner?.control_generation ?? 0
     writeRequested.current[activeControlKey] = true
-    getShellSocket(runID, activeTab)?.reopen({ takeover: true })
+    getShellSocket(runID, activeTab)?.reopen({ takeover: owner !== null })
+    setConfirmation(null)
   }
+  const releaseShellControl = async () => {
+    const fence = currentFence()
+    if (!fence || !activeTab) return
+    setBusy(true)
+    setError(null)
+    writeGeneration.current++
+    writeRequested.current[activeControlKey] = false
+    controlHeld.current[activeControlKey] = false
+    setControlState({ key: activeControlKey, held: false })
+    try {
+      await api.devControlRelease({
+        run_id: runID,
+        surface: { kind: 'terminal', id: activeTab, incarnation: fence.incarnation },
+        control_session_id: fence.control_session_id,
+        control_generation: fence.control_generation,
+      })
+      setOwner(null)
+      getShellSocket(runID, activeTab)?.reopen()
+    } catch (cause) { reportError(cause) } finally { setBusy(false) }
+  }
+  const stopTerminal = async () => {
+    const fence = currentFence()
+    if (!fence) return
+    setConfirmation(null)
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await api.devTerminalStop({ ...fence, timeout_ms: 3000 })
+      if (result.timed_out) setError('Terminal stop timed out; refresh the process state before another explicit stop.')
+      await refresh()
+    } catch (cause) { reportError(cause) } finally { setBusy(false) }
+  }
+  const screenshot = async () => {
+    if (!activeTab || !incarnation) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await api.devTerminalScreenshot({ run_id: runID, terminal_id: activeTab, incarnation })
+      setCaptureMessage(`Captured ${result.artifact.id}. Open Evidence to select and retain it.`)
+    } catch (cause) { reportError(cause) } finally { setBusy(false) }
+  }
+  const controllerName = owner?.kind === 'run_agent' ? `Run agent ${owner.run_id}` : owner?.member_id ?? 'Nobody'
 
   return (
+    <>
     <Dock
       tabs={tabs}
       activeTab={canOpenShell ? activeTab ?? '' : ''}
@@ -370,7 +576,7 @@ export function RunDock({ runID }: { runID: string }) {
         selectShellTab(runID, tab)
         focusTerminal()
       }}
-      onAddTab={canOpenShell ? open : undefined}
+      onAddTab={canOpenShell && !busy && dock.terminals.filter((item) => item.process.state === 'running').length < maxShellTabs ? () => void open() : undefined}
       maxTabs={maxShellTabs}
       onCloseTab={(tab) => closeShellTab(runID, tab)}
       height={runDockHeight}
@@ -382,7 +588,23 @@ export function RunDock({ runID }: { runID: string }) {
         if (expanding && canOpenShell) focusTerminal()
       }}
       containment="parent"
+      actions={<>
+        {canOpenShell && dock.tabs.length >= maxShellTabs && dock.terminals.some((item) => item.process.state !== 'running') &&
+          <Button size="sm" disabled={busy} onClick={() => void open()}>New terminal</Button>}
+        {run && <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} />}
+      </>}
     >
+      {error && <div role="alert" className="px-3 py-1 text-sm text-state-failed">{error}</div>}
+      {captureMessage && <p role="status" className="px-3 py-1 text-xs">{captureMessage}</p>}
+      {dock.hidden.length > 0 && (
+        <div className="flex flex-wrap gap-1 px-3 py-1">
+          {dock.terminals.filter((item) => !dock.tabs.includes(item.terminal_id)).map((item) => (
+            <Button key={item.terminal_id} size="sm" variant="outline" onClick={() => {
+              selectShellTab(runID, item.terminal_id); setDockCollapsed(runID, false)
+            }}>Show {item.name || item.terminal_id} · {item.process.state}</Button>
+          ))}
+        </div>
+      )}
       {showing === 'unavailable' ? (
         <div
           {...takesFocus}
@@ -404,30 +626,30 @@ export function RunDock({ runID }: { runID: string }) {
         </div>
       ) : showing === 'closed' ? (
         <div {...takesFocus} className={cn(focusRing, 'flex items-center bg-background px-3 py-2')}>
-          <Button type="button" size="sm" onClick={open}>
+          <Button type="button" size="sm" disabled={busy || dock.terminals.filter((item) => item.process.state === 'running').length >= maxShellTabs} onClick={() => void open()}>
             Open shell
           </Button>
         </div>
       ) : (
         <div className="flex h-full min-h-0 flex-1 flex-col">
-          {!activeHasControl && (
-            <div
-              role="status"
-              className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-toolbar px-3 py-1.5 text-[12px] text-muted-foreground"
-            >
-              <span>{shellControlMoved}</span>
-              <Button type="button" size="sm" onClick={takeShellControl}>
-                Take shell control
-              </Button>
-            </div>
-          )}
+          <div role="status" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-toolbar px-3 py-1.5 text-xs text-muted-foreground">
+            <span>{activeProcess?.name} · {activeProcess?.process.state}{activeProcess?.process.exit_code !== undefined ? ` (${activeProcess.process.exit_code})` : ''} · Controller: {activeHasControl ? 'You (this terminal)' : controllerName}</span>
+            {processRunning && (activeHasControl
+              ? <Button size="sm" disabled={busy} onClick={() => void releaseShellControl()}>Release shell control</Button>
+              : <Button size="sm" disabled={busy || attachedIdentity === null} onClick={() => owner ? setConfirmation('take') : takeShellControl()}>Take shell control</Button>)}
+            <Button size="sm" disabled={busy || !incarnation} onClick={() => void screenshot()}>Screenshot</Button>
+            <Button size="sm" variant="destructive" disabled={busy || !activeHasControl || !processRunning} onClick={() => setConfirmation('stop')}>Stop terminal</Button>
+            <Button size="sm" variant="outline" onClick={() => activeTab && closeShellTab(runID, activeTab)}>Hide terminal</Button>
+            <span>Shell control is scoped to this terminal. Releasing it does not clear durable mission holds.</span>
+          </div>
+          {!processRunning && <p className="p-3 text-sm">This process {activeProcess?.process.state}. {activeProcess?.process.reason} Opening or showing it never reruns it. Use + to start a new terminal.</p>}
           <TerminalPane
             controller={controller}
-            writable={activeHasControl && !replaying}
+            writable={activeHasControl && processRunning}
             replaying={replaying}
             className="min-h-0 flex-1 overflow-auto"
             imageTarget={runID}
-            imageTargetKey={activeTab ?? undefined}
+            imageTargetKey={activeControlKey}
             imageUploadEnabled={
               activeHasControl &&
               attachedIdentity !== null &&
@@ -439,5 +661,20 @@ export function RunDock({ runID }: { runID: string }) {
         </div>
       )}
     </Dock>
+    <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{confirmation === 'take' ? 'Take shell control?' : 'Stop this terminal process?'}</DialogTitle>
+          <DialogDescription>{confirmation === 'take'
+            ? `${controllerName} controls this terminal. Taking over fences that writer, not other terminals or the primary harness.`
+            : 'Stop ends this exact terminal incarnation. Hiding or detaching instead leaves it running.'}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setConfirmation(null)}>Cancel</Button>
+          <Button disabled={busy} onClick={() => confirmation === 'take' ? takeShellControl() : void stopTerminal()}>{confirmation === 'take' ? 'Confirm takeover' : 'Confirm stop'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

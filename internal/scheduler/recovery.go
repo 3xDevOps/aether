@@ -304,6 +304,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if diffWatchErr := s.cfg.Git.StartDiffWatch(ctx, fresh.WorkspaceID, run); diffWatchErr != nil {
 		return nil, rollback(diffWatchErr)
 	}
+	if err := s.reopenDevelopment(ctx, run); err != nil {
+		return nil, rollback(err)
+	}
 
 	s.mu.Lock()
 	if s.runs[run] != entry {
@@ -742,7 +745,7 @@ func (s *Scheduler) cleanupTerminalCreationKeyContainers(ctx context.Context) {
 				owner.lifecycleMu.Unlock()
 				continue
 			}
-			if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+			if err := s.destroyDevelopmentContainer(ctx, r.ID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 				slog.Warn("scheduler: destroy terminal creation-key container", "run", r.ID, "error", err)
 				owner.lifecycleMu.Unlock()
 				continue
@@ -1014,7 +1017,7 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 		return
 	}
 	if owner != nil {
-		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
+		if derr := s.destroyDevelopmentContainer(ctx, r.ID, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
 			slog.Warn("scheduler: destroy orphaned container during recovery", "run", r.ID, "error", derr)
 			return
 		}
@@ -1044,6 +1047,14 @@ func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {
 	s.mu.Unlock()
 	if err != nil {
 		slog.Warn("scheduler: mark run interrupted", "run", r.ID, "error", err)
+		return
+	}
+	if err := s.MarkDevelopmentContainerEnded(ctx, r.ID); err != nil {
+		slog.Warn("scheduler: fence interrupted development sessions", "run", r.ID, "error", err)
+		return
+	}
+	if err := s.StopDevelopmentRun(ctx, r.ID); err != nil {
+		slog.Warn("scheduler: clean interrupted development resources", "run", r.ID, "error", err)
 		return
 	}
 	s.removeSidecar(r.ID)
@@ -1182,7 +1193,7 @@ func (s *Scheduler) cleanupLeftoverContainer(ctx context.Context, cid runtime.ID
 		return fmt.Errorf("scheduler: load leftover run during recovery: %w", err)
 	}
 	if cid != "" {
-		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
+		if derr := s.destroyDevelopmentContainer(ctx, run, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
 			return fmt.Errorf("scheduler: destroy leftover container during recovery: %w", derr)
 		}
 	}
@@ -1213,7 +1224,7 @@ func (s *Scheduler) didNotSurvive(ctx context.Context, r *domain.Run, cid runtim
 		return
 	}
 	if owner != nil {
-		if derr := s.cfg.Runtime.Destroy(ctx, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
+		if derr := s.destroyDevelopmentContainer(ctx, r.ID, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
 			slog.Warn("scheduler: destroy stale container during recovery", "run", r.ID, "error", derr)
 			return
 		}
@@ -1301,7 +1312,7 @@ func (s *Scheduler) cleanupFailedRecoveryAttachment(ctx context.Context, entry *
 		slog.Warn("scheduler: preserve recovery attachment evidence", "run", entry.runID, "error", preserveErr)
 		return
 	}
-	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		slog.Warn("scheduler: destroy failed recovery attachment", "run", entry.runID, "error", err)
 		return
 	}

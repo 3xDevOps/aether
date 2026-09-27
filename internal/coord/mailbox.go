@@ -61,9 +61,6 @@ var coordinationCapabilities = []string{
 // peers; an ordinary run lists only the radar's.
 func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
 	const method = protocol.MethodCoordStatus
-	if s.cfg.Disabled {
-		return protocol.CoordStatusResult{}, unavailable(method)
-	}
 	if !s.enterRun(run) {
 		return protocol.CoordStatusResult{}, runClosing(method)
 	}
@@ -71,6 +68,27 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 	self, rpcErr := s.resolveRun(ctx, method, run)
 	if rpcErr != nil {
 		return protocol.CoordStatusResult{}, rpcErr
+	}
+	capabilities := []string{protocol.MethodCoordStatus}
+	if !self.Status.Terminal() && s.cfg.Development != nil {
+		available, err := s.cfg.Development.Capabilities(ctx, run)
+		if err != nil {
+			return protocol.CoordStatusResult{}, missionRPCError(method, err)
+		}
+		for _, capability := range available {
+			if isDevelopmentMethod(capability) {
+				capabilities = appendCapability(capabilities, capability)
+			}
+		}
+	}
+	if s.cfg.Disabled {
+		task, taskBytes, taskTruncated := boundStatusText(self.Task)
+		return protocol.CoordStatusResult{
+			WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
+			WorkspaceID: string(self.WorkspaceID), MemberID: string(self.MemberID),
+			Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
+			Peers: []protocol.CoordPeer{}, Capabilities: capabilities,
+		}, nil
 	}
 
 	var assignment *protocol.CoordMissionAssignment
@@ -81,6 +99,13 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 			return protocol.CoordStatusResult{}, missionRPCError(method, err)
 		}
 		if a.MissionID != "" {
+			advertised := a.Capabilities
+			a.Capabilities = nil
+			for _, capability := range advertised {
+				if isCoordinationCapability(capability) || isMissionMethod(capability) {
+					a.Capabilities = appendCapability(a.Capabilities, capability)
+				}
+			}
 			assignment = &a
 			missionPeers, err = s.cfg.Mission.Peers(ctx, run)
 			if err != nil {
@@ -157,9 +182,12 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
 	task, taskBytes, taskTruncated := boundStatusText(self.Task)
-	capabilities := coordinationCapabilities
+	policyCapabilities := coordinationCapabilities
 	if assignment != nil {
-		capabilities = assignment.Capabilities
+		policyCapabilities = assignment.Capabilities
+	}
+	for _, capability := range policyCapabilities {
+		capabilities = appendCapability(capabilities, capability)
 	}
 	return protocol.CoordStatusResult{
 		WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
@@ -167,8 +195,26 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
 		Assignment: assignment, Peers: peers, PeerTotal: total,
 		PeersTruncated: truncated, Unread: unread,
-		Capabilities: append([]string(nil), capabilities...),
+		Capabilities: capabilities,
 	}, nil
+}
+
+func appendCapability(capabilities []string, capability string) []string {
+	for _, existing := range capabilities {
+		if existing == capability {
+			return capabilities
+		}
+	}
+	return append(capabilities, capability)
+}
+
+func isCoordinationCapability(method string) bool {
+	for _, capability := range coordinationCapabilities {
+		if capability == method {
+			return true
+		}
+	}
+	return false
 }
 
 // boundStatusFiles caps one peer's overlapping files for coord.status and

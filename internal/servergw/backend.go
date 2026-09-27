@@ -38,3 +38,13 @@ func (b backend) Terminal(ctx context.Context, req protocol.TerminalRequest) (we
 	}
 	return term, ack, err
 }
+
+func (b backend) BrowserFrames(ctx context.Context, req protocol.DevBrowserStreamRequest) (io.ReadCloser, error) {
+	return b.local.BrowserFrames(ctx, req)
+}
+
+func (b backend) Artifact(ctx context.Context, req protocol.DevArtifactDownloadRequest) (io.ReadCloser, protocol.DevArtifact, error) {
+	return b.local.Artifact(ctx, req)
+}
+
+var _ webgate.DevelopmentBackend = backend{}

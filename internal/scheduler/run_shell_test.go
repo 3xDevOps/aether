@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,18 +8,17 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
-	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 func TestEnsureRunShellTabStartsBashInWorkspace(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, func(c *Config) { c.WorktreeMount = "/workspace" })
+	e := newTerminalTestEnv(t, func(c *Config) { c.WorktreeMount = "/workspace" })
 	run, _ := e.launchFake(t, "shell")
 
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "tab-1", 100, 30); err != nil {
 		t.Fatalf("EnsureRunShellTab: %v", err)
 	}
-	active := e.pty.ActiveSessions("run-shell:" + string(run.ID) + ":")
+	active := e.sched.cfg.PTY.ActiveSessions("run-shell:" + string(run.ID) + ":")
 	if len(active) != 1 || active[0] != ptyhost.RunShellSession(run.ID, "tab-1") {
 		t.Fatalf("active shell sessions = %v", active)
 	}
@@ -32,16 +30,9 @@ func TestEnsureRunShellTabStartsBashInWorkspace(t *testing.T) {
 
 func TestEnsureRunShellTabFallsBackToSh(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "shell fallback")
-	var attempts int
-	e.rt.execTTYHook = func(ctx context.Context, id runtime.ID, argv []string, workDir string, cols, rows uint) (runtime.Attachment, error) {
-		attempts++
-		if attempts == 1 {
-			return nil, &runtime.ExecExitError{Code: 127}
-		}
-		return e.rt.attachForExec(ctx, id, argv, workDir, cols, rows)
-	}
+	e.sched.cfg.Runtime.(*terminalTestRuntime).failBash = true
 
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "fallback", 80, 24); err != nil {
 		t.Fatalf("EnsureRunShellTab fallback: %v", err)
@@ -54,7 +45,7 @@ func TestEnsureRunShellTabFallsBackToSh(t *testing.T) {
 
 func TestEnsureRunShellTabRejectsInvalidAndMissingRuns(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	if err := e.sched.EnsureRunShellTab(t.Context(), "missing", "tab", 80, 24); !errors.Is(err, ptyhost.ErrNoSession) {
 		t.Fatalf("missing run error = %v, want ErrNoSession", err)
 	}
@@ -66,7 +57,7 @@ func TestEnsureRunShellTabRejectsInvalidAndMissingRuns(t *testing.T) {
 
 func TestEnsureRunShellTabWaitsForRecovery(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "recover shell")
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
@@ -86,7 +77,7 @@ func TestEnsureRunShellTabWaitsForRecovery(t *testing.T) {
 
 func TestEnsureRunShellTabCreatesAndReconnectsForStalledLiveRun(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "stalled shell")
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
@@ -109,7 +100,7 @@ func TestEnsureRunShellTabCreatesAndReconnectsForStalledLiveRun(t *testing.T) {
 
 func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "shell limit")
 	for _, tab := range []string{"one", "two", "three", "four"} {
 		if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, tab, 80, 24); err != nil {
@@ -129,7 +120,7 @@ func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
 
 func TestEnsureRunShellTabRejectsPausedStalledRun(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "paused shell")
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
@@ -146,25 +137,24 @@ func TestEnsureRunShellTabRejectsPausedStalledRun(t *testing.T) {
 
 func TestFinalizeStopsRunShellTabs(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
-	run, c := e.launchFake(t, "shell cleanup")
+	e := newTerminalTestEnv(t, nil)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "shell cleanup", "fake", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := e.rt.byName(string(run.ID))
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "cleanup", 80, 24); err != nil {
 		t.Fatalf("EnsureRunShellTab: %v", err)
 	}
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	want := "run-shell:" + string(run.ID) + ":"
-	waitFor(t, "run shell cleanup", func() bool {
-		for _, prefix := range e.pty.stoppedPrefixesSnapshot() {
-			if prefix == want {
-				return true
-			}
-		}
-		return false
+	waitFor(t, "owned shell cleanup", func() bool {
+		terminal, err := e.sched.LookupDevelopmentTerminal(t.Context(), run.ID, "cleanup")
+		return err == nil && terminal.Process.State == "exited" && terminal.Process.ExitCode == nil && terminal.Process.Reason != ""
 	})
 }
 func TestRunShellReservationAdoptionSurvivesConcurrentRollback(t *testing.T) {
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "shell reservation")
 
 	first, err := e.sched.EnsureRunShellTabReserved(t.Context(), run.ID, "shared", 80, 24)
@@ -179,7 +169,7 @@ func TestRunShellReservationAdoptionSurvivesConcurrentRollback(t *testing.T) {
 		t.Fatalf("loser rollback: %v", err)
 	}
 	second.Adopt()
-	active := e.pty.ActiveSessions("run-shell:" + string(run.ID) + ":")
+	active := e.sched.cfg.PTY.ActiveSessions("run-shell:" + string(run.ID) + ":")
 	if len(active) != 1 || active[0] != ptyhost.RunShellSession(run.ID, "shared") {
 		t.Fatalf("accepted shell was stopped by loser rollback: %v", active)
 	}
@@ -187,8 +177,12 @@ func TestRunShellReservationAdoptionSurvivesConcurrentRollback(t *testing.T) {
 
 func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
-	run, c := e.launchFake(t, "completed shell")
+	e := newTerminalTestEnv(t, nil)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "completed shell", "fake", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := e.rt.byName(string(run.ID))
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 
@@ -202,7 +196,7 @@ func TestEnsureRunShellTabRejectsCompletedRun(t *testing.T) {
 
 func TestEnsureRunShellUsesLiveSidecarBeforeRecoveryRegistersRun(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTerminalTestEnv(t, nil)
 	run, _ := e.launchFake(t, "recover sidecar shell")
 	e.sched.mu.Lock()
 	delete(e.sched.runs, run.ID)

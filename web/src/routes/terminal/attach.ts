@@ -100,6 +100,7 @@ interface AttachHeader {
   control_generation?: number
   takeover?: boolean
   release_control?: boolean
+  incarnation?: string
 }
 
 /**
@@ -123,6 +124,9 @@ interface AttachFrame {
   control_session_id?: string
   control_generation?: number
   has_control?: boolean
+  terminal_id?: string
+  incarnation?: string
+  server_owned_responder?: boolean
 }
 
 
@@ -139,6 +143,12 @@ export interface ControlResult extends ControlMetadata {
   request_id?: number
   code?: number
   error?: string
+}
+
+export interface AttachTerminalIdentity {
+  terminal_id: string
+  incarnation: string
+  server_owned_responder: boolean
 }
 
 export type AttachDataKind = 'replay' | 'replay-end' | 'live'
@@ -168,6 +178,7 @@ export interface AttachHandlers {
     write: boolean,
     size: { cols: number; rows: number },
     resumed?: boolean,
+    identity?: AttachTerminalIdentity,
   ) => void
   /**
    * Runs immediately after onAttached, before the first replay frame can be
@@ -189,7 +200,7 @@ export interface AttachHandlers {
    */
   onRefused: (message: string, code?: number) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
-  onWriteDenied: () => void
+  onWriteDenied: (message?: string) => void
   /**
    * Another session took or released writable control. This is an ephemeral
    * lease loss, not a permission denial.
@@ -211,6 +222,10 @@ export interface AttachHandlers {
   screen?: () => boolean
   /** Whether this attachment accepts framed input/control records. */
   interactive?: () => boolean
+  /** Development attaches must name a known process; never implicitly start. */
+  developmentTerminal?: () => { terminal_id: string; incarnation: string }
+  /** Observed surface generation for an explicitly confirmed takeover. */
+  takeoverGeneration?: () => number
 }
 
 export interface Attachment {
@@ -869,10 +884,15 @@ export function connectAttach(
         rows,
         control_session_id: controlSessionID,
       }
+      const development = handlers.developmentTerminal?.()
+      if (development) header.incarnation = development.incarnation
       if (screen !== undefined) header.screen = screen
       if (interactive !== undefined) header.interactive = interactive
       if ((askedWrite || options.releaseControl) && controlGeneration > 0 && (hasControl || options.takeover)) {
         header.control_generation = controlGeneration
+      }
+      if (development && (options.takeover || queuedTakeover)) {
+        header.control_generation = handlers.takeoverGeneration?.() ?? controlGeneration
       }
       if (options.takeover || queuedTakeover || (askedWrite && hasControl)) header.takeover = true
       if (options.releaseControl) header.release_control = true
@@ -979,6 +999,21 @@ export function connectAttach(
       }
 
       if (ack.ok) {
+        const development = handlers.developmentTerminal?.()
+        if (development && (
+          ack.terminal_id !== development.terminal_id ||
+          ack.incarnation !== development.incarnation ||
+          ack.server_owned_responder !== true
+        )) {
+          answered = true
+          refused = true
+          attached = false
+          clearReplay()
+          handlers.onRefused('Development terminal identity or protocol ownership changed')
+          handlers.onState('offline')
+          drop()
+          return
+        }
         const replayBytes = ack.replay === undefined ? 0 : ack.replay
         if (
           typeof replayBytes !== 'number' ||
@@ -1017,14 +1052,17 @@ export function connectAttach(
         unavailableTries = 0
         waitingForSession = false
         handlers.onState('live')
-        handlers.onAttached(
-          interactive === true ? hasControl : askedWrite,
-          {
-            cols: ack.cols ?? standardGeometry.cols,
-            rows: ack.rows ?? standardGeometry.rows,
-          },
-          resume && ack.resumed === true,
-        )
+        const size = { cols: ack.cols ?? standardGeometry.cols, rows: ack.rows ?? standardGeometry.rows }
+        const resumed = resume && ack.resumed === true
+        if (development) {
+          handlers.onAttached(hasControl, size, resumed, {
+            terminal_id: development.terminal_id,
+            incarnation: development.incarnation,
+            server_owned_responder: true,
+          })
+        } else {
+          handlers.onAttached(interactive === true ? hasControl : askedWrite, size, resumed)
+        }
         if (disposed || refused || socket !== ws) return
         // A control change that arrived while this socket was still connecting
         // has to correct the lease the header just established.
@@ -1045,7 +1083,8 @@ export function connectAttach(
         pendingControl = null
         writeDenied = true
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
-        handlers.onWriteDenied()
+        if (handlers.developmentTerminal) handlers.onWriteDenied(ack.error)
+        else handlers.onWriteDenied()
         attempt = 0
         return
       }
@@ -1056,8 +1095,16 @@ export function connectAttach(
       // the terminal.
       if (ack.code === codeConflict && askedWrite) {
         pendingControl = null
+        if (handlers.developmentTerminal) {
+          handlers.onControlResult?.({
+            ok: false, error: ack.error, code: ack.code,
+            control_session_id: controlSessionID,
+            control_generation: ack.control_generation ?? controlGeneration,
+            has_control: false,
+          })
+        }
         publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
-        if (Date.now() < reclaimUntil) {
+        if (!handlers.developmentTerminal && Date.now() < reclaimUntil) {
           // Retry unfenced on a growing backoff, starting one step up so
           // the old transport's disconnect has time to land.
           attempt = Math.max(attempt, 1)

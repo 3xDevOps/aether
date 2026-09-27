@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -314,11 +315,9 @@ func TestStagingIsFailClosed(t *testing.T) {
 	}
 }
 
-// TestCoordinationOffLeavesContainersAlone covers both directions of the
-// kill switch: with it off a run gets the version-matched CLI but no socket
-// or coordination directory, and turning it on afterwards does not retrofit
-// the already-created container.
-func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
+// Disabling peer coordination retains authenticated transport, while mission
+// admission and lifecycle reporting stay disabled.
+func TestCoordinationOffRetainsRunTransport(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "current build")))
 	coord, binDir := withCoordination(t, e)
@@ -337,11 +336,12 @@ func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
 	if !ok || !cli.ReadOnly {
 		t.Fatalf("coordination is off but the container lacks a read-only CLI mount: %+v", container.spec.Mounts)
 	}
-	if _, ok := mountFor(container.spec, coordtransport.BinaryPath); ok {
-		t.Fatalf("coordination is off but the container got a bridge mount: %+v", container.spec.Mounts)
+	if _, bridgeMounted := mountFor(container.spec, coordtransport.BinaryPath); !bridgeMounted {
+		t.Fatalf("run lacks bridge mount: %+v", container.spec.Mounts)
 	}
-	if _, ok := mountFor(container.spec, coordtransport.MountDir); ok {
-		t.Fatalf("coordination is off but the container got a socket mount: %+v", container.spec.Mounts)
+	dir, ok := mountFor(container.spec, coordtransport.MountDir)
+	if !ok || !dir.ReadOnly {
+		t.Fatalf("run lacks read-only identity mount: %+v", container.spec.Mounts)
 	}
 	if _, err := os.Stat(old); err != nil {
 		t.Fatalf("an old staged build was touched with coordination off: %v", err)
@@ -350,20 +350,109 @@ func TestCoordinationOffLeavesContainersAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read sidecar: %v", err)
 	}
-	if sc.CoordDir != "" || sc.BridgeDigest == "" || sc.BridgePath != cli.HostPath {
-		t.Fatalf("sidecar coordination reference = %+v, want CLI only", sc)
+	if sc.CoordDir != dir.HostPath || sc.BridgeDigest == "" || sc.BridgePath != cli.HostPath {
+		t.Fatalf("sidecar transport reference = %+v", sc)
 	}
 
-	// Off -> on. The container already exists; nothing retrofits it.
-	e.sched.UseCoordination(coord, binDir, true)
-	if _, ok := mountFor(container.spec, coordtransport.BinaryPath); ok {
-		t.Fatalf("an existing container gained a bridge mount")
+	if _, err := e.sched.RequireCoordination(); err == nil {
+		t.Fatal("development transport enabled mission admission")
 	}
-	if _, ok := mountFor(container.spec, coordtransport.MountDir); ok {
-		t.Fatalf("an existing container gained a socket mount")
+	if sc.Reporter != harness.ReporterNone {
+		t.Fatalf("disabled lifecycle reporter = %s", sc.Reporter)
 	}
-	if released := coord.releasedRuns(); len(released) != 0 {
-		t.Fatalf("a run that was never provisioned was released: %v", released)
+	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
+	e.sched.RecordSteer(t.Context(), run.ID, bob.ID)
+	if got := coord.trailers(run.ID); !slices.Contains(got, "Co-authored-by: Bob Steer <bob@example.com>") {
+		t.Fatalf("co-authors not updated through disabled coordination transport: %v", got)
+	}
+}
+
+func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *testing.T) {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "fake"} {
+		t.Run(name, func(t *testing.T) {
+			e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "taskless cli")))
+			root := t.TempDir()
+			coord := &recordingCoordinator{
+				fakeCoordinator: fakeCoordinator{root: filepath.Join(root, "coord")},
+				files:           make(map[domain.RunID]map[string][]byte),
+			}
+			e.sched.UseCoordination(coord, filepath.Join(root, "bin"), false)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", name, domain.LaunchTUI)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.Task != "" {
+				t.Fatalf("taskless launch gained a synthetic task: %q", run.Task)
+			}
+			spec := e.rt.byName(string(run.ID)).spec
+			if _, ok := mountFor(spec, coordtransport.MountDir); !ok {
+				t.Fatal("taskless run lost authenticated transport")
+			}
+			if got := e.reporterOf(t, run.ID); got != harness.ReporterNone {
+				t.Fatalf("disabled lifecycle reporter = %s", got)
+			}
+			profile, _ := harness.Lookup(name)
+			for file := range profile.StatusFiles {
+				if coord.file(run.ID, file) != nil {
+					t.Fatalf("disabled lifecycle asset %q was provisioned", file)
+				}
+			}
+			if name == "fake" {
+				if len(coord.files[run.ID]) != 0 {
+					t.Fatal("custom taskless harness received invented discovery assets")
+				}
+				return
+			}
+			// Native discovery is still launch-scoped; no fake user task or
+			// lifecycle callback may be substituted to get the hint delivered.
+			for _, arg := range profile.DiscoveryLaunchArgs(coordtransport.MountDir) {
+				if !slices.Contains(spec.Command, arg) {
+					t.Fatalf("native discovery argument %q missing from %v", arg, spec.Command)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenCodeDiscoveryReferencesOnlyProvisionedAssets(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "identity-only", true: "with-reporter"}[enabled], func(t *testing.T) {
+			e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "opencode discovery")))
+			root := t.TempDir()
+			coord := &recordingCoordinator{
+				fakeCoordinator: fakeCoordinator{root: filepath.Join(root, "coord")},
+				files:           make(map[domain.RunID]map[string][]byte),
+			}
+			e.sched.UseCoordination(coord, filepath.Join(root, "bin"), enabled)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "opencode", domain.LaunchTUI)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec := e.rt.byName(string(run.ID)).spec
+			var config struct {
+				Plugins      []string `json:"plugin"`
+				Instructions []string `json:"instructions"`
+			}
+			if err := json.Unmarshal([]byte(spec.Env["OPENCODE_CONFIG_CONTENT"]), &config); err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Instructions) != 1 {
+				t.Fatalf("discovery instruction files = %v", config.Instructions)
+			}
+			wantPlugins := 0
+			if enabled {
+				wantPlugins = 1
+			}
+			if len(config.Plugins) != wantPlugins {
+				t.Fatalf("status plugins = %v with policy enabled=%v", config.Plugins, enabled)
+			}
+			for _, path := range append(config.Instructions, config.Plugins...) {
+				path = strings.TrimPrefix(path, "file://")
+				if filepath.Dir(path) != coordtransport.MountDir || coord.file(run.ID, filepath.Base(path)) == nil {
+					t.Fatalf("launch references unprovisioned asset %q", path)
+				}
+			}
+		})
 	}
 }
 

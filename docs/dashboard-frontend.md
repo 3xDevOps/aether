@@ -785,11 +785,12 @@ or roles but can grant or revoke access to their own agent account.
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, gateway authentication and error decoding. It carries exactly the
 methods the views call; the team-feature methods arrive with the tickets that
-use them. Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff
-tab's patch text, the status bar's disk number, and the capabilities probe -
-
-because those read a working tree, a filesystem, and the gateway descriptor
-rather than RPC methods. `aether gui` sends its per-process token as
+use them. Control calls use `POST /api/v1/<method>`. The diff patch, disk
+gauge and capabilities descriptor are read through `GET`; development and
+retained-evidence capture bytes also use an authenticated binary `GET`, not
+base64 in control JSON. The shared browser's observation-only WebSocket is
+`/ws/dev/browser/{run_id}`; actions stay on the typed HTTP control API.
+`aether gui` sends its per-process token as
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
 server-hosted gateway sends no token; WhoIs authenticates each request.
 
@@ -1174,7 +1175,7 @@ single tab stop that follows focus, and Left/Right/Home/End through
 unmodified Delete and Backspace through `aria-keyshortcuts`.
 
 Neither strip is a Radix `Tabs`, though the library is already a dependency.
-The run strip cannot be: its four tabs are separate registry routes with no
+The run strip cannot be: its five tabs are separate registry routes with no
 common parent to hold a `Tabs.Root`, and Radix would emit `aria-controls`
 pointing at panels that are not in the tree. The dock keeps each tab's close
 affordance inside its native tab button instead of nesting another button
@@ -1192,8 +1193,8 @@ focus to the next surviving tab, the previous one when closing the last tab, or
 the Add terminal tab when the dock becomes empty.
 Each run route names the body under the strip as its `tabpanel`, through
 `runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
-one carrying `aria-controls`: on the run strip only one of the four routes is
-active at a time, so the other three would be naming a panel that is not active
+one carrying `aria-controls`: on the run strip only one of the five routes is
+active at a time, so the other four would be naming a panel that is not active
 in the tree. An open dock's body is the panel its selected tab names; a shut
 dock has no body, and a dock
 holding no tabs is no tab list at all, so neither names anything.
@@ -1227,7 +1228,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 
 `src/routes/terminal/` is the run-detail Terminal tab: xterm.js over
 `/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
-tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
+tab strip (`tabs.tsx`), so Overview, Terminal, Browser, Diff and Events are registry
 routes on the same `runId`; the strip is a real tab list, arrow keys included
 (see [Keyboard and focus](#keyboard-and-focus)).
 
@@ -1319,9 +1320,9 @@ The wire methods and bounded records are documented in
 [integration.md](integration.md); this guide records only the dashboard
 surface and its reconnect behavior.
 
-A run id none of the four tabs can find renders one shared `MissingRun`
+A run id none of the five tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
-four copies of a sentence with nothing to press. What it says is what the
+five copies of a sentence with nothing to press. What it says is what the
 store actually knows. While the server is unreachable it reports that, in
 the same words `run-list.tsx` uses and with the same split - a dead token is
 not a server that is retrying, so that one says what the error recorded -
@@ -1724,6 +1725,90 @@ The terminal's colours are the one place the tokens cannot be used directly:
 xterm needs resolved theme values rather than the CSS variables, so the view
 reads the computed background and foreground off its own host element and
 re-reads them when the dark class on `<html>` changes.
+
+## Shared run Browser
+
+`src/routes/browser/` is the run-detail **Browser** tab in the same bundle
+used by the local SSH gateway and server-hosted tailnet gateway. It observes
+the run's actual isolated Chromium companion, not an iframe or a forwarded
+preview host. App JavaScript, cookies, redirects, popups and hot updates run
+there against the run's own network namespace: `http://localhost:3000` means
+the app in the run, not the phone or laptop. No debugging/CDP endpoint is
+exposed to the dashboard.
+
+Opening the tab reads status, pages and ownership; it does not create a
+session. Enter the app address and press **Open browser** to launch explicitly.
+**New page** opens another page in the existing context. **Go**, **Back**,
+**Forward** and **Reload page** operate on the selected shared page. The
+**Page** selector includes popups and changes the selected page for the agent
+and other viewers, so it requires control. **Viewport** offers desktop
+1280 × 800, phone 390 × 844 and landscape phone 844 × 390; these change the
+real remote viewport, not just the displayed image. They do not emulate a
+different user agent, operating system or hardware.
+
+The header identifies the browser incarnation, lifecycle state and current
+member or run-agent controller. **Acquire control** claims an unoccupied
+browser; **Take over browser** explicitly displaces the displayed lease.
+**Release control** gives up only that browser surface, not a durable mission
+hold. Watchers see the same selected page but cannot navigate, resize, select
+pages or send input. The server revalidates Steer, current membership and the
+surface generation; a visible old control button never authorizes a stale
+mutation.
+
+Click or touch the image to interact. Keyboard shortcuts carry their
+modifiers, pointer gestures include button/click count, wheel input scrolls
+the remote page, and up to ten touch contacts retain distinct IDs. **Keyboard**
+focuses the phone's text input bridge; committed composition/IME text is sent
+once rather than forwarding intermediate composition candidates. Native
+hardware-bound login flows and identity providers which reject automated
+Chromium remain limitations; use test accounts rather than importing a
+personal browser profile.
+
+**Expand** fills the run pane with the selected page, hiding the run header
+and navigation/capture controls. **Restore** brings those controls back.
+Neither action reconnects the stream, changes the remote viewport, or
+reacquires control. The current controller and errors remain visible, and
+**Keyboard** remains available for phone input.
+
+The stream accepts one bounded binary frame per WebSocket message (16 KiB
+metadata and 2 MiB image maximum). It keeps one pending compressed image and
+one decode, closes decoded bitmaps after painting, and never builds an image
+history. Input uses the metadata of the frame actually painted, including
+session/page revision and viewport ID. Coordinates exclude letterboxing and
+undo image/page scaling. The ordered input buffer is capped at 32 operations
+and one second; redundant moves for the same contact are coalesced. Changed
+frame identity, expired input or changed authority discards pending input with
+a visible error. Failed mutations are not automatically retried or replayed.
+
+**Hide browser**, changing tabs, or closing the dashboard detaches observation
+only. The app, pages and login continue according to the run's lifetime.
+**Reconnect** reads surviving state and reconnects observation; it never opens
+a fresh session. Reloading the dashboard creates a new tab-local control
+identity and initially watches the surviving owner; taking over is explicit.
+Stream failures, lifecycle unavailability and mutation refusals remain visible.
+**Close page** explicitly closes the selected page
+for everyone. **Reset session** requires confirmation and current control;
+it destroys the shared pages/cookies and requires acquiring the new session
+before opening pages. Closing the run owns stopping the companion itself.
+
+**Screenshot** calls the real capture API at its own recorded boundary, not
+a canvas copy or the last received frame. It creates a private transient
+capture and displays its ID. Open the existing **Evidence** drawer to inspect
+and explicitly select captures/verification notes for retention. Taking a
+screenshot does not publish or automatically retain anything.
+
+`web/e2e/development-browser/` adds real-server Playwright scenarios using the
+existing server/SSH-gateway harness, a Node 22.14.0 app process bound only to
+run-loopback, and the real browser companion. They cover invalid credentials,
+cookie-backed sign-in/logout, module hot replacement without logout,
+desktop/phone input, native Chromium composition, multiple touch contacts,
+same-page run-principal actions, popups, detach/reconnect, watch/takeover and
+stale control/viewport rejection. The app container publishes no host port.
+Use the normal E2E binary/build prerequisites and a built `aether/browser:test`
+image, or the harness's inherited `AETHER_BROWSER_IMAGE` override. The
+deterministic harness only holds the run alive: these are not proof of an
+authenticated vendor model/tool loop, nor an authenticated Tailscale-hosted
+device run.
 
 ## Run events tab
 

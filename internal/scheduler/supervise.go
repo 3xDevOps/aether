@@ -215,6 +215,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		s.retainAfterEvidenceFailure(entry)
 		return
 	}
+	if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: record development container exit", "run", entry.runID, "error", err)
+		s.retainAfterEvidenceFailure(entry)
+		return
+	}
+	if err := s.StopDevelopmentRun(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: stop development resources", "run", entry.runID, "error", err)
+		s.retainAfterEvidenceFailure(entry)
+		return
+	}
 
 	// Keep the recording available through the capture above. A process that
 	// exits has already stopped producing PTY bytes, so stopping the session
@@ -335,7 +345,7 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 		}
 		s.mu.Unlock()
 	}
-	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		return fmt.Errorf("destroy-pending container: %w", err)
 	}
 	if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
@@ -395,7 +405,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 		return err
 	}
 
-	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		// Keep every ownership reference and make this owner due now. The
 		// bounded sweep will retry without allowing cleanup to race a live
 		// container.
@@ -650,6 +660,9 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 				identity = "none"
 			}
 			cleanup := func(cleanupCtx context.Context) error {
+				if err := s.deleteDevelopment(cleanupCtx, r.ID); err != nil {
+					return err
+				}
 				if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, r.ID); err != nil {
 					return fmt.Errorf("scheduler: checkout gc: remove run transcripts: %w", err)
 				}

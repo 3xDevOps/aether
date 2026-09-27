@@ -48,6 +48,7 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		Cols:              cols,
 		Rows:              rows,
 		Shell:             shell,
+		Incarnation:       req.Incarnation,
 		Follow:            req.Follow,
 		Resume:            req.Resume,
 		ControlSessionID:  req.ControlSessionID,
@@ -78,11 +79,11 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A read-only attach's input is dropped rather than refused. Its
-	// resizes still travel: the session decides whether a mirror's size
-	// counts, and a lone one's does. Interactive input/control is sent as
-	// NDJSON so the SSH and in-process gateways share one parser.
-	if err := s.pumpTerminal(term, allowWrite, true, req.Interactive); err != nil {
+	// Read-only input is dropped. Primary mirrors retain their session's
+	// geometry policy, but development shell watchers must never impose a
+	// size. Interactive input/control is sent as NDJSON so the SSH and
+	// in-process gateways share one parser.
+	if err := s.pumpTerminal(term, allowWrite, shell == "" || allowWrite, req.Interactive); err != nil {
 		_ = s.Conn.Close(attachEndClose(err))
 		return
 	}

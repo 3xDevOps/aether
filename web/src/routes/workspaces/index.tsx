@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import type { Workspace } from '@/lib/types'
+import { ImportRepositoryDialog } from '@/routes/admin-dialogs/import-repository-dialog'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -32,6 +33,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
   const workspaces = useMemo(() => Object.values(workspaceMap), [workspaceMap])
   const [loaded, setLoaded] = useState(useStore.getState().hydrated)
   const [deleting, setDeleting] = useState<Workspace | null>(null)
+  const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const loading = useDelayed(!loaded && error === null)
   const fetchVersion = useRef(0)
@@ -63,6 +65,12 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
         <div className="mx-auto flex w-full max-w-[1200px] min-w-0 flex-col gap-4 p-4 sm:p-6">
           {caps.hasMethod('workspace.add') && (
             <AddForm client={client} onAdded={() => void refetch()} />
+          )}
+          {isAdmin && caps.hasMethod('workspace.import') && (
+            <section className="flex flex-wrap items-center justify-between gap-3 border-y bg-sidebar px-3 py-3 sm:px-4" aria-label="Remote repository">
+              <p className="text-xs text-muted-foreground">Start from a remote repository without a local clone. Source, checkout Origin and candidate adoption remain explicit.</p>
+              <Button size="sm" variant="outline" onClick={() => setImporting(true)}>Import repository</Button>
+            </section>
           )}
 
           {loading && (
@@ -171,6 +179,13 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
             useStore.getState().removeWorkspace(deleting.id)
             void refetch()
           }}
+        />
+      )}
+      {importing && isAdmin && caps.hasMethod('workspace.import') && (
+        <ImportRepositoryDialog
+          client={client}
+          onClose={() => setImporting(false)}
+          onImported={() => void refetch()}
         />
       )}
     </div>

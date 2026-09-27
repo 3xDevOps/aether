@@ -57,9 +57,9 @@ Caller-supplied mounts are validated before these mounts are appended. A caller 
 cannot shadow the socket or either executable. The server fails closed if it
 cannot stage and verify its binary: managed-container creation or launch is
 refused rather than proceeding without the canonical CLI or bridge.
-For enabled runs, the coordination directory and staged server binary are
-therefore either present as verified or absent from a container; the canonical
-read-only CLI mount is provisioned separately.
+Every run receives its own authenticated socket, independently of conflict
+policy. Member terminals and verification containers receive the CLI without
+borrowing a run's identity.
 
 ## Wire v3
 
@@ -103,8 +103,9 @@ the radar active/grace authorization described below.
 
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
 IDs, the recorded task, each currently authorized peer, and the six base
-coordination capabilities (or the assignment-scoped capability set for a
-mission run). The sender is never a parameter. An ordinary run can message
+coordination capabilities when conflict coordination is enabled, plus the
+live development and assignment-scoped capabilities that are actually
+available. The sender is never a parameter. An ordinary run can message
 only a peer in the same workspace that the radar currently marks as
 overlapping, or a peer in its ten-minute overlap grace period. A mission run
 can message those same radar peers plus its current assignment peers, so a
@@ -141,11 +142,12 @@ also enforces these bounds:
   connections are reaped after five minutes;
 - each request line is limited to 64 KiB;
 
-The method set is closed. A connection cannot invoke a control verb, access
-Git, read another run's transcript, or address a run outside the authorized
-peer or current mission-assignment set. Assignment-scoped task and worker
-methods still enforce the role, mission, revision, generation, and current
-authority checks on the server; they are not a general control API.
+The method set is closed. Development operations use an explicit `dev.*`
+allow-list and are scoped to this run's development terminals, browser, control
+leases and captures; they cannot steer the primary harness. There is no generic
+RPC command, Git engine, caller-selected run identity or socket override.
+Assignment-scoped task and worker methods still enforce the role, mission,
+revision, generation, and current authority checks on the server.
 
 ## Delivery, acknowledgement, and retries
 
@@ -249,10 +251,10 @@ no terminal-delivery stamp.
 
 ## `aether-internal` CLI
 
-A task-bearing coordinated run receives this launch instruction automatically:
+A task-bearing run receives this capability-neutral launch instruction automatically:
 
 ```
-Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate. Report a terminal outcome only after the assigned work is finished.
+Use `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. Use only available capabilities and report only what you verified.
 ```
 
 No skill package, manual identity argument, or credential setup is required.
@@ -301,11 +303,12 @@ The stable error codes are:
 ```
 
 `status` always emits the v3 JSON envelope; `--json` remains accepted but is
-optional. Unknown flags and positional arguments are rejected. `skill` takes
-no arguments and prints the CLI build version, live role and identity, then
-the current phase and immediate actions. Its build version comes from the
-mounted binary, which may predate newly published documentation; help describes
-that binary's command syntax.
+optional. Unknown flags and positional arguments are rejected. `skill` prints
+the CLI build version, live role and identity, current phase and immediate
+actions. `skill terminal`, `skill browser`, and `skill git` load focused
+development guidance when the relevant live capabilities are advertised.
+Its build version comes from the mounted binary, which may predate newly
+published documentation; help describes that binary's command syntax.
 
 The task text in status and skill is a bounded summary (at most 512 bytes),
 not the full assignment. A worker's skill prints an executable command with
@@ -340,8 +343,9 @@ Top-level and per-command help are available without a coordination socket:
 /usr/local/bin/aether-internal send --help
 ```
 
-`skill` also works without the mounted socket. In that case it prints the
-general workflow without claiming a run identity or assignment. Commands that
+`skill` also works without the mounted socket. In that case it prints short,
+capability-neutral discovery, not an assignment, tool registration or claim
+that a terminal, browser, Git credential or image reader exists. Commands that
 need run state return `-32004` and exit with status 4 when the socket is not
 available. Message, question, reply, and report bodies read from flags, files,
 or standard input are capped at 4 KiB before a request is sent.
@@ -405,6 +409,181 @@ duplicate hint; durable inbox delivery and explicit acknowledgement are
 unchanged. An unsupported server is an error to stop on, not a reason to
 retry immediately. See the [helper contract](harness-integration.md#optional-native-idle-wake)
 for error handling and lifecycle requirements.
+
+### Development terminals, browser and captures
+
+Development is independent of conflict coordination and mission assignment.
+Run `status` first: command help describes syntax, while `capabilities` is the
+live server allow-list. Every method in the following closed families has a
+thin typed CLI command:
+
+| Command family | Subcommands |
+| --- | --- |
+| `terminal` | `list`, `start`, `output`, `screen`, `screenshot`, `input`, `resize`, `wait`, `stop` |
+| `browser` | `status`, `open`, `pages`, `navigate`, `snapshot`, `action`, `screenshot`, `viewport`, `wait`, `console`, `network`, `reset`, `close` |
+| `control` | `status`, `acquire`, `release` |
+| `artifact` | `list`, `get`, `delete`, `retain` |
+
+All use `aether-internal <family> <subcommand> [--params-file FILE|-] [--json]`.
+Omitting `--params-file` sends `{}`; use this for `terminal list`, `browser
+status`, and unfiltered `artifact list`. Other operations need the fields in
+their command-specific `--help`. A file or stdin must contain one strict JSON
+object, at most 48 KiB before and after encoding. Unknown fields and `run_id`
+(even empty, null, or differently cased) are rejected before dialing. Development
+control requests and responses stay within 64 KiB. Screenshot responses contain
+artifact metadata and a server-assigned read-only path, never image base64.
+
+```sh
+aether-internal skill terminal
+aether-internal terminal start --help
+printf '%s\n' '{"name":"app","command":["npm","run","dev"],"cols":100,"rows":30}' |
+  aether-internal terminal start --params-file -
+aether-internal terminal list
+aether-internal control acquire --help
+aether-internal terminal screen --help
+aether-internal terminal screenshot --help
+aether-internal artifact list
+```
+
+Retain the returned `terminal_id` and `incarnation`. Read raw/text output with
+`terminal output`, current styled cells with `terminal screen`, and an image
+with `terminal screenshot`: these are three different observations. Follow
+output cursors and gap/truncation flags. Screen continuation carries both row
+and column offsets plus `expected_screen_revision`; restart paging on a changed
+revision rather than combining frames. Honor protocol-error/unsupported-graphics
+indicators. A successful `wait` RPC does not mean a successful app: inspect
+`matched`, `timed_out`, and the process's exit state/code.
+
+Before input, resize or stop, acquire a surface
+`{"kind":"terminal","id":"<terminal_id>","incarnation":"<incarnation>"}`
+with your own opaque `control_session_id`. Use the returned
+`controller.control_generation` for mutations and release that exact lease
+when finished. Re-observe stale ownership instead of blindly replaying input
+or stealing a human's control. Input is fenced by incarnation and controller,
+not redraw revisions. A viewer attach does not impose geometry; resize is an
+explicit controlled action. Releasing control or detaching does not stop the
+app; `terminal stop` stops the owned process group.
+
+Browser startup is lazy and works on a standard **headless Ubuntu server**.
+There is no X11, Wayland, Xvfb, desktop session, host browser or disabled
+sandbox requirement. The isolated companion shares the run network namespace
+so an app's run-local URL is reachable; it does not mount the checkout, member
+home, credentials or Docker socket.
+
+```sh
+aether-internal skill browser
+aether-internal browser status
+printf '%s\n' '{"url":"http://127.0.0.1:3000","control_session_id":"agent-browser-1","control_generation":0}' |
+  aether-internal browser open --params-file -
+```
+
+The first `open` omits `session_id`, uses generation zero and a nonempty
+controller ID, and atomically bootstraps the companion's control ownership.
+Retain `result.page` and `result.control`. Later opens require the existing
+session and controller fence; a missing session never silently creates another
+browser. For regular acquisition use
+`{"kind":"browser","id":"browser","incarnation":"<session_id>"}`.
+Page operations carry `session_id`, `page_id`, and `page_revision`; mutations
+also carry `control_session_id` and `control_generation`. Coordinate actions
+use the observed `viewport_id`; semantic actions use revision-scoped node IDs
+from `snapshot`. Re-observe after navigation/DOM/viewport changes. `reset` is
+explicit, invalidates old identities, and requires a new control acquisition.
+Browser status also reports `state`: `not_started`, `creating`, `running`,
+`paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
+session reports `available: false`, `running: false`, and its actual error.
+Failed initial creation may return an opaque
+`pending:` session ID. It is a recovery fence, not a usable page session.
+Acquire the browser surface with that exact incarnation, then explicitly
+`browser reset` with the acquired lease to recover. The broker destroys only
+the recorded owned companion; another `open` never silently recreates it.
+
+Browser observers receive the latest complete frame when joining an active
+stream, even when the page is static; slow viewers do not queue an image
+history. On controller release, revocation or disconnect, the server clears
+held browser keys, buttons and touches before admitting another controller.
+If cleanup cannot be confirmed, new control remains fenced.
+
+Page inventories and physical-input acknowledgements use cached, best-effort
+titles without waiting for a DOM read. Inventories refresh titles asynchronously;
+navigation clears the old title. Explicit page observations wait at most one
+second for a title. Session, page, revision, URL, and viewport fences remain live.
+
+Terminal wait/stop and browser navigation/action/wait bounds are 30 seconds.
+First browser open has a 90-second bootstrap budget and reset has 30 seconds.
+Terminal screenshots have a 90-second total budget, including first companion
+startup; the isolated renderer has 30 seconds for page/font setup, VT replay,
+and PNG capture, plus five seconds for its response. Cancellation closes that
+renderer context without closing the app's browser session.
+The transport adds a three-second framing margin; browser navigation/action/wait
+also allow the companion's five-second response margin. Earlier caller
+cancellation still applies.
+
+Use the full loop: edit, run, observe, interact, correct, and verify the changed
+behavior. Browser snapshots/console/network and terminal output/screens are
+useful diagnostics but not image-based evidence. Open the screenshot artifact
+path with a harness image-consuming tool **only if one actually exists**. If
+the harness cannot read images, report that exact limitation and the checks
+actually performed; never infer visual correctness from text alone. Transient
+captures require live **Steer** and backing-account access; they are not durable
+evidence references.
+
+Before deleting captures, stopping the run or submitting a terminal worker
+report (including headless completion), explicitly retain the reviewed selection:
+
+```sh
+printf '%s\n' '{"artifact_ids":["<capture_id>"],"verification_notes":"Observed behavior and verification limits","idempotency_key":"review-captures-1"}' |
+  aether-internal artifact retain --params-file -
+```
+
+`artifact retain` returns `result.packet_id`. Read back that packet in the
+dashboard's evidence view, including its selected captures and notes, then pass
+the ID to the existing `report --evidence-ref <packet_id>`. Retention does not
+report an outcome or prove verification. Select 1–64 captures; optional notes
+must be valid UTF-8 and at most 4096 bytes. Retained and staged capture files
+together are bounded to 64 captures and 128 MiB per run, with an 8 MiB limit
+per capture. Transient captures separately have a 64-capture/128 MiB run bound.
+
+Retention copies immutable capture bytes and their original observation
+metadata; the packet's later Git snapshot is a separate boundary, not proof of
+the checkout state when pixels were captured. Unknown capture-time Git state
+stays unknown. Deleting a transient capture does not remove its retained copy.
+Retained copies use existing evidence expiry and broader workspace **View**
+access, not private live-session permissions. Review pixels, URLs and notes for
+secrets before retaining; no automatic public upload or PR attachment happens.
+
+Retention rechecks current authority after acquiring the run lock, before
+opening each source, and at publication. A busy authorization admission returns
+`authorization admission in progress; retry retention`, not a success or an
+automatic retry. Inspect evidence after an uncertain result; if explicitly
+retrying, reuse the same idempotency key, ordered capture IDs and exact notes.
+Changed selections or notes are refused rather than returning the earlier
+packet. An expired packet is also refused, including after its bytes have been
+cleaned up. Use a new key for a new retention request.
+
+### Native Git and pull requests
+
+`aether-internal skill git` teaches native `git`/`gh`; there is no second agent
+Git engine or Git RPC. The topic is offered with a live development execution
+capability, not as proof that `gh`, credentials or push permission are present.
+Check the actual account environment and inspect `git status --short`,
+`git diff`, `git diff --cached`, `git branch --show-current`, `git remote -v`,
+and `gh auth status` before relying on them. Stage exact intended paths, verify
+the behavior/staged diff, and preserve existing author/signing configuration
+and `/run/aether/co-authors` trailers.
+
+The workspace mirror's **import source**, the run checkout's **origin**, and a
+fork PR's **base repository/branch** and **head owner/branch** are distinct.
+Inspect them explicitly; do not push to a guessed mirror URL or rewrite origin
+implicitly. Inspect existing PR metadata before native `gh pr create`/update
+to avoid duplicate or wrong-base PRs. Follow the assignment's approval and
+mission integration boundaries; discovery does not authorize PR merging,
+automatic screenshot publication, or disabling commit signing.
+
+Custom or argv-overridden harnesses still receive the staged CLI and run socket
+but no guessed vendor startup flags. In taskless mode their authors must invoke
+`aether-internal skill` through their own native startup mechanism or manually.
+No fake task, permanent repository settings or implicit MCP registration is
+created to make discovery appear to work.
 
 ### Send a message
 
@@ -801,6 +980,9 @@ a durable observation and does not stop the worker or submit the task.
 Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
+Finish runtime verification and collect any required terminal/browser captures
+before that report; accepted terminal outcomes may clean up the worker's
+development resources. A capture receipt is not proof that an image was viewed.
 
 Reports publish durable timeline/evidence records, not terminal keystrokes.
 The integrator reads `worker list` and `worker inspect --attempt-id` for
@@ -864,10 +1046,8 @@ Active runs and explicitly retained terminal TUI runs keep their socket,
 unread mailbox, and timeline entries through a server restart. Recovery
 rebinds `coord3.sock` for those runs. When a run's container is destroyed,
 Aether releases the coordination directory and mailbox after any required
-evidence capture has completed. With `--conflict-coordination=false`, a newly
-created container still receives the read-only canonical CLI mount, but no
-coordination socket or borrowed run identity is provided. Run-bound
-coordination requests are unavailable; `--help` and the general, identity-free
-`skill` workflow still work, and the CLI cannot authorize run operations. The
-optional MCP bridge has no usable socket. The conflict radar itself remains
-active.
+evidence capture has completed. With `--conflict-coordination=false`, runs
+still receive their identity socket and per-launch discovery hint.
+`coord.status` reports the live method allow-list; conflict and mission
+operations remain disabled rather than inheriting authority from the socket.
+The conflict radar itself remains active.

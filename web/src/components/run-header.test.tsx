@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import { lookupRoute } from '@/routes/registry'
 import { runTabs } from '@/routes/terminal/tabs'
+import '@/routes/browser'
 import '@/routes/diff'
 import '@/routes/run'
 import '@/routes/terminal'
