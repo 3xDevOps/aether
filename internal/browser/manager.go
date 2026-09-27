@@ -156,6 +156,7 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	if err != nil {
 		return status, nil, err
 	}
+	persisted := status
 	if status.RunID != run.ID || status.RunContainer != run.ContainerID {
 		return status, nil, fmt.Errorf("%w: run container identity changed", ErrUnavailable)
 	}
@@ -178,8 +179,10 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	status.State = info.State
 	if info.State != "running" {
 		status.Reason = "Recorded companion is " + info.State
-		if err = saveStatus(dir, status); err != nil {
-			return status, nil, err
+		if status != persisted {
+			if err = saveStatus(dir, status); err != nil {
+				return status, nil, err
+			}
 		}
 		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Reason)
 	}
@@ -197,16 +200,20 @@ func (m *Manager) reconcile(ctx context.Context, run Run, entry *managedRun, dir
 	if status.ProcessID != "" && status.ProcessID != health.ProcessID {
 		status.State = "session_lost"
 		status.Reason = "Companion process restarted and its previous browser session was lost; explicit restart required"
-		if err := saveStatus(dir, status); err != nil {
-			return status, nil, err
+		if status != persisted {
+			if err := saveStatus(dir, status); err != nil {
+				return status, nil, err
+			}
 		}
 		return status, nil, fmt.Errorf("%w: %s", ErrUnavailable, status.Reason)
 	}
 	status.SessionID = health.SessionID
 	status.ProcessID = health.ProcessID
 	status.Reason = ""
-	if err := saveStatus(dir, status); err != nil {
-		return status, nil, err
+	if status != persisted {
+		if err := saveStatus(dir, status); err != nil {
+			return status, nil, err
+		}
 	}
 	return status, entry.client, nil
 }

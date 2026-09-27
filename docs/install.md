@@ -873,6 +873,9 @@ session, the returned `pending:<creation-key>` is an opaque recovery
 incarnation, not a page or frame identity. After reset, obtain the new
 session and page references; do not replay old input.
 
+Browser status and input operations still verify the recorded companion's
+ownership and health. Only lifecycle changes rewrite its journal.
+
 **Release prerequisite:** a new GHCR package starts private. Before the first
 server release can complete, a repository administrator must make the
 `aether-browser` package public. The release workflow smoke-checks each

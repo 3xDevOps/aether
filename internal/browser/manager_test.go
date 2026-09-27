@@ -91,6 +91,10 @@ func TestManagerRecoveryDistinguishesResetFromProcessLoss(t *testing.T) {
 				if err != nil || status.SessionID != "new-session" || status.ContainerID != "companion" || client == nil {
 					t.Fatalf("reset reconciliation = %+v, %v", status, err)
 				}
+				stored, readErr := loadStatus(dir)
+				if readErr != nil || stored.SessionID != "new-session" || stored.ContainerID != "companion" || stored.ProcessID != "process-one" {
+					t.Fatalf("reset reconciliation not durable: %+v, %v", stored, readErr)
+				}
 				client.Close()
 			}
 			if runtime.created || runtime.destroyed {
