@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/jsonc"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
@@ -119,9 +120,15 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 		}
 	}
 	opencode := filepath.Join(root("XDG_CONFIG_HOME", user(".config")), "opencode")
-	openPaths := []string{filepath.Join(opencode, "plugins", "aether.js"), project(".opencode", "plugins", "aether.js")}
+	openV1Paths := []string{filepath.Join(opencode, "plugins", "aether.js"), project(".opencode", "plugins", "aether.js")}
+	openV2Paths := []string{
+		filepath.Join(opencode, "plugins", "aether-mailbox", "index.js"),
+		project(".opencode", "plugins", "aether-mailbox", "index.js"),
+		filepath.Join(opencode, "plugins", "aether.js"),
+		project(".opencode", "plugins", "aether.js"),
+	}
 	if custom := in.env("OPENCODE_CONFIG_DIR"); custom != "" {
-		openPaths = append(openPaths, filepath.Join(custom, "plugins", "aether.js"))
+		openV1Paths = append(openV1Paths, filepath.Join(custom, "plugins", "aether.js"))
 	}
 	cursorNote := "CLI custom roots, --workspace, managed hooks and headless stop support are unverified."
 	if in.env("CURSOR_CONFIG_DIR") != "" || in.env("XDG_CONFIG_HOME") != "" {
@@ -135,7 +142,8 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 		{id: "cursor", assets: []string{"cursor.json"}, paths: []string{user(".cursor", "hooks.json"), project(".cursor", "hooks.json")}, unknownPaths: in.env("CURSOR_CONFIG_DIR") != "" || in.env("XDG_CONFIG_HOME") != "", note: cursorNote, activate: "Use /quit or /exit and restart Cursor CLI in the intended workspace; respect workspace trust. Observe a supported interactive boundary and inspect /logs; headless stop parity is not guaranteed."},
 		{id: "pi", assets: []string{"pi.ts"}, paths: []string{filepath.Join(pi, "extensions", "aether.ts"), project(".pi", "extensions", "aether.ts")}, controls: []string{filepath.Join(pi, "settings.json"), project(".pi", "settings.json")}, note: "Configured/package/-e extension paths, resource exclusions and --no-extensions are unverified; absence here does not prove missing installation.", activate: "Restart pi (or use its /reload), preserving existing extension settings and resource exclusions; inspect extension load errors. Respect project trust through the normal UI. Verify the current root session executes a context boundary."},
 		{id: "omp", assets: []string{"omp.ts"}, paths: []string{filepath.Join(omp, "extensions", "aether.ts"), project(".omp", "extensions", "aether.ts")}, controls: []string{filepath.Join(omp, "settings.json"), filepath.Join(omp, "config.yml"), project(".omp", "settings.json"), project(".omp", "config.yml")}, note: ompNote, activate: "Confirm active profile with omp config path, then restart OMP; inspect extension load errors. Honor disabledExtensions: [extension-module:aether] and --no-extensions; do not change them automatically."},
-		{id: "opencode", assets: []string{"opencode-v1.js", "opencode-v2.js"}, paths: openPaths, note: "V1/V2 runtime version, explicit plugin config (OPENCODE_CONFIG/OPENCODE_CONFIG_CONTENT), managed policy and additional roots are unverified.", activate: "Check opencode --version and its matching plugin API documentation. Export ONLY opencode-v1.js for V1 OR opencode-v2.js for V2 to aether.js, never both. Restart OpenCode and inspect plugin load errors; copying a V1 export into V2 is not activation."},
+		{id: "opencode-v1", assets: []string{"opencode-v1.js"}, paths: openV1Paths, note: "Runtime version, explicit plugin config (OPENCODE_CONFIG/OPENCODE_CONFIG_CONTENT), managed run mounts and additional roots are unverified.", activate: "Check opencode --version. For V1 only, export opencode-v1.js to aether.js. Never install both V1 and V2 assets. Restart OpenCode and inspect plugin load errors; verify a real root-session idle wake."},
+		{id: "opencode-v2", assets: []string{"opencode-v2.js"}, paths: openV2Paths, unknownPaths: in.env("OPENCODE_CONFIG_DIR") != "", note: "Also checks supported legacy auto-discovered plugins/aether.js files. Runtime version, OPENCODE_CONFIG_DIR behavior, explicit plugin config, managed run mounts and additional roots are unverified.", activate: "Check opencode --version. For V2, prefer exporting opencode-v2.js to the aether-mailbox/index.js package entry; auto-discovered aether.js remains supported. Inspect/diff existing manual copies before updating or migrating with normal authorization: an older global aether-mailbox ID can win before the managed package. Avoid duplicate standalone/package or V1/V2 installs. Restart OpenCode and verify plugin loading and a real root-session idle wake."},
 	}
 }
 
@@ -165,8 +173,8 @@ func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error 
 		text.WriteString("Hook executable: missing/unverified /usr/local/bin/aether-internal (must be a regular executable in the harness environment).\n")
 	}
 	text.WriteString("Safe self-install: inspect/export/diff, edit only the chosen harness with normal authorization, preserve unrelated config, and do not edit trust records, managed policy or disable flags. Restart/reload as above, then verify a real native boundary; disk checks alone never establish activation.\n")
-	text.WriteString("Generic integration: aether-internal hook file generic.sh — adapt to the host's documented context hook; no standard installation path or activation claim.\n")
-	text.WriteString("Hooks run only at native lifecycle boundaries, never watch/poll in the background or wake later-idle sessions. They emit a trusted inbox pointer, not peer instructions. Read aether-internal inbox and explicitly ack its token after handling; hook output never acknowledges mail.\n")
+	text.WriteString("Generic integration: aether-internal hook file generic.sh adapts the host's documented context hook. A custom native receiver may call hook generic wake once per bounded wait; see docs/harness-integration.md for session ownership and cancellation. No standard installation path or activation claim.\n")
+	text.WriteString("JSON command hooks run only at lifecycle boundaries. Loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox and explicitly ack its token after handling; hook output never acknowledges mail.\n")
 	_, err := io.WriteString(out, text.String())
 	return err
 }
@@ -216,6 +224,7 @@ func inspectHookInstallation(plan hookInstallPlan) (hookInstallResult, error) {
 	if plan.id == "gemini" && len(controlPaths) == 2 {
 		controlPaths = append([]string{controlPaths[0]}, append(append([]string{}, plan.paths...), controlPaths[1])...)
 	}
+	var otherOpenCodeAsset []byte
 	for _, path := range plan.paths {
 		data, err := readHookInstallFile(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -236,7 +245,26 @@ func inspectHookInstallation(plan hookInstallPlan) (hookInstallResult, error) {
 			}
 			if !matches {
 				uncertain = true
-				result.details = append(result.details, "modified/unknown source at "+shellquote.Quote(path))
+				detail := "modified/unknown source at " + shellquote.Quote(path)
+				if plan.id == "opencode-v1" || plan.id == "opencode-v2" {
+					other := "opencode-v1.js"
+					if plan.id == "opencode-v1" {
+						other = "opencode-v2.js"
+					}
+					if otherOpenCodeAsset == nil {
+						var readErr error
+						otherOpenCodeAsset, readErr = coordhooks.Files.ReadFile(other)
+						if readErr != nil {
+							return result, fmt.Errorf("read embedded hook %s: %w", other, readErr)
+						}
+					}
+					if bytes.Equal(bytes.TrimSpace(data), bytes.TrimSpace(otherOpenCodeAsset)) {
+						detail = "wrong-version " + other + " at " + shellquote.Quote(path)
+					} else if plan.id == "opencode-v2" {
+						detail += "; older/custom copy may claim aether-mailbox before the managed package; inspect/diff and update or migrate it with normal authorization"
+					}
+				}
+				result.details = append(result.details, detail)
 			}
 			continue
 		}
@@ -273,7 +301,7 @@ func inspectHookInstallation(plan hookInstallPlan) (hookInstallResult, error) {
 			case ".yml", ".yaml":
 				err = yaml.Unmarshal(data, &c)
 			default:
-				err = json.Unmarshal(stripHookJSONComments(data), &c)
+				err = json.Unmarshal(jsonc.Normalize(data), &c)
 			}
 		}
 		if err != nil {
@@ -394,80 +422,4 @@ func readHookInstallFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("configuration exceeds size limit")
 	}
 	return data, err
-}
-
-// Copilot settings are JSONC. Preserve quoted strings and newlines while removing
-// comments and trailing commas; ordinary JSON decoding still validates structure.
-func stripHookJSONComments(data []byte) []byte {
-	clean := bytes.Clone(data)
-	quoted, escaped := false, false
-	for i := 0; i < len(clean); i++ {
-		c := clean[i]
-		if quoted {
-			if escaped {
-				escaped = false
-			} else if c == '\\' {
-				escaped = true
-			} else if c == '"' {
-				quoted = false
-			}
-			continue
-		}
-		if c == '"' {
-			quoted = true
-			continue
-		}
-		if c != '/' || i+1 >= len(clean) {
-			continue
-		}
-		if clean[i+1] == '/' {
-			for ; i < len(clean) && clean[i] != '\n'; i++ {
-				clean[i] = ' '
-			}
-		} else if clean[i+1] == '*' {
-			clean[i], clean[i+1] = ' ', ' '
-			i += 2
-			closed := false
-			for ; i < len(clean); i++ {
-				if clean[i] == '*' && i+1 < len(clean) && clean[i+1] == '/' {
-					clean[i], clean[i+1] = ' ', ' '
-					i++
-					closed = true
-					break
-				}
-				if clean[i] != '\n' && clean[i] != '\r' {
-					clean[i] = ' '
-				}
-			}
-			if !closed {
-				return data // Let the JSON decoder reject an unterminated comment.
-			}
-		}
-	}
-	quoted, escaped = false, false
-	for i, c := range clean {
-		if quoted {
-			if escaped {
-				escaped = false
-			} else if c == '\\' {
-				escaped = true
-			} else if c == '"' {
-				quoted = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			quoted = true
-		case ',':
-			j := i + 1
-			for j < len(clean) && (clean[j] == ' ' || clean[j] == '\n' || clean[j] == '\r' || clean[j] == '\t') {
-				j++
-			}
-			if j < len(clean) && (clean[j] == '}' || clean[j] == ']') {
-				clean[i] = ' '
-			}
-		}
-	}
-	return clean
 }

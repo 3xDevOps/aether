@@ -85,6 +85,16 @@ const OpenCodePluginName = "opencode-status.js"
 //go:embed opencode-status.js
 var OpenCodePlugin []byte
 
+// OpenCodeV2PluginName identifies the distinct @opencode/plugin V2 reporter.
+// V1 and V2 status plugins must not be loaded together.
+const OpenCodeV2PluginName = "opencode-status-v2.js"
+
+// OpenCodeV2Plugin uses V2 execution, permission, and form events, translating
+// them into the same canonical report command as the V1 adapter.
+//
+//go:embed opencode-status-v2.js
+var OpenCodeV2Plugin []byte
+
 // claudeHook is the subset of Claude Code's hook payload the mapping
 // reads. Every event carries hook_event_name; tool_name comes with the
 // tool events and notification_type with Notification.

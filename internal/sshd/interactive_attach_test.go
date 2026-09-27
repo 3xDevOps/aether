@@ -28,6 +28,7 @@ type interactiveTestPTY struct {
 	writable     bool
 	beforeAttach func()
 	beforeReady  func(bool)
+	readyError   func(bool) error
 }
 
 func (p *interactiveTestPTY) Attach(ctx context.Context, key ptyhost.SessionKey, client ptyhost.AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
@@ -63,6 +64,11 @@ func (p *interactiveTestPTY) Attach(ctx context.Context, key ptyhost.SessionKey,
 		client.OnControlReady(func(readOnly bool) error {
 			if p.beforeReady != nil {
 				p.beforeReady(readOnly)
+			}
+			if p.readyError != nil {
+				if err := p.readyError(readOnly); err != nil {
+					return err
+				}
 			}
 			p.mu.Lock()
 			p.writable = !readOnly

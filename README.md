@@ -114,8 +114,13 @@ pre-launch operation.
 ## Supported agents
 
 Aether does not install agents - install the agent CLI in your member
-environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
-[docs/environments.md](docs/environments.md).
+environment terminal. Built-in launch profiles cover Claude Code, Codex, pi,
+OMP, and OpenCode; other CLIs can use a custom launch definition. Native
+idle wake is available through loaded pi, OMP, and version-matched OpenCode
+integrations; command-hook integrations deliver at the next supported
+boundary instead. Neither a send receipt nor a wake acknowledges mail.
+See [per-harness setup and limits](docs/harnesses.md) and
+[member environments](docs/environments.md).
 
 ## Documentation
 
@@ -127,6 +132,7 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 | [Networking](docs/networking.md) | Tailscale-first keyless setup, plus LAN and VPN. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
 | [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
+| [Harness integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
 | [Privacy](docs/privacy.md) | What the Android app and the dashboard store and send. |
@@ -149,6 +155,7 @@ development server.
 make build            # static dashboard export, then both binaries into dist/
 make test             # unit tests, race detector on
 make test-integration # integration tests; needs real Docker and git
+make test-native-hooks # native adapter lifecycle regressions; Node.js 22.13+
 make release          # cross-compile the full release matrix
 ```
 

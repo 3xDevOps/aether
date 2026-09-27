@@ -228,14 +228,13 @@ func buildStatusAgentImage(t *testing.T, agents map[string]string) string {
 	return image
 }
 
-// openCodeAgentScript stands in for opencode. Its reporter calls are the
-// ones the embedded plugin makes - the event on the command line, nothing
-// on stdin - and it prints the launch environment the plugin would have
-// been loaded from, which is the whole registration for a harness with no
-// flag to point at a file.
+// The scripted CLI reports through the same run-scoped socket as the plugin.
 const openCodeAgentScript = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "1.18.32"
+  exit 0
+fi
 sleep 1
-echo "config:$OPENCODE_CONFIG_CONTENT"
 ` + coordtransport.BinaryPath + ` report opencode --event session.idle
 echo "reported:idle"
 while read line; do
@@ -244,9 +243,7 @@ while read line; do
 done
 `
 
-// The same path for the harness whose reporter rides in the environment:
-// the plugin the server wrote into the run's coordination directory, the
-// variable naming it, and the run moving as the agent says so.
+// Exercise the native launch wrapper and status transitions in a real container.
 func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -283,7 +280,6 @@ func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o444 {
 		t.Errorf("%s mode = %o, want 0444", agentstatus.OpenCodePluginName, got)
 	}
-	att.waitOutput(t, `config:{"plugin":["file://`+path.Join(coordtransport.MountDir, agentstatus.OpenCodePluginName)+`"]}`)
 	att.waitOutput(t, "reported:idle")
 
 	parked := waitEvent(t, sub, &seen, "run.status needs-attention", func(ev events.Event) bool {

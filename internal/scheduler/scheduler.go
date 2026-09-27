@@ -694,6 +694,7 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 		profile.DiscoveryArgs = nil
 		profile.DiscoveryEnv = nil
 		profile.DiscoveryFiles = nil
+		profile.NativeCoordination = false
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:

@@ -2,6 +2,7 @@ package coord
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,7 @@ func requireTransportConflict(t *testing.T, err error) {
 func TestNativeHookBurstPreservesExplicitCoordination(t *testing.T) {
 	h := newHarness(t, 2, func(cfg *Config) {
 		cfg.Evidence = &coordReportEvidenceCapture{id: "after-hooks-evidence"}
+		cfg.WakeAdmission = allowHookWake
 	})
 	h.start()
 	ctx := context.Background()
@@ -64,12 +66,25 @@ func TestNativeHookBurstPreservesExplicitCoordination(t *testing.T) {
 			t.Fatalf("hook %d: exit %d, error %v", i, code, err)
 		}
 	}
+	var wakeOutput bytes.Buffer
+	wake := func() (int, error) {
+		wakeOutput.Reset()
+		return coordcli.Run(ctx, []string{"hook", "generic", "wake"}, coordcli.Config{
+			Socket: socket, In: strings.NewReader(`{"wait_seconds":0,"seen_message_ids":[]}`),
+			Out: &wakeOutput, ErrOut: io.Discard,
+		})
+	}
+	if code, err := wake(); code != coordcli.ExitFailure || coordtransport.ErrorCode(err) != protocol.CodeUnavailable || wakeOutput.Len() != 0 {
+		t.Fatalf("wake after hook burst: exit %d, error %v, output %q; want recoverable failure", code, err, wakeOutput.String())
+	}
 	for range 3 {
 		code, err := runContextHook(t, socket)
 		if code != coordcli.ExitFailure {
 			t.Fatalf("hook after burst: exit %d, want failure", code)
 		}
-		requireTransportConflict(t, err)
+		if got := coordtransport.ErrorCode(err); got != protocol.CodeUnavailable {
+			t.Fatalf("hook budget error = %v (code %d), want temporary unavailability", err, got)
+		}
 	}
 
 	client := h.dial(t, a)
@@ -106,11 +121,20 @@ func TestNativeHookBurstPreservesExplicitCoordination(t *testing.T) {
 	}
 
 	h.advance(requestRefill)
-	if code, err := runContextHook(t, socket); err != nil || code != coordcli.ExitOK {
-		t.Fatalf("hook after refill: exit %d, error %v", code, err)
+	if code, err := wake(); err != nil || code != coordcli.ExitOK {
+		t.Fatalf("wake after refill: exit %d, error %v", code, err)
+	}
+	var admitted protocol.CoordStatusResult
+	if err := json.Unmarshal(wakeOutput.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	if !admitted.WaitSupported || !admitted.WakeAdmitted || len(admitted.UnreadMessageIDs) != 1 || admitted.UnreadMessageIDs[0] != pending.MessageID {
+		t.Fatalf("refilled wake did not recover the original durable message: %+v", admitted)
 	}
 	_, err := runContextHook(t, socket)
-	requireTransportConflict(t, err)
+	if got := coordtransport.ErrorCode(err); got != protocol.CodeUnavailable {
+		t.Fatalf("hook budget after refill = %v (code %d), want temporary unavailability", err, got)
+	}
 }
 
 func TestOrdinaryBudgetExhaustionPreservesHooksNotMutations(t *testing.T) {
@@ -246,7 +270,10 @@ func TestHookStatusBudgetIsPerRunAndReleased(t *testing.T) {
 			t.Fatalf("hook %d: %v", i, err)
 		}
 	}
-	requireTransportConflict(t, client.Call(protocol.MethodCoordHookStatus, nil, nil))
+	var rateErr *protocol.Error
+	if err := client.Call(protocol.MethodCoordHookStatus, nil, nil); !errors.As(err, &rateErr) || rateErr.Code != protocol.CodeUnavailable {
+		t.Fatalf("exhausted hook budget: %v, want temporary unavailability", err)
+	}
 	if err := h.dial(t, b).Call(protocol.MethodCoordHookStatus, nil, nil); err != nil {
 		t.Fatalf("another run's hook budget: %v", err)
 	}

@@ -55,6 +55,9 @@ func TestCallConsumesMaximumWaitResult(t *testing.T) {
 		{"browser wait including companion margin", protocol.MethodDevBrowserWait, protocol.DevBrowserWaitParams{TimeoutMS: 30000}},
 		{"mission long poll", protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{WaitSeconds: 30}},
 		{"inbox long poll", protocol.MethodCoordInbox, protocol.CoordInboxParams{WaitSeconds: 30}},
+		{"mission pointer params", protocol.MethodMissionPlanShow, &protocol.MissionPlanShowParams{WaitSeconds: 30}},
+		{"native hook long poll", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: 30}},
+		{"native hook pointer params", protocol.MethodCoordHookStatus, &protocol.CoordHookStatusParams{WaitSeconds: 30}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -83,6 +86,48 @@ func TestCallConsumesMaximumWaitResult(t *testing.T) {
 			defer cancel()
 			if err := Call(ctx, path, tc.method, tc.params, &result); err != nil || !result.TimedOut {
 				t.Fatalf("valid maximum-wait response lost: result=%+v error=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestCallBoundsInvalidPollWait(t *testing.T) {
+	for _, tc := range []struct {
+		name, method string
+		params       any
+		bound        time.Duration
+	}{
+		{"mission excessive wait", protocol.MethodMissionPlanShow, protocol.MissionPlanShowParams{WaitSeconds: 300}, 35 * time.Second},
+		{"native hook excessive wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: 300}, 35 * time.Second},
+		{"native hook negative wait", protocol.MethodCoordHookStatus, protocol.CoordHookStatusParams{WaitSeconds: -300}, 5 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			accepted := make(chan struct{})
+			disconnected := make(chan struct{})
+			path := transportSocket(t, func(conn net.Conn) {
+				if _, err := protocol.ReadLine(bufio.NewReader(conn)); err != nil {
+					return
+				}
+				close(accepted)
+				_, _ = conn.Read(make([]byte, 1))
+				close(disconnected)
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), tc.bound)
+			defer cancel()
+			err := Call(ctx, path, tc.method, tc.params, nil)
+			if ErrorCode(err) != protocol.CodeUnavailable || ctx.Err() != nil {
+				t.Fatalf("client did not bound invalid wait: error=%v context=%v", err, ctx.Err())
+			}
+			select {
+			case <-accepted:
+			default:
+				t.Fatal("invalid wait prevented request from reaching the server")
+			}
+			select {
+			case <-disconnected:
+			case <-time.After(2 * time.Second):
+				t.Fatal("deadline retained socket")
 			}
 		})
 	}

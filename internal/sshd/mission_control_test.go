@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,6 +325,219 @@ func TestMissionRevokedBootstrapDoesNotInstallTakeover(t *testing.T) {
 		})
 	if err != nil || !admitted {
 		t.Fatalf("integrator input after revoked bootstrap = %v, admitted=%v", err, admitted)
+	}
+}
+
+func assertInteractiveMissionState(t *testing.T, e *testEnv, db *store.DB, mission *domain.Mission, pty *interactiveTestPTY, held, writable bool) {
+	t.Helper()
+	assignment, err := db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
+	if held && (err != nil || !assignment.Active) ||
+		!held && (!errors.Is(err, store.ErrNotFound) && (err != nil || assignment.Active)) {
+		t.Fatalf("mission assignment = %+v, %v; want held=%v", assignment, err, held)
+	}
+	pty.mu.Lock()
+	ready := pty.writable
+	pty.mu.Unlock()
+	if ready != writable {
+		t.Fatalf("PTY writable=%v, want %v", ready, writable)
+	}
+	accepted := false
+	err = e.srv.cfg.Services.MissionControl.AdmitInput(context.Background(),
+		mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error {
+			accepted = true
+			return nil
+		})
+	if held {
+		if !errors.Is(err, store.ErrMissionTakeover) || accepted {
+			t.Fatalf("autonomous input during takeover: %v, accepted=%v", err, accepted)
+		}
+	} else if err != nil || !accepted {
+		t.Fatalf("autonomous input after release: %v, accepted=%v", err, accepted)
+	}
+}
+
+func TestMissionInteractiveControlGrantAndRelease(t *testing.T) {
+	for _, initialWrite := range []bool{false, true} {
+		name := "mirror"
+		if initialWrite {
+			name = "initial-writer"
+		}
+		t.Run(name, func(t *testing.T) {
+			e, db, mission := missionWorkerTestEnv(t)
+			e.srv.cfg.Control = control.New(control.Config{})
+			e.srv.cfg.Services.MissionControl = missionControlStoreAdapter{store: db, control: e.srv.cfg.Control}
+			interactive := &interactiveTestPTY{fakePTY: e.pty}
+			e.srv.cfg.PTY = interactive
+			wire, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{
+				ControlSessionID: "mission-interactive", ReadOnly: !initialWrite,
+			})
+			defer func() { _ = wire.pipe.Close() }()
+			if !ack.OK || ack.HasControl != initialWrite {
+				t.Fatalf("interactive attach = %+v", ack)
+			}
+			generation := ack.ControlGeneration
+			if !initialWrite {
+				assertInteractiveMissionState(t, e, db, mission, interactive, false, false)
+				wire.send(t, protocol.DashAttachControl{
+					Type: protocol.DashAttachControlFrame, RequestID: 1, Write: true,
+				})
+				_, granted := wire.next(t)
+				if granted == nil || !granted.OK || !granted.HasControl || granted.ControlGeneration == 0 {
+					t.Fatalf("interactive grant = %+v", granted)
+				}
+				generation = granted.ControlGeneration
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, true, true)
+			before, err := db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, write := range []bool{false, true} {
+				wire.send(t, protocol.DashAttachControl{
+					Type: protocol.DashAttachControlFrame, RequestID: uint64(i + 2),
+					Write: write, Takeover: write, ControlGeneration: generation + 1,
+				})
+				_, stale := wire.next(t)
+				if stale == nil || stale.OK || stale.Code != protocol.CodeConflict ||
+					!stale.HasControl || stale.ControlGeneration != generation {
+					t.Fatalf("stale control transition = %+v", stale)
+				}
+				assertInteractiveMissionState(t, e, db, mission, interactive, true, true)
+			}
+			after, err := db.GetMissionWorkerAssignment(context.Background(), e.run.ID)
+			if err != nil || after.Generation != before.Generation {
+				t.Fatalf("stale control mutated durable hold: before=%+v after=%+v err=%v", before, after, err)
+			}
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 4, ControlGeneration: generation,
+			})
+			_, released := wire.next(t)
+			if released == nil || !released.OK || released.HasControl {
+				t.Fatalf("interactive release = %+v", released)
+			}
+			if _, present := e.srv.cfg.Control.Status(string(e.run.ID)); present {
+				t.Fatal("explicit release left a control lease")
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, false, false)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachInput, Data: "stale-human", ControlGeneration: generation,
+			})
+			_, stale := wire.next(t)
+			if stale == nil || stale.OK || stale.Code != protocol.CodeConflict {
+				t.Fatalf("released input = %+v", stale)
+			}
+			_, _, _, input, _ := e.pty.state()
+			if input != "" {
+				t.Fatalf("released human input reached PTY: %q", input)
+			}
+		})
+	}
+}
+
+type failingInteractiveMissionControl struct {
+	missionControlStoreAdapter
+	failTakeover atomic.Bool
+	failRelease  atomic.Bool
+}
+
+func (m *failingInteractiveMissionControl) Takeover(ctx context.Context, run domain.RunID, member domain.MemberID) error {
+	if m.failTakeover.Load() {
+		return errors.New("takeover persistence failed")
+	}
+	return m.missionControlStoreAdapter.Takeover(ctx, run, member)
+}
+
+func (m *failingInteractiveMissionControl) Release(ctx context.Context, run domain.RunID, member domain.MemberID) error {
+	if m.failRelease.Load() {
+		return errors.New("release persistence failed")
+	}
+	return m.missionControlStoreAdapter.Release(ctx, run, member)
+}
+
+func TestMissionInteractiveControlFailurePreservesAuthority(t *testing.T) {
+	for _, failure := range []string{"readiness", "persistence"} {
+		t.Run(failure, func(t *testing.T) {
+			e, db, mission := missionWorkerTestEnv(t)
+			e.srv.cfg.Control = control.New(control.Config{})
+			authority := &failingInteractiveMissionControl{
+				missionControlStoreAdapter: missionControlStoreAdapter{store: db, control: e.srv.cfg.Control},
+			}
+			e.srv.cfg.Services.MissionControl = authority
+			var failReady atomic.Bool
+			interactive := &interactiveTestPTY{fakePTY: e.pty, readyError: func(bool) error {
+				if failReady.Load() {
+					return errors.New("readiness transition failed")
+				}
+				return nil
+			}}
+			e.srv.cfg.PTY = interactive
+			wire, ack := openInteractiveSSHAttach(t, e, e.signer, protocol.AttachRequest{
+				ControlSessionID: "mission-failed-control", ReadOnly: true,
+			})
+			defer func() { _ = wire.pipe.Close() }()
+			if !ack.OK || ack.HasControl {
+				t.Fatalf("interactive mirror = %+v", ack)
+			}
+			setFailure := func(enabled bool) {
+				failReady.Store(enabled && failure == "readiness")
+				authority.failTakeover.Store(enabled && failure == "persistence")
+				authority.failRelease.Store(enabled && failure == "persistence")
+			}
+			setFailure(true)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 1, Write: true,
+			})
+			_, refused := wire.next(t)
+			if refused == nil || refused.OK || refused.HasControl {
+				t.Fatalf("failed grant = %+v", refused)
+			}
+			if _, present := e.srv.cfg.Control.Status(string(e.run.ID)); present {
+				t.Fatal("failed grant installed a control lease")
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, false, false)
+			setFailure(false)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 2, Write: true,
+			})
+			_, granted := wire.next(t)
+			if granted == nil || !granted.OK || !granted.HasControl {
+				t.Fatalf("retry grant = %+v", granted)
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, true, true)
+			setFailure(true)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 3, Write: true, Takeover: true,
+				ControlGeneration: granted.ControlGeneration,
+			})
+			_, refused = wire.next(t)
+			if refused == nil || refused.OK || !refused.HasControl || refused.ControlGeneration != granted.ControlGeneration {
+				t.Fatalf("failed forced grant = %+v", refused)
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, true, true)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 4, ControlGeneration: granted.ControlGeneration,
+			})
+			_, refused = wire.next(t)
+			if refused == nil || refused.OK || !refused.HasControl || refused.ControlGeneration != granted.ControlGeneration {
+				t.Fatalf("failed release = %+v", refused)
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, true, true)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachInput, Data: "still-held", ControlGeneration: granted.ControlGeneration,
+			})
+			if data, record := wire.next(t); string(data) != "echo:still-held" || record != nil {
+				t.Fatalf("input after failed release = %q/%+v", data, record)
+			}
+			setFailure(false)
+			wire.send(t, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, RequestID: 5, ControlGeneration: granted.ControlGeneration,
+			})
+			_, released := wire.next(t)
+			if released == nil || !released.OK || released.HasControl {
+				t.Fatalf("retry release = %+v", released)
+			}
+			assertInteractiveMissionState(t, e, db, mission, interactive, false, false)
+		})
 	}
 }
 

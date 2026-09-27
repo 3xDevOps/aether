@@ -452,12 +452,25 @@ Base saves require **Push** and run saves require **Steer**.
 
 ### Agent coordination hooks
 
-Native hooks tell agents when coordination messages are waiting without typing
-into their terminals. Inside a run, `aether-internal skill` checks the hook
-configuration and prints installation instructions for missing hooks. See
-[harnesses.md](harnesses.md#incoming-coordination-hooks) for copyable files and
-setup, and [coordination.md](coordination.md#delivery-acknowledgement-and-retries)
-for delivery boundaries and acknowledgements.
+Coordination mail is durable: a successful send means stored, not read. An
+agent actively awaiting a reply should use `aether-internal inbox --wait 30`
+and explicitly acknowledge the batch only after handling it.
+
+Loaded native pi, OMP, and version-matched OpenCode integrations can wake an
+eligible live idle session without terminal keystrokes. Native wake respects
+human protection, takeover, and Stop. Claude Code, Codex, Copilot CLI,
+Gemini CLI, and Cursor CLI command hooks instead announce mail at their next
+supported lifecycle boundary. Neither path restarts an exited run.
+
+Inside a run, `aether-internal skill` checks configuration and prints setup
+instructions. **Configured is not loaded, trusted, or executed**: restart or
+reload as the harness requires and inspect its real hook/plugin errors.
+See [per-harness setup](harnesses.md#incoming-coordination-hooks) for managed
+loading, copyable files, versions, and disable controls; see
+[delivery and acknowledgement](coordination.md#delivery-acknowledgement-and-retries)
+for the runtime contract. An unlisted CLI can use the
+[unsupported-harness authoring guide](harness-integration.md) without adding
+a new daemon or terminal fallback.
 
 ### Connect GitHub
 

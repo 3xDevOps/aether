@@ -134,7 +134,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build browser-image browser-smoke test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
+.PHONY: all build browser-image browser-smoke test test-integration test-e2e test-scripts test-native-hooks vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
 
 all: build
 
@@ -182,6 +182,10 @@ test-scripts:
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-changes-test.sh
+
+# Native adapter lifecycle regressions use Node 22.13+ built-ins only.
+test-native-hooks:
+	$(NODE) --experimental-vm-modules --test internal/coordhooks/native_pi_omp_lifecycle_test.mjs internal/coordhooks/native_opencode_lifecycle_test.mjs internal/agentstatus/native_opencode_v2_status_test.mjs
 
 vet:
 	go vet ./...

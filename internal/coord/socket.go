@@ -439,6 +439,12 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 				return
 			}
 		} else if valid {
+			if hookWaitRequest(req) {
+				if hookErr := s.serveHookWait(connCtx, conn, run, req, resp); hookErr != nil {
+					return
+				}
+				continue
+			}
 			resp = s.handleParsed(connCtx, run, req, resp)
 		}
 		if connCtx.Err() != nil {
@@ -477,8 +483,19 @@ func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protoc
 		rpcErr *protocol.Error
 	)
 	switch req.Method {
-	case protocol.MethodCoordStatus, protocol.MethodCoordHookStatus:
+	case protocol.MethodCoordStatus:
 		result, rpcErr = s.Status(ctx, run)
+	case protocol.MethodCoordHookStatus:
+		if !hookWaitRequest(req) {
+			result, rpcErr = s.Status(ctx, run)
+			break
+		}
+		p, perr := decodeParams[protocol.CoordHookStatusParams](req.Method, req.Params)
+		if perr != nil {
+			resp.Error = perr
+			return resp
+		}
+		result, rpcErr = s.hookStatus(ctx, run, p)
 	case protocol.MethodCoordSend:
 		p, perr := decodeParams[protocol.CoordSendParams](req.Method, req.Params)
 		if perr != nil {

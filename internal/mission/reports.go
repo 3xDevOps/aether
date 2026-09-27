@@ -120,7 +120,14 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if len(evidence) == 0 {
 		return errors.New("mission: evidence packet has no durable facts")
 	}
+	// A direct coord.report still owns a run reference. Waiting for mission
+	// admission could deadlock cancellation's synchronous coord.Release.
+	// Leave the durable outbox pending on contention so it can retry.
+	if !s.cfg.AuthorizationMu.TryLock() {
+		return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
+	}
 	_, err = s.cfg.Missions.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, ref, evidence, violations)
+	s.cfg.AuthorizationMu.Unlock()
 	if errors.Is(err, store.ErrMissionStale) {
 		// A retry raced a superseding attempt or coordinator state. It is no
 		// longer actionable for this outbox row and must not affect the new
@@ -179,7 +186,11 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 		return errors.New("mission: scheduler cancel unavailable")
 	}
 	if attempt.State.HoldsConcurrency() {
+		if !s.cfg.AuthorizationMu.TryLock() {
+			return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
+		}
 		stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptFailed, detail)
+		s.cfg.AuthorizationMu.Unlock()
 		if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 			return stateErr
 		}

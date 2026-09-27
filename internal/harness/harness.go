@@ -292,6 +292,10 @@ type Profile struct {
 	// directory before a taskless interactive container exists, keyed by
 	// the file name they take there.
 	DiscoveryFiles map[string][]byte
+	// NativeCoordination enables the shipped run-scoped mailbox integration.
+	// The scheduler applies it only to coordinated interactive runs with a task.
+	// Overrides never inherit this capability from a registry name.
+	NativeCoordination bool
 	// Reporter is how much this harness's status reporter can say.
 	Reporter Reporter
 	// StatusArgs are appended to an interactive launch so the harness runs
@@ -397,9 +401,10 @@ var profiles = map[string]Profile{
 		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
 		// pi loads an extension with -e, and the one Aether ships reports
 		// every start and stop of a turn.
-		Reporter:    ReporterFull,
-		StatusArgs:  []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
-		StatusFiles: map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		Reporter:           ReporterFull,
+		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
 	},
@@ -414,12 +419,13 @@ var profiles = map[string]Profile{
 		LocalRoot:       ".omp",
 		// omp keeps provider keys and OAuth tokens in the SQLite database
 		// under ~/.omp/agent/, so the write-ahead log holds them too.
-		DenyNames:     []string{"agent.db", "agent.db-wal", "agent.db-shm"},
-		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
-		Reporter:      ReporterFull,
-		StatusArgs:    []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
-		StatusFiles:   map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
-		InstallScript: "curl -fsSL https://omp.sh/install | sh",
+		DenyNames:          []string{"agent.db", "agent.db-wal", "agent.db-shm"},
+		DiscoveryArgs:      []string{"--append-system-prompt", DiscoveryInstruction},
+		Reporter:           ReporterFull,
+		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		NativeCoordination: true,
+		InstallScript:      "curl -fsSL https://omp.sh/install | sh",
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -441,7 +447,8 @@ var profiles = map[string]Profile{
 		StatusEnv: map[string]string{
 			"OPENCODE_CONFIG_CONTENT": `{"plugin":["file://` + CoordPlaceholder + "/" + agentstatus.OpenCodePluginName + `"]}`,
 		},
-		StatusFiles: map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
+		StatusFiles:        map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
+		NativeCoordination: true,
 		// OpenCode discovers instruction files from its merged config.
 		// Discovery must also work without the lifecycle reporter. The
 		// scheduler combines these independent config overlays when both apply.

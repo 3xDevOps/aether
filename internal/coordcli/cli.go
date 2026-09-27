@@ -420,7 +420,8 @@ const skillWorkflow = `Coordination and completion:
 Stay within your assignment. Peers listed by status are reachable with send,
 ask, and reply; ask when a decision is theirs:
   aether-internal ask --help
-Native hooks announce pending inbox items at harness lifecycle boundaries.
+Hooks announce pending inbox items at harness lifecycle boundaries; loaded
+native omp/pi/OpenCode integrations can also wake a live idle session.
 Check the inbox before waiting or reporting. Wait without reporting an outcome:
   aether-internal inbox --wait 30
 Process the batch before acknowledging it: on the next inbox call pass

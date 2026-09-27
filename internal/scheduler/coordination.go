@@ -13,6 +13,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -306,7 +307,7 @@ func (s *Scheduler) ReleaseVerificationRuntime(ctx context.Context, creationKey 
 
 // coordinationMounts stages the CLI for every configured container and provisions
 // authenticated transport for runs independently of conflict policy.
-func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile) ([]runtime.Mount, []string, map[string]string, error) {
+func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch) ([]runtime.Mount, []string, map[string]string, error) {
 	c := s.coordinationSeam()
 	if c == nil {
 		return nil, nil, nil, nil
@@ -326,19 +327,23 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 		}
 		return mounts, nil, nil, nil
 	}
-	return s.provisionCoordination(ctx, c, entry, run, profile, digest, bin, cliMount)
+	return s.provisionCoordination(ctx, c, entry, run, profile, native, digest, bin, cliMount)
 }
 
-func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
+func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
 	files := make(map[string][]byte)
+	maps.Copy(files, native.Files)
 	// Lifecycle reporting follows conflict policy; taskless discovery only needs
 	// the run transport. User-supplied MCP configuration is never rewritten.
 	reporter := harness.ReporterNone
-	if c.enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone {
+	if c.enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone && !native.ReplacesStatus {
 		maps.Copy(files, profile.StatusFiles)
 		launchArgs = append(launchArgs, profile.StatusLaunchArgs(coordtransport.MountDir)...)
 		launchEnv = profile.StatusLaunchEnv(coordtransport.MountDir)
 		reporter = profile.Reporter
+	}
+	if native.ReplacesStatus {
+		reporter = native.Reporter
 	}
 	if run.Mode == domain.LaunchTUI && run.Task == "" {
 		if launchEnv == nil && len(profile.DiscoveryEnv) > 0 {
@@ -397,6 +402,13 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
 		cliMount,
 		{HostPath: dir, ContainerPath: coordtransport.MountDir, ReadOnly: true},
+	}
+	for _, id := range slices.Sorted(maps.Keys(native.DiscoveryFiles)) {
+		mounts = append(mounts, runtime.Mount{
+			HostPath:      filepath.Join(dir, native.DiscoveryFiles[id]),
+			ContainerPath: filepath.Join(harness.OpenCodeNativeDiscoveryRoot, id+"-"+string(run.ID), "index.js"),
+			ReadOnly:      true,
+		})
 	}
 	if err = checkCoordinationMounts(mounts); err != nil {
 		return nil, nil, nil, err
