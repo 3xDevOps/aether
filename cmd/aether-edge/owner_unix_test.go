@@ -26,11 +26,9 @@ func TestCheckDataDir(t *testing.T) {
 	if err := os.Chmod(open, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkDataDir(open); err != nil {
-		t.Errorf("its own world-readable data directory: %v", err)
-	}
-	if info, err := os.Stat(open); err != nil || info.Mode().Perm() != 0o750 {
-		t.Errorf("its own world-readable data directory: %v %v, want mode 0750", info.Mode(), err)
+	want := "data directory " + open + " has mode 0755, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx " + open
+	if err := checkDataDir(open); err == nil || err.Error() != want {
+		t.Errorf("world-readable data directory: %v, want %s", err, want)
 	}
 
 	if os.Geteuid() == 0 {
@@ -50,17 +48,6 @@ func TestCheckDataDir(t *testing.T) {
 		want := key + " belongs to uid 65532 and aether-edge runs as uid 0; the edge opens only files it created, so run chown -R 0 " + foreign
 		if err := checkDataDir(foreign); err == nil || err.Error() != want {
 			t.Errorf("another user's signing key: %v, want %s", err, want)
-		}
-		theirs := t.TempDir()
-		if err := os.Chmod(theirs, 0o777); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chown(theirs, 65532, 65532); err != nil {
-			t.Fatal(err)
-		}
-		want = "data directory " + theirs + " has mode 0777, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx " + theirs
-		if err := checkDataDir(theirs); err == nil || err.Error() != want {
-			t.Errorf("another user's world-readable data directory: %v, want %s", err, want)
 		}
 		t.Skip("root writes a directory of any mode")
 	}

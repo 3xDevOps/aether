@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
       -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=${version:-dev} -X github.com/3xDevOps/Aether/internal/version.Commit=${commit:-unknown}" \
       -o /out/aether-edge ./cmd/aether-edge && \
-    mkdir -m 0700 /out/data
+    mkdir -p /out/state && mkdir -m 0700 /out/state/aether-edge
 
 # CA certificates for GitHub's API, a passwd entry for uid 65532, and no
 # shell or package manager.
@@ -34,7 +34,9 @@ LABEL org.opencontainers.image.title="aether-edge" \
       org.opencontainers.image.source="https://github.com/3xDevOps/Aether" \
       org.opencontainers.image.licenses="GPL-3.0"
 COPY --from=build /out/aether-edge /usr/local/bin/aether-edge
-COPY --from=build --chown=65532:65532 /out/data /var/lib/aether-edge
+# Copied as an entry of its parent: copying the directory itself would
+# create the destination 0755 and drop its mode.
+COPY --from=build --chown=65532:65532 /out/state/ /var/lib/
 USER 65532:65532
 VOLUME /var/lib/aether-edge
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

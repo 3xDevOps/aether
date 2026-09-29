@@ -1125,10 +1125,9 @@ must outlive every container. Mount a named volume, which takes the image's
 ownership; a directory owned by uid 65532 (`chown -R 65532:65532 <dir> &&
 chmod 0700 <dir>`); or a directory the edge's uid writes through its group,
 such as `root:<gid>` mode `2770` on a platform that runs the container with
-that supplementary group. The edge closes its own directory to other
-users when it starts. It refuses a directory its uid cannot write,
-another uid's directory that others can enter, and an `edge_key` or
-`edge.db` another uid owns, since it creates both 0600:
+that supplementary group. The edge refuses a directory its uid cannot
+write, one that others can enter, and an `edge_key` or `edge.db` another
+uid owns, since it creates both 0600:
 
 ```
 aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is not writable by uid 65532, the user aether-edge runs as: permission denied; give that user write access as the directory's owner or through its group, or name another with --data or AETHER_EDGE_DATA

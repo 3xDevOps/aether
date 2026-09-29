@@ -221,7 +221,11 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
+      # internal/sshd takes about 450 seconds here, and go test stops a
+      # package at 600 unless told otherwise.
       - name: Unit tests
+        env:
+          GOFLAGS: -timeout=30m
         run: make test TEST_PKGS="${{ matrix.pkgs }}"
 
   # Only internal/harness needs the agent images, so it is the only job that

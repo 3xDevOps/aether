@@ -202,38 +202,37 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # A multi-platform image is an index, so the annotations go on the
-      # index; the package page and its repository link read them there.
-      - name: Generate edge image tags and annotations
+      # Full history, as in edge-image, so the short commit in the sha- tag
+      # is the one `aether-edge version` prints.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Read the short commit
+        id: commit
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      # The architectures were pushed from the runner's image store as
+      # Docker manifests, so the joined image is a manifest list, which
+      # carries no annotations; each image's labels name the source.
+      - name: Generate edge image tags
         id: edge-meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        env:
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ghcr.io/3xdevops/aether-edge
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=raw,value=${{ github.sha }}
-            type=sha,prefix=sha-
-          annotations: |
-            org.opencontainers.image.title=aether-edge
-            org.opencontainers.image.description=Aether edge: GitHub sign-in and relay for Aether servers
+            type=raw,value=sha-${{ steps.commit.outputs.short }}
       - name: Publish the release manifest
         id: publish
         env:
           TAGS: ${{ steps.edge-meta.outputs.tags }}
-          ANNOTATIONS: ${{ steps.edge-meta.outputs.annotations }}
         run: |
           image=ghcr.io/3xdevops/aether-edge
           set --
           for tag in $TAGS; do
             set -- "$@" --tag "$tag"
           done
-          while IFS= read -r annotation; do
-            [ -z "$annotation" ] || set -- "$@" --annotation "$annotation"
-          done <<EOF
-          $ANNOTATIONS
-          EOF
           docker buildx imagetools create "$@" "$image:$GITHUB_REF_NAME-amd64" "$image:$GITHUB_REF_NAME-arm64"
           digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" | awk '$1 == "Digest:" { print $2; exit }')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"

@@ -25,9 +25,8 @@ func checkOwner(path string, info fs.FileInfo) error {
 	return nil
 }
 
-// checkDataDir creates the data directory when it is missing, closes its
-// own directory to other users, and refuses one this user cannot write,
-// another user's directory that other users can enter, or one whose
+// checkDataDir creates the data directory when it is missing, and refuses
+// one this user cannot write, one other users can enter, or one whose
 // signing key or database another user owns. The directory may belong to
 // another user when this one writes it through its group, as a container
 // platform arranges; the files in it are 0600, so only their owner opens
@@ -48,16 +47,8 @@ func checkDataDir(dir string) error {
 			dir, st.Uid, st.Gid, info.Mode().Perm(), uid, err)
 	}
 	if perm := info.Mode().Perm(); perm&0o007 != 0 {
-		// A volume a container runtime creates is the edge's own and
-		// 0755, and the image has no shell to run chmod in.
-		if st.Uid != uint32(uid) {
-			return fmt.Errorf("data directory %s has mode %04o, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx %s",
-				dir, perm, dir)
-		}
-		if err := os.Chmod(dir, info.Mode()&^0o007); err != nil {
-			return fmt.Errorf("data directory %s has mode %04o, which lets every user on this machine into the directory of the edge's signing key, and closing it failed: %w",
-				dir, perm, err)
-		}
+		return fmt.Errorf("data directory %s has mode %04o, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx %s",
+			dir, perm, dir)
 	}
 	for _, name := range []string{"edge_key", "edge.db"} {
 		path := filepath.Join(dir, name)
