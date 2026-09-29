@@ -217,9 +217,10 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, grouping, dismissed update versions,
-terminal zoom) are persisted; `persistedUi` in `store/index.ts` is the list
-that decides. Server data is always re-fetched.
+collapse state, `activeWorkspace`, grouping, board layout and per-workspace
+map camera, dismissed update versions, terminal zoom) are persisted;
+`persistedUi` in `store/index.ts` is the list that decides. Server data is
+always re-fetched.
 
 **`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
@@ -261,9 +262,10 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:badges` | `{ run }` | the run card's title row, after the paused and unseen markers |
-| `card:chips` | `{ run }` | the wrapping metadata row after the harness, branch and last-commit readout |
-| `card:footer` | `{ run }` | the card's bottom row, right of the owner and timestamp |
+| `card:badges` | `{ run }` | the run card's status row, alongside the paused and unseen markers |
+| `card:warnings` | `{ run }` | reserved collapsed status-row controls, outside the scrolling metadata |
+| `card:chips` | `{ run }` | the card's Details disclosure, after the expanded run metadata |
+| `card:footer` | `{ run }` | the bottom of the card's Details disclosure |
 | `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
 
 The `statusbar` Slot is mounted once, even when narrow layouts collapse its
@@ -626,10 +628,10 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   buttons do not fit across a phone, and the mouse answer to a narrow row -
   22px icons with the label in a hover tooltip - is six unnamed icons to a
   finger. Hand off is in the same menu.
-- **The board** uses one column on narrow screens and three columns from the
-  `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
-  small screens. State labels remain visible; empty, loading and error panels
-  use the same bounded surface hierarchy.
+- **The board** offers Cards and Map layouts. Cards stacks its three status
+  columns on narrow screens and places them side by side from the
+  `lg`/1024px breakpoint; Map pans and zooms inside a bounded canvas. Both
+  keep state labels and run controls available (see [Board](#board)).
 - **The workspace/run sidebar** collapses at 1000px and narrower into the
   persistent 48px activity rail, which exposes **Expand sidebar** without
   changing the stored preference. At 640px and narrower its expanded pane is a
@@ -818,27 +820,35 @@ forever.
 
 ## Board
 
-`src/routes/board/` is the default center view: the active workspace's run
-cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
-Needs You - the agent is waiting for you, or the run stalled, and the reason
-strip on the card says which - `queued`/`provisioning`/`running` is Working,
-and `completed` plus the final statuses are Done. An active run whose approval
-request is still pending also presents as needs-attention on the board and in
-the sidebar - the pause is invisible in the domain status, so `runState` takes
-a pending flag fed from the approval inbox. Cards sort by last state change,
-newest first.
+`src/routes/board/` is the default center view, reached through the activity
+rail's **Board** home icon. Its header shows the active workspace, run count,
+New run, Mark all seen and a **Cards / Map** segmented layout control.
 
-The board header wraps its title, run count Chip, descriptive copy and toolbar.
-Its grid is one column on narrow screens and three columns from the
-`lg`/1024px breakpoint, with flat bordered columns, readable state headers and
-bounded card content. The primary run-card button contains the state and
-title/task metadata as bounded previews, each capped at three lines; the button
-keeps the full `runLabel` as its accessible name, and the shared `RunHeader`
-exposes the full task through **View full task**. An empty workspace
-shows one "Ready for a task" panel and a primary New run action rather than
-three repeated empty columns. Loading uses delayed skeletons, and hydrated
-empty buckets say "Nothing here." without confusing an in-flight request with
-an empty result.
+**Cards** arranges runs in three status buckets. `needs-attention` is Needs
+You: the agent is waiting for you, or the run stalled, and the reason strip
+says which. `queued`/`provisioning`/`running` is Working; `completed` and final
+statuses are Done. An active run with a pending approval also presents as
+needs-attention on the board and in the sidebar: `runState` takes a pending
+flag from the approval inbox because the domain status alone does not show
+the pause. Cards sort by last state change, newest first. The flat bordered
+columns stack on narrow screens and sit side by side from the `lg`/1024px
+breakpoint.
+
+Both layouts use uniform-height collapsed run previews. The title has its
+own full-width row with a bounded preview and the full `runLabel` as the
+navigation button's accessible name. Status, owner, harness, timestamp and
+branch-copy controls remain available without expanding the card. Counted
+file-overlap and mission-conflict buttons stay visible beside the status
+metadata and open diagnostic controls in popovers. **Details** reveals the
+full title/task, reason and additional metadata inline in Cards and in a
+dialog in Map, so expansion does not disturb map geometry. The run page also
+exposes the full task through **View full task**.
+
+An empty workspace shows one "Ready for a task" panel and a primary New run
+action rather than three repeated empty columns. Loading uses delayed
+skeletons, and hydrated empty buckets say "Nothing here." without confusing
+an in-flight request with an empty result.
+
 The card's article remains a pointer surface for noninteractive metadata, while
 interactive descendants and any non-collapsed text selection are ignored by
 the article handler. Branch text is explicitly navigation-exempt so it can be
@@ -849,6 +859,40 @@ card is. Copying goes through `src/lib/clipboard.ts`, shared with
 `CopyableCommand`, because an origin without `navigator.clipboard` - plain
 http, an older engine - has to fall back to selecting the text for a manual
 copy rather than failing quietly.
+
+**Map** groups runs by their actual owning member, with a named boundary and
+light identity tint. Standalone runs remain individual cards; swarm groups
+label integrators and workers and draw directed hierarchy connectors. Workers
+stay inside their own owner's boundary even when coordinated by another
+member's integrator; those cross-owner connectors are dashed. A worker whose
+integrator is not in the current map, for example because it is archived,
+remains visible and is labeled as having an integrator not visible.
+Relationships use the snapshot fields described under [Sidebar](#sidebar),
+not task-text guesses. Deterministic
+rectangular shelf packing arranges the groups into a landscape-oriented map
+rather than a radial graph or a single vertical stack.
+
+Map navigation stays inside its canvas:
+
+- Drag blank canvas with the mouse or scroll the wheel to pan.
+- Hold Ctrl or Cmd while scrolling to zoom around the pointer.
+- On touch screens, drag to pan and pinch to zoom.
+- With the canvas focused, arrow keys pan; Shift increases the step.
+  `+` / `-` zoom and `Home` / `0` fit all runs.
+- Visible **Zoom out**, zoom percentage, **Zoom in** and **Fit** controls
+  provide the same operations without gestures. Tab reaches run controls.
+
+The selected layout and each workspace's map pan/zoom are stored in the
+existing `aether.ui` origin-local preferences. They survive layout switches,
+route changes and reloads; switching workspaces restores that workspace's
+camera. Unlike the separately stored workspace selection, these preferences
+do not cross origins, including a local gateway's changed ephemeral port.
+While Map stays open, a changed run set or card geometry refits only when
+every card would be offscreen. Routine metadata updates and return visits
+preserve the camera.
+Switching Cards to Map or back moves matching cards between their measured
+rectangles, including width and height, over 460ms. Reduced-motion preference
+skips this movement.
 
 Two things the buckets do not come from the run status alone:
 
@@ -876,19 +920,22 @@ carries `archived_at`/`deletes_at` once archived. Every hide guard -
 `board()`, `sidebarRuns()`, and the attention count - drops it once its
 status is also final (`isArchivable`: `merged`, `abandoned`, `failed`,
 `interrupted`); a route that opens a run by id is untouched, since it reads
-the run map directly. The Done `ColumnHeader` grows an "Archived N" toggle
-once N is over zero, swapping the column's content to those runs, and
-resets to Done the moment the last one leaves. Each archived card, and the
-run header for one, show `deletesInLabel(deletes_at)` (`src/lib/format.ts`):
+the run map directly. In Cards, the Done `ColumnHeader` grows an "Archived N"
+toggle once N is over zero, swapping the column's content to those runs. Map
+keeps the same toggle in its Runs header and replaces Done runs with archived
+runs while leaving active runs visible. Both return to Done when the last
+archived run leaves. Each archived card, and the run header for one, show
+`deletesInLabel(deletes_at)` (`src/lib/format.ts`):
 "deleted today" under 24h (past due included), "deleted in 1 day" under
 48h, then "deleted in N days".
 
 **Clear done archives every eligible Done card at once.** The Done
-`ColumnHeader` grows a "Clear done" button, and the palette carries the same
-action as "Clear done runs"; both open the one confirm dialog
-(`ClearDoneConfirm`, `src/routes/board/clear-done-dialog.tsx`) over a plan
-`clearDonePlan()` (`src/lib/commands.ts`) snapshots when it opens. Eligible:
-`isArchivable`, not already archived, and killable by the caller. The
+`ColumnHeader` in Cards and the Runs header in Map offer "Clear done"; the
+palette carries the same action as "Clear done runs". All open the one
+confirm dialog (`ClearDoneConfirm`, `src/routes/board/clear-done-dialog.tsx`)
+over a plan `clearDonePlan()` (`src/lib/commands.ts`) snapshots when it opens.
+Eligible runs are `isArchivable`, not already archived, and killable by the
+caller. The
 dialog states what it will archive and, by count, what stays and why -
 still `completed` and awaiting Close, or not this caller's to kill. On
 confirm, `runClearDone()` archives the eligible runs one at a time, never

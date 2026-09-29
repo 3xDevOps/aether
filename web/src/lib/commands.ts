@@ -13,7 +13,7 @@ import {
   CircleCheck,
   Download,
   FileText,
-  LayoutGrid,
+  House,
   List,
   MessageSquarePlus,
   Network,
@@ -440,7 +440,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
     {
       id: 'board',
       label: 'Open the board',
-      Icon: LayoutGrid,
+      Icon: House,
       perform: (d) => d.navigate('board'),
     },
     {

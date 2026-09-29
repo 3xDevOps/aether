@@ -17,14 +17,16 @@ about this policy go to <https://github.com/3xDevOps/Aether/issues>.
 - **The WebView's ordinary cache** of the dashboard's files, and the
   dashboard's own local record of how you use it. That record holds how the
   dashboard looks (theme, sidebar width and whether it is collapsed, terminal
-  font size, dock heights, diff wrapping); where you were (the workspace you
-  last opened, how the board is grouped, whether you take control of a
-  terminal when you open one); which harness you last launched for each of
-  your agent accounts; which update notices you dismissed, by version; and
+  font size, dock heights, diff wrapping, Cards/Map layout); where you were
+  (the workspace you last opened, how the sidebar's run list is grouped, each
+  workspace map's pan and zoom, whether you take control of a terminal when
+  you open one); which harness you last launched for each of your agent
+  accounts; which update notices you dismissed, by version; and
   the setup wizard's progress, which stays empty on a phone because that
-  wizard only runs in the desktop `aether gui`. The dashboard writes it,
-  nothing reads it but the dashboard, and it lasts until you uninstall the
-  app. Both are private to the app.
+  wizard only runs in the desktop `aether gui`. The dashboard writes these
+  preferences in origin-local `aether.ui` storage: they are separate for each
+  server origin, including its port. Nothing reads them but the dashboard,
+  and they last until you uninstall the app. Both are private to the app.
 
 No dashboard account, password, token, cookie or key is stored by the Android
 shell. There is no dashboard sign-in: the phone's Tailscale login identifies
