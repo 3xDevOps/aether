@@ -357,7 +357,7 @@ func (r *Relay) transferReported(reg *registration, m edgeproto.OwnerTransferred
 	if r.claimed(reg) {
 		err = r.recordOwner(reg, func(ctx context.Context) error { return r.dir.TransferOwner(ctx, reg.id, m.Owner) })
 	}
-	res := edgeproto.OwnerTransferResult{Owner: m.Owner}
+	res := edgeproto.OwnerTransferResult{ID: m.ID, Owner: m.Owner}
 	if err != nil {
 		res.Error = err.Error()
 	}

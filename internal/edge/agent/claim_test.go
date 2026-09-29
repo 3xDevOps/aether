@@ -349,7 +349,7 @@ func TestTransferOwner(t *testing.T) {
 		if got.Owner != edgeproto.AccountPrincipal(next) {
 			t.Fatalf("owner_transferred %+v", got)
 		}
-		ec.send(edgeproto.OwnerTransferResult{Owner: got.Owner, Error: answer})
+		ec.send(edgeproto.OwnerTransferResult{ID: got.ID, Owner: got.Owner, Error: answer})
 		return <-done
 	}
 	refusal := "ownership report refused: account is blocked by this edge's operator"
@@ -415,12 +415,100 @@ func TestOwnerIsReportedAgainAtEnrollment(t *testing.T) {
 	if got.Owner != edgeproto.AccountPrincipal(testOwner) {
 		t.Fatalf("owner reported at enrollment = %+v, want %+v", got.Owner, testOwner)
 	}
-	ec.send(edgeproto.OwnerTransferResult{Owner: got.Owner})
+	ec.send(edgeproto.OwnerTransferResult{ID: got.ID, Owner: got.Owner})
 	ec.send(edgeproto.Ping{})
 	expect[edgeproto.Pong](t, ec)
 	if owner, _ := a.state.Owner(); owner == nil || *owner != testOwner {
 		t.Fatalf("owner after the edge's answer = %+v", owner)
 	}
+}
+
+// A transfer takes only the edge's answer to its own report: not the
+// answer to the owner reported at enrollment, arriving before or after
+// its own, and not a repeated answer.
+func TestTransferTakesOnlyItsOwnAnswer(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.state = edgeproto.StateClaimed
+	sshd := newFakeSSH()
+	next := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-2", Email: "next@example.com"}
+	sshd.entries = []edgeproto.DirectoryEntry{
+		{Kind: edgeproto.EntryMember, Provider: testOwner.Provider, Subject: testOwner.Subject, Role: "admin"},
+		{Kind: edgeproto.EntryMember, Provider: next.Provider, Subject: next.Subject, Role: "admin"},
+	}
+	a := newAgent(t, edge.srv.URL, t.TempDir(), sshd)
+	if err := a.state.Pin(edge.pub); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.state.writeOwner(testOwner); err != nil {
+		t.Fatal(err)
+	}
+	run(t, a)
+	ec := edge.nextControl(t)
+	report := expect[edgeproto.OwnerTransferred](t, ec)
+	reportAnswer := edgeproto.OwnerTransferResult{ID: report.ID, Owner: report.Owner}
+	ec.send(edgeproto.Ping{})
+	expect[edgeproto.Pong](t, ec)
+
+	const refusal = "ownership report refused: account is blocked by this edge's operator"
+	transfer := func(to edgeproto.Account, answers func(got edgeproto.OwnerTransferred) []edgeproto.OwnerTransferResult) error {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- a.TransferOwner(to) }()
+		got := expect[edgeproto.OwnerTransferred](t, ec)
+		if got.ID == report.ID {
+			t.Fatalf("transfer reported with the enrollment report's id %s", got.ID)
+		}
+		for _, r := range answers(got) {
+			ec.send(r)
+		}
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(waitFor):
+			t.Fatal("transfer took no answer")
+			return nil
+		}
+	}
+	wantOwner := func(want edgeproto.Account) {
+		t.Helper()
+		if owner, err := a.state.Owner(); err != nil || owner == nil || *owner != want {
+			t.Fatalf("owner = %+v, %v; want %+v", owner, err, want)
+		}
+	}
+
+	// The enrollment report's answer arrives first; the transfer's own
+	// answer follows it.
+	if err := transfer(next, func(got edgeproto.OwnerTransferred) []edgeproto.OwnerTransferResult {
+		return []edgeproto.OwnerTransferResult{reportAnswer, {ID: got.ID, Owner: got.Owner}}
+	}); err != nil {
+		t.Fatalf("transfer answered after the enrollment report: %v", err)
+	}
+	wantOwner(next)
+	// Back to the previous owner, whom the edge refuses. The enrollment
+	// report's answer for that owner arrives again, before the refusal.
+	if err := transfer(testOwner, func(got edgeproto.OwnerTransferred) []edgeproto.OwnerTransferResult {
+		return []edgeproto.OwnerTransferResult{reportAnswer, {ID: got.ID, Owner: got.Owner, Error: refusal}}
+	}); err == nil || !strings.HasSuffix(err.Error(), ": "+refusal) {
+		t.Fatalf("refused transfer after the enrollment report's answer = %v, want %q", err, refusal)
+	}
+	wantOwner(next)
+	// The refusal first, then a repeated answer and the enrollment
+	// report's.
+	if err := transfer(testOwner, func(got edgeproto.OwnerTransferred) []edgeproto.OwnerTransferResult {
+		return []edgeproto.OwnerTransferResult{{ID: got.ID, Owner: got.Owner, Error: refusal}, {ID: got.ID, Owner: got.Owner}, reportAnswer}
+	}); err == nil || !strings.HasSuffix(err.Error(), ": "+refusal) {
+		t.Fatalf("refused transfer answered again = %v, want %q", err, refusal)
+	}
+	ec.send(edgeproto.Ping{})
+	expect[edgeproto.Pong](t, ec)
+	wantOwner(next)
+	// A later transfer still takes its own answer.
+	if err := transfer(testOwner, func(got edgeproto.OwnerTransferred) []edgeproto.OwnerTransferResult {
+		return []edgeproto.OwnerTransferResult{{ID: got.ID, Owner: got.Owner}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wantOwner(testOwner)
 }
 
 func issueFor(t *testing.T, a *Agent) string {

@@ -65,32 +65,53 @@ func (a *Agent) TransferOwner(owner edgeproto.Account) error {
 	})
 }
 
-// transfer reports owner as the new owner and waits for the edge's answer.
+// transfer reports owner as the new owner and waits for the edge's answer
+// to this report.
 func (s *session) transfer(owner edgeproto.Principal) error {
-	// An answer left from a transfer that stopped waiting is not this one's.
-	select {
-	case <-s.transferred:
-	default:
-	}
-	if err := s.send(edgeproto.OwnerTransferred{Owner: owner}); err != nil {
+	id := edgeproto.NewConnID()
+	answer := make(chan edgeproto.OwnerTransferResult, 1)
+	s.mu.Lock()
+	s.transfers[id] = answer
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.transfers, id)
+		s.mu.Unlock()
+	}()
+	if err := s.send(edgeproto.OwnerTransferred{ID: id, Owner: owner}); err != nil {
 		return err
 	}
 	timeout := time.NewTimer(handshakeTimeout)
 	defer timeout.Stop()
-	for {
-		select {
-		case r := <-s.transferred:
-			switch {
-			case r.Owner != owner:
-				continue
-			case r.Error != "":
-				return errors.New(r.Error)
-			}
-			return nil
-		case <-timeout.C:
-			return fmt.Errorf("no answer within %s", handshakeTimeout)
+	select {
+	case r := <-answer:
+		switch {
+		case r.Owner != owner:
+			return fmt.Errorf("the edge answered report %s for owner %s %s, not %s %s",
+				id, r.Owner.Provider, r.Owner.Subject, owner.Provider, owner.Subject)
+		case r.Error != "":
+			return errors.New(r.Error)
 		}
+		return nil
+	case <-timeout.C:
+		return fmt.Errorf("no answer within %s", handshakeTimeout)
 	}
+}
+
+// transferAnswered hands r to the transfer waiting for it. The answer to
+// the owner reported at enrollment, and a late or repeated answer, has
+// none.
+func (s *session) transferAnswered(r edgeproto.OwnerTransferResult) {
+	s.mu.Lock()
+	answer := s.transfers[r.ID]
+	delete(s.transfers, r.ID)
+	s.mu.Unlock()
+	if answer == nil {
+		slog.Info("edge: answer to an ownership report no transfer waits for", "report", r.ID,
+			"owner_provider", r.Owner.Provider, "owner_subject", r.Owner.Subject, "error", r.Error)
+		return
+	}
+	answer <- r
 }
 
 // isMember reports whether owner is a member in the directory entries.

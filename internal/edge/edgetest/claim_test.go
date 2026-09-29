@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -254,5 +255,103 @@ func TestTransferStandsOnlyOnceTheEdgeRecordsIt(t *testing.T) {
 	transfer("is not connected to")
 	h.proxy.restoreServers()
 	a.waitEnrolled()
+	h.waitEdgeOwner(t, a, &alice)
+}
+
+// The edge's answer to the owner a server reports at enrollment never
+// answers a transfer, whether it reaches the server before or after the
+// transfer's own answer. The proxy holds that answer back and releases it
+// around a transfer back to alice, which the edge refuses because its
+// operator blocked her: the server keeps bob, as the edge does.
+func TestTransferTakesOnlyItsOwnAnswer(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
+	cs := h.login(alice, bob)
+	al, bo := cs[0], cs[1]
+	h.claimServer(al, a)
+	h.join(h.control(al, a), bo, a, "admin")
+	aliceID, bobID := a.memberOf(t, alice).ID, a.memberOf(t, bob).ID
+	transfer := func(actor, to domain.MemberID) error {
+		return a.local(t, actor, protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: string(to)}, nil)
+	}
+	wantBob := func(what string) {
+		t.Helper()
+		if owner, err := a.state().Owner(); err != nil || owner == nil || owner.Login != bob.Login {
+			t.Fatalf("server's owner %s = %+v, %v; want bob", what, owner, err)
+		}
+		h.waitEdgeOwner(t, a, &bob)
+	}
+
+	held := make(chan edgeproto.Message, 1)
+	var holding atomic.Bool
+	holding.Store(true)
+	h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) {
+		if _, ok := e.msg.(edgeproto.OwnerTransferResult); ok && e.fromEdge && e.serverID == a.id && holding.CompareAndSwap(true, false) {
+			held <- e.msg
+			return nil, false
+		}
+		return e.msg, true
+	})
+	h.proxy.closeLinks()
+	var reportAnswer edgeproto.Message
+	select {
+	case reportAnswer = <-held:
+	case <-time.After(waitTimeout):
+		t.Fatal("no answer to the owner reported at enrollment")
+	}
+	// Answering a ping, the server is serving the control channel, and
+	// takes transfers.
+	from := h.proxy.mark()
+	h.proxy.inject(t, a.id, edgeproto.Ping{}, true)
+	h.proxy.await(t, "the server's pong", from, func(e logEntry) bool {
+		_, ok := e.msg.(edgeproto.Pong)
+		return ok && !e.fromEdge && e.serverID == a.id
+	})
+	if err := transfer(aliceID, bobID); err != nil {
+		t.Fatalf("transfer to bob: %v", err)
+	}
+	wantBob("after the transfer")
+	if err := h.edgeStore().BlockAccount(context.Background(), edgeproto.ProviderGitHub, fmt.Sprint(alice.ID), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	refused := "ownership report refused: " + string(edgeproto.RefusalAccountBlocked)
+
+	// The enrollment report's answer first, then the refusal.
+	seen, release := make(chan struct{}), make(chan struct{})
+	h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) {
+		if r, ok := e.msg.(edgeproto.OwnerTransferResult); ok && e.fromEdge && r.Error != "" {
+			close(seen)
+			<-release
+		}
+		return e.msg, true
+	})
+	done := make(chan error, 1)
+	go func() { done <- transfer(bobID, aliceID) }()
+	select {
+	case <-seen:
+	case <-time.After(waitTimeout):
+		t.Fatal("the edge did not answer the transfer to alice")
+	}
+	h.proxy.inject(t, a.id, reportAnswer, true)
+	close(release)
+	if err := <-done; err == nil || !strings.Contains(err.Error(), refused) {
+		t.Fatalf("transfer to alice, answered after the enrollment report: %v, want %q", err, refused)
+	}
+	wantBob("after the refused transfer")
+
+	// The refusal first, then the enrollment report's answer.
+	h.proxy.setTamper(t, nil)
+	if err := transfer(bobID, aliceID); err == nil || !strings.Contains(err.Error(), refused) {
+		t.Fatalf("transfer to alice: %v, want %q", err, refused)
+	}
+	h.proxy.inject(t, a.id, reportAnswer, true)
+	wantBob("after the late answer")
+	if err := h.edgeStore().UnblockAccount(context.Background(), edgeproto.ProviderGitHub, fmt.Sprint(alice.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := transfer(bobID, aliceID); err != nil {
+		t.Fatalf("transfer to alice once unblocked: %v", err)
+	}
 	h.waitEdgeOwner(t, a, &alice)
 }

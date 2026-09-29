@@ -235,7 +235,7 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	// the server drops the control channel and keeps its owner.
 	for _, m := range []edgeproto.Message{
 		edgeproto.Claimed{ConnID: edgeproto.NewConnID(), Owner: edgeproto.AccountPrincipal(mallory.account())},
-		edgeproto.OwnerTransferred{Owner: edgeproto.AccountPrincipal(mallory.account())},
+		edgeproto.OwnerTransferred{ID: edgeproto.NewConnID(), Owner: edgeproto.AccountPrincipal(mallory.account())},
 		edgeproto.Ownerless{},
 	} {
 		from := h.proxy.mark()

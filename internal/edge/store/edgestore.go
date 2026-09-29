@@ -67,7 +67,12 @@ func Open(path string) (*Store, error) {
 }
 
 // Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if err := s.db.Close(); err != nil {
+		return fmt.Errorf("edgestore: close: %w", err)
+	}
+	return nil
+}
 
 // migration is one step of the schema history, applied in its own
 // transaction.

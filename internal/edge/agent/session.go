@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -23,8 +24,11 @@ var errDrain = errors.New("edge is restarting (drain)")
 type session struct {
 	c       *websocket.Conn
 	edgeKey ed25519.PublicKey
-	// transferred carries the edge's answers to OwnerTransferred.
-	transferred chan edgeproto.OwnerTransferResult
+
+	mu sync.Mutex
+	// transfers holds, by report id, each transfer waiting for the edge's
+	// answer.
+	transfers map[string]chan edgeproto.OwnerTransferResult
 }
 
 func (s *session) send(m edgeproto.Message) error {
@@ -183,7 +187,7 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer cancel()
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
-	s := &session{c: c, edgeKey: ready.EdgeKey, transferred: make(chan edgeproto.OwnerTransferResult, 1)}
+	s := &session{c: c, edgeKey: ready.EdgeKey, transfers: map[string]chan edgeproto.OwnerTransferResult{}}
 	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
 	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
 
@@ -220,7 +224,7 @@ func (a *Agent) reconcileOwner(s *session, state string) error {
 		return err
 	}
 	if owner != nil {
-		return s.send(edgeproto.OwnerTransferred{Owner: edgeproto.AccountPrincipal(*owner)})
+		return s.send(edgeproto.OwnerTransferred{ID: edgeproto.NewConnID(), Owner: edgeproto.AccountPrincipal(*owner)})
 	}
 	slog.Warn("edge: the edge records an owner this server does not have for its key; reporting the server ownerless. Claim it with a code from `aether-server edge claim-code`",
 		"edge", a.origin)
@@ -320,12 +324,7 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 		case edgeproto.DeviceRevoked:
 			a.revokeDevice(m.DeviceID)
 		case edgeproto.OwnerTransferResult:
-			select {
-			case s.transferred <- m:
-			default:
-				slog.Warn("edge: dropped an answer to an ownership transfer nobody waits for",
-					"owner_provider", m.Owner.Provider, "owner_subject", m.Owner.Subject, "error", m.Error)
-			}
+			s.transferAnswered(m)
 		case edgeproto.AccountDeleted:
 			// Unanswered, the edge sends the deletion again at the next
 			// enrollment.

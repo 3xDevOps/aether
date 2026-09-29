@@ -326,8 +326,9 @@ func TestOwnershipReports(t *testing.T) {
 	e.dir.mu.Lock()
 	e.dir.recordErr = edgeproto.Refusal("google:9 has no account at this edge")
 	e.dir.mu.Unlock()
-	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
-	if got := next[edgeproto.OwnerTransferResult](t, a); got.Owner != heir ||
+	refused := edgeproto.NewConnID()
+	send(t, a.ws, edgeproto.OwnerTransferred{ID: refused, Owner: heir})
+	if got := next[edgeproto.OwnerTransferResult](t, a); got.ID != refused || got.Owner != heir ||
 		!strings.Contains(got.Error, "ownership report refused: google:9 has no account") {
 		t.Fatalf("refused transfer answered %+v", got)
 	}
@@ -338,8 +339,9 @@ func TestOwnershipReports(t *testing.T) {
 	e.dir.mu.Lock()
 	e.dir.recordErr = nil
 	e.dir.mu.Unlock()
-	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
-	if got := next[edgeproto.OwnerTransferResult](t, a); got != (edgeproto.OwnerTransferResult{Owner: heir}) {
+	recorded := edgeproto.NewConnID()
+	send(t, a.ws, edgeproto.OwnerTransferred{ID: recorded, Owner: heir})
+	if got := next[edgeproto.OwnerTransferResult](t, a); got != (edgeproto.OwnerTransferResult{ID: recorded, Owner: heir}) {
 		t.Fatalf("transfer answered %+v, want it recorded", got)
 	}
 	if p, ok := e.dir.owner(a.id); !ok || p != heir {
@@ -354,7 +356,7 @@ func TestOwnershipReports(t *testing.T) {
 	u := enroll(t, e, newSigner(t))
 	go u.run()
 	send(t, u.ws, edgeproto.Ownerless{})
-	send(t, u.ws, edgeproto.OwnerTransferred{Owner: heir})
+	send(t, u.ws, edgeproto.OwnerTransferred{ID: edgeproto.NewConnID(), Owner: heir})
 	if got := next[edgeproto.OwnerTransferResult](t, u); !strings.Contains(got.Error, "never claimed at this edge") {
 		t.Fatalf("transfer by an unclaimed server answered %+v", got)
 	}

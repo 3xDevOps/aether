@@ -699,7 +699,10 @@ that recorded a transfer whose answer was lost and then refuses the
 previous owner, because its operator blocked that account meanwhile: the
 two disagree until an admin runs the transfer again. The
 command is refused while the server is not connected to the edge or has no
-owner. A transfer never creates an admin or changes a role.
+owner. A transfer never creates an admin or changes a role. Each report
+carries an id that the edge's answer repeats, so a transfer takes only the
+answer to its own report, never the answer to the enrollment report or a
+repeated one (`TestTransferTakesOnlyItsOwnAnswer`).
 
 When the owner's identity leaves the server, because the member was
 removed or the account deleted, the server forgets the owner and reports

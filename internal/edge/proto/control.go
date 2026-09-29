@@ -108,15 +108,18 @@ type Claimed struct {
 }
 
 // OwnerTransferred (server to edge) states that an admin transferred the
-// server's ownership to Owner.
+// server's ownership to Owner, or, sent at enrollment, repeats the
+// server's owner. ID, from NewConnID, names this report.
 type OwnerTransferred struct {
+	ID    string    `json:"id"`
 	Owner Principal `json:"owner"`
 }
 
-// OwnerTransferResult (edge to server) answers OwnerTransferred. An empty
-// Error means the edge recorded Owner; otherwise the edge kept the owner
-// it had, and Error says why.
+// OwnerTransferResult (edge to server) answers the OwnerTransferred with
+// the same ID. An empty Error means the edge recorded Owner; otherwise the
+// edge kept the owner it had, and Error says why.
 type OwnerTransferResult struct {
+	ID    string    `json:"id"`
 	Owner Principal `json:"owner"`
 	Error string    `json:"error,omitempty"`
 }
@@ -262,12 +265,15 @@ func (m Claimed) validate() error {
 }
 
 func (m OwnerTransferred) validate() error {
+	if !ValidConnID(m.ID) {
+		return fmt.Errorf("invalid id %q", m.ID)
+	}
 	return m.Owner.Validate()
 }
 
 func (m OwnerTransferResult) validate() error {
-	if !validText(m.Error, maxErrorText) {
-		return errors.New("error text is too long or has control characters")
+	if err := validateReply(m.ID, m.Error); err != nil {
+		return err
 	}
 	return m.Owner.Validate()
 }

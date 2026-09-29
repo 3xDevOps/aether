@@ -77,7 +77,7 @@ commands:
 `)
 }
 
-func serve(args []string) error {
+func serve(args []string) (err error) {
 	o, err := parseOptions(args, os.Getenv)
 	if err != nil {
 		return err
@@ -92,7 +92,9 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer svc.Close() //nolint:errcheck // the serve error takes precedence
+	// Deferred, the store closes once the relay and the HTTP servers have
+	// stopped using it.
+	defer func() { err = errors.Join(err, svc.Close()) }()
 	rl, err := relay.New(ctx, svc.RelayConfig(o.egressBudget))
 	if err != nil {
 		return err
