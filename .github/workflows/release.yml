@@ -297,7 +297,16 @@ jobs:
           image="ghcr.io/3xdevops/aether-edge:$GITHUB_REF_NAME"
           # Asks the registry without pulling, so nothing the steps above
           # pulled can answer for it.
-          if ! out=$(docker --config "$config" manifest inspect "$image" 2>&1); then
+          # The list, then each architecture's own manifest by digest.
+          if out=$(docker --config "$config" manifest inspect "$image" 2>&1) &&
+            digests=$(printf '%s' "$out" | jq -er '[.manifests[].digest] | join(" ") | select(length > 0)'); then
+            for digest in $digests; do
+              out=$(docker --config "$config" manifest inspect "${image%:*}@$digest" 2>&1) || { image="${image%:*}@$digest"; digests=; break; }
+            done
+          else
+            digests=
+          fi
+          if [ -z "$digests" ]; then
             printf '%s\n' "$out"
             echo "::warning title=aether-edge is not public::$image cannot be read anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
           fi
@@ -531,9 +540,14 @@ jobs:
           # Compared by the images it carries: the tool may write the list
           # again, which changes the list's digest and none of its images.
           carried() {
-            docker buildx imagetools inspect --raw "$1" | jq -r '[.manifests[] | "\(.platform.os)/\(.platform.architecture) \(.digest)"] | sort | .[]'
+            raw=$(docker buildx imagetools inspect --raw "$1")
+            printf '%s' "$raw" | jq -er '[.manifests[] | "\(.platform.os)/\(.platform.architecture) \(.digest)"] | sort | join("\n") | select(length > 0)'
           }
-          if [ "$(carried "$image:latest")" != "$(carried "$image@$DIGEST")" ]; then
+          # An inspection that fails or lists no image is a failure, not
+          # two empty answers that agree.
+          moved=$(carried "$image:latest")
+          published=$(carried "$image@$DIGEST")
+          if [ "$moved" != "$published" ]; then
             echo "::error::$image:latest does not carry the images of the published $DIGEST"
             exit 1
           fi
