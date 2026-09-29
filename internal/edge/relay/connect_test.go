@@ -260,7 +260,7 @@ func TestRevocationClosesLiveSplices(t *testing.T) {
 
 	laptop, _ := e.connect(t, a, aliceLaptop)
 	phone, phoneServer := e.connect(t, a, alicePhone)
-	bobConn, _ := e.connect(t, a, bobLaptop)
+	bobConn, bobServer := e.connect(t, a, bobLaptop)
 
 	e.r.RevokeDevice("alice-laptop")
 	expectClosed(t, laptop)
@@ -274,6 +274,11 @@ func TestRevocationClosesLiveSplices(t *testing.T) {
 		{Kind: edgeproto.EntryMember, Provider: alice.Provider, Subject: alice.Subject, Role: "admin"},
 	}})
 	expectClosed(t, bobConn)
+	// The server's data socket carries the reason too.
+	_ = bobServer.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := bobServer.Read(make([]byte, 1)); err == nil || !strings.Contains(err.Error(), string(edgeproto.RefusalNotMember)) {
+		t.Fatalf("server side of the dropped splice closed with %v", err)
+	}
 
 	laptop, _ = e.connect(t, a, aliceLaptop)
 	e.r.CloseServer(a.id)

@@ -282,8 +282,9 @@ func TestRevocationWhileTheEdgeIsDown(t *testing.T) {
 	closedWithin(t, "member.device.revoke with the edge down", bobDirect, start, 2*time.Second)
 	call[struct{}](t, actl, protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(carolID)})
 
+	from := h.proxy.mark()
 	h.startEdge()
-	a.waitEnrolled()
+	h.reenrolled(t, a, from)
 	if _, err = h.dial(bo, h.link(a)); err == nil || !strings.Contains(err.Error(), "was revoked on this server") {
 		t.Fatalf("bob's revoked device after the edge came back: %v", err)
 	}

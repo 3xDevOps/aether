@@ -188,16 +188,16 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
 	s := &session{c: c, edgeKey: ready.EdgeKey, transfers: map[string]chan edgeproto.OwnerTransferResult{}}
-	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
-	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
-
 	if err = a.reconcileOwner(s, ready.State); err != nil {
 		return time.Since(start), err
 	}
 	// Live only now: a transfer's report must follow the owner reported
-	// here, or the edge would record this older one last.
+	// here, or the edge would record this older one last. The status says
+	// connected only once transfers and claims can use the session.
 	a.setLive(s)
 	defer a.setLive(nil)
+	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
+	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
 	go a.pushDirectory(sctx, s)

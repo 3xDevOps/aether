@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -17,11 +18,12 @@ import (
 // Reasons a control channel closes, sent to the server as the close
 // reason.
 var (
-	errReplaced      = errors.New("replaced by a newer connection of this server")
-	errUnclaimed     = fmt.Errorf("unclaimed for %s: an unclaimed server is relayed only claim connections, for this long", edgeproto.UnclaimedTTL)
-	errDraining      = errors.New("edge is shutting down")
-	errUnenrolled    = errors.New("server is no longer enrolled at this edge")
-	errClaimRecorded = errors.New("claim recorded after this connection enrolled; reconnect to learn it")
+	errReplaced         = errors.New("replaced by a newer connection of this server")
+	errUnclaimed        = fmt.Errorf("unclaimed for %s: an unclaimed server is relayed only claim connections, for this long", edgeproto.UnclaimedTTL)
+	errDraining         = errors.New("edge is shutting down")
+	errUnenrolled       = errors.New("server is no longer enrolled at this edge")
+	errClaimRecorded    = errors.New("claim recorded after this connection enrolled; reconnect to learn it")
+	errHandshakeTimeout = fmt.Errorf("enrollment not completed within %s", handshakeTimeout)
 )
 
 // registration is one authenticated control channel.
@@ -45,8 +47,11 @@ type registration struct {
 	hasDirectory bool
 }
 
+// send writes m. The write is not bound to g.ctx: cancelling the context
+// of a write in progress drops the socket without the close frame that
+// gives the server the cause.
 func (g *registration) send(m edgeproto.Message) error {
-	ctx, cancel := context.WithTimeout(g.ctx, writeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
 	if err := writeControl(ctx, g.ws, m); err != nil {
 		return fmt.Errorf("relay: send to server %s: %w", g.id, err)
@@ -111,16 +116,22 @@ func (r *Relay) serveControl(w http.ResponseWriter, req *http.Request) {
 
 // enroll runs the challenge and hello exchange and registers the server.
 func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, error) {
-	ctx, cancel := context.WithTimeout(r.ctx, handshakeTimeout)
+	ctx, cancel := context.WithTimeoutCause(r.ctx, handshakeTimeout, errHandshakeTimeout)
 	defer cancel()
+	// The handshake's I/O is not bound to ctx, which would drop the socket
+	// without the close frame that gives the server the cause.
+	stop := context.AfterFunc(ctx, func() {
+		_ = ws.Close(websocket.StatusPolicyViolation, closeReason(context.Cause(ctx)))
+	})
+	defer stop()
 	nonce := make([]byte, edgeproto.NonceSize)
 	_, _ = rand.Read(nonce) // crypto/rand.Read never returns an error.
-	if err := writeControl(ctx, ws, edgeproto.Challenge{Version: edgeproto.Version, Nonce: nonce, Origin: r.origin}); err != nil {
-		return nil, fmt.Errorf("relay: send challenge: %w", err)
+	if err := writeControl(context.Background(), ws, edgeproto.Challenge{Version: edgeproto.Version, Nonce: nonce, Origin: r.origin}); err != nil {
+		return nil, fmt.Errorf("relay: send challenge: %w", cmp.Or(context.Cause(ctx), err))
 	}
-	m, err := readControl(ctx, ws)
+	m, err := readControl(context.Background(), ws)
 	if err != nil {
-		return nil, fmt.Errorf("relay: read hello: %w", err)
+		return nil, fmt.Errorf("relay: read hello: %w", cmp.Or(context.Cause(ctx), err))
 	}
 	hello, ok := m.(edgeproto.Hello)
 	if !ok {
@@ -235,13 +246,20 @@ func (r *Relay) serveRegistration(reg *registration) {
 		}
 	})
 	defer ttl.Stop()
+	// Silence is timed apart from the read: a read whose context ends drops
+	// the socket without the close frame that gives the cause.
+	silent := fmt.Errorf("server silent for %s", r.idleTimeout)
+	idle := time.AfterFunc(r.idleTimeout, func() {
+		slog.Info("relay: control channel closed", "server", reg.id, "error", silent)
+		r.unregister(reg, silent)
+	})
+	defer idle.Stop()
 	go r.keepAlive(reg)
 	go r.deliverDeletions(reg)
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), r.idleTimeout)
-		m, err := readControl(ctx, reg.ws)
-		cancel()
+		m, err := readControl(context.Background(), reg.ws)
+		idle.Reset(r.idleTimeout)
 		if errors.Is(err, edgeproto.ErrUnknownMessage) {
 			continue
 		}

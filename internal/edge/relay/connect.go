@@ -160,7 +160,32 @@ func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request, kind stri
 		r.drop(c)
 		return
 	}
-	r.splice(c, websocket.NetConn(c.ctx, ws, websocket.MessageBinary), server)
+	r.splice(c, spliceSide(c, ws), server)
+}
+
+// spliceConn is one side of a splice. Closing it tells that side the
+// refusal that ended c, such as the account leaving the server's
+// directory, instead of dropping the socket under it.
+type spliceConn struct {
+	net.Conn
+	ws *websocket.Conn
+	c  *relayConn
+}
+
+// spliceSide returns ws as a side of c's splice. It is not bound to c.ctx:
+// a websocket.NetConn whose context ends during a read drops the socket
+// without a close frame.
+func spliceSide(c *relayConn, ws *websocket.Conn) *spliceConn {
+	nc := websocket.NetConn(context.WithoutCancel(c.ctx), ws, websocket.MessageBinary)
+	return &spliceConn{Conn: nc, ws: ws, c: c}
+}
+
+func (sc *spliceConn) Close() error {
+	var ref edgeproto.Refusal
+	if errors.As(context.Cause(sc.c.ctx), &ref) {
+		return sc.ws.Close(websocket.StatusPolicyViolation, closeReason(ref))
+	}
+	return sc.ws.Close(websocket.StatusNormalClosure, "")
 }
 
 // register admits one connection of kind from the client at addr to
@@ -333,7 +358,7 @@ func (r *Relay) serveData(w http.ResponseWriter, req *http.Request) {
 		c.cancel(edgeproto.RefusalNotAttached)
 		return
 	}
-	server := websocket.NetConn(c.ctx, ws, websocket.MessageBinary)
+	server := spliceSide(c, ws)
 	c.attached <- server
 	<-c.ctx.Done()
 	_ = server.Close()

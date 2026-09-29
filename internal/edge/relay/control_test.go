@@ -537,8 +537,8 @@ func TestIdleControlChannelCloses(t *testing.T) {
 	a := enroll(t, e, newSigner(t))
 	// Reading pings without answering them is silence.
 	start := time.Now()
-	if err := waitClosed(t, a.ws); err == nil {
-		t.Fatal("no error")
+	if err := waitClosed(t, a.ws); !strings.Contains(err.Error(), "server silent for 150ms") {
+		t.Fatalf("closed with %v", err)
 	}
 	if time.Since(start) < 100*time.Millisecond {
 		t.Fatal("closed before the idle timeout")
@@ -570,6 +570,9 @@ func TestServerLeaves(t *testing.T) {
 		return len(e.dir.unenrolled) == 1 && e.dir.unenrolled[0] == a.id
 	})
 	eventually(t, "server offline", func() bool { return !e.r.Online(a.id) })
+	if err := a.closedWith(t); !strings.Contains(err.Error(), errUnenrolled.Error()) {
+		t.Fatalf("closed with %v", err)
+	}
 }
 
 func TestShutdownDrains(t *testing.T) {
@@ -579,6 +582,9 @@ func TestShutdownDrains(t *testing.T) {
 		t.Fatal(err)
 	}
 	next[edgeproto.Drain](t, a)
+	if err := a.closedWith(t); !strings.Contains(err.Error(), errDraining.Error()) {
+		t.Fatalf("closed with %v", err)
+	}
 	_, resp, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.PathServerControl, nil)
 	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("enrollment while draining: %v", err)

@@ -60,6 +60,7 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
 	}
 	rc := &relayConn{
 		Conn:     websocket.NetConn(ctx, c, websocket.MessageBinary),
+		id:       m.ConnID,
 		deviceID: grant.DeviceID,
 	}
 	rc.release = func() {
@@ -110,9 +111,21 @@ func (a *Agent) revokeDevice(deviceID string) {
 // edge-asserted client address.
 type relayConn struct {
 	net.Conn
+	id       string
 	deviceID string
 	release  func()
 	once     sync.Once
+	logged   sync.Once
+}
+
+// Read logs the reason the edge gave for closing the connection, such as
+// the device's token being revoked: sshd sees only a failed read.
+func (rc *relayConn) Read(p []byte) (int, error) {
+	n, err := rc.Conn.Read(p)
+	if websocket.CloseStatus(err) != -1 {
+		rc.logged.Do(func() { slog.Info("edge: the edge closed a relayed connection", "conn", rc.id, "error", err) })
+	}
+	return n, err
 }
 
 func (rc *relayConn) Close() error {

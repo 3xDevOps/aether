@@ -123,7 +123,7 @@ type Relay struct {
 	store   EgressStore
 	budget  int64
 	ctx     context.Context
-	stop    context.CancelFunc
+	stop    context.CancelCauseFunc
 	flushed chan struct{}
 
 	// Durations, rates and limits that tests shorten.
@@ -205,7 +205,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		refusalsMap:        map[string]uint64{},
 	}
 	r.monthBytes.Store(used)
-	r.ctx, r.stop = context.WithCancel(context.Background())
+	r.ctx, r.stop = context.WithCancelCause(context.Background())
 	go r.flushLoop()
 	return r, nil
 }
@@ -383,7 +383,7 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 		})
 	}
 	wg.Wait()
-	r.stop()
+	r.stop(errDraining)
 	<-r.flushed
 	return r.flushEgress(ctx, time.Now())
 }

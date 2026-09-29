@@ -363,6 +363,15 @@ and `edge status` shows the reason:
 connection  disconnected since <time>: read ready: failed to get reader: received close frame: status = StatusPolicyViolation and reason = "server is blocked by this edge's operator"
 ```
 
+Every control connection the edge closes carries its reason the same way,
+logged as `edge: control connection ended; reconnecting`: for example
+`replaced by a newer connection of this server` or `server silent for
+1m0s`; a restarting edge is logged as `edge is restarting (drain)`. `EOF`
+there means the connection was cut without the edge closing it, such as
+by a network failure. `edge status` shows `connected` once the server has
+reported its owner to the edge, and from then `aether member transfer`
+works.
+
 ### Files
 
 `<data-dir>/edge/` holds the server's edge state. None of it depends on
@@ -606,6 +615,13 @@ key or a link.
 
 The times are from one run of the suite on a development machine, with
 `-race`. A revocation made on the server takes effect without the edge.
+
+A relayed connection the edge closes ends with the edge's reason in the
+client's error, such as `received close frame: status =
+StatusPolicyViolation and reason = "not a member of this server"` when the
+server's directory drops the account mid-handshake. The server logs the
+same reason as `edge: the edge closed a relayed connection`. One the server
+closes ends with `EOF`.
 
 A link survives a revoked token and a deleted account:
 

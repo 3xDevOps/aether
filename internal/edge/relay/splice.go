@@ -55,10 +55,12 @@ func (r *Relay) pipe(c *relayConn, dst, src net.Conn) {
 			if throttled && !r.throttle(c, n) {
 				return
 			}
+			// Counted before the write, so a peer never holds bytes the
+			// budget and the final flush have not seen.
+			r.count(n)
 			if _, werr := dst.Write(p[:n]); werr != nil {
 				return
 			}
-			r.count(n)
 		}
 		if err != nil {
 			return
