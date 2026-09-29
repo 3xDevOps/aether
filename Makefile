@@ -193,6 +193,7 @@ test-scripts:
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-changes-test.sh
 	sh scripts/ci-classify-edge-test.sh
+	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.

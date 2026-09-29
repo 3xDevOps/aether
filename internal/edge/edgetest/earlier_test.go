@@ -91,8 +91,9 @@ func TestServerVerifiesGrants(t *testing.T) {
 			t.Errorf("%s grant: server answered %q, want %q", tc.name, got, tc.want)
 		}
 	}
-	// A grant for a Google account, which an edge of v0.5.2-alpha.3 could
-	// sign. SignGrant refuses one, so it is signed as SignGrant documents.
+	// A grant for a Google account, which an edge built from the
+	// v0.5.2-alpha.3 tag could sign. SignGrant refuses one, so it is signed as
+	// SignGrant documents.
 	google := template
 	google.ConnID = edgeproto.NewConnID()
 	google.IssuedAt = time.Now()

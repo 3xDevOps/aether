@@ -110,28 +110,91 @@ jobs:
           docker --config "$config" pull --platform linux/amd64 "$image"
           docker --config "$config" pull --platform linux/arm64 "$image"
 
-  # A job of its own that `release` waits for: a failed edge image stops the
-  # release before its binaries are downloadable, and rerunning this job
-  # does not repeat the Android build. Actions are pinned by commit because
-  # this job can publish; each pin is the release its major tag named.
+  # Each architecture is built, loaded and smoke-tested on a native runner,
+  # as browser-image does, and only the tested image is pushed, under an
+  # architecture-suffixed tag. edge-manifest then joins them under the
+  # immutable tags, and edge-latest moves latest once the release is
+  # published. release waits for edge-manifest, so a failed edge image
+  # uploads no assets. Every edge job can publish, so its actions are pinned
+  # by commit; each pin is the release its major tag named.
   edge-image:
     needs: publisher-policy
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
     permissions:
       contents: read
       packages: write
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          # Full history, as in release, so `git rev-parse --short` picks
+          # the same length the Makefile stamps the release binaries with.
+          fetch-depth: 0
       - name: Validate the release tag
         run: sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
-      - name: Run arm64 images for the smoke test
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - name: Read the short commit
+        id: commit
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Generate edge image labels
+        id: edge-meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
-          platforms: arm64
+          images: ghcr.io/3xdevops/aether-edge
+          tags: type=raw,value=${{ github.ref_name }}-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.title=aether-edge
+            org.opencontainers.image.description=Aether edge: GitHub sign-in and relay for Aether servers
+      # No build cache: the image builds in about a minute, and a cache
+      # written by other workflows must not reach a published image.
+      - name: Build the edge image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: images/edge/Dockerfile
+          load: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ steps.commit.outputs.short }}
+          tags: ${{ steps.edge-meta.outputs.tags }}
+          labels: ${{ steps.edge-meta.outputs.labels }}
+      - name: Smoke-test the edge image
+        env:
+          EDGE_IMAGE: ghcr.io/3xdevops/aether-edge:${{ github.ref_name }}-${{ matrix.arch }}
+        run: sh scripts/edge-image-smoke.sh "$EDGE_IMAGE"
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Push the already-tested local image, not a second independent build.
+      - name: Publish the tested architecture
+        env:
+          EDGE_IMAGE: ghcr.io/3xdevops/aether-edge:${{ github.ref_name }}-${{ matrix.arch }}
+        run: docker push "$EDGE_IMAGE"
+
+  edge-manifest:
+    needs: edge-image
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -140,55 +203,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # A multi-platform image is an index, so the annotations go on the
-      # index too; the package page and its repository link read them there.
-      - name: Generate edge image tags, labels and annotations
+      # index; the package page and its repository link read them there.
+      - name: Generate edge image tags and annotations
         id: edge-meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         env:
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ghcr.io/3xdevops/aether-edge
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=raw,value=${{ github.sha }}
-            type=raw,value=latest
             type=sha,prefix=sha-
-          labels: |
-            org.opencontainers.image.title=aether-edge
-            org.opencontainers.image.description=Aether edge: GitHub sign-in and relay for Aether servers
           annotations: |
             org.opencontainers.image.title=aether-edge
             org.opencontainers.image.description=Aether edge: GitHub sign-in and relay for Aether servers
-      - name: Publish the edge image
-        id: edge-build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          file: images/edge/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            COMMIT=${{ github.sha }}
-          tags: ${{ steps.edge-meta.outputs.tags }}
-          labels: ${{ steps.edge-meta.outputs.labels }}
-          annotations: ${{ steps.edge-meta.outputs.annotations }}
-          cache-from: |
-            type=gha,scope=edge-amd64-main
-            type=gha,scope=edge-arm64-main
-      # Pulls with this job's login: a package GHCR has just created is
-      # private until an administrator makes it public.
-      - name: Verify, pull and smoke-test both edge image architectures
+      - name: Publish the release manifest
+        id: publish
         env:
-          DIGEST: ${{ steps.edge-build.outputs.digest }}
+          TAGS: ${{ steps.edge-meta.outputs.tags }}
+          ANNOTATIONS: ${{ steps.edge-meta.outputs.annotations }}
         run: |
           image=ghcr.io/3xdevops/aether-edge
-          inspect=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME")
-          tagged=$(printf '%s\n' "$inspect" | awk '$1 == "Digest:" { print $2; exit }')
-          if [ "$tagged" != "$DIGEST" ]; then
-            echo "::error::$image:$GITHUB_REF_NAME is $tagged, not the pushed $DIGEST"
-            exit 1
-          fi
+          set --
+          for tag in $TAGS; do
+            set -- "$@" --tag "$tag"
+          done
+          while IFS= read -r annotation; do
+            [ -z "$annotation" ] || set -- "$@" --annotation "$annotation"
+          done <<EOF
+          $ANNOTATIONS
+          EOF
+          docker buildx imagetools create "$@" "$image:$GITHUB_REF_NAME-amd64" "$image:$GITHUB_REF_NAME-arm64"
+          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" | awk '$1 == "Digest:" { print $2; exit }')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # Pulls with this job's login: a package GHCR has just created is
+      # private until an administrator makes it public.
+      - name: Verify and pull both edge image architectures
+        env:
+          TAGS: ${{ steps.edge-meta.outputs.tags }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          image=ghcr.io/3xdevops/aether-edge
+          for ref in $TAGS; do
+            tagged=$(docker buildx imagetools inspect "$ref" | awk '$1 == "Digest:" { print $2; exit }')
+            if [ "$tagged" != "$DIGEST" ]; then
+              echo "::error::$ref is $tagged, not the published $DIGEST"
+              exit 1
+            fi
+          done
           index=$(docker buildx imagetools inspect --raw "$image@$DIGEST")
           {
             echo "### ghcr.io/3xdevops/aether-edge"
@@ -197,17 +260,25 @@ jobs:
             echo
             echo "| Platform | Immutable reference |"
             echo "| --- | --- |"
-            echo "| linux/amd64, linux/arm64 | \`$image:$GITHUB_REF_NAME@$DIGEST\` |"
+            for ref in $TAGS; do
+              echo "| linux/amd64, linux/arm64 | \`$ref@$DIGEST\` |"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
           for arch in amd64 arm64; do
-            docker pull --platform "linux/$arch" "$image:$GITHUB_REF_NAME"
-            docker pull --platform "linux/$arch" "$image@$DIGEST"
             platform=$(printf '%s' "$index" | jq -r --arg arch "$arch" \
               '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')
+            # The index must carry the image smoke-tested for this
+            # architecture, whether that push was a manifest or an index.
+            tested=$(docker buildx imagetools inspect --raw "$image:$GITHUB_REF_NAME-$arch" | jq -r --arg arch "$arch" \
+              'if .manifests then .manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest else empty end')
+            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" | awk '$1 == "Digest:" { print $2; exit }')
+            if [ "$platform" != "$tested" ]; then
+              echo "::error::$image@$DIGEST carries $platform for linux/$arch, not the smoke-tested $tested"
+              exit 1
+            fi
+            docker pull --platform "linux/$arch" "$image:$GITHUB_REF_NAME"
+            docker pull --platform "linux/$arch" "$image@$DIGEST"
             docker pull --platform "linux/$arch" "$image@$platform"
-            # The smoke script's docker run then asks for this architecture
-            # rather than the runner's.
-            DOCKER_DEFAULT_PLATFORM="linux/$arch" sh scripts/edge-image-smoke.sh "$image@$platform"
             echo "| linux/$arch | \`$image@$platform\` |" >> "$GITHUB_STEP_SUMMARY"
           done
       # Not a release failure: the image is published and pullable with
@@ -226,7 +297,7 @@ jobs:
           done
 
   release:
-    needs: [publisher-policy, browser-manifest, edge-image]
+    needs: [publisher-policy, browser-manifest, edge-manifest]
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
     runs-on: ubuntu-latest
     # The same Gradle-in-a-container build as ci.yml's release-build, plus the
@@ -291,8 +362,9 @@ jobs:
         run: make vet
       # Every package runs at once here, so the slowest one takes longer
       # than in CI, where it has a job of its own. go test stops a package
-      # at 10 minutes unless told otherwise, and the v0.5.2-alpha.3 release
-      # failed on that limit after it was published.
+      # at 10 minutes unless told otherwise. The v0.5.2-alpha.3 release
+      # workflow stopped on that limit in this step, before it cross-compiled
+      # anything, so that release never had assets.
       - name: Unit tests
         env:
           GOFLAGS: -timeout=30m
@@ -425,3 +497,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/publish-release.sh "$GITHUB_REF_NAME" dist
+
+  # latest moves only after the release's assets are uploaded, to the index
+  # edge-manifest already pushed, so a release that fails earlier leaves it
+  # where it was and nothing is rebuilt.
+  edge-latest:
+    needs: [edge-manifest, release]
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move latest to the published edge image
+        env:
+          DIGEST: ${{ needs.edge-manifest.outputs.digest }}
+        run: |
+          image=ghcr.io/3xdevops/aether-edge
+          docker buildx imagetools create --tag "$image:latest" "$image@$DIGEST"
+          latest=$(docker buildx imagetools inspect "$image:latest" | awk '$1 == "Digest:" { print $2; exit }')
+          if [ "$latest" != "$DIGEST" ]; then
+            echo "::error::$image:latest is $latest, not the published $DIGEST"
+            exit 1
+          fi
+          echo "$image:latest is $GITHUB_REF_NAME, \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"

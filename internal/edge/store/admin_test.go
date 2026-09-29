@@ -409,10 +409,10 @@ func TestPendingDeletions(t *testing.T) {
 	}
 }
 
-// TestGoogleAccountFromAnEarlierVersion meets what v0.5.2-alpha.3 stored
-// for an account signed in with Google: the operator lists and deletes
-// it, and no server is owed a deletion it would refuse, however it was
-// recorded.
+// TestGoogleAccountFromAnEarlierVersion meets what a build from the
+// v0.5.2-alpha.3 tag stored for an account signed in with Google: the operator
+// lists and deletes it, and no server is owed a deletion it would refuse,
+// however it was recorded.
 func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()

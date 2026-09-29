@@ -34,7 +34,9 @@ expect true images/edge/Dockerfile
 expect true scripts/edge-image-smoke.sh
 expect true scripts/ci-classify-edge.sh
 expect true scripts/ci-classify-edge-test.sh
+expect true scripts/edge-go-version-test.sh
 expect true .github/workflows/ci.yml
+expect true .github/workflows/edge-image.yml
 expect true .github/workflows/release.yml
 expect true packaging/edge/aether-edge.env.example
 expect true images/other/Dockerfile

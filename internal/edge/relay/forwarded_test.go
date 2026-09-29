@@ -188,3 +188,26 @@ func TestForwardedFromTrustedProxies(t *testing.T) {
 		}
 	}
 }
+
+// TestForwardedNamesTheEntryItRefused checks that a refusal behind
+// trusted proxies names the entry the edge read past the right-most one
+// for, and that no entry puts control characters or its whole length in
+// the answer and the log.
+func TestForwardedNamesTheEntryItRefused(t *testing.T) {
+	e := newEnv(t)
+	proxies := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16")}
+	status, got := serveForwardedFrom(t, e, proxies, "172.18.0.2:50000", "unknown, 172.18.0.7")
+	want := `X-Forwarded-For entry 2 from the right, "unknown", is not an IP address; the edge read past the entries to its right because they are in --trusted-proxies, ` +
+		"so it took 172.18.0.7 for a proxy: list only the proxies' own addresses in --trusted-proxies, and have each proxy append the address it accepted the connection from"
+	if status != http.StatusBadRequest || got != want {
+		t.Fatalf("got %d %q, want 400 %q", status, got, want)
+	}
+
+	forged := "203.0.113.9\r\nlevel=ERROR msg=forged\x1b[0m" + strings.Repeat("é", 100)
+	h := http.Header{HeaderForwardedFor: {forged}}
+	_, err := forwardedFor(h, nil)
+	shown := `"203.0.113.9level=ERROR msg=forged[0m` + strings.Repeat("é", 64-len("203.0.113.9level=ERROR msg=forged[0m")) + `..."`
+	if err == nil || !strings.Contains(err.Error(), "the right-most X-Forwarded-For entry from the proxy in front of this edge, "+shown+", is not an IP address") {
+		t.Fatalf("forged entry: %v, want it shown as %s", err, shown)
+	}
+}

@@ -114,8 +114,8 @@ func TestOperatorCommands(t *testing.T) {
 	}
 }
 
-// TestGoogleAccountFromAnEarlierVersion lists and deletes an account
-// v0.5.2-alpha.3 created with Google.
+// TestGoogleAccountFromAnEarlierVersion lists and deletes an account a
+// build from the v0.5.2-alpha.3 tag created with Google.
 func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
 	dir := t.TempDir()
 	s, err := edgestore.Open(filepath.Join(dir, "edge.db"))

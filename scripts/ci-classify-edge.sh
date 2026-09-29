@@ -28,7 +28,8 @@ while IFS= read -r path || [ -n "$path" ]; do
 		;;
 	go.mod | go.sum | Makefile | .dockerignore | images/edge/* | \
 		scripts/ci-classify-edge* | scripts/edge-* | \
-		.github/workflows/ci.yml | .github/workflows/release.yml)
+		.github/workflows/ci.yml | .github/workflows/edge-image.yml | \
+		.github/workflows/release.yml)
 		printf '%s\n' true
 		exit 0
 		;;

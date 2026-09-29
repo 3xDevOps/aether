@@ -56,10 +56,11 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	fs.StringVar(&o.listen, "listen", env("AETHER_EDGE_LISTEN", ":443"),
 		"public TLS listener, with certificates for both origins' hosts")
 	fs.StringVar(&o.proxyListen, "proxy-listen", env("AETHER_EDGE_PROXY_LISTEN", ""),
-		"behind a reverse proxy on this host that terminates TLS: serve plain HTTP on this loopback address instead of --listen, "+
-			"and read client addresses from the proxy's "+relay.HeaderForwardedFor+" header")
+		"behind a reverse proxy that terminates TLS: serve plain HTTP on this address instead of --listen, "+
+			"and read client addresses from the proxy's "+relay.HeaderForwardedFor+" header; a loopback address unless --trusted-proxies names the proxies")
 	trustedProxies := fs.String("trusted-proxies", env("AETHER_EDGE_TRUSTED_PROXIES", ""),
-		"comma-separated networks, such as 172.18.0.0/16, of the reverse proxies in front of --proxy-listen when they are not on this host: "+
+		"comma-separated networks of the reverse proxies in front of --proxy-listen when they are not on this host: "+
+			"each proxy's own address, such as 10.0.0.5/32, or a network that holds only proxies, since every peer in them can set the client address. "+
 			"--proxy-listen may then be any address, and requests from any other peer are refused")
 	fs.StringVar(&o.devListen, "dev-listen", env("AETHER_EDGE_DEV_LISTEN", ""),
 		"development mode: serve plain HTTP on this loopback address instead of --listen, without certificates")

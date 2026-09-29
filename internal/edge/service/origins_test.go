@@ -75,7 +75,8 @@ func TestEachOriginServesOnlyItsOwnPaths(t *testing.T) {
 
 // TestOAuthCallbackIsOnTheSigninOrigin checks the redirect address GitHub
 // is sent, which must match the callback URL of the edge's OAuth app.
-// Sign-in with Google, which v0.5.2-alpha.3 offered, has no route.
+// Sign-in with Google, which builds from the v0.5.2-alpha.3 tag offered,
+// has no route.
 func TestOAuthCallbackIsOnTheSigninOrigin(t *testing.T) {
 	h := newHarness(t)
 	resp, _ := h.browser(t).get(t, "/signin/github")

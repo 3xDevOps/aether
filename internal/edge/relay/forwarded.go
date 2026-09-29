@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"unicode"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
@@ -101,19 +102,30 @@ func forwardedFor(h http.Header, proxies []netip.Prefix) (netip.Addr, error) {
 	var addr netip.Addr
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := strings.TrimSpace(entries[i])
-		var err error
-		addr, err = netip.ParseAddr(entry)
-		if err != nil || addr.Zone() != "" {
-			const maxShown = 64
-			if len(entry) > maxShown {
-				entry = entry[:maxShown] + "..."
+		if a, err := netip.ParseAddr(entry); err == nil && a.Zone() == "" {
+			if addr = a.Unmap(); !inAny(proxies, addr) {
+				break
 			}
+			continue
+		}
+		// The entry goes into the response and the log: a header must not
+		// fill either, or forge a log line.
+		entry = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, entry)
+		if r := []rune(entry); len(r) > 64 {
+			entry = string(r[:64]) + "..."
+		}
+		if i == len(entries)-1 {
 			return netip.Addr{}, fmt.Errorf("the right-most %s entry from the proxy in front of this edge, %q, is not an IP address%s",
 				HeaderForwardedFor, entry, fix)
 		}
-		if addr = addr.Unmap(); !inAny(proxies, addr) {
-			break
-		}
+		return netip.Addr{}, fmt.Errorf("%s entry %d from the right, %q, is not an IP address; the edge read past the entries to its right because they are in --trusted-proxies, "+
+			"so it took %s for a proxy: list only the proxies' own addresses in --trusted-proxies, and have each proxy append the address it accepted the connection from",
+			HeaderForwardedFor, len(entries)-i, entry, addr)
 	}
 	return addr, nil
 }

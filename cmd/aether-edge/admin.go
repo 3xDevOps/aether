@@ -44,9 +44,9 @@ commands:
   unblock <account>  accept the account's sign-ins again
   delete <account>   delete the account as its account page does; a block stays
 
-<account> is github:<user id>, as list prints it. An account created by
-v0.5.2-alpha.3 with Google, google:<subject>, cannot sign in; delete and
-unblock take it.
+<account> is github:<user id>, as list prints it. An account a build from
+the v0.5.2-alpha.3 tag created with Google, google:<subject>, cannot sign
+in; delete and unblock take it.
 `
 
 // errUsage reports a command line that does not name a command; the usage
@@ -153,7 +153,7 @@ func checkAccount(key string) error {
 }
 
 // checkStoredAccount checks an account as list prints it, which may be one
-// v0.5.2-alpha.3 created with Google.
+// a build from the v0.5.2-alpha.3 tag created with Google.
 func checkStoredAccount(key string) error {
 	_, _, err := splitAccount(key)
 	return err

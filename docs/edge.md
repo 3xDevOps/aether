@@ -984,10 +984,10 @@ front of a real edge ([testing.md](testing.md#behind-nginx)).
 #### A proxy that is not on this host
 
 A proxy in another container reaches the edge from that container's
-address, not from loopback. Name the networks the proxy connects from with
-`--trusted-proxies` (`AETHER_EDGE_TRUSTED_PROXIES`), a comma-separated list
-such as `172.18.0.0/16` for a container network or `10.0.0.5/32` for one
-machine. `--proxy-listen` may then be any address, such as `:8443`, and:
+address, not from loopback. Name the proxies with `--trusted-proxies`
+(`AETHER_EDGE_TRUSTED_PROXIES`), a comma-separated list of networks such as
+`10.0.0.5/32`. `--proxy-listen` may then be any address, such as `:8443`,
+and:
 
 - A request from a peer in those networks takes the right-most
   `X-Forwarded-For` entry that is not itself in them, so a chain of proxies
@@ -1000,10 +1000,18 @@ machine. `--proxy-listen` may then be any address, such as `:8443`, and:
   this edge serves requests only through its reverse proxy, and 198.51.100.7 is not in the edge's --trusted-proxies
   ```
 
-Every peer in the list is trusted to state client addresses, so list only
-the proxy's own network, and publish only the proxy's ports, not the
-edge's. `0.0.0.0/0` and `::/0` are refused: they would let any client
-choose the address the edge limits it by.
+Every peer in the listed networks can set the client address the edge
+rate-limits by. List each proxy's own address as a `/32` or `/128`, or a
+network that holds only proxies, and let nothing but the proxies reach the
+edge's `--proxy-listen` port; in a container, do not publish it.
+`0.0.0.0/0` and `::/0` are refused.
+
+A malformed entry to the left of trusted addresses is refused with `400`,
+naming its position from the right:
+
+```
+X-Forwarded-For entry 2 from the right, "unknown", is not an IP address; the edge read past the entries to its right because they are in --trusted-proxies, so it took 172.18.0.7 for a proxy: list only the proxies' own addresses in --trusted-proxies, and have each proxy append the address it accepted the connection from
+```
 
 ### Without a reverse proxy
 
@@ -1114,11 +1122,17 @@ tokens, owners and owed deletions; `edge_key`, the edge signing key every
 enrolled server pins; and, when the edge obtains its own certificates, the
 ACME cache in `acme/` ([Backup and recovery](#backup-and-recovery)). It
 must outlive every container. Mount a named volume, which takes the image's
-ownership, or a directory owned by uid 65532 (`chown -R 65532:65532
-<dir>`). The edge creates nothing in a directory another uid owns:
+ownership; a directory owned by uid 65532 (`chown -R 65532:65532 <dir> &&
+chmod 0700 <dir>`); or a directory the edge's uid writes through its group,
+such as `root:<gid>` mode `2770` on a platform that runs the container with
+that supplementary group. The edge refuses a directory its uid cannot
+write, one that others can enter, and an `edge_key` or `edge.db` another
+uid owns, since it creates both 0600:
 
 ```
-aether-edge: data directory /var/lib/aether-edge belongs to uid 0 and aether-edge runs as uid 65532; run chown -R 65532 /var/lib/aether-edge, or run the edge as uid 0
+aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is not writable by uid 65532, the user aether-edge runs as: permission denied; give that user write access as the directory's owner or through its group, or name another with --data or AETHER_EDGE_DATA
+aether-edge: data directory /var/lib/aether-edge has mode 0775, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx /var/lib/aether-edge
+aether-edge: /var/lib/aether-edge/edge_key belongs to uid 1000 and aether-edge runs as uid 65532; the edge opens only files it created, so run chown -R 65532 /var/lib/aether-edge
 ```
 
 A replacement container without the directory makes a new signing key and
@@ -1159,11 +1173,14 @@ shows it.
 #### Listening
 
 Behind a reverse proxy in another container, put both on one container
-network, publish only the proxy's ports, and trust that network's subnet,
-which `docker network inspect <network>` prints
+network, publish only the proxy's ports, and trust the proxy's own address
+on that network, not the network's subnet: every container on a trusted
+network could set the client address
 ([A proxy that is not on this host](#a-proxy-that-is-not-on-this-host)).
-The proxy passes both host names to `http://aether-edge:8443` with the
-headers and timeouts of [Behind a reverse proxy](#behind-a-reverse-proxy):
+Give the proxy a fixed address on that network, or use a network that holds
+only the proxy and the edge. The proxy passes both host names to
+`http://aether-edge:8443` with the headers and timeouts of
+[Behind a reverse proxy](#behind-a-reverse-proxy):
 
 ```sh
 docker volume create aether-edge-data
@@ -1174,7 +1191,7 @@ docker run -d --name aether-edge --network <network> \
   -e AETHER_EDGE_SIGNIN_ORIGIN=https://auth.example.com \
   -e AETHER_EDGE_RELAY_ORIGIN=https://edge.example.com \
   -e AETHER_EDGE_PROXY_LISTEN=:8443 \
-  -e AETHER_EDGE_TRUSTED_PROXIES=<network-subnet> \
+  -e AETHER_EDGE_TRUSTED_PROXIES=<proxy-address>/32 \
   -e AETHER_EDGE_GITHUB_CLIENT_ID=<github-client-id> \
   -e AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE=/run/secrets/github-client-secret \
   ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
@@ -1231,7 +1248,7 @@ The edge checks its options before it binds anything. Among the errors:
 aether-edge: edge: no GitHub OAuth app is configured; set --github-client-id and its client secret
 aether-edge: --github-client-id is set but its secret is not; name a file holding it with AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE (--github-client-secret-file), or set AETHER_EDGE_GITHUB_CLIENT_SECRET
 aether-edge: --github-client-secret-file: open /run/secrets/github-client-secret: no such file or directory; put the secret there, or name the file that holds it
-aether-edge: data directory /var/lib/aether-edge belongs to uid 0 and aether-edge runs as uid 65532; run chown -R 65532 /var/lib/aether-edge, or run the edge as uid 0
+aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is not writable by uid 65532, the user aether-edge runs as: permission denied; give that user write access as the directory's owner or through its group, or name another with --data or AETHER_EDGE_DATA
 aether-edge: --egress-budget "10G" is not a byte count
 aether-edge: --relay-origin must be https://host[:port], not "edge.example.com"; for a local plain-HTTP edge use --dev-listen
 aether-edge: --signin-origin https://edge.example.com and --relay-origin https://edge.example.com must name different hosts, such as auth.example.com and edge.example.com
@@ -1427,6 +1444,10 @@ migrated database with `edgestore: database schema version <n> is newer
 than this binary supports (<m>)`; to roll back, restore the backup taken
 before the upgrade.
 
+An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
+be replaced by this release together; a mix of that build and this one
+does not interoperate.
+
 Every handshake carries a protocol version. The edge accepts any server or
 client at or above its minimum version, including newer ones, which speak
 down. An older one is refused with `upgrade required: <minimum>` (HTTP 426
@@ -1458,8 +1479,9 @@ sudo -u aether-edge aether-edge accounts delete github:<user id>
 An account is `github:<user id>`, as the `ACCOUNT` column of `accounts
 list` prints it.
 
-An edge that ran v0.5.2-alpha.3 with Google sign-in may list accounts as
-`google:<subject>`. They cannot sign in: their sessions and device tokens
+Google sign-in existed only in builds from the `v0.5.2-alpha.3` tag, which
+never had a published binary or image. An edge built from that tag may
+list accounts as `google:<subject>`. They cannot sign in: their sessions and device tokens
 are refused with `sign-in provider "google" is not supported: Aether signs
 in with GitHub only; this edge's operator removes the account with:
 aether-edge accounts delete google:<subject>`. `accounts delete` and

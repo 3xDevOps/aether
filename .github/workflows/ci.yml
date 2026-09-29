@@ -351,45 +351,15 @@ jobs:
           path: ${{ runner.temp }}/aether-browser.tar
           retention-days: 1
 
-  # Builds the edge image on both architectures it ships for and runs its
-  # smoke test on each, natively. A pull request runs it only when
+  # A pull request runs the edge image build and smoke test only when
   # scripts/ci-classify-edge.sh says a changed path can affect the image.
-  # It pushes nothing: the release builds and publishes the image. Only
-  # pushes to main write the build cache the release reads.
+  # A workflow of its own so it can be started by hand on any branch.
   edge-image:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.edge == 'true') }}
     permissions:
       contents: read
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@v3
-      - name: Build the edge image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/edge/Dockerfile
-          load: true
-          tags: aether-edge:ci
-          build-args: |
-            VERSION=dev
-            COMMIT=${{ github.sha }}
-          cache-from: type=gha,scope=edge-${{ matrix.arch }}-main
-          cache-to: ${{ github.event_name == 'push' && format('type=gha,mode=max,scope=edge-{0}-main', matrix.arch) || '' }}
-      - name: Smoke-test the edge image
-        run: sh scripts/edge-image-smoke.sh aether-edge:ci
+    uses: ./.github/workflows/edge-image.yml
 
   # Sharded so the slow server scenarios do not share one runner. Five shards
   # cover internal/server by test name, balanced by the durations -v prints; scheduler is its own package; rest is

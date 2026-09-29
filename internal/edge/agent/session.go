@@ -225,8 +225,8 @@ func (a *Agent) reconcileOwner(s *session, state string) error {
 	}
 	if owner != nil {
 		if err := edgeproto.CheckProvider(owner.Provider); err != nil {
-			// v0.5.2-alpha.3 could record a Google account as the owner,
-			// which no edge signs in any more.
+			// A build from the v0.5.2-alpha.3 tag could record a Google
+			// account as the owner, which no edge signs in any more.
 			slog.Warn("edge: forgetting this server's owner", "edge", a.origin, "error", err)
 			return a.disown(s, *owner)
 		}

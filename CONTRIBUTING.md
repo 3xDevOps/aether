@@ -86,7 +86,14 @@ bun run test
 `images/edge/Dockerfile` builds the edge's container image. CI builds and
 smoke-tests it on amd64 and arm64 when `scripts/ci-classify-edge.sh` says a
 pull request's changes can affect it, and always on `main` and in the merge
-queue. To check it locally, with Docker and curl:
+queue. To run those checks on a branch the classifier skips, with write
+access to the repository:
+
+```sh
+gh workflow run edge-image.yml --ref <branch>
+```
+
+To check it locally, with Docker and curl:
 
 ```sh
 make edge-image
@@ -95,7 +102,9 @@ sh scripts/edge-image-smoke.sh aether/edge:test
 
 When `aether-edge` starts importing another repository package, `make
 test-scripts` fails naming the pattern to add to
-`scripts/ci-classify-edge.sh`. Both are described in
+`scripts/ci-classify-edge.sh`; when the Dockerfile's golang image and
+go.mod's `toolchain` line name different Go versions, it fails naming both.
+All three are described in
 [docs/testing.md](docs/testing.md#the-edge-image).
 
 ### Desktop shell

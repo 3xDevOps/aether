@@ -39,15 +39,23 @@ Layers, per the design spec's testing strategy:
   `scripts/ci-classify-changes.sh` from the pull request's base revision, so
   a change to that script cannot make the decision itself, and a rename is
   classified by both its old path and its new one. The `edge-image` job
-  builds [`images/edge/Dockerfile`](../images/edge/Dockerfile) on an amd64
-  and an arm64 runner and runs `scripts/edge-image-smoke.sh` on each
-  ([The edge image](#the-edge-image)); it pushes nothing. A pull request
-  runs it only when `scripts/ci-classify-edge.sh`, also from the base
-  revision, says a changed path can affect the image; a push to `main`, the
-  merge queue and a failed classification always run it. Nothing forces it
-  on a pull request the classifier skips, and a rerun classifies the same
-  files; run the smoke test locally instead. These jobs are the merge gate
-  the E2E suite owns.
+  calls `.github/workflows/edge-image.yml`, which builds
+  [`images/edge/Dockerfile`](../images/edge/Dockerfile) on an amd64 and an
+  arm64 runner and runs `scripts/edge-image-smoke.sh` on each
+  ([The edge image](#the-edge-image)); it pushes nothing and uses no build
+  cache. A pull request runs it only when `scripts/ci-classify-edge.sh`,
+  also from the base revision, says a changed path can affect the image; a
+  push to `main`, the merge queue and a failed classification always run
+  it. A rerun classifies the same files, so to force it on a branch the
+  classifier skips, start the workflow by hand, which needs write access to
+  the repository:
+
+  ```sh
+  gh workflow run edge-image.yml --ref <branch>
+  gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
+  ```
+
+  These jobs are the merge gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -567,6 +575,15 @@ ci-classify-edge-test: aether-edge imports internal/<package> on linux/amd64, wh
 ```
 
 Add that pattern, then run `sh scripts/ci-classify-edge-test.sh` again.
+
+The golang base image in `images/edge/Dockerfile` sets `GOTOOLCHAIN=local`,
+so the image builds with that image's Go whatever go.mod's `toolchain` line
+says. `scripts/edge-go-version-test.sh`, part of `make test-scripts`, fails
+when the two differ and names both versions:
+
+```
+edge-go-version-test: images/edge/Dockerfile builds with golang:1.26.8, but go.mod pins go1.26.9; change the golang tag and its @sha256 digest in images/edge/Dockerfile to 1.26.9 (or go.mod's toolchain line to go1.26.8)
+```
 
 ## The dashboard end-to-end suite
 

@@ -32,8 +32,9 @@ func oweDeletion(ctx context.Context, tx *sql.Tx, serverID, provider, subject st
 }
 
 // PendingDeletions returns the account deletions owed to serverID, oldest
-// first. A deletion v0.5.2-alpha.3 owed for a Google account is left out:
-// no server accepts it, and sending it would hold up the rest.
+// first. A deletion a build from the v0.5.2-alpha.3 tag owed for a Google
+// account is left out: no server accepts it, and sending it would hold up the
+// rest.
 func (s *Store) PendingDeletions(ctx context.Context, serverID string) ([]edgeproto.AccountDeleted, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT provider, subject FROM pending_account_deletions
 		WHERE server_id = ? AND provider = ? ORDER BY created_at, rowid`, serverID, edgeproto.ProviderGitHub)

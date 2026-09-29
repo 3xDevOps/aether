@@ -222,9 +222,10 @@ account is linked again with `aether member link` by an admin for
 themself, and restored on the machine for an admin who has no other way in
 ([edge.md](edge.md#console-recovery)).
 
-A server that used an edge with Google sign-in under v0.5.2-alpha.3 may
-list identities as `google:<subject>`, and invitations as `google:<email>`
-in `aether invite list`. They admit nobody: the edge directory leaves them
+A server built from the `v0.5.2-alpha.3` tag that used an edge with Google
+sign-in, which only such builds had, may list identities as
+`google:<subject>`, and invitations as `google:<email>` in `aether invite
+list`. They admit nobody: the edge directory leaves them
 out, and a grant naming a Google account is refused with `sign-in provider
 "google" is not supported: Aether signs in with GitHub only`. `aether
 member transfer` refuses a member whose only identity is one of them.

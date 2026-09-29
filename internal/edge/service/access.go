@@ -57,9 +57,9 @@ func (s *Service) deviceByToken(ctx context.Context, token string) (Client, int6
 	}, d.AccountID, nil
 }
 
-// unsupported refuses a when its provider is not GitHub: an account
-// v0.5.2-alpha.3 signed in with Google can no longer sign in or connect,
-// and only the edge's operator removes it.
+// unsupported refuses a when its provider is not GitHub: an account a build
+// from the v0.5.2-alpha.3 tag signed in with Google can no longer sign in or
+// connect, and only the edge's operator removes it.
 func unsupported(a edgeproto.Account) error {
 	if err := edgeproto.CheckProvider(a.Provider); err != nil {
 		return edgeproto.Refusal(fmt.Sprintf("%v; this edge's operator removes the account with: aether-edge accounts delete %s",

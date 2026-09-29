@@ -59,7 +59,8 @@ func newHarnessBehind(t *testing.T, addr netip.Addr) *harness {
 // and invites a collaborator, and both call a method over the relay. The
 // edge records the address the proxy forwarded, not the proxy's own, and
 // refuses a request that reaches it from any other peer, loopback
-// included. Google sign-in, which v0.5.2-alpha.3 offered, has no route.
+// included. Google sign-in, which builds from the v0.5.2-alpha.3 tag
+// offered, has no route.
 func TestBehindTrustedProxies(t *testing.T) {
 	t.Parallel()
 	proxyAddr := nonLoopback(t)

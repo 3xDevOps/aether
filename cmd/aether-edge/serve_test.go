@@ -70,8 +70,12 @@ func edgeCommand(dir string, env []string, args ...string) *exec.Cmd {
 
 func startEdge(t *testing.T, dataDir, emptyDir, secretFile string) *edgeProc {
 	t.Helper()
-	p := &edgeProc{stderr: &lockedBuffer{}, done: make(chan struct{})}
-	p.cmd = edgeCommand(emptyDir, []string{
+	return startEdgeCommand(t, serveCommand(dataDir, emptyDir, secretFile))
+}
+
+// serveCommand is aether-edge serve in development mode.
+func serveCommand(dataDir, emptyDir, secretFile string) *exec.Cmd {
+	return edgeCommand(emptyDir, []string{
 		"AETHER_EDGE_DATA=" + dataDir,
 		"AETHER_EDGE_DEV_LISTEN=127.0.0.1:0",
 		"AETHER_EDGE_METRICS_LISTEN=127.0.0.1:0",
@@ -80,6 +84,11 @@ func startEdge(t *testing.T, dataDir, emptyDir, secretFile string) *edgeProc {
 		"AETHER_EDGE_GITHUB_CLIENT_ID=fake-client-id",
 		"AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE=" + secretFile,
 	}, "serve")
+}
+
+func startEdgeCommand(t *testing.T, cmd *exec.Cmd) *edgeProc {
+	t.Helper()
+	p := &edgeProc{cmd: cmd, stderr: &lockedBuffer{}, done: make(chan struct{})}
 	p.cmd.Stderr = p.stderr
 	if err := p.cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -229,5 +238,22 @@ func TestServeWithoutConfigurationSaysWhatIsMissing(t *testing.T) {
 	want := `aether-edge: --signin-origin must be https://host[:port], not ""; set it or AETHER_EDGE_SIGNIN_ORIGIN` + "\n"
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 || string(out) != want {
 		t.Fatalf("serve with no configuration: %v\n%s", err, out)
+	}
+}
+
+// TestServeHelpDescribesTheProxyOptions checks that the help of the proxy
+// options matches both modes: a proxy on this host, and trusted proxies
+// elsewhere.
+func TestServeHelpDescribesTheProxyOptions(t *testing.T) {
+	out, _ := edgeCommand(t.TempDir(), nil, "serve", "-h").CombinedOutput()
+	help := strings.Join(strings.Fields(string(out)), " ")
+	for _, want := range []string{
+		"serve plain HTTP on this address instead of --listen, and read client addresses from the proxy's X-Forwarded-For header; " +
+			"a loopback address unless --trusted-proxies names the proxies",
+		"each proxy's own address, such as 10.0.0.5/32, or a network that holds only proxies, since every peer in them can set the client address.",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("aether-edge serve -h lacks %q:\n%s", want, out)
+		}
 	}
 }

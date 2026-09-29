@@ -395,9 +395,9 @@ func TestOwnerLeavingMakesTheServerOwnerless(t *testing.T) {
 	}
 }
 
-// An owner v0.5.2-alpha.3 recorded through Google is forgotten at
-// enrollment: the edge is told the server is ownerless, and the control
-// channel stays up.
+// An owner a build from the v0.5.2-alpha.3 tag recorded through Google is
+// forgotten at enrollment: the edge is told the server is ownerless, and the
+// control channel stays up.
 func TestGoogleOwnerFromAnEarlierVersion(t *testing.T) {
 	edge := newFakeEdge(t)
 	edge.state = edgeproto.StateClaimed

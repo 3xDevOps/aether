@@ -1365,20 +1365,33 @@ built - which used to leave the published release with no assets and
 `/releases/latest` pointing at it. Only an admin publisher runs the release
 job on a GitHub-hosted runner; other publishers are skipped.
 
-The `edge-image` job publishes the [edge](edge.md#in-a-container) image
+The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
-[`images/edge/Dockerfile`](../images/edge/Dockerfile) and tagged, like
-`aether-standard`, with the release tag, the full commit SHA,
-`sha-<short-sha>` and `latest`. It checks that the release tag names the
-digest it pushed, pulls each architecture and runs
-`scripts/edge-image-smoke.sh` on it, and lists the digests in the job
-summary. The release job waits for it, so a failed edge image uploads no
-assets. A new GHCR package starts private: after the first release that
+[`images/edge/Dockerfile`](../images/edge/Dockerfile) without a build cache
+and stamped with the release tag and the same short commit as the release
+binaries. Nothing reaches a tag before it is tested:
+
+1. `edge-image` builds each architecture on a native runner, runs
+   `scripts/edge-image-smoke.sh` on it, and only then pushes it as
+   `<tag>-amd64` or `<tag>-arm64`.
+2. `edge-manifest` joins those two under the immutable tags: the release
+   tag, the full commit SHA and `sha-<short-sha>`. It checks that every tag
+   names one index digest and that the index carries the two tested images,
+   pulls each architecture by tag and by digest, and lists the digests in
+   the job summary. The release job waits for it, so a failed edge image
+   uploads no assets.
+3. `edge-latest` moves `latest` to that digest only after the release job
+   has uploaded the assets. A release that fails earlier leaves `latest` on
+   the previous release.
+
+A new GHCR package starts private. The workflow does not fail on that, by
+design: the image is published and pullable with credentials, and only an
+administrator can change the visibility. After the first release that
 publishes `aether-edge`, a repository administrator opens
 <https://github.com/orgs/3xDevOps/packages/container/package/aether-edge>,
 chooses Package settings, and sets Danger Zone > Change visibility to
 Public; if the package page does not show the repository, **Connect
-repository** links it. Until then the job ends with the warning
+repository** links it. Until then `edge-manifest` ends with the warning
 `aether-edge is not public` and the release still completes.
 
 `make release` also builds and signs the [Android app](#android-app), the

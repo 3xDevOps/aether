@@ -220,11 +220,11 @@ func TestClaimCodeForAnAdminRecoversThatAdmin(t *testing.T) {
 	}
 }
 
-// TestGoogleIdentityFromAnEarlierVersion meets what v0.5.2-alpha.3 could
-// store through an edge that signed people in with Google: an identity
-// with its device, and an email invitation. The directory leaves them out
-// while the listings show them, ownership cannot go to them, and the
-// removal methods remove them.
+// TestGoogleIdentityFromAnEarlierVersion meets what a build from the
+// v0.5.2-alpha.3 tag could store through an edge that signed people in with
+// Google: an identity with its device, and an email invitation. The directory
+// leaves them out while the listings show them, ownership cannot go to them,
+// and the removal methods remove them.
 func TestGoogleIdentityFromAnEarlierVersion(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))

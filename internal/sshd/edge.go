@@ -695,8 +695,9 @@ func (s *Server) EdgeDirectory(ctx context.Context) ([]edgeproto.DirectoryEntry,
 	if err != nil {
 		return nil, fmt.Errorf("sshd: edge directory: %w", err)
 	}
-	// An identity or invitation v0.5.2-alpha.3 stored for Google matches no
-	// account and is left out; the listings show it until it is removed.
+	// An identity or invitation a build from the v0.5.2-alpha.3 tag stored
+	// for Google matches no account and is left out; the listings show it
+	// until it is removed.
 	var entries []edgeproto.DirectoryEntry
 	for _, id := range identities {
 		if id.Provider != edgeproto.ProviderGitHub {

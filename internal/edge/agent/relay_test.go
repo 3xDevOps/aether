@@ -89,8 +89,8 @@ func TestValidGrantReachesSSHOnce(t *testing.T) {
 	}
 }
 
-// An edge still signing Google accounts in, as v0.5.2-alpha.3 could,
-// opens nothing, and its client is told why.
+// An edge still signing Google accounts in, as a build from the v0.5.2-alpha.3
+// tag could, opens nothing, and its client is told why.
 func TestGoogleGrantRefusedWithTheReason(t *testing.T) {
 	edge, sshd, a, ec := enrolled(t)
 	openID := edgeproto.NewConnID()

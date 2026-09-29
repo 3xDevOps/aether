@@ -98,8 +98,8 @@ func TestDirectoryEntryMatches(t *testing.T) {
 
 	confirmed := now.Add(-IdentityMaxAge)
 	gh := Account{Provider: ProviderGitHub, Subject: "1001", Login: "Octo-Fake", Email: "Octo@Example.com", IdentityAt: confirmed}
-	// google is an account of the provider v0.5.2-alpha.3 also offered:
-	// no current edge signs it in, and nothing matches it.
+	// google is an account of the provider builds from the v0.5.2-alpha.3
+	// tag also offered: no current edge signs it in, and nothing matches it.
 	google := Account{Provider: "google", Subject: "1001", Email: "octo@example.com", IdentityAt: confirmed}
 	sameEmail := Account{Provider: ProviderGitHub, Subject: "4004", Login: "someone", Email: "octo@example.com", IdentityAt: confirmed}
 	noEmail := Account{Provider: ProviderGitHub, Subject: "2002", Login: "other", IdentityAt: confirmed}

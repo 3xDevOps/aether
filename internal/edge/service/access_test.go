@@ -30,7 +30,7 @@ func TestAdmissionMatrix(t *testing.T) {
 	staleInvitee.IdentityAt = now.Add(-edgeproto.IdentityMaxAge - time.Second)
 	unverified := edgeproto.Account{Provider: "github", Subject: "5", Login: "unverified", IdentityAt: now}
 	kelvin := edgeproto.Account{Provider: "github", Subject: "6", Login: "Kelvin", IdentityAt: now}
-	// An account v0.5.2-alpha.3 signed in with Google.
+	// An account a build from the v0.5.2-alpha.3 tag signed in with Google.
 	sameSubjectOtherProvider := edgeproto.Account{Provider: "google", Subject: "1", IdentityAt: now}
 	expiredInvitee := edgeproto.Account{Provider: "github", Subject: "7", Login: "late", IdentityAt: now}
 
@@ -457,10 +457,10 @@ func TestLimiterFullTableAdmitsNewAddresses(t *testing.T) {
 	}
 }
 
-// TestGoogleAccountFromAnEarlierVersion meets an account v0.5.2-alpha.3
-// signed in with Google, with a browser session and a device token: both
-// are refused with the reason and the command that removes the account,
-// and the browser can then sign in with GitHub.
+// TestGoogleAccountFromAnEarlierVersion meets an account a build from the
+// v0.5.2-alpha.3 tag signed in with Google, with a browser session and a
+// device token: both are refused with the reason and the command that removes
+// the account, and the browser can then sign in with GitHub.
 func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
 	h := newHarness(t)
 	b := signedInBrowser(t, h)

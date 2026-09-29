@@ -21,8 +21,8 @@ keeps every security property of that plan.
    handling, pages, client and dashboard choices, tests and documentation.
    Nothing is hidden behind a switch.
 2. An identity stays `(provider, subject)` with `github` as the only
-   provider. The server's schema and the wire contract shipped in
-   `v0.5.2-alpha.3` with that pair, and a shipped migration is never edited.
+   provider. The server's schema and the wire contract carry that pair at
+   the `v0.5.2-alpha.3` tag, and a tagged migration is never edited.
    What goes is the machinery for choosing between providers: flags,
    parameters, registries and branches that only a second provider needed.
 3. The edge's internal account id stays distinct from the GitHub identity.
@@ -80,15 +80,20 @@ again on this change:
   names the proxies' networks and requires `--proxy-listen`, which may then
   be any address. With it, loopback is no longer trusted implicitly, the
   client address is the right-most `X-Forwarded-For` entry outside the
-  networks, and a list that trusts every address is refused. Without it,
-  behaviour is unchanged.
+  networks, and a list that trusts every address is refused. Every peer in
+  the networks can set the client address, so the guide says to list each
+  proxy's own address or a network of proxies only. A malformed entry is
+  refused naming its position from the right and its value, bounded and
+  stripped of control characters. Without it, behaviour is unchanged.
 - **Health.** `aether-edge healthcheck` asks for `/healthz` on the
   loopback metrics listener, which answers only once the public listener
   is bound. It needs no certificate, host name or forwarded address in any
   listen mode.
-- **Data directory.** The edge creates it with mode 0700 and refuses one
-  that another uid owns or that it cannot write, naming the command that
-  fixes it. The database keeps SQLite's temporary storage in memory, so the
+- **Data directory.** The edge creates it with mode 0700. It accepts one
+  its uid writes as owner or through the directory's group, as container
+  platforms grant volumes, and refuses one it cannot write, one others can
+  enter, or an `edge_key` or `edge.db` another uid owns, naming the command
+  that fixes it and never suggesting root. The database keeps SQLite's temporary storage in memory, so the
   root filesystem may be read-only.
 - **Partial configuration.** The image's smoke test covers a start with no
   configuration; the refusals of a partial one, such as a client id
@@ -96,7 +101,12 @@ again on this change:
   binary's tests in `cmd/aether-edge`.
 - **Pinning.** The Dockerfile pins both base images by digest, and the
   release's edge job pins its actions by commit.
-- **Google data from v0.5.2-alpha.3.** Accounts and identities are listed
-  and removable and admit nobody. A v0.5.2-alpha.3 server that still holds
-  Google identities has its directory refused by a new edge, which closes
-  its control connection; such a server is upgraded with the edge.
+- **Google data from a build of the v0.5.2-alpha.3 tag.** That tag's
+  release workflow failed before building anything, so it has no published
+  binary or image and Google sign-in existed only in builds from source.
+  Accounts and identities such a build stored are listed and removable and
+  admit nobody. No compatibility is kept with such a build: a new edge
+  refuses the directory of a server that holds a Google invitation or
+  identity, a new CLI sends no provider when it creates a login
+  invitation, and a new server ignores an older CLI's `--provider`. The
+  edge, servers and clients built from the tag are replaced together.
