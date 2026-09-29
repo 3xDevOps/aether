@@ -96,8 +96,10 @@ func (p *proxy) serveControl(w http.ResponseWriter, r *http.Request, backAddr st
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// The edge picks the origin by host name, so the dial keeps the one
+	// the server named.
 	edgeWS, _, err := websocket.Dial(ctx, "ws://"+backAddr+edgeproto.PathServerControl,
-		&websocket.DialOptions{CompressionMode: websocket.CompressionDisabled})
+		&websocket.DialOptions{CompressionMode: websocket.CompressionDisabled, Host: r.Host})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

@@ -652,6 +652,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     memberRole: vi.fn(async () => bob),
     // No edge devices or invitations unless a test says so.
     memberDeviceList: vi.fn(async () => []),
+    memberDeviceLookup: vi.fn(async () => needsOverride('memberDeviceLookup')),
     memberDeviceApprove: vi.fn(async () => needsOverride('memberDeviceApprove')),
     memberDeviceRevoke: vi.fn(async () => needsOverride('memberDeviceRevoke')),
     memberInvitationList: vi.fn(async () => []),

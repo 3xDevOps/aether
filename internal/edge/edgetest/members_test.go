@@ -138,7 +138,7 @@ func TestCrossServerIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, banner, herr := sshOver(nc, b, "aether", al.signer(t)); herr == nil || !strings.Contains(banner, "github account alice is not a member of this server") {
+	if _, banner, herr := sshOver(nc, b, edgeproto.AccountUser(alice.account()), al.signer(t)); herr == nil || !strings.Contains(banner, "github account alice is not a member of this server") {
 		t.Fatalf("forged grant for A's owner on B: %v, banner %q", herr, banner)
 	}
 

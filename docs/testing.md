@@ -446,7 +446,7 @@ go test -race ./internal/edge/edgetest/
 | --- | --- |
 | `TestAccountAccess` | Under `account` an invited person works with no approval, the device is recorded `registered`, and a registered device approves nothing |
 | `TestApprovedDevices` | Under `approved-devices` every new device, a member's first included, waits: approved from the member's approved device, an admin's, or the console; a waiting device, an admin's included, opens no control channel |
-| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, a grant naming another account on a victim's approved key, a forged invitation acceptance, a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential |
+| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance, a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential; after the forged acceptance no member or administrator exists and the invitation is open |
 | `TestMaliciousEdgeSubstitutesTheClaimingAccount` | Under both policies a claim whose grant names another account is refused before the code is tried; no member, owner or spent attempt |
 | `TestMaliciousEdgeAccountAccess` | Against `account` the same forged admin grant is admitted with the admin's role: what that policy trusts the edge with. A key registered to one account still serves no other |
 | `TestTakenOverProviderAccount` | A taken-over GitHub account signs in on its own machine: access under `account`, a waiting device under `approved-devices` |
@@ -461,6 +461,8 @@ go test -race ./internal/edge/edgetest/
 | `TestDeleteAccountAfterTransfer` | `server.owner.transfer`, then deletion: the server keeps its new owner and every member and role |
 | `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; the console recovers it |
 | `TestAccountDeletionReachesAnOfflineServer` | A deletion reaches a server that was offline when it next enrolls |
+| `TestConsoleRecoveryOfAnAdminWithoutAnAccount` | Under both policies: the only admin, reachable only through the edge, deletes their account; a claim code from `claim-code --admin` binds the account they sign in with again to the same member and approves the device; a code naming a collaborator claims nothing; no member or admin is added |
+| `TestRelayHostNameChangeKeepsPinAndOwner` | The edge moves to other host names with the same key; the server, its `edge-url` changed, keeps its pin and owner, the edge keeps it claimed, and an admin transfers ownership |
 | `TestPolicySwitchToApprovedDevices` | Switching `account` to `approved-devices` refuses registered devices until reviewed; approved devices, member SSH keys and the tailnet dashboard keep working |
 | `TestExistingPathsWithoutTheEdge` | With the edge down, an invite code with an SSH key and the tailnet dashboard's in-process client work |
 | `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected, other-issuer, other-kind and wrong-connection grants; `aether-server edge trust` fetches the signing key |
@@ -471,6 +473,23 @@ go test -race ./internal/edge/edgetest/
 | `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again |
 | `TestBlockedServerStatusSaysWhy` | A blocked server's status for `aether-server edge status` carries the edge's reason |
 | `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone |
+
+Beside the suite, `internal/sshd` checks each server rule on its own,
+among them `TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
+an invitation until one is approved, which creates the member and removes
+the others), `TestRevokedInvitationDropsItsWaitingDevices`,
+`TestMemberIdentityListAndRemove`,
+`TestClaimCodeForAnAdminRecoversThatAdmin`,
+`TestApprovalShowsWhomTheCodeAdmits` (a lookup names the member and role
+before approving, and an approval naming another device commits nothing),
+`TestRelayedConnectionThroughAnEdgeThatSubstitutesTheAccount` and
+`TestWaitingDevicesAreBounded`; `internal/edge/agent` has
+`TestPinAndOwnerFollowTheEdgeKey`, `TestTransferOwner` and
+`TestOwnerIsReportedAgainAtEnrollment`. The integration suite's
+`TestIntegrationUpgradeFromMainWithoutTheEdge` starts this build on a
+database at main's schema version and a configuration without edge keys:
+any outbound HTTP request fails it, and its SSH key and tailnet members
+sign in as before.
 
 Every request reaches the edge from 127.0.0.1, so each test moves its
 edge's clock forward to refill the per-address rate limits. Tests run in

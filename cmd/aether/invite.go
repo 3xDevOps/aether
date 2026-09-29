@@ -55,7 +55,8 @@ func runInvite(args []string) error {
 		}
 		inv := res.Invitation
 		fmt.Printf("invited %s as %s until %s (invitation %s)\n", inviteeOf(inv), inv.Role, inv.ExpiresAt, inv.ID)
-		fmt.Println("send them this server's id, which sudo aether-server edge status prints; they run aether login, then aether link <server id>")
+		fmt.Println("send them this server's id, which sudo aether-server edge status prints; they run aether login, then aether link <server id>.\n" +
+			"Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>")
 		return nil
 	})
 }
@@ -70,7 +71,7 @@ const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
 func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int, error) {
 	fs := flag.NewFlagSet("invite", flag.ExitOnError)
 	ttl := fs.Int("ttl", 86400, "lifetime of a one-time invite code in seconds")
-	github := fs.String("github", "", "invite this GitHub login; it joins on its first connection through the edge")
+	github := fs.String("github", "", "invite this GitHub login; its first connection through the edge joins under edge-access account, and waits for aether device approve <code> under approved-devices")
 	email := fs.String("email", "", "invite the account with this provider-verified email")
 	provider := fs.String("provider", "", `with --email: accept only "github" or "google" (default either)`)
 	role := fs.String("role", "collaborator", "role of an invited account: viewer, collaborator, or admin")

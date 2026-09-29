@@ -110,8 +110,14 @@ func TestAccountPageDeletes(t *testing.T) {
 		t.Errorf("stale sign-in: account page offers deletion:\n%s", page)
 	}
 	if resp, page = f.b.post(t, "/account/delete", url.Values{"confirm": {"owner"}}); resp.StatusCode != http.StatusForbidden ||
-		!strings.Contains(page, "deleting an account needs a sign-in from the last 5m0s") {
+		!strings.Contains(page, "deleting an account needs a sign-in in this browser from the last 5m0s") {
 		t.Fatalf("delete with a stale sign-in: %s\n%s", resp.Status, page)
+	}
+	// The account signing in elsewhere, as its person does every day,
+	// does not let a stolen copy of this browser's cookie delete it.
+	h.browser(t).signIn(t, edgeproto.ProviderGitHub)
+	if resp, page = f.b.post(t, "/account/delete", url.Values{"confirm": {"owner"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("delete from a stale browser after a sign-in in another: %s\n%s", resp.Status, page)
 	}
 
 	f.b.signIn(t, edgeproto.ProviderGitHub)
@@ -135,7 +141,10 @@ func TestAccountPageDeletes(t *testing.T) {
 	checkDeleted(t, h, f)
 }
 
-func TestAccountAPIDeletes(t *testing.T) {
+// A device token reads what deleting the account touches but cannot
+// delete it, even right after the person signed in: only a browser that
+// signed in itself deletes.
+func TestDeviceTokenCannotDeleteAccount(t *testing.T) {
 	h := newHarness(t)
 	f := newAccountFixture(t, h)
 
@@ -147,24 +156,14 @@ func TestAccountAPIDeletes(t *testing.T) {
 		len(sum.Member) != 1 || sum.Member[0].ID != f.member || sum.Member[0].Role != "collaborator" {
 		t.Fatalf("account summary %+v", sum)
 	}
-	if status, _ := h.apiCall(t, http.MethodPost, edgeproto.PathAccountDelete, "", edgeproto.AccountDeleteRequest{Confirm: "owner"}, nil); status != http.StatusUnauthorized {
-		t.Fatalf("delete without a device token: %d", status)
-	}
 
-	// A device token alone does not delete: the person signs in again.
-	h.clock.Advance(reauthWindow + time.Second)
-	if status, msg := h.apiCall(t, http.MethodPost, edgeproto.PathAccountDelete, f.tok.Token, edgeproto.AccountDeleteRequest{Confirm: "owner"}, nil); status != http.StatusForbidden ||
-		!strings.Contains(msg, "sign in again at "+testSignin+"/signin/github?next=%2Faccount") {
-		t.Fatalf("delete with a stale sign-in: %d %q", status, msg)
+	h.browser(t).signIn(t, edgeproto.ProviderGitHub)
+	if status, msg := h.apiCall(t, http.MethodPost, "/v1/account/delete", f.tok.Token, map[string]string{"confirm": "owner"}, nil); status != http.StatusNotFound {
+		t.Fatalf("delete with a device token: %d %q", status, msg)
 	}
-	f.b.signIn(t, edgeproto.ProviderGitHub)
-	if status, msg := h.apiCall(t, http.MethodPost, edgeproto.PathAccountDelete, f.tok.Token, edgeproto.AccountDeleteRequest{Confirm: "someone"}, nil); status != http.StatusBadRequest {
-		t.Fatalf("delete with a wrong confirmation: %d %q", status, msg)
+	if status, msg := h.apiCall(t, http.MethodGet, edgeproto.PathAccount, f.tok.Token, nil, &sum); status != http.StatusOK || len(h.link.deleted) != 0 {
+		t.Fatalf("account after a device token asked to delete it: %d %q, relay told %+v", status, msg, h.link.deleted)
 	}
-	if status, msg := h.apiCall(t, http.MethodPost, edgeproto.PathAccountDelete, f.tok.Token, edgeproto.AccountDeleteRequest{Confirm: "owner"}, nil); status != http.StatusNoContent {
-		t.Fatalf("delete: %d %q", status, msg)
-	}
-	checkDeleted(t, h, f)
 }
 
 func TestConfirmationOfAnAccountWithoutLoginOrEmail(t *testing.T) {

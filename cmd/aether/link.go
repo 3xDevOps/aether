@@ -211,13 +211,22 @@ func runLink(args []string) error {
 // to a server the edge lists.
 func edgeLinkOptions(opts linkOptions) (cli.LinkOptions, error) {
 	if opts.claim != "" {
-		if _, _, err := edgeproto.ParseClaimCode(opts.claim); err != nil {
+		_, serverID, err := edgeproto.ParseClaimCode(opts.claim)
+		if err != nil {
 			return cli.LinkOptions{}, fmt.Errorf("link --claim: %w", err)
 		}
 		client, err := edgeClient(opts.edge)
 		if err != nil {
 			return cli.LinkOptions{}, err
 		}
+		// The claim is made for the account the edge reported at sign-in,
+		// so the person sees it before the code is sent.
+		session, err := client.Session()
+		if err != nil {
+			return cli.LinkOptions{}, fmt.Errorf("link --claim through %s: %w", client.Host(), err)
+		}
+		fmt.Printf("claiming server %s as %s, the account %s reported when this device signed in\n",
+			serverID, accountName(session.Account.Account), client.Host())
 		return cli.LinkOptions{Addr: opts.direct, Name: opts.name, EdgeURL: client.URL(), Claim: opts.claim}, nil
 	}
 	if opts.invite != "" || opts.key != "" || !edgeproto.ValidServerID(opts.addr) {

@@ -65,12 +65,10 @@ func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID
 	if perr != nil {
 		return nil, perr
 	}
-	// Under registerMu the new owner stays an admin until the edge has it.
-	s.registerMu.Lock()
-	defer s.registerMu.Unlock()
-	if perr := s.requireAdmin(ctx, member, method); perr != nil {
-		return nil, perr
-	}
+	// No registerMu here: a claim holds the edge state lock that
+	// TransferOwner takes while it waits for registerMu. A role change or
+	// removal that lands after these checks has the effect it would have
+	// landing just after the transfer.
 	target, err := s.cfg.Store.GetMember(ctx, domain.MemberID(p.MemberID))
 	if err != nil {
 		return nil, rpcError(err)
@@ -115,10 +113,11 @@ func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID
 }
 
 // requireApprovedCaller refuses method on a connection that authenticated
-// with an edge device no person has approved. Approving devices needs it
-// under either policy, so that no device is approved on the strength of
-// a sign-in alone and a later switch to approved-devices inherits
-// nothing. The other methods that raise privilege or admit a credential
+// with an edge device no person has approved. Approving devices and
+// minting invite codes need it under either policy, so that no device is
+// approved and no bearer credential is issued on the strength of a
+// sign-in alone, and a later switch to approved-devices inherits nothing.
+// The other methods that raise privilege or admit a credential
 // need it under approved-devices, where signing in admits nothing. A
 // member SSH key, a tailnet identity and the tailnet dashboard carry no
 // device and pass.

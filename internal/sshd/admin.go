@@ -98,7 +98,7 @@ func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, param
 	if err := s.requireAdmin(ctx, member, protocol.MethodMemberInvite); err != nil {
 		return nil, err
 	}
-	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberInvite, false); err != nil {
+	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberInvite, true); err != nil {
 		return nil, err
 	}
 	if s.cfg.InvitesDir == "" {

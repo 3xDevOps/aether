@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -84,10 +85,21 @@ func linkKey(choice string, prev Config, name string) (string, error) {
 
 func linkConfig(cfg, prev Config, name string) Config {
 	cfg.Links = prev.Links
+	// Git remotes of an edge link name only its server id, and edge-ssh
+	// finds the link by that id: a replaced edge default stays, named by
+	// its server id.
+	if prev.ServerID != "" && prev.ServerID != cfg.ServerID &&
+		!slices.ContainsFunc(prev.Links, func(l NamedLink) bool { return l.ServerID == prev.ServerID }) {
+		cfg = UpsertLink(cfg, namedLink(prev.ServerID, prev))
+	}
 	if name == "" {
 		return cfg
 	}
-	return UpsertLink(cfg, NamedLink{
+	return UpsertLink(cfg, namedLink(name, cfg))
+}
+
+func namedLink(name string, cfg Config) NamedLink {
+	return NamedLink{
 		Name:       name,
 		Addr:       cfg.Addr,
 		User:       cfg.User,
@@ -97,7 +109,7 @@ func linkConfig(cfg, prev Config, name string) Config {
 		KnownHosts: cfg.KnownHosts,
 		EdgeURL:    cfg.EdgeURL,
 		ServerID:   cfg.ServerID,
-	})
+	}
 }
 
 // Link dials and verifies a server, returning the config to save and the

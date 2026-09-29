@@ -225,7 +225,6 @@ func (s *Service) Handler() http.Handler {
 	api.HandleFunc("POST "+edgeproto.PathLogout, s.api(s.apiLogout))
 	api.HandleFunc("GET "+edgeproto.PathServers, s.api(s.apiServers))
 	api.HandleFunc("GET "+edgeproto.PathAccount, s.api(s.apiAccount))
-	api.HandleFunc("POST "+edgeproto.PathAccountDelete, s.api(s.apiAccountDelete))
 
 	signin := http.NewServeMux()
 	signin.Handle("/v1/", api)

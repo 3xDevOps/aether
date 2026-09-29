@@ -94,10 +94,7 @@ func reportEdge(w io.Writer, configPath string) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(w, "\nedge: %s\nedge access: %s\nserver id: %s\n", edgeURL, fs.Lookup("edge-access").Value, id)
-	state, err := edgeagent.OpenState(dataDir, edgeURL)
-	if err != nil {
-		return err
-	}
+	state := edgeagent.OpenState(dataDir)
 	pinned, err := state.PinnedKey()
 	if err != nil {
 		return err
@@ -115,7 +112,7 @@ func reportEdge(w io.Writer, configPath string) error {
 		_, _ = fmt.Fprintf(w, "owner: %s\n", describeAccount(*owner))
 		return nil
 	}
-	code, expires, err := state.IssueClaimCode(id, time.Now())
+	code, expires, err := state.IssueClaimCode(id, "", time.Now())
 	if err != nil {
 		return err
 	}

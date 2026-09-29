@@ -54,11 +54,12 @@ func (s *Store) PendingDeletions(ctx context.Context, serverID string) ([]edgepr
 	return out, nil
 }
 
-// DeletionDelivered forgets a deletion owed to serverID once it was sent.
-func (s *Store) DeletionDelivered(ctx context.Context, serverID string, d edgeproto.AccountDeleted) error {
+// DeletionApplied forgets a deletion owed to serverID once the server
+// applied it.
+func (s *Store) DeletionApplied(ctx context.Context, serverID string, d edgeproto.AccountDeleted) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM pending_account_deletions
 		WHERE server_id = ? AND provider = ? AND subject = ?`, serverID, d.Provider, d.Subject); err != nil {
-		return fmt.Errorf("edgestore: forget deletion delivered to %s: %w", serverID, err)
+		return fmt.Errorf("edgestore: forget deletion applied by %s: %w", serverID, err)
 	}
 	return nil
 }

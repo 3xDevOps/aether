@@ -210,19 +210,3 @@ func (c *Client) Account(ctx context.Context) (edgeproto.AccountSummary, error) 
 	}
 	return sum, nil
 }
-
-// DeleteAccount deletes the signed-in account at the edge once confirm,
-// as the person typed it, names it, then deletes this machine's token.
-// The edge refuses unless the account signed in with its provider in a
-// browser within the last few minutes, and its refusal says where.
-func (c *Client) DeleteAccount(ctx context.Context, confirm string) error {
-	s, err := c.session()
-	if err != nil {
-		return err
-	}
-	req := edgeproto.AccountDeleteRequest{Confirm: confirm}
-	if err := c.call(ctx, "delete account", http.MethodPost, s.SigninOrigin, edgeproto.PathAccountDelete, s.Token, req, nil); err != nil {
-		return err
-	}
-	return updateTokens(c.dir, func(f tokensFile) { delete(f.Edges, c.origin) })
-}

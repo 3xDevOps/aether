@@ -39,14 +39,23 @@ func (s DeviceStatus) AwaitsApproval() bool {
 
 // Device is one client install a member reaches the server through an
 // edge with. Credential is its device key as an authorized_keys line.
-// Provider and Subject name the member's edge identity the device was
-// registered through; only grants naming that identity may use it.
-// ApprovalCode is set only while the device awaits approval.
+// Provider and Subject name the edge account the device signed in with,
+// the member's identity; only grants naming that account may use it.
+// Email, Login and Name are what the edge reported for that account when
+// the device registered. ApprovalCode is set only while the device awaits
+// approval.
+//
+// A device waiting on an invitation has Invitation set and no Member:
+// approving it accepts the invitation for its account.
 type Device struct {
 	ID           DeviceID
 	Member       MemberID
+	Invitation   InvitationID
 	Provider     string
 	Subject      string
+	Email        string
+	Login        string
+	Name         string
 	Credential   string
 	Label        string
 	Status       DeviceStatus

@@ -1169,7 +1169,7 @@ automatic.
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
-| `edge/` | Edge enrollment, one directory per edge origin (`https_edge.onaether.dev/`): the pinned edge key, the owner, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
+| `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |

@@ -23,7 +23,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const edgeUsage = "usage: aether-server edge <status|claim-code|trust|leave> [--config <file>]"
+const edgeUsage = "usage: aether-server edge <status|claim-code [--admin <member id>]|trust|leave> [--config <file>]"
 
 // edgeURLValue is the edge-url option: an edge URL, or empty for no edge.
 // Validating it as a flag makes `config set` and the config file refuse a
@@ -63,11 +63,14 @@ func (v *accessPolicyValue) Set(s string) error {
 
 // loadOptions parses args as serve options over the config file, so the
 // edge and device commands act on the data directory and edge the service
-// uses.
-func loadOptions(name string, args []string) (*serveOptions, string, []string, error) {
+// uses. extra, when set, declares the command's own flags.
+func loadOptions(name string, args []string, extra func(*flag.FlagSet)) (*serveOptions, string, []string, error) {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	configPath := fs.String("config", serversetup.DefaultConfigPath, "options file to read")
 	o := serveFlags(fs)
+	if extra != nil {
+		extra(fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		return nil, "", nil, err
 	}
@@ -82,7 +85,14 @@ func edgeCmd(args []string) error {
 		return errors.New(edgeUsage)
 	}
 	sub := args[0]
-	o, configPath, rest, err := loadOptions("edge "+sub, args[1:])
+	var admin *string
+	var extra func(*flag.FlagSet)
+	if sub == "claim-code" {
+		extra = func(fs *flag.FlagSet) {
+			admin = fs.String("admin", "", "the id of an existing admin member the claim binds the claiming account to, to restore an admin who can no longer reach the server")
+		}
+	}
+	o, configPath, rest, err := loadOptions("edge "+sub, args[1:], extra)
 	if err != nil {
 		return err
 	}
@@ -97,7 +107,7 @@ func edgeCmd(args []string) error {
 	case "status":
 		return edgeStatus(os.Stdout, *o.dataDir, edgeURL, edgeproto.AccessPolicy(*o.edgeAccess), time.Now())
 	case "claim-code":
-		return edgeClaimCode(os.Stdout, *o.dataDir, edgeURL)
+		return edgeClaimCode(os.Stdout, *o.dataDir, domain.MemberID(*admin))
 	case "trust":
 		return edgeTrust(os.Stdout, os.Stdin, *o.dataDir, edgeURL)
 	case "leave":
@@ -132,10 +142,7 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	if err != nil {
 		return err
 	}
-	state, err := edgeagent.OpenState(dataDir, edgeURL)
-	if err != nil {
-		return err
-	}
+	state := edgeagent.OpenState(dataDir)
 	pinned, err := state.PinnedKey()
 	if err != nil {
 		return err
@@ -181,11 +188,14 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	return tw.Flush()
 }
 
-func edgeClaimCode(w io.Writer, dataDir, edgeURL string) error {
-	state, err := edgeagent.OpenState(dataDir, edgeURL)
-	if err != nil {
-		return err
-	}
+// edgeClaimCode issues a claim code. With admin it is console recovery:
+// the claim binds the claiming account to that existing admin member and
+// approves the claiming device, for an admin who can no longer reach the
+// server, such as after deleting their account. It never creates a member
+// or changes a role, so a member who is not an admin is refused here and
+// again when the claim is made.
+func edgeClaimCode(w io.Writer, dataDir string, admin domain.MemberID) error {
+	state := edgeagent.OpenState(dataDir)
 	owner, err := state.Owner()
 	if err != nil {
 		return err
@@ -193,16 +203,58 @@ func edgeClaimCode(w io.Writer, dataDir, edgeURL string) error {
 	if owner != nil {
 		return fmt.Errorf("this server is already claimed by %s", describeAccount(*owner))
 	}
+	var m *domain.Member
+	if admin != "" {
+		if m, err = recoveryAdmin(dataDir, admin); err != nil {
+			return err
+		}
+	}
 	id, err := serverID(dataDir)
 	if err != nil {
 		return err
 	}
-	code, expires, err := state.IssueClaimCode(id, time.Now())
+	code, expires, err := state.IssueClaimCode(id, string(admin), time.Now())
 	if err != nil {
 		return err
 	}
 	printClaimCode(w, code, expires)
+	if m != nil {
+		_, _ = fmt.Fprintf(w, "the claim binds the claiming account to admin %s (%s) and approves the claiming device; it creates no member and changes no role\n",
+			m.DisplayName, m.ID)
+	}
 	return nil
+}
+
+// recoveryAdmin is the member claim-code --admin names, which must exist
+// and be an admin.
+func recoveryAdmin(dataDir string, id domain.MemberID) (*domain.Member, error) {
+	db, err := store.Open(server.StorePath(dataDir))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close() //nolint:errcheck // read only
+	ctx := context.Background()
+	m, err := db.GetMember(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		members, lerr := db.ListMembers(ctx)
+		if lerr != nil {
+			return nil, lerr
+		}
+		var admins []string
+		for _, a := range members {
+			if a.Role == domain.RoleAdmin {
+				admins = append(admins, fmt.Sprintf("%s (%s)", a.ID, a.DisplayName))
+			}
+		}
+		return nil, fmt.Errorf("--admin: no member %s; the admins are: %s", id, strings.Join(admins, ", "))
+	}
+	if err != nil {
+		return nil, err
+	}
+	if m.Role != domain.RoleAdmin {
+		return nil, fmt.Errorf("--admin: member %s (%s) is %s; console recovery restores an admin and never raises a role", m.DisplayName, id, m.Role)
+	}
+	return m, nil
 }
 
 func printClaimCode(w io.Writer, code string, expires time.Time) {
@@ -211,10 +263,7 @@ func printClaimCode(w io.Writer, code string, expires time.Time) {
 }
 
 func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {
-	state, err := edgeagent.OpenState(dataDir, edgeURL)
-	if err != nil {
-		return err
-	}
+	state := edgeagent.OpenState(dataDir)
 	pinned, err := state.PinnedKey()
 	if err != nil {
 		return err
@@ -243,10 +292,19 @@ func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {
 	if strings.TrimSpace(answer) != "yes" {
 		return errors.New("not pinned; the edge key is unchanged")
 	}
-	if err := state.Pin(key); err != nil {
+	if err = state.Pin(key); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(w, "pinned %s; the server uses it when it next reconnects\n", offered)
+	owner, err := state.Owner()
+	if err != nil {
+		return err
+	}
+	if owner == nil {
+		_, _ = fmt.Fprintln(w, "The server keeps its owner per edge key and has none for this one. If the edge records an owner, the server reports itself ownerless when it reconnects; `aether-server edge claim-code` gives a code to claim it.")
+	} else {
+		_, _ = fmt.Fprintf(w, "owner with this key: %s\n", describeAccount(*owner))
+	}
 	return nil
 }
 
@@ -268,13 +326,9 @@ func edgeLeave(w io.Writer, dataDir, edgeURL, configPath string) error {
 
 // deviceStore is the part of the store the device commands use.
 type deviceStore interface {
-	GetDeviceByApprovalCode(ctx context.Context, code string) (*domain.Device, error)
-	ListDevices(ctx context.Context, member domain.MemberID) ([]*domain.Device, error)
-	ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error
-	RevokeDevice(ctx context.Context, id domain.DeviceID) error
+	store.IdentityStore
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
-	ListIdentities(ctx context.Context) ([]*domain.Identity, error)
 }
 
 const deviceUsage = "usage: aether-server device <approve <code> | review> [--config <file>]"
@@ -295,7 +349,7 @@ func deviceCmd(args []string) error {
 	default:
 		return fmt.Errorf("unknown device command %q (want approve or review)", sub)
 	}
-	o, _, rest, err := loadOptions("device "+sub, args)
+	o, _, rest, err := loadOptions("device "+sub, args, nil)
 	if err != nil {
 		return err
 	}
@@ -308,14 +362,15 @@ func deviceCmd(args []string) error {
 	}
 	defer db.Close() //nolint:errcheck // every change is committed before Close
 	if sub == "approve" {
-		return deviceApprove(context.Background(), os.Stdout, db, code)
+		return deviceApprove(context.Background(), os.Stdout, os.Stdin, db, code)
 	}
 	return deviceReview(context.Background(), os.Stdout, os.Stdin, db, edgeproto.AccessPolicy(*o.edgeAccess))
 }
 
-// deviceApprove approves a device awaiting approval as the machine's
+// deviceApprove shows the device code names and whom approving admits it
+// as, and approves it once the operator answers yes, as the machine's
 // administrator, who is no member, so the approval names no approver.
-func deviceApprove(ctx context.Context, w io.Writer, db deviceStore, code string) error {
+func deviceApprove(ctx context.Context, w io.Writer, in io.Reader, db deviceStore, code string) error {
 	dev, err := db.GetDeviceByApprovalCode(ctx, code)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -325,15 +380,61 @@ func deviceApprove(ctx context.Context, w io.Writer, db deviceStore, code string
 	case err != nil:
 		return err
 	}
+	members, err := db.ListMembers(ctx)
+	if err != nil {
+		return err
+	}
+	owner, err := deviceOwner(ctx, db, membersByID(members), dev)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "%q %s, signed in as %s\n   %s, key %s\n", dev.Label, owner, deviceAccount(dev), dev.Status, keyFingerprint(dev.Credential))
+	_, _ = fmt.Fprint(w, "Whoever holds this device gets that member's access. approve it? [y/N]: ")
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if answer := strings.ToLower(strings.TrimSpace(line)); answer != "y" && answer != "yes" {
+		return errors.New("device approve: not approved")
+	}
+	invitation := dev.Invitation
+	if dev, err = sshd.ApproveDevice(ctx, db, db, dev, ""); err != nil {
+		return err
+	}
 	member, err := db.GetMember(ctx, dev.Member)
 	if err != nil {
 		return err
 	}
-	if err := db.ApproveDevice(ctx, dev.ID, ""); err != nil {
-		return err
+	_, _ = fmt.Fprintf(w, "approved device %q of %s (%s), signed in as %s\n", dev.Label, member.DisplayName, member.ID, deviceAccount(dev))
+	if invitation != "" {
+		_, _ = fmt.Fprintf(w, "invitation %s accepted: %s joined as %s\n", invitation, member.DisplayName, member.Role)
 	}
-	_, _ = fmt.Fprintf(w, "approved device %q of %s (%s)\n", dev.Label, member.DisplayName, member.ID)
 	return nil
+}
+
+func membersByID(members []*domain.Member) map[domain.MemberID]*domain.Member {
+	byID := make(map[domain.MemberID]*domain.Member, len(members))
+	for _, m := range members {
+		byID[m.ID] = m
+	}
+	return byID
+}
+
+// deviceOwner says whom approving dev admits it as: its member with that
+// member's role, or what its invitation adds.
+func deviceOwner(ctx context.Context, db deviceStore, byID map[domain.MemberID]*domain.Member, dev *domain.Device) (string, error) {
+	if dev.Invitation != "" {
+		return invitee(ctx, db, byID, dev.Invitation)
+	}
+	if m := byID[dev.Member]; m != nil {
+		return fmt.Sprintf("of %s (%s), %s", m.DisplayName, m.ID, m.Role), nil
+	}
+	return "of " + string(dev.Member), nil
+}
+
+// deviceAccount names the edge account dev signed in as.
+func deviceAccount(dev *domain.Device) string {
+	return dev.Provider + " " + cmp.Or(dev.Login, dev.Email, dev.Subject)
 }
 
 // deviceReview walks the operator through every edge device awaiting
@@ -346,18 +447,7 @@ func deviceReview(ctx context.Context, w io.Writer, in io.Reader, db deviceStore
 	if err != nil {
 		return err
 	}
-	byID := make(map[domain.MemberID]*domain.Member, len(members))
-	for _, m := range members {
-		byID[m.ID] = m
-	}
-	identities, err := db.ListIdentities(ctx)
-	if err != nil {
-		return err
-	}
-	logins := make(map[[2]string]string, len(identities))
-	for _, id := range identities {
-		logins[[2]string{id.Provider, id.Subject}] = cmp.Or(id.Login, id.Email)
-	}
+	byID := membersByID(members)
 	devices, err := db.ListDevices(ctx, "")
 	if err != nil {
 		return err
@@ -379,17 +469,16 @@ func deviceReview(ctx context.Context, w io.Writer, in io.Reader, db deviceStore
 	}
 	lines := bufio.NewReader(in)
 	for i, dev := range waiting {
-		name, member := string(dev.Member), byID[dev.Member]
-		if member != nil {
-			name = fmt.Sprintf("%s (%s)", member.DisplayName, member.ID)
+		owner, err := deviceOwner(ctx, db, byID, dev)
+		if err != nil {
+			return err
 		}
-		account := dev.Provider + " " + cmp.Or(logins[[2]string{dev.Provider, dev.Subject}], dev.Subject)
 		lastSeen := "never"
 		if dev.LastSeenAt != nil {
 			lastSeen = dev.LastSeenAt.Local().Format(time.DateTime)
 		}
-		_, _ = fmt.Fprintf(w, "\n%d. %q of %s, signed in as %s\n   %s, key %s\n   first seen %s, last seen %s\n",
-			i+1, dev.Label, name, account, dev.Status, keyFingerprint(dev.Credential),
+		_, _ = fmt.Fprintf(w, "\n%d. %q %s, signed in as %s\n   %s, key %s\n   first seen %s, last seen %s\n",
+			i+1, dev.Label, owner, deviceAccount(dev), dev.Status, keyFingerprint(dev.Credential),
 			dev.CreatedAt.Local().Format(time.DateTime), lastSeen)
 		action, err := askDeviceAction(w, lines)
 		if err != nil {
@@ -397,7 +486,7 @@ func deviceReview(ctx context.Context, w io.Writer, in io.Reader, db deviceStore
 		}
 		switch action {
 		case "approve":
-			err = db.ApproveDevice(ctx, dev.ID, "")
+			_, err = sshd.ApproveDevice(ctx, db, db, dev, "")
 		case "revoke":
 			err = db.RevokeDevice(ctx, dev.ID)
 		}
@@ -427,6 +516,19 @@ func deviceReview(ctx context.Context, w io.Writer, in io.Reader, db deviceStore
 		_, _ = fmt.Fprintln(w, "  none")
 	}
 	return nil
+}
+
+// invitee describes who approving a device waiting on invitation id
+// admits: a new member with the invited role, or the member a link names.
+func invitee(ctx context.Context, db deviceStore, byID map[domain.MemberID]*domain.Member, id domain.InvitationID) (string, error) {
+	inv, err := db.GetInvitation(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if m := byID[inv.Member]; m != nil {
+		return fmt.Sprintf("waiting on invitation %s (approving links the account to %s (%s), %s)", inv.ID, m.DisplayName, m.ID, m.Role), nil
+	}
+	return fmt.Sprintf("waiting on invitation %s (approving adds a new member, %s)", inv.ID, inv.Role), nil
 }
 
 // askDeviceAction returns "approve", "revoke", or "" to skip. Enter and

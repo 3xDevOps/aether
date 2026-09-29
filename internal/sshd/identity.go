@@ -1,14 +1,17 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -17,12 +20,15 @@ import (
 
 func init() {
 	registerMethod(protocol.MethodMemberDeviceList, (*Server).memberDeviceList)
+	registerMethod(protocol.MethodMemberDeviceLookup, (*Server).memberDeviceLookup)
 	registerMethod(protocol.MethodMemberDeviceApprove, (*Server).memberDeviceApprove)
 	registerMethod(protocol.MethodMemberDeviceRevoke, (*Server).memberDeviceRevoke)
 	registerMethod(protocol.MethodMemberInvitationCreate, (*Server).memberInvitationCreate)
 	registerMethod(protocol.MethodMemberInvitationList, (*Server).memberInvitationList)
 	registerMethod(protocol.MethodMemberInvitationRevoke, (*Server).memberInvitationRevoke)
 	registerMethod(protocol.MethodMemberIdentityLink, (*Server).memberIdentityLink)
+	registerMethod(protocol.MethodMemberIdentityList, (*Server).memberIdentityList)
+	registerMethod(protocol.MethodMemberIdentityRemove, (*Server).memberIdentityRemove)
 }
 
 func (s *Server) rpcIdentityStore() (store.IdentityStore, *protocol.Error) {
@@ -47,10 +53,26 @@ func (s *Server) actingOn(ctx context.Context, caller, owner domain.MemberID, me
 	return nil
 }
 
+// actingOnDevice is actingOn for dev's member. A device waiting on an
+// invitation acts for the member a link invitation names, and otherwise
+// for nobody but an admin.
+func (s *Server) actingOnDevice(ctx context.Context, ids store.IdentityStore, caller domain.MemberID, dev *domain.Device, method string) *protocol.Error {
+	owner := dev.Member
+	if dev.Invitation != "" {
+		inv, err := ids.GetInvitation(ctx, dev.Invitation)
+		if err != nil {
+			return rpcError(err)
+		}
+		owner = inv.Member
+	}
+	return s.actingOn(ctx, caller, owner, method)
+}
+
 func deviceToWire(d *domain.Device) protocol.Device {
 	out := protocol.Device{
-		ID: string(d.ID), MemberID: string(d.Member), Label: d.Label,
+		ID: string(d.ID), MemberID: string(d.Member), InvitationID: string(d.Invitation), Label: d.Label,
 		Status: string(d.Status), Fingerprint: fingerprintOf(d.Credential),
+		Provider: d.Provider, Account: cmp.Or(d.Login, d.Email, d.Subject),
 		ApprovedBy: string(d.ApprovedBy), CreatedAt: d.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if d.LastSeenAt != nil {
@@ -92,8 +114,67 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	return protocol.MemberDeviceListResult{Devices: out}, nil
 }
 
+// deviceByCode returns the device awaiting approval with code.
+func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*domain.Device, *protocol.Error) {
+	dev, err := ids.GetDeviceByApprovalCode(ctx, code)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", code)}
+	case errors.Is(err, store.ErrConflict):
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
+			"approval code %q names more than one waiting device, so it approves none; approve the right one on the server with `sudo aether-server device review`", code)}
+	case err != nil:
+		return nil, rpcError(err)
+	}
+	return dev, nil
+}
+
+// memberDeviceLookup shows the approver of a code which device it names
+// and which member and role approving admits it as. The member is chosen
+// by the account the device signed in as, which the edge vouches for, so
+// the approver checks it before member.device.approve commits.
+func (s *Server) memberDeviceLookup(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberDeviceLookup, true); perr != nil {
+		return nil, perr
+	}
+	ids, perr := s.rpcIdentityStore()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.MemberDeviceLookupParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	dev, perr := deviceByCode(ctx, ids, p.Code)
+	if perr != nil {
+		return nil, perr
+	}
+	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceLookup); perr != nil {
+		return nil, perr
+	}
+	res := protocol.MemberDeviceLookupResult{Device: deviceToWire(dev)}
+	admits := dev.Member
+	if dev.Invitation != "" {
+		inv, err := ids.GetInvitation(ctx, dev.Invitation)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		admits, res.Role = inv.Member, string(inv.Role)
+	}
+	if admits != "" {
+		m, err := s.cfg.Store.GetMember(ctx, admits)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		res.MemberID, res.DisplayName, res.Role = string(m.ID), m.DisplayName, string(m.Role)
+	}
+	return res, nil
+}
+
 // memberDeviceApprove approves a device awaiting approval for its own
-// member or an admin. The dispatcher already refused pending members, and
+// member or an admin. A device waiting on an invitation belongs to no
+// member yet: an admin approves it, or the member a link invitation names.
+// The dispatcher already refused pending members, and
 // requireApprovedCaller refuses a connection that signed in with a device
 // awaiting approval, so a device never approves itself.
 func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -108,27 +189,67 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 	if perr != nil {
 		return nil, perr
 	}
-	dev, err := ids.GetDeviceByApprovalCode(ctx, p.Code)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", p.Code)}
-	case errors.Is(err, store.ErrConflict):
-		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
-			"approval code %q names more than one waiting device, so it approves none; approve the right one on the server with `sudo aether-server device review`", p.Code)}
-	case err != nil:
-		return nil, rpcError(err)
-	}
-	if perr := s.actingOn(ctx, member, dev.Member, protocol.MethodMemberDeviceApprove); perr != nil {
+	dev, perr := deviceByCode(ctx, ids, p.Code)
+	if perr != nil {
 		return nil, perr
 	}
-	if err = ids.ApproveDevice(ctx, dev.ID, member); err != nil {
+	invitation := dev.Invitation
+	if invitation != "" {
+		// Accepting the invitation creates a member and binds an account,
+		// so the caller's role is checked under the lock member.role holds.
+		s.registerMu.Lock()
+		defer s.registerMu.Unlock()
+	}
+	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceApprove); perr != nil {
+		return nil, perr
+	}
+	if string(dev.ID) != p.DeviceID {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
+			"approval code %q names device %s, not %q; nothing was approved: look the code up with %s and approve the device it names",
+			p.Code, dev.ID, p.DeviceID, protocol.MethodMemberDeviceLookup)}
+	}
+	var err error
+	if dev, err = ApproveDevice(ctx, ids, s.cfg.Store, dev, member); err != nil {
 		return nil, rpcError(err)
 	}
-	if dev, err = ids.GetDevice(ctx, dev.ID); err != nil {
-		return nil, rpcError(err)
+	if invitation != "" {
+		s.notifyDirectory()
 	}
-	slog.Info("sshd: device approved", "actor", member, "member", dev.Member, "device", dev.ID)
+	slog.Info("sshd: device approved", "actor", member, "member", dev.Member, "device", dev.ID, "invitation", invitation)
 	return protocol.MemberDeviceResult{Device: deviceToWire(dev)}, nil
+}
+
+// ApproveDevice approves dev, which awaits approval, as approver, empty
+// for the machine's administrator, and returns it as it now stands. A
+// device waiting on an invitation is approved by accepting that invitation
+// for the account the device signed in as: it creates the invited member,
+// or binds the account to the member a link names, and uses the
+// invitation up.
+func ApproveDevice(ctx context.Context, ids store.IdentityStore, members MemberLister, dev *domain.Device, approver domain.MemberID) (*domain.Device, error) {
+	if dev.Invitation == "" {
+		if err := ids.ApproveDevice(ctx, dev.ID, approver); err != nil {
+			return nil, err
+		}
+		return ids.GetDevice(ctx, dev.ID)
+	}
+	all, err := members.ListMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	account := edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Email: dev.Email, Login: dev.Login, Name: dev.Name}
+	fresh := &domain.Member{DisplayName: displayNameOf(account), Color: attribution.NextColor(memberColorsOf(all))}
+	m, err := ids.AcceptInvitationDevice(ctx, dev.ID, approver, fresh, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("sshd: invitation accepted by approving its device", "invitation", dev.Invitation, "member", m.ID,
+		"role", m.Role, "device", dev.ID, "approver", approver, "provider", dev.Provider, "subject", dev.Subject)
+	return ids.GetDevice(ctx, dev.ID)
+}
+
+// MemberLister lists members; store.Store is one.
+type MemberLister interface {
+	ListMembers(ctx context.Context) ([]*domain.Member, error)
 }
 
 func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -147,7 +268,7 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if perr := s.actingOn(ctx, member, dev.Member, protocol.MethodMemberDeviceRevoke); perr != nil {
+	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceRevoke); perr != nil {
 		return nil, perr
 	}
 	if err = ids.RevokeDevice(ctx, dev.ID); err != nil {
@@ -228,6 +349,90 @@ func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID,
 	}
 	inv.Role, inv.Member = "", member
 	return s.createInvitation(ctx, ids, inv, protocol.MethodMemberIdentityLink)
+}
+
+func (s *Server) memberIdentityList(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	ids, perr := s.rpcIdentityStore()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.MemberIdentityListParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	target := domain.MemberID(p.MemberID)
+	if target == "" {
+		return nil, invalidParams("member_id is required")
+	}
+	if perr := s.actingOn(ctx, member, target, protocol.MethodMemberIdentityList); perr != nil {
+		return nil, perr
+	}
+	if _, err := s.cfg.Store.GetMember(ctx, target); err != nil {
+		return nil, rpcError(err)
+	}
+	all, err := ids.ListIdentities(ctx)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	out := protocol.MemberIdentityListResult{Identities: []protocol.Identity{}, Devices: []protocol.Device{}}
+	for _, id := range all {
+		if id.Member == target {
+			out.Identities = append(out.Identities, protocol.Identity{Provider: id.Provider, Subject: id.Subject,
+				Login: id.Login, Email: id.Email, CreatedAt: id.CreatedAt.UTC().Format(time.RFC3339)})
+		}
+	}
+	devs, err := ids.ListDevices(ctx, target)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	for _, d := range devs {
+		out.Devices = append(out.Devices, deviceToWire(d))
+	}
+	return out, nil
+}
+
+// memberIdentityRemove unbinds one edge identity from a member: the remedy
+// when an account was linked while someone else held it. The devices that
+// signed in with it are revoked, not deleted, so their keys stay refused
+// if the account is linked again, and their connections close. The member,
+// its role and its other credentials stay.
+func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	const method = protocol.MethodMemberIdentityRemove
+	ids, perr := s.rpcIdentityStore()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.MemberIdentityRemoveParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	target := domain.MemberID(p.MemberID)
+	if target == "" || p.Provider == "" || p.Subject == "" {
+		return nil, invalidParams("member_id, provider and subject are required")
+	}
+	if perr := s.actingOn(ctx, member, target, method); perr != nil {
+		return nil, perr
+	}
+	if perr := s.requireApprovedCaller(ctx, method, false); perr != nil {
+		return nil, perr
+	}
+	revoked, err := ids.UnlinkIdentity(ctx, target, p.Provider, p.Subject)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	s.closeConns(func(id connIdentity) bool { return slices.Contains(revoked, id.device) })
+	s.notifyDirectory()
+	out := protocol.MemberIdentityRemoveResult{Revoked: []protocol.Device{}}
+	for _, id := range revoked {
+		dev, err := ids.GetDevice(ctx, id)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		out.Revoked = append(out.Revoked, deviceToWire(dev))
+	}
+	slog.Info("sshd: edge identity removed", "actor", member, "member", target,
+		"provider", p.Provider, "subject", p.Subject, "revoked_devices", len(revoked))
+	return out, nil
 }
 
 // createInvitation stores inv while its creator is an admin. member.role

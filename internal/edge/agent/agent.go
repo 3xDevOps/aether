@@ -32,8 +32,9 @@ type SSH interface {
 	ServeEdgeConn(ctx context.Context, nc net.Conn, grant edgeproto.Grant)
 	// ServeEdgeClaim serves one relayed connection whose claim grant the
 	// agent verified. attempt checks the claim code the client presents
-	// inside SSH and runs claim when it matches.
-	ServeEdgeClaim(ctx context.Context, nc net.Conn, grant edgeproto.Grant, attempt func(code string, claim func() error) error)
+	// inside SSH and, when it matches, runs claim with the admin member
+	// the code names, empty for none.
+	ServeEdgeClaim(ctx context.Context, nc net.Conn, grant edgeproto.Grant, attempt func(code string, claim func(admin string) error) error)
 	// EdgeAccountDeleted removes the identity of an account the edge
 	// deleted, and the devices registered through it.
 	EdgeAccountDeleted(ctx context.Context, provider, subject string) error
@@ -46,7 +47,7 @@ type Config struct {
 	// EdgeURL is the edge to enroll with, https://host[:port].
 	EdgeURL string
 	// DataDir is the server data directory; the agent keeps its state in
-	// OpenState(DataDir, EdgeURL).
+	// OpenState(DataDir).
 	DataDir string
 	// HostKey is the server's SSH host key. It derives the server id and
 	// signs enrollment.
@@ -67,6 +68,9 @@ const (
 	// maxSeenGrants bounds the replay cache: an edge cannot grow the
 	// server's memory without limit by opening connections.
 	maxSeenGrants = 4096
+	// directoryRefresh is how often the agent re-reads the directory for
+	// changes made on the machine by another process.
+	directoryRefresh = time.Minute
 )
 
 // Agent keeps one server's control connection to an edge.
@@ -82,6 +86,7 @@ type Agent struct {
 	minBackoff, maxBackoff    time.Duration
 	pingInterval, idleTimeout time.Duration
 	attachDeadline            time.Duration
+	directoryRefresh          time.Duration
 
 	// slots holds one entry per relayed connection.
 	slots chan struct{}
@@ -107,10 +112,7 @@ func New(cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edgeagent: %w", err)
 	}
-	state, err := OpenState(cfg.DataDir, origin)
-	if err != nil {
-		return nil, err
-	}
+	state := OpenState(cfg.DataDir)
 	// The hostname only labels the server for its owner at the edge.
 	name, _ := os.Hostname()
 	// Encoding a hello now turns a hostname the edge would refuse into a
@@ -121,20 +123,21 @@ func New(cfg Config) (*Agent, error) {
 		return nil, fmt.Errorf("edgeagent: hostname %q or version %q: %w", name, version.Version, err)
 	}
 	return &Agent{
-		cfg:            cfg,
-		name:           name,
-		origin:         origin,
-		serverID:       edgeproto.ServerID(cfg.HostKey.PublicKey()),
-		policy:         policy,
-		state:          state,
-		minBackoff:     edgeproto.ReconnectMinBackoff,
-		maxBackoff:     edgeproto.ReconnectMaxBackoff,
-		pingInterval:   edgeproto.PingInterval,
-		idleTimeout:    edgeproto.ControlIdleTimeout,
-		attachDeadline: edgeproto.AttachDeadline,
-		slots:          make(chan struct{}, edgeproto.MaxSSHConnsPerServer),
-		conns:          make(map[*relayConn]struct{}),
-		seen:           make(map[string]time.Time),
+		cfg:              cfg,
+		name:             name,
+		origin:           origin,
+		serverID:         edgeproto.ServerID(cfg.HostKey.PublicKey()),
+		policy:           policy,
+		state:            state,
+		minBackoff:       edgeproto.ReconnectMinBackoff,
+		maxBackoff:       edgeproto.ReconnectMaxBackoff,
+		pingInterval:     edgeproto.PingInterval,
+		idleTimeout:      edgeproto.ControlIdleTimeout,
+		attachDeadline:   edgeproto.AttachDeadline,
+		directoryRefresh: directoryRefresh,
+		slots:            make(chan struct{}, edgeproto.MaxSSHConnsPerServer),
+		conns:            make(map[*relayConn]struct{}),
+		seen:             make(map[string]time.Time),
 	}, nil
 }
 
@@ -229,6 +232,6 @@ func (a *Agent) logPolicy() {
 }
 
 func pinMismatch(pinned, offered ed25519.PublicKey) error {
-	return fmt.Errorf("edge key changed: pinned %s, edge presents %s; if the edge operator rotated its key, run `aether-server edge trust`",
+	return fmt.Errorf("edge key changed: pinned %s, edge presents %s; if the edge's operator rotated its key, or edge-url now names another edge, run `aether-server edge trust`",
 		edgeproto.EdgeKeyFingerprint(pinned), edgeproto.EdgeKeyFingerprint(offered))
 }

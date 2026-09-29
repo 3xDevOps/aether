@@ -257,13 +257,22 @@ func (s *Store) ServerAccess(ctx context.Context, id string, a edgeproto.Account
 // AccountAccess returns every claimed server a owns or has a candidate
 // directory entry on, ordered by server name.
 func (s *Store) AccountAccess(ctx context.Context, a edgeproto.Account) ([]Access, error) {
-	return s.access(ctx, a, `(o.provider = ? AND o.subject = ?) OR e.server_id IS NOT NULL`, a.Provider, a.Subject)
+	return s.access(ctx, a, accountServers, a.Provider, a.Subject, a.Provider, a.Subject, a.Login, a.Email)
 }
 
-// access selects candidates in SQL; lower() folds ASCII only, like Matches.
-func (s *Store) access(ctx context.Context, a edgeproto.Account, where string, whereArgs ...any) ([]Access, error) {
-	args := append([]any{a.Provider, a.Subject, a.Provider, a.Subject, a.Login, a.Email}, whereArgs...)
-	rows, err := s.db.QueryContext(ctx, `SELECT s.id, s.name, s.kind, s.access_policy,
+// accountServers picks AccountAccess's servers through the owner and
+// directory indexes. Every request that lists servers runs it, so its cost
+// must follow the account's own servers, not every directory at the edge.
+const accountServers = `s.id IN (
+	SELECT id FROM servers WHERE owner_account_id = (SELECT id FROM accounts WHERE provider = ? AND subject = ?)
+	UNION SELECT server_id FROM directory_entries WHERE kind = 'member' AND provider = ? AND subject = ?
+	UNION SELECT server_id FROM directory_entries WHERE kind = 'invitation' AND login <> '' AND lower(login) = lower(?)
+	UNION SELECT server_id FROM directory_entries WHERE kind = 'invitation' AND email <> '' AND lower(email) = lower(?))`
+
+// accessQuery selects candidates in SQL; lower() folds ASCII only, like
+// Matches.
+func accessQuery(where string) string {
+	return `SELECT s.id, s.name, s.kind, s.access_policy,
 			COALESCE(o.provider = ? AND o.subject = ?, 0),
 			e.kind, e.provider, e.subject, e.login, e.email, e.role, e.expires_at
 		FROM servers s
@@ -272,8 +281,13 @@ func (s *Store) access(ctx context.Context, a edgeproto.Account, where string, w
 			(e.kind = 'member' AND e.provider = ? AND e.subject = ?)
 			OR (e.kind = 'invitation' AND (
 				(e.login <> '' AND lower(e.login) = lower(?)) OR (e.email <> '' AND lower(e.email) = lower(?)))))
-		WHERE `+where+`
-		ORDER BY s.name, s.id`, args...)
+		WHERE ` + where + `
+		ORDER BY s.name, s.id`
+}
+
+func (s *Store) access(ctx context.Context, a edgeproto.Account, where string, whereArgs ...any) ([]Access, error) {
+	args := append([]any{a.Provider, a.Subject, a.Provider, a.Subject, a.Login, a.Email}, whereArgs...)
+	rows, err := s.db.QueryContext(ctx, accessQuery(where), args...)
 	if err != nil {
 		return nil, fmt.Errorf("edgestore: read access: %w", err)
 	}

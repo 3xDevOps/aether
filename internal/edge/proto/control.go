@@ -113,6 +113,14 @@ type OwnerTransferred struct {
 	Owner Principal `json:"owner"`
 }
 
+// OwnerTransferResult (edge to server) answers OwnerTransferred. An empty
+// Error means the edge recorded Owner; otherwise the edge kept the owner
+// it had, and Error says why.
+type OwnerTransferResult struct {
+	Owner Principal `json:"owner"`
+	Error string    `json:"error,omitempty"`
+}
+
 // Ownerless (server to edge) states that the server has no owner. It stays
 // enrolled; a new claim code from its host gives it one again.
 type Ownerless struct{}
@@ -137,6 +145,15 @@ type AccountDeleted struct {
 	Subject  string `json:"subject"`
 }
 
+// AccountDeletionApplied (server to edge) answers AccountDeleted once the
+// server removed that identity and its edge devices, or holds no such
+// identity. The edge sends the deletion again at each enrollment until
+// this answer arrives.
+type AccountDeletionApplied struct {
+	Provider string `json:"provider"`
+	Subject  string `json:"subject"`
+}
+
 // Unenroll, from the edge, reports that the owner removed the server at the
 // edge; from the server, that its operator ran `aether-server edge leave`.
 // The receiver forgets the enrollment and the control channel closes.
@@ -153,21 +170,23 @@ type (
 	Pong struct{}
 )
 
-func (Challenge) controlType() string        { return "challenge" }
-func (Hello) controlType() string            { return "hello" }
-func (Ready) controlType() string            { return "ready" }
-func (Open) controlType() string             { return "open" }
-func (OpenResult) controlType() string       { return "open_result" }
-func (Claimed) controlType() string          { return "claimed" }
-func (OwnerTransferred) controlType() string { return "owner_transferred" }
-func (Ownerless) controlType() string        { return "ownerless" }
-func (Directory) controlType() string        { return "directory" }
-func (DeviceRevoked) controlType() string    { return "device_revoked" }
-func (AccountDeleted) controlType() string   { return "account_deleted" }
-func (Unenroll) controlType() string         { return "unenroll" }
-func (Drain) controlType() string            { return "drain" }
-func (Ping) controlType() string             { return "ping" }
-func (Pong) controlType() string             { return "pong" }
+func (Challenge) controlType() string              { return "challenge" }
+func (Hello) controlType() string                  { return "hello" }
+func (Ready) controlType() string                  { return "ready" }
+func (Open) controlType() string                   { return "open" }
+func (OpenResult) controlType() string             { return "open_result" }
+func (Claimed) controlType() string                { return "claimed" }
+func (OwnerTransferred) controlType() string       { return "owner_transferred" }
+func (OwnerTransferResult) controlType() string    { return "owner_transfer_result" }
+func (Ownerless) controlType() string              { return "ownerless" }
+func (Directory) controlType() string              { return "directory" }
+func (DeviceRevoked) controlType() string          { return "device_revoked" }
+func (AccountDeleted) controlType() string         { return "account_deleted" }
+func (AccountDeletionApplied) controlType() string { return "account_deletion_applied" }
+func (Unenroll) controlType() string               { return "unenroll" }
+func (Drain) controlType() string                  { return "drain" }
+func (Ping) controlType() string                   { return "ping" }
+func (Pong) controlType() string                   { return "pong" }
 
 func (m Challenge) validate() error {
 	if len(m.Nonce) != NonceSize {
@@ -246,6 +265,13 @@ func (m OwnerTransferred) validate() error {
 	return m.Owner.Validate()
 }
 
+func (m OwnerTransferResult) validate() error {
+	if !validText(m.Error, maxErrorText) {
+		return errors.New("error text is too long or has control characters")
+	}
+	return m.Owner.Validate()
+}
+
 func (m Directory) validate() error {
 	if len(m.Entries) > MaxDirectoryEntries {
 		return fmt.Errorf("directory has %d entries, limit %d", len(m.Entries), MaxDirectoryEntries)
@@ -270,6 +296,10 @@ func (m AccountDeleted) validate() error {
 		return errors.New("an account is named by a provider and a subject")
 	}
 	return nil
+}
+
+func (m AccountDeletionApplied) validate() error {
+	return AccountDeleted(m).validate()
 }
 
 func (Ownerless) validate() error { return nil }
@@ -339,6 +369,8 @@ func DecodeControl(data []byte) (Message, error) {
 		return decodeAs[Claimed](data)
 	case "owner_transferred":
 		return decodeAs[OwnerTransferred](data)
+	case "owner_transfer_result":
+		return decodeAs[OwnerTransferResult](data)
 	case "ownerless":
 		return decodeAs[Ownerless](data)
 	case "directory":
@@ -347,6 +379,8 @@ func DecodeControl(data []byte) (Message, error) {
 		return decodeAs[DeviceRevoked](data)
 	case "account_deleted":
 		return decodeAs[AccountDeleted](data)
+	case "account_deletion_applied":
+		return decodeAs[AccountDeletionApplied](data)
 	case "unenroll":
 		return decodeAs[Unenroll](data)
 	case "drain":

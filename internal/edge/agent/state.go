@@ -18,8 +18,8 @@ import (
 )
 
 // StateDir is where the agent keeps its state under a server data
-// directory: one directory per edge origin. Every directory is 0700 and
-// every file 0600.
+// directory. Every directory is 0700 and every file 0600, and a root
+// process gives what it creates to the data directory's owner.
 func StateDir(dataDir string) string { return filepath.Join(dataDir, "edge") }
 
 const (
@@ -28,29 +28,26 @@ const (
 	claimFile  = "claim.json"
 	statusFile = "status.json"
 	lockFile   = "lock"
+	// keysDir holds one directory per edge key the server has pinned,
+	// with the owner it has at the edge holding that key.
+	keysDir = "keys"
 )
 
-// State is the agent's persistent state with one edge: the pinned edge
-// key, the owner, the claim code and the agent's last status. The serve
-// process and the aether-server edge commands share it, so every method
-// reads the files afresh.
+// State is the agent's persistent state: the pinned edge key, the owner,
+// the claim code and the agent's last status. The serve process and the
+// aether-server edge commands share it, so every method reads the files
+// afresh.
+//
+// Trust in an edge rests on its signing key, not on a host name, so none
+// of it depends on edge-url: a server moved to another host name of the
+// same edge keeps its pin and owner. The owner is kept per edge key: an
+// edge with another key, once `aether-server edge trust` pins it, starts
+// without one, and pinning the first edge's key again finds its owner.
 type State struct{ dir string }
 
-// OpenState returns the state for the edge at edgeURL under dataDir. Each
-// edge origin keeps its own, so a server moved to another edge enrolls
-// there unclaimed and pins that edge's key, and moving back finds the
-// first edge's pin and owner again. Nothing is created until a method
-// writes.
-func OpenState(dataDir, edgeURL string) (*State, error) {
-	origin, err := edgeproto.Origin(edgeURL)
-	if err != nil {
-		return nil, fmt.Errorf("edgeagent: %w", err)
-	}
-	// A scheme holds no "_" and a host no "://", so the name is unique
-	// per origin.
-	name := strings.Replace(origin, "://", "_", 1)
-	return &State{dir: filepath.Join(StateDir(dataDir), name)}, nil
-}
+// OpenState returns the state under dataDir. Nothing is created until a
+// method writes.
+func OpenState(dataDir string) *State { return &State{dir: StateDir(dataDir)} }
 
 // Status is what the agent last reported about its control connection.
 type Status struct {
@@ -61,11 +58,13 @@ type Status struct {
 }
 
 // ClaimCode describes the current claim code. The code itself is shown
-// only when it is issued: the state keeps its hash.
+// only when it is issued: the state keeps its hash. Admin, when set, is
+// the existing admin member the claim binds the claiming account to.
 type ClaimCode struct {
 	Hash         string    `json:"hash"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	AttemptsLeft int       `json:"attempts_left"`
+	Admin        string    `json:"admin,omitempty"`
 }
 
 // Usable reports whether the code can still claim the server at now.
@@ -98,11 +97,16 @@ func (s *State) Pin(key ed25519.PublicKey) error {
 	return s.write(pinFile, pin{Key: key})
 }
 
-// Owner returns the account that owns this server at the edge, by a
-// claim or a transfer, nil when it has none.
+// Owner returns the account that owns this server at the edge holding
+// the pinned key, by a claim or a transfer, nil when it has none or no
+// key is pinned.
 func (s *State) Owner() (*edgeproto.Account, error) {
+	name, err := s.ownerName()
+	if err != nil || name == "" {
+		return nil, err
+	}
 	var a edgeproto.Account
-	ok, err := s.read(ownerFile, &a)
+	ok, err := s.read(name, &a)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -111,7 +115,36 @@ func (s *State) Owner() (*edgeproto.Account, error) {
 
 // ClearOwner forgets the owner, which leaves the server unclaimed at the
 // edge. Members keep their access to the server itself.
-func (s *State) ClearOwner() error { return s.remove(ownerFile) }
+func (s *State) ClearOwner() error {
+	name, err := s.ownerName()
+	if err != nil || name == "" {
+		return err
+	}
+	return s.remove(name)
+}
+
+// ownerName is the owner file of the pinned key, empty when none is
+// pinned.
+func (s *State) ownerName() (string, error) {
+	key, err := s.PinnedKey()
+	if err != nil || key == nil {
+		return "", err
+	}
+	id := strings.NewReplacer("+", "-", "/", "_").Replace(strings.TrimPrefix(edgeproto.EdgeKeyFingerprint(key), "SHA256:"))
+	return filepath.Join(keysDir, "sha256-"+id, ownerFile), nil
+}
+
+// writeOwner records owner for the pinned key.
+func (s *State) writeOwner(owner edgeproto.Account) error {
+	name, err := s.ownerName()
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return errors.New("edgeagent: no edge key is pinned, so no owner can be recorded")
+	}
+	return s.write(name, owner)
+}
 
 // ClaimCode returns the current claim code's record, false when there is
 // none.
@@ -122,8 +155,10 @@ func (s *State) ClaimCode() (ClaimCode, bool, error) {
 }
 
 // IssueClaimCode replaces any claim code with a fresh one for serverID,
-// valid from now for ClaimCodeTTL and ClaimCodeAttempts attempts.
-func (s *State) IssueClaimCode(serverID string, now time.Time) (string, time.Time, error) {
+// valid from now for ClaimCodeTTL and ClaimCodeAttempts attempts. admin,
+// when not empty, names the existing admin member the claim binds the
+// claiming account to.
+func (s *State) IssueClaimCode(serverID, admin string, now time.Time) (string, time.Time, error) {
 	code, err := edgeproto.NewClaimCode(serverID)
 	if err != nil {
 		return "", time.Time{}, err
@@ -133,7 +168,8 @@ func (s *State) IssueClaimCode(serverID string, now time.Time) (string, time.Tim
 		return "", time.Time{}, err
 	}
 	defer unlock()
-	c := ClaimCode{Hash: edgeproto.HashToken(code), ExpiresAt: now.Add(edgeproto.ClaimCodeTTL), AttemptsLeft: edgeproto.ClaimCodeAttempts}
+	c := ClaimCode{Hash: edgeproto.HashToken(code), ExpiresAt: now.Add(edgeproto.ClaimCodeTTL), AttemptsLeft: edgeproto.ClaimCodeAttempts,
+		Admin: admin}
 	if err := s.write(claimFile, c); err != nil {
 		return "", time.Time{}, err
 	}
@@ -144,11 +180,11 @@ func (s *State) IssueClaimCode(serverID string, now time.Time) (string, time.Tim
 func (s *State) RemoveClaimCode() error { return s.remove(claimFile) }
 
 // attemptClaim spends one attempt of the claim code on presented. On a
-// match it calls claim, and on claim's success destroys the code and
-// records owner. A code is destroyed when it matches, and made unusable
+// match it calls claim with the admin member the code names, and on
+// claim's success destroys the code and records owner. A code is destroyed when it matches, and made unusable
 // when it expires or runs out of attempts. The refusals are the
 // edgeproto claim refusals.
-func (s *State) attemptClaim(presented string, owner edgeproto.Account, now time.Time, claim func() error) error {
+func (s *State) attemptClaim(presented string, owner edgeproto.Account, now time.Time, claim func(admin string) error) error {
 	unlock, err := s.lock()
 	if err != nil {
 		return err
@@ -192,14 +228,14 @@ func (s *State) attemptClaim(presented string, owner edgeproto.Account, now time
 		}
 		return refusal
 	}
-	if err := claim(); err != nil {
+	if err := claim(c.Admin); err != nil {
 		if werr := s.write(claimFile, c); werr != nil {
 			return errors.Join(err, werr)
 		}
 		return err
 	}
 	// Either write alone keeps the used code from claiming again.
-	return errors.Join(s.write(ownerFile, owner), s.remove(claimFile))
+	return errors.Join(s.writeOwner(owner), s.remove(claimFile))
 }
 
 // transferOwner replaces the owner with owner and runs report; when
@@ -218,11 +254,11 @@ func (s *State) transferOwner(origin string, owner edgeproto.Account, report fun
 	if prev == nil {
 		return fmt.Errorf("this server has no owner at %s; its administrator gives it one with a claim code from `aether-server edge claim-code`", origin)
 	}
-	if err := s.write(ownerFile, owner); err != nil {
+	if err := s.writeOwner(owner); err != nil {
 		return err
 	}
 	if err := report(); err != nil {
-		return errors.Join(fmt.Errorf("report the new owner to %s: %w", origin, err), s.write(ownerFile, *prev))
+		return errors.Join(fmt.Errorf("report the new owner to %s: %w", origin, err), s.writeOwner(*prev))
 	}
 	return nil
 }
@@ -318,14 +354,19 @@ func (s *State) write(name string, v any) error {
 	if err != nil {
 		return fmt.Errorf("edgeagent: encode %s: %w", name, err)
 	}
-	if err = s.mkdir(); err != nil {
+	dir := filepath.Dir(s.path(name))
+	if err = s.mkdir(dir); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(s.dir, "."+name+".*")
+	f, err := os.CreateTemp(dir, "."+filepath.Base(name)+".*")
 	if err != nil {
 		return fmt.Errorf("edgeagent: %w", err)
 	}
 	defer os.Remove(f.Name()) //nolint:errcheck // gone after a successful rename
+	if err := s.chown(f.Name()); err != nil {
+		_ = f.Close()
+		return err
+	}
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("edgeagent: write %s: %w", f.Name(), err)
@@ -350,33 +391,64 @@ func (s *State) remove(name string) error {
 	return nil
 }
 
-// mkdir creates the state directory and its parent 0700, and narrows
-// existing ones: they hold the pin that authenticates the edge.
-func (s *State) mkdir() error {
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+// mkdir creates dir, within the state directory, and every directory
+// between it and the state directory 0700, and narrows existing ones:
+// they hold the pin that authenticates the edge.
+func (s *State) mkdir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("edgeagent: %w", err)
 	}
-	for _, dir := range []string{filepath.Dir(s.dir), s.dir} {
-		if err := os.Chmod(dir, 0o700); err != nil {
+	for d := dir; ; d = filepath.Dir(d) {
+		if err := os.Chmod(d, 0o700); err != nil {
 			return fmt.Errorf("edgeagent: %w", err)
 		}
+		if err := s.chown(d); err != nil {
+			return err
+		}
+		if d == s.dir {
+			return nil
+		}
 	}
-	return nil
 }
 
-// lock serializes claim-code changes between the serve process and the
-// aether-server edge commands.
+// lock serializes claim-code and owner changes between the serve process
+// and the aether-server edge commands.
 func (s *State) lock() (func(), error) {
-	if err := s.mkdir(); err != nil {
+	if err := s.mkdir(s.dir); err != nil {
 		return nil, err
 	}
 	f, err := os.OpenFile(s.path(lockFile), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("edgeagent: %w", err)
 	}
+	if err := s.chown(f.Name()); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("edgeagent: lock %s: %w", f.Name(), err)
 	}
 	return func() { _ = f.Close() }, nil
+}
+
+// chown gives path to the owner of the data directory when this process
+// runs as root: `sudo aether-server edge claim-code` and `edge trust` must
+// leave files a server running as that owner can read and lock.
+func (s *State) chown(path string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	info, err := os.Stat(filepath.Dir(s.dir))
+	if err != nil {
+		return fmt.Errorf("edgeagent: %w", err)
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if err := os.Lchown(path, int(st.Uid), int(st.Gid)); err != nil {
+		return fmt.Errorf("edgeagent: %w", err)
+	}
+	return nil
 }

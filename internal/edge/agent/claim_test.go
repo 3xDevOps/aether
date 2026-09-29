@@ -1,9 +1,14 @@
 package edgeagent
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -12,11 +17,16 @@ import (
 
 var testOwner = edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo"}
 
-// openState opens the state for edgeURL under dataDir.
-func openState(t *testing.T, dataDir, edgeURL string) *State {
+// pinnedState is the state under a new data directory with a new edge key
+// pinned, as it is once the server has enrolled.
+func pinnedState(t *testing.T) *State {
 	t.Helper()
-	s, err := OpenState(dataDir, edgeURL)
+	s := OpenState(t.TempDir())
+	key, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pin(key); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -24,12 +34,19 @@ func openState(t *testing.T, dataDir, edgeURL string) *State {
 
 func issue(t *testing.T, s *State, at time.Time) string {
 	t.Helper()
-	code, _, err := s.IssueClaimCode(edgeproto.ServerID(newHostKey(t).PublicKey()), at)
+	return issueAdmin(t, s, "", at)
+}
+
+func issueAdmin(t *testing.T, s *State, admin string, at time.Time) string {
+	t.Helper()
+	code, _, err := s.IssueClaimCode(edgeproto.ServerID(newHostKey(t).PublicKey()), admin, at)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return code
 }
+
+func claimOK(string) error { return nil }
 
 func wrongCode(code string) string {
 	last := "a"
@@ -40,11 +57,11 @@ func wrongCode(code string) string {
 }
 
 func TestClaimCodeAllowsFiveAttempts(t *testing.T) {
-	s := openState(t, t.TempDir(), "https://edge.example.test")
+	s := pinnedState(t)
 	now := time.Now()
 	code := issue(t, s, now)
 	claims := 0
-	claim := func() error { claims++; return nil }
+	claim := func(string) error { claims++; return nil }
 	for i := 1; i <= edgeproto.ClaimCodeAttempts; i++ {
 		want := edgeproto.RefusalClaimWrong
 		if i == edgeproto.ClaimCodeAttempts {
@@ -67,23 +84,22 @@ func TestClaimCodeAllowsFiveAttempts(t *testing.T) {
 }
 
 func TestClaimCodeExpires(t *testing.T) {
-	s := openState(t, t.TempDir(), "https://edge.example.test")
+	s := pinnedState(t)
 	issued := time.Now()
 	code := issue(t, s, issued)
 	late := issued.Add(edgeproto.ClaimCodeTTL + time.Second)
-	if err := s.attemptClaim(code, testOwner, late, func() error { return nil }); !errors.Is(err, edgeproto.RefusalClaimExpired) {
+	if err := s.attemptClaim(code, testOwner, late, claimOK); !errors.Is(err, edgeproto.RefusalClaimExpired) {
 		t.Fatalf("expired code: %v", err)
 	}
-	if err := s.attemptClaim(code, testOwner, issued, func() error { return nil }); err == nil {
+	if err := s.attemptClaim(code, testOwner, issued, claimOK); err == nil {
 		t.Fatal("an expired code claimed after the clock went back")
 	}
 }
 
 func TestClaimCodeIsUsedOnce(t *testing.T) {
-	dir := t.TempDir()
-	s := openState(t, dir, "https://edge.example.test")
+	s := pinnedState(t)
 	now := time.Now()
-	code := issue(t, s, now)
+	code := issueAdmin(t, s, "m-1", now)
 	raw, err := os.ReadFile(s.path(claimFile))
 	if err != nil {
 		t.Fatal(err)
@@ -91,8 +107,12 @@ func TestClaimCodeIsUsedOnce(t *testing.T) {
 	if strings.Contains(string(raw), code[edgeproto.ServerIDLength+1:]) {
 		t.Fatal("the claim code's secret is stored in the clear")
 	}
-	if err := s.attemptClaim("  "+strings.ToUpper(code)+"\n", testOwner, now, func() error { return nil }); err != nil {
+	var admin string
+	if err := s.attemptClaim("  "+strings.ToUpper(code)+"\n", testOwner, now, func(a string) error { admin = a; return nil }); err != nil {
 		t.Fatalf("right code as a person typed it: %v", err)
+	}
+	if admin != "m-1" {
+		t.Fatalf("the claim ran for admin %q, want the member the code names", admin)
 	}
 	if owner, _ := s.Owner(); owner == nil || *owner != testOwner {
 		t.Fatalf("owner = %+v", owner)
@@ -100,17 +120,17 @@ func TestClaimCodeIsUsedOnce(t *testing.T) {
 	if _, ok, _ := s.ClaimCode(); ok {
 		t.Error("a used code was kept")
 	}
-	if err := s.attemptClaim(code, testOwner, now, func() error { return nil }); !errors.Is(err, edgeproto.RefusalClaimed) {
+	if err := s.attemptClaim(code, testOwner, now, claimOK); !errors.Is(err, edgeproto.RefusalClaimed) {
 		t.Fatalf("second claim: %v, want already claimed", err)
 	}
 }
 
 func TestFailedClaimKeepsTheCodeButSpendsTheAttempt(t *testing.T) {
-	s := openState(t, t.TempDir(), "https://edge.example.test")
+	s := pinnedState(t)
 	now := time.Now()
 	code := issue(t, s, now)
 	boom := errors.New("store is read-only")
-	if err := s.attemptClaim(code, testOwner, now, func() error { return boom }); !errors.Is(err, boom) {
+	if err := s.attemptClaim(code, testOwner, now, func(string) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 	c, ok, _ := s.ClaimCode()
@@ -159,11 +179,11 @@ func TestClaimOverTheEdge(t *testing.T) {
 	if c.grant.ConnID != connID || c.grant.Kind != edgeproto.KindClaim {
 		t.Fatalf("sshd got claim grant %+v", c.grant)
 	}
-	if err := c.attempt(wrongCode(code), func() error { t.Fatal("a wrong code ran the claim"); return nil }); !errors.Is(err, edgeproto.RefusalClaimWrong) {
+	if err := c.attempt(wrongCode(code), func(string) error { t.Fatal("a wrong code ran the claim"); return nil }); !errors.Is(err, edgeproto.RefusalClaimWrong) {
 		t.Fatalf("wrong code: %v", err)
 	}
 	claimed := false
-	if err := c.attempt(code, func() error { claimed = true; return nil }); err != nil || !claimed {
+	if err := c.attempt(code, func(string) error { claimed = true; return nil }); err != nil || !claimed {
 		t.Fatalf("right code: %v, claimed %v", err, claimed)
 	}
 	got := expect[edgeproto.Claimed](t, ec)
@@ -172,6 +192,52 @@ func TestClaimOverTheEdge(t *testing.T) {
 	}
 	if owner, _ := a.state.Owner(); owner == nil || *owner != testOwner {
 		t.Fatalf("owner = %+v", owner)
+	}
+}
+
+// A claim outlives the control connection that opened it: the owner is
+// reported on the connection that replaced it.
+func TestClaimIsReportedOnTheLiveControlConnection(t *testing.T) {
+	edge, sshd, a, ec := enrolled(t)
+	code := issueFor(t, a)
+	connID := edgeproto.NewConnID()
+	edge.openKind(ec, edgeproto.KindClaim, connID, edge.grant(t, claimGrant(t, a, connID)))
+	expect[edgeproto.OpenResult](t, ec)
+	data := edge.nextData(t)
+	t.Cleanup(func() { _ = data.CloseNow() })
+	c := nextClaim(t, sshd)
+	_ = ec.c.CloseNow()
+	next := edge.nextControl(t)
+	expect[edgeproto.Directory](t, next)
+	if err := c.attempt(code, claimOK); err != nil {
+		t.Fatalf("claim after the control connection was replaced: %v", err)
+	}
+	if got := expect[edgeproto.Claimed](t, next); got.ConnID != connID || got.Owner != edgeproto.AccountPrincipal(testOwner) {
+		t.Fatalf("claimed %+v on the live connection", got)
+	}
+	if owner, _ := a.state.Owner(); owner == nil || *owner != testOwner {
+		t.Fatalf("owner = %+v", owner)
+	}
+}
+
+// A claim the edge cannot be told about records no owner and keeps the
+// code for another attempt.
+func TestClaimWithoutAControlConnectionRecordsNothing(t *testing.T) {
+	edge := newFakeEdge(t)
+	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
+	if err := a.state.Pin(edge.pub); err != nil {
+		t.Fatal(err)
+	}
+	code := issueFor(t, a)
+	err := a.claimAttempt(claimGrant(t, a, edgeproto.NewConnID()))(code, claimOK)
+	if err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("claim while not connected = %v", err)
+	}
+	if owner, _ := a.state.Owner(); owner != nil {
+		t.Fatalf("an unreported claim recorded owner %+v", owner)
+	}
+	if c, ok, _ := a.state.ClaimCode(); !ok || !c.Usable(time.Now()) {
+		t.Fatalf("claim code after an unreported claim: %+v, %v", c, ok)
 	}
 }
 
@@ -203,17 +269,54 @@ func TestGrantKindMustMatchTheOpen(t *testing.T) {
 	}
 }
 
+// An account deletion reaches sshd, and the edge hears it was applied.
 func TestAccountDeletedReachesSSH(t *testing.T) {
 	_, sshd, _, ec := enrolled(t)
-	ec.send(edgeproto.AccountDeleted{Provider: testOwner.Provider, Subject: testOwner.Subject})
+	deleted := edgeproto.AccountDeleted{Provider: testOwner.Provider, Subject: testOwner.Subject}
+	ec.send(deleted)
 	select {
 	case got := <-sshd.deleted:
-		if got.Provider != testOwner.Provider || got.Subject != testOwner.Subject {
+		if got != deleted {
 			t.Fatalf("EdgeAccountDeleted(%+v)", got)
 		}
 	case <-time.After(waitFor):
 		t.Fatal("sshd was not told about the deleted account")
 	}
+	if got := expect[edgeproto.AccountDeletionApplied](t, ec); edgeproto.AccountDeleted(got) != deleted {
+		t.Fatalf("applied %+v, want %+v", got, deleted)
+	}
+}
+
+// A deletion the server failed to apply is not answered, and the control
+// connection ends, so the edge sends it again at the next enrollment.
+func TestAccountDeletionNotAppliedIsNotAnswered(t *testing.T) {
+	edge, sshd, _, ec := enrolled(t)
+	sshd.mu.Lock()
+	sshd.deleteErr = errors.New("database is locked")
+	sshd.mu.Unlock()
+	ec.send(edgeproto.AccountDeleted{Provider: testOwner.Provider, Subject: testOwner.Subject})
+	<-sshd.deleted
+	for deadline := time.After(waitFor); ; {
+		select {
+		case m, open := <-ec.msgs:
+			if applied, ok := m.(edgeproto.AccountDeletionApplied); ok {
+				t.Fatalf("a failed deletion was answered %+v", applied)
+			}
+			if open {
+				continue
+			}
+		case <-deadline:
+			t.Fatal("the control connection stayed open after a deletion failed")
+		}
+		break
+	}
+	sshd.mu.Lock()
+	sshd.deleteErr = nil
+	sshd.mu.Unlock()
+	next := edge.nextControl(t)
+	next.send(edgeproto.AccountDeleted{Provider: testOwner.Provider, Subject: testOwner.Subject})
+	<-sshd.deleted
+	expect[edgeproto.AccountDeletionApplied](t, next)
 }
 
 func TestTransferOwner(t *testing.T) {
@@ -235,14 +338,29 @@ func TestTransferOwner(t *testing.T) {
 	if err := a.TransferOwner(next); err == nil || !strings.Contains(err.Error(), "claim code") {
 		t.Fatalf("transfer of a server without an owner = %v, want refused", err)
 	}
-	if err := a.state.write(ownerFile, testOwner); err != nil {
+	if err := a.state.writeOwner(testOwner); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.TransferOwner(next); err != nil {
-		t.Fatal(err)
+	// The transfer stands only once the edge answers that it recorded it.
+	transfer := func(answer string) error {
+		done := make(chan error, 1)
+		go func() { done <- a.TransferOwner(next) }()
+		got := expect[edgeproto.OwnerTransferred](t, ec)
+		if got.Owner != edgeproto.AccountPrincipal(next) {
+			t.Fatalf("owner_transferred %+v", got)
+		}
+		ec.send(edgeproto.OwnerTransferResult{Owner: got.Owner, Error: answer})
+		return <-done
 	}
-	if got := expect[edgeproto.OwnerTransferred](t, ec); got.Owner != edgeproto.AccountPrincipal(next) {
-		t.Fatalf("owner_transferred %+v", got)
+	refusal := "ownership report refused: account is blocked by this edge's operator"
+	if err := transfer(refusal); err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Fatalf("transfer the edge refused = %v", err)
+	}
+	if owner, _ := a.state.Owner(); owner == nil || *owner != testOwner {
+		t.Fatalf("owner after a refused transfer = %+v, want the previous one", owner)
+	}
+	if err := transfer(""); err != nil {
+		t.Fatal(err)
 	}
 	if owner, _ := a.state.Owner(); owner == nil || *owner != next {
 		t.Fatalf("owner after transfer = %+v", owner)
@@ -258,7 +376,10 @@ func TestOwnerLeavingMakesTheServerOwnerless(t *testing.T) {
 	sshd := newFakeSSH()
 	sshd.entries = []edgeproto.DirectoryEntry{{Kind: edgeproto.EntryMember, Provider: testOwner.Provider, Subject: testOwner.Subject, Role: "admin"}}
 	a := newAgent(t, edge.srv.URL, dir, sshd)
-	if err := a.state.write(ownerFile, testOwner); err != nil {
+	if err := a.state.Pin(edge.pub); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.state.writeOwner(testOwner); err != nil {
 		t.Fatal(err)
 	}
 	run(t, a)
@@ -274,11 +395,80 @@ func TestOwnerLeavingMakesTheServerOwnerless(t *testing.T) {
 	}
 }
 
+// A transfer whose answer never came may or may not stand at the edge, so
+// every enrollment with a claimed server reports the server's owner again.
+func TestOwnerIsReportedAgainAtEnrollment(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.state = edgeproto.StateClaimed
+	sshd := newFakeSSH()
+	sshd.entries = []edgeproto.DirectoryEntry{{Kind: edgeproto.EntryMember, Provider: testOwner.Provider, Subject: testOwner.Subject, Role: "admin"}}
+	a := newAgent(t, edge.srv.URL, t.TempDir(), sshd)
+	if err := a.state.Pin(edge.pub); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.state.writeOwner(testOwner); err != nil {
+		t.Fatal(err)
+	}
+	run(t, a)
+	ec := edge.nextControl(t)
+	got := expect[edgeproto.OwnerTransferred](t, ec)
+	if got.Owner != edgeproto.AccountPrincipal(testOwner) {
+		t.Fatalf("owner reported at enrollment = %+v, want %+v", got.Owner, testOwner)
+	}
+	ec.send(edgeproto.OwnerTransferResult{Owner: got.Owner})
+	ec.send(edgeproto.Ping{})
+	expect[edgeproto.Pong](t, ec)
+	if owner, _ := a.state.Owner(); owner == nil || *owner != testOwner {
+		t.Fatalf("owner after the edge's answer = %+v", owner)
+	}
+}
+
 func issueFor(t *testing.T, a *Agent) string {
 	t.Helper()
-	code, _, err := a.state.IssueClaimCode(a.ServerID(), time.Now())
+	code, _, err := a.state.IssueClaimCode(a.ServerID(), "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return code
+}
+
+// A root-run edge command leaves the state to the data directory's
+// owner, so a server running as that user still reads and locks it.
+func TestStateWrittenAsRootBelongsToTheDataDirOwner(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to write as another user")
+	}
+	const uid, gid = 4242, 4243
+	dataDir := t.TempDir()
+	if err := os.Chown(dataDir, uid, gid); err != nil {
+		t.Fatal(err)
+	}
+	s := OpenState(dataDir)
+	key, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Pin(key); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.writeOwner(testOwner); err != nil {
+		t.Fatal(err)
+	}
+	issue(t, s, time.Now())
+	err = filepath.WalkDir(s.dir, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if st := info.Sys().(*syscall.Stat_t); st.Uid != uid || st.Gid != gid {
+			t.Errorf("%s belongs to %d:%d, want %d:%d", path, st.Uid, st.Gid, uid, gid)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

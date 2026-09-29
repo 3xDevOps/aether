@@ -88,7 +88,7 @@ encrypted end to end between your computer and your server.
 
 | What | Why | Kept |
 | --- | --- | --- |
-| Your account: an account id the edge assigns, provider (GitHub or Google), the provider's user id, email, login, display name, and when you last signed in with the provider | To sign you in and to match invitations | Until you delete it on the edge's Account page or with `aether logout --delete-account`, or its operator deletes it with `aether-edge accounts delete` |
+| Your account: an account id the edge assigns, provider (GitHub or Google), the provider's user id, email, login, display name, and when you last signed in with the provider | To sign you in and to match invitations | Until you delete it on the edge's Account page, or its operator deletes it with `aether-edge accounts delete` |
 | Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `aether logout` or the edge's Devices page |
 | Browser sessions at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
 | A pending sign-in from `aether login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
@@ -110,10 +110,10 @@ connections.
 
 Revoking your devices removes them from the edge; the account record stays.
 To delete it yourself, open the edge's Account page,
-`https://auth.onaether.dev/account` for the project's edge, or run `aether
-logout --delete-account`; both ask you to sign in with your provider within
-the last 5 minutes and to type your login or email
-([edge.md](edge.md#deleting-an-account)). The edge then deletes the
+`https://auth.onaether.dev/account` for the project's edge; `aether logout
+--delete-account` prints that address. The page asks you to sign in with
+your provider in that browser within the last 5 minutes and to type your
+login or email ([edge.md](edge.md#deleting-an-account)). The edge then deletes the
 account, its devices and sessions, and tells each server it reached to
 remove your identity there; what a server holds is its administrator's.
 You can also ask the edge's operator, `team@onaether.dev` for the

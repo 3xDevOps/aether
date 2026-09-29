@@ -121,6 +121,12 @@ type Principal struct {
 	Subject  string        `json:"subject,omitempty"`
 }
 
+// AccountUser is the SSH user name of a relayed connection by a device
+// signed in as a. The device's SSH signature covers it, so the server
+// learns from the device, not from the edge's grant, which account it
+// connects as.
+func AccountUser(a Account) string { return a.Provider + ":" + a.Subject }
+
 // AccountPrincipal is the principal of account a.
 func AccountPrincipal(a Account) Principal {
 	return Principal{Type: PrincipalAccount, Provider: a.Provider, Subject: a.Subject}

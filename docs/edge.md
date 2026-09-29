@@ -57,8 +57,9 @@ host only, never to a sibling host under the same domain.
 | OAuth callback addresses, the edge session cookie, the client API | The sign-in host |
 | A client's stored device token | The relay origin it is filed under and the sign-in origin that issued it; it is sent to those two and nowhere else |
 | A server's enrollment signature | The relay origin the server dials: it signs `aether-edge-enroll-v1`, that origin, its id and a nonce |
-| A server's pin of the edge | The edge signing key, kept per relay origin |
-| A server's own record of its owner and claim code | The relay origin, under `<data-dir>/edge/<origin>/` |
+| A server's pin of the edge | The edge signing key: one pin per server, whatever host name `edge-url` names |
+| A server's own record of its owner | The edge signing key, under `<data-dir>/edge/keys/sha256-<fingerprint>/` |
+| A server's claim code | The server, under `<data-dir>/edge/` |
 | Grants | The edge signing key, and the relay origin, which each grant names as its issuer |
 | The edge's record of a server: claim, owner, policy | The server id, in the edge's database |
 | A client's pin of a server | The server id |
@@ -69,13 +70,12 @@ host only, never to a sibling host under the same domain.
 | Change | Servers | Clients and people |
 | --- | --- | --- |
 | Sign-in host name | Nothing: servers never contact the sign-in origin | Browsers sign in again. Relayed connections keep working with the stored token, but `aether servers`, `aether logout` and `--delete-account` go to the old sign-in origin and fail with its error until `aether login` runs again. The replaced token stays valid at the edge until it is revoked on the Devices page. The operator registers the new callback addresses with each provider |
-| Relay host name | Each operator sets `edge-url` to the new origin and restarts; a server still on the old origin is refused. The server keeps its pin and owner per origin, so at the new one it pins the edge key again on first connection and records no owner, while the edge still holds the owner under the server id. Relaying works. `aether member transfer` is refused and a new claim is refused with `server is already claimed` until the edge's operator runs `aether-edge servers remove <server id>` and an admin claims again with a code from `sudo aether-server edge claim-code` | `aether login --edge <new relay origin>`, then `aether link <server id> --edge <new relay origin>` again. The server id and each device's approval stay: the server knows a device by its key |
-| Edge signing key | Every server refuses the edge with `edge key changed: ...` until its operator runs `sudo aether-server edge trust` and types `yes` | Nothing: clients do not pin the edge key |
+| Relay host name | Each operator sets `edge-url` to the new origin and restarts; a server still on the old origin is refused. The edge key is the same, so the server keeps its pin and its owner, and the edge keeps it claimed under the server id: relaying, `aether member transfer` and the ownerless recovery work as before (`TestRelayHostNameChangeKeepsPinAndOwner`) | `aether login --edge <new relay origin>`, then `aether link <server id> --edge <new relay origin>` again. The server id and each device's approval stay: the server knows a device by its key |
+| Edge signing key | Every server refuses the edge with `edge key changed: ...` until its operator runs `sudo aether-server edge trust` and types `yes`. The server keeps its owner per edge key and has none for the new one, so when it reconnects it tells the edge it is ownerless; an admin claims it again with a code from `sudo aether-server edge claim-code`. Members, roles and devices stay (`TestPinAndOwnerFollowTheEdgeKey` in `internal/edge/agent`) | Nothing: clients do not pin the edge key |
 | A server's host key | New server id. At the edge it is a new, unclaimed server: an admin whose account is linked claims it with a code from `sudo aether-server edge claim-code`. Members, roles and devices stay on the server. The old id stays listed until its owner removes it on the Servers page | Every link refuses the new key; link again by the new id |
 | OAuth application (client id or secret) | Nothing | Nothing: accounts, tokens, sessions and server identities stay. The next provider sign-in may show the consent page again |
 
-The relay host name row follows from the code and is not exercised by a
-test. Back up the edge signing key and each server's host key
+Back up the edge signing key and each server's host key
 ([Backup and recovery](#backup-and-recovery),
 [Server id and claiming](#server-id-and-claiming)) so that neither has to
 change.
@@ -127,11 +127,11 @@ With a member's GitHub or Google account, the edge honest:
 | Sign in and list the member's servers: names, ids, roles, online state, policy | Yes | Yes |
 | Reach a workspace | **Yes**, with the member's role on each server they belong to (`TestTakenOverProviderAccount`) | No: the new device is pending (`TestTakenOverProviderAccount`) |
 | As an admin | Invite accounts, mint invite codes, change roles, link accounts, transfer ownership. Not approve a device: a registered device approves nothing (`TestAccountAccess`) | Nothing: a pending device completes no handshake (`TestApprovedDevices`) |
-| Accept an invitation addressed to the member | Yes, with its role (`TestAccountAccess`) | Creates the member with a pending device; no access (`TestApprovedDevices`) |
+| Accept an invitation addressed to the member | Yes, with its role (`TestAccountAccess`) | No: the device waits on the invitation. No member is created, no account bound and the invitation stays open until an approver types the device's code (`TestInvitationWaitsUntilOneDeviceIsApproved` in `internal/sshd`) |
 | Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, along with anything done as an admin ([Recovering a provider account](#recovering-a-provider-account)) | A pending device and a device token remain, with no access |
-| Get a device approved | Not needed | Only by having an approver type the code shown on the attacker's device |
+| Get a device approved | Not needed | Only by having an approver type the code shown on the attacker's device. The approver is shown the member and role the code admits the device as before anything is approved |
 | Disrupt | Revoke the member's device tokens; delete the account, which removes its identity and edge devices on every server | The same |
-| Be noticed | The device is listed in `aether device list`, in `sudo aether-server device review` with the account it signed in as, and on the edge's Devices page | The same, as pending |
+| Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Devices view and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
 
 With the edge, or its signing key:
 
@@ -139,14 +139,16 @@ With the edge, or its signing key:
 | --- | --- | --- |
 | Forge a grant for any account | Yes | Yes |
 | Reach a workspace | **Yes**, as any member of any server on that edge using this policy, with that member's role (`TestMaliciousEdgeAccountAccess`) | No: a forged grant yields a pending device (`TestMaliciousEdgeApprovedDevices`) |
-| Accept an open invitation | Yes, with its role | Creates the invited member bound to the attacker's account, with a pending device; no access (`TestMaliciousEdgeApprovedDevices`) |
-| Use a member's approved device key under another account | No: `this device key is registered to another account on this server` (both tests) | No |
+| Accept an open invitation | Yes, with its role | No: the device waits on the invitation, and no member, administrator or bound account exists until an approver types that device's code (`TestMaliciousEdgeApprovedDevices`) |
+| Record a device an honest client relays under another account than the one it signed in as | No: the client names its account in the SSH user name, under its own signature, and the server refuses before recording anything: `this device connects as "<provider>:<subject>", but the edge signed the connection in as <account> (<provider>:<subject>); nothing was recorded` (both tests). An edge that also lied to the client at sign-in about which account it is gets past this check, as for a claim | The same |
+| Record its own key under a member's account | Yes, admitted as that member | Pending: `aether device approve`, `sudo aether-server device approve` and the dashboard show whoever is handed its code that it admits the key as that member, with that role, and approve only after a yes (`TestMaliciousEdgeApprovedDevices`) |
+| Grow the server's device table | Registered devices are admitted devices, not bounded | At most 10 pending devices per account and 10 per invitation (`TestWaitingDevicesAreBounded` in `internal/sshd`) |
 | Replay a connection, or change the policy, a member, a role or the owner by altering or injecting control messages | No: the server refuses a used connection id and takes no instruction from the edge's messages | No (`TestMaliciousEdgeApprovedDevices`, `TestServerVerifiesGrants`) |
-| Send a forged account deletion | Removes that identity and its edge devices on the server: access lost, none gained | The same (`TestMaliciousEdgeApprovedDevices`) |
+| Send a forged account deletion | Removes that identity and its edge devices on the server, including approved device keys used on the direct path: access lost, none gained. An admin restores it with `aether member link` | The same (`TestMaliciousEdgeApprovedDevices`) |
 | Read or alter an SSH session | No: SSH is end to end | No |
 | Impersonate a server to a linked client | No: the host key must derive the linked id (`TestEnrollmentSignatureIsNotAHostSignature`) | No |
 | Send a client that is linking for the first time to another server | Yes, by listing a false id, unless the person links by an id from the server's admin ([First link](#first-link-and-server-identity)) | The same |
-| Take a claim | No: the code travels inside SSH, and the server refuses a claim whose grant names another account than the client's (`TestClaim`, `TestMaliciousEdgeSubstitutesTheClaimingAccount`). An edge that also lied to the client at sign-in about which account it is could claim for its own account; `aether login` prints the account the edge reported | The same |
+| Take a claim | No: the code travels inside SSH, and the server refuses a claim whose grant names another account than the client's (`TestClaim`, `TestMaliciousEdgeSubstitutesTheClaimingAccount`). An edge that also lied to the client at sign-in about which account it is could claim for its own account; `aether login`, `aether link --claim` and the dashboard's claim form show the account the edge reported before the code is sent | The same |
 | Learn who connects to which server, when, from where; deny service | Yes | Yes |
 
 The tests named are in `internal/edge/edgetest` ([testing.md](testing.md#the-edge-suite)).
@@ -213,8 +215,10 @@ Switching changes no device's status. A device registered under `account`
 is refused under `approved-devices` with `device "<label>" was admitted by
 signing in alone and is waiting for approval: this server now admits
 approved devices only`, followed by its approval commands. An approval is
-never made by signing in alone, under either policy, so a switch inherits
-nothing. To see what a switch affects:
+never made by signing in alone, under either policy, and neither is an
+invite code: `aether invite` needs an approved device, a member SSH key or
+a tailnet connection. A switch inherits nothing. To see what a switch
+affects:
 
 ```sh
 sudo aether-server device review
@@ -258,17 +262,19 @@ every 20 seconds and reconnecting with jittered backoff from 1 to 60
 seconds. The agent honours `HTTPS_PROXY` from
 `/etc/aether/aether-server.env`.
 
-The pinned edge key, the owner and the claim code are kept per relay
-origin ([Files](#files)). Pointing `edge-url` at another edge starts clean
-there: the server pins that edge's key on first connection and enrolls
-unclaimed. Pointing it back finds the first edge's pin and owner again. To
-move an enrolled server to another edge:
+The server trusts an edge by its signing key, not its host name. It pins
+the key on first connection and keeps one pin, whatever `edge-url` says,
+and it keeps its owner per edge key ([Files](#files)). A new host name of
+the same edge keeps both. An edge with another key is refused with `edge
+key changed` until `sudo aether-server edge trust` pins it; the server then
+has no owner there and is claimed with a new code. Trusting the first key
+again finds its owner. To move an enrolled server to another edge:
 
 ```sh
 sudo aether-server edge leave                 # unenroll at the old edge, forget its owner
 sudo aether-server config set edge-url https://<edge-host>
+sudo aether-server edge trust                 # compare the key with the one the edge's operator publishes, type yes
 sudo systemctl restart aether-server
-sudo aether-server edge status                # compare the edge key with the one the edge's operator publishes
 sudo aether-server edge claim-code
 ```
 
@@ -302,27 +308,31 @@ under either policy, because the code came from the machine's console.
 
 A server that already has members is claimed by an admin who first links
 their edge account over SSH key or tailnet
-([teams.md](teams.md#linking-an-existing-member)). Any other claim on such
-a server is refused with `server is already claimed`, so a claim never
-makes a new admin there.
+([teams.md](teams.md#linking-an-existing-member)), or by an admin the
+machine's administrator names ([Console recovery](#console-recovery)). Any
+other claim on such a server is refused with `server is already claimed`,
+so a claim never makes a new admin there.
 
 The edge records the owner only when the server reports the claim on its
 own control connection, within 60 seconds of the claim connection opening,
-and only as the account that connection was opened for. When the edge
-cannot record a report, for example because the account was deleted
-meanwhile, it closes the control connection with `ownership report
-refused: <reason>`, which `sudo aether-server edge status` shows; the
-server reconnects and learns whether the edge holds it as claimed.
+and only as the account that connection was opened for. The server records
+the claim only once that report is sent. When the edge cannot record a
+claim, or a report that the server is ownerless, for example because the
+account was deleted meanwhile, it closes the control connection with
+`ownership report refused: <reason>`, which `sudo aether-server edge
+status` shows; the server reconnects and learns whether the edge holds it
+as claimed. A transfer is answered instead ([Transfer and the ownerless
+state](#transfer-and-the-ownerless-state)).
 
 ### Commands
 
 | Command | Does |
 | --- | --- |
 | `sudo aether-server edge status` | Edge, access policy, server id, pinned edge key, owner or claim code state, connection state |
-| `sudo aether-server edge claim-code` | Issue a new claim code, replacing the old one. Refused while the server has an owner |
+| `sudo aether-server edge claim-code [--admin <member id>]` | Issue a new claim code, replacing the old one. Refused while the server has an owner. `--admin` names an existing admin the claim binds the claiming account to ([Console recovery](#console-recovery)) |
 | `sudo aether-server edge trust` | Fetch the edge's signing key from `GET <edge>/v1/edge`, show both fingerprints, and pin it after you type `yes` |
 | `sudo aether-server edge leave` | Unenroll at the edge, forget the owner and the claim code, set `edge-url ""` |
-| `sudo aether-server device approve <code>` | Approve a registered or pending device from the machine |
+| `sudo aether-server device approve <code>` | Show the device a code names, the account it signed in as and the member and role approving admits it as, and approve it after you answer `y` |
 | `sudo aether-server device review` | Approve, revoke or skip each registered and pending device; list member SSH keys and tailnet logins |
 
 ```
@@ -339,12 +349,15 @@ later is refused, and the server keeps retrying with this error in its log
 and in `edge status`:
 
 ```
-edge key changed: pinned SHA256:<old>, edge presents SHA256:<new>; if the edge operator rotated its key, run `aether-server edge trust`
+edge key changed: pinned SHA256:<old>, edge presents SHA256:<new>; if the edge's operator rotated its key, or edge-url now names another edge, run `aether-server edge trust`
 ```
 
 Run `edge trust` only after the edge's operator has confirmed the new
-fingerprint. A server id the edge's operator blocked is refused at every
-enrollment, and `edge status` shows the reason:
+fingerprint. The server has no owner for a key it has not been claimed
+under; when the edge still records one, the server reports itself
+ownerless as it reconnects, and `edge claim-code` gives it an owner again.
+A server id the edge's operator blocked is refused at every enrollment,
+and `edge status` shows the reason:
 
 ```
 connection  disconnected since <time>: read ready: failed to get reader: received close frame: status = StatusPolicyViolation and reason = "server is blocked by this edge's operator"
@@ -352,18 +365,25 @@ connection  disconnected since <time>: read ready: failed to get reader: receive
 
 ### Files
 
-`<data-dir>/edge/` holds one directory per relay origin the server has
-used, named after the origin with `://` replaced by `_`, such as
-`https_edge.onaether.dev/`. Directories are mode 0700, files 0600:
+`<data-dir>/edge/` holds the server's edge state. None of it depends on
+the edge's host names. Directories are mode 0700, files 0600:
 
 | Path under `<data-dir>/edge/` | Holds |
 | --- | --- |
-| `<origin>/edge_key.json` | The pinned edge signing key |
-| `<origin>/owner.json` | The account that owns the server at that edge |
-| `<origin>/claim.json` | The claim code's SHA-256 hash, expiry and attempts left; never the code |
-| `<origin>/status.json` | Last connection state, for `edge status` |
-| `<origin>/lock` | Serializes claim attempts between the server and the commands |
+| `edge_key.json` | The pinned edge signing key |
+| `keys/sha256-<fingerprint>/owner.json` | The account that owns the server at the edge holding that key; the fingerprint is the key's, with `+` and `/` written `-` and `_` |
+| `claim.json` | The claim code's SHA-256 hash, expiry, attempts left and the admin `--admin` named; never the code |
+| `status.json` | Last connection state, for `edge status` |
+| `lock` | Serializes claim attempts and owner changes between the server and the commands |
 | `access_policy.json` | The policy of the last start, to log a change |
+
+`aether-server edge` commands run as root leave every file they write here
+owned by the data directory's owner, so the server keeps reading it.
+
+Development builds before this layout kept a directory per relay origin,
+such as `https_edge.onaether.dev/`. That layout never shipped and is not
+read: such a server pins the edge key again on first connection, reports
+itself ownerless and is claimed again. The old directory can be deleted.
 
 ## Client side
 
@@ -419,13 +439,18 @@ registered under `account` and the server now requires approval, the
 command fails with the server's own message, line by line:
 
 ```
-device "dana-laptop" is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
+device "dana-laptop", signed in as github account dana, is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
   aether device approve <code>
 or on the server:
   sudo aether-server device approve <code>
 ```
 
 `aether link` and `aether edge-ssh` (git) print it; the sync daemon logs it.
+
+Every relayed connection names, in its SSH user name, the account this
+device signed in as, `<provider>:<subject>`. The device's SSH signature
+covers it, so the server refuses a grant that names another account before
+it records anything.
 
 ## First link and server identity
 
@@ -488,6 +513,13 @@ claim whose grant names another account before it tries the code:
 this device claims as github account <subject>, but the edge signed the connection in as github account <login>; the claim was not attempted
 ```
 
+Before it dials, the command prints the account the claim is made for,
+the one the edge reported when this device signed in:
+
+```
+claiming server <server id> as <login> (github), the account edge.onaether.dev reported when this device signed in
+```
+
 On success the same connection becomes the link:
 
 ```
@@ -506,9 +538,12 @@ aether link <server id> --addr host:2222    # also try this SSH address first
 ```
 
 With `--addr`, the client dials that address first (3-second timeout) and
-falls back to the edge; when both fail the error names both causes, and
-when only the address fails its error goes to stderr followed by `aether:
-reached server <id> through <edge> instead`. On both paths the host key
+falls back to the edge; when both fail the error names both causes, with
+what the server said, and when only the address fails its error goes to
+stderr followed by `aether: reached server <id> through <edge> instead`.
+That stderr line leaves out the server's approval banner: under `account`
+the edge admits a device the direct path refuses until it is approved, and
+the banner would repeat on every command. On both paths the host key
 must derive the server id and nothing is read from or written to
 `known_hosts`. The device key authenticates on both, but the direct path
 accepts approved devices only, under either policy.
@@ -525,6 +560,11 @@ earlier link; otherwise `aether link` prints the line to add. The sync
 daemon takes the same link: `aether daemon install --server-id <id>
 --edge-url <url> [--server host:port]`.
 
+Linking another server in place of a default link that has a server id
+keeps the old one as a saved link named by its server id, so the old
+repository's `git push aether` and `aether --server <server id>` keep
+working.
+
 ## Credentials and revocation
 
 | Credential | Where | Lifetime | Ended by |
@@ -536,7 +576,7 @@ daemon takes the same link: `aether daemon install --server-id <id>
 | Grant | Signed by the edge | 60 seconds, admitting one connection; 30 seconds of clock skew allowed | Its first use. It does not bound a connection already open |
 | Claim code | Server console | 30 minutes, 5 attempts | Its use, or a new code |
 | Invitation | Server | 7 days | `aether invite revoke`, its use, or a demotion of its creator |
-| Device status on a server | Server | Until changed | `aether device revoke`, `device review`, removing the member, or deleting the account at the edge |
+| Device status on a server | Server | Until changed | `aether device revoke`, `device review`, `aether member unlink`, removing the member, or deleting the account at the edge |
 
 `aether logout` revokes the token at the sign-in origin that issued it,
 then deletes it from `edge-tokens.json`. When the edge cannot be reached it
@@ -586,7 +626,28 @@ until revoked. After recovery:
    invitations and account links), and the SSH keys and tailnet logins
    `device review` lists at its end. Revoke invitations with `aether invite
    revoke <id>` and remove unknown members with `aether member remove
-   <id>`.
+   <id>`. A device that only signed in cannot mint invite codes, but one an
+   approved device, SSH key or tailnet connection minted is a file in the
+   server's invites directory until redeemed or expired; no command lists
+   them.
+4. If the account was linked to a member while someone else held it, list
+   that member's accounts and devices and remove the account without
+   removing the member:
+
+   ```sh
+   aether member identities <member-id>
+   aether member unlink <member-id> github:<subject>
+   ```
+
+   ```
+   unlinked github:<subject> from member <member id>; revoked 2 device(s) that signed in with it
+   ```
+
+   The account's devices are revoked, not deleted, so their keys stay
+   refused, and their connections close. The member, its role, its other
+   accounts, SSH keys and tailnet identity stay. The member themself or an
+   admin may do it; under `approved-devices` not from a pending or
+   registered device.
 
 Under `approved-devices` the attacker's devices are pending and had no
 access; revoke them anyway so nobody approves one by mistake.
@@ -619,10 +680,14 @@ aether member transfer <member-id> [--provider github|google]
 member <member id> now owns this server at its edge, as github account <login>
 ```
 
-`--provider` is needed when that admin has both. The server records the
-transfer and reports it to the edge, and refuses while it is not connected
-to the edge or has no owner. A transfer never creates an admin or changes a
-role.
+`--provider` is needed when that admin has both. The server reports the
+transfer to the edge and keeps the new owner only once the edge answers
+that it recorded it; a refusal fails the command with `ownership report
+refused: <reason>`, and no answer within 10 seconds fails it too. Either
+way the server keeps its previous owner, and at every enrollment it
+reports its owner again, so the edge ends up recording the server's. The
+command is refused while the server is not connected to the edge or has no
+owner. A transfer never creates an admin or changes a role.
 
 When the owner's identity leaves the server, because the member was
 removed or the account deleted, the server forgets the owner and reports
@@ -638,19 +703,27 @@ aether link --claim <code>
 
 A member who is not an admin cannot become owner this way: the claim is
 refused and makes no admin (`TestDeleteAccountLeavesTheServerOwnerless`).
+An admin with no SSH key or tailnet identity to link from is restored on
+the machine instead ([Console recovery](#console-recovery)).
 
 ### Deleting an account
 
 The Account page, `https://auth.onaether.dev/account` on the project's
-edge, or `aether logout --delete-account`, lists the servers the account
-owns and the servers it is a member of, then deletes it. Both need:
+edge, lists the servers the account owns and the servers it is a member
+of, and deletes it. Only that page deletes an account, and it needs:
 
-- A sign-in with the provider in the last 5 minutes. Without one the
-  deletion is refused with `deleting an account needs a sign-in from the
-  last 5m0s: sign in again at <url>, then delete it within 5m0s`; open
-  `<url>`, sign in, and run the deletion again.
+- A sign-in with the provider in this browser in the last 5 minutes. A
+  sign-in in another browser does not count, and neither does a device
+  token. Without one the deletion is refused with `deleting an account
+  needs a sign-in in this browser from the last 5m0s: sign in again at
+  <url>, then delete it within 5m0s`; open `<url>`, sign in, and delete
+  again.
 - The account's login typed back, or its email for an account without a
-  login. The page also needs its form token.
+  login, and the page's form token.
+
+So deleting takes the person's provider sign-in, or a session cookie
+stolen within 5 minutes of its sign-in. `aether logout --delete-account`
+lists the same servers and where to delete:
 
 ```
 account <login> (github) at edge.onaether.dev
@@ -661,15 +734,17 @@ deleting it ends its sign-ins and device tokens, and each server above removes t
 its edge devices. No server loses a member, a role or data: an SSH key or tailnet identity of yours keeps
 working there until an admin removes it. A server left without an owner is claimed again with a code from
 `aether-server edge claim-code` on its machine.
-type <login> to delete the account:
+delete it in a browser at https://auth.onaether.dev/account: sign in with github there and type <login>. Then run `aether logout` here to
+delete this machine's token.
 ```
 
 The edge deletes the account, its device tokens and its edge sessions, and
 closes its relayed connections. Each server the account owned, was a member
 of, or was admitted to through this edge is told at once, or when it next
-connects; the edge keeps at most 1000 deletions owed to one server. The
-server removes that identity and its edge devices and closes their
-connections. It removes no member, changes no role and deletes no data.
+connects. A deletion stays owed, and is sent again at each enrollment,
+until the server answers that it applied it; the edge keeps at most 1000
+deletions owed to one server. The server removes that identity and its
+edge devices and closes their connections. It removes no member, changes no role and deletes no data.
 
 What stays: the member itself, with its runs and role; its SSH keys and
 tailnet identity; invitations to the login or email, until an admin revokes
@@ -679,9 +754,36 @@ or invites it, which creates a new member.
 
 Before deleting an account that is the only way an admin reaches a server,
 make sure another admin exists, or that the admin also has an SSH key or a
-tailnet identity there. Otherwise nobody can administer that server
-remotely afterwards: the console claim code links only an account an
-existing admin has linked.
+tailnet identity there. Otherwise only the machine's administrator can
+restore them ([Console recovery](#console-recovery)).
+
+### Console recovery
+
+An admin who reached a server only through the edge, and lost that
+account, is restored on the machine. The server must have no owner, as
+after the owner deletes their account:
+
+```sh
+sudo aether-server edge claim-code --admin <member id>
+```
+
+```
+claim code: <server id>-<secret> (valid until 3:04PM, 5 attempts)
+claim this server with:
+  aether link --claim <server id>-<secret>
+the claim binds the claiming account to admin <name> (<member id>) and approves the claiming device; it creates no member and changes no role
+```
+
+The admin signs in with the account they now use and claims with that code.
+The server binds the account to that member, approves the claiming device
+and becomes owned by that account, and logs `sshd: console recovery bound
+an edge account to an admin`. It creates no member and raises no role: a
+member who is not an admin is refused when the code is issued and again at
+the claim (`is collaborator, not an admin; the claim was refused`), and an
+account bound to another member is refused
+(`TestConsoleRecoveryOfAnAdminWithoutAnAccount`). The member id is in
+`aether member list`; an id that names no member is refused with the list
+of admins: `--admin: no member <id>; the admins are: <member id> (<name>)`.
 
 ## Trust models
 
@@ -1074,7 +1176,7 @@ enrollments (`relay: enrollment refused client=<address>`) and failed TLS
 handshakes without a proxy, client addresses. A request that fails on the
 edge's side or at the provider logs `edge: request failed route=<route>
 status=<5xx> error=<error>`; refusals the client can fix are not logged. A
-refused ownership report logs `relay: control channel closed server=<id>
+refused claim or ownerless report logs `relay: control channel closed server=<id>
 error="ownership report refused: <reason>"`. nginx keeps its own access log
 of client addresses in `/var/log/nginx/access.log`.
 
@@ -1239,7 +1341,8 @@ legitimate.
 | Edge down | [During an edge outage](#during-an-edge-outage) |
 | Edge restart | Relayed connections drop; servers and clients reconnect; runs are unaffected |
 | Server offline | `503 server is not connected to the edge` |
-| Ownership report refused | The edge closes the control connection with `ownership report refused: <reason>`; the server reconnects and learns whether the edge holds it as claimed |
+| Claim or ownerless report refused | The edge closes the control connection with `ownership report refused: <reason>`; the server reconnects and learns whether the edge holds it as claimed |
+| Transfer refused | The edge answers with the reason; `aether member transfer` fails with `ownership report refused: <reason>` and the server keeps its previous owner |
 | OAuth provider down | No new sign-ins. Device tokens and edge sessions keep working, but invitations stop matching accounts whose last sign-in is over 24 hours old |
 | Host key lost or rotated | New server id: claim again and link again |
 | Edge signing key lost | Every server refuses the edge until `aether-server edge trust` |

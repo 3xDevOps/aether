@@ -68,8 +68,7 @@ func accountDest(id *int64, a *edgeproto.AccountInfo) []any {
 	return []any{id, &a.ID, &a.Provider, &a.Subject, &a.Email, &a.Login, &a.Name, identityAt{&a.IdentityAt}}
 }
 
-// identityAt scans accounts.identity_at, where 0 is an account from
-// before the column: never confirmed.
+// identityAt scans accounts.identity_at.
 type identityAt struct{ t *time.Time }
 
 func (d identityAt) Scan(v any) error {
@@ -77,19 +76,18 @@ func (d identityAt) Scan(v any) error {
 	if !ok {
 		return fmt.Errorf("edgestore: identity_at is %T, want an integer", v)
 	}
-	*d.t = time.Time{}
-	if n != 0 {
-		*d.t = fromUnix(n)
-	}
+	*d.t = fromUnix(n)
 	return nil
 }
 
 // Session is a signed-in browser at the edge. AccountID is the account's
-// row id; Account.ID its public id.
+// row id; Account.ID its public id. SignedInAt is when this browser
+// signed in with the provider: only a sign-in creates a session.
 type Session struct {
-	ID        string
-	AccountID int64
-	Account   edgeproto.AccountInfo
+	ID         string
+	AccountID  int64
+	Account    edgeproto.AccountInfo
+	SignedInAt time.Time
 }
 
 // CreateSession stores a session under the hash of its cookie token and
@@ -109,15 +107,17 @@ func (s *Store) CreateSession(ctx context.Context, id, tokenHash string, account
 // blocked stored under tokenHash, and moves its expiry to expires.
 func (s *Store) UseSession(ctx context.Context, tokenHash string, now, expires time.Time) (Session, error) {
 	var sess Session
+	var created int64
 	err := s.db.QueryRowContext(ctx, `UPDATE web_sessions SET expires_at = ?
-		WHERE token_hash = ? AND expires_at > ? AND `+notBlocked("web_sessions.account_id")+` RETURNING id, account_id`,
-		unix(expires), tokenHash, unix(now)).Scan(&sess.ID, &sess.AccountID)
+		WHERE token_hash = ? AND expires_at > ? AND `+notBlocked("web_sessions.account_id")+` RETURNING id, account_id, created_at`,
+		unix(expires), tokenHash, unix(now)).Scan(&sess.ID, &sess.AccountID, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
 	if err != nil {
 		return Session{}, fmt.Errorf("edgestore: use session: %w", err)
 	}
+	sess.SignedInAt = fromUnix(created)
 	var id int64
 	if err := s.db.QueryRowContext(ctx, `SELECT `+accountCols+` FROM accounts a WHERE a.id = ?`,
 		sess.AccountID).Scan(accountDest(&id, &sess.Account)...); err != nil {

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"golang.org/x/term"
@@ -16,14 +18,14 @@ import (
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, set the git identity of, change the role of, link an edge account to, transfer server ownership to, or remove members",
+		short: "list, approve, color, set the git identity of, change the role of, link, list or unlink the edge accounts of, transfer server ownership to, or remove members",
 		run:   runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|transfer|remove>")
+		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|identities|unlink|transfer|remove>")
 	}
 	switch args[0] {
 	case "list":
@@ -46,6 +48,13 @@ func runMember(args []string) error {
 		return memberRole(args[1:])
 	case "link":
 		return memberLink(args[1:])
+	case "identities":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: aether member identities <member-id>")
+		}
+		return memberIdentities(args[1])
+	case "unlink":
+		return memberUnlink(args[1:])
 	case "transfer":
 		return memberTransfer(args[1:])
 	default:
@@ -123,6 +132,54 @@ func memberLink(args []string) error {
 		}
 		fmt.Printf("%s can link to member %s until %s: sign in with aether login and connect through the edge\n",
 			inviteeOf(res.Invitation), res.Invitation.MemberID, res.Invitation.ExpiresAt)
+		return nil
+	})
+}
+
+// memberIdentities lists a member's edge accounts and every device of the
+// member with the account it signed in as.
+func memberIdentities(id string) error {
+	return withControl(func(c *protocol.Client) error {
+		var res protocol.MemberIdentityListResult
+		if err := c.Call(protocol.MethodMemberIdentityList, protocol.MemberIdentityListParams{MemberID: id}, &res); err != nil {
+			return err
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "IDENTITY\tLOGIN\tEMAIL\tLINKED")
+		for _, i := range res.Identities {
+			_, _ = fmt.Fprintf(tw, "%s:%s\t%s\t%s\t%s\n", i.Provider, i.Subject, i.Login, i.Email, i.CreatedAt)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		fmt.Println()
+		return printDevices(res.Devices)
+	})
+}
+
+// memberUnlink removes one edge account from a member: its devices are
+// revoked and their connections closed. The member, its role, its other
+// accounts, SSH key and tailnet identity stay.
+func memberUnlink(args []string) error {
+	const usage = "usage: aether member unlink <member-id> <provider>:<subject>\n" +
+		"the identity as aether member identities prints it; the member or an admin"
+	if len(args) != 2 {
+		return errors.New(usage)
+	}
+	provider, subject, ok := strings.Cut(args[1], ":")
+	if !ok || provider == "" || subject == "" {
+		return errors.New(usage)
+	}
+	return withControl(func(c *protocol.Client) error {
+		var res protocol.MemberIdentityRemoveResult
+		params := protocol.MemberIdentityRemoveParams{MemberID: args[0], Provider: provider, Subject: subject}
+		if err := c.Call(protocol.MethodMemberIdentityRemove, params, &res); err != nil {
+			return err
+		}
+		fmt.Printf("unlinked %s:%s from member %s; revoked %d device(s) that signed in with it\n", provider, subject, args[0], len(res.Revoked))
+		for _, d := range res.Revoked {
+			fmt.Printf("  %s %q %s\n", d.ID, d.Label, d.Fingerprint)
+		}
 		return nil
 	})
 }

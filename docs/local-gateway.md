@@ -919,11 +919,16 @@ does, with the same files in the config directory:
 
 The member's devices and edge invitations are control-channel methods, so
 the dashboard calls them through `POST /api/v1/<method>` like any other:
-`member.device.list`, `member.device.approve` (`{"code":"..."}`),
+`member.device.list`, `member.device.lookup` (`{"code":"..."}`),
+`member.device.approve` (`{"code":"...","device_id":"..."}`, the id the
+lookup returned),
 `member.device.revoke` (`{"device_id":"..."}`),
 `member.invitation.create`, `member.invitation.list`,
 `member.invitation.revoke` (`{"invitation_id":"..."}`),
-`member.identity.link` and `server.owner.transfer`
+`member.identity.link`, `member.identity.list` (`{"member_id":"..."}`),
+`member.identity.remove`
+(`{"member_id":"...","provider":"github","subject":"..."}`) and
+`server.owner.transfer`
 (`{"member_id":"...","provider":"github"}`, `provider` only when the member
 has more than one edge identity). Their shapes are in
 `internal/protocol/identity.go`,

@@ -21,6 +21,9 @@ var (
 	// ErrInUse is returned when a delete is blocked by rows that still
 	// reference the target (e.g. a workspace with runs).
 	ErrInUse = errors.New("store: in use")
+	// ErrLimit is returned when a write would exceed a bound on rows (e.g.
+	// devices waiting for approval on one account).
+	ErrLimit = errors.New("store: limit reached")
 )
 
 // Store is the persistence contract the rest of the system consumes.

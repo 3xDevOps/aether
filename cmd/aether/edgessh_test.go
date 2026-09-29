@@ -151,8 +151,12 @@ func TestLinkResolvesOnlyServerIDsOnTheEdge(t *testing.T) {
 			{ID: testServerID, Name: "devbox", Online: true, Role: "member"},
 		}})
 	})
-	if _, err := captureStdout(t, func() error { return runLogin([]string{"--edge", edge.URL, "--label", "ci"}) }); err != nil {
-		t.Fatal(err)
+	out, loginErr := captureStdout(t, func() error { return runLogin([]string{"--edge", edge.URL, "--label", "ci"}) })
+	if loginErr != nil {
+		t.Fatal(loginErr)
+	}
+	if !strings.Contains(out, "as octo (github)") {
+		t.Fatalf("aether login does not show the account the edge reported:\n%s", out)
 	}
 	for _, addr := range []string{"devbox", "localhost"} {
 		got, err := edgeLinkOptions(linkOptions{addr: addr})
@@ -165,11 +169,18 @@ func TestLinkResolvesOnlyServerIDsOnTheEdge(t *testing.T) {
 	if err != nil || got != want {
 		t.Fatalf("edgeLinkOptions(id) = %+v, %v; want %+v", got, err, want)
 	}
+	// A claim shows the account it is made for before anything is sent.
 	code := testServerID + "-abcdefghijklmnop"
-	got, err = edgeLinkOptions(linkOptions{claim: code, direct: "devbox"})
+	out, err = captureStdout(t, func() error {
+		got, err = edgeLinkOptions(linkOptions{claim: code, direct: "devbox"})
+		return err
+	})
 	want = cli.LinkOptions{Addr: "devbox", EdgeURL: edge.URL, Claim: code}
 	if err != nil || got != want {
 		t.Fatalf("edgeLinkOptions(claim) = %+v, %v; want %+v", got, err, want)
+	}
+	if !strings.Contains(out, "claiming server "+testServerID+" as octo (github), the account "+edgeclient.HostOf(edge.URL)) {
+		t.Fatalf("a claim does not show the account it is made for:\n%s", out)
 	}
 	edge.Close()
 	if _, err := edgeLinkOptions(linkOptions{claim: "not-a-code"}); err == nil || !strings.Contains(err.Error(), "link --claim") {

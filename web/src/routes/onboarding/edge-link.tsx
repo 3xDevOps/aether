@@ -11,13 +11,11 @@ import { Chip } from '@/components/ui/heroui'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Api } from '@/lib/api'
-import { edgeHost, message } from '@/lib/format'
+import { edgeHost, message, providerName } from '@/lib/format'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeServer } from '@/lib/types'
 
 /** How often the screen asks the gateway whether the sign-in finished. */
 const pollMs = 2000
-
-const providerName: Record<string, string> = { github: 'GitHub', google: 'Google' }
 
 type Phase =
   | { name: 'checking' }
@@ -364,7 +362,9 @@ function ServerPicker({
           <p className="text-[13px] leading-5 text-muted-foreground">
             <span className="font-mono">aether-server setup</span> printed it on the server,
             valid for 30 minutes. <span className="font-mono">sudo aether-server edge claim-code</span>{' '}
-            prints a new one. Claiming makes your account the server&apos;s admin.
+            prints a new one. Claiming makes{' '}
+            <span className="font-medium">{accountName(account)}</span>, the account the edge
+            reported when you signed in, the server&apos;s admin.
           </p>
           <Button type="submit" size="sm" disabled={busy || !code.trim()}>
             {busy ? 'Claiming...' : 'Claim and link'}

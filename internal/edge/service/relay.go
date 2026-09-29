@@ -75,8 +75,8 @@ func (d relayDirectory) PendingDeletions(ctx context.Context, serverID string) (
 	return d.s.store.PendingDeletions(ctx, serverID)
 }
 
-func (d relayDirectory) DeletionDelivered(ctx context.Context, serverID string, del edgeproto.AccountDeleted) error {
-	return d.s.store.DeletionDelivered(ctx, serverID, del)
+func (d relayDirectory) DeletionApplied(ctx context.Context, serverID string, del edgeproto.AccountDeleted) error {
+	return d.s.store.DeletionApplied(ctx, serverID, del)
 }
 
 func (d relayDirectory) Egress(ctx context.Context, month string) (int64, error) {

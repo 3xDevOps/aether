@@ -34,12 +34,14 @@ const (
 
 // Paths served on the sign-in origin.
 const (
-	PathDeviceStart   = "/v1/device/start"
-	PathDeviceToken   = "/v1/device/token"
-	PathLogout        = "/v1/device/logout"
-	PathServers       = "/v1/servers"
-	PathAccount       = "/v1/account"
-	PathAccountDelete = "/v1/account/delete"
+	PathDeviceStart = "/v1/device/start"
+	PathDeviceToken = "/v1/device/token"
+	PathLogout      = "/v1/device/logout"
+	PathServers     = "/v1/servers"
+	PathAccount     = "/v1/account"
+	// PathAccountPage is the Account page, where a browser that signed in
+	// within the last few minutes deletes the account.
+	PathAccountPage = "/account"
 )
 
 // DataPath is the path a server dials to attach the data socket of connID.
@@ -207,19 +209,13 @@ type ServersResponse struct {
 
 // AccountSummary answers GET PathAccount: the signed-in account and what
 // deleting it touches, the servers it owns and the other servers it is a
-// member of. Confirm is the text AccountDeleteRequest must repeat.
+// member of. Confirm is the text the Account page asks the person to type
+// to delete it.
 type AccountSummary struct {
 	Account AccountInfo  `json:"account"`
 	Owned   []ServerInfo `json:"owned"`
 	Member  []ServerInfo `json:"member"`
 	Confirm string       `json:"confirm"`
-}
-
-// AccountDeleteRequest is the body of POST PathAccountDelete. The edge
-// deletes the account only when Confirm names it and the account signed
-// in with its provider within the last few minutes; it answers 204.
-type AccountDeleteRequest struct {
-	Confirm string `json:"confirm"`
 }
 
 // EdgeInfo answers GET PathEdgeInfo on the relay origin: the sign-in

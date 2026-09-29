@@ -39,10 +39,11 @@ func ServerIDFromEdgeHost(host string) (string, bool) {
 // DialLinked opens an SSH client connection to the server of cfg, a link
 // with a server id. Syncd and Dial share it. The host key must derive the
 // server id on every path; nothing is trusted on first use and nothing is
-// written to known_hosts. The device key authenticates. With an address
-// the server is dialed there first, and with an edge as well the edge is
-// the fallback; when both fail the error carries both causes, and when
-// only the address fails its cause goes to stderr, because a host key
+// written to known_hosts. The device key authenticates, as user on the
+// direct path and as the signed-in account through the edge. With an
+// address the server is dialed there first, and with an edge as well the
+// edge is the fallback; when both fail the error carries both causes, and
+// when only the address fails its cause goes to stderr, because a host key
 // that is not the server's there means the address reaches another host.
 func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, error) {
 	if !edgeproto.ValidServerID(cfg.ServerID) {
@@ -67,11 +68,18 @@ func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, erro
 		}
 		directErr = err
 	}
-	client, edgeErr := dialEdge(ctx, dir, cfg, user, signer)
+	client, edgeErr := dialEdge(ctx, dir, cfg, signer)
 	if directErr == nil {
 		return client, edgeErr
 	}
 	if edgeErr == nil {
+		// The edge admits a device that the direct path refuses until it is
+		// approved, under account access; the refusal's approval demand
+		// would repeat on every command and git operation.
+		var refused *refusalError
+		if errors.As(directErr, &refused) {
+			directErr = refused.err
+		}
 		fmt.Fprintf(os.Stderr, "aether: %v\naether: reached server %s through %s instead\n", directErr, cfg.ServerID, cfg.EdgeURL)
 		return client, nil
 	}
@@ -86,8 +94,15 @@ func dialDirect(ctx context.Context, cfg Config, user string, signer ssh.Signer)
 	return pinnedHandshake(nc, cfg.Addr, user, signer, pinnedHostKey(cfg.ServerID, "the linked server"))
 }
 
-func dialEdge(ctx context.Context, dir string, cfg Config, user string, signer ssh.Signer) (*ssh.Client, error) {
+// dialEdge reaches the server through the edge. The SSH user name is
+// the account this device signed in as, which the server checks against
+// the edge's grant.
+func dialEdge(ctx context.Context, dir string, cfg Config, signer ssh.Signer) (*ssh.Client, error) {
 	edge, err := edgeclient.New(dir, cfg.EdgeURL)
+	if err != nil {
+		return nil, err
+	}
+	session, err := edge.Session()
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +110,8 @@ func dialEdge(ctx context.Context, dir string, cfg Config, user string, signer s
 	if err != nil {
 		return nil, err
 	}
-	return pinnedHandshake(nc, EdgeHost(cfg.ServerID), user, signer, pinnedHostKey(cfg.ServerID, "the linked server"))
+	return pinnedHandshake(nc, EdgeHost(cfg.ServerID), edgeproto.AccountUser(session.Account.Account), signer,
+		pinnedHostKey(cfg.ServerID, "the linked server"))
 }
 
 // DialClaim claims the server that code, a claim code as aether-server
@@ -207,7 +223,7 @@ func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh
 		_ = nc.Close()
 		err = fmt.Errorf("ssh handshake with %s: %w", where, err)
 		if len(said) > 0 {
-			err = fmt.Errorf("%w\n  server said:\n    %s", err, strings.Join(said, "\n    "))
+			err = &refusalError{err: err, said: said}
 		}
 		return nil, err
 	}
@@ -217,6 +233,18 @@ func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh
 	}
 	return ssh.NewClient(cc, chans, reqs), nil
 }
+
+// refusalError is a failed handshake and what the server said about it.
+type refusalError struct {
+	err  error
+	said []string
+}
+
+func (e *refusalError) Error() string {
+	return fmt.Sprintf("%v\n  server said:\n    %s", e.err, strings.Join(e.said, "\n    "))
+}
+
+func (e *refusalError) Unwrap() error { return e.err }
 
 // bannerLines splits a banner into its non-empty lines, with control
 // characters replaced so the text cannot drive the terminal it is

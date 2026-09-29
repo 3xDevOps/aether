@@ -1,7 +1,6 @@
 // Invitations for edge accounts: an admin names the GitHub login or email a
-// person signs in to the edge with, and that person's first connection makes
-// them a member. No code changes hands, unlike the Invite button's one-time
-// codes for SSH-key joins.
+// person signs in to the edge with. No code changes hands, unlike the Invite
+// button's one-time codes for SSH-key joins.
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -27,14 +26,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { Api } from '@/lib/api'
-import { message, timeAgo } from '@/lib/format'
+import { message, providerName, timeAgo } from '@/lib/format'
 import type { Invitation, Member } from '@/lib/types'
 import { cn, field } from '@/lib/utils'
 import { useStore } from '@/store'
 
 const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
-
-const providerName: Record<string, string> = { github: 'GitHub', google: 'Google' }
 
 /** Who an invitation admits, as the person reading the list knows them. */
 function invitee(invitation: Invitation): string {
@@ -75,7 +72,9 @@ export function InvitationsSection({ client }: { client: Api }) {
     setError(null)
     try {
       const invitation = await client.memberInvitationCreate(
-        by === 'login' ? { login: who.trim(), role } : { email: who.trim(), role },
+        by === 'login'
+          ? { provider: 'github', login: who.trim(), role }
+          : { email: who.trim(), role },
       )
       setWho('')
       toast.success(`Invited ${invitee(invitation)}`)
@@ -95,8 +94,12 @@ export function InvitationsSection({ client }: { client: Api }) {
         <h2 className="text-[13px] font-semibold">Invitations</h2>
         <p className="mt-1 max-w-2xl text-xs leading-4 text-muted-foreground">
           Invite a person by the account they sign in to the edge with. After aether login they
-          see this server, and their first connection makes them a member with the role you
-          pick. Invitations expire after 7 days.
+          see this server. When signing in is enough for this server, their first connection
+          makes them a member with the role you pick. When the server admits approved devices
+          only, their device waits for an admin to approve it with the code it shows, using{' '}
+          <span className="font-mono">aether device approve</span> or{' '}
+          <span className="font-mono">sudo aether-server device approve</span> on the server;
+          approving it makes them a member. Invitations expire after 7 days.
         </p>
       </div>
 

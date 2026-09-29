@@ -58,9 +58,9 @@ type Directory interface {
 	// no owner.
 	DropOwner(ctx context.Context, serverID string) error
 	// PendingDeletions returns the account deletions owed to serverID,
-	// and DeletionDelivered forgets one once it was sent.
+	// and DeletionApplied forgets one once serverID applied it.
 	PendingDeletions(ctx context.Context, serverID string) ([]edgeproto.AccountDeleted, error)
-	DeletionDelivered(ctx context.Context, serverID string, d edgeproto.AccountDeleted) error
+	DeletionApplied(ctx context.Context, serverID string, d edgeproto.AccountDeleted) error
 }
 
 // EgressStore persists the monthly egress counter so the budget survives

@@ -2036,8 +2036,11 @@ through an edge, with each device key's fingerprint: the member's own, or
 every member's for an admin, and each device's status: `approved`,
 `pending`, `registered` (admitted by signing in under `edge-access
 account`) or `revoked`. It approves a pending or registered device only by
-the code typed in from that device, which no row shows, and revokes one,
-showing the server's refusal verbatim. It is its own view, not part of Settings, because
+the code typed in from that device, which no row shows: **Review** looks the
+code up with `member.device.lookup`, and a dialog shows the device, the
+account it signed in as, and the member and role approving admits it as,
+before **Approve** sends `member.device.approve` with that device's id. It
+revokes a device too, and shows every server refusal verbatim. It is its own view, not part of Settings, because
 Settings is local-gateway only and the tailnet server gateway serves the
 same methods; the sidebar and palette show it whenever the gateway serves
 `member.device.list`.
@@ -2046,6 +2049,11 @@ The Members view carries an admin-only **Invitations** section
 (`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
 an email, a role, and revoke. Its button reads **Invite account**, so it is
 not confused with **Invite**, which mints one-time codes for SSH-key joins.
+A GitHub login invitation is sent with provider `github`. The section says
+what an invitation admits under each policy, because `server.info` does not
+report the policy: under `account` the first connection makes the account a
+member; under `approved-devices` its device waits until an admin approves
+it with its code.
 
 ## Manage workspaces
 

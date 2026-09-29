@@ -50,7 +50,7 @@ var policies = []edgeproto.AccessPolicy{edgeproto.PolicyAccount, edgeproto.Polic
 // harness is one edge, the servers enrolled with it and the clients
 // signed in to it. The edge serves two origins from one process, as in
 // production: the sign-in origin on the host name localhost and the relay
-// origin on 127.0.0.1. Everything that dials the edge reaches it through
+// origin on 127.0.0.1, swapped by renameHosts. Everything that dials the edge reaches it through
 // proxy, which plays the network in between and, when a test asks it
 // to, a compromised edge: it holds the edge's signing key and can forge,
 // replay, alter and inject control messages and grants.
@@ -63,6 +63,8 @@ type harness struct {
 	signinURL string
 	relayURL  string
 	proxy     *proxy
+	// renamed swaps the host names of the two origins.
+	renamed bool
 
 	mu        sync.Mutex
 	skew      time.Duration
@@ -121,6 +123,9 @@ func (h *harness) startEdge() {
 	_, port, _ := net.SplitHostPort(h.frontAddr)
 	h.signinURL = "http://localhost:" + port
 	h.relayURL = "http://127.0.0.1:" + port
+	if h.renamed {
+		h.signinURL, h.relayURL = h.relayURL, h.signinURL
+	}
 	svc, err := edge.New(edge.Config{
 		DataDir: h.edgeDir, SigninOrigin: h.signinURL, RelayOrigin: h.relayURL,
 		GitHub: h.github.app(), Clock: h.now,
@@ -144,6 +149,15 @@ func (h *harness) startEdge() {
 	h.mu.Lock()
 	h.node = n
 	h.mu.Unlock()
+}
+
+// renameHosts restarts the edge, with the same key and data, under the
+// other host names: its relay origin changes, as when its operator moves
+// it to a new host name.
+func (h *harness) renameHosts() {
+	h.stopEdge()
+	h.renamed = !h.renamed
+	h.startEdge()
 }
 
 // stopEdge stops the edge cleanly: the relay drains every server first.
@@ -734,21 +748,25 @@ func (s *serverNode) waitEnrolled() {
 	})
 }
 
-// state is the server's edge agent state with the harness's edge.
-func (s *serverNode) state() *edgeagent.State {
-	s.h.t.Helper()
-	st, err := edgeagent.OpenState(s.dir, s.h.relayURL)
-	if err != nil {
-		s.h.t.Fatal(err)
-	}
-	return st
-}
+// state is the server's edge agent state.
+func (s *serverNode) state() *edgeagent.State { return edgeagent.OpenState(s.dir) }
 
 // claimCode issues a claim code as `aether-server edge claim-code` does,
 // valid from issued for edgeproto.ClaimCodeTTL.
 func (s *serverNode) claimCode(t *testing.T, issued time.Time) string {
 	t.Helper()
-	code, _, err := s.state().IssueClaimCode(s.id, issued)
+	code, _, err := s.state().IssueClaimCode(s.id, "", issued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
+}
+
+// recoveryCode issues a claim code for the existing admin member admin,
+// as `aether-server edge claim-code --admin <member id>` does.
+func (s *serverNode) recoveryCode(t *testing.T, admin domain.MemberID) string {
+	t.Helper()
+	code, _, err := s.state().IssueClaimCode(s.id, string(admin), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +804,7 @@ func (s *serverNode) consoleApprove(t *testing.T, code string) {
 	if err != nil {
 		t.Fatalf("device waiting with code %s: %v", code, err)
 	}
-	if err := db.ApproveDevice(context.Background(), dev.ID, ""); err != nil {
+	if _, err := sshd.ApproveDevice(context.Background(), db, db, dev, ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -881,6 +899,15 @@ func (sn snapshot) admins() []domain.MemberID {
 
 // approvalCode is the code a pending device's refusal names.
 var approvalCode = regexp.MustCompile(`aether device approve (\S+)`)
+
+// approve approves the device code names through ctl as clients do: it
+// looks the code up, then approves the device the lookup named.
+func approve(t *testing.T, ctl *protocol.Client, code string) protocol.MemberDeviceResult {
+	t.Helper()
+	found := call[protocol.MemberDeviceLookupResult](t, ctl, protocol.MethodMemberDeviceLookup, protocol.MemberDeviceLookupParams{Code: code})
+	return call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove,
+		protocol.MemberDeviceApproveParams{Code: code, DeviceID: found.Device.ID})
+}
 
 // waitingCode returns the approval code in err, which must be the
 // server's refusal of a device waiting for approval.
@@ -999,27 +1026,27 @@ func (h *harness) join(ctl *protocol.Client, c *client, s *serverNode, role stri
 	inviteLogin(t, ctl, c, s.id, role)
 	_, err := h.dial(c, h.link(s))
 	if s.policy == edgeproto.PolicyApprovedDevices {
-		call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove,
-			protocol.MemberDeviceApproveParams{Code: waitingCode(t, c.user.Login+"'s first device", err)})
+		approve(t, ctl, waitingCode(t, c.user.Login+"'s first device", err))
 	} else if err != nil {
 		t.Fatalf("%s joins %s: %v", c.user.Login, s.id, err)
 	}
 }
 
-// deleteAccount deletes c's account at the edge as `aether logout
-// --delete-account` does, after signing in again in a browser, which the
-// edge requires shortly before a deletion.
+// deleteAccount deletes c's account on the edge's Account page, from a
+// browser that has just signed in, which the edge requires.
 func (h *harness) deleteAccount(c *client) {
 	h.t.Helper()
-	if _, err := h.signIn(c.user); err != nil {
+	b, err := h.signIn(c.user)
+	if err != nil {
 		h.t.Fatal(err)
 	}
 	sum, err := c.edge.Account(context.Background())
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if err := c.edge.DeleteAccount(context.Background(), sum.Confirm); err != nil {
-		h.t.Fatalf("delete %s's account: %v", c.user.Login, err)
+	resp, page, err := b.post("/account/delete", url.Values{"confirm": {sum.Confirm}})
+	if err != nil || resp.StatusCode != http.StatusOK || !strings.Contains(page, "The account is deleted") {
+		h.t.Fatalf("delete %s's account: %v %v\n%s", c.user.Login, err, resp, page)
 	}
 }
 
@@ -1042,5 +1069,5 @@ func (h *harness) approveForDirect(ctl *protocol.Client, c *client, s *serverNod
 	if m == nil || !strings.Contains(err.Error(), "a direct connection accepts approved devices only") {
 		t.Fatalf("%s's registered device directly: %v, want refused until approved", c.user.Login, err)
 	}
-	call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: m[1]})
+	approve(t, ctl, m[1])
 }

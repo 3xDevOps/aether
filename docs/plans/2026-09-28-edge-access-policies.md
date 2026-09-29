@@ -75,26 +75,44 @@ alone.
    one. Today's code accepts it; that changes.
 2. **An approved key names its member.** The grant's account must map to the
    member that owns the key. A grant naming another account with that key is
-   refused.
+   refused. Every relayed connection also names, as its SSH user
+   `<provider>:<subject>`, the account the device signed in as, under the
+   device's signature; a grant naming another is refused before anything is
+   recorded.
 3. **Approval is by code, typed.** The code is derived from the device key
    and shown on the requesting device, inside SSH. Lists never carry it. The
    approver gets it from the person, not from Aether. At 40 bits a key can
    be ground to match another device's code, so a code naming two waiting
    devices approves neither; `sudo aether-server device review` approves by
-   choosing the device.
+   choosing the device. Before approving, every client shows what the code
+   admits: `member.device.lookup` returns the device, its account, and the
+   member and role approving admits it as, and `member.device.approve`
+   takes the device id the lookup returned and refuses a code naming
+   another. The member follows from the account, which the edge vouches
+   for, so this is what lets an approver refuse a code that admits someone
+   else's key as their own member.
 4. **Approvers are already approved.** An approval RPC is accepted only on a
    connection authenticated by an approved device key, a member SSH key, or a
    tailnet identity, under either policy. A pending or registered device
-   cannot approve. Under `approved-devices` the same holds for inviting,
-   linking an account, changing a role, approving a tailnet member and
+   cannot approve, or mint an invite code. Under `approved-devices` the same holds for inviting,
+   linking or unlinking an account, changing a role, approving a tailnet member and
    transferring ownership; a waiting device does not complete the SSH
    handshake at all.
-5. **Invitations create members, not access.** Accepting an invitation
-   creates the member with a pending device.
-6. **Linking an identity to an existing member** creates no device. That
-   member approves their first device from their tailnet or key connection.
+5. **An invitation is accepted by approving a device.** A device signing in
+   with an invited account waits on the invitation: no member is created,
+   no account bound and nothing used up. Approving it creates the member
+   with the invited role, binds that device's account and consumes the
+   invitation in one transaction, and deletes the other devices waiting on
+   it, such as one an edge forged for the same login. Only an admin
+   approves it. Revoking the invitation deletes its waiting devices; once
+   it expires they are not listed or approvable. Under `account` the first
+   connection accepts the invitation as before.
+6. **Linking an identity to an existing member** binds it only when the
+   first device signing in with it is approved, which that member does
+   from their tailnet or key connection, or an admin.
 7. **Replacing a key is enrolling a device.** A reinstall, a new machine or
-   a rotated key is a new device and waits for approval.
+   a rotated key is a new device and waits for approval. At most 10 devices
+   wait per account and 10 per invitation; past that none is recorded.
 8. **Another provider is another account.** The edge offers no account
    linking and no email match. Signing in with Google as a person known by
    GitHub reaches nothing.
@@ -120,6 +138,10 @@ alone.
     keep working; the review prints them so the owner sees what remains.
 14. **A device belongs to the identity it first signed in with**, not only
     to its member, so an account deletion finds its devices.
+15. **One identity of a member can be removed.** `member.identity.remove`
+    (`aether member unlink`) unbinds it, revokes its devices and closes
+    their connections, keeping the member; the member or an admin, from an
+    approved device, member SSH key or tailnet identity.
 
 ## 3. What an attacker can do
 
@@ -134,11 +156,12 @@ is named where one exists.
 | See the member's servers: names, ids, roles, online state, policy | Yes | Yes |
 | Reach a workspace | **Yes**, with the member's role on every server they belong to (`TestTakenOverProviderAccount`) | No. The attacker's device is pending (`TestTakenOverProviderAccount`) |
 | As an admin | Invite, mint invite codes, change roles, link accounts, transfer ownership; not approve a device (`TestAccountAccess`) | Nothing: a pending device completes no handshake (`TestApprovedDevices`) |
-| Accept an invitation addressed to the member | Yes, and gains its role | Creates the member with a pending device; no access |
+| Accept an invitation addressed to the member | Yes, and gains its role | No: the device waits on the invitation; no member, bound account or used invitation until an approver types its code (`TestInvitationWaitsUntilOneDeviceIsApproved`) |
 | Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, with anything done as an admin | A pending device and a token remain, with no access |
-| Trick someone into approving | Not needed | Must get an approver to type the code shown on the attacker's device |
+| Trick someone into approving | Not needed | Must get an approver to type the code shown on the attacker's device, after being shown the member and role it admits the device as |
 | Disrupt | Revoke the member's device tokens; delete the edge account, which removes the member's edge identity and edge devices on every server | The same |
-| Be noticed | The device appears in `aether device list` and `aether-server device review` with the account it signed in as (`TestTakenOverProviderAccount`) | The pending request appears there |
+| Be noticed | The device appears with the account it signed in as in `aether device list`, `aether member identities`, the dashboard's Devices view and `aether-server device review` (`TestTakenOverProviderAccount`) | The pending request appears there |
+| Undo a link made while holding the account | `aether member unlink` removes that account from the member and revokes its devices (`TestMemberIdentityListAndRemove`) | The same |
 
 ### With the edge or its signing key
 
@@ -146,14 +169,16 @@ is named where one exists.
 | --- | --- | --- |
 | Forge a grant for any account | Yes | Yes |
 | Reach a workspace | **Yes**, as any member of any server on that edge using this policy (`TestMaliciousEdgeAccountAccess`) | No. A forged grant yields a pending device (`TestMaliciousEdgeApprovedDevices`) |
-| Accept an open invitation | Yes, with its role | Creates the invited member, bound to the attacker's account, with a pending device; no access (`TestMaliciousEdgeApprovedDevices`) |
+| Accept an open invitation | Yes, with its role | No: no member, administrator or bound account exists after a forged acceptance, and the invitation stays open (`TestMaliciousEdgeApprovedDevices`) |
 | Present a member's approved key under another account | No (`TestMaliciousEdgeAccountAccess`) | No (`TestMaliciousEdgeApprovedDevices`) |
+| Record a device an honest client relays under another account | No: the client names its account inside SSH, unless the edge also lied to it at sign-in (both tests) | The same |
+| Record its own key under a member's account | Yes, admitted | Pending; the approver of its code is shown that it admits the key as that member, with that role (`TestMaliciousEdgeApprovedDevices`) |
 | Replay a connection; change the policy, a member or the owner through control messages | No | No (`TestMaliciousEdgeApprovedDevices`, `TestServerVerifiesGrants`) |
 | Send a forged account deletion | Removes access only | Removes access only (`TestMaliciousEdgeApprovedDevices`) |
 | Read or alter an existing SSH session | No | No |
 | Impersonate a server to a linked client | No: the host key is pinned by server id | No |
 | Send a client that is linking for the first time to another server | Yes, by listing a false server id, unless the person links by an id their admin gave them | The same |
-| Take a claim | No: the secret is inside SSH and the server refuses a grant naming another account than the client's (`TestMaliciousEdgeSubstitutesTheClaimingAccount`, `TestClaim`), unless the edge also lied to the device at sign-in about its account, which `aether login` prints | The same |
+| Take a claim | No: the secret is inside SSH and the server refuses a grant naming another account than the client's (`TestMaliciousEdgeSubstitutesTheClaimingAccount`, `TestClaim`), unless the edge also lied to the device at sign-in about its account, which `aether login`, `aether link --claim` and the dashboard's claim form show before the code is sent | The same |
 | Learn who connects to which server, when, from where | Yes | Yes |
 | Deny service | Yes | Yes |
 
@@ -194,8 +219,18 @@ before it pins them; `docs/security.md` says so.
 The edge sees neither the secret nor a moment at which it could substitute
 an account and keep the device, unless it also told the client at sign-in
 that it is another account; `aether login` prints the account the edge
-reported. The edge's **Add a server** page is removed:
-a claim needs a device.
+reported, and `aether link --claim` and the dashboard's claim form show it
+again before the code is sent. The edge's **Add a server** page is
+removed: a claim needs a device.
+
+**Console recovery.** `aether-server edge claim-code --admin <member id>`
+records an existing admin with the code. Its claim binds the claiming
+account to that admin instead of step 4's rules and approves the claiming
+device. It creates no member and raises no role: a member who is not an
+admin is refused when the code is issued and at the claim, and so is an
+account bound to another member. The server logs the binding
+(`TestConsoleRecoveryOfAnAdminWithoutAnAccount`,
+`TestClaimCodeForAnAdminRecoversThatAdmin`).
 
 ## 5. Setup wording
 
@@ -283,7 +318,9 @@ As found in the code:
 | A client's device token | The relay origin it is filed under and the sign-in origin that issued it |
 | Server enrollment signature, relay endpoints, `GET /v1/edge` | Relay origin |
 | Grants | The edge signing key, and the relay origin each names as its issuer |
-| A server's pin, recorded owner and claim code | The edge signing key, kept per relay origin on the server |
+| A server's pin | The edge signing key: one pin per server, whatever `edge-url` names |
+| A server's recorded owner | The edge signing key, one record per key the server has pinned |
+| A server's claim code | The server |
 | The edge's record of a server | The server id |
 | A client's pin of a server | The server id, not a host name |
 | An account | The provider's user id, which does not depend on the OAuth application |
@@ -295,12 +332,15 @@ What a change forces:
   login` before the client API works again; relayed connections keep
   working with the old token.
 - **Relay host:** each server's `edge-url` changes and the server enrolls at
-  the new origin, pinning the edge key again and holding no owner record
-  there, while the edge keeps the claim under the server id. Ownership
-  changes are refused until the operator removes the server and an admin
-  claims it again. Clients sign in and link again by the same id. Not
-  covered by a test.
-- **Edge signing key:** every server runs `aether-server edge trust`.
+  the new origin. The key is the same, so it keeps its pin and owner, and
+  the edge keeps the claim under the server id: ownership changes work as
+  before (`TestRelayHostNameChangeKeepsPinAndOwner`). Clients sign in and
+  link again by the same id.
+- **Edge signing key:** every server runs `aether-server edge trust`. The
+  server has no owner record for the new key and reports itself ownerless
+  when it reconnects; an admin claims it again. An edge with another key,
+  such as another operator's, is the same case: refused until trusted,
+  then clean (`TestPinAndOwnerFollowTheEdgeKey`).
 - **A server's host key:** a new server id: claim and link again.
 - **OAuth application:** nothing beyond the new client id and secret.
 
@@ -321,39 +361,53 @@ What a change forces:
 
 ## 11. Deleting an account
 
-1. The page, or `aether logout --delete-account` (`aether account` already
-   shares agent accounts), lists the servers the account owns and the
-   servers it is a member of.
+1. The Account page lists the servers the account owns and the servers it
+   is a member of, and only that page deletes the account. `aether logout
+   --delete-account` (`aether account` already names agent accounts) lists
+   the same and prints the page's address; a device token deletes nothing.
 2. For each owned server it names the transfer command, `aether member
    transfer <member id>`. A transfer is an admin's request to the server
    (`server.owner.transfer`), names an existing admin with a linked
    account, and is recorded by the edge only when the server reports it.
-3. The person confirms by typing the account's login or email, within 5
-   minutes of a sign-in with the provider.
+   The edge answers the report; the server keeps the new owner only on a
+   success and reports its owner again at every enrollment, so the two
+   converge when an answer is lost.
+3. The person confirms by typing the account's login or email, from a
+   browser that itself signed in with the provider within the last 5
+   minutes. A sign-in in another browser does not count, so a stolen
+   device token or older session cookie cannot delete the account.
 4. The edge deletes the account, its device tokens and its sessions, closes
    its relayed connections, and tells each server it owned, was a member
    of or was admitted to, at once or at the server's next enrollment (at
-   most 1000 owed per server). The server removes that identity and its
+   most 1000 owed per server). A deletion stays owed until the server
+   answers that it applied it. The server removes that identity and its
    edge devices and closes their connections, direct ones included. It
    removes no member, changes no role and deletes no data.
 5. The confirmation states what remains: a member's SSH key and tailnet
    identity on each server keep working until an admin removes them there.
 6. A server left without an owner stays enrolled and ownerless. Its
    administrator recovers it on the machine with a new claim code, used by
-   an admin whose account is linked. No account becomes owner or admin
-   without that.
+   an admin whose account is linked, or with `claim-code --admin <member
+   id>`, whose claim binds the claiming account to that existing admin
+   (section 4). No account becomes owner or admin without that.
 
 ## 12. Existing installations
 
 - A server that never enabled the edge is untouched by an upgrade: with
   `edge-url` empty no agent is created, and the store migration keeps every
-  row. No test starts an upgraded server without the edge.
+  row. `TestIntegrationUpgradeFromMainWithoutTheEdge` starts this build on
+  main's schema and a configuration without edge keys, fails on any
+  outbound HTTP request, and signs in its SSH key and tailnet members.
+- The server's edge state under `<data-dir>/edge/` was kept per relay
+  origin by development builds of this change. That layout never shipped
+  and is not read; such a server pins the key again and is claimed again.
 - Enabling it later goes through the same policy question.
 - Existing tailnet and key members stay as they are. An admin links a
   member to an account; under `approved-devices` that member approves their
   first device from their tailnet or key connection.
-- The server's store migration and the edge's are each tested on a
-  populated database.
+- The server's store migration is tested on a populated database. The
+  edge's store has never shipped, so its schema is one initial version
+  with nothing to migrate from.
 
 ## 13. Testing
 
@@ -368,7 +422,9 @@ substitutes the account (`TestMaliciousEdgeSubstitutesTheClaimingAccount`);
 a tightened policy refusing inherited devices until reviewed
 (`TestPolicySwitchToApprovedDevices`); revocation, deletion and ownership
 (`TestRevocationClosesLiveConnections`, `TestDeleteAccount*`,
-`TestAccountDeletionReachesAnOfflineServer`); and the nginx configuration
+`TestAccountDeletionReachesAnOfflineServer`); console recovery of an admin
+without an account (`TestConsoleRecoveryOfAnAdminWithoutAnAccount`); a
+relay host name change (`TestRelayHostNameChangeKeepsPinAndOwner`); and the nginx configuration
 (`TestBehindNginx`, `scripts/edge-nginx-test.sh`). A policy change by RPC
 or by edge message is refused for every control method
 (`TestNoControlMethodChangesEdgeAccess` in `internal/sshd`) and every

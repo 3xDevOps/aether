@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,11 +17,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
-func TestDeleteEdgeAccountShowsWhatItTouchesAndAsks(t *testing.T) {
+func TestDeleteEdgeAccountShowsWhatItTouchesAndWhere(t *testing.T) {
 	testhome.Isolate(t)
 	token := edgeproto.NewToken()
 	owned := edgeproto.ServerInfo{ID: testServerID, Name: "prod", Role: "admin"}
-	var deletes []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+edgeproto.PathAccount, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
@@ -34,12 +32,6 @@ func TestDeleteEdgeAccountShowsWhatItTouchesAndAsks(t *testing.T) {
 				Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo"}},
 			Owned: []edgeproto.ServerInfo{owned}, Member: []edgeproto.ServerInfo{}, Confirm: "octo",
 		})
-	})
-	mux.HandleFunc("POST "+edgeproto.PathAccountDelete, func(w http.ResponseWriter, r *http.Request) {
-		var req edgeproto.AccountDeleteRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		deletes = append(deletes, req.Confirm)
-		w.WriteHeader(http.StatusNoContent)
 	})
 	edge := httptest.NewServer(mux)
 	t.Cleanup(edge.Close)
@@ -64,19 +56,17 @@ func TestDeleteEdgeAccountShowsWhatItTouchesAndAsks(t *testing.T) {
 	ctx := context.Background()
 
 	var out bytes.Buffer
-	if err := deleteEdgeAccount(ctx, client, strings.NewReader("\n"), &out); err == nil || !strings.Contains(err.Error(), "cancelled") || len(deletes) != 0 {
-		t.Fatalf("Enter at the prompt = %v, %d deletions; want cancelled", err, len(deletes))
+	if err := deleteEdgeAccount(ctx, client, &out); err != nil {
+		t.Fatal(err)
 	}
 	for _, want := range []string{"octo (github)", testServerID, "aether member transfer <member id>",
-		"servers it is a member of: none", "keeps\nworking there until an admin removes it", "type octo to delete the account: "} {
+		"servers it is a member of: none", "keeps\nworking there until an admin removes it",
+		"delete it in a browser at " + edge.URL + "/account: sign in with github there and type octo"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
 	}
-	if err := deleteEdgeAccount(ctx, client, strings.NewReader("octo\n"), &out); err != nil || len(deletes) != 1 || deletes[0] != "octo\n" {
-		t.Fatalf("typed confirmation = %v, sent %q", err, deletes)
-	}
-	if _, err := client.Session(); !errors.Is(err, edgeclient.ErrNotSignedIn) {
-		t.Fatalf("token after the deletion: %v, want it deleted here", err)
+	if _, err := client.Session(); err != nil {
+		t.Fatalf("token after listing what a deletion touches: %v, want it kept", err)
 	}
 }

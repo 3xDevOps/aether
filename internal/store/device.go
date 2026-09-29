@@ -53,23 +53,31 @@ func normalizeApprovalCode(code string) string {
 	return code[:4] + "-" + code[4:]
 }
 
-const deviceCols = `id, member_id, provider, subject, credential, label, status, approval_code, created_at,
-	last_seen_at, approved_by`
+const deviceCols = `id, member_id, invitation_id, provider, subject, email, login, name, credential, label, status,
+	approval_code, created_at, last_seen_at, approved_by`
 
 func scanDevice(row interface{ Scan(...any) error }) (*domain.Device, error) {
 	var (
-		dev       domain.Device
-		createdAt int64
-		lastSeen  *int64
+		dev                domain.Device
+		member, invitation sql.NullString
+		createdAt          int64
+		lastSeen           *int64
 	)
-	if err := row.Scan(&dev.ID, &dev.Member, &dev.Provider, &dev.Subject, &dev.Credential, &dev.Label, &dev.Status,
-		&dev.ApprovalCode, &createdAt, &lastSeen, &dev.ApprovedBy); err != nil {
+	if err := row.Scan(&dev.ID, &member, &invitation, &dev.Provider, &dev.Subject, &dev.Email, &dev.Login, &dev.Name,
+		&dev.Credential, &dev.Label, &dev.Status, &dev.ApprovalCode, &createdAt, &lastSeen, &dev.ApprovedBy); err != nil {
 		return nil, err
 	}
+	dev.Member, dev.Invitation = domain.MemberID(member.String), domain.InvitationID(invitation.String)
 	dev.CreatedAt = decodeTime(createdAt)
 	dev.LastSeenAt = decodeTimePtr(lastSeen)
 	return &dev, nil
 }
+
+// MaxWaitingDevices bounds the pending devices of one account and the
+// devices waiting on one invitation. Every relayed connection with a new
+// key records a device, so without it an edge could grow the table
+// without limit.
+const MaxWaitingDevices = 10
 
 func (d *DB) RegisterDevice(ctx context.Context, dev *domain.Device) error {
 	switch {
@@ -80,6 +88,89 @@ func (d *DB) RegisterDevice(ctx context.Context, dev *domain.Device) error {
 	case dev.Status != domain.DeviceApproved && dev.ApprovedBy != "":
 		return errors.New("store: register device: only an approved device has an approver")
 	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin register device: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if dev.Status == domain.DevicePending {
+		if err = checkWaiting(ctx, tx, `provider = ? AND subject = ? AND status = 'pending'`, dev.Provider, dev.Subject); err != nil {
+			return fmt.Errorf("store: register device: %s %s: %w", dev.Provider, dev.Subject, err)
+		}
+	}
+	// Nothing is inserted unless the identity is the member's.
+	err = insertDevice(ctx, tx, dev,
+		`EXISTS (SELECT 1 FROM member_identities WHERE provider = ? AND subject = ? AND member_id = ?)`,
+		dev.Provider, dev.Subject, dev.Member)
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("store: register device: %s %s is not an identity of member %s: %w",
+			dev.Provider, dev.Subject, dev.Member, ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit register device: %w", err)
+	}
+	return nil
+}
+
+// checkWaiting returns ErrLimit when MaxWaitingDevices devices match where.
+func checkWaiting(ctx context.Context, tx *sql.Tx, where string, args ...any) error {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM member_devices WHERE `+where, args...).Scan(&n); err != nil {
+		return fmt.Errorf("count waiting devices: %w", err)
+	}
+	if n >= MaxWaitingDevices {
+		return fmt.Errorf("%w: %d devices are waiting for approval already", ErrLimit, n)
+	}
+	return nil
+}
+
+func (d *DB) RegisterInvitationDevice(ctx context.Context, dev *domain.Device, now time.Time) error {
+	switch {
+	case dev.Invitation == "" || dev.Member != "" || dev.Provider == "" || dev.Subject == "" || dev.Credential == "":
+		return errors.New("store: register invitation device: invitation, account and credential are required, and no member")
+	case dev.Status != domain.DevicePending || dev.ApprovedBy != "":
+		return fmt.Errorf("store: register invitation device: it waits for approval, so it is pending, not %q", dev.Status)
+	}
+	nowNS, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: register invitation device: %w", err)
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin register invitation device: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = deleteExpiredInvitationDevices(ctx, tx, nowNS); err != nil {
+		return err
+	}
+	if err = checkWaiting(ctx, tx, `invitation_id = ?`, dev.Invitation); err != nil {
+		return fmt.Errorf("store: register invitation device: invitation %s: %w", dev.Invitation, err)
+	}
+	// Nothing is inserted unless the invitation is open and the account
+	// is no member's yet.
+	err = insertDevice(ctx, tx, dev,
+		`EXISTS (SELECT 1 FROM identity_invitations WHERE id = ? AND consumed_at IS NULL AND expires_at > ?)
+		 AND NOT EXISTS (SELECT 1 FROM member_identities WHERE provider = ? AND subject = ?)`,
+		dev.Invitation, nowNS, dev.Provider, dev.Subject)
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("store: register invitation device: invitation %s is used or expired, or %s %s is a member already: %w",
+			dev.Invitation, dev.Provider, dev.Subject, ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit register invitation device: %w", err)
+	}
+	return nil
+}
+
+// insertDevice inserts dev when the condition cond, with args, holds, and
+// returns ErrNotFound when it does not.
+func insertDevice(ctx context.Context, q execer, dev *domain.Device, cond string, args ...any) error {
 	id, ts, err := prepareCreate(dev.CreatedAt)
 	if err != nil {
 		return err
@@ -92,25 +183,45 @@ func (d *DB) RegisterDevice(ctx context.Context, dev *domain.Device) error {
 	if dev.Status.AwaitsApproval() {
 		code = ApprovalCode(dev.Credential)
 	}
-	// Nothing is inserted unless the identity is the member's.
-	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`INSERT INTO member_devices (id, member_id, provider, subject, credential, label, status, approval_code,
-		                             created_at, approved_by)
-		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-		 WHERE EXISTS (SELECT 1 FROM member_identities WHERE provider = ? AND subject = ? AND member_id = ?)`,
-		id, dev.Member, dev.Provider, dev.Subject, dev.Credential, dev.Label, dev.Status, code, createdAt, dev.ApprovedBy,
-		dev.Provider, dev.Subject, dev.Member,
-	))
-	if errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("store: register device: %s %s is not an identity of member %s: %w",
-			dev.Provider, dev.Subject, dev.Member, ErrNotFound)
+	var member, invitation any
+	if dev.Member != "" {
+		member = dev.Member
 	}
-	if err != nil {
+	if dev.Invitation != "" {
+		invitation = dev.Invitation
+	}
+	err = notFoundOnZeroRows(q.ExecContext(ctx,
+		`INSERT INTO member_devices (id, member_id, invitation_id, provider, subject, email, login, name, credential,
+		                             label, status, approval_code, created_at, approved_by)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE `+cond,
+		append([]any{id, member, invitation, dev.Provider, dev.Subject, dev.Email, dev.Login, dev.Name, dev.Credential,
+			dev.Label, dev.Status, code, createdAt, dev.ApprovedBy}, args...)...,
+	))
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return err
+	case err != nil:
 		return fmt.Errorf("store: register device: %w", mapConstraint(err, ErrNotFound))
 	}
 	dev.ID, dev.ApprovalCode, dev.CreatedAt, dev.LastSeenAt = domain.DeviceID(id), code, ts, nil
 	return nil
 }
+
+// deleteExpiredInvitationDevices deletes the devices waiting on an
+// invitation that expired at nowNS.
+func deleteExpiredInvitationDevices(ctx context.Context, q execer, nowNS int64) error {
+	if _, err := q.ExecContext(ctx,
+		`DELETE FROM member_devices WHERE invitation_id IN
+		 (SELECT id FROM identity_invitations WHERE expires_at <= ?)`, nowNS); err != nil {
+		return fmt.Errorf("store: delete devices of expired invitations: %w", err)
+	}
+	return nil
+}
+
+// openInvitationDevice is the condition that leaves out a device waiting
+// on an invitation that expired at the time bound to its one parameter.
+const openInvitationDevice = `(invitation_id IS NULL OR invitation_id IN
+	(SELECT id FROM identity_invitations WHERE expires_at > ?))`
 
 func (d *DB) getDevice(ctx context.Context, op, where string, arg any) (*domain.Device, error) {
 	dev, err := scanDevice(d.db.QueryRowContext(ctx,
@@ -137,8 +248,13 @@ func (d *DB) GetDeviceByApprovalCode(ctx context.Context, code string) (*domain.
 	if code == "" {
 		return nil, ErrNotFound
 	}
+	now, err := encodeTime(time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("store: get device by approval code: %w", err)
+	}
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+deviceCols+` FROM member_devices WHERE approval_code = ? LIMIT 2`, code)
+		`SELECT `+deviceCols+` FROM member_devices WHERE approval_code = ? AND `+openInvitationDevice+` LIMIT 2`,
+		code, now)
 	if err != nil {
 		return nil, fmt.Errorf("store: get device by approval code: %w", err)
 	}
@@ -155,9 +271,13 @@ func (d *DB) GetDeviceByApprovalCode(ctx context.Context, code string) (*domain.
 }
 
 func (d *DB) ListDevices(ctx context.Context, member domain.MemberID) ([]*domain.Device, error) {
+	now, err := encodeTime(time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("store: list devices: %w", err)
+	}
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT `+deviceCols+` FROM member_devices
-		 WHERE ? = '' OR member_id = ? ORDER BY created_at, id`, member, member)
+		 WHERE (? = '' OR member_id = ?) AND `+openInvitationDevice+` ORDER BY created_at, id`, member, member, now)
 	if err != nil {
 		return nil, fmt.Errorf("store: list devices: %w", err)
 	}
@@ -167,7 +287,7 @@ func (d *DB) ListDevices(ctx context.Context, member domain.MemberID) ([]*domain
 func (d *DB) ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error {
 	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE member_devices SET status = 'approved', approval_code = '', approved_by = ?
-		 WHERE id = ? AND status IN ('registered', 'pending')`, approver, id))
+		 WHERE id = ? AND member_id IS NOT NULL AND status IN ('registered', 'pending')`, approver, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: approve device: %w", err)
 	}

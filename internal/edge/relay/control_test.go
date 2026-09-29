@@ -318,29 +318,45 @@ func TestClaimReportNotRecorded(t *testing.T) {
 func TestOwnershipReports(t *testing.T) {
 	e := newEnv(t)
 	a := claimedAgent(t, e)
+	prev := edgeproto.AccountPrincipal(account("owner"))
 	heir := edgeproto.Principal{Type: edgeproto.PrincipalAccount, Provider: edgeproto.ProviderGoogle, Subject: "9"}
+
+	// A refused transfer is answered, so the server keeps its previous
+	// owner as the edge does, and the control channel stays up.
+	e.dir.mu.Lock()
+	e.dir.recordErr = edgeproto.Refusal("google:9 has no account at this edge")
+	e.dir.mu.Unlock()
 	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
-	eventually(t, "transfer recorded", func() bool { p, ok := e.dir.owner(a.id); return ok && p == heir })
+	if got := next[edgeproto.OwnerTransferResult](t, a); got.Owner != heir ||
+		!strings.Contains(got.Error, "ownership report refused: google:9 has no account") {
+		t.Fatalf("refused transfer answered %+v", got)
+	}
+	if p, ok := e.dir.owner(a.id); !ok || p != prev || !e.r.Online(a.id) {
+		t.Fatalf("after a refused transfer: owner %+v, online %v; want %+v, online", p, e.r.Online(a.id), prev)
+	}
+
+	e.dir.mu.Lock()
+	e.dir.recordErr = nil
+	e.dir.mu.Unlock()
+	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
+	if got := next[edgeproto.OwnerTransferResult](t, a); got != (edgeproto.OwnerTransferResult{Owner: heir}) {
+		t.Fatalf("transfer answered %+v, want it recorded", got)
+	}
+	if p, ok := e.dir.owner(a.id); !ok || p != heir {
+		t.Fatalf("owner after the transfer: %+v", p)
+	}
 	send(t, a.ws, edgeproto.Ownerless{})
 	eventually(t, "owner dropped", func() bool { _, ok := e.dir.owner(a.id); return !ok })
 	if !e.r.Online(a.id) {
 		t.Fatal("an ownerless server stopped relaying for its members")
 	}
 
-	e.dir.mu.Lock()
-	e.dir.recordErr = edgeproto.Refusal("github:404 has no account at this edge")
-	e.dir.mu.Unlock()
-	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
-	if err := a.closedWith(t); !strings.Contains(err.Error(), "ownership report refused: github:404 has no account") {
-		t.Fatalf("transfer to an unknown account: %v", err)
-	}
-
 	u := enroll(t, e, newSigner(t))
 	go u.run()
 	send(t, u.ws, edgeproto.Ownerless{})
 	send(t, u.ws, edgeproto.OwnerTransferred{Owner: heir})
-	if err := u.closedWith(t); !strings.Contains(err.Error(), "never claimed at this edge") {
-		t.Fatalf("transfer by an unclaimed server: %v", err)
+	if got := next[edgeproto.OwnerTransferResult](t, u); !strings.Contains(got.Error, "never claimed at this edge") {
+		t.Fatalf("transfer by an unclaimed server answered %+v", got)
 	}
 	if _, ok := e.dir.owner(u.id); ok {
 		t.Fatal("an unclaimed server recorded an owner")
@@ -358,14 +374,21 @@ func TestAccountDeletionsAreDelivered(t *testing.T) {
 	e.dir.pending[id] = []edgeproto.AccountDeleted{deleted}
 	e.dir.mu.Unlock()
 
-	// Owed while the server was offline: sent when it enrolls.
+	// Owed while the server was offline: sent when it enrolls, and again
+	// at each enrollment until the server answers that it applied it.
 	a := enroll(t, e, signer)
-	a.attach = true
 	go a.run()
 	if got := next[edgeproto.AccountDeleted](t, a); got != deleted {
 		t.Fatalf("delivered %+v", got)
 	}
-	eventually(t, "delivered deletion forgotten", func() bool {
+	a = enroll(t, e, signer)
+	a.attach = true
+	go a.run()
+	if got := next[edgeproto.AccountDeleted](t, a); got != deleted {
+		t.Fatalf("sent again %+v", got)
+	}
+	send(t, a.ws, edgeproto.AccountDeletionApplied(deleted))
+	eventually(t, "applied deletion forgotten", func() bool {
 		owed, _ := e.dir.PendingDeletions(t.Context(), id)
 		return len(owed) == 0
 	})

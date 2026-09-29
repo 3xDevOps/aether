@@ -297,3 +297,42 @@ func TestExistingPathsWithoutTheEdge(t *testing.T) {
 		t.Fatalf("tailnet dashboard with the edge down: %+v %v", list, err)
 	}
 }
+
+// The server trusts the edge's signing key, not its host name. When the
+// edge's relay host name changes and the server's edge-url follows, the
+// server keeps its pin and its owner, the edge keeps the server claimed,
+// and an admin still transfers ownership.
+func TestRelayHostNameChangeKeepsPinAndOwner(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
+	cs := h.login(alice, bob)
+	al, bo := cs[0], cs[1]
+	h.claimServer(al, a)
+	h.join(h.control(al, a), bo, a, "admin")
+	pin, err := a.state().PinnedKey()
+	if err != nil || pin == nil {
+		t.Fatalf("pin before the rename = %x, %v", pin, err)
+	}
+	oldRelay := h.relayURL
+
+	h.renameHosts()
+	a.restart(a.policy)
+	if h.relayURL == oldRelay {
+		t.Fatalf("the relay origin is still %s", oldRelay)
+	}
+	if got, err := a.state().PinnedKey(); err != nil || !got.Equal(pin) {
+		t.Fatalf("pin after the rename = %x, %v; want the edge's key", got, err)
+	}
+	if owner, err := a.state().Owner(); err != nil || owner == nil || owner.Login != alice.Login {
+		t.Fatalf("owner after the rename = %+v, %v; want alice", owner, err)
+	}
+	h.waitEdgeOwner(t, a, &alice)
+
+	var res protocol.ServerOwnerTransferResult
+	if err := a.local(t, a.memberOf(t, alice).ID, protocol.MethodServerOwnerTransfer,
+		protocol.ServerOwnerTransferParams{MemberID: string(a.memberOf(t, bob).ID)}, &res); err != nil {
+		t.Fatalf("transfer after the rename: %v", err)
+	}
+	h.waitEdgeOwner(t, a, &bob)
+}

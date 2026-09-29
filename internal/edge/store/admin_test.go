@@ -2,7 +2,6 @@ package edgestore
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -402,72 +401,11 @@ func TestPendingDeletions(t *testing.T) {
 	if len(owed) != maxPendingDeletions || owed[0].Subject != "1" || owed[len(owed)-1].Subject != last {
 		t.Fatalf("owed %d deletions from %+v to %+v; want the newest %d", len(owed), owed[0], owed[len(owed)-1], maxPendingDeletions)
 	}
-	if err := s.DeletionDelivered(ctx, serverA, owed[0]); err != nil {
+	if err := s.DeletionApplied(ctx, serverA, owed[0]); err != nil {
 		t.Fatal(err)
 	}
 	if again, err := s.PendingDeletions(ctx, serverA); err != nil || len(again) != maxPendingDeletions-1 || again[0] == owed[0] {
 		t.Fatalf("after delivering %+v: %d owed, %v", owed[0], len(again), err)
-	}
-}
-
-// TestMigrationOnPopulatedDatabase upgrades a database written by the
-// previous schema: accounts get distinct ids, and servers keep their
-// owners and directories.
-func TestMigrationOnPopulatedDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "edge.db")
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = migrate(db, migrations[:6]); err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range []string{
-		`INSERT INTO accounts (id, provider, subject, email, login, name, created_at, identity_at)
-			VALUES (1, 'github', '1', 'owner@example.test', 'owner', 'Owner', 1, 1),
-			       (2, 'google', '2', '', '', 'Other', 1, 1)`,
-		`INSERT INTO servers (id, name, owner_id, claimed_at) VALUES ('` + serverA + `', 'alpha', 1, 5)`,
-		`INSERT INTO directory_entries (server_id, kind, provider, subject, login, email, role, expires_at)
-			VALUES ('` + serverA + `', 'member', 'google', '2', '', '', 'collaborator', 0)`,
-		`INSERT INTO web_sessions (id, token_hash, account_id, created_at, expires_at) VALUES ('s', 'h', 2, 1, 9e18)`,
-	} {
-		if _, err = db.Exec(q); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-	}
-	if err = db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() }) //nolint:errcheck // test cleanup
-	ctx := context.Background()
-	srv, err := s.Server(ctx, serverA)
-	if err != nil || srv.Name != "alpha" || srv.Owner == nil || srv.Owner.Login != "owner" ||
-		srv.Kind != edgeproto.ServerSelfHosted || srv.AccessPolicy != edgeproto.PolicyApprovedDevices || !srv.ClaimedAt.Equal(fromUnix(5)) {
-		t.Fatalf("migrated server %+v, %v", srv, err)
-	}
-	sess, err := s.UseSession(ctx, "h", testNow, testNow.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !edgeproto.ValidAccountID(sess.Account.ID) || sess.Account.ID == srv.Owner.ID || !edgeproto.ValidAccountID(srv.Owner.ID) {
-		t.Fatalf("account ids %q and %q", sess.Account.ID, srv.Owner.ID)
-	}
-	acc, err := s.ServerAccess(ctx, serverA, edgeproto.Account{Provider: "google", Subject: "2"})
-	if err != nil || len(acc.Entries) != 1 || acc.Entries[0].Role != "collaborator" || acc.Owner {
-		t.Fatalf("migrated directory %+v, %v", acc, err)
-	}
-	// The rebuilt directory still belongs to its server.
-	if err := s.DeleteServer(ctx, serverA); err != nil {
-		t.Fatal(err)
-	}
-	var left int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM directory_entries`).Scan(&left); err != nil || left != 0 {
-		t.Fatalf("%d directory entries outlive their server, %v", left, err)
 	}
 }
 

@@ -97,6 +97,34 @@ describe('invitations', () => {
     })
   })
 
+  it('invites a GitHub login as a GitHub account', async () => {
+    seed()
+    const client = fakeApi({ memberInvitationCreate: vi.fn(async () => invitation()) })
+    render(<MembersRoute params={{}} client={client} />)
+    const invitations = await section()
+
+    fireEvent.change(invitations.getByLabelText('GitHub login'), { target: { value: ' octocat ' } })
+    fireEvent.click(invitations.getByRole('button', { name: 'Invite account' }))
+
+    await vi.waitFor(() =>
+      expect(client.memberInvitationCreate).toHaveBeenCalledWith({
+        provider: 'github',
+        login: 'octocat',
+        role: 'collaborator',
+      }),
+    )
+  })
+
+  it('says what an invitation admits under each access policy', async () => {
+    seed()
+    render(<MembersRoute params={{}} client={fakeApi()} />)
+    const text = (await section()).getByText(/Invite a person by the account/).textContent
+
+    expect(text).toContain('When signing in is enough for this server')
+    expect(text).toContain('When the server admits approved devices only')
+    expect(text).toContain('aether device approve')
+  })
+
   it('shows the server refusal of an invitation verbatim', async () => {
     seed()
     const client = fakeApi({
@@ -113,7 +141,11 @@ describe('invitations', () => {
     expect((await invitations.findByRole('alert')).textContent).toBe(
       'member.invitation.create: login "-x" is not a GitHub login',
     )
-    expect(client.memberInvitationCreate).toHaveBeenCalledWith({ login: '-x', role: 'collaborator' })
+    expect(client.memberInvitationCreate).toHaveBeenCalledWith({
+      provider: 'github',
+      login: '-x',
+      role: 'collaborator',
+    })
   })
 
   it('confirms a revoke, saying what stops working, before it revokes', async () => {

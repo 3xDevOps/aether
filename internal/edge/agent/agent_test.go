@@ -55,10 +55,18 @@ type edgeControl struct {
 
 func newFakeEdge(t *testing.T) *fakeEdge {
 	t.Helper()
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return newFakeEdgeWithKey(t, priv)
+}
+
+// newFakeEdgeWithKey is an edge that signs with priv, on an origin of its
+// own: another host name of the edge holding priv.
+func newFakeEdgeWithKey(t *testing.T, priv ed25519.PrivateKey) *fakeEdge {
+	t.Helper()
+	pub := priv.Public().(ed25519.PublicKey)
 	e := &fakeEdge{
 		t: t, priv: priv, pub: pub, state: edgeproto.StateUnclaimed,
 		controls: make(chan *edgeControl, 64),
@@ -75,6 +83,7 @@ func newFakeEdge(t *testing.T) *fakeEdge {
 	})
 	e.srv = httptest.NewServer(mux)
 	t.Cleanup(e.srv.Close)
+	var err error
 	e.origin, err = edgeproto.Origin(e.srv.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -248,13 +257,15 @@ type fakeSSH struct {
 	// claims receives each claim connection; the test answers it.
 	claims  chan fakeClaim
 	deleted chan edgeproto.AccountDeleted
+	// deleteErr is what EdgeAccountDeleted returns.
+	deleteErr error
 }
 
 // fakeClaim is one claim connection: the test calls attempt with the code
 // the client would present.
 type fakeClaim struct {
 	grant   edgeproto.Grant
-	attempt func(code string, claim func() error) error
+	attempt func(code string, claim func(admin string) error) error
 	done    chan struct{}
 }
 
@@ -272,7 +283,7 @@ func (f *fakeSSH) ServeEdgeConn(_ context.Context, nc net.Conn, g edgeproto.Gran
 	_, _ = io.Copy(nc, nc)
 }
 
-func (f *fakeSSH) ServeEdgeClaim(_ context.Context, _ net.Conn, g edgeproto.Grant, attempt func(string, func() error) error) {
+func (f *fakeSSH) ServeEdgeClaim(_ context.Context, _ net.Conn, g edgeproto.Grant, attempt func(string, func(string) error) error) {
 	c := fakeClaim{grant: g, attempt: attempt, done: make(chan struct{})}
 	f.claims <- c
 	<-c.done
@@ -280,7 +291,9 @@ func (f *fakeSSH) ServeEdgeClaim(_ context.Context, _ net.Conn, g edgeproto.Gran
 
 func (f *fakeSSH) EdgeAccountDeleted(_ context.Context, provider, subject string) error {
 	f.deleted <- edgeproto.AccountDeleted{Provider: provider, Subject: subject}
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deleteErr
 }
 
 func (f *fakeSSH) EdgeDirectory(context.Context) ([]edgeproto.DirectoryEntry, error) {
@@ -378,7 +391,7 @@ func TestChangedEdgeKeyIsRefused(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
 	old, _, _ := ed25519.GenerateKey(rand.Reader)
-	if err := openState(t, dir, edge.srv.URL).Pin(old); err != nil {
+	if err := OpenState(dir).Pin(old); err != nil {
 		t.Fatal(err)
 	}
 	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
@@ -398,42 +411,91 @@ func TestChangedEdgeKeyIsRefused(t *testing.T) {
 	}
 }
 
-// Changing edge-url must not meet the previous edge's pin or owner, and
-// returning to that edge must find both again.
-func TestPinAndOwnerBelongToTheirEdge(t *testing.T) {
-	first, second := newFakeEdge(t), newFakeEdge(t)
-	first.state = edgeproto.StateClaimed
-	dir := t.TempDir()
-	owner := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}
-	if err := openState(t, dir, first.srv.URL).write(ownerFile, owner); err != nil {
+// setOwner records owner at the edge holding key, as a claim there did.
+func setOwner(t *testing.T, s *State, key ed25519.PublicKey, owner edgeproto.Account) {
+	t.Helper()
+	if err := s.Pin(key); err != nil {
 		t.Fatal(err)
 	}
-	enroll := func(edge *fakeEdge) *Agent {
+	if err := s.writeOwner(owner); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The pin and the owner follow the edge's key, not its host name: a new
+// host name of the same edge keeps both, and an edge with another key is
+// refused until `aether-server edge trust` pins it, then starts without an
+// owner and tells an edge recording one that the server is ownerless.
+// Pinning the first key again finds its owner.
+func TestPinAndOwnerFollowTheEdgeKey(t *testing.T) {
+	first := newFakeEdge(t)
+	first.state = edgeproto.StateClaimed
+	renamed := newFakeEdgeWithKey(t, first.priv)
+	renamed.state = edgeproto.StateClaimed
+	other := newFakeEdge(t)
+	other.state = edgeproto.StateClaimed
+	dir := t.TempDir()
+	owner := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}
+	state := OpenState(dir)
+	setOwner(t, state, first.pub, owner)
+	// The owner is a member, so the server stays claimed.
+	sshd := newFakeSSH()
+	sshd.entries = []edgeproto.DirectoryEntry{{Kind: edgeproto.EntryMember, Provider: owner.Provider, Subject: owner.Subject, Role: "admin"}}
+	// enroll runs the server with edge until it pushed its directory, and
+	// returns whether it reported itself ownerless before that.
+	enroll := func(edge *fakeEdge) (ownerless bool) {
 		t.Helper()
-		// The owner is a member, so the server stays claimed.
-		sshd := newFakeSSH()
-		sshd.entries = []edgeproto.DirectoryEntry{{Kind: edgeproto.EntryMember, Provider: owner.Provider, Subject: owner.Subject, Role: "admin"}}
 		a := newAgent(t, edge.srv.URL, dir, sshd)
 		stop, _ := run(t, a)
-		edge.nextControl(t)
-		waitStatus(t, a.state, func(st Status) bool { return st.Connected })
-		stop()
-		return a
+		defer stop()
+		ec := edge.nextControl(t)
+		for m := range ec.msgs {
+			switch m.(type) {
+			case edgeproto.Ownerless:
+				ownerless = true
+			case edgeproto.Directory:
+				return ownerless
+			}
+		}
+		t.Fatal("control connection closed before the directory")
+		return false
 	}
-	enroll(first)
-	a := enroll(second)
-	if pinned, err := a.state.PinnedKey(); err != nil || !pinned.Equal(second.pub) {
-		t.Fatalf("pin at the second edge = %x, %v; want its own key", pinned, err)
+
+	if enroll(renamed) {
+		t.Fatal("the server reported itself ownerless to its edge under a new host name")
 	}
-	if got, err := a.state.Owner(); got != nil || err != nil {
-		t.Fatalf("owner at the second edge = %+v, %v; want none", got, err)
+	if pinned, err := state.PinnedKey(); err != nil || !pinned.Equal(first.pub) {
+		t.Fatalf("pin under the new host name = %x, %v; want the edge's key", pinned, err)
 	}
-	a = enroll(first)
-	if pinned, err := a.state.PinnedKey(); err != nil || !pinned.Equal(first.pub) {
-		t.Fatalf("pin back at the first edge = %x, %v; want its key", pinned, err)
+	if got, err := state.Owner(); err != nil || got == nil || *got != owner {
+		t.Fatalf("owner under the new host name = %+v, %v; want %+v", got, err, owner)
 	}
-	if got, err := a.state.Owner(); err != nil || got == nil || *got != owner {
-		t.Fatalf("owner back at the first edge = %+v, %v; want %+v", got, err, owner)
+
+	a := newAgent(t, other.srv.URL, dir, sshd)
+	stop, _ := run(t, a)
+	waitStatus(t, state, func(st Status) bool { return strings.Contains(st.Error, "edge key changed") })
+	stop()
+	for len(other.controls) > 0 {
+		<-other.controls
+	}
+	if pinned, _ := state.PinnedKey(); !pinned.Equal(first.pub) {
+		t.Fatal("an edge with another key replaced the pin")
+	}
+	if err := state.Pin(other.pub); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := state.Owner(); got != nil || err != nil {
+		t.Fatalf("owner with another edge key = %+v, %v; want none", got, err)
+	}
+	if !enroll(other) {
+		t.Fatal("the server did not tell an edge recording an owner it lacks that it is ownerless")
+	}
+
+	if err := state.Pin(first.pub); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := state.Owner(); err != nil || got == nil || *got != owner {
+		t.Fatalf("owner with the first key pinned again = %+v, %v; want %+v", got, err, owner)
 	}
 }
 
@@ -556,11 +618,8 @@ func TestDirectoryPushedOnChange(t *testing.T) {
 func TestOwnerForgottenWhenTheEdgeHasNone(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
-	state := openState(t, dir, edge.srv.URL)
-	owner := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-1", Email: "owner@example.com"}
-	if err := state.write(ownerFile, owner); err != nil {
-		t.Fatal(err)
-	}
+	state := OpenState(dir)
+	setOwner(t, state, edge.pub, edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-1", Email: "owner@example.com"})
 	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
 	run(t, a)
 	edge.nextControl(t)
@@ -583,10 +642,8 @@ func TestOwnerForgottenWhenTheEdgeHasNone(t *testing.T) {
 func TestUnenrollForgetsTheOwner(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
-	state := openState(t, dir, edge.srv.URL)
-	if err := state.write(ownerFile, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}); err != nil {
-		t.Fatal(err)
-	}
+	state := OpenState(dir)
+	setOwner(t, state, edge.pub, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"})
 	edge.state = edgeproto.StateClaimed
 	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
 	run(t, a)
@@ -600,12 +657,10 @@ func TestUnenrollForgetsTheOwner(t *testing.T) {
 func TestLeaveUnenrollsAndForgetsTheOwner(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
-	state := openState(t, dir, edge.srv.URL)
-	if err := state.write(ownerFile, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}); err != nil {
-		t.Fatal(err)
-	}
+	state := OpenState(dir)
+	setOwner(t, state, edge.pub, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"})
 	a := newAgent(t, edge.srv.URL, dir, nil)
-	if _, _, err := state.IssueClaimCode(a.ServerID(), time.Now()); err != nil {
+	if _, _, err := state.IssueClaimCode(a.ServerID(), "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Leave(context.Background()); err != nil {
@@ -691,21 +746,23 @@ func TestNoEdgeMessageChangesThePolicy(t *testing.T) {
 	now := time.Now()
 	principal := edgeproto.Principal{Type: edgeproto.PrincipalAccount, Provider: edgeproto.ProviderGitHub, Subject: "1"}
 	messages := map[string]edgeproto.Message{
-		"challenge":         edgeproto.Challenge{Version: edgeproto.Version, Nonce: make([]byte, edgeproto.NonceSize), Origin: "https://edge.example.test"},
-		"hello":             edgeproto.Hello{Version: edgeproto.Version, HostKey: newHostKey(t).PublicKey().Marshal(), AccessPolicy: edgeproto.PolicyAccount},
-		"ready":             edgeproto.Ready{ServerID: edgeproto.ServerID(newHostKey(t).PublicKey()), State: edgeproto.StateClaimed, EdgeKey: make([]byte, ed25519.PublicKeySize)},
-		"open":              edgeproto.Open{ConnID: edgeproto.NewConnID(), Ticket: edgeproto.NewToken(), Kind: edgeproto.KindSSH, Grant: "x.y"},
-		"open_result":       edgeproto.OpenResult{ConnID: edgeproto.NewConnID()},
-		"claimed":           edgeproto.Claimed{ConnID: edgeproto.NewConnID(), Owner: principal},
-		"owner_transferred": edgeproto.OwnerTransferred{Owner: principal},
-		"ownerless":         edgeproto.Ownerless{},
-		"directory":         edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{{Kind: edgeproto.EntryInvitation, Provider: edgeproto.ProviderGitHub, Login: "x", Role: "admin", ExpiresAt: now.Add(time.Hour)}}},
-		"device_revoked":    edgeproto.DeviceRevoked{DeviceID: "dev-1"},
-		"account_deleted":   edgeproto.AccountDeleted{Provider: edgeproto.ProviderGitHub, Subject: "1"},
-		"unenroll":          edgeproto.Unenroll{},
-		"drain":             edgeproto.Drain{},
-		"ping":              edgeproto.Ping{},
-		"pong":              edgeproto.Pong{},
+		"challenge":                edgeproto.Challenge{Version: edgeproto.Version, Nonce: make([]byte, edgeproto.NonceSize), Origin: "https://edge.example.test"},
+		"hello":                    edgeproto.Hello{Version: edgeproto.Version, HostKey: newHostKey(t).PublicKey().Marshal(), AccessPolicy: edgeproto.PolicyAccount},
+		"ready":                    edgeproto.Ready{ServerID: edgeproto.ServerID(newHostKey(t).PublicKey()), State: edgeproto.StateClaimed, EdgeKey: make([]byte, ed25519.PublicKeySize)},
+		"open":                     edgeproto.Open{ConnID: edgeproto.NewConnID(), Ticket: edgeproto.NewToken(), Kind: edgeproto.KindSSH, Grant: "x.y"},
+		"open_result":              edgeproto.OpenResult{ConnID: edgeproto.NewConnID()},
+		"claimed":                  edgeproto.Claimed{ConnID: edgeproto.NewConnID(), Owner: principal},
+		"owner_transferred":        edgeproto.OwnerTransferred{Owner: principal},
+		"owner_transfer_result":    edgeproto.OwnerTransferResult{Owner: principal},
+		"ownerless":                edgeproto.Ownerless{},
+		"directory":                edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{{Kind: edgeproto.EntryInvitation, Provider: edgeproto.ProviderGitHub, Login: "x", Role: "admin", ExpiresAt: now.Add(time.Hour)}}},
+		"device_revoked":           edgeproto.DeviceRevoked{DeviceID: "dev-1"},
+		"account_deleted":          edgeproto.AccountDeleted{Provider: edgeproto.ProviderGitHub, Subject: "1"},
+		"account_deletion_applied": edgeproto.AccountDeletionApplied{Provider: edgeproto.ProviderGitHub, Subject: "1"},
+		"unenroll":                 edgeproto.Unenroll{},
+		"drain":                    edgeproto.Drain{},
+		"ping":                     edgeproto.Ping{},
+		"pong":                     edgeproto.Pong{},
 	}
 	defined := protocolMessageTypes(t)
 	if sent := slices.Sorted(maps.Keys(messages)); !slices.Equal(sent, slices.Sorted(maps.Keys(defined))) {

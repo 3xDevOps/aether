@@ -423,3 +423,109 @@ func TestDeleteMemberRemovesIdentitiesDevicesAndInvitations(t *testing.T) {
 		t.Fatalf("invitations survived member removal: %+v", invs)
 	}
 }
+
+func invitationDevice(t *testing.T, inv *domain.Invitation, subject string) *domain.Device {
+	t.Helper()
+	return &domain.Device{Invitation: inv.ID, Provider: "github", Subject: subject, Login: "octo",
+		Credential: testKey(t, ""), Label: "laptop", Status: domain.DevicePending}
+}
+
+// Devices wait on an invitation without a member. Approving one accepts
+// the invitation for that device's account in one transaction and deletes
+// the others; an expired invitation's devices are neither listed nor
+// approvable, and the next registration deletes them.
+func TestInvitationDevices(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t)
+	admin := mustCreateMember(t, db)
+	inv := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
+	now := time.Now()
+	invitee, forged := invitationDevice(t, inv, "42"), invitationDevice(t, inv, "666")
+	for _, dev := range []*domain.Device{invitee, forged} {
+		if err := db.RegisterInvitationDevice(ctx, dev, now); err != nil {
+			t.Fatalf("RegisterInvitationDevice: %v", err)
+		}
+	}
+	if members, _ := db.ListMembers(ctx); len(members) != 1 {
+		t.Fatalf("members while devices wait = %d, want 1", len(members))
+	}
+	if err := db.ApproveDevice(ctx, invitee.ID, admin.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ApproveDevice of an invitation device = %v, want ErrNotFound", err)
+	}
+	m, err := db.AcceptInvitationDevice(ctx, invitee.ID, admin.ID, edgeMember("octo"), now)
+	if err != nil || m.Role != domain.RoleAdmin {
+		t.Fatalf("AcceptInvitationDevice = %+v, %v", m, err)
+	}
+	got, err := db.GetDevice(ctx, invitee.ID)
+	if err != nil || got.Member != m.ID || got.Invitation != "" || got.Status != domain.DeviceApproved || got.ApprovedBy != admin.ID {
+		t.Fatalf("device after acceptance = %+v, %v", got, err)
+	}
+	if bound, gerr := db.GetMemberByIdentity(ctx, "github", "42"); gerr != nil || bound.ID != m.ID {
+		t.Fatalf("identity after acceptance = %+v, %v", bound, gerr)
+	}
+	if _, err = db.GetDevice(ctx, forged.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the other waiting device = %v, want deleted", err)
+	}
+	if _, err = db.AcceptInvitationDevice(ctx, forged.ID, admin.ID, edgeMember("x"), now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("accepting through a deleted device = %v", err)
+	}
+
+	expiring := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "dana", Role: domain.RoleViewer})
+	stale := invitationDevice(t, expiring, "77")
+	if err = db.RegisterInvitationDevice(ctx, stale, now); err != nil {
+		t.Fatal(err)
+	}
+	past, err := encodeTime(now.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.db.ExecContext(ctx, `UPDATE identity_invitations SET expires_at = ? WHERE id = ?`, past, expiring.ID); err != nil {
+		t.Fatal(err)
+	}
+	if devs, _ := db.ListDevices(ctx, ""); len(devs) != 1 || devs[0].ID != invitee.ID {
+		t.Fatalf("devices after the invitation expired = %+v, want only the approved one", devs)
+	}
+	if _, err = db.GetDeviceByApprovalCode(ctx, stale.ApprovalCode); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("approval code of an expired invitation's device = %v, want ErrNotFound", err)
+	}
+	if _, err = db.AcceptInvitationDevice(ctx, stale.ID, admin.ID, edgeMember("dana"), now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("accepting an expired invitation = %v, want ErrNotFound", err)
+	}
+	other := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "erin", Role: domain.RoleViewer})
+	if err = db.RegisterInvitationDevice(ctx, invitationDevice(t, other, "88"), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.GetDevice(ctx, stale.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("an expired invitation's device after the next registration = %v, want deleted", err)
+	}
+}
+
+// Unlinking an identity revokes its devices and keeps them listed, so
+// their keys stay refused; the member and its other devices stay.
+func TestUnlinkIdentityRevokesItsDevices(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t)
+	m := edgeMemberWithIdentity(t, db, "42")
+	dev := newDevice(t, m, "42", domain.DeviceApproved)
+	if err := db.RegisterDevice(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UnlinkIdentity(ctx, "someone-else", "github", "42"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unlink through another member = %v, want ErrNotFound", err)
+	}
+	revoked, err := db.UnlinkIdentity(ctx, m.ID, "github", "42")
+	if err != nil || len(revoked) != 1 || revoked[0] != dev.ID {
+		t.Fatalf("UnlinkIdentity = %v, %v", revoked, err)
+	}
+	if got, err := db.GetDevice(ctx, dev.ID); err != nil || got.Status != domain.DeviceRevoked || got.Member != m.ID {
+		t.Fatalf("device after unlink = %+v, %v; want it revoked and kept", got, err)
+	}
+	if _, err := db.GetMemberByIdentity(ctx, "github", "42"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("identity after unlink: %v", err)
+	}
+	if _, err := db.GetMember(ctx, m.ID); err != nil {
+		t.Fatalf("member after unlink: %v", err)
+	}
+}

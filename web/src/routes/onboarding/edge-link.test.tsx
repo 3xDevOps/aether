@@ -303,6 +303,12 @@ describe('onboarding link through an edge', () => {
 
     expect(await screen.findByText(/Your account reaches no servers yet/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Add a server' }))
+    // The claim is made for the account the edge reported at sign-in, shown
+    // before the code is sent.
+    const form = screen.getByRole('form', { name: 'Add a server' })
+    expect(form.textContent).toContain(
+      'Claiming makes octocat (GitHub), the account the edge reported when you signed in',
+    )
     fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: ' abcdefgh-example ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 

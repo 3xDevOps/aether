@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -22,6 +23,8 @@ var errDrain = errors.New("edge is restarting (drain)")
 type session struct {
 	c       *websocket.Conn
 	edgeKey ed25519.PublicKey
+	// transferred carries the edge's answers to OwnerTransferred.
+	transferred chan edgeproto.OwnerTransferResult
 }
 
 func (s *session) send(m edgeproto.Message) error {
@@ -177,16 +180,14 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer cancel()
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
-	s := &session{c: c, edgeKey: ready.EdgeKey}
+	s := &session{c: c, edgeKey: ready.EdgeKey, transferred: make(chan edgeproto.OwnerTransferResult, 1)}
 	a.setLive(s)
 	defer a.setLive(nil)
 	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
 	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
 
-	if ready.State == edgeproto.StateUnclaimed {
-		if err = a.forgetOwner(); err != nil {
-			return time.Since(start), err
-		}
+	if err = a.reconcileOwner(s, ready.State); err != nil {
+		return time.Since(start), err
 	}
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -194,6 +195,31 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	go a.ping(sctx, s)
 	err = a.serve(sctx, s)
 	return time.Since(start), err
+}
+
+// reconcileOwner makes the edge's record of this server's owner, state,
+// agree with this server's, which only a claim code from this host or a
+// transfer sets. An edge without an owner makes the server forget its own.
+// An edge recording a claimed server is told the server's owner again: a
+// transfer that got no answer may or may not have been recorded there. An
+// edge recording an owner the server does not have is told the server is
+// ownerless, so a claim code can claim it: the server keeps its owner per
+// edge key, and has none for a key `aether-server edge trust` pinned in
+// place of another.
+func (a *Agent) reconcileOwner(s *session, state string) error {
+	if state == edgeproto.StateUnclaimed {
+		return a.forgetOwner()
+	}
+	owner, err := a.state.Owner()
+	if err != nil {
+		return err
+	}
+	if owner != nil {
+		return s.send(edgeproto.OwnerTransferred{Owner: edgeproto.AccountPrincipal(*owner)})
+	}
+	slog.Warn("edge: the edge records an owner this server does not have for its key; reporting the server ownerless. Claim it with a code from `aether-server edge claim-code`",
+		"edge", a.origin)
+	return s.send(edgeproto.Ownerless{})
 }
 
 // forgetOwner drops an owner the edge does not know. The edge records
@@ -236,10 +262,14 @@ func (a *Agent) setLive(s *session) {
 	a.mu.Unlock()
 }
 
-// pushDirectory sends the directory whenever it may have changed. When
-// the owner's identity is no longer a member's, the server is ownerless:
-// the agent forgets the owner and tells the edge.
+// pushDirectory sends the directory whenever it may have changed, and
+// re-reads it every directoryRefresh for changes another process made,
+// such as `aether-server device approve` accepting an invitation. An
+// unchanged directory is not sent again. When the owner's identity is no
+// longer a member's, the server is ownerless: the agent forgets the owner
+// and tells the edge.
 func (a *Agent) pushDirectory(ctx context.Context, s *session) {
+	var sent []edgeproto.DirectoryEntry
 	for {
 		// The owner is read before the directory: a claim or a transfer
 		// records an owner only once its member is in the directory.
@@ -248,8 +278,10 @@ func (a *Agent) pushDirectory(ctx context.Context, s *session) {
 		if err == nil {
 			entries, err = a.cfg.SSH.EdgeDirectory(ctx)
 		}
-		if err == nil {
-			err = s.send(edgeproto.Directory{Entries: entries})
+		if err == nil && (sent == nil || !slices.Equal(sent, entries)) {
+			if err = s.send(edgeproto.Directory{Entries: entries}); err == nil {
+				sent = append(make([]edgeproto.DirectoryEntry, 0, len(entries)), entries...)
+			}
 		}
 		if err == nil && owner != nil && !isMember(entries, *owner) {
 			err = a.disown(s, *owner)
@@ -261,6 +293,7 @@ func (a *Agent) pushDirectory(ctx context.Context, s *session) {
 		case <-ctx.Done():
 			return
 		case <-a.cfg.SSH.EdgeDirectoryChanged():
+		case <-time.After(a.directoryRefresh):
 		}
 	}
 }
@@ -281,9 +314,21 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 			a.open(s, m)
 		case edgeproto.DeviceRevoked:
 			a.revokeDevice(m.DeviceID)
+		case edgeproto.OwnerTransferResult:
+			select {
+			case s.transferred <- m:
+			default:
+				slog.Warn("edge: dropped an answer to an ownership transfer nobody waits for",
+					"owner_provider", m.Owner.Provider, "owner_subject", m.Owner.Subject, "error", m.Error)
+			}
 		case edgeproto.AccountDeleted:
+			// Unanswered, the edge sends the deletion again at the next
+			// enrollment.
 			if err := a.cfg.SSH.EdgeAccountDeleted(ctx, m.Provider, m.Subject); err != nil {
-				slog.Error("edge: account deleted at the edge", "provider", m.Provider, "subject", m.Subject, "error", err)
+				return fmt.Errorf("apply the deletion of %s account %s at the edge: %w", m.Provider, m.Subject, err)
+			}
+			if err := s.send(edgeproto.AccountDeletionApplied(m)); err != nil {
+				return err
 			}
 		case edgeproto.Unenroll:
 			if err := a.state.ClearOwner(); err != nil {

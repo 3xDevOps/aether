@@ -15,8 +15,6 @@ import (
 
 	sqlite "modernc.org/sqlite" // pure-Go sqlite driver
 	sqlite3 "modernc.org/sqlite/lib"
-
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
 // ErrNotFound reports a missing, expired or already used row.
@@ -85,13 +83,15 @@ func stmt(q string) migration {
 // migrations is the append-only schema history; entry i is version i+1.
 var migrations = []migration{stmt(`
 CREATE TABLE accounts (
-	id         INTEGER PRIMARY KEY,
-	provider   TEXT NOT NULL,
-	subject    TEXT NOT NULL,
-	email      TEXT NOT NULL,
-	login      TEXT NOT NULL,
-	name       TEXT NOT NULL,
-	created_at INTEGER NOT NULL,
+	id          INTEGER PRIMARY KEY,
+	public_id   TEXT NOT NULL UNIQUE,
+	provider    TEXT NOT NULL,
+	subject     TEXT NOT NULL,
+	email       TEXT NOT NULL,
+	login       TEXT NOT NULL,
+	name        TEXT NOT NULL,
+	created_at  INTEGER NOT NULL,
+	identity_at INTEGER NOT NULL,
 	UNIQUE (provider, subject)
 );
 
@@ -102,18 +102,21 @@ CREATE TABLE web_sessions (
 	created_at INTEGER NOT NULL,
 	expires_at INTEGER NOT NULL
 );
+CREATE INDEX web_sessions_expiry ON web_sessions(expires_at);
 
 CREATE TABLE device_authorizations (
 	code_hash      TEXT PRIMARY KEY,
 	user_code_hash TEXT NOT NULL UNIQUE,
 	label          TEXT NOT NULL,
 	public_key     TEXT NOT NULL,
+	client_addr    TEXT NOT NULL,
 	status         TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'denied')),
 	account_id     INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
 	created_at     INTEGER NOT NULL,
 	expires_at     INTEGER NOT NULL,
 	last_poll_at   INTEGER NOT NULL
 );
+CREATE INDEX device_authorizations_expiry ON device_authorizations(expires_at);
 
 CREATE TABLE devices (
 	id           TEXT PRIMARY KEY,
@@ -127,12 +130,16 @@ CREATE TABLE devices (
 CREATE INDEX devices_account ON devices(account_id);
 
 CREATE TABLE servers (
-	id         TEXT PRIMARY KEY,
-	name       TEXT NOT NULL,
-	owner_id   INTEGER NOT NULL REFERENCES accounts(id),
-	claimed_at INTEGER NOT NULL
+	id               TEXT PRIMARY KEY,
+	name             TEXT NOT NULL,
+	kind             TEXT NOT NULL CHECK (kind IN ('self-hosted', 'hosted')),
+	access_policy    TEXT NOT NULL CHECK (access_policy IN ('account', 'approved-devices')),
+	owner_type       TEXT CHECK (owner_type IN ('account')),
+	owner_account_id INTEGER REFERENCES accounts(id),
+	claimed_at       INTEGER NOT NULL,
+	CHECK ((owner_type IS NULL) = (owner_account_id IS NULL))
 );
-CREATE INDEX servers_owner ON servers(owner_id);
+CREATE INDEX servers_owner ON servers(owner_account_id);
 
 CREATE TABLE directory_entries (
 	server_id  TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
@@ -148,14 +155,12 @@ CREATE INDEX directory_server ON directory_entries(server_id);
 CREATE INDEX directory_member ON directory_entries(provider, subject) WHERE kind = 'member';
 CREATE INDEX directory_login ON directory_entries(lower(login)) WHERE login <> '';
 CREATE INDEX directory_email ON directory_entries(lower(email)) WHERE email <> '';
-`), stmt(`
+
 CREATE TABLE egress (
 	month TEXT PRIMARY KEY,
 	bytes INTEGER NOT NULL
 );
-`), stmt(`
-ALTER TABLE device_authorizations ADD COLUMN client_addr TEXT NOT NULL DEFAULT '';
-`), stmt(`
+
 CREATE TABLE blocked_servers (
 	id         TEXT PRIMARY KEY,
 	blocked_at INTEGER NOT NULL
@@ -167,89 +172,6 @@ CREATE TABLE blocked_accounts (
 	blocked_at INTEGER NOT NULL,
 	PRIMARY KEY (provider, subject)
 );
-`), stmt(`
-CREATE INDEX web_sessions_expiry ON web_sessions(expires_at);
-CREATE INDEX device_authorizations_expiry ON device_authorizations(expires_at);
-`), stmt(`
-ALTER TABLE accounts ADD COLUMN identity_at INTEGER NOT NULL DEFAULT 0;
-`), accountIDsAndOwners, stmt(`
-CREATE TABLE account_reach (
-	provider  TEXT NOT NULL,
-	subject   TEXT NOT NULL,
-	server_id TEXT NOT NULL,
-	PRIMARY KEY (provider, subject, server_id)
-) WITHOUT ROWID;
-`)}
-
-// accountIDsAndOwners gives every account its public id, rebuilds servers
-// so that a server can have no owner and records its kind and announced
-// access policy, and adds the account deletions owed to servers. SQLite
-// cannot drop NOT NULL from a column, so servers and the directory that
-// references it are copied into new tables; the directory is dropped
-// first, so dropping servers cascades into nothing.
-func accountIDsAndOwners(tx *sql.Tx) error {
-	if _, err := tx.Exec(`ALTER TABLE accounts ADD COLUMN public_id TEXT`); err != nil {
-		return err
-	}
-	rows, err := tx.Query(`SELECT id FROM accounts`)
-	if err != nil {
-		return err
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err = rows.Scan(&id); err != nil {
-			rows.Close() //nolint:errcheck // the scan error takes precedence
-			return err
-		}
-		ids = append(ids, id)
-	}
-	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if _, err = tx.Exec(`UPDATE accounts SET public_id = ? WHERE id = ?`, edgeproto.NewAccountID(), id); err != nil {
-			return err
-		}
-	}
-	_, err = tx.Exec(`
-CREATE UNIQUE INDEX accounts_public_id ON accounts(public_id);
-
-CREATE TABLE servers_v7 (
-	id               TEXT PRIMARY KEY,
-	name             TEXT NOT NULL,
-	kind             TEXT NOT NULL CHECK (kind IN ('self-hosted', 'hosted')),
-	access_policy    TEXT NOT NULL CHECK (access_policy IN ('account', 'approved-devices')),
-	owner_type       TEXT CHECK (owner_type IN ('account')),
-	owner_account_id INTEGER REFERENCES accounts(id),
-	claimed_at       INTEGER NOT NULL,
-	CHECK ((owner_type IS NULL) = (owner_account_id IS NULL))
-);
-INSERT INTO servers_v7 (id, name, kind, access_policy, owner_type, owner_account_id, claimed_at)
-	SELECT id, name, 'self-hosted', 'approved-devices', 'account', owner_id, claimed_at FROM servers;
-
-CREATE TABLE directory_v7 (
-	server_id  TEXT NOT NULL REFERENCES servers_v7(id) ON DELETE CASCADE,
-	kind       TEXT NOT NULL,
-	provider   TEXT NOT NULL,
-	subject    TEXT NOT NULL,
-	login      TEXT NOT NULL,
-	email      TEXT NOT NULL,
-	role       TEXT NOT NULL,
-	expires_at INTEGER NOT NULL
-);
-INSERT INTO directory_v7 (server_id, kind, provider, subject, login, email, role, expires_at)
-	SELECT server_id, kind, provider, subject, login, email, role, expires_at FROM directory_entries;
-
-DROP TABLE directory_entries;
-DROP TABLE servers;
-ALTER TABLE servers_v7 RENAME TO servers;
-ALTER TABLE directory_v7 RENAME TO directory_entries;
-CREATE INDEX servers_owner ON servers(owner_account_id);
-CREATE INDEX directory_server ON directory_entries(server_id);
-CREATE INDEX directory_member ON directory_entries(provider, subject) WHERE kind = 'member';
-CREATE INDEX directory_login ON directory_entries(lower(login)) WHERE login <> '';
-CREATE INDEX directory_email ON directory_entries(lower(email)) WHERE email <> '';
 
 CREATE TABLE pending_account_deletions (
 	server_id  TEXT NOT NULL,
@@ -258,9 +180,14 @@ CREATE TABLE pending_account_deletions (
 	created_at INTEGER NOT NULL,
 	PRIMARY KEY (server_id, provider, subject)
 );
-`)
-	return err
-}
+
+CREATE TABLE account_reach (
+	provider  TEXT NOT NULL,
+	subject   TEXT NOT NULL,
+	server_id TEXT NOT NULL,
+	PRIMARY KEY (provider, subject, server_id)
+) WITHOUT ROWID;
+`)}
 
 func migrate(db *sql.DB, steps []migration) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

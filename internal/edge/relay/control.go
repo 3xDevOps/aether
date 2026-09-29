@@ -301,24 +301,25 @@ func (r *Relay) handle(reg *registration, m edgeproto.Message) error {
 	case edgeproto.Claimed:
 		return r.claimReported(reg, m)
 	case edgeproto.OwnerTransferred:
-		if !r.claimed(reg) {
-			return reportRefused("this server was never claimed at this edge; claim it first")
-		}
-		return r.recordOwner(reg, func(ctx context.Context) error { return r.dir.TransferOwner(ctx, reg.id, m.Owner) })
+		return r.transferReported(reg, m)
 	case edgeproto.Ownerless:
 		if !r.claimed(reg) {
 			return nil
 		}
 		return r.recordOwner(reg, func(ctx context.Context) error { return r.dir.DropOwner(ctx, reg.id) })
+	case edgeproto.AccountDeletionApplied:
+		r.deletionApplied(reg, edgeproto.AccountDeleted(m))
+		return nil
 	case edgeproto.Unenroll:
 		return r.leave(reg)
 	}
 	return fmt.Errorf("relay: unexpected %T from server", m)
 }
 
-// reportRefused is an ownership report the edge did not record. The
-// control channel closes with it as the reason; the server, reconnecting,
-// learns from ready whether the edge holds it as claimed.
+// reportRefused is an ownership report the edge did not record. A
+// transfer is answered with it. Any other report closes the control
+// channel with it as the reason; the server, reconnecting, learns from
+// ready whether the edge holds it as claimed.
 func reportRefused(format string, args ...any) error {
 	return fmt.Errorf("ownership report refused: "+format, args...)
 }
@@ -346,6 +347,21 @@ func (r *Relay) claimReported(reg *registration, m edgeproto.Claimed) error {
 	return r.recordOwner(reg, func(ctx context.Context) error {
 		return r.dir.RecordClaim(ctx, reg.id, reg.name, reg.policy, g.account)
 	})
+}
+
+// transferReported records the owner a server reported after an admin
+// transferred it, and answers with the outcome: the server made the
+// transfer only on the condition that the edge records it.
+func (r *Relay) transferReported(reg *registration, m edgeproto.OwnerTransferred) error {
+	err := reportRefused("this server was never claimed at this edge; claim it first")
+	if r.claimed(reg) {
+		err = r.recordOwner(reg, func(ctx context.Context) error { return r.dir.TransferOwner(ctx, reg.id, m.Owner) })
+	}
+	res := edgeproto.OwnerTransferResult{Owner: m.Owner}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	return reg.send(res)
 }
 
 // recordOwner runs record and, once it succeeded, treats reg as claimed.
@@ -388,8 +404,10 @@ func (r *Relay) claimed(reg *registration) bool {
 	return reg.claimed
 }
 
-// deliverDeletions sends reg's server the account deletions it is owed,
-// forgetting each once it was written to the control channel.
+// deliverDeletions sends reg's server the account deletions it is owed.
+// Each stays owed until the server answers
+// edgeproto.AccountDeletionApplied: a write reaching the socket does not
+// mean the server applied it.
 func (r *Relay) deliverDeletions(reg *registration) {
 	ctx, cancel := context.WithTimeout(reg.ctx, directoryTimeout)
 	defer cancel()
@@ -403,10 +421,15 @@ func (r *Relay) deliverDeletions(reg *registration) {
 			slog.Info("relay: account deletion not delivered; sent at the next enrollment", "server", reg.id, "error", err)
 			return
 		}
-		if err := r.dir.DeletionDelivered(ctx, reg.id, d); err != nil {
-			slog.Warn("relay: delivered account deletion not forgotten; sent again at the next enrollment", "server", reg.id, "error", err)
-			return
-		}
+	}
+}
+
+// deletionApplied forgets the deletion reg's server applied.
+func (r *Relay) deletionApplied(reg *registration, d edgeproto.AccountDeleted) {
+	ctx, cancel := context.WithTimeout(reg.ctx, directoryTimeout)
+	defer cancel()
+	if err := r.dir.DeletionApplied(ctx, reg.id, d); err != nil {
+		slog.Warn("relay: applied account deletion not forgotten; sent again at the next enrollment", "server", reg.id, "error", err)
 	}
 }
 

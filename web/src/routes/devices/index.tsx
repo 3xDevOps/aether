@@ -1,7 +1,8 @@
 // Devices: the computers members reach this server through an edge with. A
 // member sees their own and an admin sees everyone's; both approve a
 // device by the code it shows on its own screen, which no list carries,
-// and revoke one. Every refusal is the server's message, shown verbatim.
+// after seeing which member and role the code admits it as, and revoke
+// one. Every refusal is the server's message, shown verbatim.
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -21,8 +22,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { message, timeAgo } from '@/lib/format'
-import type { Device } from '@/lib/types'
+import { message, providerName, timeAgo } from '@/lib/format'
+import type { Device, DeviceLookup } from '@/lib/types'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useIsAdmin } from '@/store/hooks'
@@ -44,7 +45,8 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
   const [devices, setDevices] = useState<Device[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [code, setCode] = useState('')
-  const [approving, setApproving] = useState(false)
+  const [looking, setLooking] = useState(false)
+  const [confirming, setConfirming] = useState<{ code: string; found: DeviceLookup } | null>(null)
   const [revoking, setRevoking] = useState<Device | null>(null)
 
   useEffect(() => {
@@ -64,23 +66,23 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
 
   const refetch = async () => setDevices(await client.memberDeviceList())
 
-  const approve = async (value: string) => {
-    setApproving(true)
+  const lookup = async (value: string) => {
+    setLooking(true)
     setError(null)
     try {
-      const device = await client.memberDeviceApprove(value.trim())
-      setCode('')
-      toast.success(`${device.label} approved`)
-      await refetch()
+      const trimmed = value.trim()
+      setConfirming({ code: trimmed, found: await client.memberDeviceLookup(trimmed) })
     } catch (err) {
       setError(message(err))
     } finally {
-      setApproving(false)
+      setLooking(false)
     }
   }
 
   const owner = (device: Device) =>
-    members[device.member_id]?.display_name ?? device.member_id
+    device.invitation_id
+      ? `invitation ${device.invitation_id}`
+      : (members[device.member_id]?.display_name ?? device.member_id)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -98,7 +100,8 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
             admin, or <span className="font-mono">sudo aether-server device approve</span> on the
             server approves it. Approve with the code the device shows on its own screen: a
             device nobody is holding is someone else signed in with the member&apos;s account, so
-            revoke it instead.
+            revoke it instead. Before approving, check the member and role the code admits the
+            device as: whoever holds it gets that member&apos;s access.
           </p>
 
           <form
@@ -106,7 +109,7 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
             className="flex min-w-0 flex-wrap items-end gap-2"
             onSubmit={(e) => {
               e.preventDefault()
-              void approve(code)
+              void lookup(code)
             }}
           >
             <Label className="block min-w-0 flex-[1_1_12rem] space-y-1 sm:max-w-xs">
@@ -116,12 +119,12 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                 value={code}
                 placeholder="ABCD-EFGH"
                 autoComplete="off"
-                disabled={approving}
+                disabled={looking}
                 onChange={(e) => setCode(e.target.value)}
               />
             </Label>
-            <Button type="submit" size="default" disabled={approving || !code.trim()}>
-              Approve
+            <Button type="submit" size="default" disabled={looking || !code.trim()}>
+              Review
             </Button>
           </form>
 
@@ -167,6 +170,10 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                         'never seen'
                       )}
                     </p>
+                    <p className="min-w-0 break-words text-xs text-muted-foreground">
+                      signed in as {device.account} on{' '}
+                      {providerName[device.provider] ?? device.provider}
+                    </p>
                     <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">
                       {device.fingerprint}
                     </p>
@@ -189,6 +196,18 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
           )}
         </div>
       </div>
+      {confirming && (
+        <ApproveDialog
+          code={confirming.code}
+          found={confirming.found}
+          client={client}
+          onClose={() => setConfirming(null)}
+          onApproved={() => {
+            setCode('')
+            void refetch().catch((err: unknown) => setError(message(err)))
+          }}
+        />
+      )}
       {revoking && (
         <RevokeDialog
           device={revoking}
@@ -199,6 +218,81 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
         />
       )}
     </div>
+  )
+}
+
+function ApproveDialog({
+  code,
+  found,
+  client,
+  onClose,
+  onApproved,
+}: {
+  code: string
+  found: DeviceLookup
+  client: Api
+  onClose: () => void
+  onApproved: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { device } = found
+  const admits = found.member_id
+    ? `${found.display_name ?? found.member_id} (${found.role})`
+    : `a new member (${found.role})`
+
+  const approve = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const approved = await client.memberDeviceApprove(code, device.id)
+      onApproved()
+      onClose()
+      toast.success(`${approved.label} approved`)
+    } catch (err) {
+      setBusy(false)
+      setError(message(err))
+    }
+  }
+
+  return (
+    <AlertDialog
+      open
+      onOpenChange={() => {
+        if (!busy) onClose()
+      }}
+    >
+      <AlertDialogContent className="max-h-[calc(100dvh-1rem)] sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            Approve {device.label} as {admits}?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            It signed in as {device.account} on {providerName[device.provider] ?? device.provider}
+            {device.invitation_id ? `, and approving accepts invitation ${device.invitation_id}` : ''}.
+            Whoever holds this device gets that member&apos;s access.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">{device.fingerprint}</p>
+        {error && (
+          <p role="alert" className="border-l-2 border-state-failed bg-state-failed/10 px-3 py-2 text-[13px] text-state-failed">
+            {error}
+          </p>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(event) => {
+              event.preventDefault()
+              void approve()
+            }}
+          >
+            Approve
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

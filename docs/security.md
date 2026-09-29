@@ -650,12 +650,14 @@ can do under each policy, with the tests that show it; the reasons follow.
   without tailscaled it turns on the project's edge and prints what that
   edge sees and how to turn it off; with tailscaled it asks, defaulting to
   no. An upgraded server whose config never named an edge stays off it and
-  discloses nothing.
-- **Each edge origin has its own pin and owner.** The server keeps the
-  pinned edge key, the recorded owner and the claim code per edge origin.
-  Pointing `edge-url` at another edge enrolls there unclaimed and pins that
-  edge's key on first contact; pointing it back finds the first edge's pin
-  again, so a changed key at a known origin is still refused.
+  discloses nothing (`TestIntegrationUpgradeFromMainWithoutTheEdge`).
+- **The server trusts an edge by its signing key, not its host name.** It
+  keeps one pinned edge key, whatever `edge-url` names, and its owner per
+  edge key. A new host name of the same edge keeps both. A different key,
+  at any host name, is refused until `sudo aether-server edge trust` pins
+  it after a person compared fingerprints; the server then has no owner
+  for that key and reports itself ownerless to an edge that records one.
+  Changing `edge-url` alone never makes the server trust another key.
 - **SSH is end to end.** The relay splices bytes between two outbound
   WebSockets and never holds a key that could decrypt them. Clients check
   the host key against the server id on every path, so an edge cannot pose
@@ -669,7 +671,16 @@ can do under each policy, with the tests that show it; the reasons follow.
 - **Membership stays on the server.** The server maps the account to a
   member itself and checks the device. A compromised edge can forge a grant
   for any account, but that account gets in only as a member or through an
-  open invitation the server holds.
+  open invitation the server holds. The SSH user name of a relayed
+  connection names the account the device signed in as, under the device's
+  own signature, and the server refuses a grant naming another before it
+  records anything; so an edge cannot file the key of a device it relays
+  under another account unless it also lied to that device at sign-in. Under `approved-devices` a grant for an
+  invited account changes nothing on the server but a device waiting on
+  the invitation: no member, role or bound account exists, and the
+  invitation stays open, until a person approves that device. Approving it
+  creates the member and uses the invitation in one transaction; the other
+  devices waiting on it are deleted.
 - **The access policy decides what a grant is worth.** Under `edge-access
   account`, a grant for a member's account admits a new device of that
   member: an attacker gets in when either the member's GitHub or Google
@@ -679,8 +690,10 @@ can do under each policy, with the tests that show it; the reasons follow.
   admin, or `sudo aether-server device approve <code>` on the server. An
   attacker then also needs an approver to type the code their device
   shows. The policy is set only on the server's host, and a missing
-  setting means `approved-devices`. Neither policy assumes OAuth is weaker
-  or SSH keys stronger; they differ in how many parties must fail.
+  setting means `approved-devices`. Under either policy a device that only
+  signed in cannot mint an invite code, a bearer credential that would
+  outlive a switch to `approved-devices`. Neither policy assumes OAuth is
+  weaker or SSH keys stronger; they differ in how many parties must fail.
 - **An approved device key is a credential on its own on the direct
   path.** The direct SSH port admits approved device keys, under both
   policies, without asking the edge, as it admits a member SSH key.
@@ -693,6 +706,20 @@ can do under each policy, with the tests that show it; the reasons follow.
   approves neither, and `sudo aether-server device review` approves by
   choosing the device instead. An approval from a connection that signed
   in with an unapproved device is refused under either policy.
+- **An approver sees what a code admits before approving.** The member a
+  waiting device belongs to follows from the account it signed in as,
+  which the edge vouches for, so a compromised edge, or someone holding a
+  member's provider account, can make a code admit their own key as that
+  member. `aether device approve`, `sudo aether-server device approve` and
+  the dashboard first look the code up (`member.device.lookup`), show the
+  device, the account, and the member and role approving admits it as, and
+  approve only after a yes; `member.device.approve` takes the device id the
+  lookup returned and refuses a code that names another. Someone handed a
+  code that admits their own member, or an admin, should refuse it.
+- **Waiting devices are bounded.** A relayed connection with a new key
+  records a device. The server keeps at most 10 pending devices per account
+  and 10 per invitation, and refuses more with a banner naming `aether
+  device list` and `sudo aether-server device review`.
 - **Enrollment signatures cannot become host signatures.** The host key
   signs `aether-edge-enroll-v1\x00`, the edge origin, the server id and a
   nonce. That message is longer than any SSH exchange hash, so an edge that
@@ -707,8 +734,21 @@ can do under each policy, with the tests that show it; the reasons follow.
   grant names another account before it tries the code. The edge relays
   the bytes without reading them; to take a claim it would need the code,
   which only the server's console printed. An edge that also lied to the
-  client about who signed in could make the claim for its own account;
-  `aether login` prints the account the edge reported.
+  client about who signed in could make the claim for its own account:
+  the person then has to notice the account shown by `aether login`,
+  `aether link --claim` and the dashboard's claim form, which is the one
+  the edge reported, before the code is sent.
+- **Console recovery restores an existing admin and nothing else.** `sudo
+  aether-server edge claim-code --admin <member id>` issues a code whose
+  claim binds the claiming account to that admin and approves the claiming
+  device. The code is refused for a member who is not an admin, when issued
+  and again when used; it creates no member, raises no role, and cannot
+  move an account that is another member's. The server logs each use.
+- **One account of a member can be removed.** An account linked to a
+  member while someone else held it is unlinked with `aether member unlink`
+  by the member or an admin, from a credential a person approved: the
+  devices that signed in with it are revoked, not deleted, so their keys
+  stay refused if the account is linked again.
 - **The first link decides which server a client pins.** Every later
   connection must present a host key that derives the linked id. An id
   from the server's admin, or from `sudo aether-server edge status`, rules
@@ -740,10 +780,13 @@ can do under each policy, with the tests that show it; the reasons follow.
   recorded only from that server's own report on its control connection,
   for the account whose claim connection presented the code; no client
   request or operator command records an owner or approves a device.
-- **Deleting an account needs a fresh sign-in.** The edge deletes an
-  account only within 5 minutes of a sign-in with the provider and with the
-  login or email typed back. A stolen device token or edge session cookie
-  alone cannot delete it: the provider must also confirm the person.
+- **Deleting an account needs a fresh sign-in in the same browser.** The
+  edge deletes an account only on its Account page, from a browser that
+  itself signed in with the provider in the last 5 minutes, with the login
+  or email typed back. A device token cannot delete it, and neither can a
+  session cookie from a browser that has not signed in since, even after
+  the person signs in elsewhere. Deleting takes the person's provider
+  sign-in, or a cookie stolen within 5 minutes of its sign-in.
 - **Invitations match only a recently confirmed login or email.** The edge
   learns an account's GitHub login and verified email only when that person
   signs in with the provider in a browser. Signing in takes the login from

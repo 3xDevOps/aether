@@ -12,10 +12,10 @@ import (
 	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
-// reauthWindow is how recently the account must have signed in with its
-// provider for a deletion to proceed: a stolen device token or edge
-// session cookie alone cannot delete it without the provider confirming
-// the person again.
+// reauthWindow is how recently the browser deleting an account must
+// itself have signed in with the provider. The account's last sign-in
+// does not count: a sign-in in any browser refreshes it, so a stolen
+// device token or session cookie could wait for one.
 const reauthWindow = 5 * time.Minute
 
 // transferCommand is the client command an admin of a server runs to
@@ -49,10 +49,10 @@ func confirms(a edgeproto.AccountInfo, typed string) bool {
 	return (a.Login != "" && strings.EqualFold(typed, a.Login)) || (a.Email != "" && strings.EqualFold(typed, a.Email))
 }
 
-// signedInRecently reports whether a signed in with its provider within
-// reauthWindow of now.
-func (s *Service) signedInRecently(a edgeproto.AccountInfo) bool {
-	return !a.IdentityAt.IsZero() && s.now().Sub(a.IdentityAt) <= reauthWindow
+// signedInRecently reports whether the browser v signed in with its
+// provider within reauthWindow of now.
+func (s *Service) signedInRecently(v visitor) bool {
+	return s.now().Sub(v.SignedInAt) <= reauthWindow
 }
 
 func (s *Service) reauthURL(a edgeproto.AccountInfo) string {
@@ -76,14 +76,15 @@ func (s *Service) summary(ctx context.Context, a edgeproto.AccountInfo) (edgepro
 	return out, nil
 }
 
-// deleteAccount deletes a once confirm names it and a signed in with its
-// provider within reauthWindow: its sessions, device tokens and live
-// connections end, the servers it owns become ownerless, and every
-// server it owned or belonged to is sent edgeproto.AccountDeleted, now or
-// when it next connects.
-func (s *Service) deleteAccount(ctx context.Context, a edgeproto.AccountInfo, confirm string) error {
-	if !s.signedInRecently(a) {
-		return pageErr(http.StatusForbidden, "deleting an account needs a sign-in from the last %s: sign in again at %s, then delete it within %s",
+// deleteAccount deletes the account of the browser v once confirm names
+// it and v signed in with its provider within reauthWindow: its sessions,
+// device tokens and live connections end, the servers it owns become
+// ownerless, and every server it owned or belonged to is sent
+// edgeproto.AccountDeleted, now or when it next connects.
+func (s *Service) deleteAccount(ctx context.Context, v visitor, confirm string) error {
+	a := v.Account
+	if !s.signedInRecently(v) {
+		return pageErr(http.StatusForbidden, "deleting an account needs a sign-in in this browser from the last %s: sign in again at %s, then delete it within %s",
 			reauthWindow, s.reauthURL(a), reauthWindow)
 	}
 	if !confirms(a, confirm) {
@@ -115,7 +116,7 @@ func (s *Service) accountPage(w http.ResponseWriter, r *http.Request, v visitor)
 	}
 	s.render(w, http.StatusOK, "account_page", s.view(&v, "Account", accountPage{
 		AccountSummary: sum,
-		Fresh:          s.signedInRecently(v.Account),
+		Fresh:          s.signedInRecently(v),
 		Reauth:         s.reauthURL(v.Account),
 		Window:         reauthWindow,
 		Transfer:       transferCommand,
@@ -128,12 +129,12 @@ func (s *Service) accountDelete(w http.ResponseWriter, r *http.Request, v visito
 	if err != nil {
 		return err
 	}
-	if err := s.deleteAccount(r.Context(), v.Account, r.PostForm.Get("confirm")); err != nil {
+	if err := s.deleteAccount(r.Context(), v, r.PostForm.Get("confirm")); err != nil {
 		status := errorStatus(err)
 		logFailure(r, status, err)
 		page := s.view(&v, "Account", accountPage{
 			AccountSummary: sum,
-			Fresh:          s.signedInRecently(v.Account),
+			Fresh:          s.signedInRecently(v),
 			Reauth:         s.reauthURL(v.Account),
 			Window:         reauthWindow,
 			Transfer:       transferCommand,
@@ -153,16 +154,4 @@ func (s *Service) apiAccount(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return s.summary(r.Context(), c.Account)
-}
-
-func (s *Service) apiAccountDelete(r *http.Request) (any, error) {
-	c, _, err := s.authenticate(r)
-	if err != nil {
-		return nil, err
-	}
-	var req edgeproto.AccountDeleteRequest
-	if err := decodeJSON(r, &req); err != nil {
-		return nil, err
-	}
-	return nil, s.deleteAccount(r.Context(), c.Account, req.Confirm)
 }

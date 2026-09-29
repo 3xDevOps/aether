@@ -685,14 +685,8 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE members SET display_name = ?, public_key = ?, tailnet_login = ?, pending = ?,
 		 color = ?, role = ?
-		 WHERE id = ? AND (? <> '' OR ? <> ''
-		   OR EXISTS (SELECT 1 FROM member_identities WHERE member_id = members.id))`,
-		m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, m.ID, key, m.TailnetLogin))
-	if errors.Is(err, ErrNotFound) {
-		if _, gerr := d.GetMember(ctx, m.ID); gerr == nil {
-			return errors.New("store: update member: a public key, a tailnet login or an edge identity is required")
-		}
-	}
+		 WHERE id = ?`,
+		m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, m.ID))
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			err = fmt.Errorf("store: update member: %w", mapConstraint(err, ErrNotFound))

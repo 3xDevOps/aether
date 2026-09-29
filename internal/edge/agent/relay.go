@@ -36,7 +36,7 @@ func (a *Agent) open(s *session, m edgeproto.Open) {
 		return
 	}
 	a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID})
-	go a.attach(s, m, grant)
+	go a.attach(m, grant)
 }
 
 func (a *Agent) reply(s *session, m edgeproto.Message) {
@@ -47,7 +47,7 @@ func (a *Agent) reply(s *session, m edgeproto.Message) {
 
 // attach dials the data socket of one open and hands the connection to
 // sshd. It holds the slot open took until the connection closes.
-func (a *Agent) attach(s *session, m edgeproto.Open, grant edgeproto.Grant) {
+func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
 	a.mu.Lock()
 	ctx := a.runCtx
 	a.mu.Unlock()
@@ -81,7 +81,7 @@ func (a *Agent) attach(s *session, m edgeproto.Open, grant edgeproto.Grant) {
 	slog.Info("edge: relayed connection", "conn", m.ConnID, "kind", grant.Kind, "client", m.ClientAddr,
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 	if grant.Kind == edgeproto.KindClaim {
-		a.cfg.SSH.ServeEdgeClaim(ctx, rc, grant, a.claimAttempt(s, grant))
+		a.cfg.SSH.ServeEdgeClaim(ctx, rc, grant, a.claimAttempt(grant))
 	} else {
 		a.cfg.SSH.ServeEdgeConn(ctx, rc, grant)
 	}

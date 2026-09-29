@@ -187,7 +187,7 @@ func TestNoBootstrapOverTheRelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, banner, herr := sshOver(nc, fresh, "aether", attacker); herr == nil || !strings.Contains(banner, "is not a member of this server") {
+	if _, banner, herr := sshOver(nc, fresh, edgeproto.AccountUser(mallory.account()), attacker); herr == nil || !strings.Contains(banner, "is not a member of this server") {
 		t.Fatalf("forged grant to an empty server: %v, banner %q", herr, banner)
 	}
 	if members, lerr := fresh.db.ListMembers(context.Background()); lerr != nil || len(members) != 0 {

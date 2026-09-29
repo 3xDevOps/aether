@@ -33,6 +33,9 @@ func validMessages(t *testing.T) []Message {
 		OpenResult{ConnID: conn, Error: "device is pending approval: run aether device approve fake"},
 		Claimed{ConnID: conn, Owner: Principal{Type: PrincipalAccount, Provider: ProviderGoogle, Subject: "fake-sub"}},
 		OwnerTransferred{Owner: Principal{Type: PrincipalAccount, Provider: ProviderGitHub, Subject: "1002"}},
+		OwnerTransferResult{Owner: Principal{Type: PrincipalAccount, Provider: ProviderGitHub, Subject: "1002"}},
+		OwnerTransferResult{Owner: Principal{Type: PrincipalAccount, Provider: ProviderGitHub, Subject: "1002"},
+			Error: "ownership report refused: account is blocked by this edge's operator"},
 		Ownerless{},
 		Directory{Entries: []DirectoryEntry{
 			{Kind: EntryMember, Provider: ProviderGitHub, Subject: "1001", Role: "admin"},
@@ -41,6 +44,7 @@ func validMessages(t *testing.T) []Message {
 		Directory{},
 		DeviceRevoked{DeviceID: "dev-fake-1"},
 		AccountDeleted{Provider: ProviderGitHub, Subject: "1001"},
+		AccountDeletionApplied{Provider: ProviderGitHub, Subject: "1001"},
 		Unenroll{},
 		Drain{},
 		Ping{},
@@ -124,6 +128,9 @@ func TestDecodeControlRefusals(t *testing.T) {
 		{"transferred to nobody", `{"type":"owner_transferred","owner":{"type":"account"}}`, false},
 		{"account deleted without subject", `{"type":"account_deleted","provider":"github"}`, false},
 		{"account deleted with unknown provider", `{"type":"account_deleted","provider":"gitlab","subject":"1"}`, false},
+		{"deletion applied without subject", `{"type":"account_deletion_applied","provider":"github"}`, false},
+		{"transfer result for nobody", `{"type":"owner_transfer_result","owner":{"type":"account"}}`, false},
+		{"transfer result with escape in error", `{"type":"owner_transfer_result","owner":{"type":"account","provider":"github","subject":"1"},"error":"\u001b[2J"}`, false},
 		{"directory with bad entry", `{"type":"directory","entries":[{"kind":"member","provider":"github","role":"admin"}]}`, false},
 		{"device revoked without id", `{"type":"device_revoked"}`, false},
 	}

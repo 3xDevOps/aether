@@ -9,6 +9,8 @@ function device(over: Partial<Device> = {}): Device {
   return {
     id: 'dev_laptop',
     member_id: alice.id,
+    provider: 'github',
+    account: 'alice',
     label: 'laptop',
     status: 'approved',
     fingerprint: 'SHA256:examplefingerprint',
@@ -21,6 +23,8 @@ function device(over: Partial<Device> = {}): Device {
 const pendingDesktop = device({
   id: 'dev_desktop',
   member_id: bob.id,
+  account: 'bob@example.com',
+  provider: 'google',
   label: 'desktop',
   status: 'pending',
   fingerprint: 'SHA256:otherfingerprint',
@@ -47,11 +51,24 @@ describe('devices view', () => {
     expect(within(laptop).getByText('approved')).toBeDefined()
     expect(within(laptop).getByText('SHA256:examplefingerprint')).toBeDefined()
     expect(laptop.textContent).toMatch(/Alice · added .+ · last seen/)
+    expect(within(laptop).getByText('signed in as alice on GitHub')).toBeDefined()
     const desktop = list.getByText('desktop').closest('li')!
     expect(within(desktop).getByText('pending')).toBeDefined()
     expect(within(desktop).getByText('SHA256:otherfingerprint')).toBeDefined()
     // An admin reads whose device it is.
     expect(desktop.textContent).toMatch(/Bob · added .+ · never seen/)
+    expect(within(desktop).getByText('signed in as bob@example.com on Google')).toBeDefined()
+  })
+
+  it('names the invitation a device waits on, which has no member yet', async () => {
+    seed()
+    const waiting = device({ id: 'dev_new', member_id: '', invitation_id: 'inv_1', label: 'new', status: 'pending' })
+    const client = fakeApi({ memberDeviceList: vi.fn(async () => [waiting]) })
+    render(<DevicesRoute params={{}} client={client} />)
+
+    const row = (await screen.findByText('new')).closest('li')!
+    expect(row.textContent).toMatch(/invitation inv_1 · added/)
+    expect(within(row).getByText('signed in as alice on GitHub')).toBeDefined()
   })
 
   it('leaves owner names off a member own list', async () => {
@@ -64,7 +81,7 @@ describe('devices view', () => {
     expect(screen.getByText('your devices')).toBeDefined()
   })
 
-  it('approves by code and re-reads the list', async () => {
+  it('shows whom a code admits, and approves that device once confirmed', async () => {
     seed()
     const list = vi
       .fn()
@@ -72,17 +89,49 @@ describe('devices view', () => {
       .mockResolvedValue([{ ...pendingDesktop, status: 'approved' }])
     const client = fakeApi({
       memberDeviceList: list,
+      memberDeviceLookup: vi.fn(async () => ({
+        device: pendingDesktop,
+        member_id: bob.id,
+        display_name: 'Bob',
+        role: 'admin' as const,
+      })),
       memberDeviceApprove: vi.fn(async () => ({ ...pendingDesktop, status: 'approved' as const })),
     })
     render(<DevicesRoute params={{}} client={client} />)
     await screen.findByText('desktop')
 
     fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: ' ABCD-EFGH ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(client.memberDeviceLookup).toHaveBeenCalledWith('ABCD-EFGH')
+    expect(dialog.getByText('Approve desktop as Bob (admin)?')).toBeDefined()
+    expect(dialog.getByText(/signed in as bob@example.com on Google/)).toBeDefined()
+    expect(dialog.getByText('SHA256:otherfingerprint')).toBeDefined()
+    expect(client.memberDeviceApprove).not.toHaveBeenCalled()
 
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(client.memberDeviceApprove).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Approve' }))
     expect(await screen.findByText('approved')).toBeDefined()
-    expect(client.memberDeviceApprove).toHaveBeenCalledWith('ABCD-EFGH')
+    expect(client.memberDeviceApprove).toHaveBeenCalledWith('ABCD-EFGH', 'dev_desktop')
     expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('says when a code adds a new member through an invitation', async () => {
+    seed()
+    const waiting = device({ id: 'dev_new', member_id: '', invitation_id: 'inv_1', account: 'dana', label: 'new', status: 'pending' })
+    const client = fakeApi({
+      memberDeviceLookup: vi.fn(async () => ({ device: waiting, role: 'collaborator' as const })),
+    })
+    render(<DevicesRoute params={{}} client={client} />)
+
+    fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: 'ABCD-EFGH' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    expect(dialog.getByText('Approve new as a new member (collaborator)?')).toBeDefined()
+    expect(dialog.getByText(/approving accepts invitation inv_1/)).toBeDefined()
   })
 
   it('approves only with a code typed from the new device, never from a row', async () => {
@@ -102,19 +151,19 @@ describe('devices view', () => {
   it('shows the server refusal of a code verbatim', async () => {
     seed()
     const client = fakeApi({
-      memberDeviceApprove: vi.fn(() =>
+      memberDeviceLookup: vi.fn(() =>
         Promise.reject(
-          new ApiError(404, 'member.device.approve: no device is waiting for approval with code "ZZZZ-ZZZZ"'),
+          new ApiError(404, 'member.device.lookup: no device is waiting for approval with code "ZZZZ-ZZZZ"'),
         ),
       ),
     })
     render(<DevicesRoute params={{}} client={client} />)
 
     fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: 'ZZZZ-ZZZZ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
 
     expect((await screen.findByRole('alert')).textContent).toBe(
-      'member.device.approve: no device is waiting for approval with code "ZZZZ-ZZZZ"',
+      'member.device.lookup: no device is waiting for approval with code "ZZZZ-ZZZZ"',
     )
   })
 

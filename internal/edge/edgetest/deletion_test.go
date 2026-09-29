@@ -200,3 +200,52 @@ func TestAccountDeletionReachesAnOfflineServer(t *testing.T) {
 		t.Fatal("erin's identity is still listed")
 	}
 }
+
+// An admin who reached the server only through the edge deletes their
+// account: nobody remote can restore them. On the machine, a claim code
+// naming that admin binds the account they sign in with again to the
+// same member and approves the claiming device. A code naming a member
+// who is not an admin claims nothing, and no member or admin is added.
+func TestConsoleRecoveryOfAnAdminWithoutAnAccount(t *testing.T) {
+	t.Parallel()
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			a := h.newServer(policy)
+			cs := h.login(carol, dave)
+			ca, da := cs[0], cs[1]
+			h.claimServer(ca, a)
+			h.join(h.control(ca, a), da, a, "collaborator")
+			carolID, daveID := a.memberOf(t, carol).ID, a.memberOf(t, dave).ID
+			before := a.snapshot(t)
+
+			h.deleteAccount(ca)
+			identityGone(t, a, carol)
+			h.waitEdgeOwner(t, a, nil)
+			ca2 := h.login(carol)[0]
+			if _, err := h.claim(ca2, a.claimCode(t, time.Now())); err == nil {
+				t.Fatal("a plain claim code bound an account no admin holds")
+			}
+
+			_, err := h.claim(ca2, a.recoveryCode(t, daveID))
+			if err == nil || !strings.Contains(err.Error(), "is collaborator, not an admin") {
+				t.Fatalf("a recovery code naming a collaborator: %v", err)
+			}
+			res, err := h.claim(ca2, a.recoveryCode(t, carolID))
+			if err != nil || res.Info.Member.ID != string(carolID) || res.Info.Member.Role != string(domain.RoleAdmin) {
+				t.Fatalf("console recovery claim: %+v %v; want carol's admin member", res.Info.Member, err)
+			}
+			h.waitEdgeOwner(t, a, &carol)
+			if a.deviceStatus(t, ca2) != domain.DeviceApproved {
+				t.Fatal("the recovering device is not approved")
+			}
+			after := a.snapshot(t)
+			if len(after.members) != len(before.members) || len(after.admins()) != len(before.admins()) ||
+				after.members[daveID] != domain.RoleCollaborator {
+				t.Fatalf("members %v -> %v; want the same members and roles", before.members, after.members)
+			}
+			h.mustDial(ca2, a)
+		})
+	}
+}

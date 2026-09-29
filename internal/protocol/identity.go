@@ -6,9 +6,14 @@ const (
 	// MethodMemberDeviceList lists the caller's devices; an admin sees
 	// every member's.
 	MethodMemberDeviceList = "member.device.list"
+	// MethodMemberDeviceLookup describes the device an approval code names
+	// and whom approving it admits, without approving it: the callers
+	// member.device.approve accepts.
+	MethodMemberDeviceLookup = "member.device.lookup"
 	// MethodMemberDeviceApprove approves a device awaiting approval by its
-	// approval code: its own member or an admin, on a connection that did
-	// not sign in with a device awaiting approval.
+	// approval code and the id member.device.lookup gave for it: its own
+	// member or an admin, on a connection that did not sign in with a
+	// device awaiting approval.
 	MethodMemberDeviceApprove = "member.device.approve"
 	// MethodMemberDeviceRevoke revokes a device and closes its
 	// connections: its own member or an admin.
@@ -25,6 +30,14 @@ const (
 	// MethodMemberIdentityLink names an edge account the caller signs in
 	// with, as an invitation bound to the caller's own member: admin only.
 	MethodMemberIdentityLink = "member.identity.link"
+	// MethodMemberIdentityList lists a member's edge identities and the
+	// devices that signed in with each: the member or an admin.
+	MethodMemberIdentityList = "member.identity.list"
+	// MethodMemberIdentityRemove unbinds one edge identity from a member,
+	// revokes the devices that signed in with it and closes their
+	// connections: the member or an admin, and under approved-devices not
+	// on a connection that signed in with a device no person approved.
+	MethodMemberIdentityRemove = "member.identity.remove"
 	// MethodServerOwnerTransfer makes another admin, through one of their
 	// edge identities, the server's owner at its edge: admin only.
 	MethodServerOwnerTransfer = "server.owner.transfer"
@@ -32,19 +45,24 @@ const (
 
 // Device is the wire form of a member's device. Status is one of the edge
 // protocol's device statuses: registered, pending, approved or revoked.
-// Fingerprint is the SHA256 fingerprint of its device key. It never
-// carries the approval code of a device awaiting approval: only that
-// device shows it, so approving with it proves the approver saw that
-// device.
+// Provider and Account name the edge account the device signed in as:
+// its login, else its email, else its subject. A device waiting on an
+// invitation has InvitationID and no MemberID. Fingerprint is the SHA256
+// fingerprint of its device key. It never carries the approval code of a
+// device awaiting approval: only that device shows it, so approving with
+// it proves the approver saw that device.
 type Device struct {
-	ID          string `json:"id"`
-	MemberID    string `json:"member_id"`
-	Label       string `json:"label"`
-	Status      string `json:"status"`
-	Fingerprint string `json:"fingerprint"`
-	CreatedAt   string `json:"created_at"`
-	LastSeenAt  string `json:"last_seen_at,omitempty"`
-	ApprovedBy  string `json:"approved_by,omitempty"`
+	ID           string `json:"id"`
+	MemberID     string `json:"member_id"`
+	InvitationID string `json:"invitation_id,omitempty"`
+	Provider     string `json:"provider"`
+	Account      string `json:"account"`
+	Label        string `json:"label"`
+	Status       string `json:"status"`
+	Fingerprint  string `json:"fingerprint"`
+	CreatedAt    string `json:"created_at"`
+	LastSeenAt   string `json:"last_seen_at,omitempty"`
+	ApprovedBy   string `json:"approved_by,omitempty"`
 }
 
 // MemberDeviceListResult is the result of member.device.list.
@@ -52,9 +70,30 @@ type MemberDeviceListResult struct {
 	Devices []Device `json:"devices"`
 }
 
-// MemberDeviceApproveParams are the params of member.device.approve.
-type MemberDeviceApproveParams struct {
+// MemberDeviceLookupParams are the params of member.device.lookup.
+type MemberDeviceLookupParams struct {
 	Code string `json:"code"`
+}
+
+// MemberDeviceLookupResult is the result of member.device.lookup: the
+// device and the member approving it admits it as, its own or the one a
+// link invitation names, with that member's role. For a device waiting on
+// an invitation that adds a new member, MemberID and DisplayName are empty
+// and Role is the invited role.
+type MemberDeviceLookupResult struct {
+	Device      Device `json:"device"`
+	MemberID    string `json:"member_id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Role        string `json:"role"`
+}
+
+// MemberDeviceApproveParams are the params of member.device.approve.
+// DeviceID is the device member.device.lookup described for Code; the
+// server refuses a code that names another, so what is approved is what
+// the approver was shown.
+type MemberDeviceApproveParams struct {
+	Code     string `json:"code"`
+	DeviceID string `json:"device_id"`
 }
 
 // MemberDeviceRevokeParams are the params of member.device.revoke.
@@ -116,6 +155,42 @@ type MemberInvitationListResult struct {
 // MemberInvitationRevokeParams are the params of member.invitation.revoke.
 type MemberInvitationRevokeParams struct {
 	InvitationID string `json:"invitation_id"`
+}
+
+// Identity is the wire form of an edge account bound to a member, as the
+// provider reported it when it was bound.
+type Identity struct {
+	Provider  string `json:"provider"`
+	Subject   string `json:"subject"`
+	Login     string `json:"login,omitempty"`
+	Email     string `json:"email,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+// MemberIdentityListParams are the params of member.identity.list.
+type MemberIdentityListParams struct {
+	MemberID string `json:"member_id"`
+}
+
+// MemberIdentityListResult is the result of member.identity.list: the
+// member's identities, and every device of the member with the account it
+// signed in as, revoked ones and those of removed identities included.
+type MemberIdentityListResult struct {
+	Identities []Identity `json:"identities"`
+	Devices    []Device   `json:"devices"`
+}
+
+// MemberIdentityRemoveParams are the params of member.identity.remove.
+type MemberIdentityRemoveParams struct {
+	MemberID string `json:"member_id"`
+	Provider string `json:"provider"`
+	Subject  string `json:"subject"`
+}
+
+// MemberIdentityRemoveResult is the result of member.identity.remove: the
+// devices that signed in with the removed identity, now revoked.
+type MemberIdentityRemoveResult struct {
+	Revoked []Device `json:"revoked"`
 }
 
 // ServerOwnerTransferParams are the params of server.owner.transfer.

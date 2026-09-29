@@ -15,6 +15,7 @@ import type {
   DaemonInstallResult,
   DaemonStatusResult,
   Device,
+  DeviceLookup,
   DiskUsage,
   EdgeHostKey,
   EdgeLinkResult,
@@ -707,15 +708,25 @@ export const api = {
     ),
   memberDeviceList: () =>
     call<{ devices: Device[] }>('member.device.list').then((r) => r.devices),
-  memberDeviceApprove: (code: string) =>
-    call<{ device: Device }>('member.device.approve', { code }).then((r) => r.device),
+  memberDeviceLookup: (code: string) => call<DeviceLookup>('member.device.lookup', { code }),
+  /** Approves the device member.device.lookup named for code; the server
+   * refuses a code that now names another. */
+  memberDeviceApprove: (code: string, deviceID: string) =>
+    call<{ device: Device }>('member.device.approve', { code, device_id: deviceID }).then(
+      (r) => r.device,
+    ),
   memberDeviceRevoke: (deviceID: string) =>
     call<{ device: Device }>('member.device.revoke', { device_id: deviceID }).then(
       (r) => r.device,
     ),
   memberInvitationList: () =>
     call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
-  memberInvitationCreate: (params: { login?: string; email?: string; role: Member['role'] }) =>
+  memberInvitationCreate: (params: {
+    provider?: string
+    login?: string
+    email?: string
+    role: Member['role']
+  }) =>
     call<{ invitation: Invitation }>('member.invitation.create', params).then(
       (r) => r.invitation,
     ),

@@ -40,7 +40,7 @@ func TestEdgeURLOptionIsValidated(t *testing.T) {
 func TestEdgeStatusAndClaimCode(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	if err := edgeClaimCode(&out, dir, edgeagent.DefaultURL); err != nil {
+	if err := edgeClaimCode(&out, dir, ""); err != nil {
 		t.Fatal(err)
 	}
 	id, err := serverID(dir)
@@ -52,7 +52,7 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 	}
 
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
-	if err := openState(t, dir, edgeagent.DefaultURL).Pin(pub); err != nil {
+	if err := edgeagent.OpenState(dir).Pin(pub); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
@@ -66,13 +66,43 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 	}
 }
 
-func openState(t *testing.T, dataDir, edgeURL string) *edgeagent.State {
-	t.Helper()
-	s, err := edgeagent.OpenState(dataDir, edgeURL)
+// claim-code --admin names the existing admin a console recovery binds
+// the claiming account to. A member who is not an admin, or none, is
+// refused before a code exists.
+func TestClaimCodeForAnAdmin(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "aether.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
+	ctx := context.Background()
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: deviceKey(t), Color: "#e6194b", Role: domain.RoleAdmin}
+	viewer := &domain.Member{DisplayName: "Vic", PublicKey: deviceKey(t), Color: "#3cb44b", Role: domain.RoleViewer}
+	for _, m := range []*domain.Member{admin, viewer} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+	state := edgeagent.OpenState(dir)
+	var out bytes.Buffer
+	for id, want := range map[domain.MemberID]string{viewer.ID: "is viewer; console recovery restores an admin", "nobody": "no member nobody; the admins are: " + string(admin.ID) + " (Ada)"} {
+		if err := edgeClaimCode(&out, dir, id); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("claim-code --admin %s = %v, want %q", id, err, want)
+		}
+		if _, ok, _ := state.ClaimCode(); ok {
+			t.Fatalf("claim-code --admin %s issued a code", id)
+		}
+	}
+	if err := edgeClaimCode(&out, dir, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok, err := state.ClaimCode(); err != nil || !ok || c.Admin != string(admin.ID) {
+		t.Fatalf("claim code = %+v, %v, %v; want one naming %s", c, ok, err, admin.ID)
+	}
+	if !strings.Contains(out.String(), "binds the claiming account to admin Ada ("+string(admin.ID)+")") {
+		t.Fatalf("claim-code --admin does not say what the claim does:\n%s", out.String())
+	}
 }
 
 // An upgraded server whose config never named edge-url must not start
@@ -83,7 +113,7 @@ func TestEdgeIsOffUnlessConfigured(t *testing.T) {
 	if err := serversetup.WriteConfig(path, map[string]string{"addr": ":2300"}); err != nil {
 		t.Fatal(err)
 	}
-	o, _, _, err := loadOptions("serve", []string{"--config", path})
+	o, _, _, err := loadOptions("serve", []string{"--config", path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +199,7 @@ func TestEdgeTrustNeedsConfirmation(t *testing.T) {
 	defer edge.Close()
 	dir := t.TempDir()
 	old, _, _ := ed25519.GenerateKey(rand.Reader)
-	state := openState(t, dir, edge.URL)
+	state := edgeagent.OpenState(dir)
 	if err := state.Pin(old); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +249,7 @@ func newDeviceStore(t *testing.T, statuses ...domain.DeviceStatus) (*store.DB, [
 	}
 	var devs []*domain.Device
 	for i, status := range statuses {
-		dev := &domain.Device{Member: m.ID, Provider: "github", Subject: "1001", Credential: deviceKey(t),
+		dev := &domain.Device{Member: m.ID, Provider: "github", Subject: "1001", Login: "octo", Credential: deviceKey(t),
 			Label: fmt.Sprintf("device-%d", i), Status: status}
 		if err := db.RegisterDevice(ctx, dev); err != nil {
 			t.Fatal(err)
@@ -245,11 +275,24 @@ func deviceKey(t *testing.T) string {
 func TestDeviceApprove(t *testing.T) {
 	db, devs := newDeviceStore(t, domain.DevicePending, domain.DeviceRegistered)
 	var out bytes.Buffer
-	if err := deviceApprove(context.Background(), &out, db, "WRONG"); err == nil || !strings.Contains(err.Error(), "no device is waiting") {
+	if err := deviceApprove(context.Background(), &out, strings.NewReader("y\n"), db, "WRONG"); err == nil || !strings.Contains(err.Error(), "no device is waiting") {
 		t.Fatalf("wrong code: %v", err)
 	}
+	// Enter, or the end of input, approves nothing.
+	for _, answer := range []string{"\n", ""} {
+		out.Reset()
+		if err := deviceApprove(context.Background(), &out, strings.NewReader(answer), db, devs[0].ApprovalCode); err == nil || !strings.Contains(err.Error(), "not approved") {
+			t.Fatalf("answer %q: %v", answer, err)
+		}
+		if got, _ := db.GetDevice(context.Background(), devs[0].ID); got.Status != domain.DevicePending {
+			t.Fatalf("device after answer %q = %s", answer, got.Status)
+		}
+		if !strings.Contains(out.String(), `"device-0" of Octo (`) || !strings.Contains(out.String(), "), collaborator, signed in as github octo") {
+			t.Fatalf("the prompt does not name the member and role approving admits:\n%s", out.String())
+		}
+	}
 	for _, dev := range devs {
-		if err := deviceApprove(context.Background(), &out, db, dev.ApprovalCode); err != nil {
+		if err := deviceApprove(context.Background(), &out, strings.NewReader("yes\n"), db, dev.ApprovalCode); err != nil {
 			t.Fatal(err)
 		}
 		got, _ := db.GetDevice(context.Background(), dev.ID)
@@ -257,7 +300,40 @@ func TestDeviceApprove(t *testing.T) {
 			t.Fatalf("device after approval on the machine = %+v", got)
 		}
 	}
-	if !strings.Contains(out.String(), `"device-0" of Octo`) {
+}
+
+// A device waiting on an invitation, approved on the machine, accepts the
+// invitation: the member is created with the invited role only then.
+func TestDeviceApproveAcceptsAnInvitation(t *testing.T) {
+	db, _ := newDeviceStore(t)
+	ctx := context.Background()
+	members, _ := db.ListMembers(ctx)
+	inv := &domain.Invitation{Provider: "github", Login: "dana", Role: domain.RoleViewer, CreatedBy: members[0].ID,
+		ExpiresAt: time.Now().Add(time.Hour)}
+	if err := db.CreateInvitation(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	dev := &domain.Device{Invitation: inv.ID, Provider: "github", Subject: "2002", Login: "dana", Name: "Dana",
+		Credential: deviceKey(t), Label: "dana-laptop", Status: domain.DevicePending}
+	if err := db.RegisterInvitationDevice(ctx, dev, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var review bytes.Buffer
+	if err := deviceReview(ctx, &review, strings.NewReader("\n\n"), db, edgeproto.PolicyApprovedDevices); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(review.String(), `"dana-laptop" waiting on invitation `+string(inv.ID)+" (approving adds a new member, viewer), signed in as github dana") {
+		t.Fatalf("review does not say what approving the invitation device does:\n%s", review.String())
+	}
+	var out bytes.Buffer
+	if err := deviceApprove(ctx, &out, strings.NewReader("y\n"), db, dev.ApprovalCode); err != nil {
+		t.Fatal(err)
+	}
+	m, err := db.GetMemberByIdentity(ctx, "github", "2002")
+	if err != nil || m.Role != domain.RoleViewer || m.DisplayName != "Dana" {
+		t.Fatalf("member after approval on the machine = %+v, %v", m, err)
+	}
+	if !strings.Contains(out.String(), "invitation "+string(inv.ID)+" accepted: Dana joined as viewer") {
 		t.Fatalf("output %q", out.String())
 	}
 }

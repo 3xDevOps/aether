@@ -151,7 +151,7 @@ func (d *fakeDir) PendingDeletions(_ context.Context, serverID string) ([]edgepr
 	return slices.Clone(d.pending[serverID]), nil
 }
 
-func (d *fakeDir) DeletionDelivered(_ context.Context, serverID string, del edgeproto.AccountDeleted) error {
+func (d *fakeDir) DeletionApplied(_ context.Context, serverID string, del edgeproto.AccountDeleted) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.pending[serverID] = slices.DeleteFunc(d.pending[serverID], func(o edgeproto.AccountDeleted) bool { return o == del })

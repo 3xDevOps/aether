@@ -99,7 +99,7 @@ func TestApprovedDevices(t *testing.T) {
 	// Alice's second device, approved from her first.
 	_, err := h.dial(al2, h.link(a))
 	code := waitingCode(t, "alice's second device", err)
-	approved := call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code})
+	approved := approve(t, ctl, code)
 	if approved.Device.Status != "approved" || approved.Device.ApprovedBy != string(a.memberOf(t, alice).ID) {
 		t.Fatalf("approve: %+v", approved.Device)
 	}
@@ -113,7 +113,7 @@ func TestApprovedDevices(t *testing.T) {
 	if _, err = h.tryControl(bo, a); err == nil {
 		t.Fatal("bob's waiting device opened a control channel")
 	}
-	call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code})
+	approve(t, ctl, code)
 	h.mustDial(bo, a)
 
 	// Bob's second device, approved on the machine.
