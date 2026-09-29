@@ -152,10 +152,13 @@ type Relay struct {
 
 	pace pacer
 
-	egressMu    sync.Mutex
-	month       string
-	monthBytes  atomic.Int64
-	unflushed   atomic.Int64
+	egressMu   sync.Mutex
+	month      string
+	monthBytes atomic.Int64
+	unflushed  atomic.Int64
+	// months counts month changes, so a failed write gives bytes back
+	// only to the month that counted them.
+	months      atomic.Uint64
 	bytes       atomic.Uint64
 	refusalsMu  sync.Mutex
 	refusalsMap map[string]uint64

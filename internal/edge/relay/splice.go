@@ -57,9 +57,13 @@ func (r *Relay) pipe(c *relayConn, dst, src net.Conn) {
 			}
 			// Counted before the write, so a peer never holds bytes the
 			// budget and the final flush have not seen.
+			month := r.months.Load()
 			r.count(n)
 			if w, werr := dst.Write(p[:n]); werr != nil {
-				r.count(w - n)
+				// Given back only within the month that counted them.
+				if r.months.Load() == month {
+					r.count(w - n)
+				}
 				return
 			}
 		}
@@ -169,7 +173,11 @@ func (r *Relay) flushEgress(ctx context.Context, now time.Time) error {
 			return fmt.Errorf("relay: load egress for %s: %w", m, err)
 		}
 		r.month = m
+		r.months.Add(1)
 		r.monthBytes.Store(used)
+		if r.unflushed.Load() < 0 {
+			r.unflushed.Store(0)
+		}
 	}
 	return nil
 }

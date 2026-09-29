@@ -1,9 +1,11 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"net"
 	"testing"
+	"time"
 )
 
 // shortWriter accepts two bytes of a write and fails the rest.
@@ -27,5 +29,37 @@ func TestFailedWriteCountsOnlyDeliveredBytes(t *testing.T) {
 	}
 	if got := e.r.unflushed.Load(); got != 2 {
 		t.Fatalf("unflushed = %d, want 2", got)
+	}
+}
+
+// rolloverWriter moves the relay to the next month while a write is in
+// flight, then fails it.
+type rolloverWriter struct {
+	net.Conn
+	t *testing.T
+	r *Relay
+}
+
+func (w rolloverWriter) Write(p []byte) (int, error) {
+	if err := w.r.flushEgress(context.Background(), time.Now().AddDate(0, 1, 0)); err != nil {
+		w.t.Error(err)
+	}
+	return 0, errors.New("peer went away")
+}
+
+func TestFailedWriteGivesNothingBackToTheNextMonth(t *testing.T) {
+	e := newEnv(t)
+	src, peer := net.Pipe()
+	t.Cleanup(func() { _ = src.Close() })
+	go func() {
+		_, _ = peer.Write([]byte("0123456789"))
+		_ = peer.Close()
+	}()
+	e.r.pipe(nil, rolloverWriter{t: t, r: e.r}, src)
+	if got := e.r.Metrics().EgressThisMonth; got != 0 {
+		t.Fatalf("egress of the new month = %d, want 0", got)
+	}
+	if got := e.r.unflushed.Load(); got != 0 {
+		t.Fatalf("unflushed = %d, want 0", got)
 	}
 }
