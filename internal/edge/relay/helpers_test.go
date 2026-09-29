@@ -189,6 +189,8 @@ func (d *fakeDir) addMember(serverID string, a edgeproto.Account) {
 type fakeEgress struct {
 	mu     sync.Mutex
 	months map[string]int64
+	// add, when set, runs before each AddEgress and may fail it.
+	add func(month string, n int64) error
 }
 
 func (f *fakeEgress) Egress(_ context.Context, month string) (int64, error) {
@@ -198,6 +200,11 @@ func (f *fakeEgress) Egress(_ context.Context, month string) (int64, error) {
 }
 
 func (f *fakeEgress) AddEgress(_ context.Context, month string, n int64) error {
+	if f.add != nil {
+		if err := f.add(month, n); err != nil {
+			return err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.months[month] += n

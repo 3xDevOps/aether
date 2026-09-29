@@ -106,3 +106,37 @@ func TestEveryCountedByteIsSavedAcrossMonthChanges(t *testing.T) {
 		t.Fatalf("usage of the month = %d, saved for it = %d", got, want)
 	}
 }
+
+func TestEndedMonthIsSavedAfterAFailedWrite(t *testing.T) {
+	store := &fakeEgress{months: map[string]int64{}}
+	e := newEnvWith(t, 0, store)
+	now := time.Now()
+	ended, next := monthOf(now), now.AddDate(0, 1, 0)
+	e.r.count(100)
+	saves := 0
+	store.add = func(string, int64) error {
+		saves++
+		switch saves {
+		case 1:
+			// Counted after the month's save and before its end.
+			e.r.count(40)
+			return nil
+		case 2:
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	if err := e.r.flushEgress(t.Context(), next); err == nil {
+		t.Fatal("flush with a failed save: no error")
+	}
+	e.r.count(7)
+	if err := e.r.flushEgress(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.months[ended]; got != 140 {
+		t.Fatalf("month that ended saved %d, want 140", got)
+	}
+	if got := store.months[monthOf(next)]; got != 7 {
+		t.Fatalf("new month saved %d, want 7", got)
+	}
+}

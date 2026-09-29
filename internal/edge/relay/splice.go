@@ -190,6 +190,9 @@ func (r *Relay) flushLoop() {
 func (r *Relay) flushEgress(ctx context.Context, now time.Time) error {
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
+	if err := r.saveEnded(ctx); err != nil {
+		return err
+	}
 	m := &r.egress
 	m.mu.Lock()
 	month, n := m.month, max(m.pending, 0)
@@ -217,10 +220,20 @@ func (r *Relay) flushEgress(ctx context.Context, now time.Time) error {
 	m.changes++
 	m.mu.Unlock()
 	// Bytes counted after the save above still belong to the month that ended.
-	if rest > 0 {
-		if err := r.store.AddEgress(ctx, month, rest); err != nil {
-			return fmt.Errorf("relay: save egress for %s: %w", month, err)
-		}
+	r.ended, r.endedBytes = month, max(rest, 0)
+	return r.saveEnded(ctx)
+}
+
+// saveEnded saves what the month that ended is still owed. Until it
+// succeeds no later flush saves or changes month, so the amount is kept
+// for the next attempt.
+func (r *Relay) saveEnded(ctx context.Context) error {
+	if r.endedBytes == 0 {
+		return nil
 	}
+	if err := r.store.AddEgress(ctx, r.ended, r.endedBytes); err != nil {
+		return fmt.Errorf("relay: save egress for %s: %w", r.ended, err)
+	}
+	r.endedBytes = 0
 	return nil
 }

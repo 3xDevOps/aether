@@ -152,7 +152,11 @@ type Relay struct {
 
 	pace pacer
 
-	flushMu     sync.Mutex // serializes saves and month changes
+	flushMu sync.Mutex // serializes saves and month changes
+	// ended and endedBytes are the month that ended and what it is still
+	// owed, guarded by flushMu.
+	ended       string
+	endedBytes  int64
 	egress      egressMeter
 	bytes       atomic.Uint64
 	refusalsMu  sync.Mutex
