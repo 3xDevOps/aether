@@ -6,8 +6,6 @@ on:
 permissions:
   contents: read
   packages: read
-env:
-  GITHUB_REF_NAME: v0.5.2-alpha.4
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -63,9 +61,9 @@ jobs:
               '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')
             # The index must carry the image smoke-tested for this
             # architecture, whether that push was a manifest or an index.
-            tested=$(docker buildx imagetools inspect --raw "$image:$GITHUB_REF_NAME-$arch" | jq -r --arg arch "$arch" \
+            tested=$(docker buildx imagetools inspect --raw "$image:v0.5.2-alpha.4-$arch" | jq -r --arg arch "$arch" \
               'if .manifests then .manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest else empty end')
-            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" | awk '$1 == "Digest:" { print $2; exit }')
+            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:v0.5.2-alpha.4-$arch" | awk '$1 == "Digest:" { print $2; exit }')
             if [ "$platform" != "$tested" ]; then
               echo "::error::$image@$DIGEST carries $platform for linux/$arch, not the smoke-tested $tested"
               exit 1
@@ -89,7 +87,7 @@ jobs:
         run: |
           config=$(mktemp -d)
           trap 'rm -rf "$config"' EXIT
-          image="ghcr.io/3xdevops/aether-edge:$GITHUB_REF_NAME"
+          image="ghcr.io/3xdevops/aether-edge:v0.5.2-alpha.4"
           # Asks the registry without pulling, so nothing the steps above
           # pulled can answer for it.
           if ! out=$(docker --config "$config" manifest inspect "$image" 2>&1); then
