@@ -5,6 +5,8 @@ import type { GatewayCapabilities, Run } from '@/lib/types'
 import { Board } from '@/routes/board'
 import { RunCard } from '@/routes/board/run-card'
 import { useBoard } from '@/routes/board/selectors'
+import '@/routes/diff/conflict-chips'
+import '@/routes/missions'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { applyEvent } from '@/store/sync'
@@ -13,6 +15,7 @@ import {
   approval,
   bob,
   fakeApi,
+  mission,
   otherWorkspace,
   run,
   serverInfo,
@@ -41,6 +44,8 @@ function seed(runs: Run[], active = workspace.id) {
     pausedRuns: {},
     inbox: {},
     hydrated: true,
+    overlaps: {},
+    missionDetails: {},
     hydrationError: null,
     lastSeq: 0,
     route: { name: 'board', params: {} },
@@ -214,6 +219,72 @@ describe('board', () => {
       name: 'terminal',
       params: { runId: detailed.id },
     })
+  })
+
+  it.each(['cards', 'map'] as const)('keeps overlap and mission warnings actionable on collapsed %s cards', async (variant) => {
+    const peer = run({ id: 'run_peer', member_id: bob.id })
+    seed([working, peer])
+    const activeMission = mission()
+    useStore.setState({
+      overlaps: {
+        [working.id]: [{
+          run_id: peer.id,
+          member_id: bob.id,
+          files: ['src/checkout.ts', 'src/payment.ts'],
+        }],
+      },
+      missionDetails: {
+        [activeMission.id]: {
+          mission: activeMission,
+          tasks: [],
+          attempts: [],
+          submissions: [],
+          questions: [],
+          plan_reviews: [],
+          diagnostics: [{
+            kind: 'observed_overlap',
+            task_id: 'task_checkout',
+            task_revision: 1,
+            run_id: working.id,
+            peer_run_id: peer.id,
+            paths: ['src/checkout.ts'],
+            detail: 'Checkout changes overlap the payment worker.',
+          }],
+        },
+      },
+    })
+    render(
+      <RunCard
+        variant={variant}
+        card={{ run: toRecord(working), state: 'working', owner: alice, unseen: false, paused: false }}
+      />,
+    )
+
+    const disclosure = screen.getByRole('button', { name: `Show details for ${working.task}` })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    const fileWarning = screen.getByRole('button', { name: 'File overlap warnings: 1 other run' })
+    const missionWarning = screen.getByRole('button', { name: 'Mission conflict warnings: 1' })
+    fireEvent.click(fileWarning)
+    const overlaps = await screen.findByRole('dialog', { name: 'File overlap warnings' })
+    fireEvent.click(within(overlaps).getByRole('button', { name: '2 overlapping files with Bob, open their run' }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: peer.id } })
+    fireEvent.keyDown(overlaps, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'File overlap warnings' })).toBeNull())
+
+    act(() => useStore.setState({ route: { name: 'board', params: {} } }))
+    fireEvent.click(missionWarning)
+    const conflicts = await screen.findByRole('dialog', { name: 'Mission conflict warnings' })
+    expect(within(conflicts).getByText('Checkout changes overlap the payment worker.')).toBeDefined()
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    fireEvent.click(within(conflicts).getByRole('button', { name: 'observed overlap · 1 path' }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: peer.id } })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.keyDown(conflicts, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Mission conflict warnings' })).toBeNull())
+
+    act(() => useStore.setState({ overlaps: {}, missionDetails: {} }))
+    expect(screen.queryByRole('button', { name: /^File overlap warnings:/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Mission conflict warnings:/ })).toBeNull()
   })
 
   it.each([undefined, ''])('discloses a full multiline task with title %s without navigating', (title) => {

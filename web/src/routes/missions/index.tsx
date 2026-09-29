@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { ViewHeader } from '@/components/view-header'
 import {
@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -875,13 +876,22 @@ function MissionCancel({
   )
 }
 
-function MissionConflictDiagnostics({ run }: CardSlotProps) {
+function useMissionConflictDiagnostics(runID: string) {
   const detailRecords = useStore((state) => state.missionDetails)
-  const details = useMemo(() => Object.values(detailRecords), [detailRecords])
+  return useMemo(
+    () => Object.values(detailRecords)
+      .flatMap((detail) => detail.diagnostics ?? [])
+      .filter((diagnostic) => diagnostic.run_id === runID || diagnostic.peer_run_id === runID),
+    [detailRecords, runID],
+  )
+}
+
+function MissionConflictDiagnostics({
+  run,
+  showDetails = false,
+}: CardSlotProps & { showDetails?: boolean }) {
+  const diagnostics = useMissionConflictDiagnostics(run.id)
   const navigate = useStore((state) => state.navigate)
-  const diagnostics = details
-    .flatMap((detail) => detail.diagnostics ?? [])
-    .filter((diagnostic) => diagnostic.run_id === run.id || diagnostic.peer_run_id === run.id)
   return diagnostics.map((diagnostic, index) => {
     const target =
       diagnostic.peer_run_id && diagnostic.peer_run_id !== run.id
@@ -892,23 +902,55 @@ function MissionConflictDiagnostics({ run }: CardSlotProps) {
       ? diagnostic.unavailable_why || diagnostic.detail || 'snapshot or evidence is unavailable'
       : diagnostic.detail || diagnostic.paths.join('\n') || 'No paths reported'
     return (
-      <Button
-        key={`${diagnostic.kind}-${diagnostic.task_id}-${index}`}
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-[22px] min-h-[22px] border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[11px]"
-        title={detail}
-        disabled={!target}
-        onClick={() => target && navigate('terminal', { runId: target })}
-      >
-        {label}{diagnostic.unavailable ? ' · unavailable' : ''}
-        {!diagnostic.unavailable && diagnostic.paths.length
-          ? ` · ${diagnostic.paths.length} path${diagnostic.paths.length === 1 ? '' : 's'}`
-          : ''}
-      </Button>
+      <Fragment key={`${diagnostic.kind}-${diagnostic.task_id}-${index}`}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-[22px] min-h-[22px] border border-state-needs-attention/40 bg-state-needs-attention/10 px-1.5 text-[11px]"
+          title={detail}
+          disabled={!target}
+          onClick={() => target && navigate('terminal', { runId: target })}
+        >
+          {label}{diagnostic.unavailable ? ' · unavailable' : ''}
+          {!diagnostic.unavailable && diagnostic.paths.length
+            ? ` · ${diagnostic.paths.length} path${diagnostic.paths.length === 1 ? '' : 's'}`
+            : ''}
+        </Button>
+        {showDetails && (
+          <p className="min-w-0 basis-full whitespace-pre-wrap break-words text-xs text-muted-foreground">{detail}</p>
+        )}
+      </Fragment>
     )
   })
+}
+
+function MissionConflictWarning({ run }: CardSlotProps) {
+  const diagnostics = useMissionConflictDiagnostics(run.id)
+  if (!diagnostics.length) return null
+  const label = `Mission conflict warnings: ${diagnostics.length}`
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={label}
+          title={label}
+          className="gap-1 border border-state-needs-attention/40 bg-state-needs-attention/10 px-1 text-state-needs-attention coarse:h-11 coarse:min-h-11 coarse:min-w-11 coarse:px-1"
+        >
+          <TriangleAlert className="size-3.5" aria-hidden />
+          {diagnostics.length}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent aria-label="Mission conflict warnings" onClick={(event) => event.stopPropagation()}>
+        <p className="mb-2 font-medium">Mission conflicts</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <MissionConflictDiagnostics run={run} showDetails />
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 /** Compact mission marker contributed to ordinary run cards through the slot registry. */
@@ -929,6 +971,7 @@ function MissionRunChip({ run }: CardSlotProps) {
   return <Chip color="accent" variant="soft" size="sm"><Chip.Label>Mission</Chip.Label></Chip>
 }
 registerSlot('card:chips', 'mission-diagnostics', MissionConflictDiagnostics)
+registerSlot('card:warnings', 'mission-diagnostics', MissionConflictWarning)
 
 registerSlot('card:badges', 'missions', MissionRunChip)
 registerRoute('missions', MissionRoute)

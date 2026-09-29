@@ -38,6 +38,7 @@ function MapViewport({ layout, scope }: { layout: RunMapLayout; scope: string })
   )
   const camera = useRef(viewport)
   const initialized = useRef(Boolean(normalizeBoardMapViewport(useStore.getState().boardMapViewports[scope])))
+  const previousLayout = useRef(layout)
   const canvas = useRef<HTMLDivElement>(null)
   const world = useRef<HTMLDivElement>(null)
   const saveFrame = useRef<number | null>(null)
@@ -103,14 +104,35 @@ function MapViewport({ layout, scope }: { layout: RunMapLayout; scope: string })
   }, [commit])
 
   useLayoutEffect(() => {
-    if (initialized.current || !layout.nodes.length) return
+    const previous = previousLayout.current
+    previousLayout.current = layout
+    if (!layout.nodes.length) return
+    if (initialized.current) {
+      // A remount or live metadata update must keep even an intentionally
+      // blank pan. Only a different card set/geometry can invalidate the view.
+      const changed = previous.nodes.length !== layout.nodes.length || layout.nodes.some((node, index) => {
+        const before = previous.nodes[index]
+        return !before || node.key !== before.key || node.x !== before.x || node.y !== before.y
+          || node.width !== before.width || node.height !== before.height
+      })
+      const element = canvas.current
+      if (!changed || !element?.clientWidth || !element.clientHeight) return
+      const current = camera.current
+      const visible = layout.nodes.some((node) =>
+        current.x + (node.x + node.width) * current.zoom > 0
+        && current.x + node.x * current.zoom < element.clientWidth
+        && current.y + (node.y + node.height) * current.zoom > 0
+        && current.y + node.y * current.zoom < element.clientHeight,
+      )
+      if (visible) return
+    }
     fit()
     const observer = new ResizeObserver(() => {
       if (!initialized.current) fit()
     })
     if (canvas.current) observer.observe(canvas.current)
     return () => observer.disconnect()
-  }, [fit, layout.nodes.length])
+  }, [fit, layout])
 
   useLayoutEffect(() => {
     const element = canvas.current

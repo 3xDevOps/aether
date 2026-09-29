@@ -30,7 +30,7 @@ const lifecycleLabel: Record<RunRecord['status'], string> = {
 
 /**
  * One run, as it appears on the board. Another feature contributes to the
- * card through the slots (`card:badges`, `card:chips`, `card:footer`); the
+ * card through the slots (`card:badges`, `card:warnings`, `card:chips`, `card:footer`); the
  * card's own content is written here.
  *
  * The article is a forgiving pointer surface for its noninteractive metadata,
@@ -155,44 +155,47 @@ export function RunCard({
         )}
       >
         <div className="grid h-[190px] min-w-0 grid-rows-[22px_40px_32px_20px_1fr] gap-1 px-3 py-2 coarse:grid-rows-[44px_40px_16px_20px_1fr] coarse:gap-0.5">
-          <div className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
-            <StateIndicator state={state} decorative className="shrink-0" />
-            <StateChip state={state} />
-            {finishedQuestion && (
-              <span className="shrink-0 text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}</span>
-            )}
-            {unseen && (
-              <Chip color="accent" variant="soft" size="sm" aria-label="Unseen">
-                <Chip.Label>New</Chip.Label>
-              </Chip>
-            )}
-            {paused && (
-              <span title="Paused" className="shrink-0">
-                <Chip color="warning" variant="soft" size="sm">
-                  <PauseCircle className="size-3" aria-hidden />
-                  <Chip.Label>Paused</Chip.Label>
+          <div className="flex min-w-0 items-center gap-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
+              <StateIndicator state={state} decorative className="shrink-0" />
+              <StateChip state={state} />
+              {finishedQuestion && (
+                <span className="shrink-0 text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}</span>
+              )}
+              {unseen && (
+                <Chip color="accent" variant="soft" size="sm" aria-label="Unseen">
+                  <Chip.Label>New</Chip.Label>
                 </Chip>
-              </span>
-            )}
-            {run.protected && (
-              <span
-                role="img"
-                aria-label="Protected: only the owner or an admin can steer or kill this run"
-                title="Protected: only the owner or an admin can steer or kill this run"
-                className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground"
-              >
-                <Shield className="size-3.5" aria-hidden />
-              </span>
-            )}
-            {deletesLabel && (
-              <span title="Archived" className="shrink-0">
-                <Chip color="default" variant="soft" size="sm">
-                  <Archive className="size-3" aria-hidden />
-                  <Chip.Label>{deletesLabel}</Chip.Label>
-                </Chip>
-              </span>
-            )}
-            <CardSlot name="card:badges" run={run} />
+              )}
+              {paused && (
+                <span title="Paused" className="shrink-0">
+                  <Chip color="warning" variant="soft" size="sm">
+                    <PauseCircle className="size-3" aria-hidden />
+                    <Chip.Label>Paused</Chip.Label>
+                  </Chip>
+                </span>
+              )}
+              {run.protected && (
+                <span
+                  role="img"
+                  aria-label="Protected: only the owner or an admin can steer or kill this run"
+                  title="Protected: only the owner or an admin can steer or kill this run"
+                  className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground"
+                >
+                  <Shield className="size-3.5" aria-hidden />
+                </span>
+              )}
+              {deletesLabel && (
+                <span title="Archived" className="shrink-0">
+                  <Chip color="default" variant="soft" size="sm">
+                    <Archive className="size-3" aria-hidden />
+                    <Chip.Label>{deletesLabel}</Chip.Label>
+                  </Chip>
+                </span>
+              )}
+              <CardSlot name="card:badges" run={run} />
+            </div>
+            <CardSlot name="card:warnings" run={run} />
           </div>
           <button
             type="button"
@@ -296,7 +299,7 @@ function StateChip({ state }: { state: PresentationState }) {
 /** Slot content may contain its own links or buttons. */
 function CardSlot({ name, run }: { name: CardSlotName; run: RunRecord }): ReactNode {
   return (
-    <span className={cn('flex items-center gap-1 empty:hidden', name === 'card:badges' ? 'shrink-0' : 'flex-wrap')}>
+    <span data-run-navigation-exempt className={cn('flex items-center gap-1 empty:hidden', name === 'card:badges' || name === 'card:warnings' ? 'shrink-0' : 'flex-wrap')}>
       <Slot name={name} run={run} />
     </span>
   )

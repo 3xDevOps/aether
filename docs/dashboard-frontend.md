@@ -263,6 +263,7 @@ The slots that exist:
 | Slot | Props | Where it renders |
 | --- | --- | --- |
 | `card:badges` | `{ run }` | the run card's status row, alongside the paused and unseen markers |
+| `card:warnings` | `{ run }` | reserved collapsed status-row controls, outside the scrolling metadata |
 | `card:chips` | `{ run }` | the card's Details disclosure, after the expanded run metadata |
 | `card:footer` | `{ run }` | the bottom of the card's Details disclosure |
 | `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
@@ -836,10 +837,12 @@ breakpoint.
 Both layouts use uniform-height collapsed run previews. The title has its
 own full-width row with a bounded preview and the full `runLabel` as the
 navigation button's accessible name. Status, owner, harness, timestamp and
-branch-copy controls remain available without expanding the card. **Details**
-reveals the full title/task, reason and additional metadata inline in Cards
-and in a dialog in Map, so expansion does not disturb map geometry. The run
-page also exposes the full task through **View full task**.
+branch-copy controls remain available without expanding the card. Counted
+file-overlap and mission-conflict buttons stay visible beside the status
+metadata and open diagnostic controls in popovers. **Details** reveals the
+full title/task, reason and additional metadata inline in Cards and in a
+dialog in Map, so expansion does not disturb map geometry. The run page also
+exposes the full task through **View full task**.
 
 An empty workspace shows one "Ready for a task" panel and a primary New run
 action rather than three repeated empty columns. Loading uses delayed
@@ -884,6 +887,9 @@ existing `aether.ui` origin-local preferences. They survive layout switches,
 route changes and reloads; switching workspaces restores that workspace's
 camera. Unlike the separately stored workspace selection, these preferences
 do not cross origins, including a local gateway's changed ephemeral port.
+While Map stays open, a changed run set or card geometry refits only when
+every card would be offscreen. Routine metadata updates and return visits
+preserve the camera.
 Switching Cards to Map or back moves matching cards between their measured
 rectangles, including width and height, over 460ms. Reduced-motion preference
 skips this movement.
