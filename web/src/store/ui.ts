@@ -11,6 +11,43 @@ import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type GroupBy = 'status' | 'member'
+export type BoardView = 'cards' | 'map'
+
+export interface BoardMapViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export const minBoardMapZoom = 0.02
+export const maxBoardMapZoom = 2
+
+export function normalizeBoardMapViewport(value: unknown): BoardMapViewport | null {
+  if (!value || typeof value !== 'object') return null
+  const { x, y, zoom } = value as BoardMapViewport
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(zoom) ||
+    zoom <= 0
+  ) return null
+  return {
+    x: Math.max(-10_000_000, Math.min(10_000_000, x)),
+    y: Math.max(-10_000_000, Math.min(10_000_000, y)),
+    zoom: Math.max(minBoardMapZoom, Math.min(maxBoardMapZoom, zoom)),
+  }
+}
+
+export function normalizeBoardMapViewports(value: unknown): Record<string, BoardMapViewport> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const viewports: [string, BoardMapViewport][] = []
+  for (const [scope, candidate] of Object.entries(value)) {
+    const viewport = normalizeBoardMapViewport(candidate)
+    if (viewport) viewports.push([scope, viewport])
+  }
+  return Object.fromEntries(viewports)
+}
+
 /** The three things an update banner can be about. */
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
@@ -140,6 +177,8 @@ export interface UiSlice {
    */
   activeWorkspace: string
   groupBy: GroupBy
+  boardView: BoardView
+  boardMapViewports: Record<string, BoardMapViewport>
   /**
    * The last harness successfully used for each agent account. This is a
    * preference, not run state: it survives run cleanup and gives a launch
@@ -168,6 +207,8 @@ export interface UiSlice {
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
   setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
+  setBoardView: (view: BoardView) => void
+  setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
   rememberHarness: (accountID: string, harness: string) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
@@ -194,6 +235,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
   groupBy: 'status',
+  boardView: 'cards',
+  boardMapViewports: {},
   lastHarnessByAccount: {},
   route: { name: 'board', params: {} },
   dismissedUpdates: { cli: '', server: '', shell: '' },
@@ -235,6 +278,14 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
           : s.route,
     })),
   setGroupBy: (groupBy) => set({ groupBy }),
+  setBoardView: (boardView) => set({ boardView }),
+  setBoardMapViewport: (scope, value) => {
+    const viewport = normalizeBoardMapViewport(value)
+    if (!viewport) return
+    set((s) => ({
+      boardMapViewports: { ...s.boardMapViewports, [scope]: viewport },
+    }))
+  },
   rememberHarness: (accountID, harness) => {
     if (!accountID || !harness) return
     set((s) => ({

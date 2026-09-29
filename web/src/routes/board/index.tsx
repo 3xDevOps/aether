@@ -18,27 +18,34 @@ import { ClearDoneConfirm } from '@/routes/board/clear-done-dialog'
 import { TerminalDock } from '@/routes/board/terminal-dock'
 import { RunCard } from '@/routes/board/run-card'
 import { useBoard, type BoardColumn } from '@/routes/board/selectors'
+import { RunMap } from '@/routes/board/run-map'
+import { useBoardTransition } from '@/routes/board/use-board-transition'
 import { useStore } from '@/store'
 import { useCapability, useSelf, useSelfRole } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import '@/components/palette'
 
-/** The default centre view: the active workspace's run cards in three buckets. */
+/** The active workspace's runs, as status columns or a spatial workbench. */
 export function Board() {
   const { columns, archivedCards } = useBoard()
   const ackAll = useStore((s) => s.ackAll)
   const removeRun = useStore((s) => s.removeRun)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspace = useStore((s) => s.workspaces[s.activeWorkspace])
+  const boardView = useStore((s) => s.boardView)
+  const setBoardView = useStore((s) => s.setBoardView)
+  const { boardRef, changeView } = useBoardTransition(
+    boardView,
+    setBoardView,
+    activeWorkspace || 'all',
+  )
   const caps = useCapability()
   const self = useSelf()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => s.hydrationError)
   const dead = useStore((s) => s.streamDead)
   const unreachable = error !== null
-  // Archived runs count too: an all-archived scope must still render the
-  // grid (so the Done header's toggle - the only way back to them - can
-  // mount) rather than falling into the empty-workspace notice.
+  // An all-archived scope still needs the archive toggle in either layout.
   const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
   // Nothing to sort into buckets, and nothing still on its way.
@@ -63,17 +70,46 @@ export function Board() {
   useEffect(() => {
     setShowArchived(false)
   }, [activeWorkspace])
+  const visibleColumns = columns.map((column) =>
+    column.key === 'done' && showArchived ? { ...column, cards: archivedCards } : column,
+  )
+  const archivedToggle = {
+    count: archivedCards.length,
+    showing: showArchived,
+    onToggle: setShowArchived,
+  }
+  const clearDone = showArchived ? undefined : { plan: donePlan, onRun: runClear }
 
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader
         title="Board"
         titleAdornment={
-          <Chip color="default" variant="soft" size="sm">
-            <Chip.Label>
-              {total} {total === 1 ? 'run' : 'runs'}
-            </Chip.Label>
-          </Chip>
+          <>
+            <div
+              role="group"
+              aria-label="Board layout"
+              className="inline-flex shrink-0 items-center border border-border p-0.5"
+            >
+              {(['cards', 'map'] as const).map((view) => (
+                <Button
+                  key={view}
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={boardView === view}
+                  className="rounded-none px-2 aria-pressed:bg-selection aria-pressed:text-selection-foreground"
+                  onClick={() => changeView(view)}
+                >
+                  {view === 'cards' ? 'Cards' : 'Map'}
+                </Button>
+              ))}
+            </div>
+            <Chip color="default" variant="soft" size="sm">
+              <Chip.Label>
+                {total} {total === 1 ? 'run' : 'runs'}
+              </Chip.Label>
+            </Chip>
+          </>
         }
         subtitle={
           workspace ? `${workspace.name} · base ${workspace.base_branch}` : 'All workspaces'
@@ -104,7 +140,12 @@ export function Board() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <div className="flex min-h-24 min-w-0 flex-1 flex-col overflow-y-auto">
+        <div
+          ref={boardRef}
+          className={`flex min-h-24 min-w-0 flex-1 flex-col overflow-x-hidden ${
+            empty || (unreachable && total === 0) ? 'overflow-y-auto' : 'overflow-y-hidden'
+          }`}
+        >
           {unreachable && total === 0 ? (
             <div
               role="alert"
@@ -116,22 +157,36 @@ export function Board() {
             </div>
           ) : empty ? (
             <EmptyNotice />
+          ) : boardView === 'map' ? (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <ColumnHeader
+                label={showArchived ? 'Runs · archived' : 'Runs'}
+                count={visibleColumns.reduce((count, column) => count + column.cards.length, 0)}
+                archived={archivedToggle}
+                clearDone={clearDone}
+              />
+              {loading ? (
+                <div role="status" aria-label="Loading runs" className="flex min-h-0 flex-1 gap-4 overflow-hidden p-4">
+                  <Skeleton className="h-48 w-80 max-w-full shrink-0 rounded-none" />
+                  <Skeleton className="h-48 w-80 shrink-0 rounded-none" />
+                </div>
+              ) : (
+                <RunMap
+                  cards={visibleColumns.flatMap((column) => column.cards)}
+                  scope={activeWorkspace || 'all'}
+                />
+              )}
+            </div>
           ) : (
             <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-3 lg:overflow-hidden">
-              {columns.map((column) =>
+              {visibleColumns.map((column) =>
                 column.key === 'done' ? (
                   <Column
                     key={column.key}
-                    column={showArchived ? { ...column, cards: archivedCards } : column}
+                    column={column}
                     placeholder={placeholder}
-                    archived={{
-                      count: archivedCards.length,
-                      showing: showArchived,
-                      onToggle: setShowArchived,
-                    }}
-                    clearDone={
-                      showArchived ? undefined : { plan: donePlan, onRun: runClear }
-                    }
+                    archived={archivedToggle}
+                    clearDone={clearDone}
                   />
                 ) : (
                   <Column key={column.key} column={column} placeholder={placeholder} />
@@ -286,7 +341,7 @@ function ColumnHeader({
   }
 
   return (
-    <header className="flex min-h-[35px] shrink-0 items-center justify-between gap-2 border-b border-border px-3">
+    <header className="flex min-h-[35px] shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-border px-3 py-1">
       <h2
         ref={heading}
         tabIndex={-1}
@@ -294,7 +349,7 @@ function ColumnHeader({
       >
         {label}
       </h2>
-      <div ref={actions} className="flex shrink-0 items-center gap-1.5">
+      <div ref={actions} className="flex max-w-full flex-wrap items-center gap-1.5">
         {clearDone && <ClearDoneButton {...clearDone} onClosed={takeFocus} />}
         {archived && archived.count > 0 && (
           <Tooltip>

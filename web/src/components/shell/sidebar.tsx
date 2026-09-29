@@ -2,7 +2,7 @@ import {
   ChevronDown,
   ChevronRight,
   FolderGit2,
-  LayoutGrid,
+  House,
   List,
   PanelLeftClose,
   PanelLeftOpen,
@@ -542,7 +542,7 @@ export function ActivityRail({
   const waiting = pendingApprovals(inbox).length
   const surfaceLinks = surfaces(cap)
   const primaryLinks: Surface[] = [
-    { name: 'board', label: 'Board', Icon: LayoutGrid },
+    { name: 'board', label: 'Board', Icon: House },
     { name: 'overview', label: 'All runs', Icon: List },
     ...surfaceLinks.filter(
       ({ name }) => name !== 'onboarding' && name !== 'settings',

@@ -51,8 +51,9 @@ where needed to keep the boundary discernible against its field surface.
 Pane seams retain the quieter Modern values and do not need input-border
 contrast. The subdued brand teal is separate from run status and member attribution.
 HeroUI aliases consume these semantics; they do not define a second palette.
-Member colours are the only arbitrary server data applied inline, on avatars
-and attribution rails while text remains token-based.
+Member colours are the only arbitrary server data applied inline, on avatars,
+attribution rails and the Map's owner boundaries with light identity tints.
+Text remains token-based; identity colour never replaces run-state colour.
 
 ## Geometry and responsive behavior
 
@@ -74,6 +75,10 @@ Use compact workbench geometry rather than landing-page ornament:
   Restrained shadows are limited to actual floating menus, quick input and
   dialogs. Headers stay 13-16px, with no promotional 20-24px titles or
   oversized cards.
+- Board cards share a uniform collapsed preview height, with a full-width
+  title row and visible status and branch-copy controls. The Cards / Map
+  layouts and their disclosure, packing and motion contracts are described in
+  [Dashboard SPA: Board](dashboard-frontend.md#board).
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main

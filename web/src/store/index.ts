@@ -20,6 +20,7 @@ import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import {
   createUiSlice,
+  normalizeBoardMapViewports,
   onboardingSteps,
   type OnboardingStep,
   type UiSlice,
@@ -72,6 +73,8 @@ const persistedUi = (s: RootState) => ({
   activeWorkspace: s.activeWorkspace,
   groupBy: s.groupBy,
   lastHarnessByAccount: s.lastHarnessByAccount,
+  boardView: s.boardView,
+  boardMapViewports: s.boardMapViewports,
   dismissedUpdates: s.dismissedUpdates,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
@@ -162,6 +165,8 @@ export function createRootStore() {
             ),
             terminalControlTaken:
               stored.terminalControlTaken === true || current.terminalControlTaken,
+            boardView: stored.boardView === 'map' ? 'map' : 'cards',
+            boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
           }
         },
         // Only view preferences survive a reload; server data is re-hydrated.
