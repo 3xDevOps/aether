@@ -6,7 +6,7 @@
 # host's certificate. docs/edge.md, "Behind a reverse proxy", explains
 # each line.
 
-map $http_upgrade $connection_upgrade {
+map $http_upgrade $aether_edge_connection {
     default upgrade;
     ''      close;
 }
@@ -43,7 +43,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Connection $aether_edge_connection;
         proxy_buffering off;
         proxy_request_buffering off;
         # Servers and clients hold WebSockets here, and a relayed terminal

@@ -1414,7 +1414,10 @@ only be verified on the live host.
    ```
 
 2. **Firewall** ([Firewall](#firewall)): 22 from `<admin-address>`, 80 and
-   443 from anywhere.
+   443 from anywhere. On a host that already serves other sites, check the
+   rules it has with `sudo ufw status` and add only what is missing:
+   `ufw default deny incoming` cuts off every service the rules do not
+   name.
 3. **Cloudflare DNS** for `onaether.dev`. Proxy status **DNS only** on
    every record ([DNS](#dns) says why):
 
@@ -1463,6 +1466,14 @@ only be verified on the live host.
    sudo nginx -t
    sudo systemctl reload nginx
    ```
+
+   The edge listens on `127.0.0.1:8443`. Check nothing else on the host
+   does, with `sudo ss -ltnp 'sport = :8443'`, which prints only its header
+   line when the port is free. For another port, change `proxy_pass` in
+   both `server` blocks and `AETHER_EDGE_PROXY_LISTEN` in step 8. The file
+   adds two `server` blocks and one `map` whose variable,
+   `$aether_edge_connection`, no other site's configuration uses; it
+   changes no existing site.
 
    `nginx -t` prints `syntax is ok` and `test is successful`. Set
    `worker_connections <worker-connections>;` in the `events` block of
