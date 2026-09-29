@@ -275,9 +275,17 @@ jobs:
               echo "::error::$image@$DIGEST carries $platform for linux/$arch, not the smoke-tested $tested"
               exit 1
             fi
-            docker pull --platform "linux/$arch" "$image:$GITHUB_REF_NAME"
-            docker pull --platform "linux/$arch" "$image@$DIGEST"
-            docker pull --platform "linux/$arch" "$image@$platform"
+            # By its own digest only. The tags and the index were resolved
+            # at the registry above, and docker refuses a second pull of
+            # one digest for another platform ("cannot overwrite digest"),
+            # which failed the v0.5.2-alpha.4 release after its image was
+            # published.
+            docker pull "$image@$platform"
+            pulled=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image@$platform")
+            if [ "$pulled" != "linux/$arch" ]; then
+              echo "::error::$image@$platform is $pulled, not linux/$arch"
+              exit 1
+            fi
             echo "| linux/$arch | \`$image@$platform\` |" >> "$GITHUB_STEP_SUMMARY"
           done
       # Not a release failure: the image is published and pullable with
@@ -287,13 +295,12 @@ jobs:
           config=$(mktemp -d)
           trap 'rm -rf "$config"' EXIT
           image="ghcr.io/3xdevops/aether-edge:$GITHUB_REF_NAME"
-          for arch in amd64 arm64; do
-            if ! out=$(docker --config "$config" pull --platform "linux/$arch" "$image" 2>&1); then
-              printf '%s\n' "$out"
-              echo "::warning title=aether-edge is not public::$image (linux/$arch) cannot be pulled anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
-              exit 0
-            fi
-          done
+          # Asks the registry without pulling, so nothing the steps above
+          # pulled can answer for it.
+          if ! out=$(docker --config "$config" manifest inspect "$image" 2>&1); then
+            printf '%s\n' "$out"
+            echo "::warning title=aether-edge is not public::$image cannot be read anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
+          fi
 
   release:
     needs: [publisher-policy, browser-manifest, edge-manifest]
@@ -521,9 +528,13 @@ jobs:
         run: |
           image=ghcr.io/3xdevops/aether-edge
           docker buildx imagetools create --tag "$image:latest" "$image@$DIGEST"
-          latest=$(docker buildx imagetools inspect "$image:latest" | awk '$1 == "Digest:" { print $2; exit }')
-          if [ "$latest" != "$DIGEST" ]; then
-            echo "::error::$image:latest is $latest, not the published $DIGEST"
+          # Compared by the images it carries: the tool may write the list
+          # again, which changes the list's digest and none of its images.
+          carried() {
+            docker buildx imagetools inspect --raw "$1" | jq -r '[.manifests[] | "\(.platform.os)/\(.platform.architecture) \(.digest)"] | sort | .[]'
+          }
+          if [ "$(carried "$image:latest")" != "$(carried "$image@$DIGEST")" ]; then
+            echo "::error::$image:latest does not carry the images of the published $DIGEST"
             exit 1
           fi
           echo "$image:latest is $GITHUB_REF_NAME, \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
