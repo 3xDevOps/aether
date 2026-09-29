@@ -55,6 +55,12 @@
   text-spacing-trim: space-all;
 }
 
+/* xterm's visible/invisible classes control opacity, not CSS visibility.
+   Keep Tailwind's utilities from revealing its scrollbar over a hidden host. */
+.xterm .xterm-scrollable-element > .scrollbar {
+  visibility: inherit;
+}
+
 /* Design tokens. These values follow VS Code Dark Modern and Light Modern.
    Surface roles stay neutral so adjoining workbench panes read as one
    workspace; state colors remain separate from the subdued brand accent. */
