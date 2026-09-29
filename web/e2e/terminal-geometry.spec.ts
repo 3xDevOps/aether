@@ -102,6 +102,8 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await page.mouse.wheel(0, -60)
     const scrollback = page.getByLabel('Terminal scrollback', { exact: true })
     await expect(scrollback).toBeVisible()
+    const liveScrollbar = page.locator('.xterm-scrollable-element > .scrollbar.vertical')
+    await expect(liveScrollbar).toBeHidden()
     const firstVisible = () => scrollback.evaluate((element) => {
       const top = element.getBoundingClientRect().top + element.clientTop
       const row = Array.from(element.querySelectorAll<HTMLElement>('[data-history-row]'))
@@ -120,6 +122,17 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await page.keyboard.press('End')
     await expect(scrollback).toBeHidden()
     await assertGrid(72, 22)
+    for (let pass = 0; pass < 2; pass++) {
+      await screen.hover()
+      await expect(liveScrollbar).toBeVisible()
+      await page.mouse.wheel(0, -60)
+      await expect(scrollback).toBeVisible()
+      await expect(liveScrollbar).toBeHidden()
+      await scrollback.hover()
+      await page.mouse.wheel(0, 600)
+      await expect(scrollback).toBeHidden()
+      await assertGrid(72, 22)
+    }
     await expect(page.getByRole('button', { name: 'Take control' })).toBeVisible()
     await assertGrid(72, 22)
     await page.getByRole('tab', { name: 'Overview', exact: true }).click()

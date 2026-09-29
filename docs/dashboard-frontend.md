@@ -1430,12 +1430,22 @@ settles before visibility is restored.
 
 There is one vertical scroll owner at a time: xterm while live, the virtual
 read surface while pinned. The host and ancestors suppress competing vertical
-overflow. Live xterm follows output at the bottom. Its controller still
+overflow. xterm's scrollbar inherits the host's CSS visibility: its
+`visible`/`invisible` classes control opacity and must not pick up Tailwind's
+visibility utilities. Otherwise an inert live scrollbar remains painted over
+the reading surface or compact-bootstrap overlay.
+
+Live xterm follows output at the bottom. Its controller still
 protects viewport intent across structural replay or column reflow: it restores
 only a current operation, with no intervening viewport interaction and no
 normal/alternate-buffer change. The run's saved static reading surface is
 independent of those live-buffer operations, so a fresh bootstrap cannot
 overwrite it or shift its anchor.
+
+The [scrollbar comparison](media/terminal-scrollbar-visibility.webp) shows,
+top to bottom, the leaked scrollbar, the corrected reading surface, and the
+return to the live prompt. It uses the real terminal components with synthetic
+output; the headless browser suppresses its own native scrollbar in captures.
 
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
