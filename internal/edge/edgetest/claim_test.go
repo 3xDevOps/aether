@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -199,4 +200,59 @@ func TestClaimKeepsTheDirectoryPushedWithIt(t *testing.T) {
 	if info.Member.Role != string(domain.RoleCollaborator) {
 		t.Fatalf("bob joined as %+v", info.Member)
 	}
+}
+
+// server.owner.transfer succeeds only once the edge answers that it
+// recorded the new owner. An answer lost on the way, a refusal and an
+// unreachable edge each fail it with the reason and keep the server's
+// owner; after the lost answer, which the edge had recorded, the server
+// reports its owner as it reconnects and the edge records that owner.
+func TestTransferStandsOnlyOnceTheEdgeRecordsIt(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
+	cs := h.login(alice, bob)
+	al, bo := cs[0], cs[1]
+	h.claimServer(al, a)
+	h.join(h.control(al, a), bo, a, "admin")
+	aliceID, bobID := a.memberOf(t, alice).ID, a.memberOf(t, bob).ID
+	transfer := func(want string) {
+		t.Helper()
+		err := a.local(t, aliceID, protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: string(bobID)}, nil)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("transfer to bob: %v, want %q", err, want)
+		}
+		if owner, err := a.state().Owner(); err != nil || owner == nil || owner.Login != alice.Login {
+			t.Fatalf("server's owner after a failed transfer = %+v, %v; want alice", owner, err)
+		}
+	}
+
+	h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) {
+		_, answer := e.msg.(edgeproto.OwnerTransferResult)
+		return e.msg, !answer
+	})
+	transfer("no answer within")
+	h.waitEdgeOwner(t, a, &bob)
+	h.proxy.setTamper(t, nil)
+	h.proxy.closeLinks()
+	h.waitEdgeOwner(t, a, &alice)
+
+	ctx := context.Background()
+	if err := h.edgeStore().BlockAccount(ctx, edgeproto.ProviderGitHub, fmt.Sprint(bob.ID), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	transfer("ownership report refused: " + string(edgeproto.RefusalAccountBlocked))
+	h.waitEdgeOwner(t, a, &alice)
+
+	h.proxy.cutServers()
+	eventually(t, "server off the edge", func() error {
+		if st, _, err := a.state().Status(); err != nil || st.Connected {
+			return fmt.Errorf("status %+v, %v", st, err)
+		}
+		return nil
+	})
+	transfer("is not connected to")
+	h.proxy.restoreServers()
+	a.waitEnrolled()
+	h.waitEdgeOwner(t, a, &alice)
 }

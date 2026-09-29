@@ -318,6 +318,47 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-example', edge)
   })
 
+  it('makes the person choose the edge when signed in to more than one', async () => {
+    seed()
+    const other = 'https://edge.other.test'
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => ({
+        edges: [
+          { edge, account },
+          { edge: other, account: { ...account, login: 'octo-work' } },
+        ],
+      })),
+      localEdgeServers: vi.fn(async (e: string) => ({
+        edge: e,
+        servers: e === other ? [{ ...buildBox, name: 'work-box' }] : [buildBox],
+      })),
+      localEdgeLink: vi.fn(async () => ({ ...linkResult, edge: other })),
+      localEdgeClaim: vi.fn(() => Promise.reject(new ApiError(409, 'claim code is wrong'))),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    const choice = within(await screen.findByRole('group', { name: /signed in to 2 edges/ }))
+    expect(screen.queryByLabelText('Server id from your admin')).toBeNull()
+    expect(client.localEdgeServers).not.toHaveBeenCalled()
+
+    fireEvent.click(choice.getByRole('radio', { name: 'edge.other.test as octo-work (GitHub)' }))
+    expect(await screen.findByText('work-box')).toBeDefined()
+    expect(client.localEdgeServers).toHaveBeenCalledWith(other)
+    expect(client.localEdgeServers).not.toHaveBeenCalledWith(edge)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add a server' }))
+    fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: 'abcdefgh-wrong' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
+    expect(await screen.findByText('claim code is wrong')).toBeDefined()
+    expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-wrong', other)
+
+    fireEvent.change(screen.getByLabelText('Server id from your admin'), { target: { value: serverID } })
+    fireEvent.click(screen.getByRole('button', { name: 'Link by id' }))
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+    expect(client.localEdgeLink).toHaveBeenCalledWith(serverID, other)
+  })
+
   it('shows the edge refusal of a claim code verbatim and keeps the form', async () => {
     seed()
     const refusal = `ssh handshake with ${serverID}.edge.aether.invalid: ssh: handshake failed: server said: claim code is wrong`

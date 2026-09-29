@@ -411,6 +411,45 @@ func TestChangedEdgeKeyIsRefused(t *testing.T) {
 	}
 }
 
+// A server whose only pin is in the per-origin directory of an earlier
+// development build refuses to pin the key the edge presents, and names
+// the file and both ways out. `edge trust` pinning a key resolves it.
+func TestEarlierLayoutPinIsNotSilentlyReplaced(t *testing.T) {
+	edge := newFakeEdge(t)
+	dir := t.TempDir()
+	old, _, _ := ed25519.GenerateKey(rand.Reader)
+	earlier := filepath.Join(StateDir(dir), "https_edge.example.test")
+	if err := (&State{dir: earlier}).Pin(old); err != nil {
+		t.Fatal(err)
+	}
+	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
+	stop, _ := run(t, a)
+	ec := edge.nextControl(t)
+	for m := range ec.msgs {
+		t.Errorf("server sent %T while an earlier pin is unread", m)
+	}
+	st := waitStatus(t, a.state, func(st Status) bool { return strings.Contains(st.Error, "earlier development build") })
+	for _, want := range []string{filepath.Join(earlier, pinFile), "sudo aether-server edge trust", "sudo rm -r " + earlier} {
+		if !strings.Contains(st.Error, want) {
+			t.Errorf("refusal %q does not name %s", st.Error, want)
+		}
+	}
+	if pinned, err := a.state.PinnedKey(); pinned != nil || err != nil {
+		t.Fatalf("pinned %x, %v; want nothing pinned", pinned, err)
+	}
+	stop()
+	for len(edge.controls) > 0 {
+		<-edge.controls
+	}
+
+	if err := a.state.Pin(edge.pub); err != nil {
+		t.Fatal(err)
+	}
+	a = newAgent(t, edge.srv.URL, dir, newFakeSSH())
+	run(t, a)
+	expect[edgeproto.Directory](t, edge.nextControl(t))
+}
+
 // setOwner records owner at the edge holding key, as a claim there did.
 func setOwner(t *testing.T, s *State, key ed25519.PublicKey, owner edgeproto.Account) {
 	t.Helper()

@@ -382,8 +382,16 @@ owned by the data directory's owner, so the server keeps reading it.
 
 Development builds before this layout kept a directory per relay origin,
 such as `https_edge.onaether.dev/`. That layout never shipped and is not
-read: such a server pins the edge key again on first connection, reports
-itself ownerless and is claimed again. The old directory can be deleted.
+read. A server with no `edge_key.json` that finds one in such a directory
+refuses to connect rather than pin whatever key the edge presents, with
+this error in its log and in `edge status`:
+
+```
+edgeagent: <data-dir>/edge/https_edge.onaether.dev/edge_key.json: an edge key pinned by an earlier development build, which this server does not read; pin the edge's key with `sudo aether-server edge trust`, or remove the old state with `sudo rm -r <data-dir>/edge/https_edge.onaether.dev` to pin the key the edge presents at the next connection
+```
+
+Either command resolves it. The server has no owner under the new layout,
+so it reports itself ownerless and is claimed again.
 
 ## Client side
 
@@ -685,7 +693,11 @@ transfer to the edge and keeps the new owner only once the edge answers
 that it recorded it; a refusal fails the command with `ownership report
 refused: <reason>`, and no answer within 10 seconds fails it too. Either
 way the server keeps its previous owner, and at every enrollment it
-reports its owner again, so the edge ends up recording the server's. The
+reports its owner again, so the edge ends up recording the server's
+(`TestTransferStandsOnlyOnceTheEdgeRecordsIt`). The exception is an edge
+that recorded a transfer whose answer was lost and then refuses the
+previous owner, because its operator blocked that account meanwhile: the
+two disagree until an admin runs the transfer again. The
 command is refused while the server is not connected to the edge or has no
 owner. A transfer never creates an admin or changes a role.
 
@@ -742,8 +754,11 @@ The edge deletes the account, its device tokens and its edge sessions, and
 closes its relayed connections. Each server the account owned, was a member
 of, or was admitted to through this edge is told at once, or when it next
 connects. A deletion stays owed, and is sent again at each enrollment,
-until the server answers that it applied it; the edge keeps at most 1000
-deletions owed to one server. The server removes that identity and its
+until the server answers that it applied it
+(`TestLostAccountDeletionIsSentAgain`); the edge keeps at most 1000
+deletions owed to one server. A server that fails to apply one closes its
+control connection and receives it again when it reconnects; applying one
+again changes nothing. The server removes that identity and its
 edge devices and closes their connections. It removes no member, changes no role and deletes no data.
 
 What stays: the member itself, with its runs and role; its SSH keys and

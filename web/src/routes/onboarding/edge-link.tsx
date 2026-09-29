@@ -21,7 +21,9 @@ type Phase =
   | { name: 'checking' }
   | { name: 'signed-out' }
   | { name: 'waiting'; login: EdgeLogin }
-  | { name: 'signed-in'; edge: string; account: EdgeAccount }
+  | { name: 'signed-in'; edges: SignedInEdge[]; chosen: string | null }
+
+type SignedInEdge = { edge: string; account: EdgeAccount }
 
 // Pre-wrapped: a server's refusal lists the commands that fix it, one per line.
 const errorLine =
@@ -47,9 +49,10 @@ export function EdgeSignIn({
         return
       }
       if (status.login?.state === 'failed' && status.login.error) setError(status.login.error)
-      const signedIn = status.edges.find((e) => e.account)
-      if (signedIn?.account) {
-        setPhase({ name: 'signed-in', edge: signedIn.edge, account: signedIn.account })
+      const signedIn = status.edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
+      if (signedIn.length > 0) {
+        // With more than one edge the person picks, as the CLI's --edge does.
+        setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
         return
       }
       // A stored sign-in the gateway cannot read is fixed by signing in again.
@@ -79,7 +82,11 @@ export function EdgeSignIn({
             const login = status.login
             if (login?.state === 'signed_in' && login.account) {
               setError(null)
-              setPhase({ name: 'signed-in', edge: login.edge, account: login.account })
+              setPhase({
+                name: 'signed-in',
+                edges: [{ edge: login.edge, account: login.account }],
+                chosen: login.edge,
+              })
             } else if (login?.state === 'failed') {
               setError(login.error ?? 'sign in failed')
               setPhase({ name: 'signed-out' })
@@ -124,6 +131,8 @@ export function EdgeSignIn({
     }
   }
 
+  const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
+
   return (
     <section aria-label="Sign in" className="min-w-0 max-w-2xl space-y-3 text-sm">
       <div className="space-y-1">
@@ -167,10 +176,18 @@ export function EdgeSignIn({
         </div>
       )}
       {phase.name === 'signed-in' && (
+        <EdgeChoice
+          edges={phase.edges}
+          chosen={phase.chosen}
+          onChoose={(edge) => setPhase({ ...phase, chosen: edge })}
+        />
+      )}
+      {picked && (
         <ServerPicker
+          key={picked.edge}
           client={client}
-          edge={phase.edge}
-          account={phase.account}
+          edge={picked.edge}
+          account={picked.account}
           onLinked={onLinked}
         />
       )}
@@ -182,6 +199,39 @@ function accountName(account: EdgeAccount): string {
   const name = account.login ?? account.email ?? account.name ?? account.subject
   const provider = providerName[account.provider] ?? account.provider
   return `${name} (${provider})`
+}
+
+/** The edges this machine is signed in to, when there is more than one. */
+function EdgeChoice({
+  edges,
+  chosen,
+  onChoose,
+}: {
+  edges: SignedInEdge[]
+  chosen: string | null
+  onChoose: (edge: string) => void
+}) {
+  if (edges.length < 2) return null
+  return (
+    <fieldset className="min-w-0 space-y-1.5">
+      <legend className="mb-1.5">
+        You are signed in to {edges.length} edges. Link through:
+      </legend>
+      {edges.map((e) => (
+        <label key={e.edge} className="flex min-w-0 items-center gap-2">
+          <input
+            type="radio"
+            name="edge"
+            checked={chosen === e.edge}
+            onChange={() => onChoose(e.edge)}
+          />
+          <span className="min-w-0 break-all">
+            <span className="font-mono">{edgeHost(e.edge)}</span> as {accountName(e.account)}
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  )
 }
 
 const policyLine: Record<EdgeServer['access_policy'], string> = {

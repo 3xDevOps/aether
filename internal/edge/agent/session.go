@@ -160,6 +160,9 @@ func (a *Agent) handshake(ctx context.Context, c *websocket.Conn) (edgeproto.Rea
 	}
 	switch {
 	case pinned == nil:
+		if err := a.state.refuseEarlierPins(); err != nil {
+			return edgeproto.Ready{}, err
+		}
 		if err := a.state.Pin(ready.EdgeKey); err != nil {
 			return edgeproto.Ready{}, err
 		}
@@ -181,14 +184,16 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
 	s := &session{c: c, edgeKey: ready.EdgeKey, transferred: make(chan edgeproto.OwnerTransferResult, 1)}
-	a.setLive(s)
-	defer a.setLive(nil)
 	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
 	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
 
 	if err = a.reconcileOwner(s, ready.State); err != nil {
 		return time.Since(start), err
 	}
+	// Live only now: a transfer's report must follow the owner reported
+	// here, or the edge would record this older one last.
+	a.setLive(s)
+	defer a.setLive(nil)
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
 	go a.pushDirectory(sctx, s)

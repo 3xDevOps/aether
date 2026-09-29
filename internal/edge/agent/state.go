@@ -97,6 +97,32 @@ func (s *State) Pin(key ed25519.PublicKey) error {
 	return s.write(pinFile, pin{Key: key})
 }
 
+// refuseEarlierPins refuses a first pin while an edge key pinned by a
+// development build that kept a directory per relay origin is present:
+// pinning over it would trust whatever key the edge presents.
+func (s *State) refuseEarlierPins() error {
+	entries, err := os.ReadDir(s.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("edgeagent: %w", err)
+	}
+	var earlier, dirs []string
+	for _, e := range entries {
+		p := filepath.Join(s.dir, e.Name(), pinFile)
+		if _, err := os.Lstat(p); err == nil && e.IsDir() {
+			earlier, dirs = append(earlier, p), append(dirs, filepath.Dir(p))
+		}
+	}
+	if len(earlier) == 0 {
+		return nil
+	}
+	return fmt.Errorf("edgeagent: %s: an edge key pinned by an earlier development build, which this server does not read; "+
+		"pin the edge's key with `sudo aether-server edge trust`, or remove the old state with `sudo rm -r %s` to pin the key the edge presents at the next connection",
+		strings.Join(earlier, ", "), strings.Join(dirs, " "))
+}
+
 // Owner returns the account that owns this server at the edge holding
 // the pinned key, by a claim or a transfer, nil when it has none or no
 // key is pinned.

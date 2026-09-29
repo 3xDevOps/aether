@@ -2239,7 +2239,10 @@ The Link step first offers signing in to an edge
 (`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
 through the local gateway, which keeps the device token, shows the code
 while it polls `edge.status`, then links a server or claims a new one
-with the code `aether-server setup` printed. **Server id from your admin**
+with the code `aether-server setup` printed. Signed in to more than one
+edge, it lists them and shows nothing to link until one is chosen; the
+server list, link by id and claim then pass that edge to the gateway, as
+`--edge` does on the command line. **Server id from your admin**
 links by an id typed in, which the edge cannot substitute. A server picked
 from the account's list opens a **Confirm server** panel with its id and
 the host key fingerprint `edge.hostkey` read, and links only on **Link and

@@ -249,3 +249,71 @@ func TestConsoleRecoveryOfAnAdminWithoutAnAccount(t *testing.T) {
 		})
 	}
 }
+
+// An account deletion lost between the edge and the server, with the
+// control channel closing before the server applied it, stays owed: the
+// edge sends it again when the server reconnects and forgets it only once
+// the server answers that it applied it. The deleted account's identity
+// and edge devices are then gone, its device key no longer connects
+// directly, and the same notice again changes nothing.
+func TestLostAccountDeletionIsSentAgain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
+	cs := h.login(alice, erin)
+	al, er := cs[0], cs[1]
+	h.claimServer(al, a)
+	ctl := h.control(al, a)
+	h.join(ctl, er, a, "collaborator")
+	h.approveForDirect(ctl, er, a)
+	erinID := a.memberOf(t, erin).ID
+	ctx := context.Background()
+	notice := edgeproto.AccountDeleted{Provider: edgeproto.ProviderGitHub, Subject: fmt.Sprint(erin.ID)}
+	isNotice := func(e logEntry) bool { return e.fromEdge && e.serverID == a.id && e.msg == notice }
+	isAnswer := func(e logEntry) bool {
+		return !e.fromEdge && e.serverID == a.id && e.msg == edgeproto.AccountDeletionApplied(notice)
+	}
+
+	from := h.proxy.mark()
+	h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) { return e.msg, !isNotice(e) })
+	h.deleteAccount(er)
+	h.proxy.await(t, "the deletion the proxy drops", from, isNotice)
+	if _, err := a.db.GetMemberByIdentity(ctx, notice.Provider, notice.Subject); err != nil {
+		t.Fatalf("the server lost erin's identity without the notice: %v", err)
+	}
+	if owed, err := h.edgeStore().PendingDeletions(ctx, a.id); err != nil || len(owed) != 1 || owed[0] != notice {
+		t.Fatalf("deletions owed after the write = %+v, %v; want erin's still owed", owed, err)
+	}
+
+	h.proxy.setTamper(t, nil)
+	from = h.proxy.mark()
+	h.proxy.closeLinks()
+	h.proxy.await(t, "the deletion sent again", from, isNotice)
+	h.proxy.await(t, "the server's answer", from, isAnswer)
+	identityGone(t, a, erin)
+	if devs := a.devicesOf(t, erinID); len(devs) != 0 {
+		t.Fatalf("erin's edge devices after the deletion = %+v", devs)
+	}
+	if sc, err := h.dial(er, directLink(a)); err == nil {
+		_ = sc.Close()
+		t.Fatal("the deleted account's device key still connects directly")
+	}
+	eventually(t, "the edge forgets the applied deletion", func() error {
+		owed, err := h.edgeStore().PendingDeletions(ctx, a.id)
+		if err == nil && len(owed) > 0 {
+			err = fmt.Errorf("still owes %+v", owed)
+		}
+		return err
+	})
+
+	before := a.snapshot(t)
+	from = h.proxy.mark()
+	h.proxy.inject(t, a.id, notice, true)
+	h.proxy.await(t, "the answer to a repeated deletion", from, isAnswer)
+	if after := a.snapshot(t); fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatalf("a repeated deletion changed the server: %+v -> %+v", before, after)
+	}
+	if !h.relay().Online(a.id) {
+		t.Fatal("a repeated deletion took the server off the edge")
+	}
+}
