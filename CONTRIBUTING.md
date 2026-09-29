@@ -81,6 +81,23 @@ bun run typecheck
 bun run test
 ```
 
+### Edge image
+
+`images/edge/Dockerfile` builds the edge's container image. CI builds and
+smoke-tests it on amd64 and arm64 when `scripts/ci-classify-edge.sh` says a
+pull request's changes can affect it, and always on `main` and in the merge
+queue. To check it locally, with Docker and curl:
+
+```sh
+make edge-image
+sh scripts/edge-image-smoke.sh aether/edge:test
+```
+
+When `aether-edge` starts importing another repository package, `make
+test-scripts` fails naming the pattern to add to
+`scripts/ci-classify-edge.sh`. Both are described in
+[docs/testing.md](docs/testing.md#the-edge-image).
+
 ### Desktop shell
 
 The optional Electron shell in `desktop/` wraps `aether gui` in a window. The

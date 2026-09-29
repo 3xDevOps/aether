@@ -641,7 +641,7 @@ The edge ([edge.md](edge.md)) is an identity broker, not an authority. The
 server believes it about who signed in; whether that admits a new device is
 the server's access policy, and membership, role and device status are
 always the server's own. [edge.md](edge.md#what-an-attacker-can-do)
-tabulates what a taken-over GitHub or Google account and a compromised edge
+tabulates what a taken-over GitHub account and a compromised edge
 can do under each policy, with the tests that show it; the reasons follow.
 
 - **A server uses an edge only when its operator chose one.** `edge-url` is
@@ -683,8 +683,8 @@ can do under each policy, with the tests that show it; the reasons follow.
   devices waiting on it are deleted.
 - **The access policy decides what a grant is worth.** Under `edge-access
   account`, a grant for a member's account admits a new device of that
-  member: an attacker gets in when either the member's GitHub or Google
-  account or the edge is taken over. Under `approved-devices`, every new
+  member: an attacker gets in when either the member's GitHub account or
+  the edge is taken over. Under `approved-devices`, every new
   device key, a member's first included, waits until a person approves it:
   the member from an approved device, SSH key or tailnet connection, an
   admin, or `sudo aether-server device approve <code>` on the server. An
@@ -709,7 +709,7 @@ can do under each policy, with the tests that show it; the reasons follow.
 - **An approver sees what a code admits before approving.** The member a
   waiting device belongs to follows from the account it signed in as,
   which the edge vouches for, so a compromised edge, or someone holding a
-  member's provider account, can make a code admit their own key as that
+  member's GitHub account, can make a code admit their own key as that
   member. `aether device approve`, `sudo aether-server device approve` and
   the dashboard first look the code up (`member.device.lookup`), show the
   device, the account, and the member and role approving admits it as, and
@@ -770,8 +770,11 @@ can do under each policy, with the tests that show it; the reasons follow.
   entry is also limited per account. The address a relayed connection came from is for
   logs and rate limits only, never for authentication. Behind a reverse
   proxy the edge reads the address from the right-most `X-Forwarded-For`
-  entry, and only when the connection comes from a loopback address;
-  a request whose header is missing or not an IP address is refused. The
+  entry, and only when the connection comes from a loopback address. With
+  `--trusted-proxies` it takes the right-most entry outside the named
+  networks, only from a peer inside them, and refuses every other peer,
+  loopback included; a list that trusts every address is refused. A
+  request whose header is missing or not an IP address is refused. The
   packaged nginx configuration sets the header to the address nginx saw,
   discarding the client's.
 - **Sign-in and relay are two host names.** The sign-in cookies are
@@ -782,28 +785,28 @@ can do under each policy, with the tests that show it; the reasons follow.
   request or operator command records an owner or approves a device.
 - **Deleting an account needs a fresh sign-in in the same browser.** The
   edge deletes an account only on its Account page, from a browser that
-  itself signed in with the provider in the last 5 minutes, with the login
-  or email typed back. A device token cannot delete it, and neither can a
+  itself signed in with GitHub in the last 5 minutes, with the login typed
+  back. A device token cannot delete it, and neither can a
   session cookie from a browser that has not signed in since, even after
-  the person signs in elsewhere. Deleting takes the person's provider
+  the person signs in elsewhere. Deleting takes the person's GitHub
   sign-in, or a cookie stolen within 5 minutes of its sign-in.
 - **Invitations match only a recently confirmed login or email.** The edge
   learns an account's GitHub login and verified email only when that person
-  signs in with the provider in a browser. Signing in takes the login from
+  signs in with GitHub in a browser. Signing in takes the login from
   any other account that held it, but someone who renamed on GitHub, or
   whose email moved to another account, keeps the old value until they
   sign in again. So an invitation matches an account only within 24 hours
   of its last sign-in: the edge refuses such an account with `your login
   and email were last confirmed over 24 hours ago; open this edge in a
-  browser to confirm them, then retry`, any edge page opened later asks the
-  provider again, and the server checks the same age in the grant, which
-  carries when the provider last confirmed the account. Within those 24
-  hours an old login or email can still match. Members match by the
-  provider's immutable subject and are unaffected.
-- **Recovering a provider account removes nothing at the edge or on a
+  browser to confirm them, then retry`, any edge page opened later asks
+  GitHub again, and the server checks the same age in the grant, which
+  carries when GitHub last confirmed the account. Within those 24 hours an
+  old login or email can still match. Members match by GitHub's immutable
+  user id and are unaffected.
+- **Recovering a GitHub account removes nothing at the edge or on a
   server.** Device tokens do not expire, so devices signed in while the
   account was taken over keep working until revoked
-  ([edge.md](edge.md#recovering-a-provider-account)).
+  ([edge.md](edge.md#recovering-a-github-account)).
 - **Only self-hosted servers exist.** The protocol reserves a `hosted`
   kind for a workspace Aether would operate. Such a workspace would not be
   protected end to end against Aether's operators, who would hold its host

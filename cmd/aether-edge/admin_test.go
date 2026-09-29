@@ -105,10 +105,44 @@ func TestOperatorCommands(t *testing.T) {
 		{"servers", "block", "not-an-id"},
 		{"accounts", "block", "42"},
 		{"accounts", "block", "gitlab:42"},
+		{"accounts", "block", "google:g-1"},
+		{"accounts", "delete", "google"},
 	} {
 		if _, err := run(t, dir, bad...); err == nil {
 			t.Errorf("%v accepted", bad)
 		}
+	}
+}
+
+// TestGoogleAccountFromAnEarlierVersion lists and deletes an account
+// v0.5.2-alpha.3 created with Google.
+func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
+	dir := t.TempDir()
+	s, err := edgestore.Open(filepath.Join(dir, "edge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SignIn(context.Background(), edgeproto.Account{Provider: "google", Subject: "g-1", Email: "person@example.test"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, dir, "accounts", "list")
+	if err != nil || !strings.Contains(out, "google:g-1  active  -      person@example.test") {
+		t.Fatalf("accounts list:\n%s%v", out, err)
+	}
+	if _, err = run(t, dir, "accounts", "block", "google:g-1"); err == nil ||
+		!strings.Contains(err.Error(), `sign-in provider "google" is not supported: Aether signs in with GitHub only`) {
+		t.Fatalf("block: %v", err)
+	}
+	out, err = run(t, dir, "accounts", "delete", "google:g-1")
+	if err != nil || !strings.Contains(out, "deleted account google:g-1 (person@example.test): 0 devices") ||
+		!strings.Contains(out, "sent the deletion when each next enrolls: []") {
+		t.Fatalf("accounts delete:\n%s%v", out, err)
+	}
+	if out, err = run(t, dir, "accounts", "list"); err != nil || strings.Contains(out, "google") {
+		t.Fatalf("accounts list after delete:\n%s%v", out, err)
 	}
 }
 
@@ -124,7 +158,7 @@ func TestOperatorCommandsOnlyRemoveAndBlock(t *testing.T) {
 		got   []string
 		want  []string
 	}{
-		{"aether-edge", slices.Collect(maps.Keys(commands)), []string{"accounts", "serve", "servers", "version"}},
+		{"aether-edge", slices.Collect(maps.Keys(commands)), []string{"accounts", "healthcheck", "serve", "servers", "version"}},
 		{"aether-edge servers", slices.Collect(maps.Keys(serverCommands)), []string{"block", "list", "remove", "unblock"}},
 		{"aether-edge accounts", slices.Collect(maps.Keys(accountCommands)), []string{"block", "delete", "list", "unblock"}},
 	} {

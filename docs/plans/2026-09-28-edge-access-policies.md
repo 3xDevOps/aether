@@ -4,7 +4,9 @@
 (https://github.com/3xDevOps/aether/pull/249). It revises
 [Edge remote access](2026-09-27-edge-remote-access.md), which describes the
 first version of that change. This document now describes what was built;
-`docs/edge.md` is the operator and user guide.
+`docs/edge.md` is the operator and user guide. Google sign-in was removed by
+[GitHub-only sign-in and an edge container
+image](2026-09-29-edge-github-container.md).
 
 **Goal:** The owner of a server decides whether signing in with GitHub or
 Google is enough to reach a workspace. The relay is usable under either

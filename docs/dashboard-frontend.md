@@ -2106,7 +2106,9 @@ The Members view carries an admin-only **Invitations** section
 (`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
 an email, a role, and revoke. Its button reads **Invite account**, so it is
 not confused with **Invite**, which mints one-time codes for SSH-key joins.
-A GitHub login invitation is sent with provider `github`. The section says
+The server records every new invitation for a GitHub account; an email
+invitation an earlier version stored for another provider shows that
+provider as stored, such as `dana@example.com on google`. The section says
 what an invitation admits under each policy, because `server.info` does not
 report the policy: under `account` the first connection makes the account a
 member; under `approved-devices` its device waits until an admin approves

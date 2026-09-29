@@ -16,7 +16,7 @@
 <a href="/account">Account</a>
 <form method="post" action="/signout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out</button></form>
 </nav>
-<p class="who">Signed in with {{.Account.Provider}} as {{template "account" .Account}}</p>{{end}}
+<p class="who">Signed in with GitHub as {{template "account" .Account}}</p>{{end}}
 </header>
 <main>
 <h1>{{.Title}}</h1>

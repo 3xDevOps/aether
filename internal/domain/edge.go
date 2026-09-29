@@ -77,8 +77,9 @@ type InvitationID string
 // tailnet links an edge account.
 type Invitation struct {
 	ID InvitationID
-	// Provider is "github" for a login invitation, and "", "github" or
-	// "google" for an email invitation; "" accepts either provider.
+	// Provider is "github". An email invitation v0.5.2-alpha.3 stored may
+	// have none, which matches by email alone, or "google", which matches
+	// nothing.
 	Provider   string
 	Login      string
 	Email      string

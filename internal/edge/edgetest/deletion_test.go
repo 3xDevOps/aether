@@ -143,7 +143,7 @@ func TestDeleteAccountLeavesTheServerOwnerless(t *testing.T) {
 			// Recovery on the machine: carol's member, on the tailnet
 			// dashboard, links her account again, and a new code claims.
 			if err = a.local(t, carolID, protocol.MethodMemberIdentityLink,
-				protocol.MemberIdentityLinkParams{Provider: edgeproto.ProviderGitHub, Login: carol.Login}, nil); err != nil {
+				protocol.MemberIdentityLinkParams{Login: carol.Login}, nil); err != nil {
 				t.Fatalf("link carol's account: %v", err)
 			}
 			ca2 := h.login(carol)[0]

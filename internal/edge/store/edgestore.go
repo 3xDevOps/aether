@@ -53,8 +53,11 @@ func Open(path string) (*Store, error) {
 	if err = f.Close(); err != nil {
 		return nil, fmt.Errorf("edgestore: create %s: %w", path, err)
 	}
+	// temp_store(memory): the edge may run on a read-only root, where
+	// SQLite could not create its temporary files outside the data
+	// directory.
 	dsn := "file:" + url.PathEscape(path) +
-		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate"
+		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=temp_store(memory)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("edgestore: open %s: %w", path, err)

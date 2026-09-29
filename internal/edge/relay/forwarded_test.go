@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -18,13 +19,18 @@ var echoAddr = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 func serveForwarded(t *testing.T, e *env, remote string, xff ...string) (int, string) {
 	t.Helper()
+	return serveForwardedFrom(t, e, nil, remote, xff...)
+}
+
+func serveForwardedFrom(t *testing.T, e *env, proxies []netip.Prefix, remote string, xff ...string) (int, string) {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = remote
 	for _, v := range xff {
 		req.Header.Add(HeaderForwardedFor, v)
 	}
 	rec := httptest.NewRecorder()
-	e.r.Forwarded(echoAddr).ServeHTTP(rec, req)
+	e.r.Forwarded(proxies, echoAddr).ServeHTTP(rec, req)
 	body := rec.Body.String()
 	if rec.Code != http.StatusOK {
 		var e edgeproto.ErrorBody
@@ -94,7 +100,7 @@ func TestForwardedLimitsOpenRequestsPerClient(t *testing.T) {
 	e := newEnv(t)
 	e.r.maxConnsPerAddress = 1
 	entered, release := make(chan struct{}), make(chan struct{})
-	held := e.r.Forwarded(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	held := e.r.Forwarded(nil, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		close(entered)
 		<-release
 	}))
@@ -118,5 +124,67 @@ func TestForwardedLimitsOpenRequestsPerClient(t *testing.T) {
 	<-done
 	if status, got := serveForwarded(t, e, "127.0.0.1:50003", "203.0.113.9"); status != http.StatusOK {
 		t.Fatalf("after the first request ended: %d %q", status, got)
+	}
+}
+
+// TestForwardedFromTrustedProxies runs the edge behind a proxy in another
+// container: the proxies are the networks --trusted-proxies names.
+func TestForwardedFromTrustedProxies(t *testing.T) {
+	e := newEnv(t)
+	proxies := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("fd00:18::/64")}
+	for _, tt := range []struct {
+		name   string
+		remote string
+		xff    []string
+		want   string
+	}{
+		{"proxy in the network", "172.18.0.2:50000", []string{"203.0.113.9"}, "203.0.113.9:0"},
+		{"forged header through the proxy", "172.18.0.2:50000", []string{"6.6.6.6, 203.0.113.9"}, "203.0.113.9:0"},
+		{"forged header naming a proxy address", "172.18.0.2:50000", []string{"172.18.0.9", "203.0.113.9"}, "203.0.113.9:0"},
+		{"chain of two trusted proxies", "172.18.0.2:50000", []string{"6.6.6.6, 203.0.113.9, 172.18.0.3"}, "203.0.113.9:0"},
+		// Every entry is a proxy: the left-most is the client.
+		{"client inside the trusted network", "172.18.0.2:50000", []string{"172.18.0.7"}, "172.18.0.7:0"},
+		{"IPv6 proxy and client", "[fd00:18::2]:50000", []string{"2001:db8::7"}, "[2001:db8::7]:0"},
+		{"IPv4-mapped proxy", "[::ffff:172.18.0.2]:50000", []string{"::ffff:203.0.113.9"}, "203.0.113.9:0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			status, got := serveForwardedFrom(t, e, proxies, tt.remote, tt.xff...)
+			if status != http.StatusOK || got != tt.want {
+				t.Fatalf("got %d %q, want the address %q", status, got, tt.want)
+			}
+		})
+	}
+
+	// A peer outside the networks is refused, with or without a header:
+	// it neither chooses an address nor is served with its own. The
+	// loopback proxy of the mode without --trusted-proxies is no longer
+	// trusted either.
+	for _, tt := range []struct {
+		name   string
+		remote string
+		xff    []string
+	}{
+		{"header from an untrusted peer", "198.51.100.7:4000", []string{"203.0.113.9"}},
+		{"untrusted peer without a header", "198.51.100.7:4000", nil},
+		{"untrusted IPv6 peer", "[2001:db8::66]:4000", []string{"203.0.113.9"}},
+		{"untrusted IPv4-mapped peer", "[::ffff:198.51.100.7]:4000", []string{"203.0.113.9"}},
+		{"loopback peer", "127.0.0.1:4000", []string{"203.0.113.9"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			status, got := serveForwardedFrom(t, e, proxies, tt.remote, tt.xff...)
+			if status != http.StatusForbidden || !strings.Contains(got, "is not in the edge's --trusted-proxies") {
+				t.Fatalf("got %d %q, want 403 naming --trusted-proxies", status, got)
+			}
+		})
+	}
+	if got := e.r.Metrics().Refusals["not from a trusted proxy"]; got != 5 {
+		t.Fatalf("counted %d refusals, want 5", got)
+	}
+
+	for _, xff := range [][]string{nil, {"203.0.113.9, unknown"}} {
+		status, got := serveForwardedFrom(t, e, proxies, "172.18.0.2:50000", xff...)
+		if status != http.StatusBadRequest || !strings.Contains(got, "proxy_set_header X-Forwarded-For $remote_addr") {
+			t.Errorf("%q from the proxy: got %d %q, want 400", xff, status, got)
+		}
 	}
 }

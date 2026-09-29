@@ -2,8 +2,10 @@ package edge
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -21,13 +23,14 @@ func TestAdmissionMatrix(t *testing.T) {
 	ctx := context.Background()
 	now := h.clock.Now()
 	owner := edgeproto.Account{Provider: "github", Subject: "1", Login: "owner"}
-	member := edgeproto.Account{Provider: "google", Subject: "g-2", Email: "member@example.test"}
+	member := edgeproto.Account{Provider: "github", Subject: "2", Login: "member", Email: "member@example.test"}
 	loginInvitee := edgeproto.Account{Provider: "github", Subject: "3", Login: "Invitee", IdentityAt: now}
-	emailInvitee := edgeproto.Account{Provider: "google", Subject: "g-4", Email: "Invited@Example.test", IdentityAt: now}
+	emailInvitee := edgeproto.Account{Provider: "github", Subject: "4", Login: "someone", Email: "Invited@Example.test", IdentityAt: now}
 	staleInvitee := loginInvitee
 	staleInvitee.IdentityAt = now.Add(-edgeproto.IdentityMaxAge - time.Second)
-	unverified := edgeproto.Account{Provider: "google", Subject: "g-5", IdentityAt: now}
+	unverified := edgeproto.Account{Provider: "github", Subject: "5", Login: "unverified", IdentityAt: now}
 	kelvin := edgeproto.Account{Provider: "github", Subject: "6", Login: "Kelvin", IdentityAt: now}
+	// An account v0.5.2-alpha.3 signed in with Google.
 	sameSubjectOtherProvider := edgeproto.Account{Provider: "google", Subject: "1", IdentityAt: now}
 	expiredInvitee := edgeproto.Account{Provider: "github", Subject: "7", Login: "late", IdentityAt: now}
 
@@ -40,7 +43,7 @@ func TestAdmissionMatrix(t *testing.T) {
 	}
 	if err := h.svc.ReplaceDirectory(ctx, id, edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{
 		{Kind: edgeproto.EntryMember, Provider: "github", Subject: "1", Role: "admin"},
-		{Kind: edgeproto.EntryMember, Provider: "google", Subject: "g-2", Role: "collaborator"},
+		{Kind: edgeproto.EntryMember, Provider: "github", Subject: "2", Role: "collaborator"},
 		{Kind: edgeproto.EntryInvitation, Provider: "github", Login: "invitee", Role: "viewer", ExpiresAt: now.Add(time.Hour)},
 		{Kind: edgeproto.EntryInvitation, Email: "invited@example.test", Role: "collaborator", ExpiresAt: now.Add(time.Hour)},
 		{Kind: edgeproto.EntryInvitation, Provider: "github", Login: "kelvin", Role: "viewer", ExpiresAt: now.Add(time.Hour)},
@@ -96,7 +99,7 @@ func TestStaleLoginMatchesNoInvitation(t *testing.T) {
 	ctx := context.Background()
 	h.setGitHubUser(1, "alice", "alice@example.test", true)
 	b := h.browser(t)
-	b.signIn(t, edgeproto.ProviderGitHub)
+	b.signIn(t)
 	start := startDevice(t, h)
 	b.post(t, "/device/confirm", url.Values{"user_code": {start.UserCode}, "decision": {"approve"}})
 	tok, status, msg := pollDevice(t, h, start.DeviceCode)
@@ -144,7 +147,7 @@ func TestStaleLoginMatchesNoInvitation(t *testing.T) {
 		t.Fatalf("an edge page a day later: %s to %q, want GitHub asked again", resp.Status, loc)
 	}
 	h.setGitHubUser(1, "alice-old", "alice@example.test", true)
-	b.signIn(t, edgeproto.ProviderGitHub)
+	b.signIn(t)
 	if err := admit(); !errors.Is(err, edgeproto.RefusalNotMember) {
 		t.Fatalf("after GitHub reports the new login, Admit = %v, want %q", err, edgeproto.RefusalNotMember)
 	}
@@ -171,7 +174,7 @@ func TestOwnershipComesFromServerReports(t *testing.T) {
 	ctx := context.Background()
 	id := testServerID(t)
 	owner := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1", Login: "owner"}
-	heir := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-2"}
+	heir := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2", Login: "heir"}
 
 	if err := h.svc.RecordClaim(ctx, id, "workstation", edgeproto.PolicyAccount, owner); !errors.Is(err, refusalNoOwnerAccount) {
 		t.Fatalf("claim by an account the edge does not hold: %v", err)
@@ -257,12 +260,12 @@ func TestClaimConnectionsAreLimited(t *testing.T) {
 	}
 	// Per server: many accounts from many addresses guessing one code.
 	for i := range 10 {
-		acct := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: fmt.Sprint(i)}
+		acct := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: fmt.Sprint(100 + i)}
 		if err := h.svc.AdmitClaim(ctx, id, acct, addr(30+i)); err != nil {
 			t.Fatalf("claim %d of one server: %v", i+1, err)
 		}
 	}
-	if err := h.svc.AdmitClaim(ctx, id, edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "x"}, addr(50)); !errors.Is(err, edgeproto.RefusalTooMany) {
+	if err := h.svc.AdmitClaim(ctx, id, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "200"}, addr(50)); !errors.Is(err, edgeproto.RefusalTooMany) {
 		t.Fatalf("11th claim of one server: %v", err)
 	}
 	h.clock.Advance(time.Minute)
@@ -316,7 +319,7 @@ func TestCSRF(t *testing.T) {
 	b := signedInBrowser(t, h)
 	h.setGitHubUser(2, "other", "other@example.test", true)
 	other := h.browser(t)
-	other.signIn(t, edgeproto.ProviderGitHub)
+	other.signIn(t)
 
 	for name, token := range map[string]string{"no token": "", "another session's token": other.csrf(t)} {
 		resp, _ := b.do(t, http.MethodPost, "/signout", url.Values{"csrf": {token}}, nil)
@@ -451,5 +454,35 @@ func TestLimiterFullTableAdmitsNewAddresses(t *testing.T) {
 	}
 	if n := len(l.buckets); n > maxTracked {
 		t.Errorf("limiter tracks %d keys, bound %d", n, maxTracked)
+	}
+}
+
+// TestGoogleAccountFromAnEarlierVersion meets an account v0.5.2-alpha.3
+// signed in with Google, with a browser session and a device token: both
+// are refused with the reason and the command that removes the account,
+// and the browser can then sign in with GitHub.
+func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
+	h := newHarness(t)
+	b := signedInBrowser(t, h)
+	tok := approvedDevice(t, h, b)
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(filepath.Join(h.dataDir, "edge.db"))+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close() //nolint:errcheck // test
+	if _, err := db.Exec(`UPDATE accounts SET provider = 'google', login = '' WHERE subject = '1'`); err != nil {
+		t.Fatal(err)
+	}
+	const reason = `sign-in provider "google" is not supported: Aether signs in with GitHub only; ` +
+		`this edge's operator removes the account with: aether-edge accounts delete google:1`
+
+	if status, msg := h.apiCall(t, http.MethodGet, edgeproto.PathServers, tok.Token, nil, nil); status != http.StatusForbidden || !strings.Contains(msg, reason) {
+		t.Errorf("device token of a Google account: %d %q", status, msg)
+	}
+	if resp, page := b.get(t, "/servers"); resp.StatusCode != http.StatusForbidden || !strings.Contains(page, html.EscapeString(reason)) {
+		t.Errorf("session of a Google account: %s\n%s", resp.Status, page)
+	}
+	if resp, page := b.get(t, "/signin"); resp.StatusCode != http.StatusOK || !strings.Contains(page, "Sign in with GitHub") {
+		t.Errorf("sign-in page after the refusal: %s\n%s", resp.Status, page)
 	}
 }

@@ -9,9 +9,11 @@ it.
 
 Terms used below:
 
-- An **account** is a person signed in to the edge with GitHub or Google.
-  It is keyed by the provider and the provider's immutable user id; the
-  same email at two providers is two accounts.
+- An **account** is a person signed in to the edge with GitHub. It is
+  keyed by the pair `github:<user id>`, GitHub's immutable numeric id, and
+  the edge gives it an account id of its own. A login or email identifies
+  no account: two GitHub accounts that held the same email are two
+  accounts.
 - A **device** is one client install. It holds a **device key**, an Ed25519
   key of its own (not your `~/.ssh` key), and a **device token** from the
   edge.
@@ -63,17 +65,17 @@ host only, never to a sibling host under the same domain.
 | Grants | The edge signing key, and the relay origin, which each grant names as its issuer |
 | The edge's record of a server: claim, owner, policy | The server id, in the edge's database |
 | A client's pin of a server | The server id |
-| An account | The provider's user id: GitHub's numeric id, Google's `sub`. Neither depends on the OAuth application |
+| An account | GitHub's numeric user id. It does not depend on the OAuth app |
 
 ### If you change one of them
 
 | Change | Servers | Clients and people |
 | --- | --- | --- |
-| Sign-in host name | Nothing: servers never contact the sign-in origin | Browsers sign in again. Relayed connections keep working with the stored token, but `aether servers`, `aether logout` and `--delete-account` go to the old sign-in origin and fail with its error until `aether login` runs again. The replaced token stays valid at the edge until it is revoked on the Devices page. The operator registers the new callback addresses with each provider |
+| Sign-in host name | Nothing: servers never contact the sign-in origin | Browsers sign in again. Relayed connections keep working with the stored token, but `aether servers`, `aether logout` and `--delete-account` go to the old sign-in origin and fail with its error until `aether login` runs again. The replaced token stays valid at the edge until it is revoked on the Devices page. The operator changes the OAuth app's callback URL on GitHub |
 | Relay host name | Each operator sets `edge-url` to the new origin and restarts; a server still on the old origin is refused. The edge key is the same, so the server keeps its pin and its owner, and the edge keeps it claimed under the server id: relaying, `aether member transfer` and the ownerless recovery work as before (`TestRelayHostNameChangeKeepsPinAndOwner`) | `aether login --edge <new relay origin>`, then `aether link <server id> --edge <new relay origin>` again. The server id and each device's approval stay: the server knows a device by its key |
 | Edge signing key | Every server refuses the edge with `edge key changed: ...` until its operator runs `sudo aether-server edge trust` and types `yes`. The server keeps its owner per edge key and has none for the new one, so when it reconnects it tells the edge it is ownerless; an admin claims it again with a code from `sudo aether-server edge claim-code`. Members, roles and devices stay (`TestPinAndOwnerFollowTheEdgeKey` in `internal/edge/agent`) | Nothing: clients do not pin the edge key |
 | A server's host key | New server id. At the edge it is a new, unclaimed server: an admin whose account is linked claims it with a code from `sudo aether-server edge claim-code`. Members, roles and devices stay on the server. The old id stays listed until its owner removes it on the Servers page | Every link refuses the new key; link again by the new id |
-| OAuth application (client id or secret) | Nothing | Nothing: accounts, tokens, sessions and server identities stay. The next provider sign-in may show the consent page again |
+| OAuth app (client id or secret) | Nothing | Nothing: accounts, tokens, sessions and server identities stay. The next GitHub sign-in may show the authorization page again |
 
 Back up the edge signing key and each server's host key
 ([Backup and recovery](#backup-and-recovery),
@@ -94,7 +96,7 @@ authorizes it.
 | Who approves | Nobody needs to | The member from an approved device, SSH key or tailnet connection; an admin the same way; or `sudo aether-server device approve <code>` on the machine |
 | The claiming device | Approved: the code came from the machine's console | Approved, the same way |
 | Lost every device | Sign in on a new one | An admin, or the machine's administrator, approves the new one |
-| Suits | One person, or a team that already relies on its GitHub or Google accounts for source access | A server holding code or credentials that must stay protected even if a GitHub or Google account, or the edge, is taken over |
+| Suits | One person, or a team that already relies on its GitHub accounts for source access | A server holding code or credentials that must stay protected even if a GitHub account, or the edge, is taken over |
 
 Under both: the server maps the account to a member itself, roles and
 capabilities are the usual ones, every device is listed with `aether device
@@ -103,13 +105,13 @@ connection.
 
 ### Who must fail for access to be gained
 
-- **`account`:** an attacker gets in when a member's GitHub or Google
-  account is taken over, or when the edge is (its host, its database or
+- **`account`:** an attacker gets in when a member's GitHub account is
+  taken over, or when the edge is (its host, its database or
   its signing key). Either one is enough, and a compromised edge reaches
   every member of every server on it that chose this policy.
 - **`approved-devices`:** one of those, and also a person who approves the
-  attacker's device by typing the code that device shows. The edge and the
-  provider each identify; neither can admit a device.
+  attacker's device by typing the code that device shows. The edge and
+  GitHub each identify; neither can admit a device.
 - **Under both:** a stolen device key alone reaches the server's direct
   address once that device is approved, like a member SSH key; through the
   edge it also needs the device's token or the edge. A stolen device token
@@ -120,7 +122,7 @@ difference is how many parties must fail.
 
 ### What an attacker can do
 
-With a member's GitHub or Google account, the edge honest:
+With a member's GitHub account, the edge honest:
 
 | | `account` | `approved-devices` |
 | --- | --- | --- |
@@ -128,7 +130,7 @@ With a member's GitHub or Google account, the edge honest:
 | Reach a workspace | **Yes**, with the member's role on each server they belong to (`TestTakenOverProviderAccount`) | No: the new device is pending (`TestTakenOverProviderAccount`) |
 | As an admin | Invite accounts, mint invite codes, change roles, link accounts, transfer ownership. Not approve a device: a registered device approves nothing (`TestAccountAccess`) | Nothing: a pending device completes no handshake (`TestApprovedDevices`) |
 | Accept an invitation addressed to the member | Yes, with its role (`TestAccountAccess`) | No: the device waits on the invitation. No member is created, no account bound and the invitation stays open until an approver types the device's code (`TestInvitationWaitsUntilOneDeviceIsApproved` in `internal/sshd`) |
-| Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, along with anything done as an admin ([Recovering a provider account](#recovering-a-provider-account)) | A pending device and a device token remain, with no access |
+| Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, along with anything done as an admin ([Recovering a GitHub account](#recovering-a-github-account)) | A pending device and a device token remain, with no access |
 | Get a device approved | Not needed | Only by having an approver type the code shown on the attacker's device. The approver is shown the member and role the code admits the device as before anything is approved |
 | Disrupt | Revoke the member's device tokens; delete the account, which removes its identity and edge devices on every server | The same |
 | Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Devices view and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
@@ -140,7 +142,7 @@ With the edge, or its signing key:
 | Forge a grant for any account | Yes | Yes |
 | Reach a workspace | **Yes**, as any member of any server on that edge using this policy, with that member's role (`TestMaliciousEdgeAccountAccess`) | No: a forged grant yields a pending device (`TestMaliciousEdgeApprovedDevices`) |
 | Accept an open invitation | Yes, with its role | No: the device waits on the invitation, and no member, administrator or bound account exists until an approver types that device's code (`TestMaliciousEdgeApprovedDevices`) |
-| Record a device an honest client relays under another account than the one it signed in as | No: the client names its account in the SSH user name, under its own signature, and the server refuses before recording anything: `this device connects as "<provider>:<subject>", but the edge signed the connection in as <account> (<provider>:<subject>); nothing was recorded` (both tests). An edge that also lied to the client at sign-in about which account it is gets past this check, as for a claim | The same |
+| Record a device an honest client relays under another account than the one it signed in as | No: the client names its account in the SSH user name, under its own signature, and the server refuses before recording anything: `this device connects as "github:<user id>", but the edge signed the connection in as <account> (github:<user id>); nothing was recorded` (both tests). An edge that also lied to the client at sign-in about which account it is gets past this check, as for a claim | The same |
 | Record its own key under a member's account | Yes, admitted as that member | Pending: `aether device approve`, `sudo aether-server device approve` and the dashboard show whoever is handed its code that it admits the key as that member, with that role, and approve only after a yes (`TestMaliciousEdgeApprovedDevices`) |
 | Grow the server's device table | Registered devices are admitted devices, not bounded | At most 10 pending devices per account and 10 per invitation (`TestWaitingDevicesAreBounded` in `internal/sshd`) |
 | Replay a connection, or change the policy, a member, a role or the owner by altering or injecting control messages | No: the server refuses a used connection id and takes no instruction from the edge's messages | No (`TestMaliciousEdgeApprovedDevices`, `TestServerVerifiesGrants`) |
@@ -162,10 +164,10 @@ question until you answer `1` or `2`; Enter selects nothing:
 Who may reach this server through the edge?
 
   1) Account access
-     Signing in with GitHub or Google is enough. People you invite start on
-     a new device by signing in, and Aether creates and manages the device
-     key. Access is as strong as each person's GitHub or Google account and
-     the edge that vouches for it.
+     Signing in with GitHub is enough. People you invite start on a new
+     device by signing in, and Aether creates and manages the device key.
+     Access is as strong as each person's GitHub account and the edge that
+     vouches for it.
 
   2) Approved devices
      Signing in says who someone is. It does not admit a device. Each new
@@ -465,7 +467,7 @@ or on the server:
 `aether link` and `aether edge-ssh` (git) print it; the sync daemon logs it.
 
 Every relayed connection names, in its SSH user name, the account this
-device signed in as, `<provider>:<subject>`. The device's SSH signature
+device signed in as, `github:<user id>`. The device's SSH signature
 covers it, so the server refuses a grant that names another account before
 it records anything.
 
@@ -519,7 +521,7 @@ reaches the edge: server names are chosen by each server's admin.
 `aether link --claim <code>` dials the edge's claim path,
 `/v1/connect/<server id>/claim`, with the id from the code, and offers the
 code and the account this device signed in as in the SSH user name,
-`claim:<code>:<provider>:<subject>`. An SSH client sends the user name only
+`claim:<code>:github:<user id>`. An SSH client sends the user name only
 after the key exchange has verified the host key, so the code crosses the
 edge encrypted, and only to a server whose host key derives the id in the
 code. Another host key ends the connection with both server ids and the
@@ -630,9 +632,9 @@ A link survives a revoked token and a deleted account:
 | Token revoked | Refused: `device token revoked` | Still works with the approved device key | Unaffected |
 | Account deleted | Refused the same way | Refused: the server removed the account's edge devices | Unaffected |
 
-### Recovering a provider account
+### Recovering a GitHub account
 
-Recovering a GitHub or Google account ends the attacker's use of it for new
+Recovering a GitHub account ends the attacker's use of it for new
 sign-ins, and nothing else. Devices the attacker signed in while holding it
 keep their device tokens, which do not expire, and stay on every server
 until revoked. After recovery:
@@ -660,11 +662,11 @@ until revoked. After recovery:
 
    ```sh
    aether member identities <member-id>
-   aether member unlink <member-id> github:<subject>
+   aether member unlink <member-id> github:<user id>
    ```
 
    ```
-   unlinked github:<subject> from member <member id>; revoked 2 device(s) that signed in with it
+   unlinked github:<user id> from member <member id>; revoked 2 device(s) that signed in with it
    ```
 
    The account's devices are revoked, not deleted, so their keys stay
@@ -693,18 +695,19 @@ access; revoke them anyway so nobody approves one by mistake.
 
 ### Transfer and the ownerless state
 
-An admin hands ownership at the edge to another admin who has a linked edge
-account:
+An admin hands ownership at the edge to another admin who has a linked
+GitHub account:
 
 ```sh
-aether member transfer <member-id> [--provider github|google]
+aether member transfer <member-id>
 ```
 
 ```
 member <member id> now owns this server at its edge, as github account <login>
 ```
 
-`--provider` is needed when that admin has both. The server reports the
+An admin with two linked GitHub accounts is refused until one is removed
+with `aether member unlink`. The server reports the
 transfer to the edge and keeps the new owner only once the edge answers
 that it recorded it; a refusal fails the command with `ownership report
 refused: <reason>`, and no answer within 10 seconds fails it too. Either
@@ -743,16 +746,18 @@ The Account page, `https://auth.onaether.dev/account` on the project's
 edge, lists the servers the account owns and the servers it is a member
 of, and deletes it. Only that page deletes an account, and it needs:
 
-- A sign-in with the provider in this browser in the last 5 minutes. A
+- A sign-in with GitHub in this browser in the last 5 minutes. A
   sign-in in another browser does not count, and neither does a device
   token. Without one the deletion is refused with `deleting an account
   needs a sign-in in this browser from the last 5m0s: sign in again at
   <url>, then delete it within 5m0s`; open `<url>`, sign in, and delete
   again.
-- The account's login typed back, or its email for an account without a
-  login, and the page's form token.
+- The account's GitHub login typed back, and the page's form token. An
+  account that lost its login here, because another account signed in
+  holding it after a rename on GitHub, types its email instead, or its
+  account id when it has no verified email.
 
-So deleting takes the person's provider sign-in, or a session cookie
+So deleting takes the person's GitHub sign-in, or a session cookie
 stolen within 5 minutes of its sign-in. `aether logout --delete-account`
 lists the same servers and where to delete:
 
@@ -765,7 +770,7 @@ deleting it ends its sign-ins and device tokens, and each server above removes t
 its edge devices. No server loses a member, a role or data: an SSH key or tailnet identity of yours keeps
 working there until an admin removes it. A server left without an owner is claimed again with a code from
 `aether-server edge claim-code` on its machine.
-delete it in a browser at https://auth.onaether.dev/account: sign in with github there and type <login>. Then run `aether logout` here to
+delete it in a browser at https://auth.onaether.dev/account: sign in with GitHub there and type <login>. Then run `aether logout` here to
 delete this machine's token.
 ```
 
@@ -827,7 +832,7 @@ of admins: `--admin: no member <id>; the admins are: <member id> (<name>)`.
 | Runs the edge | Aether, or the owner | Aether |
 | Who can read the workspace | The owner's machine administrators | Aether's operators |
 | What separating edge and server protects against | A compromised edge, under `approved-devices` | Nothing against Aether: one party runs both |
-| What `approved-devices` protects against | A taken-over provider account, and a compromised edge | A taken-over provider account only |
+| What `approved-devices` protects against | A taken-over GitHub account, and a compromised edge | A taken-over GitHub account only |
 | Server id | Derived from a host key the owner holds | Derived from a host key Aether would hold |
 
 Every server today is user-operated, and `aether servers` shows it as
@@ -854,12 +859,17 @@ link goes through one ([local-gateway.md](local-gateway.md)).
 ## Running an edge
 
 `aether-edge serve` is one static Linux binary (amd64 or arm64) with an
-embedded SQLite store. It answers on its sign-in host and its relay host
+embedded SQLite store, installed with a systemd unit
+([Installing](#installing)) or run from the image
+`ghcr.io/3xdevops/aether-edge` ([In a container](#in-a-container)). It
+answers on its sign-in host and its relay host
 ([Two host names](#two-host-names)) in one of two modes:
 
 - **Behind a reverse proxy** (`--proxy-listen`): plain HTTP on a loopback
   port; nginx on the same machine terminates TLS with certbot certificates.
-  The packaged unit and environment file are set up for this mode.
+  The packaged unit and environment file are set up for this mode. A proxy
+  in another container or on another machine is named with
+  `--trusted-proxies`.
 - **Without a reverse proxy** (`--listen`, the flag default): the edge
   terminates TLS on `:443` itself, with Let's Encrypt certificates for
   exactly its two names.
@@ -870,28 +880,28 @@ and `edge.example.com`.
 
 ### What it needs
 
-- A Linux host with systemd 248 or newer and a public IPv4 address (IPv6
-  optional). The edge limits requests by client address, so no other proxy
-  or load balancer may stand between clients and the edge's own proxy.
-- Outbound HTTPS to `github.com` and `api.github.com`, and to
-  `oauth2.googleapis.com` and `openidconnect.googleapis.com`, for the
-  providers you enable; to Let's Encrypt for certificates.
+- A Linux host with systemd 248 or newer, or a container runtime, and a
+  public IPv4 address (IPv6 optional). The edge limits requests by client
+  address, so no other proxy or load balancer may stand between clients
+  and the edge's own proxy.
+- Outbound HTTPS to `github.com` and `api.github.com`, and to Let's
+  Encrypt for certificates.
 - Two DNS names ([DNS](#dns)).
-- A GitHub OAuth app, a Google OAuth client, or both.
+- A GitHub OAuth app.
 - About 64 KiB of copy buffers per open relayed connection, plus socket
   buffers. Relaying is byte copying, so egress bandwidth runs out first
   ([egress budget](#egress-budget)).
 
-### OAuth applications
+### GitHub OAuth app
 
-Name each application **Aether**, not after the edge: the consent page then
-stays accurate if other Aether services use the same sign-in. The edge asks
-only for the account's identity and verified email. The callback addresses
-are on the sign-in host and fixed by the code; each must match exactly,
-scheme and path included.
+Name the app **Aether**, not after the edge: GitHub's authorization page
+then stays accurate if other Aether services use the same sign-in. The
+edge asks only for the account's identity and its verified primary email.
+The callback URL is on the sign-in host and fixed by the code; it must
+match exactly, scheme and path included.
 
-**GitHub.** In the account or organization that should own it, open
-Settings > Developer settings > OAuth Apps > New OAuth App:
+In the account or organization that should own it, open Settings >
+Developer settings > OAuth Apps > New OAuth App:
 
 | Field | Value |
 | --- | --- |
@@ -902,21 +912,6 @@ Settings > Developer settings > OAuth Apps > New OAuth App:
 
 The edge requests the scope `user:email`. Generate a client secret and keep
 it for [Installing](#installing).
-
-**Google.** In a Google Cloud project, open Google Auth Platform:
-
-- Branding: app name `Aether`, a support email, `<signin-host>`'s
-  registrable domain as an authorized domain, and a privacy policy URL.
-- Audience: External, and publish the app. In Testing status only listed
-  test users can sign in.
-- Data access: the scopes `openid`, `.../auth/userinfo.email` and
-  `.../auth/userinfo.profile`. They are non-sensitive and need no scope
-  verification.
-- Clients: create an OAuth client, application type Web application, with
-  the authorized redirect URI `https://<signin-host>/signin/google/callback`.
-  No JavaScript origin is needed.
-
-Keep the client id and secret.
 
 ### DNS
 
@@ -941,8 +936,10 @@ Keep the client id and secret.
 
 With `--proxy-listen 127.0.0.1:8443` (`AETHER_EDGE_PROXY_LISTEN`), the edge
 serves plain HTTP on that address and obtains no certificate. The origins
-stay `https://`. Any address that is not loopback is refused: `--proxy-listen
-"0.0.0.0:8443" must be a loopback address such as 127.0.0.1:8080`.
+stay `https://`. Without `--trusted-proxies`, any address that is not
+loopback is refused: `--proxy-listen "0.0.0.0:8443" must be a loopback
+address such as 127.0.0.1:8080, or name the proxies' networks with
+--trusted-proxies`.
 
 The edge takes each client's address from the `X-Forwarded-For` header,
 only on a request whose TCP peer is a loopback address. It uses the
@@ -983,6 +980,30 @@ more pair, so raise `worker_connections` in `/etc/nginx/nginx.conf` above
 the 768 Debian and Ubuntu ship with when the edge serves more than a few
 hundred of them. `scripts/edge-nginx-test.sh` runs the example file in
 front of a real edge ([testing.md](testing.md#behind-nginx)).
+
+#### A proxy that is not on this host
+
+A proxy in another container reaches the edge from that container's
+address, not from loopback. Name the networks the proxy connects from with
+`--trusted-proxies` (`AETHER_EDGE_TRUSTED_PROXIES`), a comma-separated list
+such as `172.18.0.0/16` for a container network or `10.0.0.5/32` for one
+machine. `--proxy-listen` may then be any address, such as `:8443`, and:
+
+- A request from a peer in those networks takes the right-most
+  `X-Forwarded-For` entry that is not itself in them, so a chain of proxies
+  in the list passes the client's address along.
+- A request from any other peer, loopback included, is refused with `403`,
+  counted as `not from a trusted proxy` and logged as `relay: request from
+  outside the trusted proxies refused`:
+
+  ```
+  this edge serves requests only through its reverse proxy, and 198.51.100.7 is not in the edge's --trusted-proxies
+  ```
+
+Every peer in the list is trusted to state client addresses, so list only
+the proxy's own network, and publish only the proxy's ports, not the
+edge's. `0.0.0.0/0` and `::/0` are refused: they would let any client
+choose the address the edge limits it by.
 
 ### Without a reverse proxy
 
@@ -1030,32 +1051,147 @@ sudo curl -fsSL -o /etc/aether-edge/aether-edge.env "$src/edge/aether-edge.env.e
 sudo chmod 0600 /etc/aether-edge/aether-edge.env
 ```
 
-Put each provider's client secret in a root-only file. Each command reads
-the secret from the terminal, so it lands in no shell history; paste it,
-then press Ctrl-D:
+Put the GitHub client secret in a root-only file. The command reads the
+secret from the terminal, so it lands in no shell history; paste it, then
+press Ctrl-D:
 
 ```sh
 sudo sh -c 'umask 077 && cat > /etc/aether-edge/github-client-secret'
-sudo sh -c 'umask 077 && cat > /etc/aether-edge/google-client-secret'
 ```
 
 [`packaging/systemd/aether-edge.service`](../packaging/systemd/aether-edge.service)
 runs the edge as the `aether-edge` user with no capabilities, a read-only
 system, no home directories, private `/tmp` and devices, and
-`/var/lib/aether-edge` as its only writable path. It passes each secret
+`/var/lib/aether-edge` as its only writable path. It passes the secret
 file with `LoadCredential=`: systemd reads the file as root and gives the
 service a private copy, and the unit points
-`AETHER_EDGE_*_CLIENT_SECRET_FILE` at it. For a provider without a file,
+`AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` at it. When the file is missing,
 `SetCredential=` supplies a single newline instead, which the edge reads as
-no secret, so an edge offering one provider runs the unit unchanged. A
-client id whose secret file is missing still fails the start:
+no secret, and the start fails:
 
 ```
-aether-edge: --google-client-id is set but /run/credentials/aether-edge.service/google-client-secret, named by --google-client-secret-file, holds no secret
+aether-edge: --github-client-id is set but /run/credentials/aether-edge.service/github-client-secret, named by --github-client-secret-file, holds no secret
 ```
 
 The unit restarts the edge 5 seconds after any exit, allows 1048576 open
 files, and gives a stop 30 seconds.
+
+### In a container
+
+The release publishes the image `ghcr.io/3xdevops/aether-edge` for
+linux/amd64 and linux/arm64: the `aether-edge` binary and CA certificates on
+a distroless base, with no shell. It runs `aether-edge serve` as uid and gid
+65532 and carries no configuration.
+
+Each release tags it with the release tag, the full commit SHA,
+`sha-<short-sha>` and `latest`. Pin a release tag, or better its digest,
+which no later push can move; `docker pull
+ghcr.io/3xdevops/aether-edge:<release-tag>` prints it as `Digest:`.
+`latest` moves with every release, so an unattended restart can upgrade the
+database schema under you ([Upgrades](#upgrades)); do not run it in
+production.
+
+```
+ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
+```
+
+| What | How |
+| --- | --- |
+| Configuration | Environment variables. The [Configuration](#configuration) table lists every one the binary reads. Leave `AETHER_EDGE_DATA` unset |
+| Data directory | `/var/lib/aether-edge`, declared as a volume ([What the data directory holds](#what-the-data-directory-holds)) |
+| Client secret | A file, named by `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` ([The client secret](#the-client-secret)) |
+| Listening | Behind a reverse proxy on a container network, or with the edge's own certificates on a published port ([Listening](#listening)) |
+| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck` every 30 seconds, after a 30-second start period, and marks the container unhealthy after 3 failures. On a runtime that ignores `HEALTHCHECK`, use the same command as the probe. It reads `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
+| Stop | `SIGTERM`: the edge sends `drain` to every server and exits 0 within 10 seconds, or exits 1 if shutdown takes longer. Docker's default grace period is also 10 seconds, so give it more: `--stop-timeout 30` |
+| Metrics | Loopback only, inside the container: scrape them from a container that shares its network namespace (`--network container:aether-edge`) ([Monitoring](#monitoring)) |
+| Root filesystem | May be read-only (`--read-only`): the edge writes only to the data directory, and SQLite keeps its temporary tables in memory |
+| Operator commands | `docker exec <container> aether-edge servers list`, as the image's user ([Operator commands](#operator-commands)) |
+
+#### What the data directory holds
+
+`/var/lib/aether-edge` holds `edge.db`, the database of accounts, device
+tokens, owners and owed deletions; `edge_key`, the edge signing key every
+enrolled server pins; and, when the edge obtains its own certificates, the
+ACME cache in `acme/` ([Backup and recovery](#backup-and-recovery)). It
+must outlive every container. Mount a named volume, which takes the image's
+ownership, or a directory owned by uid 65532 (`chown -R 65532:65532
+<dir>`). The edge creates nothing in a directory another uid owns:
+
+```
+aether-edge: data directory /var/lib/aether-edge belongs to uid 0 and aether-edge runs as uid 65532; run chown -R 65532 /var/lib/aether-edge, or run the edge as uid 0
+```
+
+A replacement container without the directory makes a new signing key and
+an empty database. Every enrolled server then refuses the edge with `edge
+key changed` until its operator runs `sudo aether-server edge trust`, and
+has no owner there until an admin claims it again with a code from `sudo
+aether-server edge claim-code`; every client runs `aether login` again.
+
+A copy of the directory is a secret. `edge_key` signs the grants servers
+accept, so whoever holds it can act as the edge
+([What an attacker can do](#what-an-attacker-can-do)). Encrypt backups and
+store them where only the edge's operators can read them.
+
+The image has no `sqlite3`: back up by copying the volume while the
+container is stopped, or run `sqlite3 edge.db ".backup <file>"` as uid 65532
+from another container that mounts the volume. The fingerprint servers pin
+is in `GET /v1/edge` ([First start and checks](#first-start-and-checks)).
+To upgrade, back up, then start the new tag's container with the same
+volume.
+
+#### The client secret
+
+Put the GitHub client secret in a file mounted read-only from your
+platform's secret store, such as a Compose, Swarm or Kubernetes secret, and
+name it with `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE`; a trailing newline is
+ignored. With plain `docker run`, mount a file only uid 65532 can read
+(`chown 65532 <secret-file> && chmod 0400 <secret-file>`); anything else is
+refused with its reason:
+
+```
+aether-edge: --github-client-secret-file: open /run/secrets/github-client-secret: permission denied; make it readable by uid 65532, the user aether-edge runs as
+```
+
+Never put the secret in an image layer, a build argument or a committed
+file. `AETHER_EDGE_GITHUB_CLIENT_SECRET` works too, but `docker inspect`
+shows it.
+
+#### Listening
+
+Behind a reverse proxy in another container, put both on one container
+network, publish only the proxy's ports, and trust that network's subnet,
+which `docker network inspect <network>` prints
+([A proxy that is not on this host](#a-proxy-that-is-not-on-this-host)).
+The proxy passes both host names to `http://aether-edge:8443` with the
+headers and timeouts of [Behind a reverse proxy](#behind-a-reverse-proxy):
+
+```sh
+docker volume create aether-edge-data
+docker run -d --name aether-edge --network <network> \
+  --restart unless-stopped --stop-timeout 30 --read-only \
+  -v aether-edge-data:/var/lib/aether-edge \
+  -v <secret-file>:/run/secrets/github-client-secret:ro \
+  -e AETHER_EDGE_SIGNIN_ORIGIN=https://auth.example.com \
+  -e AETHER_EDGE_RELAY_ORIGIN=https://edge.example.com \
+  -e AETHER_EDGE_PROXY_LISTEN=:8443 \
+  -e AETHER_EDGE_TRUSTED_PROXIES=<network-subnet> \
+  -e AETHER_EDGE_GITHUB_CLIENT_ID=<github-client-id> \
+  -e AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE=/run/secrets/github-client-secret \
+  ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
+```
+
+With its own certificates, a non-root user cannot bind port 443 on every
+runtime. Replace the proxy variables with a high port published as 443:
+
+```sh
+  -e AETHER_EDGE_LISTEN=:8443 -e AETHER_EDGE_ACME_EMAIL=<acme-contact-email> -p 443:8443
+```
+
+The TLS-ALPN-01 challenge arrives on 443 and reaches `:8443`, which
+answers it. The edge limits requests by client address, so the published
+port must keep the client's source address; a userland port forwarder, as
+some rootless runtimes use, replaces it with its own, and every client then
+shares one address's limits.
 
 ### Configuration
 
@@ -1070,29 +1206,32 @@ is the whole configuration. Replace every `<...>` in it.
 | `--signin-origin` | `AETHER_EDGE_SIGNIN_ORIGIN` | required: `https://<signin-host>` |
 | `--relay-origin` | `AETHER_EDGE_RELAY_ORIGIN` | required: `https://<relay-host>`, another host than the sign-in origin's |
 | `--proxy-listen` | `AETHER_EDGE_PROXY_LISTEN` | none; `127.0.0.1:8443` in the environment file |
+| `--trusted-proxies` | `AETHER_EDGE_TRUSTED_PROXIES` | none: the proxy is on loopback ([A proxy that is not on this host](#a-proxy-that-is-not-on-this-host)) |
 | `--listen` | `AETHER_EDGE_LISTEN` | `:443`, with the edge's own certificates; unused with `--proxy-listen` |
 | `--data` | `AETHER_EDGE_DATA` | `/var/lib/aether-edge` |
-| `--metrics-listen` | `AETHER_EDGE_METRICS_LISTEN` | `127.0.0.1:9464`, loopback only |
+| `--metrics-listen` | `AETHER_EDGE_METRICS_LISTEN` | `127.0.0.1:9464`, loopback only; serves `/metrics` and `/healthz` |
 | `--acme-email` | `AETHER_EDGE_ACME_EMAIL` | none |
 | `--acme-directory` | `AETHER_EDGE_ACME_DIRECTORY` | `https://acme-v02.api.letsencrypt.org/directory` |
 | `--egress-budget` | `AETHER_EDGE_EGRESS_BUDGET` | `0`: bytes per UTC month, a plain integer; 0 = none |
-| `--github-client-id` | `AETHER_EDGE_GITHUB_CLIENT_ID` | none |
+| `--github-client-id` | `AETHER_EDGE_GITHUB_CLIENT_ID` | required |
 | `--github-client-secret-file` | `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` | none; set by the unit |
-| `--google-client-id` | `AETHER_EDGE_GOOGLE_CLIENT_ID` | none |
-| `--google-client-secret-file` | `AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE` | none; set by the unit |
 | `--dev-listen` | `AETHER_EDGE_DEV_LISTEN` | none |
+| none | `AETHER_EDGE_GITHUB_CLIENT_SECRET` | none; the secret itself, instead of a file |
 
-Client secrets are never flags, because a flag's value shows in the process
-list. They come from the files the `*-secret-file` options name, or from
-`AETHER_EDGE_GITHUB_CLIENT_SECRET` and `AETHER_EDGE_GOOGLE_CLIENT_SECRET`;
-setting both for one provider is refused. A provider is offered when it has
-both a client id and a secret.
+The client secret is never a flag, because a flag's value shows in the
+process list. It comes from the file `--github-client-secret-file` names,
+or from `AETHER_EDGE_GITHUB_CLIENT_SECRET`; setting both is refused. These
+are all the variables the edge reads, apart from Go's standard ones, such
+as `HTTPS_PROXY` and `NO_PROXY` for its requests to GitHub and Let's
+Encrypt.
 
 The edge checks its options before it binds anything. Among the errors:
 
 ```
-aether-edge: edge: no sign-in provider is configured; configure a GitHub or Google OAuth application
-aether-edge: --github-client-id is set but its secret is not; set AETHER_EDGE_GITHUB_CLIENT_SECRET or --github-client-secret-file
+aether-edge: edge: no GitHub OAuth app is configured; set --github-client-id and its client secret
+aether-edge: --github-client-id is set but its secret is not; name a file holding it with AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE (--github-client-secret-file), or set AETHER_EDGE_GITHUB_CLIENT_SECRET
+aether-edge: --github-client-secret-file: open /run/secrets/github-client-secret: no such file or directory; put the secret there, or name the file that holds it
+aether-edge: data directory /var/lib/aether-edge belongs to uid 0 and aether-edge runs as uid 65532; run chown -R 65532 /var/lib/aether-edge, or run the edge as uid 0
 aether-edge: --egress-budget "10G" is not a byte count
 aether-edge: --relay-origin must be https://host[:port], not "edge.example.com"; for a local plain-HTTP edge use --dev-listen
 aether-edge: --signin-origin https://edge.example.com and --relay-origin https://edge.example.com must name different hosts, such as auth.example.com and edge.example.com
@@ -1108,8 +1247,8 @@ loopback names of that address.
 
 Inbound, allow TCP 443 on IPv4 and IPv6, TCP 80 for certbot's HTTP-01
 challenge behind nginx, and your own administration access; refuse
-everything else. The metrics listener and `--proxy-listen` are loopback
-only. With `ufw`:
+everything else. The metrics listener is loopback only, and so is
+`--proxy-listen` without `--trusted-proxies`. With `ufw`:
 
 ```sh
 sudo ufw default deny incoming
@@ -1133,7 +1272,7 @@ journalctl -u aether-edge -f
 Behind a proxy the start prints:
 
 ```
-INFO aether-edge: behind a reverse proxy: plain HTTP on loopback, client addresses from X-Forwarded-For listen=127.0.0.1:8443
+INFO aether-edge: behind a reverse proxy: plain HTTP, client addresses from X-Forwarded-For listen=127.0.0.1:8443 proxies=loopback
 INFO aether-edge: serving signin=https://<signin-host> relay=https://<relay-host> metrics=127.0.0.1:9464
 ```
 
@@ -1153,8 +1292,7 @@ Then check, from another machine:
    `302` with a `Location` on `github.com` whose `redirect_uri` is
    `https%3A%2F%2F<signin-host>%2Fsignin%2Fgithub%2Fcallback`, and
    `Set-Cookie: __Host-aether_edge_signin=...; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Lax`.
-   The same for `/signin/google`.
-5. Open `https://<signin-host>/signin` and sign in with each provider; the
+5. Open `https://<signin-host>/signin` and sign in with GitHub; the
    Servers page opens. On a laptop, `aether login --edge
    https://<relay-host>`, confirm the code, then `aether servers --edge
    https://<relay-host>`.
@@ -1187,7 +1325,15 @@ format:
 | `aether_edge_refusals_total{reason="..."}` | Refused connections and enrollments by reason, such as `enrollment refused`, `upgrade required`, `too many connections from one address` or `no forwarded client address` |
 
 Scrape it from the edge host itself or over an SSH tunnel; it is never
-exposed. Alert on `aether_edge_throttled` equal to 1 and on
+exposed. `aether-edge healthcheck` asks the edge on the same machine for
+`/healthz` on that listener, reading `AETHER_EDGE_METRICS_LISTEN` or
+`--metrics-listen` as `serve` does, and exits 0, or 1 with the reason:
+
+```
+aether-edge: healthcheck: no edge answers on its metrics listener: Get "http://127.0.0.1:9464/healthz": dial tcp 127.0.0.1:9464: connect: connection refused
+```
+
+Alert on `aether_edge_throttled` equal to 1 and on
 `aether_edge_egress_month_bytes` passing a fraction of the budget; on a fall
 in `aether_edge_servers{state="claimed"}` to near zero, which means servers
 cannot enroll; and on a sustained rise in one refusal reason. Probe from
@@ -1208,7 +1354,7 @@ The edge logs to standard error, which the unit sends to the journal:
 `journalctl -u aether-edge`. Entries carry server ids and, for refused
 enrollments (`relay: enrollment refused client=<address>`) and failed TLS
 handshakes without a proxy, client addresses. A request that fails on the
-edge's side or at the provider logs `edge: request failed route=<route>
+edge's side or at GitHub logs `edge: request failed route=<route>
 status=<5xx> error=<error>`; refusals the client can fix are not logged. A
 refused claim or ownerless report logs `relay: control channel closed server=<id>
 error="ownership report refused: <reason>"`. nginx keeps its own access log
@@ -1306,11 +1452,21 @@ sudo -u aether-edge aether-edge servers unblock <server id>
 sudo -u aether-edge aether-edge accounts list
 sudo -u aether-edge aether-edge accounts block github:<user id>
 sudo -u aether-edge aether-edge accounts unblock github:<user id>
-sudo -u aether-edge aether-edge accounts delete google:<subject>
+sudo -u aether-edge aether-edge accounts delete github:<user id>
 ```
 
-An account is `<provider>:<subject>`, as the `ACCOUNT` column of `accounts
+An account is `github:<user id>`, as the `ACCOUNT` column of `accounts
 list` prints it.
+
+An edge that ran v0.5.2-alpha.3 with Google sign-in may list accounts as
+`google:<subject>`. They cannot sign in: their sessions and device tokens
+are refused with `sign-in provider "google" is not supported: Aether signs
+in with GitHub only; this edge's operator removes the account with:
+aether-edge accounts delete google:<subject>`. `accounts delete` and
+`accounts unblock` take such an account; `accounts block` does not. No
+server is sent its deletion, because none accepts one: each server's admin
+removes the identity with `aether member unlink <member-id>
+google:<subject>` ([teams.md](teams.md#a-members-edge-accounts)).
 
 | Command | Effect |
 | --- | --- |
@@ -1329,7 +1485,7 @@ reconnects and receives the deletions it is owed.
 
 A server id is derived from a host key anyone can generate, so blocking an
 id stops that one server; likewise a blocked person can sign in with
-another GitHub or Google account. Anyone who signs in can claim a server
+another GitHub account. Anyone who signs in can claim a server
 and relay SSH to it; when a server or an account misuses the relay, block
 it.
 
@@ -1363,7 +1519,7 @@ restarts.
 | Sign-in before an account deletion | 5 minutes |
 | Directory stores per server | 1 per 5 seconds; only the latest waiting push is stored |
 | Members and open invitations per server directory | 1000 |
-| Login and email matching invitations | 24 hours after the account's last provider sign-in |
+| Login and email matching invitations | 24 hours after the account's last GitHub sign-in |
 
 No idle timeout applies to a relayed stream: an idle terminal is
 legitimate.
@@ -1377,7 +1533,7 @@ legitimate.
 | Server offline | `503 server is not connected to the edge` |
 | Claim or ownerless report refused | The edge closes the control connection with `ownership report refused: <reason>`; the server reconnects and learns whether the edge holds it as claimed |
 | Transfer refused | The edge answers with the reason; `aether member transfer` fails with `ownership report refused: <reason>` and the server keeps its previous owner |
-| OAuth provider down | No new sign-ins. Device tokens and edge sessions keep working, but invitations stop matching accounts whose last sign-in is over 24 hours old |
+| GitHub sign-in down | No new sign-ins. Device tokens and edge sessions keep working, but invitations stop matching accounts whose last sign-in is over 24 hours old |
 | Host key lost or rotated | New server id: claim again and link again |
 | Edge signing key lost | Every server refuses the edge until `aether-server edge trust` |
 
@@ -1394,10 +1550,7 @@ value you supply is a placeholder:
 | `<admin-address>` | The address you administer the host from |
 | `<certbot-email>` | Contact for the Let's Encrypt account |
 | `<github-owner>` | The GitHub account or organization that owns the OAuth app |
-| `<google-project>` | The Google Cloud project that holds the OAuth client |
-| `<google-support-email>` | The support email on Google's consent screen |
-| `<privacy-policy-url>` | The privacy policy on an authorized domain |
-| `<github-client-id>`, `<google-client-id>` | From steps 4 and 5; the secrets go only into files in step 9 |
+| `<github-client-id>` | From step 4; the secret goes only into a file in step 8 |
 | `<egress-budget-bytes>` | Below the provider's monthly egress ceiling ([Egress budget](#egress-budget)) |
 | `<worker-connections>` | nginx connections per worker, at least twice the relayed connections and servers you expect |
 | `<retention>` | Log retention, such as `14day` |
@@ -1436,15 +1589,8 @@ only be verified on the live host.
 4. **GitHub OAuth app** in `<github-owner>`: name `Aether`, homepage
    `https://auth.onaether.dev`, callback
    `https://auth.onaether.dev/signin/github/callback`, Enable Device Flow
-   off. Generate a client secret; do not store it anywhere but step 9.
-5. **Google OAuth client** in `<google-project>`, as in
-   [OAuth applications](#oauth-applications): app name `Aether`, support
-   email `<google-support-email>`, authorized domain `onaether.dev`,
-   privacy policy `<privacy-policy-url>`, audience External and published,
-   scopes `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`,
-   a Web application client with redirect URI
-   `https://auth.onaether.dev/signin/google/callback`.
-6. **Certificates**, one per name, reloading nginx after each renewal:
+   off. Generate a client secret; do not store it anywhere but step 8.
+5. **Certificates**, one per name, reloading nginx after each renewal:
 
    ```sh
    sudo certbot certonly --nginx --email <certbot-email> --agree-tos -d auth.onaether.dev --deploy-hook "systemctl reload nginx"
@@ -1452,7 +1598,7 @@ only be verified on the live host.
    sudo certbot renew --dry-run
    ```
 
-7. **nginx.** Install the server blocks, then check and reload
+6. **nginx.** Install the server blocks, then check and reload
    (**tested**: `scripts/edge-nginx-test.sh` runs this file with real
    nginx, `nginx -t`, WebSockets idle for 75 seconds and a forged
    `X-Forwarded-For`, on the names `localhost` and `127.0.0.1` with a
@@ -1470,7 +1616,7 @@ only be verified on the live host.
    The edge listens on `127.0.0.1:8443`. Check nothing else on the host
    does, with `sudo ss -ltnp 'sport = :8443'`, which prints only its header
    line when the port is free. For another port, change `proxy_pass` in
-   both `server` blocks and `AETHER_EDGE_PROXY_LISTEN` in step 8. The file
+   both `server` blocks and `AETHER_EDGE_PROXY_LISTEN` in step 7. The file
    adds two `server` blocks and one `map` whose variable,
    `$aether_edge_connection`, no other site's configuration uses; it
    changes no existing site.
@@ -1478,7 +1624,7 @@ only be verified on the live host.
    `nginx -t` prints `syntax is ok` and `test is successful`. Set
    `worker_connections <worker-connections>;` in the `events` block of
    `/etc/nginx/nginx.conf`, run `nginx -t` again, and reload.
-8. **Binary, unit, user and environment file**, as in
+7. **Binary, unit, user and environment file**, as in
    [Installing](#installing). In `/etc/aether-edge/aether-edge.env`:
 
    ```sh
@@ -1487,29 +1633,24 @@ only be verified on the live host.
    AETHER_EDGE_PROXY_LISTEN=127.0.0.1:8443
    AETHER_EDGE_EGRESS_BUDGET=<egress-budget-bytes>
    AETHER_EDGE_GITHUB_CLIENT_ID=<github-client-id>
-   AETHER_EDGE_GOOGLE_CLIENT_ID=<google-client-id>
    ```
 
-   (**tested**: the edge starts from the example file with its
-   placeholders filled in.)
-9. **Secrets** into `/etc/aether-edge/github-client-secret` and
-   `/etc/aether-edge/google-client-secret`, as in
-   [Installing](#installing). The unit hands them to the service through
+8. **Secret** into `/etc/aether-edge/github-client-secret`, as in
+   [Installing](#installing). The unit hands it to the service through
    systemd credentials (live host only).
-10. **First start** ([First start and checks](#first-start-and-checks)):
-    `systemd-analyze verify` (**tested** on the packaged unit), then
-    `enable --now`, then checks 1 to 7, with a canary server claimed by a
-    project account.
-11. **Signing key.** Record the fingerprint from `sudo ssh-keygen -lf
+9. **First start** ([First start and checks](#first-start-and-checks)):
+   `systemd-analyze verify`, then `enable --now`, then checks 1 to 7, with
+   a canary server claimed by a project account.
+10. **Signing key.** Record the fingerprint from `sudo ssh-keygen -lf
     /var/lib/aether-edge/edge_key`, publish it on this page, and store
     `edge_key` offline.
-12. **Backups.** Schedule the daily `edge.db` backup and copy it off the
+11. **Backups.** Schedule the daily `edge.db` backup and copy it off the
     machine ([Backup and recovery](#backup-and-recovery)).
-13. **Log retention** for the journal (`<retention>`) and nginx's access
+12. **Log retention** for the journal (`<retention>`) and nginx's access
     log ([Logs](#logs)).
-14. **Monitoring**: the external probes and metric alerts in
+13. **Monitoring**: the external probes and metric alerts in
     [Monitoring](#monitoring).
-15. **Privacy.** Put the retention period in
+14. **Privacy.** Put the retention period in
     [privacy.md](privacy.md#what-an-edge-stores); privacy requests go to
     `team@onaether.dev`.
-16. **Upgrades** follow [Upgrades](#upgrades).
+15. **Upgrades** follow [Upgrades](#upgrades).

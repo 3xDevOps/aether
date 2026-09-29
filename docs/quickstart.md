@@ -12,7 +12,7 @@ no local project clone or toolchain. Administrators can seed a repository with
 The local-client path below is also available on Linux, macOS, or Windows.
 That path needs git for local linking/pushing. How your machine reaches the
 server is [step 3](#3-link-from-your-machine): through an edge with a GitHub
-or Google sign-in, over a tailnet, or by SSH address with a key.
+sign-in, over a tailnet, or by SSH address with a key.
 
 ---
 
@@ -79,7 +79,7 @@ project runs at `https://edge.onaether.dev` that the server and your machine
 both dial out to, so neither needs an open port ([edge.md](edge.md)). Setup
 prints what the edge can see and `aether-server config set edge-url ""`,
 which turns it off. It then asks for the **access policy**: `1` (account
-access) lets people you invite in by signing in with GitHub or Google; `2`
+access) lets people you invite in by signing in with GitHub; `2`
 (approved devices) makes each new device wait until a person approves it.
 [edge.md](edge.md#access-policies) compares them. Setup then prints the
 server's id and a **claim code**, which makes whoever uses it first the
@@ -115,7 +115,7 @@ aether link --claim <code>
 ```
 
 `aether login` prints an address and a short code; open it, sign in with
-GitHub or Google, and confirm the code:
+GitHub, and confirm the code:
 
 ```
 auth.onaether.dev signs you in for the edge edge.onaether.dev
@@ -855,7 +855,7 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `not a member of this server` | Your edge account has no membership or open invitation there. An admin runs `aether invite --github <your-login>` ([teams.md](teams.md#through-an-edge)). |
 | `device "<label>", signed in as <account>, is waiting for approval` | The server admits approved devices only (`edge-access approved-devices`), and this one is new. Run the `aether device approve <code>` the message prints from a device, SSH key or tailnet connection you already use, or give the code to an admin or to the machine's administrator (`sudo aether-server device approve <code>`). Either shows the member and role the code admits the device as and asks before approving. |
 | `10 devices of <account> are waiting for approval on this server already, so no new one is recorded` | An admin approves or revokes the waiting devices with `aether device list` and `aether device revoke <device-id>`, or `sudo aether-server device review` on the server. |
-| `this device connects as "<provider>:<subject>", but the edge signed the connection in as <account> ...; nothing was recorded` | The edge vouched for another account than the one this device signed in as. Nothing changed on the server; tell the edge's operator. |
+| `this device connects as "github:<user id>", but the edge signed the connection in as <account> ...; nothing was recorded` | The edge vouched for another account than the one this device signed in as. Nothing changed on the server; tell the edge's operator. |
 | `... was admitted by signing in alone and is waiting for approval: this server now admits approved devices only` | The server switched from `account` to `approved-devices`. Approve it the same way. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |

@@ -722,7 +722,6 @@ export const api = {
   memberInvitationList: () =>
     call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
   memberInvitationCreate: (params: {
-    provider?: string
     login?: string
     email?: string
     role: Member['role']

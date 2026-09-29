@@ -19,26 +19,18 @@ func TestParseInviteArgs(t *testing.T) {
 		{args: []string{"--ttl", "3600"}, ttl: 3600},
 		{
 			args: []string{"--github", "octocat", "--role", "viewer"},
-			want: &protocol.MemberInvitationCreateParams{Provider: "github", Login: "octocat", Role: "viewer"},
+			want: &protocol.MemberInvitationCreateParams{Login: "octocat", Role: "viewer"},
 		},
 		{
 			args: []string{"--email", "dana@example.com"},
 			want: &protocol.MemberInvitationCreateParams{Email: "dana@example.com", Role: "collaborator"},
 		},
 		{
-			args: []string{"--email", "dana@example.com", "--provider", "google", "--role", "admin"},
-			want: &protocol.MemberInvitationCreateParams{Provider: "google", Email: "dana@example.com", Role: "admin"},
-		},
-		// A provider other than GitHub on a login goes to the server as
-		// typed, so its refusal names the real problem instead of the
-		// flag being dropped.
-		{
-			args: []string{"--github", "octocat", "--provider", "google"},
-			want: &protocol.MemberInvitationCreateParams{Provider: "google", Login: "octocat", Role: "collaborator"},
+			args: []string{"--email", "dana@example.com", "--role", "admin"},
+			want: &protocol.MemberInvitationCreateParams{Email: "dana@example.com", Role: "admin"},
 		},
 		{args: []string{"--github", "octocat", "--ttl", "60"}, wantErr: "--ttl applies to a one-time invite code"},
-		{args: []string{"--role", "admin"}, wantErr: "--provider and --role apply to --github and --email"},
-		{args: []string{"--provider", "github"}, wantErr: "--provider and --role apply to --github and --email"},
+		{args: []string{"--role", "admin"}, wantErr: "--role applies to --github and --email"},
 		{args: []string{"--github", "octocat", "extra"}, wantErr: "usage: aether invite"},
 	} {
 		got, ttl, err := parseInviteArgs(tc.args)

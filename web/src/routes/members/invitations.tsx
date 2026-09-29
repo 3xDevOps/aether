@@ -36,8 +36,8 @@ const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
 /** Who an invitation admits, as the person reading the list knows them. */
 function invitee(invitation: Invitation): string {
   if (invitation.login) return `${invitation.login} on GitHub`
-  const provider = invitation.provider ? providerName[invitation.provider] : undefined
-  return provider ? `${invitation.email} on ${provider}` : (invitation.email ?? '')
+  if (!invitation.provider) return invitation.email ?? ''
+  return `${invitation.email} on ${providerName[invitation.provider] ?? invitation.provider}`
 }
 
 export function InvitationsSection({ client }: { client: Api }) {
@@ -73,7 +73,7 @@ export function InvitationsSection({ client }: { client: Api }) {
     try {
       const invitation = await client.memberInvitationCreate(
         by === 'login'
-          ? { provider: 'github', login: who.trim(), role }
+          ? { login: who.trim(), role }
           : { email: who.trim(), role },
       )
       setWho('')

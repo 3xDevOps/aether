@@ -38,8 +38,16 @@ Layers, per the design spec's testing strategy:
   end-to-end fixture, does not. The `changes` job runs
   `scripts/ci-classify-changes.sh` from the pull request's base revision, so
   a change to that script cannot make the decision itself, and a rename is
-  classified by both its old path and its new one. These jobs are the merge
-  gate the E2E suite owns.
+  classified by both its old path and its new one. The `edge-image` job
+  builds [`images/edge/Dockerfile`](../images/edge/Dockerfile) on an amd64
+  and an arm64 runner and runs `scripts/edge-image-smoke.sh` on each
+  ([The edge image](#the-edge-image)); it pushes nothing. A pull request
+  runs it only when `scripts/ci-classify-edge.sh`, also from the base
+  revision, says a changed path can affect the image; a push to `main`, the
+  merge queue and a failed classification always run it. Nothing forces it
+  on a pull request the classifier skips, and a rerun classifies the same
+  files; run the smoke test locally instead. These jobs are the merge gate
+  the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -467,13 +475,14 @@ go test -race ./internal/edge/edgetest/
 | `TestRelayHostNameChangeKeepsPinAndOwner` | The edge moves to other host names with the same key; the server, its `edge-url` changed, keeps its pin and owner, the edge keeps it claimed, and an admin transfers ownership |
 | `TestPolicySwitchToApprovedDevices` | Switching `account` to `approved-devices` refuses registered devices until reviewed; approved devices, member SSH keys and the tailnet dashboard keep working |
 | `TestExistingPathsWithoutTheEdge` | With the edge down, an invite code with an SSH key and the tailnet dashboard's in-process client work |
-| `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected, other-issuer, other-kind and wrong-connection grants; `aether-server edge trust` fetches the signing key |
+| `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected, other-issuer, other-kind and wrong-connection grants, and a grant for a Google account with the reason; `aether-server edge trust` fetches the signing key |
 | `TestEnrollmentSignatureIsNotAHostSignature` | A server posing with a captured enrollment signature fails the client's handshake |
 | `TestNoBootstrapOverTheRelay` | An unclaimed server takes no member from the relay, and an invite code over the relay joins nobody |
 | `TestRelayedFloodDoesNotBlockDirect` | Relayed connections that never finish their handshake fill the relayed budget only; a direct connection still works |
 | `TestEdgeRestartAndDirectFallback` | A clean edge stop drops relayed connections, the server re-enrolls, and a link with an address uses it while the edge is down |
 | `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again |
 | `TestBlockedServerStatusSaysWhy` | A blocked server's status for `aether-server edge status` carries the edge's reason |
+| `TestBehindTrustedProxies` | Under both policies, with the edge behind `--trusted-proxies` and its proxy reaching it from a non-loopback address of this machine (skipped on a machine with none): GitHub sign-in, a claim, an invitation and relayed `server.info` calls work; the edge records the forwarded client address, not the proxy's; `/signin/google` answers 404; a request from loopback past the proxy is refused with `403` and counted |
 | `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone |
 
 Beside the suite, `internal/sshd` checks each server rule on its own,
@@ -516,6 +525,48 @@ saw. It takes about 80 seconds.
 ```sh
 sh scripts/edge-nginx-test.sh
 ```
+
+### The edge image
+
+`scripts/edge-image-smoke.sh` runs a built
+[`images/edge/Dockerfile`](../images/edge/Dockerfile) image with fake
+GitHub credentials behind `curl` as its proxy, on a port published on
+127.0.0.1. It checks that the image runs as a non-root numeric uid, has no
+shell and declares its `HEALTHCHECK`; that a start without configuration
+fails naming `--signin-origin`; that a GitHub-only configuration passes
+`aether-edge healthcheck` and exits 0 on `SIGTERM` within 30 seconds
+without logging the secret; and, through `/v1/edge`, that a replacement
+container on the same volume presents the same edge key fingerprint and one
+on a new volume a different one. It needs a container runtime, so it is not
+part of `make test-scripts`; the second argument names the runtime, docker
+by default:
+
+```sh
+make edge-image
+sh scripts/edge-image-smoke.sh aether/edge:test
+```
+
+With podman, build with `podman build --format docker -f
+images/edge/Dockerfile .`: the default OCI format drops `HEALTHCHECK`, and
+the smoke test fails on it.
+
+`TestServeAsAContainerRunsIt` in `cmd/aether-edge` covers the same start,
+healthcheck, stop and key checks on the binary without a runtime, with a
+read-only working directory, `HOME` and `TMPDIR`.
+
+`scripts/ci-classify-edge.sh` decides from a pull request's changed paths
+whether the image can change. Its first `case` pattern lists every
+repository package `aether-edge` imports. `scripts/ci-classify-edge-test.sh`,
+part of `make test-scripts`, runs `go list -deps ./cmd/aether-edge` for
+linux/amd64 and linux/arm64 and fails when a package it imports is
+classified false. When the edge starts importing a new package, the test
+prints the line to add:
+
+```
+ci-classify-edge-test: aether-edge imports internal/<package> on linux/amd64, which ci-classify-edge.sh classifies false; add internal/<package>/* to its first case pattern
+```
+
+Add that pattern, then run `sh scripts/ci-classify-edge-test.sh` again.
 
 ## The dashboard end-to-end suite
 

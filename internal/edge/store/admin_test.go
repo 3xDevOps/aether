@@ -94,7 +94,7 @@ func TestRecordClaim(t *testing.T) {
 		t.Fatalf("claimed server %+v, %v", srv, err)
 	}
 
-	other := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "2"}
+	other := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2", Login: "other"}
 	if _, err = s.SignIn(ctx, other, testNow); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestBlockAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	addDevice(t, s, id, "device-1", "token-hash")
-	stranger := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "never-signed-in"}
+	stranger := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2002"}
 
 	for _, b := range []edgeproto.Account{a, stranger} {
 		if err = s.BlockAccount(ctx, b.Provider, b.Subject, testNow); err != nil {
@@ -406,6 +406,43 @@ func TestPendingDeletions(t *testing.T) {
 	}
 	if again, err := s.PendingDeletions(ctx, serverA); err != nil || len(again) != maxPendingDeletions-1 || again[0] == owed[0] {
 		t.Fatalf("after delivering %+v: %d owed, %v", owed[0], len(again), err)
+	}
+}
+
+// TestGoogleAccountFromAnEarlierVersion meets what v0.5.2-alpha.3 stored
+// for an account signed in with Google: the operator lists and deletes
+// it, and no server is owed a deletion it would refuse, however it was
+// recorded.
+func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	google := edgeproto.Account{Provider: "google", Subject: "g-1", Email: "person@example.test"}
+	if _, err := s.SignIn(ctx, google, testNow); err != nil {
+		t.Fatal(err)
+	}
+	claim(t, s, serverA, "alpha", owner())
+	if err := s.RecordReach(ctx, serverA, google); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO pending_account_deletions (server_id, provider, subject, created_at)
+		VALUES (?, 'google', 'g-0', ?), (?, 'github', '7', ?)`, serverA, unix(testNow), serverA, unix(testNow)+1); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.ListAccounts(ctx)
+	if err != nil || len(rows) != 2 || rows[1].Account.Provider != "google" || rows[1].Account.Subject != "g-1" {
+		t.Fatalf("accounts %+v, %v", rows, err)
+	}
+	d, err := s.DeleteAccount(ctx, "google", "g-1", testNow)
+	if err != nil || !slices.Equal(d.Reached, []string{serverA}) || len(d.Notify) != 0 {
+		t.Fatalf("delete: %+v, %v", d, err)
+	}
+	owed, err := s.PendingDeletions(ctx, serverA)
+	if err != nil || !slices.Equal(owed, []edgeproto.AccountDeleted{{Provider: "github", Subject: "7"}}) {
+		t.Fatalf("owed to %s: %+v, %v; want the GitHub deletion only", serverA, owed, err)
+	}
+	if rows, err = s.ListAccounts(ctx); err != nil || len(rows) != 1 {
+		t.Fatalf("accounts after delete %+v, %v", rows, err)
 	}
 }
 

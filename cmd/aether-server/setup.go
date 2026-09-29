@@ -236,10 +236,10 @@ const edgeAccessQuestion = `
 Who may reach this server through the edge?
 
   1) Account access
-     Signing in with GitHub or Google is enough. People you invite start on
-     a new device by signing in, and Aether creates and manages the device
-     key. Access is as strong as each person's GitHub or Google account and
-     the edge that vouches for it.
+     Signing in with GitHub is enough. People you invite start on a new
+     device by signing in, and Aether creates and manages the device key.
+     Access is as strong as each person's GitHub account and the edge that
+     vouches for it.
 
   2) Approved devices
      Signing in says who someone is. It does not admit a device. Each new

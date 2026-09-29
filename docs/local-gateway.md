@@ -928,9 +928,7 @@ lookup returned),
 `member.identity.link`, `member.identity.list` (`{"member_id":"..."}`),
 `member.identity.remove`
 (`{"member_id":"...","provider":"github","subject":"..."}`) and
-`server.owner.transfer`
-(`{"member_id":"...","provider":"github"}`, `provider` only when the member
-has more than one edge identity). Their shapes are in
+`server.owner.transfer` (`{"member_id":"..."}`). Their shapes are in
 `internal/protocol/identity.go`,
 and [edge.md](edge.md) describes what each does.
 

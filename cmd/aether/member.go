@@ -11,7 +11,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -107,24 +106,20 @@ func memberRemove(id string) error {
 	})
 }
 
-// memberLink binds a GitHub or Google account at the edge to your own
-// member, which must be an admin: that account connects through the edge
-// as you and can claim this server with a claim code.
+// memberLink binds a GitHub account at the edge to your own member, which
+// must be an admin: that account connects through the edge as you and can
+// claim this server with a claim code.
 func memberLink(args []string) error {
 	fs := flag.NewFlagSet("member link", flag.ExitOnError)
 	github := fs.String("github", "", "your GitHub login")
-	email := fs.String("email", "", "your provider-verified email")
-	provider := fs.String("provider", "", `with --email: accept only "github" or "google" (default either)`)
+	email := fs.String("email", "", "the verified primary email of your GitHub account")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if (*github == "") == (*email == "") || fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether member link --github <login> | --email <address> [--provider github|google]\nadmins only; anyone else is invited by an admin with aether invite --github or --email")
+		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nadmins only; anyone else is invited by an admin with aether invite --github or --email")
 	}
-	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email, Provider: *provider}
-	if *github != "" && *provider == "" {
-		params.Provider = edgeproto.ProviderGitHub
-	}
+	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.MemberInvitationResult
 		if err := c.Call(protocol.MethodMemberIdentityLink, params, &res); err != nil {
@@ -185,18 +180,15 @@ func memberUnlink(args []string) error {
 }
 
 // memberTransfer makes another admin the server's owner at its edge,
-// through one of their edge identities. The server reports it to the
-// edge; the edge records it only from that report.
+// through their GitHub identity. The server reports it to the edge; the
+// edge records it only from that report.
 func memberTransfer(args []string) error {
-	fs := flag.NewFlagSet("member transfer", flag.ExitOnError)
-	provider := fs.String("provider", "", `the new owner's edge identity to use, "github" or "google", when they have both`)
-	memberID, err := parseLeadingArg(fs, args)
-	if err != nil {
-		return fmt.Errorf("usage: aether member transfer <member-id> [--provider github|google]\nadmins only; the new owner must already be an admin with a linked edge account")
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: aether member transfer <member-id>\nadmins only; the new owner must already be an admin with a linked GitHub account")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.ServerOwnerTransferResult
-		if err := c.Call(protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: memberID, Provider: *provider}, &res); err != nil {
+		if err := c.Call(protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: args[0]}, &res); err != nil {
 			return err
 		}
 		who := res.Login

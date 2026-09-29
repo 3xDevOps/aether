@@ -88,7 +88,7 @@ func TestAccountAccessRegistersDevices(t *testing.T) {
 	// from a registered device, but approves no device from one (rule 4):
 	// switching to approved-devices must inherit nothing.
 	if err := laptopRPC.Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Provider: "github", Login: "someone", Role: "viewer"}, nil); err != nil {
+		protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"}, nil); err != nil {
 		t.Fatalf("invitation from a registered admin device under account access: %v", err)
 	}
 	code := store.ApprovalCode(edgeproto.DeviceKeyLine(phone.PublicKey()))
@@ -261,13 +261,13 @@ func TestApprovedKeyNamesItsIdentity(t *testing.T) {
 	e.mustDialEdge(t, octo, laptop, "laptop")
 	e.mustRefuseEdge(t, mallory(), laptop, "laptop", "registered to another account")
 
-	google := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-1", Email: "octo@example.com", IdentityAt: time.Now()}
+	second := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "5005", Login: "octo-alt", Email: "octo@example.com", IdentityAt: time.Now()}
 	m, err := identities(t, e).GetMemberByIdentity(context.Background(), octo.Provider, octo.Subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inviteAccount(t, e, domain.Invitation{Provider: "google", Email: "octo@example.com", Member: m.ID})
-	e.mustRefuseEdge(t, google, laptop, "laptop", "registered to another account")
+	inviteAccount(t, e, domain.Invitation{Provider: "github", Email: "octo@example.com", Member: m.ID})
+	e.mustRefuseEdge(t, second, laptop, "laptop", "registered to another account")
 }
 
 // Linking an identity to an existing member binds nothing until the
@@ -278,7 +278,7 @@ func TestLinkedIdentityCreatesNoDevice(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada", Name: "Ada", IdentityAt: time.Now()}
 	admin := controlClient(t, e)
-	if err := admin.Call(protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Provider: "github", Login: "ada"}, nil); err != nil {
+	if err := admin.Call(protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"}, nil); err != nil {
 		t.Fatalf("link: %v", err)
 	}
 	laptop := newSigner(t)
@@ -321,8 +321,8 @@ func TestPrivilegedMethodsRefuseAnUnapprovedDevice(t *testing.T) {
 	calls := map[string]any{
 		protocol.MethodMemberDeviceLookup:     protocol.MemberDeviceLookupParams{Code: dev.ApprovalCode},
 		protocol.MethodMemberDeviceApprove:    protocol.MemberDeviceApproveParams{Code: dev.ApprovalCode, DeviceID: string(dev.ID)},
-		protocol.MethodMemberInvitationCreate: protocol.MemberInvitationCreateParams{Provider: "github", Login: "x", Role: "admin"},
-		protocol.MethodMemberIdentityLink:     protocol.MemberIdentityLinkParams{Provider: "github", Login: "x"},
+		protocol.MethodMemberInvitationCreate: protocol.MemberInvitationCreateParams{Login: "x", Role: "admin"},
+		protocol.MethodMemberIdentityLink:     protocol.MemberIdentityLinkParams{Login: "x"},
 		protocol.MethodMemberRole:             protocol.MemberRoleParams{MemberID: string(e.member.ID), Role: "viewer"},
 		protocol.MethodMemberApprove:          protocol.MemberApproveParams{MemberID: string(e.member.ID)},
 		protocol.MethodMemberInvite:           protocol.MemberInviteParams{},
@@ -385,7 +385,7 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	}
 	e.mustRefuseEdge(t, octo, laptop, "laptop", "not a member of this server")
 	serverInfoMember(t, controlClient(t, e))
-	if err := e.srv.EdgeAccountDeleted(context.Background(), edgeproto.ProviderGoogle, "nobody"); err != nil {
+	if err := e.srv.EdgeAccountDeleted(context.Background(), edgeproto.ProviderGitHub, "999999"); err != nil {
 		t.Fatalf("notice for an unknown account: %v", err)
 	}
 	if members, _ := e.store.ListMembers(context.Background()); len(members) != 2 {
@@ -472,6 +472,17 @@ func TestServerOwnerTransfer(t *testing.T) {
 	owner.err = errors.New("not connected")
 	if err := transfer(m.ID); !errors.As(err, &pe) || !strings.Contains(pe.Message, "not connected") {
 		t.Fatalf("transfer the edge refused = %v, want its error", err)
+	}
+	// With two GitHub identities, the admin removes the one ownership
+	// should not go to.
+	owner.err = nil
+	if err := identities(t, e).BindIdentity(context.Background(), &domain.Identity{Member: domain.MemberID(m.ID),
+		Provider: edgeproto.ProviderGitHub, Subject: "8008", Login: "octo-alt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := transfer(m.ID); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams ||
+		!strings.Contains(pe.Message, "has the GitHub identities github:"+octo.Subject+", github:8008 and ownership goes to one") {
+		t.Fatalf("transfer to a member with two GitHub identities = %v, want refused", err)
 	}
 }
 

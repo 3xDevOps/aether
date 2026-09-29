@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -83,6 +85,30 @@ func TestValidGrantReachesSSHOnce(t *testing.T) {
 	select {
 	case g := <-sshd.served:
 		t.Fatalf("replayed grant reached sshd: %+v", g)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// An edge still signing Google accounts in, as v0.5.2-alpha.3 could,
+// opens nothing, and its client is told why.
+func TestGoogleGrantRefusedWithTheReason(t *testing.T) {
+	edge, sshd, a, ec := enrolled(t)
+	openID := edgeproto.NewConnID()
+	g := sshGrant(t, a, openID)
+	g.Account = edgeproto.Account{Provider: "google", Subject: "g-1", Email: "octo@example.com"}
+	payload, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig := ed25519.Sign(edge.priv, append([]byte("aether-edge-grant-v1\x00"), payload...))
+	edge.open(ec, openID, base64.RawURLEncoding.EncodeToString(payload)+"."+base64.RawURLEncoding.EncodeToString(sig))
+	r := expect[edgeproto.OpenResult](t, ec)
+	if r.ConnID != openID || !strings.Contains(r.Error, `sign-in provider "google" is not supported: Aether signs in with GitHub only`) {
+		t.Fatalf("open result %+v, want the reason", r)
+	}
+	select {
+	case g := <-sshd.served:
+		t.Fatalf("a Google grant reached sshd: %+v", g)
 	case <-time.After(100 * time.Millisecond):
 	}
 }

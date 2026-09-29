@@ -211,11 +211,11 @@ func TestAcceptInvitationRefusesExpired(t *testing.T) {
 	inv := mustInvite(t, db, admin.ID, domain.Invitation{Email: "a@example.com", Role: domain.RoleCollaborator,
 		ExpiresAt: time.Now().Add(time.Minute)})
 	_, err := db.AcceptInvitation(ctx, inv.ID,
-		&domain.Identity{Provider: "google", Subject: "g1", Email: "a@example.com"}, edgeMember("a"), time.Now().Add(time.Hour))
+		&domain.Identity{Provider: "github", Subject: "44", Email: "a@example.com"}, edgeMember("a"), time.Now().Add(time.Hour))
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired invitation = %v, want ErrNotFound", err)
 	}
-	if _, err := db.GetMemberByIdentity(ctx, "google", "g1"); !errors.Is(err, ErrNotFound) {
+	if _, err := db.GetMemberByIdentity(ctx, "github", "44"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired invitation bound an identity: %v", err)
 	}
 }
@@ -360,12 +360,12 @@ func TestRemoveIdentityKeepsTheMember(t *testing.T) {
 	db := openTestDB(t)
 	m := edgeMemberWithIdentity(t, db, "42")
 	if _, err := db.AcceptInvitation(ctx,
-		mustInvite(t, db, m.ID, domain.Invitation{Provider: "google", Email: "u@example.com", Member: m.ID}).ID,
-		&domain.Identity{Provider: "google", Subject: "g1", Email: "u@example.com"}, nil, time.Now()); err != nil {
-		t.Fatalf("link google: %v", err)
+		mustInvite(t, db, m.ID, domain.Invitation{Provider: "github", Email: "u@example.com", Member: m.ID}).ID,
+		&domain.Identity{Provider: "github", Subject: "45", Email: "u@example.com"}, nil, time.Now()); err != nil {
+		t.Fatalf("link a second identity: %v", err)
 	}
 	gone := newDevice(t, m, "42", domain.DeviceApproved)
-	kept := &domain.Device{Member: m.ID, Provider: "google", Subject: "g1", Credential: testKey(t, ""), Label: "phone",
+	kept := &domain.Device{Member: m.ID, Provider: "github", Subject: "45", Credential: testKey(t, ""), Label: "phone",
 		Status: domain.DeviceApproved}
 	for _, dev := range []*domain.Device{gone, kept} {
 		if err := db.RegisterDevice(ctx, dev); err != nil {

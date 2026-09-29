@@ -695,8 +695,13 @@ func (s *Server) EdgeDirectory(ctx context.Context) ([]edgeproto.DirectoryEntry,
 	if err != nil {
 		return nil, fmt.Errorf("sshd: edge directory: %w", err)
 	}
+	// An identity or invitation v0.5.2-alpha.3 stored for Google matches no
+	// account and is left out; the listings show it until it is removed.
 	var entries []edgeproto.DirectoryEntry
 	for _, id := range identities {
+		if id.Provider != edgeproto.ProviderGitHub {
+			continue
+		}
 		// A member removed between the two reads has no role and is left out.
 		if role, ok := roles[id.Member]; ok {
 			entries = append(entries, edgeproto.DirectoryEntry{Kind: edgeproto.EntryMember,
@@ -705,6 +710,9 @@ func (s *Server) EdgeDirectory(ctx context.Context) ([]edgeproto.DirectoryEntry,
 	}
 	now := time.Now()
 	for _, inv := range invs {
+		if inv.Provider != "" && inv.Provider != edgeproto.ProviderGitHub {
+			continue
+		}
 		role, ok := string(inv.Role), true
 		if inv.Member != "" {
 			role, ok = roles[inv.Member]

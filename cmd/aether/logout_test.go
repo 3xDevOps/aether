@@ -61,7 +61,7 @@ func TestDeleteEdgeAccountShowsWhatItTouchesAndWhere(t *testing.T) {
 	}
 	for _, want := range []string{"octo (github)", testServerID, "aether member transfer <member id>",
 		"servers it is a member of: none", "keeps\nworking there until an admin removes it",
-		"delete it in a browser at " + edge.URL + "/account: sign in with github there and type octo"} {
+		"delete it in a browser at " + edge.URL + "/account: sign in with GitHub there and type octo"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}

@@ -82,24 +82,29 @@ func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID
 		return nil, rpcError(err)
 	}
 	var matched []*domain.Identity
-	var providers []string
+	var names, others []string
 	for _, id := range all {
 		if id.Member != target.ID {
 			continue
 		}
-		providers = append(providers, id.Provider)
-		if p.Provider == "" || p.Provider == id.Provider {
-			matched = append(matched, id)
+		if id.Provider != edgeproto.ProviderGitHub {
+			others = append(others, id.Provider+":"+id.Subject)
+			continue
 		}
+		matched = append(matched, id)
+		names = append(names, id.Provider+":"+id.Subject)
 	}
 	switch {
-	case len(providers) == 0:
+	case len(matched) == 0 && len(others) == 0:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
 			"%s: %s has no edge identity; they link one with member.identity.link first", method, target.ID)}
 	case len(matched) == 0:
-		return nil, invalidParams(fmt.Sprintf("%s has no %s identity; it has %s", target.ID, p.Provider, strings.Join(providers, ", ")))
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+			"%s: %s has no GitHub identity, only %s, which cannot sign in at an edge; they link a GitHub account with member.identity.link first",
+			method, target.ID, strings.Join(others, ", "))}
 	case len(matched) > 1:
-		return nil, invalidParams(fmt.Sprintf("%s has identities from %s; name the provider", target.ID, strings.Join(providers, ", ")))
+		return nil, invalidParams(fmt.Sprintf("%s has the GitHub identities %s and ownership goes to one; remove the others with member.identity.remove",
+			target.ID, strings.Join(names, ", ")))
 	}
 	id := matched[0]
 	account := edgeproto.Account{Provider: id.Provider, Subject: id.Subject, Email: id.Email, Login: id.Login}

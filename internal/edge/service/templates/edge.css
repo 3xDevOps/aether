@@ -51,6 +51,5 @@ button, .button {
   text-decoration: none;
   display: inline-block;
 }
-.providers { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
 .warning { background: var(--warn-bg); padding: 0.75rem; border-radius: 4px; }
 .error { color: var(--error); font-weight: 600; }

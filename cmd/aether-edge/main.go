@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -36,9 +37,10 @@ var commands = map[string]func(args []string) error{
 		_, err := fmt.Println("aether-edge", version.String())
 		return err
 	},
-	"serve":    serve,
-	"servers":  func(args []string) error { return servers(args, os.Getenv, os.Stdout) },
-	"accounts": func(args []string) error { return accounts(args, os.Getenv, os.Stdout) },
+	"serve":       serve,
+	"healthcheck": func(args []string) error { return healthcheck(args, os.Getenv) },
+	"servers":     func(args []string) error { return servers(args, os.Getenv, os.Stdout) },
+	"accounts":    func(args []string) error { return accounts(args, os.Getenv, os.Stdout) },
 }
 
 func main() {
@@ -70,10 +72,11 @@ func usage() {
 	_, _ = fmt.Fprint(os.Stderr, `usage: aether-edge <command>
 
 commands:
-  serve     run the edge (aether-edge serve -h lists its options)
-  servers   list, remove, block and unblock servers
-  accounts  list, block, unblock and delete accounts
-  version   print the version
+  serve        run the edge (aether-edge serve -h lists its options)
+  healthcheck  exit 0 when the edge on this machine answers, 1 with the reason
+  servers      list, remove, block and unblock servers
+  accounts     list, block, unblock and delete accounts
+  version      print the version
 `)
 }
 
@@ -84,10 +87,13 @@ func serve(args []string) (err error) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err = checkDataDir(o.dataDir); err != nil {
+		return err
+	}
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,
-		GitHub: o.github, Google: o.google,
+		GitHub: o.github,
 	})
 	if err != nil {
 		return err
@@ -95,7 +101,9 @@ func serve(args []string) (err error) {
 	// Deferred, the store closes once the relay and the HTTP servers have
 	// stopped using it.
 	defer func() { err = errors.Join(err, svc.Close()) }()
-	rl, err := relay.New(ctx, svc.RelayConfig(o.egressBudget))
+	// Not ctx: a stop signal during startup ends the edge through the
+	// shutdown below, not with the load it interrupted.
+	rl, err := relay.New(context.Background(), svc.RelayConfig(o.egressBudget))
 	if err != nil {
 		return err
 	}
@@ -116,7 +124,6 @@ func serve(args []string) (err error) {
 	if err != nil {
 		return fmt.Errorf("metrics listener: %w", err)
 	}
-	go func() { errc <- serveHTTP("metrics", metrics, metricsLn) }()
 
 	var public net.Listener
 	switch {
@@ -132,17 +139,27 @@ func serve(args []string) (err error) {
 		if ln, err = net.Listen("tcp", o.proxyListen); err != nil {
 			return fmt.Errorf("proxy listener: %w", err)
 		}
-		web.Handler = rl.Forwarded(web.Handler)
-		slog.Info("aether-edge: behind a reverse proxy: plain HTTP on loopback, client addresses from "+relay.HeaderForwardedFor,
-			"listen", ln.Addr())
+		web.Handler = rl.Forwarded(o.trustedProxies, web.Handler)
+		proxies := "loopback"
+		if o.trustedProxies != nil {
+			proxies = fmt.Sprint(o.trustedProxies)
+		}
+		slog.Info("aether-edge: behind a reverse proxy: plain HTTP, client addresses from "+relay.HeaderForwardedFor,
+			"listen", ln.Addr(), "proxies", proxies)
 		go func() { errc <- serveHTTP("edge", web, ln) }()
 	default:
 		tlsConfig := edgeTLS(o)
-		if public, err = net.Listen("tcp", o.listen); err != nil {
+		if public, err = net.Listen("tcp", o.listen); errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf("public listener: %w; ports below 1024 need a privilege this user lacks: "+
+				"listen on a higher port such as :8443 (--listen, AETHER_EDGE_LISTEN) and forward 443 to it", err)
+		} else if err != nil {
 			return fmt.Errorf("public listener: %w", err)
 		}
 		go func() { errc <- serveHTTP("edge", web, tls.NewListener(rl.Listener(public), tlsConfig)) }()
 	}
+	// The metrics listener serves /healthz, so it answers only once the
+	// edge's own listener is up.
+	go func() { errc <- serveHTTP("metrics", metrics, metricsLn) }()
 	slog.Info("aether-edge: serving", "signin", o.signinOrigin, "relay", o.relayOrigin, "metrics", metricsLn.Addr())
 
 	select {

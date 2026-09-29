@@ -6,7 +6,9 @@
 PR: the dashboard through the edge, browser devices and the Android return
 link were removed; claiming moved inside SSH; the server chooses an access
 policy; sign-in and relay got two host names. The sections below describe
-what shipped; `docs/edge.md` is the operator and user guide.
+what shipped; `docs/edge.md` is the operator and user guide. Google sign-in
+was removed by [GitHub-only sign-in and an edge container
+image](2026-09-29-edge-github-container.md).
 
 **Goal:** A developer reaches their Aether server from a computer without
 configuring Tailscale, SSH, router ports, or certificates. Tailnet and

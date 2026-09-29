@@ -1,6 +1,4 @@
 {{define "signin"}}{{template "top" .}}
 <p>Sign in to see your Aether servers or to approve a device.</p>
-<ul class="providers">
-{{range .Data}}<li><a class="button" href="{{.URL}}">Sign in with {{.Title}}</a></li>
-{{end}}</ul>
+<p><a class="button" href="{{.Data}}">Sign in with GitHub</a></p>
 {{template "bottom" .}}{{end}}

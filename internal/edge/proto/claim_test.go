@@ -77,7 +77,7 @@ func TestClaimUser(t *testing.T) {
 		t.Fatalf("ParseClaimUser(%q) = %q, %+v, %v", user, got, gotOwner, ok)
 	}
 	// A subject may hold a colon; the provider may not.
-	colon := Principal{Type: PrincipalAccount, Provider: ProviderGoogle, Subject: "a:b"}
+	colon := Principal{Type: PrincipalAccount, Provider: ProviderGitHub, Subject: "a:b"}
 	if user, _, err := ClaimUser(code, colon); err != nil {
 		t.Fatal(err)
 	} else if _, got, ok := ParseClaimUser(user); !ok || got != colon {

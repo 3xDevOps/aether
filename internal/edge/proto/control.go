@@ -298,10 +298,10 @@ func (m DeviceRevoked) validate() error {
 }
 
 func (m AccountDeleted) validate() error {
-	if !ValidProvider(m.Provider) || !validRequiredText(m.Subject, maxShortText) {
+	if !validRequiredText(m.Subject, maxShortText) {
 		return errors.New("an account is named by a provider and a subject")
 	}
-	return nil
+	return CheckProvider(m.Provider)
 }
 
 func (m AccountDeletionApplied) validate() error {

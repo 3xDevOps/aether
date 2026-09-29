@@ -319,17 +319,17 @@ func TestOwnershipReports(t *testing.T) {
 	e := newEnv(t)
 	a := claimedAgent(t, e)
 	prev := edgeproto.AccountPrincipal(account("owner"))
-	heir := edgeproto.Principal{Type: edgeproto.PrincipalAccount, Provider: edgeproto.ProviderGoogle, Subject: "9"}
+	heir := edgeproto.Principal{Type: edgeproto.PrincipalAccount, Provider: edgeproto.ProviderGitHub, Subject: "9"}
 
 	// A refused transfer is answered, so the server keeps its previous
 	// owner as the edge does, and the control channel stays up.
 	e.dir.mu.Lock()
-	e.dir.recordErr = edgeproto.Refusal("google:9 has no account at this edge")
+	e.dir.recordErr = edgeproto.Refusal("github:9 has no account at this edge")
 	e.dir.mu.Unlock()
 	refused := edgeproto.NewConnID()
 	send(t, a.ws, edgeproto.OwnerTransferred{ID: refused, Owner: heir})
 	if got := next[edgeproto.OwnerTransferResult](t, a); got.ID != refused || got.Owner != heir ||
-		!strings.Contains(got.Error, "ownership report refused: google:9 has no account") {
+		!strings.Contains(got.Error, "ownership report refused: github:9 has no account") {
 		t.Fatalf("refused transfer answered %+v", got)
 	}
 	if p, ok := e.dir.owner(a.id); !ok || p != prev || !e.r.Online(a.id) {

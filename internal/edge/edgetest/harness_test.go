@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -65,6 +66,9 @@ type harness struct {
 	proxy     *proxy
 	// renamed swaps the host names of the two origins.
 	renamed bool
+	// proxies, when set, puts the edge behind relay.Forwarded with these
+	// trusted proxy networks, as --trusted-proxies does.
+	proxies []netip.Prefix
 
 	mu        sync.Mutex
 	skew      time.Duration
@@ -138,10 +142,14 @@ func (h *harness) startEdge() {
 		t.Fatal(err)
 	}
 	svc.SetLink(rl)
+	handler := svc.Handler()
+	if h.proxies != nil {
+		handler = rl.Forwarded(h.proxies, handler)
+	}
 	quiet := log.New(io.Discard, "", 0)
 	n := &edgeNode{
 		svc: svc, relay: rl,
-		back:  &http.Server{Handler: svc.Handler(), ReadHeaderTimeout: 10 * time.Second, ErrorLog: quiet},
+		back:  &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, ErrorLog: quiet},
 		front: &http.Server{Handler: h.proxy.handler(h.backAddr), ReadHeaderTimeout: 10 * time.Second, ErrorLog: quiet},
 	}
 	go func() { _ = n.back.Serve(back) }()
@@ -989,7 +997,7 @@ func invite(t *testing.T, ctl *protocol.Client, p protocol.MemberInvitationCreat
 // edge lists the server for u.
 func inviteLogin(t *testing.T, ctl *protocol.Client, c *client, serverID, role string) {
 	t.Helper()
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: c.user.Login, Role: role})
+	invite(t, ctl, protocol.MemberInvitationCreateParams{Login: c.user.Login, Role: role})
 	waitRole(t, c, serverID, role)
 }
 
