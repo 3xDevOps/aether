@@ -1348,7 +1348,7 @@ exposed. `aether-edge healthcheck` asks the edge on the same machine for
 `--metrics-listen` as `serve` does, and exits 0, or 1 with the reason:
 
 ```
-aether-edge: healthcheck: no edge answers on its metrics listener: Get "http://127.0.0.1:9464/healthz": dial tcp 127.0.0.1:9464: connect: connection refused
+aether-edge: healthcheck: no edge answers on 127.0.0.1:9464: Get "http://127.0.0.1:9464/healthz": dial tcp 127.0.0.1:9464: connect: connection refused; when serve was given --metrics-listen, give this command the same address or set AETHER_EDGE_METRICS_LISTEN for both
 ```
 
 Alert on `aether_edge_throttled` equal to 1 and on

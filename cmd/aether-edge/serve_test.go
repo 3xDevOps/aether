@@ -206,7 +206,7 @@ func TestServeAsAContainerRunsIt(t *testing.T) {
 	}
 	out, err := healthcheckProc(empty, first.metrics)
 	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(out, "aether-edge: healthcheck: no edge answers on its metrics listener") {
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(out, "aether-edge: healthcheck: no edge answers on ") {
 		t.Fatalf("healthcheck of a stopped edge: %v\n%s", err, out)
 	}
 

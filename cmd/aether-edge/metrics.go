@@ -45,7 +45,7 @@ func healthcheck(args []string, getenv func(string) string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get("http://" + *addr + "/healthz")
 	if err != nil {
-		return fmt.Errorf("healthcheck: no edge answers on its metrics listener: %w", err)
+		return fmt.Errorf("healthcheck: no edge answers on %s: %w; when serve was given --metrics-listen, give this command the same address or set AETHER_EDGE_METRICS_LISTEN for both", *addr, err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // read-only
 	if resp.StatusCode != http.StatusOK {

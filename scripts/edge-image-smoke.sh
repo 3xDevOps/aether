@@ -84,10 +84,10 @@ fi
 ok "no configuration: $(cat "$work/out")"
 
 # start <container> <volume> runs the edge with GitHub-only configuration
-# and waits until its healthcheck passes.
+# on a read-only root filesystem and waits until its healthcheck passes.
 start() {
 	containers="$containers $1"
-	rt run -d --name "$1" \
+	rt run -d --name "$1" --read-only \
 		-e AETHER_EDGE_SIGNIN_ORIGIN=https://auth.example.test \
 		-e AETHER_EDGE_RELAY_ORIGIN=https://edge.example.test \
 		-e AETHER_EDGE_PROXY_LISTEN=:8443 \
