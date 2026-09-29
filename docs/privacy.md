@@ -1,14 +1,19 @@
 # Privacy policy
 
 Aether is self-hosted software. Nothing about you reaches the people who
-publish it. This page is the privacy policy for the Aether Android app
-(package `io.aether.android`), whether it came from a GitHub release or from
-Google Play, and for the dashboard the app shows. Effective 2026-09-26.
+publish it unless you sign in to the edge they run, at `auth.onaether.dev`
+and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
+policy for the Aether Android app (package `io.aether.android`), whether it
+came from a GitHub release or from Google Play, for the dashboard the app
+shows, and for that edge. Effective 2026-09-29.
 
 ## Who publishes it
 
 Aether is published by 3xDevOps, <https://github.com/3xDevOps>. Questions
 about this policy go to <https://github.com/3xDevOps/Aether/issues>.
+Privacy requests about what the project's edge holds, such as a copy or a
+deletion, go to <team@onaether.dev>; deleting your own account needs no
+request ([What an edge stores](#what-an-edge-stores)).
 
 ## What the app stores on the phone
 
@@ -73,6 +78,48 @@ again.
 Everything above goes to one server, the one you typed in, and stops there.
 Nothing is sold, and nothing is handed to anyone the server's administrator
 has not made a member of it.
+
+## What an edge stores
+
+An **edge** is the relay and sign-in service that lets a computer running
+`aether` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
+Android app does not use it. Whoever runs an edge, the publisher for
+`auth.onaether.dev` and `edge.onaether.dev`, holds the following. The edge cannot read terminal,
+agent, file or dashboard content: all of it travels inside SSH, which is
+encrypted end to end between your computer and your server.
+
+| What | Why | Kept |
+| --- | --- | --- |
+| Your account: an account id the edge assigns, provider (GitHub or Google), the provider's user id, email, login, display name, and when you last signed in with the provider | To sign you in and to match invitations | Until you delete it on the edge's Account page, or its operator deletes it with `aether-edge accounts delete` |
+| Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `aether logout` or the edge's Devices page |
+| Browser sessions at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
+| A pending sign-in from `aether login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
+| Each server you claim: its id, its host name, the access policy it announces, you as its owner | To route connections and show you your servers | Until the owner removes it, or the edge's operator removes or blocks it. Deleting your account removes you as its owner |
+| Each server the edge let your account connect to: its id, your provider and the provider's user id | To tell every server that may hold your identity when you delete your account | Until you delete your account |
+| A deletion owed to a server that was offline when you deleted your account: that server's id, your provider and the provider's user id | To tell that server to remove your identity | Until it is sent, when the server next connects; at most 1000 per server |
+| Each server's directory: the provider, user id, login, email and role of its members and open invitations | To refuse strangers before they reach the server | Replaced every time the server sends it |
+| Bytes relayed per month, not per person | To enforce the operator's bandwidth budget | Indefinitely |
+| A server id the operator blocked, and when | To refuse that server | Until the operator unblocks it |
+| An account the operator blocked: provider, the provider's user id, and when | To refuse its sign-ins and claims | Until the operator unblocks it, also after the account is deleted |
+| The edge's log: server ids, error messages, and the IP addresses of refused connections and failed TLS handshakes | To operate and defend the edge | For the retention period its operator sets |
+
+Rate limits count requests per IP address, or per /64 for IPv6, in memory
+only; nothing is written. While you are connected, the edge also sees your
+IP address, which server you reach, when, and how many bytes flow. Your
+server logs the IP address of each connection the edge relays to it
+(`edge: relayed connection ... client=<address>`), as it does for direct
+connections.
+
+Revoking your devices removes them from the edge; the account record stays.
+To delete it yourself, open the edge's Account page,
+`https://auth.onaether.dev/account` for the project's edge; `aether logout
+--delete-account` prints that address. The page asks you to sign in with
+your provider in that browser within the last 5 minutes and to type your
+login or email ([edge.md](edge.md#deleting-an-account)). The edge then deletes the
+account, its devices and sessions, and tells each server it reached to
+remove your identity there; what a server holds is its administrator's.
+You can also ask the edge's operator, `team@onaether.dev` for the
+project's edge, who runs `aether-edge accounts delete`.
 
 ## Remote-development data
 
@@ -165,6 +212,7 @@ which no other app can hold and which grants nothing.
 ## Deleting your data
 
 - On the phone: uninstall the app.
+- At an edge: see [What an edge stores](#what-an-edge-stores).
 - On the server: the server's administrator owns the data directory and can
   delete a run, a member home, or the whole directory
   ([install.md](install.md#uninstalling)). `aether member remove` destroys

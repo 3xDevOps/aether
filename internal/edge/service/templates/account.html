@@ -1,0 +1,48 @@
+{{define "account_page"}}{{template "top" .}}
+{{with .Data}}
+<dl>
+<dt>Signed in with</dt><dd>{{.Account.Provider}}</dd>
+<dt>Account</dt><dd>{{template "account" .Account}}</dd>
+<dt>Account id</dt><dd><code>{{.Account.ID}}</code></dd>
+</dl>
+
+<h2>Delete this account</h2>
+<p>Deleting it removes the account, its device tokens and its sessions at this edge, and closes its open connections. Every server below is told, now or when it next connects, and removes this identity and its edge devices. No server removes a member, changes a role or deletes data because of it.</p>
+<p>What stays: an SSH key or tailnet identity you use on a server keeps working until an admin removes it there, and an invitation to your login or email stays until that server's admin revokes it. Signing in again later creates a new account.</p>
+
+<h3>Servers you own</h3>
+{{if .Owned}}<table>
+<thead><tr><th>Name</th><th>Server id</th><th>Before you delete</th></tr></thead>
+<tbody>
+{{range .Owned}}<tr>
+<td>{{.Name}}</td>
+<td><code>{{.ID}}</code></td>
+<td>To hand it over, an admin of it runs <code>{{$.Data.Transfer}}</code>, naming another admin</td>
+</tr>
+{{end}}</tbody>
+</table>
+<p>A server you still own when you delete this account is left without an owner. It stays enrolled and its members keep their access; its administrator makes it owned again on the machine with a new code from <code>sudo aether-server edge claim-code</code>. The edge cannot transfer ownership itself: it records a new owner only when the server reports one.</p>
+{{else}}<p>None.</p>{{end}}
+
+<h3>Servers you are a member of</h3>
+{{if .Member}}<table>
+<thead><tr><th>Name</th><th>Server id</th><th>Role</th></tr></thead>
+<tbody>
+{{range .Member}}<tr><td>{{.Name}}</td><td><code>{{.ID}}</code></td><td>{{.Role}}</td></tr>
+{{end}}</tbody>
+</table>
+{{else}}<p>None.</p>{{end}}
+
+{{if .Fresh}}<form method="post" action="/account/delete">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<label>Type <strong>{{.Confirm}}</strong> to confirm <input name="confirm" autocomplete="off" spellcheck="false" required></label>
+<button>Delete this account</button>
+</form>
+{{else}}<p>Deleting needs a sign-in in this browser from the last {{.Window}}. <a class="button" href="{{.Reauth}}">Sign in again with {{.Account.Provider}}</a>, then delete it from this page.</p>{{end}}
+{{end}}
+{{template "bottom" .}}{{end}}
+
+{{define "account_deleted"}}{{template "top" .}}
+<p>The account is deleted. {{with .Data}}{{len .Owned}} server(s) you owned now have no owner.{{end}} Each server you owned or belonged to is told when it is connected to this edge.</p>
+<p><a href="/signin">Sign in</a></p>
+{{template "bottom" .}}{{end}}

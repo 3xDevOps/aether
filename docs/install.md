@@ -15,7 +15,7 @@ build and development server.
 
 ```sh
 make dashboard         # build the static dashboard export in web/dist
-make build             # dashboard, then the Go server and CLI into dist/
+make build             # dashboard, then the Go server, CLI and edge into dist/
 cd web && bun run dev  # development server
 ```
 
@@ -408,12 +408,15 @@ Every release publishes bare binaries plus `checksums.txt`:
 
 ```
 aether-server-linux-amd64   aether-server-linux-arm64
+aether-edge-linux-amd64     aether-edge-linux-arm64
 aether-linux-amd64          aether-linux-arm64
 aether-darwin-amd64         aether-darwin-arm64
 aether-windows-amd64.exe    aether-windows-arm64.exe
 ```
 
-`aether-server` is Linux-only. The Windows and macOS assets are the client.
+`aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
+are the client. `aether-edge` is only for running your own edge
+([edge.md](edge.md)); servers and clients do not need it.
 
 **Linux and macOS.** Download the one you want, check it against
 `checksums.txt`, `chmod +x`, and drop it on your `PATH` under the name
@@ -721,7 +724,9 @@ The app holds no logic and no credential. It is a WebView locked to one HTTPS
 origin, so identity stays the phone's own tailnet login, resolved by the server
 on every request ([networking.md](networking.md#the-dashboard)). Two things
 have to be true first: the server has `web-port` set, and the phone is signed
-in to the same tailnet.
+in to the same tailnet. The app does not use the edge in this release: it
+works over a tailnet exactly as before, whatever the server's `edge-url`
+and `edge-access` say ([edge.md](edge.md#the-dashboard)).
 
 1. Open the release page in the phone's browser and download
    `aether-android.apk`. Check it against its line in `checksums.txt` if you
@@ -777,7 +782,8 @@ Building the APK from a checkout is in
   [environment-home.md](environment-home.md#connect-github). `aether github
   connect` refuses rather than generating a key it could not sign with.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
-  reachable and the recommended identity layer. See
+  reachable and the recommended identity layer. Without it, outbound HTTPS to
+  the edge is enough: nothing needs to reach the server. See
   [networking.md](networking.md).
 
 A standard headless Ubuntu server is sufficient. No desktop login, display
@@ -933,8 +939,20 @@ starts the service. On a host that already runs tailscaled, and where tailnet
 connections are not required to carry a key, it asks one more question -
 `Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
 fresh config - which is how a phone on the tailnet reaches the dashboard
-([networking.md](networking.md#the-dashboard)). Answering `server` to the
-install script's question runs it for you; this is the same command by hand.
+([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
+on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
+that lets clients reach the server over SSH with a GitHub or Google sign-in
+([edge.md](edge.md)), and prints what the edge can see and the command that
+turns it off; with tailscaled it asks, defaulting to no. With the edge on
+it asks who may reach the server through it, `1` (account access) or `2`
+(approved devices), and repeats the question until answered
+([edge.md](edge.md#access-policies)). Setup is the only thing that turns
+the edge on: `edge-url` is empty unless the config file or a flag names an
+edge, so an upgrade never enrolls an existing server. With the edge on,
+setup ends by printing the server id and a claim code for `aether link
+--claim <code>`.
+Answering `server` to the install script's question runs it for you; this
+is the same command by hand.
 
 ```sh
 sudo aether-server setup
@@ -942,7 +960,9 @@ sudo aether-server setup
 
 For an unattended install, `aether-server install` writes the same files from
 flags instead of questions - any serve option below is accepted, and options
-you leave off keep tracking the binary's defaults across upgrades:
+you leave off keep tracking the binary's defaults across upgrades. The edge
+stays off unless you pass `--edge-url`, which is refused without
+`--edge-access account` or `--edge-access approved-devices`:
 
 ```sh
 sudo aether-server install --addr :2222 --tailnet-auto-join
@@ -993,6 +1013,8 @@ uses the default; negative values have the semantics in the table.
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
+| `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled. See [edge.md](edge.md). |
+| `--edge-access` | `approved-devices` | Who may reach the server through the edge: `account` (signing in is enough) or `approved-devices` (each new device waits until a person approves it). `install` refuses `--edge-url` without it. See [edge.md](edge.md#access-policies). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -1013,13 +1035,15 @@ swarms need conflict coordination; the server was started with --conflict-coordi
 
 Three things happen on the first start and never need attention again:
 
-1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`.
-   Clients record its fingerprint on first link and print it. Do not delete it:
-   clients that already trust it refuse to connect until you clear the entry
-   from their `known_hosts`.
+1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`
+   (by setup already, when the edge is on). Clients record its fingerprint on
+   first link and print it, and the edge derives the server id from it. Do
+   not delete it: clients that already trust it refuse to connect until you
+   clear the entry from their `known_hosts`, and at the edge a new key is a
+   new server that must be claimed and linked again.
 2. **The first identity to link becomes the admin** - the SSH key, or the
-   tailnet login, of whoever runs `aether link` first. There is no other
-   account creation step.
+   tailnet login, of whoever runs `aether link` first, or the edge account
+   that uses the claim code. There is no other account creation step.
 3. **The SQLite store and the git repo root** are created under the data
    directory.
 
@@ -1144,7 +1168,8 @@ automatic.
 | Path | Contents |
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
-| `ssh/` | The server's SSH host key. |
+| `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
+| `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
@@ -1200,6 +1225,9 @@ install end to end.
 ### Server
 
 ```sh
+# 0. With the edge on: unenroll, so the edge stops listing the server.
+sudo aether-server edge leave
+
 # 1. Stop the service.
 sudo systemctl disable --now aether-server
 sudo rm -f /etc/systemd/system/aether-server.service

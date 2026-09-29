@@ -21,6 +21,9 @@ var (
 	// ErrInUse is returned when a delete is blocked by rows that still
 	// reference the target (e.g. a workspace with runs).
 	ErrInUse = errors.New("store: in use")
+	// ErrLimit is returned when a write would exceed a bound on rows (e.g.
+	// devices waiting for approval on one account).
+	ErrLimit = errors.New("store: limit reached")
 )
 
 // Store is the persistence contract the rest of the system consumes.
@@ -36,7 +39,8 @@ var (
 // Member public keys are canonicalized to "type base64" (options, comment,
 // and surrounding whitespace stripped) on write and lookup, so equality
 // follows the physical key rather than the authorized_keys line. A member
-// may have an empty PublicKey or an empty TailnetLogin, never both.
+// has a PublicKey, a TailnetLogin or an edge identity (IdentityStore), and
+// may have any of them.
 type Store interface {
 	CreateWorkspace(ctx context.Context, w *domain.Workspace) error
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)

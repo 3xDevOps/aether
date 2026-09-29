@@ -14,7 +14,14 @@ import type {
   ConfigRoot,
   DaemonInstallResult,
   DaemonStatusResult,
+  Device,
+  DeviceLookup,
   DiskUsage,
+  EdgeHostKey,
+  EdgeLinkResult,
+  EdgeLogin,
+  EdgeServer,
+  EdgeStatus,
   EnvHarnessesResult,
   EnvSaveResult,
   EvidenceGetResult,
@@ -25,6 +32,7 @@ import type {
   GitHubConnectResult,
   GitHubProbeResult,
   GitIdentity,
+  Invitation,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
@@ -698,6 +706,32 @@ export const api = {
     call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
       (r) => r.member,
     ),
+  memberDeviceList: () =>
+    call<{ devices: Device[] }>('member.device.list').then((r) => r.devices),
+  memberDeviceLookup: (code: string) => call<DeviceLookup>('member.device.lookup', { code }),
+  /** Approves the device member.device.lookup named for code; the server
+   * refuses a code that now names another. */
+  memberDeviceApprove: (code: string, deviceID: string) =>
+    call<{ device: Device }>('member.device.approve', { code, device_id: deviceID }).then(
+      (r) => r.device,
+    ),
+  memberDeviceRevoke: (deviceID: string) =>
+    call<{ device: Device }>('member.device.revoke', { device_id: deviceID }).then(
+      (r) => r.device,
+    ),
+  memberInvitationList: () =>
+    call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
+  memberInvitationCreate: (params: {
+    provider?: string
+    login?: string
+    email?: string
+    role: Member['role']
+  }) =>
+    call<{ invitation: Invitation }>('member.invitation.create', params).then(
+      (r) => r.invitation,
+    ),
+  memberInvitationRevoke: (invitationID: string) =>
+    call<unknown>('member.invitation.revoke', { invitation_id: invitationID }),
   workspaceAdd: (params: {
     name: string
     base_branch?: string
@@ -843,6 +877,17 @@ export const api = {
   // link.switch never succeeds: the gateway's SSH identity is fixed at
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
+  /** Starts a sign-in at the edge; edge.status reports how it ends. */
+  localEdgeLogin: () => local<EdgeLogin>('edge.login'),
+  localEdgeStatus: () => local<EdgeStatus>('edge.status'),
+  localEdgeServers: (edge: string) =>
+    local<{ edge: string; servers: EdgeServer[] }>('edge.servers', { edge }),
+  localEdgeHostKey: (serverID: string, edge: string) =>
+    local<EdgeHostKey>('edge.hostkey', { server_id: serverID, edge }),
+  localEdgeLink: (serverID: string, edge: string) =>
+    local<EdgeLinkResult>('edge.link', { server_id: serverID, edge }),
+  localEdgeClaim: (code: string, edge: string) =>
+    local<EdgeLinkResult>('edge.claim', { code, edge }),
   /** This machine's own git identity, for prefilling the one the server
    * stores. */
   localGitIdentity: () => local<GitIdentity>('git.identity'),

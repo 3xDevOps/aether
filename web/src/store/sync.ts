@@ -3,7 +3,7 @@
 
 import { toast } from 'sonner'
 import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { edgeHost, message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
@@ -37,13 +37,37 @@ import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | null {
   if (err instanceof ApiError && err.status === 503) {
     if (err.message.includes('network unreachable')) return 'network'
-    if (err.message.includes('server unreachable')) return 'server'
+    if (err.message.includes('server unreachable')) return edgeHop(err.message, store) ?? 'server'
   }
   if (err instanceof TypeError) {
     // An unknown gateway is the desktop one: it is the only surface that can
     // fail before the descriptor is read, since the probe seeds it.
     return store.getState().capabilities?.gateway === 'server' ? 'tailnet' : 'gateway'
   }
+  return null
+}
+
+/**
+ * Which part of an edge link failed, from the "server unreachable" error
+ * the local gateway passes on. The client's error keeps the edge's refusal
+ * and the server's SSH banner in their own words, and a failure to reach the
+ * edge at all names the edge host followed by the transport error. Any
+ * other refusal the edge words itself is `edge-refused`. Null when the link
+ * is not through an edge or the error is none of these.
+ */
+function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
+  const edge = store.getState().linkStatus?.edge_url
+  if (!edge) return null
+  if (detail.includes('server is not connected to the edge')) return 'edge-server'
+  if (detail.includes('device token revoked') || detail.includes('not signed in')) {
+    return 'signed-out'
+  }
+  if (detail.includes('was revoked on this server')) return 'device-revoked'
+  if (detail.includes('is waiting for approval')) return 'device-pending'
+  // The edge's refusal and the server's SSH banner word it the same way.
+  if (detail.includes('not a member of this server')) return 'not-member'
+  if (detail.includes(`${edgeHost(edge)} refused: `)) return 'edge-refused'
+  if (detail.includes(`${edgeHost(edge)}: `)) return 'edge'
   return null
 }
 
@@ -593,6 +617,10 @@ async function probeGateway(
   try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
+    if (signal.aborted) return null
+    // A failure before hydration succeeds is classified by whether the link
+    // runs through an edge, so the link has to be known first.
+    store.getState().setLinkStatus(status)
     return status.server_configured ? null : { unlinked: { capabilities, status } }
   } catch {
     return null
@@ -630,7 +658,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
   let stopStream: () => void = () => {}
   let selectionWrite = Promise.resolve()
   const stopSelection = store.subscribe((state, previous) => {
-    if (!state.hydrated || !state.capabilities?.local?.includes('workspace.selection')) return
+    // The gateway keys the selection by the server's answer, so an unlinked
+    // gateway, hydrated only for onboarding, has nowhere to save it.
+    if (!state.hydrated || !state.info || !state.capabilities?.local?.includes('workspace.selection')) return
     if (state.activeWorkspace === previous.activeWorkspace && previous.hydrated) return
     const workspace = state.activeWorkspace
     selectionWrite = selectionWrite
@@ -775,7 +805,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // machine's own network, or the SSH tunnel to aether-server. Either
         // way the gateway itself is fine.
         const s = store.getState()
-        s.setUnreachable(kind)
+        s.setUnreachable(kind === 'server' ? edgeHop(detail, store) ?? kind : kind)
         // A refused subscribe never goes live, so hydration never runs and
         // nothing else will ever record what happened. Keep an error already
         // recorded: a dead token is more precise than a dead hop.

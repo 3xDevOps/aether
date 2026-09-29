@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordcli"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -51,6 +53,10 @@ func main() {
 		exitOn(setup(args))
 	case "config":
 		exitOn(configCmd(args))
+	case "edge":
+		exitOn(edgeCmd(args))
+	case "device":
+		exitOn(deviceCmd(args))
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", os.Args[1])
 		usage()
@@ -74,6 +80,8 @@ commands:
   install  write the systemd unit and the config file (same options as serve)
   setup    walk through the install interactively
   config   show | path | set <key> <value> | edit
+  edge     status | claim-code | trust | leave
+  device   approve <code> | review: approve or revoke members' edge devices
   version  print the version
 
 serve and install options, which are also the config file keys:
@@ -92,6 +100,8 @@ type serveOptions struct {
 	harnessDefinitions   *string
 	tailnetAutoJoin      *bool
 	tailnetRequireKey    *bool
+	edgeURL              *edgeURLValue
+	edgeAccess           *accessPolicyValue
 	conflictCoordination *bool
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
@@ -123,6 +133,13 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		`JSON object of administrator-owned generic harness definitions`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	o.tailnetRequireKey = fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
+	o.edgeURL = new(edgeURLValue)
+	fs.Var(o.edgeURL, "edge-url",
+		"edge that relays SSH for members without a direct or tailnet route (empty = off; aether-server setup offers "+edgeagent.DefaultURL+")")
+	o.edgeAccess = new(accessPolicyValue(edgeproto.PolicyApprovedDevices))
+	fs.Var(o.edgeAccess, "edge-access",
+		"who may reach this server through the edge: account (signing in with GitHub or Google is enough) or approved-devices "+
+			"(each new device waits until a person approves it); changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
@@ -166,6 +183,9 @@ func serve(args []string) error {
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *o.tailnetAutoJoin,
 		TailnetRequireKey: *o.tailnetRequireKey,
+
+		EdgeURL:    string(*o.edgeURL),
+		EdgeAccess: edgeproto.AccessPolicy(*o.edgeAccess),
 
 		CoordinationDisabled: !*o.conflictCoordination,
 		// The one place a process is granted the right to replace itself

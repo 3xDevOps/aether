@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/cli"
 )
 
 // ErrPushPrecondition marks a push the repository cannot even attempt:
@@ -82,7 +84,11 @@ func Push(repo, branch string) (string, error) {
 	// Nothing here can answer git's own credential prompt. This does not
 	// reach ssh, which asks for a key passphrase on its own terminal; the
 	// push timeout is what bounds that case.
-	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
+	env, err := remoteEnv(repo)
+	if err != nil {
+		return "", err
+	}
+	cmd.Env = append(cmd.Environ(), env...)
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	output := string(out)
@@ -142,6 +148,21 @@ func AetherRemoteURL(repo string) (string, error) {
 		return "", fmt.Errorf("git remote get-url --push aether: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// remoteEnv is the environment of a git command that dials repo's aether
+// remote: no credential prompt, since nothing here can answer one, and
+// aether edge-ssh when the remote is an edge link.
+func remoteEnv(repo string) ([]string, error) {
+	url, err := AetherRemoteURL(repo)
+	if err != nil {
+		return nil, err
+	}
+	ssh, err := cli.GitSSHEnv(url)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{"GIT_TERMINAL_PROMPT=0"}, ssh...), nil
 }
 
 // pushPreflight refuses, before git dials anything, the states a user

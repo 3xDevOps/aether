@@ -89,4 +89,75 @@ describe('ConnectionError', () => {
     expect(screen.getByRole('heading', { name: 'This dashboard link has expired' })).toBeDefined()
     expect(screen.getByText(/aether gui/i)).toBeDefined()
   })
+
+  describe('on a link through an edge', () => {
+    it('names a server with no edge connection and where to see why', () => {
+      render(
+        <ConnectionError
+          kind="edge-server"
+          dead={false}
+          error="server unreachable: connect to server abc: edge.example.test refused: server is not connected to the edge (HTTP 503)"
+          onRetry={vi.fn()}
+        />,
+      )
+
+      expect(
+        screen.getByRole('heading', { name: 'Your server is not connected to the edge' }),
+      ).toBeDefined()
+      expect(screen.getByText('sudo aether-server edge status')).toBeDefined()
+      expect(screen.getByText(/refused: server is not connected to the edge/)).toBeDefined()
+      expect(screen.queryByText(/Tailscale/)).toBeNull()
+    })
+
+    it('does not send an edge outage to the server', () => {
+      render(<ConnectionError kind="edge" dead={false} error={null} onRetry={vi.fn()} />)
+
+      expect(screen.getByRole('heading', { name: 'Cannot reach the edge' })).toBeDefined()
+      expect(screen.getByText(/nothing was asked of the server/)).toBeDefined()
+      expect(screen.getByRole('button', { name: 'Retry connection' })).toBeDefined()
+    })
+
+    it('gives a signed-out computer the sign-in command for its own edge', () => {
+      render(
+        <ConnectionError
+          kind="signed-out"
+          dead={false}
+          error={null}
+          edge="https://edge.example.test"
+          onRetry={vi.fn()}
+        />,
+      )
+
+      expect(
+        screen.getByRole('heading', { name: 'This computer is signed out of the edge' }),
+      ).toBeDefined()
+      expect(screen.getByText('aether login --edge https://edge.example.test')).toBeDefined()
+    })
+
+    it('offers no retry to a revoked device, which a retry cannot fix', () => {
+      render(
+        <ConnectionError
+          kind="device-revoked"
+          dead={false}
+          error='device "laptop" was revoked on this server'
+          onRetry={vi.fn()}
+        />,
+      )
+
+      expect(screen.getByRole('heading', { name: 'The server revoked this device' })).toBeDefined()
+      expect(screen.getByText('device "laptop" was revoked on this server')).toBeDefined()
+      expect(screen.queryByRole('button', { name: 'Retry connection' })).toBeNull()
+    })
+
+    it('points a pending computer at the approve command the server printed', () => {
+      const banner =
+        'device "laptop" is waiting for approval. From a device this account already uses, or as an admin, run:\n  aether device approve ABCD-EFGH'
+      render(<ConnectionError kind="device-pending" dead={false} error={banner} onRetry={vi.fn()} />)
+
+      expect(
+        screen.getByRole('heading', { name: 'This computer is waiting for approval' }),
+      ).toBeDefined()
+      expect(screen.getByText(/aether device approve ABCD-EFGH/)).toBeDefined()
+    })
+  })
 })

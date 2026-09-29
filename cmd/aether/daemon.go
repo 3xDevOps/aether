@@ -31,7 +31,9 @@ func daemonCmd(args []string) error {
 // `daemon install` on fs and returns the bound Config.
 func daemonFlags(fs *flag.FlagSet) *syncd.Config {
 	cfg := &syncd.Config{}
-	fs.StringVar(&cfg.Server, "server", "", "aether-server SSH address, host:port (required)")
+	fs.StringVar(&cfg.Server, "server", "", "aether-server SSH address, host:port (required unless --server-id is set)")
+	fs.StringVar(&cfg.ServerID, "server-id", "", "server id of an edge link; pins the host key and authenticates with the device key from aether login")
+	fs.StringVar(&cfg.EdgeURL, "edge-url", "", "edge URL of an edge link, tried after --server when both are set")
 	fs.StringVar(&cfg.KeyPath, "key", "", "SSH private key file (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
 	fs.StringVar(&cfg.KnownHostsPath, "known-hosts", "", "known_hosts file for host key verification (default ~/.ssh/known_hosts)")
 	fs.StringVar(&cfg.User, "user", "aether", "SSH username")
@@ -59,7 +61,11 @@ func daemonRun(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	fmt.Fprintf(os.Stderr, "aether daemon: syncing %s with %s (remote %q)\n", cfg.RepoPath, cfg.Server, cfg.Remote)
+	server := cfg.Server
+	if cfg.ServerID != "" {
+		server = "server " + cfg.ServerID
+	}
+	fmt.Fprintf(os.Stderr, "aether daemon: syncing %s with %s (remote %q)\n", cfg.RepoPath, server, cfg.Remote)
 	err = d.Run(ctx)
 	if errors.Is(err, context.Canceled) {
 		return nil
@@ -73,8 +79,8 @@ func daemonInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if cfg.Server == "" {
-		return errors.New("daemon install: --server is required")
+	if cfg.Server == "" && cfg.ServerID == "" {
+		return errors.New("daemon install: --server or --server-id is required")
 	}
 	path, activate, err := localops.InstallDaemonUnit(*cfg)
 	if err != nil {

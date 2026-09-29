@@ -1,4 +1,15 @@
-import { CircleAlert, KeyRound, RefreshCw, ServerOff, ShieldOff, Unplug, WifiOff } from 'lucide-react'
+import {
+  CircleAlert,
+  CloudOff,
+  Hourglass,
+  KeyRound,
+  LogIn,
+  RefreshCw,
+  ServerOff,
+  ShieldOff,
+  Unplug,
+  WifiOff,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +22,8 @@ type ConnectionErrorProps = {
   kind: UnreachableKind | null
   dead: boolean
   error: string | null
+  /** The edge of the local gateway's link, when it runs through one. */
+  edge?: string
   onRetry: () => void
 }
 
@@ -38,7 +51,7 @@ function Cmd({ children }: { children: string }) {
  * never be described as one they can, which is why `gateway` is the desktop
  * origin only.
  */
-function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
+function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
   if (dead) {
     return {
       icon: KeyRound,
@@ -72,6 +85,93 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
       title: 'Cannot reach your server over the tailnet',
       description:
         'The dashboard comes from your server, and this phone got no answer from it. Check that Tailscale is connected here and that the server host is running, then retry.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'edge') {
+    return {
+      icon: CloudOff,
+      eyebrow: 'Edge unreachable',
+      title: 'Cannot reach the edge',
+      description:
+        'This computer reaches your server through an edge relay, and the edge did not answer, so nothing was asked of the server. The details below name the edge and the error. Check this computer can reach it, then retry.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'edge-server') {
+    return {
+      icon: ServerOff,
+      eyebrow: 'Server not on the edge',
+      title: 'Your server is not connected to the edge',
+      description: (
+        <>
+          The edge answered, and your server holds no connection to it: the server is stopped,
+          offline, or failing to reach the edge. On the server host,{' '}
+          <Cmd>sudo aether-server edge status</Cmd> shows why.
+        </>
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'edge-refused') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Refused by the edge',
+      title: 'The edge refused to connect this computer to your server',
+      description:
+        "The edge answered and refused the connection, so nothing was asked of the server. The details below carry the edge's reason.",
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'not-member') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Not a member',
+      title: 'You are not a member of this server',
+      description:
+        'The edge or the server no longer counts your account as a member: an admin removed it, or revoked its invitation. Ask an admin of the server to invite you again, then retry.',
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'signed-out') {
+    return {
+      icon: LogIn,
+      eyebrow: 'Signed out',
+      title: 'This computer is signed out of the edge',
+      description: (
+        <>
+          The edge holds no valid sign-in for this computer: it signed out, or its sign-in was
+          revoked on the edge&apos;s Devices page. Run{' '}
+          <Cmd>{edge ? `aether login --edge ${edge}` : 'aether login'}</Cmd>, then retry.
+        </>
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'device-revoked') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Device revoked',
+      title: 'The server revoked this device',
+      description:
+        "This computer's device key was revoked on the server, which now refuses it on every path. A member or admin of the server revoked it; the details below carry the server's words.",
+      action: null,
+    }
+  }
+
+  if (kind === 'device-pending') {
+    return {
+      icon: Hourglass,
+      eyebrow: 'Waiting for approval',
+      title: 'This computer is waiting for approval',
+      description:
+        "This server admits approved devices only, and has not approved this computer's device key: it is new, or it was registered while signing in was enough. From a device you already use, as an admin, or on the server, run the approve command in the details below, then retry.",
       action: 'Retry connection',
     }
   }
@@ -139,8 +239,8 @@ function copyFor({ kind, dead }: ConnectionErrorProps): ErrorCopy {
  * rather than sitting inside it: an empty sidebar and an empty board around
  * a toast tell the user nothing about what broke or what to do next.
  */
-export function ConnectionError({ kind, dead, error, onRetry }: ConnectionErrorProps) {
-  const content = copyFor({ kind, dead, error, onRetry })
+export function ConnectionError({ kind, dead, error, edge, onRetry }: ConnectionErrorProps) {
+  const content = copyFor({ kind, dead, error, edge, onRetry })
   const Icon = content.icon
 
   return (

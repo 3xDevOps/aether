@@ -694,7 +694,13 @@ Removal also repairs the selection and open route before any refresh awaits.
   reason. A fetch that got no answer at all is `gateway` only on the desktop
   origin, where that process can be restarted; on the server gateway it is
   `tailnet`, because the page came over the tailnet and there is no local
-  process to blame and no wifi advice to give. The capabilities probe records
+  process to blame and no wifi advice to give. A local gateway linked through
+  an edge classifies the client's own error text: `edge` (the edge did not
+  answer), `edge-server` (the server is not connected to it), `signed-out`
+  (no valid device token; gives the `aether login --edge` command),
+  `device-revoked` and `device-pending`. `src/store/edge-sync.test.ts` pins
+  the wording those classes match, so a change in `internal/edge/client` or
+  the sshd banners fails there. The capabilities probe records
   which gateway serves the page before hydration runs, so the first failure
   is classified too. The gateway's message appears in an initially open
   "Technical details" disclosure, and the page suppresses the toast that
@@ -2080,6 +2086,32 @@ Room tab count, and neither creates a second action inbox.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
   `server.info`, which is what fills the status bar's disk gauge.
 
+## Devices and invitations
+
+`src/routes/devices/` lists the computers members reach the server with
+through an edge, with each device key's fingerprint: the member's own, or
+every member's for an admin, and each device's status: `approved`,
+`pending`, `registered` (admitted by signing in under `edge-access
+account`) or `revoked`. It approves a pending or registered device only by
+the code typed in from that device, which no row shows: **Review** looks the
+code up with `member.device.lookup`, and a dialog shows the device, the
+account it signed in as, and the member and role approving admits it as,
+before **Approve** sends `member.device.approve` with that device's id. It
+revokes a device too, and shows every server refusal verbatim. It is its own view, not part of Settings, because
+Settings is local-gateway only and the tailnet server gateway serves the
+same methods; the sidebar and palette show it whenever the gateway serves
+`member.device.list`.
+
+The Members view carries an admin-only **Invitations** section
+(`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
+an email, a role, and revoke. Its button reads **Invite account**, so it is
+not confused with **Invite**, which mints one-time codes for SSH-key joins.
+A GitHub login invitation is sent with provider `github`. The section says
+what an invitation admits under each policy, because `server.info` does not
+report the policy: under `account` the first connection makes the account a
+member; under `approved-devices` its device waits until an admin approves
+it with its code.
+
 ## Manage workspaces
 
 `src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
@@ -2260,7 +2292,22 @@ here when `onboarded` is false. The server-hosted gateway has no local link
 state and opens at the board. Completing the final step or navigating
 elsewhere marks the UI onboarded and clears that wizard state.
 
-The Link step distinguishes no configured server, a server with no repository,
+The Link step first offers signing in to an edge
+(`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
+through the local gateway, which keeps the device token, shows the code
+while it polls `edge.status`, then links a server or claims a new one
+with the code `aether-server setup` printed. Signed in to more than one
+edge, it lists them and shows nothing to link until one is chosen; the
+server list, link by id and claim then pass that edge to the gateway, as
+`--edge` does on the command line. **Server id from your admin**
+links by an id typed in, which the edge cannot substitute. A server picked
+from the account's list opens a **Confirm server** panel with its id and
+the host key fingerprint `edge.hostkey` read, and links only on **Link and
+pin**, because that id comes from the edge. **Link by
+address** swaps the sign-in for the address form, for a tailnet or SSH
+server, and **Sign in instead** swaps it back; showing one at a time keeps
+the address field above a phone's soft keyboard. The Link step
+distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
 focus, so a separate `aether link` command appears without restarting the GUI.
 

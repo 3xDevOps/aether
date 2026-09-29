@@ -20,6 +20,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/adapter"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
@@ -94,6 +96,13 @@ type Config struct {
 	// TailnetRequireKey additionally requires pubkey verification on
 	// tailnet connections.
 	TailnetRequireKey bool
+	// EdgeURL is the edge the server enrolls with (docs/edge.md); empty
+	// keeps the server off every edge.
+	EdgeURL string
+	// EdgeAccess is the server's edge access policy; empty is
+	// PolicyApprovedDevices. The server enforces it and announces it to
+	// the edge for display only.
+	EdgeAccess edgeproto.AccessPolicy
 	// CoordinationDisabled turns the conflict coordination kill switch off.
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
@@ -152,6 +161,7 @@ type Server struct {
 	evidence *evidence.Service
 	adapters *adapter.Manager
 	ssh      *sshd.Server
+	edge     *edgeagent.Agent
 	web      *servergw.Gateway
 	tailnet  servergw.Tailnet
 	services []namedService
@@ -226,10 +236,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if err = os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("server: create data dir: %w", err)
 	}
-	if s.db, err = store.Open(filepath.Join(cfg.DataDir, "aether.db")); err != nil {
+	if s.db, err = store.Open(StorePath(cfg.DataDir)); err != nil {
 		return nil, err
 	}
-	if s.log, err = events.OpenSQLiteLog(filepath.Join(cfg.DataDir, "aether.db")); err != nil {
+	if s.log, err = events.OpenSQLiteLog(StorePath(cfg.DataDir)); err != nil {
 		return nil, err
 	}
 	if s.bus, err = events.NewInProc(ctx, s.log); err != nil {
@@ -361,7 +371,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus}
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
-		HostKeyPath:       filepath.Join(cfg.DataDir, "ssh", "host_ed25519_key"),
+		HostKeyPath:       HostKeyPath(cfg.DataDir),
 		Store:             s.db,
 		Bus:               s.bus,
 		Git:               lazyGit{s.git},
@@ -379,6 +389,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		AuthorizationMu:   authMu,
 		DeleteWorkspace:   workspaces.Delete,
 	}
+	sshCfg.EdgeAccess = cfg.EdgeAccess
 	if err = s.buildServices(Deps{
 		Config:     cfg,
 		DataDir:    cfg.DataDir,
@@ -399,6 +410,12 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
 		return nil, err
 	}
+	if cfg.EdgeURL != "" {
+		if s.edge, err = newEdgeAgent(cfg, s.ssh); err != nil {
+			return nil, err
+		}
+		s.ssh.SetEdgeOwner(s.edge)
+	}
 	if cfg.WebPort != 0 {
 		if cfg.WebPort < 0 || cfg.WebPort > 65535 {
 			return nil, fmt.Errorf("server: web-port %d is not a port", cfg.WebPort)
@@ -412,6 +429,24 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		s.tailnet = servergw.Tailnet{Node: node, Port: cfg.WebPort, Certs: tailscaled}
 	}
 	return s, nil
+}
+
+// StorePath is the server's database under dataDir.
+func StorePath(dataDir string) string { return filepath.Join(dataDir, "aether.db") }
+
+// HostKeyPath is where the server keeps its SSH host key under dataDir.
+// The key derives the server's id at an edge.
+func HostKeyPath(dataDir string) string {
+	return filepath.Join(dataDir, "ssh", "host_ed25519_key")
+}
+
+func newEdgeAgent(cfg Config, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
+	hostKey, err := sshd.LoadOrCreateHostKey(HostKeyPath(cfg.DataDir))
+	if err != nil {
+		return nil, err
+	}
+	return edgeagent.New(edgeagent.Config{EdgeURL: cfg.EdgeURL, DataDir: cfg.DataDir, HostKey: hostKey, SSH: sshSrv,
+		AccessPolicy: cfg.EdgeAccess})
 }
 
 // WebURL is the address the dashboard is served at, empty when the
@@ -467,6 +502,15 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 3)
 	var wg sync.WaitGroup
 	wg.Add(2)
+	if s.edge != nil {
+		// The agent never ends the server: it retries an unreachable
+		// edge until runCtx is done.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.edge.Run(runCtx)
+		}()
+	}
 	if s.web != nil {
 		wg.Add(1)
 		go func() {

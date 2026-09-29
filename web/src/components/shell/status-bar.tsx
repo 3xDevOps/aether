@@ -36,14 +36,22 @@ const connectionDot: Record<ConnectionState, string> = {
 
 // Which hop is down decides what an operator does next: a dead local
 // network needs wifi or a VPN back, a dead gateway origin needs its process
-// restarted, a phone off the tailnet needs Tailscale or the server host, and
-// a dead SSH hop needs the server or the tunnel looked at while the gateway
-// keeps retrying on its own.
+// restarted, a phone off the tailnet needs Tailscale or the server host, a
+// link through an edge needs whichever of the edge, the server's edge
+// connection, the sign-in or the device failed, and a dead SSH hop needs the
+// server or the tunnel looked at while the gateway keeps retrying on its own.
 const unreachableLabel: Record<UnreachableKind, string> = {
   network: 'this computer is offline - reconnect to wifi or your VPN',
   gateway: 'dashboard gateway is gone - restart aether gui',
   tailnet: 'no answer from your server - check Tailscale and the server host',
   server: 'server unreachable over SSH - check the server and network; retrying',
+  edge: 'edge unreachable - check this computer can reach it; retrying',
+  'edge-server': 'server not connected to the edge - check aether-server edge status',
+  'edge-refused': 'the edge refused the connection to this server',
+  'signed-out': 'signed out of the edge - run aether login',
+  'not-member': 'not a member of this server - ask an admin to invite you again',
+  'device-revoked': 'this device was revoked on the server',
+  'device-pending': 'this device is waiting for approval - approve its code from another device or on the server',
   refused: 'the gateway refused this device - it is not identified as a member',
   identity: 'the server cannot identify this device - check tailscaled on the server host',
 }

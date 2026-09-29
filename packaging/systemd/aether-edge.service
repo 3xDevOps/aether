@@ -1,0 +1,71 @@
+[Unit]
+Description=Aether edge (sign-in service and relay)
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/edge.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Options come from the environment file, never from this line, so that an
+# upgraded unit keeps the operator's settings. docs/edge.md lists them.
+ExecStart=/usr/local/bin/aether-edge serve
+EnvironmentFile=/etc/aether-edge/aether-edge.env
+
+# OAuth client secrets. systemd reads each file as root and hands the
+# service a private copy under %d, so /etc/aether-edge stays root-only.
+# A provider whose file is missing gets the SetCredential= value instead,
+# a single newline, which the edge reads as no secret: an edge offering
+# one provider needs only that provider's file and client id.
+SetCredential=github-client-secret:\n
+SetCredential=google-client-secret:\n
+LoadCredential=github-client-secret:/etc/aether-edge/github-client-secret
+LoadCredential=google-client-secret:/etc/aether-edge/google-client-secret
+Environment=AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE=%d/github-client-secret
+Environment=AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE=%d/google-client-secret
+
+User=aether-edge
+Group=aether-edge
+# Behind a reverse proxy the edge binds only loopback ports above 1024 and
+# needs no capability. Serving :443 itself takes CAP_NET_BIND_SERVICE from
+# a drop-in; docs/edge.md, "Without a reverse proxy", has it.
+AmbientCapabilities=
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+
+StateDirectory=aether-edge
+StateDirectoryMode=0700
+UMask=0077
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Every relayed connection holds at least two sockets, and one client
+# address may keep 1024 connections open.
+LimitNOFILE=1048576
+Restart=always
+RestartSec=5s
+# SIGTERM sends drain to every server, then closes within 10 seconds.
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

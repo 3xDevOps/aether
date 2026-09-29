@@ -98,6 +98,9 @@ func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, param
 	if err := s.requireAdmin(ctx, member, protocol.MethodMemberInvite); err != nil {
 		return nil, err
 	}
+	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberInvite, true); err != nil {
+		return nil, err
+	}
 	if s.cfg.InvitesDir == "" {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "invites are not configured"}
 	}
@@ -192,6 +195,8 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			}
 		}
 	}
+	s.closeMemberConns(id)
+	s.notifyDirectory()
 	if s.cfg.Homes != nil {
 		if err := s.cfg.Homes.Remove(id); err != nil {
 			slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)

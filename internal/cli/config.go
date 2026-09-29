@@ -23,6 +23,11 @@ type Config struct {
 	Key        string `json:"key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
+	// EdgeURL and ServerID link the server through an edge. With ServerID
+	// set, the host key must derive it on every path, Addr (when set) is
+	// dialed before the edge, and the device key authenticates.
+	EdgeURL  string `json:"edge_url,omitempty"`
+	ServerID string `json:"server_id,omitempty"`
 	// Links are the named server profiles saved by `aether link --name`.
 	// The top-level fields stay the default link, so config files written
 	// before this field existed parse and re-save unchanged.
@@ -51,6 +56,12 @@ type NamedLink struct {
 	AutoKey    bool   `json:"auto_key,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	KnownHosts string `json:"known_hosts,omitempty"`
+	// EdgeURL and ServerID are this profile's own and never inherited: a
+	// server id pins one server, so borrowing the default link's would
+	// refuse this profile's server, and an edge profile does not borrow
+	// the default link's address either.
+	EdgeURL  string `json:"edge_url,omitempty"`
+	ServerID string `json:"server_id,omitempty"`
 }
 
 // Named returns c with the named link's non-empty fields overlaid on the
@@ -81,6 +92,10 @@ func (c Config) Named(name string) (Config, bool) {
 		if l.KnownHosts != "" {
 			out.KnownHosts = l.KnownHosts
 		}
+		out.EdgeURL, out.ServerID = l.EdgeURL, l.ServerID
+		if l.ServerID != "" {
+			out.Addr = l.Addr
+		}
 		return out, true
 	}
 	return Config{}, false
@@ -100,6 +115,29 @@ func UpsertLink(cfg Config, l NamedLink) Config {
 	}
 	cfg.Links = append(links, l)
 	return cfg
+}
+
+// ByServerID returns the link, default or named, whose server id is id.
+func (c Config) ByServerID(id string) (Config, bool) {
+	if c.ServerID == id {
+		return c, true
+	}
+	for _, l := range c.Links {
+		if l.ServerID == id {
+			return c.Named(l.Name)
+		}
+	}
+	return Config{}, false
+}
+
+// GitHost is the host a git remote URL names for this link: the logical
+// edge host when the link has a server id, so git reaches it through
+// aether edge-ssh, and the address otherwise.
+func (c Config) GitHost() string {
+	if c.ServerID != "" {
+		return EdgeHost(c.ServerID)
+	}
+	return c.Addr
 }
 
 func (c Config) user() string {
@@ -138,6 +176,16 @@ func Path() (string, error) {
 	return filepath.Join(dir, "aether", "config.json"), nil
 }
 
+// Dir is the directory that holds config.json, the device key and the
+// device tokens.
+func Dir() (string, error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(path), nil
+}
+
 // ErrNotLinked reports that no local server link has been saved.
 var ErrNotLinked = errors.New("not linked; run aether link <addr>")
 
@@ -159,7 +207,7 @@ func Load() (Config, error) {
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return Config{}, fmt.Errorf("cli: parse config: %w", err)
 	}
-	if cfg.Addr == "" {
+	if cfg.Addr == "" && cfg.ServerID == "" {
 		return Config{}, fmt.Errorf("cli: config %s has no addr", path)
 	}
 	return cfg, nil

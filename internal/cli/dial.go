@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -31,7 +32,8 @@ type Conn struct {
 // Dial connects to cfg.Addr as cfg.User (default aether) with the key
 // ResolveAuth selects, verifying the host against known_hosts (TOFU on
 // first contact). A server that needs no key connects even when no key
-// was found; one that does gets an error saying what was tried.
+// was found; one that does gets an error saying what was tried. A link
+// with a server id goes through DialLinked instead.
 func Dial(cfg Config) (*Conn, error) {
 	return dial(cfg, cfg.user(), false)
 }
@@ -47,6 +49,13 @@ func DialInvite(cfg Config, code, display string) (*Conn, error) {
 }
 
 func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
+	if cfg.ServerID != "" {
+		client, err := DialLinked(context.Background(), cfg, user)
+		if err != nil {
+			return nil, err
+		}
+		return &Conn{client: client, cfg: cfg}, nil
+	}
 	if cfg.Addr == "" {
 		return nil, errors.New("cli: server address required")
 	}

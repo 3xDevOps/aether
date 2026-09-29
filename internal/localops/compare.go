@@ -210,12 +210,15 @@ func aheadBehind(repo, branch string) (int, int, error) {
 }
 
 // runRemoteGit runs one git command that dials the `aether` remote, under
-// the same discipline as the seeding push: the ten-minute bound, and
-// GIT_TERMINAL_PROMPT=0 because nothing here can answer git's own
-// credential prompt.
+// the same discipline as the seeding push: the ten-minute bound and
+// remoteEnv.
 func runRemoteGit(ctx context.Context, repo string, args ...string) (string, error) {
+	env, err := remoteEnv(repo)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
-	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(cmd.Environ(), env...)
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	output := string(out)

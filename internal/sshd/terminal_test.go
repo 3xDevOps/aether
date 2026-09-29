@@ -114,9 +114,10 @@ func TestTerminalHistoryRevalidatesOpenControlChannelMembershipBeforePTY(t *test
 		t.Fatalf("approved member PTY history calls = %d, want 1", history.calls)
 	}
 
-	if err := controlClient(t, e).Call(protocol.MethodMemberRemove,
-		protocol.MemberRemoveParams{MemberID: string(member.ID)}, nil); err != nil {
-		t.Fatalf("member.remove: %v", err)
+	// member.remove would close this connection outright; deleting the row
+	// underneath it exercises the per-request revalidation instead.
+	if err := e.store.DeleteMember(context.Background(), member.ID); err != nil {
+		t.Fatalf("delete member: %v", err)
 	}
 
 	var rpcErr *protocol.Error
