@@ -25,9 +25,11 @@ Environment=AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE=%d/google-client-secret
 
 User=aether-edge
 Group=aether-edge
-# :443 is the only privileged thing the edge does.
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Behind a reverse proxy the edge binds only loopback ports above 1024 and
+# needs no capability. Serving :443 itself takes CAP_NET_BIND_SERVICE from
+# a drop-in; docs/edge.md, "Without a reverse proxy", has it.
+AmbientCapabilities=
+CapabilityBoundingSet=
 NoNewPrivileges=yes
 
 StateDirectory=aether-edge

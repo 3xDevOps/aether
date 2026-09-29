@@ -16,9 +16,11 @@ type LinkOptions struct {
 	Name   string
 	Key    string
 	// EdgeURL and ServerID link a server through an edge; Addr is then
-	// optional.
+	// optional. Claim, a claim code, claims the server it names through
+	// EdgeURL and links it: ServerID is then the code's.
 	EdgeURL  string
 	ServerID string
+	Claim    string
 }
 
 // LinkResult is an unsaved link and its live server connection.
@@ -102,7 +104,7 @@ func linkConfig(cfg, prev Config, name string) Config {
 // live connection. The caller owns the connection and must close it or adopt it.
 // With a server id the link goes through DialLinked: no SSH key is
 // resolved or generated, and Addr, when set, is the direct address tried
-// before the edge.
+// before the edge. A claim goes through DialClaim.
 func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 	cfg := Config{Addr: normalizeAddr(opts.Addr), User: "aether", EdgeURL: opts.EdgeURL, ServerID: opts.ServerID}
 	var (
@@ -110,9 +112,15 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		keyGenerated string
 		err          error
 	)
-	if cfg.ServerID != "" {
+	switch {
+	case opts.Claim != "":
+		conn, err = DialClaim(cfg, opts.Claim)
+		if err == nil {
+			cfg.ServerID = conn.cfg.ServerID
+		}
+	case cfg.ServerID != "":
 		conn, err = Dial(cfg)
-	} else {
+	default:
 		conn, keyGenerated, err = linkDial(opts, prev, &cfg)
 	}
 	if err != nil {

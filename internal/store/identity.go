@@ -13,8 +13,8 @@ import (
 // IdentityStore holds what edge access adds to membership: the edge
 // identities bound to members, the devices members reach the server
 // through, and invitations naming edge accounts. Removing a member removes
-// its identities, its devices with their browser sessions, and the
-// invitations it created or is linked by.
+// its identities, its devices, and the invitations it created or is linked
+// by.
 type IdentityStore interface {
 	// GetMemberByIdentity returns the member bound to (provider, subject).
 	GetMemberByIdentity(ctx context.Context, provider, subject string) (*domain.Member, error)
@@ -41,36 +41,31 @@ type IdentityStore interface {
 	// invitation is then consumed, so it binds at most one identity.
 	AcceptInvitation(ctx context.Context, id domain.InvitationID, identity *domain.Identity, m *domain.Member, now time.Time) (*domain.Member, error)
 
-	// RegisterDevice records a new device of d.Member. A member's first
-	// device, or any device when requireApproval is false, is approved;
-	// a later one is pending with a fresh ApprovalCode.
-	RegisterDevice(ctx context.Context, d *domain.Device, requireApproval bool) error
+	// RemoveIdentity unbinds (provider, subject) from its member and
+	// deletes the devices registered through it, returning that member and
+	// those devices. The member, its role and its other credentials stay.
+	RemoveIdentity(ctx context.Context, provider, subject string) (domain.MemberID, []domain.DeviceID, error)
+
+	// RegisterDevice records a new device of d.Member through its identity
+	// d.Provider, d.Subject, with d.Status: approved, or awaiting approval
+	// with its ApprovalCode.
+	RegisterDevice(ctx context.Context, d *domain.Device) error
 	GetDevice(ctx context.Context, id domain.DeviceID) (*domain.Device, error)
 	GetDeviceByCredential(ctx context.Context, credential string) (*domain.Device, error)
-	// GetDeviceByApprovalCode finds the pending device with code, as a
-	// person typed it (any case, with or without the dash).
+	// GetDeviceByApprovalCode finds the device awaiting approval with
+	// code, as a person typed it (any case, with or without the dash). A
+	// code naming more than one such device is ErrConflict.
 	GetDeviceByApprovalCode(ctx context.Context, code string) (*domain.Device, error)
 	// ListDevices returns member's devices, or every device when member
 	// is empty, oldest first.
 	ListDevices(ctx context.Context, member domain.MemberID) ([]*domain.Device, error)
-	// ApproveDevice approves a pending device; ErrNotFound when it is not
-	// pending.
+	// ApproveDevice approves a device awaiting approval; ErrNotFound when
+	// it is approved or revoked.
 	ApproveDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID) error
 	// RevokeDevice revokes a device that is not revoked yet. A revoked
-	// device still counts as its member's device, and its browser
-	// sessions are refused with it.
+	// device still counts as its member's device.
 	RevokeDevice(ctx context.Context, id domain.DeviceID) error
 	TouchDevice(ctx context.Context, id domain.DeviceID, at time.Time) error
-
-	// CreateBrowserSession records a new session of the browser device
-	// s.Device.
-	CreateBrowserSession(ctx context.Context, s *domain.BrowserSession) error
-	GetBrowserSession(ctx context.Context, id domain.BrowserSessionID) (*domain.BrowserSession, error)
-	GetBrowserSessionByCredential(ctx context.Context, credential string) (*domain.BrowserSession, error)
-	// DeleteBrowserSession ends a session and leaves its device as it is.
-	DeleteBrowserSession(ctx context.Context, id domain.BrowserSessionID) error
-	// TouchBrowserSession records a use of the session and of its device.
-	TouchBrowserSession(ctx context.Context, id domain.BrowserSessionID, at time.Time) error
 }
 
 var _ IdentityStore = (*DB)(nil)
@@ -158,6 +153,48 @@ func (d *DB) ClaimMember(ctx context.Context, m *domain.Member, identity *domain
 		return fmt.Errorf("store: commit claim: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) RemoveIdentity(ctx context.Context, provider, subject string) (domain.MemberID, []domain.DeviceID, error) {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("store: begin remove identity: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var member domain.MemberID
+	err = tx.QueryRowContext(ctx,
+		`SELECT member_id FROM member_identities WHERE provider = ? AND subject = ?`, provider, subject).Scan(&member)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("store: remove identity: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM member_devices WHERE provider = ? AND subject = ?`, provider, subject)
+	if err != nil {
+		return "", nil, fmt.Errorf("store: remove identity: %w", err)
+	}
+	ids, err := collect(rows, func(row interface{ Scan(...any) error }) (*domain.DeviceID, error) {
+		var id domain.DeviceID
+		return &id, row.Scan(&id)
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	// The identity's devices go with it (ON DELETE CASCADE).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM member_identities WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
+		return "", nil, fmt.Errorf("store: remove identity: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", nil, fmt.Errorf("store: commit remove identity: %w", err)
+	}
+	devices := make([]domain.DeviceID, len(ids))
+	for i, id := range ids {
+		devices[i] = *id
+	}
+	return member, devices, nil
 }
 
 const invitationCols = `id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at`

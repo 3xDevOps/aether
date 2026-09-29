@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/coder/websocket"
 )
 
@@ -124,15 +123,271 @@ func TestUnclaimedServerIsNotRelayed(t *testing.T) {
 	e.dir.addMember(a.id, acct)
 	_, token := e.addDevice(t, acct, "dev-1")
 
-	// A server asserting its own owner stays unclaimed.
-	send(t, a.ws, edgeproto.Claimed{Owner: acct})
 	status, text := e.get(t, a.id, bearerHeader(token))
 	if status != http.StatusServiceUnavailable || text != string(edgeproto.RefusalNotConnected) {
-		t.Fatalf("connect to unclaimed server: %d %q", status, text)
+		t.Fatalf("ssh connection to an unclaimed server: %d %q", status, text)
 	}
-	if e.r.Online(a.id) {
-		t.Fatal("unclaimed server online after asserting an owner")
+	// A server asserting its own owner, with no claim connection behind
+	// it, is refused and stays unclaimed.
+	send(t, a.ws, edgeproto.Claimed{ConnID: edgeproto.NewConnID(), Owner: edgeproto.AccountPrincipal(acct)})
+	if err := a.closedWith(t); !strings.Contains(err.Error(), "ownership report refused: connection") {
+		t.Fatalf("self-asserted owner: %v", err)
 	}
+	if _, owned := e.dir.owner(a.id); owned || e.r.Online(a.id) {
+		t.Fatal("a server named its own owner")
+	}
+}
+
+func TestClaimConnection(t *testing.T) {
+	e := newEnv(t)
+	a := enroll(t, e, newSigner(t))
+	a.attach = true
+	go a.run()
+	acct := account("7")
+	dev, token := e.addDevice(t, acct, "dev-7")
+
+	client, server := e.connectPath(t, a, edgeproto.ClaimConnectPath(a.id), token)
+	open := next[edgeproto.Open](t, a)
+	g, err := edgeproto.VerifyGrant(a.ready.EdgeKey, open.Grant, edgeproto.GrantScope{
+		Issuer: e.origin, ServerID: a.id, ConnID: open.ConnID, Kind: edgeproto.KindClaim}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open.Kind != edgeproto.KindClaim || g.Account != acct || g.DeviceKey != dev.Key {
+		t.Fatalf("open %+v with grant %+v", open, g)
+	}
+	roundTrip(t, client, server, "claim connection")
+	if addrs := e.dir.claimAddrs; len(addrs) != 1 || !addrs[0].IsLoopback() {
+		t.Fatalf("claim admitted for addresses %v", addrs)
+	}
+
+	// The server accepts the code: it pushes its directory, then reports
+	// the claim. The directory waits for the claim to be recorded.
+	send(t, a.ws, edgeproto.Directory{Entries: []edgeproto.DirectoryEntry{
+		{Kind: edgeproto.EntryMember, Provider: acct.Provider, Subject: acct.Subject, Role: "admin"},
+	}})
+	send(t, a.ws, edgeproto.Claimed{ConnID: open.ConnID, Owner: edgeproto.AccountPrincipal(acct)})
+	eventually(t, "claim recorded", func() bool { return e.r.Online(a.id) })
+	if owner, ok := e.dir.owner(a.id); !ok || owner != edgeproto.AccountPrincipal(acct) {
+		t.Fatalf("owner %+v", owner)
+	}
+	eventually(t, "directory stored", func() bool {
+		e.dir.mu.Lock()
+		defer e.dir.mu.Unlock()
+		return len(e.dir.dirs[a.id]) == 1 && e.dir.policies[a.id] == edgeproto.PolicyAccount
+	})
+	e.dir.addMember(a.id, acct)
+	e.connect(t, a, token)
+
+	// A report is good once.
+	send(t, a.ws, edgeproto.Claimed{ConnID: open.ConnID, Owner: edgeproto.AccountPrincipal(acct)})
+	if err := a.closedWith(t); !strings.Contains(err.Error(), "ownership report refused") {
+		t.Fatalf("repeated report: %v", err)
+	}
+}
+
+// The server may report a claim before it pushes the directory that names
+// the claimant. The directory it pushed before the claim, stored once the
+// claim is recorded, does not end the claim connection.
+func TestClaimConnectionOutlivesAnOlderDirectory(t *testing.T) {
+	e := newEnv(t)
+	a := enroll(t, e, newSigner(t))
+	a.attach = true
+	go a.run()
+	acct := account("8")
+	_, token := e.addDevice(t, acct, "dev-8")
+	send(t, a.ws, edgeproto.Directory{})
+
+	client, server := e.connectPath(t, a, edgeproto.ClaimConnectPath(a.id), token)
+	open := next[edgeproto.Open](t, a)
+	send(t, a.ws, edgeproto.Claimed{ConnID: open.ConnID, Owner: edgeproto.AccountPrincipal(acct)})
+	eventually(t, "claim recorded", func() bool { return e.r.Online(a.id) })
+	eventually(t, "the older directory stored", func() bool {
+		e.dir.mu.Lock()
+		defer e.dir.mu.Unlock()
+		return e.dir.dirWrites == 1
+	})
+	roundTrip(t, client, server, "claim connection after the older directory was stored")
+}
+
+func TestClaimConnectionRefusals(t *testing.T) {
+	e := newEnv(t)
+	a := enroll(t, e, newSigner(t))
+	go a.run()
+	owned := claimedAgent(t, e)
+	_, token := e.addDevice(t, account("7"), "dev-7")
+	offline := edgeproto.ServerID(newSigner(t).PublicKey())
+
+	for _, tt := range []struct {
+		name     string
+		serverID string
+		header   http.Header
+		refusal  error
+		want     edgeproto.Refusal
+	}{
+		{"not signed in", a.id, http.Header{}, nil, edgeproto.RefusalTokenRequired},
+		{"revoked token", a.id, bearerHeader(edgeproto.NewToken()), nil, edgeproto.RefusalTokenRevoked},
+		{"server has an owner", owned.id, bearerHeader(token), nil, edgeproto.RefusalClaimed},
+		{"over a claim limit", a.id, bearerHeader(token), edgeproto.RefusalTooMany, edgeproto.RefusalTooMany},
+		{"server not connected", offline, bearerHeader(token), nil, edgeproto.RefusalNotConnected},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e.dir.mu.Lock()
+			e.dir.claimRefusal = tt.refusal
+			e.dir.mu.Unlock()
+			status, text := e.getPath(t, edgeproto.ClaimConnectPath(tt.serverID), tt.header)
+			if status != tt.want.Status() || text != string(tt.want) {
+				t.Fatalf("got %d %q, want %d %q", status, text, tt.want.Status(), tt.want)
+			}
+		})
+	}
+	select {
+	case m := <-a.msgs:
+		t.Fatalf("the server received %T for a refused claim", m)
+	default:
+	}
+}
+
+// claimOpen opens a claim connection to a for acct and returns its open.
+func claimOpen(t *testing.T, e *env, a *agent, acct edgeproto.Account) edgeproto.Open {
+	t.Helper()
+	_, token := e.addDevice(t, acct, "dev-"+acct.Subject)
+	e.connectPath(t, a, edgeproto.ClaimConnectPath(a.id), token)
+	return next[edgeproto.Open](t, a)
+}
+
+func TestClaimReportNeedsTheServersOwnClaimConnection(t *testing.T) {
+	e := newEnv(t)
+	a := enroll(t, e, newSigner(t))
+	a.attach = true
+	go a.run()
+	b := enroll(t, e, newSigner(t))
+	b.attach = true
+	go b.run()
+	claimant := account("7")
+	open := claimOpen(t, e, a, claimant)
+
+	// b reports a's claim connection.
+	send(t, b.ws, edgeproto.Claimed{ConnID: open.ConnID, Owner: edgeproto.AccountPrincipal(claimant)})
+	if err := b.closedWith(t); !strings.Contains(err.Error(), "is not to this server") {
+		t.Fatalf("report of another server's claim: %v", err)
+	}
+	// a names an owner other than the connection's account.
+	send(t, a.ws, edgeproto.Claimed{ConnID: open.ConnID, Owner: edgeproto.AccountPrincipal(account("8"))})
+	if err := a.closedWith(t); !strings.Contains(err.Error(), "is not the account connection") {
+		t.Fatalf("report naming another owner: %v", err)
+	}
+	for _, id := range []string{a.id, b.id} {
+		if _, owned := e.dir.owner(id); owned {
+			t.Fatalf("server %s owned after refused reports", id)
+		}
+	}
+}
+
+func TestClaimReportNotRecorded(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"refused", edgeproto.RefusalAccountBlocked, "ownership report refused: " + string(edgeproto.RefusalAccountBlocked)},
+		{"failed", errors.New("disk I/O error at /var/lib/aether-edge/edge.db"), "ownership report refused: internal error"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			signer := newSigner(t)
+			a := enroll(t, e, signer)
+			a.attach = true
+			go a.run()
+			acct := account("7")
+			open := claimOpen(t, e, a, acct)
+			e.dir.mu.Lock()
+			e.dir.recordErr = tt.err
+			e.dir.mu.Unlock()
+			send(t, a.ws, edgeproto.Claimed{ConnID: open.ConnID, Owner: edgeproto.AccountPrincipal(acct)})
+			if err := a.closedWith(t); !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("closed with %v, want %q", err, tt.want)
+			}
+			if again := enroll(t, e, signer); again.ready.State != edgeproto.StateUnclaimed || e.r.Online(a.id) {
+				t.Fatalf("server told %q after an unrecorded claim", again.ready.State)
+			}
+		})
+	}
+}
+
+func TestOwnershipReports(t *testing.T) {
+	e := newEnv(t)
+	a := claimedAgent(t, e)
+	heir := edgeproto.Principal{Type: edgeproto.PrincipalAccount, Provider: edgeproto.ProviderGoogle, Subject: "9"}
+	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
+	eventually(t, "transfer recorded", func() bool { p, ok := e.dir.owner(a.id); return ok && p == heir })
+	send(t, a.ws, edgeproto.Ownerless{})
+	eventually(t, "owner dropped", func() bool { _, ok := e.dir.owner(a.id); return !ok })
+	if !e.r.Online(a.id) {
+		t.Fatal("an ownerless server stopped relaying for its members")
+	}
+
+	e.dir.mu.Lock()
+	e.dir.recordErr = edgeproto.Refusal("github:404 has no account at this edge")
+	e.dir.mu.Unlock()
+	send(t, a.ws, edgeproto.OwnerTransferred{Owner: heir})
+	if err := a.closedWith(t); !strings.Contains(err.Error(), "ownership report refused: github:404 has no account") {
+		t.Fatalf("transfer to an unknown account: %v", err)
+	}
+
+	u := enroll(t, e, newSigner(t))
+	go u.run()
+	send(t, u.ws, edgeproto.Ownerless{})
+	send(t, u.ws, edgeproto.OwnerTransferred{Owner: heir})
+	if err := u.closedWith(t); !strings.Contains(err.Error(), "never claimed at this edge") {
+		t.Fatalf("transfer by an unclaimed server: %v", err)
+	}
+	if _, ok := e.dir.owner(u.id); ok {
+		t.Fatal("an unclaimed server recorded an owner")
+	}
+}
+
+func TestAccountDeletionsAreDelivered(t *testing.T) {
+	e := newEnv(t)
+	signer := newSigner(t)
+	id := edgeproto.ServerID(signer.PublicKey())
+	gone := account("1")
+	deleted := edgeproto.AccountDeleted{Provider: gone.Provider, Subject: gone.Subject}
+	e.dir.mu.Lock()
+	e.dir.owners[id] = true
+	e.dir.pending[id] = []edgeproto.AccountDeleted{deleted}
+	e.dir.mu.Unlock()
+
+	// Owed while the server was offline: sent when it enrolls.
+	a := enroll(t, e, signer)
+	a.attach = true
+	go a.run()
+	if got := next[edgeproto.AccountDeleted](t, a); got != deleted {
+		t.Fatalf("delivered %+v", got)
+	}
+	eventually(t, "delivered deletion forgotten", func() bool {
+		owed, _ := e.dir.PendingDeletions(t.Context(), id)
+		return len(owed) == 0
+	})
+
+	// Deleted while it is online: sent at once, and the account's
+	// connections close.
+	stays := account("2")
+	e.dir.addMember(id, gone)
+	e.dir.addMember(id, stays)
+	_, goneToken := e.addDevice(t, gone, "gone-laptop")
+	_, staysToken := e.addDevice(t, stays, "stays-laptop")
+	goneConn, _ := e.connect(t, a, goneToken)
+	staysConn, staysServer := e.connect(t, a, staysToken)
+	e.dir.mu.Lock()
+	e.dir.pending[id] = []edgeproto.AccountDeleted{deleted}
+	e.dir.mu.Unlock()
+	e.r.AccountDeleted(gone, []string{id, edgeproto.ServerID(newSigner(t).PublicKey())})
+	expectClosed(t, goneConn)
+	if got := next[edgeproto.AccountDeleted](t, a); got != deleted {
+		t.Fatalf("delivered %+v", got)
+	}
+	roundTrip(t, staysConn, staysServer, "other accounts stay connected")
 }
 
 func TestUnclaimedRegistrationsPerAddress(t *testing.T) {
@@ -266,186 +521,6 @@ func TestIdleControlChannelCloses(t *testing.T) {
 	eventually(t, "registration dropped", func() bool { return e.r.Metrics().UnclaimedServers == 0 })
 }
 
-func TestClaim(t *testing.T) {
-	e := newEnv(t)
-	a := enroll(t, e, newSigner(t))
-	go a.run()
-	acct := account("7")
-	dev, _ := e.addDevice(t, acct, "dev-7")
-	code, err := edgeproto.NewClaimCode(a.id)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	answer := func(errText string) {
-		m := next[edgeproto.Claim](t, a)
-		g, verr := edgeproto.VerifyGrant(a.ready.EdgeKey, m.Grant, edgeproto.GrantScope{ServerID: a.id, ConnID: m.ID, Kind: edgeproto.KindClaim}, time.Now())
-		if verr != nil {
-			t.Error(verr)
-		}
-		if g.Account != acct || g.DeviceKey != dev.Key || m.Code != code {
-			t.Errorf("claim carries %+v code %q", g, m.Code)
-		}
-		if werr := writeControl(t.Context(), a.ws, edgeproto.ClaimResult{ID: m.ID, Error: errText}); werr != nil {
-			t.Error(werr)
-		}
-	}
-
-	go answer(string(edgeproto.RefusalClaimWrong))
-	_, _, err = e.r.Claim(t.Context(), strings.ToUpper(code), acct, dev, e.record)
-	var ref edgeproto.Refusal
-	if !errors.As(err, &ref) || ref != edgeproto.RefusalClaimWrong || ref.Status() != http.StatusForbidden {
-		t.Fatalf("wrong code: %v", err)
-	}
-
-	go answer("")
-	id, name, err := e.r.Claim(t.Context(), code, acct, dev, e.record)
-	if err != nil || id != a.id || name != "devbox" {
-		t.Fatalf("claim: %q %q %v", id, name, err)
-	}
-	if !e.r.Online(a.id) {
-		t.Fatal("claimed server is not online")
-	}
-	if _, _, err := e.r.Claim(t.Context(), code, acct, dev, e.record); !errors.Is(err, edgeproto.RefusalClaimed) {
-		t.Fatalf("second claim: %v", err)
-	}
-}
-
-func TestClaimGoesOnlyToTheServerItNames(t *testing.T) {
-	e := newEnv(t)
-	a := enroll(t, e, newSigner(t))
-	go a.run()
-	// The code names a server that is not connected, and a's id shares
-	// all but its last character, as a host key ground to collect that
-	// server's claim code would.
-	named := a.id[:edgeproto.ServerIDLength-1] + "a"
-	if named == a.id {
-		named = a.id[:edgeproto.ServerIDLength-1] + "b"
-	}
-	code, err := edgeproto.NewClaimCode(named)
-	if err != nil {
-		t.Fatal(err)
-	}
-	acct := account("7")
-	dev, _ := e.addDevice(t, acct, "dev-7")
-	if _, _, err := e.r.Claim(t.Context(), code, acct, dev, e.record); !errors.Is(err, edgeproto.RefusalNotConnected) {
-		t.Fatalf("claim for a server that is not connected: %v, want %q", err, edgeproto.RefusalNotConnected)
-	}
-}
-
-func TestClaimNotAnswered(t *testing.T) {
-	e := newEnv(t)
-	e.r.attachDeadline = 100 * time.Millisecond
-	a := enroll(t, e, newSigner(t))
-	code, err := edgeproto.NewClaimCode(a.id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dev := edgeproto.Device{ID: "browser-1", Label: "browser"}
-	_, _, err = e.r.Claim(t.Context(), code, account("1"), dev, e.record)
-	var unsettled *ClaimUnsettledError
-	if !errors.As(err, &unsettled) || !strings.Contains(err.Error(), "did not answer") {
-		t.Fatalf("unanswered claim: %v", err)
-	}
-	// The server may still accept; it must reconnect to learn it is
-	// unclaimed.
-	if err = waitClosed(t, a.ws); !strings.Contains(err.Error(), errClaimUnsettled.Error()) {
-		t.Fatalf("control channel after an unanswered claim: %v", err)
-	}
-	other, err := edgeproto.NewClaimCode(edgeproto.ServerID(newSigner(t).PublicKey()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = e.r.Claim(t.Context(), other, account("1"), dev, e.record); !errors.Is(err, edgeproto.RefusalNotConnected) {
-		t.Fatalf("claim for a server that is not connected: %v", err)
-	}
-}
-
-// answerClaim plays the server accepting the next claim a receives.
-func answerClaim(t *testing.T, a *agent) {
-	m := next[edgeproto.Claim](t, a)
-	if err := writeControl(t.Context(), a.ws, edgeproto.ClaimResult{ID: m.ID}); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestClaimNotRecorded(t *testing.T) {
-	e := newEnv(t)
-	signer := newSigner(t)
-	a := enroll(t, e, signer)
-	go a.run()
-	acct := account("7")
-	dev, _ := e.addDevice(t, acct, "dev-7")
-	code, err := edgeproto.NewClaimCode(a.id)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	go answerClaim(t, a)
-	failing := func(context.Context, string, string) error { return errors.New("disk I/O error") }
-	_, _, err = e.r.Claim(t.Context(), code, acct, dev, failing)
-	var unsettled *ClaimUnsettledError
-	if !errors.As(err, &unsettled) || unsettled.ServerID != a.id ||
-		!strings.Contains(err.Error(), "could not record you as its owner: disk I/O error") ||
-		!strings.Contains(err.Error(), "aether-server edge claim-code") {
-		t.Fatalf("claim the edge could not record: %v", err)
-	}
-	if e.r.Online(a.id) {
-		t.Fatal("server reported claimed with no owner recorded")
-	}
-	// The server accepted: it holds an owner the edge does not. The
-	// relay disconnects it so that it reconnects, reads that it is
-	// unclaimed, and drops that owner.
-	eventually(t, "server disconnected", func() bool { return e.r.Metrics().UnclaimedServers == 0 })
-
-	again := enroll(t, e, signer)
-	if again.ready.State != edgeproto.StateUnclaimed {
-		t.Fatalf("reconnected server told %q, want unclaimed", again.ready.State)
-	}
-	go again.run()
-	fresh, err := edgeproto.NewClaimCode(a.id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go answerClaim(t, again)
-	if id, _, err := e.r.Claim(t.Context(), fresh, acct, dev, e.record); err != nil || id != a.id {
-		t.Fatalf("claim with a fresh code: %q %v", id, err)
-	}
-	if !e.r.Online(a.id) || !e.owned(a.id) {
-		t.Fatal("second claim not recorded")
-	}
-}
-
-func TestClaimRecordedAfterReconnect(t *testing.T) {
-	e := newEnv(t)
-	signer := newSigner(t)
-	a := enroll(t, e, signer)
-	go a.run()
-	acct := account("7")
-	dev, _ := e.addDevice(t, acct, "dev-7")
-	code, err := edgeproto.NewClaimCode(a.id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go answerClaim(t, a)
-	// The server reconnects between accepting and the edge recording
-	// the owner, so its new registration was told it is unclaimed.
-	var between *agent
-	record := func(ctx context.Context, id, name string) error {
-		between = enroll(t, e, signer)
-		return e.record(ctx, id, name)
-	}
-	if _, _, err := e.r.Claim(t.Context(), code, acct, dev, record); err != nil {
-		t.Fatal(err)
-	}
-	if err := waitClosed(t, between.ws); !strings.Contains(err.Error(), errClaimRecorded.Error()) {
-		t.Fatalf("registration enrolled before the owner was recorded: %v", err)
-	}
-	if after := enroll(t, e, signer); after.ready.State != edgeproto.StateClaimed {
-		t.Fatalf("reconnected server told %q, want claimed", after.ready.State)
-	}
-}
-
 func TestBlockedServerCannotEnroll(t *testing.T) {
 	e := newEnv(t)
 	signer := newSigner(t)
@@ -457,25 +532,6 @@ func TestBlockedServerCannotEnroll(t *testing.T) {
 	send(t, ws, helloFor(t, signer, e.origin, c.Nonce))
 	if err := waitClosed(t, ws); !strings.Contains(err.Error(), string(edgeproto.RefusalServerBlocked)) {
 		t.Fatalf("blocked server enrolled: %v", err)
-	}
-}
-
-func TestWebRedeem(t *testing.T) {
-	e := newEnv(t)
-	a := claimedAgent(t, e)
-	code := edgeproto.NewToken()
-	e.dir.mu.Lock()
-	e.dir.webCodes[a.id+" "+code] = "signed-web-grant"
-	e.dir.mu.Unlock()
-
-	id := edgeproto.NewConnID()
-	send(t, a.ws, edgeproto.WebRedeem{ID: id, Code: code, Verifier: edgeproto.NewVerifier()})
-	if got := next[edgeproto.WebRedeemResult](t, a); got.ID != id || got.Grant != "signed-web-grant" {
-		t.Fatalf("redeem: %+v", got)
-	}
-	send(t, a.ws, edgeproto.WebRedeem{ID: id, Code: edgeproto.NewToken(), Verifier: edgeproto.NewVerifier()})
-	if got := next[edgeproto.WebRedeemResult](t, a); got.Error != "web sign-in code is not valid" {
-		t.Fatalf("unknown code: %+v", got)
 	}
 }
 

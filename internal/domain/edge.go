@@ -17,56 +17,45 @@ type Identity struct {
 // DeviceID identifies a Device.
 type DeviceID string
 
-// DeviceKind is how a device authenticates to the server.
-type DeviceKind string
-
-const (
-	// DeviceSSH is a client install; its credential is its device key as
-	// an authorized_keys line.
-	DeviceSSH DeviceKind = "ssh"
-	// DeviceBrowser is one browser; its credential is the hash of the
-	// token in the browser's device cookie, which outlives sign-out.
-	DeviceBrowser DeviceKind = "browser"
-)
-
-// DeviceStatus is where a device stands in approval.
+// DeviceStatus is where a device stands in approval. The values are the
+// edge protocol's device statuses.
 type DeviceStatus string
 
 const (
-	DevicePending  DeviceStatus = "pending"
-	DeviceApproved DeviceStatus = "approved"
-	DeviceRevoked  DeviceStatus = "revoked"
+	// DeviceRegistered is a device admitted under account access on first
+	// connection. No person approved it, so under approved-devices access
+	// it is refused like a pending one.
+	DeviceRegistered DeviceStatus = "registered"
+	DevicePending    DeviceStatus = "pending"
+	DeviceApproved   DeviceStatus = "approved"
+	DeviceRevoked    DeviceStatus = "revoked"
 )
 
-// Device is one credential a member reaches the server through an edge
-// with. ApprovalCode is set only while the device is pending.
+// AwaitsApproval reports whether a person may still approve a device with
+// status s.
+func (s DeviceStatus) AwaitsApproval() bool {
+	return s == DevicePending || s == DeviceRegistered
+}
+
+// Device is one client install a member reaches the server through an
+// edge with. Credential is its device key as an authorized_keys line.
+// Provider and Subject name the member's edge identity the device was
+// registered through; only grants naming that identity may use it.
+// ApprovalCode is set only while the device awaits approval.
 type Device struct {
 	ID           DeviceID
 	Member       MemberID
-	Kind         DeviceKind
+	Provider     string
+	Subject      string
 	Credential   string
 	Label        string
 	Status       DeviceStatus
 	ApprovalCode string
 	CreatedAt    time.Time
 	LastSeenAt   *time.Time
-	// ApprovedBy is the member who approved a device that needed approval;
-	// empty for a member's first device.
+	// ApprovedBy is the member who approved the device; empty when the
+	// machine's administrator did, by a claim code or on the console.
 	ApprovedBy MemberID
-}
-
-// BrowserSessionID identifies a BrowserSession.
-type BrowserSessionID string
-
-// BrowserSession is one sign-in of a browser device. Signing out ends the
-// session and keeps the device with its approval. Credential is the hash
-// of the session token.
-type BrowserSession struct {
-	ID         BrowserSessionID
-	Device     DeviceID
-	Credential string
-	CreatedAt  time.Time
-	LastSeenAt *time.Time
 }
 
 // InvitationID identifies an Invitation.

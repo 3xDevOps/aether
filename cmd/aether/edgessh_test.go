@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,12 +16,35 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/edgeclient"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 const testServerID = "wqc4lsjvzdzrwq3k5dabdtajwj"
+
+func testAccount() edgeproto.AccountInfo {
+	return edgeproto.AccountInfo{
+		ID:      edgeproto.NewAccountID(),
+		Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+	}
+}
+
+// serveEdgeInfo answers the edge's metadata on mux, naming origin() as
+// the sign-in origin: the edge serves both from one process.
+func serveEdgeInfo(t *testing.T, mux *http.ServeMux, origin func() string) {
+	t.Helper()
+	key, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux.HandleFunc("GET "+edgeproto.PathEdgeInfo, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(edgeproto.EdgeInfo{
+			SigninOrigin: origin(), Key: key, Fingerprint: edgeproto.EdgeKeyFingerprint(key),
+			Version: edgeproto.Version, MinVersion: edgeproto.MinVersion,
+		})
+	})
+}
 
 // stubSystemSSH records the arguments edge-ssh hands to the system ssh.
 func stubSystemSSH(t *testing.T) *[][]string {
@@ -102,6 +127,7 @@ func TestLinkResolvesOnlyServerIDsOnTheEdge(t *testing.T) {
 	mux := http.NewServeMux()
 	edge := httptest.NewServer(mux)
 	t.Cleanup(edge.Close)
+	serveEdgeInfo(t, mux, func() string { return edge.URL })
 	var key string
 	mux.HandleFunc("POST "+edgeproto.PathDeviceStart, func(w http.ResponseWriter, r *http.Request) {
 		var req edgeproto.DeviceStartRequest
@@ -115,7 +141,7 @@ func TestLinkResolvesOnlyServerIDsOnTheEdge(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(edgeproto.DeviceTokenResponse{
 			Token:   edgeproto.NewToken(),
 			Device:  edgeproto.Device{ID: "dev-1", Label: "ci", Key: key},
-			Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+			Account: testAccount(),
 		})
 	})
 	// A stranger's server, named like the person's tailnet host, that
@@ -139,7 +165,16 @@ func TestLinkResolvesOnlyServerIDsOnTheEdge(t *testing.T) {
 	if err != nil || got != want {
 		t.Fatalf("edgeLinkOptions(id) = %+v, %v; want %+v", got, err, want)
 	}
+	code := testServerID + "-abcdefghijklmnop"
+	got, err = edgeLinkOptions(linkOptions{claim: code, direct: "devbox"})
+	want = cli.LinkOptions{Addr: "devbox", EdgeURL: edge.URL, Claim: code}
+	if err != nil || got != want {
+		t.Fatalf("edgeLinkOptions(claim) = %+v, %v; want %+v", got, err, want)
+	}
 	edge.Close()
+	if _, err := edgeLinkOptions(linkOptions{claim: "not-a-code"}); err == nil || !strings.Contains(err.Error(), "link --claim") {
+		t.Fatalf("edgeLinkOptions with a malformed code = %v, want it refused before the edge", err)
+	}
 	if got, err := edgeLinkOptions(linkOptions{addr: "devbox"}); err != nil || got != (cli.LinkOptions{}) {
 		t.Fatalf("edgeLinkOptions(devbox) with the edge down = %+v, %v; want the SSH address", got, err)
 	}
@@ -156,6 +191,7 @@ func TestLoginNeverPrintsTheToken(t *testing.T) {
 	mux := http.NewServeMux()
 	edge := httptest.NewServer(mux)
 	t.Cleanup(edge.Close)
+	serveEdgeInfo(t, mux, func() string { return edge.URL })
 	var key string
 	mux.HandleFunc("POST "+edgeproto.PathDeviceStart, func(w http.ResponseWriter, r *http.Request) {
 		var req edgeproto.DeviceStartRequest
@@ -169,7 +205,7 @@ func TestLoginNeverPrintsTheToken(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(edgeproto.DeviceTokenResponse{
 			Token:   token,
 			Device:  edgeproto.Device{ID: "dev-1", Label: "ci", Key: key},
-			Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+			Account: testAccount(),
 		})
 	})
 	mux.HandleFunc("GET "+edgeproto.PathServers, func(w http.ResponseWriter, r *http.Request) {
@@ -178,8 +214,9 @@ func TestLoginNeverPrintsTheToken(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(edgeproto.ErrorBody{Error: string(edgeproto.RefusalTokenRevoked)})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(edgeproto.ServersResponse{ServerDomain: "servers.example.test", Servers: []edgeproto.ServerInfo{
+		_ = json.NewEncoder(w).Encode(edgeproto.ServersResponse{Servers: []edgeproto.ServerInfo{
 			{ID: testServerID, Name: "prod", Online: true, Role: "admin"},
+			{ID: testServerID, Name: "solo", Online: true, Role: "admin", AccessPolicy: edgeproto.PolicyAccount},
 		}})
 	})
 
@@ -187,17 +224,24 @@ func TestLoginNeverPrintsTheToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "WXYZ-1234") || !strings.Contains(out, edge.URL+"/device") || !strings.Contains(out, "octo") {
-		t.Fatalf("login output %q lacks the code, the address or the account", out)
+	for _, want := range []string{"WXYZ-1234", edge.URL + "/device", "octo", "does not expire and is not refreshed"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("login output %q lacks %q", out, want)
+		}
 	}
 	// With one edge signed in, later commands need no --edge.
 	listed, err := captureStdout(t, func() error { return runServers(nil) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(listed, testServerID) || !strings.Contains(listed, "prod") || !strings.Contains(listed, "yes") ||
-		!strings.Contains(listed, "https://"+testServerID+".servers.example.test/") {
-		t.Fatalf("servers output %q", listed)
+	for _, want := range []string{
+		testServerID, "prod", "yes", "self-hosted",
+		"approved-devices: a new device waits for approval", "account: signing in is enough",
+		"aether link <id>", "aether link --from-edge <id>",
+	} {
+		if !strings.Contains(listed, want) {
+			t.Fatalf("servers output %q lacks %q", listed, want)
+		}
 	}
 	if strings.Contains(out+listed, token) {
 		t.Fatal("a command printed the device token")

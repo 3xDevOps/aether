@@ -17,9 +17,6 @@ import type { SliceCreator } from '@/store/slice'
  * only gateway the user can restart.
  * `tailnet`: the same silence on a phone, where the server itself serves the
  * page over the tailnet, so the hop that died is the tailnet or the host.
- * `relay`: the same silence where the server serves the page through an
- * edge, so either the server is not connected to the edge or the edge is
- * down; the browser cannot tell which.
  * `server`: the gateway answers but its SSH backend cannot reach
  * aether-server (it reports 503 "server unreachable: ..."). The next seven
  * are that failure on a link through an edge, told apart by the client's
@@ -32,7 +29,6 @@ export type UnreachableKind =
   | 'network'
   | 'gateway'
   | 'tailnet'
-  | 'relay'
   | 'server'
   | 'edge'
   | 'edge-server'
@@ -43,12 +39,6 @@ export type UnreachableKind =
   | 'device-pending'
   | 'refused'
   | 'identity'
-
-/** Why the edge gateway serves this browser nothing yet: it has no session,
- * or it is a device waiting for approval under this code. */
-export type EdgeAccess =
-  | { state: 'signed-out' }
-  | { state: 'pending'; approvalCode: string }
 
 /** The order the phases of one update run in. A terminal phase - failed
  * or cancelled - is not in it: those always win. */
@@ -112,8 +102,6 @@ export interface ServerSlice {
   streamDead: boolean
   /** Which hop failed on the last fetch, or null when reachable. */
   unreachable: UnreachableKind | null
-  /** Set while the edge gateway refuses this browser; null otherwise. */
-  edgeAccess: EdgeAccess | null
   /** The last server.update_status answer; null until the update banner
    * host reads it, and on a server too old to serve the method. */
   serverUpdate: ServerUpdateStatus | null
@@ -136,7 +124,6 @@ export interface ServerSlice {
   setHydrated: (hydrated: boolean, error?: string | null) => void
   setStreamDead: () => void
   setUnreachable: (kind: UnreachableKind | null) => void
-  setEdgeAccess: (access: EdgeAccess | null) => void
   setServerUpdate: (status: ServerUpdateStatus) => void
   /** Records a failed status read, keeping the last good answer. */
   setServerUpdateFailed: (detail: string) => void
@@ -155,7 +142,6 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       hydrationError: null,
       streamDead: false,
       unreachable: null,
-      edgeAccess: null,
     })
   return {
     info: null,
@@ -169,7 +155,6 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     hydrationError: null,
     streamDead: false,
     unreachable: null,
-    edgeAccess: null,
     serverUpdate: null,
     serverUpdateError: null,
     serverUpdateProgress: null,
@@ -188,7 +173,6 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       set({ hydrated, hydrationError: error }),
     setStreamDead: () => set({ streamDead: true }),
     setUnreachable: (unreachable) => set({ unreachable }),
-    setEdgeAccess: (edgeAccess) => set({ edgeAccess }),
     setServerUpdate: (serverUpdate) =>
       set((s) => ({
         serverUpdate,

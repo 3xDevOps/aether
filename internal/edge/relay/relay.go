@@ -1,7 +1,6 @@
 // Package relay is the edge's relay. It enrolls servers over their control
-// channel, splices client SSH connections and browser TLS connections to
-// them without decrypting either, and routes the public TLS listener by
-// SNI. docs/edge.md describes the edge; internal/edgeproto holds the wire
+// channel and splices client SSH connections to them without decrypting
+// them. docs/edge.md describes the edge; internal/edge/proto holds the wire
 // contract.
 package relay
 
@@ -13,13 +12,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/coder/websocket"
 )
 
@@ -30,26 +27,40 @@ type Directory interface {
 	// Authenticate returns the account and device a device token belongs
 	// to, or edgeproto.RefusalTokenRevoked for a token it does not hold.
 	Authenticate(ctx context.Context, token string) (edgeproto.Account, edgeproto.Device, error)
-	// Admit returns nil when account may connect to serverID,
-	// edgeproto.RefusalUnknownServer when serverID has no owner, and
-	// edgeproto.RefusalNotMember otherwise.
+	// Admit returns nil when account may open an ssh connection to
+	// serverID, edgeproto.RefusalUnknownServer when serverID is not
+	// claimed, and edgeproto.RefusalNotMember otherwise.
 	Admit(ctx context.Context, serverID string, account edgeproto.Account) error
-	// Enroll reports whether serverID has an owner, and records name,
-	// the name its hello announced, for a server that has one. It returns
+	// AdmitClaim returns nil when account, connecting from addr, may open
+	// a claim connection to serverID: edgeproto.RefusalTooMany past a
+	// limit per account, per address or per server, and
+	// edgeproto.RefusalClaimed when serverID has an owner.
+	AdmitClaim(ctx context.Context, serverID string, account edgeproto.Account, addr netip.Addr) error
+	// Enroll reports whether serverID is claimed, and records name and
+	// policy, from its hello, for a server that is. It returns
 	// edgeproto.RefusalServerBlocked for a server id the operator
 	// blocked.
-	Enroll(ctx context.Context, serverID, name string) (claimed bool, err error)
-	// Claimed reports whether serverID has an owner.
-	Claimed(ctx context.Context, serverID string) (bool, error)
+	Enroll(ctx context.Context, serverID, name string, policy edgeproto.AccessPolicy) (claimed bool, err error)
 	// ReplaceDirectory stores the directory a claimed server pushed.
 	ReplaceDirectory(ctx context.Context, serverID string, entries []edgeproto.DirectoryEntry) error
-	// RedeemWebCode redeems a web sign-in code serverID presented and
-	// returns the signed web grant, whose ConnID is m.ID. The text of a
-	// returned Refusal is sent to the server.
-	RedeemWebCode(ctx context.Context, serverID string, m edgeproto.WebRedeem) (string, error)
 	// Unenroll forgets serverID after its operator ran
 	// `aether-server edge leave`.
 	Unenroll(ctx context.Context, serverID string) error
+	// RecordClaim records owner as the owner of serverID, which has none,
+	// after serverID reported that a claim connection the relay opened
+	// for owner presented its claim code. name and policy are from its
+	// hello.
+	RecordClaim(ctx context.Context, serverID, name string, policy edgeproto.AccessPolicy, owner edgeproto.Account) error
+	// TransferOwner records owner as the owner of the claimed server
+	// serverID, which reported the transfer.
+	TransferOwner(ctx context.Context, serverID string, owner edgeproto.Principal) error
+	// DropOwner records that the claimed server serverID reported it has
+	// no owner.
+	DropOwner(ctx context.Context, serverID string) error
+	// PendingDeletions returns the account deletions owed to serverID,
+	// and DeletionDelivered forgets one once it was sent.
+	PendingDeletions(ctx context.Context, serverID string) ([]edgeproto.AccountDeleted, error)
+	DeletionDelivered(ctx context.Context, serverID string, d edgeproto.AccountDeleted) error
 }
 
 // EgressStore persists the monthly egress counter so the budget survives
@@ -61,12 +72,9 @@ type EgressStore interface {
 
 // Config configures a Relay.
 type Config struct {
-	// Origin is the edge URL. Servers sign its canonical origin to enroll,
-	// and its host is the SNI the edge serves itself.
+	// Origin is the edge's relay origin. Servers sign it to enroll, and
+	// grants name it as their issuer.
 	Origin string
-	// ServerDomain is the domain under which a server's dashboard is
-	// <server id>.<ServerDomain>.
-	ServerDomain string
 	// EdgeKey signs grants. Servers pin its public half.
 	EdgeKey   ed25519.PrivateKey
 	Directory Directory
@@ -101,26 +109,22 @@ const (
 	// maxConnsPerAddress bounds the public listener's open connections
 	// from one edgeproto.RateLimitKey block. It sits far above what an
 	// office behind one NAT address holds: MaxConnsPerDevice SSH streams
-	// per install, plus browsers.
+	// per install, plus sign-in pages.
 	maxConnsPerAddress = 1024
 )
 
-// Relay is the edge relay. Register its HTTP endpoints on the edge's mux,
-// run Serve on the public TLS listener and serve the edge's own HTTPS on
-// Listener.
+// Relay is the edge relay. Register its HTTP endpoints on the edge's mux
+// and serve the edge's HTTPS on Listener.
 type Relay struct {
-	origin   string
-	edgeHost string
-	domain   string
-	key      ed25519.PrivateKey
-	pub      ed25519.PublicKey
-	dir      Directory
-	store    EgressStore
-	budget   int64
-	local    *localListener
-	ctx      context.Context
-	stop     context.CancelFunc
-	flushed  chan struct{}
+	origin  string
+	key     ed25519.PrivateKey
+	pub     ed25519.PublicKey
+	dir     Directory
+	store   EgressStore
+	budget  int64
+	ctx     context.Context
+	stop    context.CancelFunc
+	flushed chan struct{}
 
 	// Durations, rates and limits that tests shorten.
 	attachDeadline     time.Duration
@@ -136,7 +140,9 @@ type Relay struct {
 	closing bool
 	servers map[string]*registration
 	conns   map[string]*relayConn
-	claims  map[string]*pendingClaim
+	// claims holds, by connection id, the claim connections a server may
+	// still report as claimed.
+	claims map[string]claimGrant
 	// directories holds, per server id, the directory waiting to be
 	// stored.
 	directories map[string]*directoryWrite
@@ -144,8 +150,7 @@ type Relay struct {
 	addrMu    sync.Mutex
 	addrConns map[netip.Prefix]int
 
-	sshPace pacer
-	webPace pacer
+	pace pacer
 
 	egressMu    sync.Mutex
 	month       string
@@ -162,14 +167,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 	if err != nil {
 		return nil, fmt.Errorf("relay: %w", err)
 	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return nil, fmt.Errorf("relay: parse origin: %w", err)
-	}
 	switch {
-	case !edgeproto.ValidServerDomain(cfg.ServerDomain):
-		// Every ready carries it, and a ready that does not validate is never sent.
-		return nil, fmt.Errorf("relay: server domain %q is not a lowercase DNS name such as servers.example.com", cfg.ServerDomain)
 	case len(cfg.EdgeKey) != ed25519.PrivateKeySize:
 		return nil, fmt.Errorf("relay: edge key is %d bytes, want %d", len(cfg.EdgeKey), ed25519.PrivateKeySize)
 	case cfg.Directory == nil || cfg.Egress == nil:
@@ -184,14 +182,11 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 	}
 	r := &Relay{
 		origin:             origin,
-		edgeHost:           strings.ToLower(u.Hostname()),
-		domain:             cfg.ServerDomain,
 		key:                cfg.EdgeKey,
 		pub:                cfg.EdgeKey.Public().(ed25519.PublicKey),
 		dir:                cfg.Directory,
 		store:              cfg.Egress,
 		budget:             cfg.EgressBudget,
-		local:              newLocalListener(),
 		flushed:            make(chan struct{}),
 		attachDeadline:     edgeproto.AttachDeadline,
 		unclaimedTTL:       edgeproto.UnclaimedTTL,
@@ -203,7 +198,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		maxConnsPerAddress: maxConnsPerAddress,
 		servers:            map[string]*registration{},
 		conns:              map[string]*relayConn{},
-		claims:             map[string]*pendingClaim{},
+		claims:             map[string]claimGrant{},
 		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},
 		month:              month,
@@ -215,11 +210,17 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 	return r, nil
 }
 
-// Register adds the control, data and connect endpoints to mux.
+// Register adds the control, data, connect and claim endpoints to mux,
+// which serves the relay origin.
 func (r *Relay) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+edgeproto.PathServerControl, r.serveControl)
 	mux.HandleFunc("GET "+edgeproto.PathServerData, r.serveData)
-	mux.HandleFunc("GET "+edgeproto.PathConnect, r.serveConnect)
+	mux.HandleFunc("GET "+edgeproto.PathConnect, func(w http.ResponseWriter, req *http.Request) {
+		r.serveConnect(w, req, edgeproto.KindSSH)
+	})
+	mux.HandleFunc("GET "+edgeproto.PathClaimConnect, func(w http.ResponseWriter, req *http.Request) {
+		r.serveConnect(w, req, edgeproto.KindClaim)
+	})
 }
 
 // Compression is off: the streams are already encrypted end to end, and
@@ -240,7 +241,7 @@ type Metrics struct {
 	// UnclaimedServers the unclaimed ones.
 	Servers          int
 	UnclaimedServers int
-	// Splices counts attached connections, ssh and web.
+	// Splices counts attached connections.
 	Splices int
 	// BytesRelayed counts bytes sent to either side since the relay
 	// started; EgressThisMonth the calendar month's total, persisted.
@@ -297,6 +298,27 @@ func (r *Relay) RevokeDevice(deviceID string) {
 	}
 }
 
+// AccountDeleted closes every live connection of the deleted account a and
+// sends each connected server among servers the deletions it is owed.
+func (r *Relay) AccountDeleted(a edgeproto.Account, servers []string) {
+	r.closeConns(func(c *relayConn) bool { return sameAccount(c.account, a) }, edgeproto.RefusalTokenRevoked)
+	r.mu.Lock()
+	var regs []*registration
+	for _, id := range servers {
+		if reg := r.servers[id]; reg != nil {
+			regs = append(regs, reg)
+		}
+	}
+	r.mu.Unlock()
+	for _, reg := range regs {
+		go r.deliverDeletions(reg)
+	}
+}
+
+func sameAccount(a, b edgeproto.Account) bool {
+	return a.Provider == b.Provider && a.Subject == b.Subject
+}
+
 // CloseServer closes every live connection to serverID.
 func (r *Relay) CloseServer(serverID string) {
 	r.closeConns(func(c *relayConn) bool { return c.serverID == serverID }, edgeproto.RefusalNotConnected)
@@ -338,7 +360,7 @@ func (r *Relay) closeConns(match func(*relayConn) bool, cause error) []*registra
 }
 
 // Shutdown sends drain to every server, closes every control channel and
-// connection, stops the edge listener and saves the egress counter.
+// connection, and saves the egress counter.
 func (r *Relay) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.closing = true
@@ -361,7 +383,6 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 		})
 	}
 	wg.Wait()
-	_ = r.local.Close()
 	r.stop()
 	<-r.flushed
 	return r.flushEgress(ctx, time.Now())

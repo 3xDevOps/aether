@@ -29,6 +29,9 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
 		return nil, err
 	}
+	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberRole, false); err != nil {
+		return nil, err
+	}
 	p, perr := decodeParams[protocol.MemberRoleParams](params)
 	if perr != nil {
 		return nil, perr

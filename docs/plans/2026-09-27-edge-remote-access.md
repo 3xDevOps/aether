@@ -1,18 +1,24 @@
 # Edge remote access
 
 **Status:** Implemented in PR #249
-(https://github.com/3xDevOps/aether/pull/249). This document describes what
-was built; `docs/edge.md` is the operator and user guide.
+(https://github.com/3xDevOps/aether/pull/249), as revised by
+[Edge access policies](2026-09-28-edge-access-policies.md) in the same
+PR: the dashboard through the edge, browser devices and the Android return
+link were removed; claiming moved inside SSH; the server chooses an access
+policy; sign-in and relay got two host names. The sections below describe
+what shipped; `docs/edge.md` is the operator and user guide.
 
-**Goal:** A developer reaches their Aether server from a laptop, a phone, or a
-browser without configuring Tailscale, SSH, router ports, or certificates.
-Tailnet and direct SSH-key connections keep working unchanged.
+**Goal:** A developer reaches their Aether server from a computer without
+configuring Tailscale, SSH, router ports, or certificates. Tailnet and
+direct SSH-key connections, and the phone dashboard over a tailnet, keep
+working unchanged.
 
 An **edge** is a relay and sign-in service that Aether servers and clients
-both dial out to. The project runs one at `edge.onaether.dev`; anyone can run
+both dial out to. The project runs one, signing people in at
+`auth.onaether.dev` and relaying at `edge.onaether.dev`; anyone can run
 their own from the same binary. An **account** is a person signed in to the
-edge with GitHub or Google. A **device** is one client install, or one
-browser, holding its own credential. A **grant** is a short-lived statement
+edge with GitHub or Google. A **device** is one client install holding its
+own key. A **grant** is a short-lived statement
 signed by the edge: "this account, on this device, is opening this
 connection".
 
@@ -27,17 +33,15 @@ connection".
    signed-in account has claimed it with a code printed on the server.
 4. The server stays the authority on membership, roles and devices. The edge
    holds a copy (the **directory**) that the server pushes, and uses it only
-   to refuse connections early. A compromised edge cannot add a member, and
-   cannot add a device to a member who already has one without that member's
-   approval.
+   to refuse connections early. A compromised edge cannot add a member.
+   Whether it can add a device is the server's access policy: under
+   `approved-devices` it cannot; under `account` a grant admits a member's
+   new device.
 5. User identity and credentials are separate objects with separate
    lifecycles: account (edge), device token (edge, per device), device key
-   (client, verified by the server), browser device and browser session
-   (server).
-6. Browsers reach the server's own HTTPS listener through TLS passthrough.
-   The server holds its own certificate. The edge does not see dashboard
-   plaintext unless it misissues a certificate, which Certificate
-   Transparency records. `docs/security.md` states this plainly.
+   (client, verified by the server).
+6. The edge serves no dashboard. The TLS-passthrough design first built for
+   it was removed; see the newer plan, decision 7.
 7. `edge-url` is empty, and the edge off, unless the operator names one.
    `aether-server setup` is the only command that sets it unasked: when
    tailscaled is absent it enables the project's edge and says what that
@@ -46,7 +50,7 @@ connection".
    upgrade never enrolls an existing server.
 8. One new Go module: `golang.org/x/net` v0.57.0, indirect, which
    `x/crypto/acme/autocert` pulls in through `x/net/idna` and which is
-   compiled into `aether-edge` and `aether-server`. `coder/websocket`,
+   compiled into `aether-edge` only. `coder/websocket`,
    `x/crypto` and `modernc.org/sqlite` were already required; `x/oauth2`
    moves from indirect to direct.
 
@@ -60,35 +64,36 @@ is bound to).
 
 | Party | Can | Cannot |
 | --- | --- | --- |
-| Edge operator, honest | See server ids, account identities, device labels, client IPs, timing, byte counts | Read SSH or dashboard traffic |
-| Edge, compromised | Deny service. Forge a grant for any account. Obtain a certificate for a server hostname and intercept browser sessions (logged in CT) | Read or alter SSH traffic. Impersonate a server to a client. Claim an unclaimed server without its claim code (a code entered through it, it can use). Add a device to a member who has one, when device approval is on (the default) |
+| Edge operator, honest | See server ids, account identities, device labels, client IPs, timing, byte counts | Read SSH traffic |
+| Edge, compromised | Deny service. Forge a grant for any account, which reaches a workspace on a server whose policy is `account` | Read or alter SSH traffic. Impersonate a server to a client. Take a claim. Admit a device on a server whose policy is `approved-devices` |
 | Holder of a stolen device token | Open a splice to servers that account can reach | Authenticate to the server: the device key is also required |
 | Holder of a stolen claim code | Nothing without a signed-in account; with one, claim that server before its owner does | Claim after the code is used, expired, or five attempts failed |
 
-The edge is a trusted identity broker: the server believes the edge about
-*who* signed in. It does not believe the edge about *what that person may
-do*.
+The edge is an identity broker: the server believes the edge about *who*
+signed in. Whether that admits a device is the server's policy; what the
+person may do is always the server's decision. The newer plan, section 3,
+has the full attacker tables.
 
 ## 3. Components
 
 | Component | Package | New or changed |
 | --- | --- | --- |
-| Wire types, ids, signatures | `internal/edgeproto` | new |
-| Edge binary | `cmd/aether-edge` | new |
-| Edge store (SQLite) | `internal/edge/edgestore` | new |
-| Edge sign-in, pages, API | `internal/edge` | new |
-| Edge relay and TLS router | `internal/edge/relay` | new |
-| Server agent | `internal/edgeagent` | new |
-| Relayed SSH transport, grant auth, device approval | `internal/sshd` | changed |
+| Wire types, ids, signatures, claim user name, account API types | `internal/edge/proto` (package `edgeproto`) | new |
+| Edge binary and operator commands | `cmd/aether-edge` | new |
+| Edge store (SQLite) | `internal/edge/store` (package `edgestore`) | new |
+| Edge sign-in, pages, API, host routing, account deletion | `internal/edge/service` (package `edge`) | new |
+| Edge relay, forwarded client address | `internal/edge/relay` | new |
+| Server agent: enrollment, pin, claim, ownership reports | `internal/edge/agent` (package `edgeagent`) | new |
+| Client sign-in, token store, dialer | `internal/edge/client` (package `edgeclient`) | new |
+| End-to-end tests | `internal/edge/edgetest` | new |
+| Relayed SSH transport, grant auth, access policy, claims, device approval | `internal/sshd` | changed |
 | Identities, devices, identity invitations | `internal/store` | changed (migration) |
-| Edge dashboard listener, sessions, certificate | `internal/servergw` | changed |
-| Shared dashboard core: exported same-origin check, handler wrap | `internal/webgate` | changed |
-| Client sign-in, dialer | `internal/edgeclient`, `internal/cli`, `internal/syncd` | new, changed |
+| Access policy, device status | `internal/domain`, `internal/protocol` | changed |
+| Client link and claim | `internal/cli`, `internal/syncd` | changed |
 | Desktop onboarding: sign in, claim, link | `internal/localgw` | changed |
 | Commands | `cmd/aether`, `cmd/aether-server` | changed |
-| Dashboard sign-in, devices, onboarding | `web/` | changed |
-| Android sign-in return | `android/` | changed |
-| Unit, env example, guides | `packaging/`, `docs/` | new, changed |
+| Dashboard devices and onboarding | `web/` | changed |
+| Unit, environment example, nginx example, guides | `packaging/`, `scripts/edge-nginx-test.sh`, `docs/` | new, changed |
 
 ## 4. Identifiers and signatures
 
@@ -99,7 +104,7 @@ do*.
   hashes, which are at most 64 bytes. Every edge message it signs starts with
   a context string and is longer than 64 bytes, so an edge cannot obtain a
   signature usable in an SSH handshake.
-  - Enrollment: `"aether-edge-enroll-v1\x00" || edge origin || "\x00" || server id || "\x00" || nonce`.
+  - Enrollment: `"aether-edge-enroll-v1\x00" || relay origin || "\x00" || server id || "\x00" || nonce`.
   - Grant (signed by the edge's Ed25519 key): `"aether-edge-grant-v1\x00" || canonical JSON`.
 - **Edge key.** An Ed25519 key created on first start in the edge data
   directory. The server pins it when it enrolls and prints its fingerprint.
@@ -117,101 +122,61 @@ do*.
 
 ### Server to edge
 
-1. `aether-server` dials `wss://<edge>/v1/server/control`.
+1. `aether-server` dials `wss://<relay>/v1/server/control`.
 2. Edge sends `challenge{version, nonce, origin}`.
-3. Server sends `hello{version, host_key, signature, agent_version, name}`.
-4. Edge verifies, derives the id, replies
-   `ready{server_id, state, edge_key, server_domain}`. A newer registration
-   for the same id replaces the older one. `server_domain` is the domain the
-   edge passes dashboards through; the server learns it here and has no
-   setting of its own for it.
+3. Server sends `hello{version, host_key, signature, agent_version, name,
+   access_policy}`, signing the origin it dialed, never the challenge's.
+4. Edge verifies, derives the id, replies `ready{server_id, state,
+   edge_key}`. A newer registration for the same id replaces the older one.
+   The announced policy is for display; the server enforces its own.
 5. Ping every 20 s; 60 s of silence closes. Reconnect with jittered
    exponential backoff, 1 s to 60 s. The agent never stops the server: an
    edge outage leaves direct and tailnet paths and running work untouched.
 
 ### Client to server (SSH)
 
-1. Client dials `wss://<edge>/v1/connect/<server id>` with
+1. Client dials `wss://<relay>/v1/connect/<server id>` with
    `Authorization: Bearer <device token>`.
 2. Edge checks the token, then the directory. Refusals are HTTP errors with
    the reason: `401 device token revoked`, `403 not a member of this server`,
    `404 unknown server`, `503 server is not connected to the edge`.
 3. Edge sends `open{conn_id, ticket, kind: "ssh", grant}` on the control
-   socket.
-4. Server verifies the grant (edge key, its own id, `conn_id`, expiry of
-   60 s) and dials `wss://<edge>/v1/server/data/<conn_id>` with the ticket.
+   socket (`kind: "claim"` for `/v1/connect/<server id>/claim`).
+4. Server verifies the grant (edge key, issuer equal to the relay origin it
+   enrolled with, its own id, `conn_id`, kind, expiry of 60 s) and dials
+   `wss://<relay>/v1/server/data/<conn_id>` with the ticket.
 5. Edge splices. Each connection has its own sockets, so TCP flow control is
    per stream and a large fetch does not stall a terminal.
 6. SSH handshake. The relayed transport has its own `ssh.ServerConfig`: no
    `none` method, no tailnet WhoIs, no first-key bootstrap, no invite-code
    user names, and its own handshake budget. The offered key must equal the
    grant's device key.
-7. Server maps `(provider, subject)` to a member, then checks the device.
+7. Server maps `(provider, subject)` to a member, then checks the device
+   under its access policy.
 
 The edge-asserted client address is used for logs and rate limits only. It
 is never the connection's `RemoteAddr` and never an input to authentication.
 
-### Browser to server (dashboard)
-
-1. DNS `*.<server domain>` points at the edge. The edge reads the TLS
-   ClientHello. SNI equal to the edge host is served locally; SNI
-   `<server id>.<server domain>` is passed through as `open{kind: "web"}`;
-   anything else is closed.
-2. The server terminates TLS with a certificate for exactly its own hostname,
-   obtained by TLS-ALPN-01 through the same passthrough. Issuance starts
-   once the server is claimed, at an enrollment the edge answers as claimed
-   or when a claim succeeds, and the edge announced a server domain; never
-   on first request; until it succeeds, ordinary handshakes are
-   refused so browsers cannot start orders of their own. Failure is retried
-   from 1 minute to 1 hour and never stops the server. An edge that
-   announces no domain gets no dashboard; a changed domain takes effect at
-   the next server restart.
-3. No session: every `/api/v1` call answers 401 with `data.login`, and the
-   dashboard sends the browser to `/auth/login`. The server sets
-   `__Host-aether_signin` (state, PKCE verifier and the browser's device
-   cookie when it has one, 10 minutes, SameSite=Lax) and redirects to `https://<edge>/authorize?server=<id>&state=…&challenge=…`.
-4. The edge signs the person in, checks the directory, shows the server name
-   and id, and redirects to `https://<id>.<server domain>/auth/callback`
-   with a one-time code. The return address is computed by the edge, never
-   taken from the request.
-5. The server redeems the code over its control socket, presenting the
-   verifier. The code is useless to anyone else. It receives a grant.
-6. The server continues on the browser's device, or creates one, and
-   starts a session bound to it. The device is identified by
-   `__Host-aether_device` and the session by `__Host-aether_session`, both
-   random, HttpOnly, Secure and SameSite=Strict, and stored hashed. The
-   Strict device cookie does not survive the edge's cross-site redirect,
-   which is why step 3 copies it into the sign-in cookie. A device cookie of
-   an unrevoked browser device of the same member continues on that device;
-   any other is a new device. Sessions idle out after 30 days. Browser
-   devices are listed and revocable beside device keys. State changes and
-   WebSocket handshakes without an `Origin` naming the server's host are
-   refused. An ended session, a revoked device or a removed member loses
-   its WebSockets within 3 seconds; sign-out ends the session only, and
-   closes its WebSockets at once.
-
-The Android app opens step 3 in the system browser, because Google refuses
-OAuth inside a WebView, adding `return=app`. The edge returns to
-`aether://auth/callback?code=…&state=…`, and the app loads the callback on
-the saved server's host in its WebView. The code in that link is bound to
-the state cookie and verifier held by the WebView, so another app that
-intercepts the link cannot use it. It can if the attacker started the
-sign-in and talked the victim into confirming it; verified app links would
-close that and are not built.
+The dashboard path first built here (TLS passthrough by SNI, server
+certificates by TLS-ALPN-01, browser devices and sessions, and the Android
+app's return link) was removed before release. A phone reaches the
+dashboard over a tailnet; a computer through `aether gui`.
 
 ## 6. Authentication and authorization
 
 ### Accounts and devices at the edge
 
-- `aether login` runs a device authorization flow: the CLI shows a URL and a
-  short code, the person signs in at the edge and confirms the code, the CLI
-  receives a device token. Nothing secret is in the URL.
+- `aether login` runs a device authorization flow on the sign-in origin,
+  which the client reads from `GET <relay>/v1/edge`: the CLI shows a URL and
+  a short code, the person signs in at the edge and confirms the code, the
+  CLI receives a device token. Nothing secret is in the URL.
 - The device key is a dedicated Ed25519 key in the Aether config directory,
   mode 0600. It is not the person's `~/.ssh` key.
 - The token is 32 random bytes, stored hashed at the edge, bound to the
   account and the device key.
 - `aether logout` revokes the token. The edge's **Devices** page lists and
-  revokes them. Revoking closes that device's live splices.
+  revokes them. Revoking closes that device's live splices; its direct
+  connections stay, since the device is still approved on the server.
 - The confirmation page shows the address the sign-in started from. Code
   entry is limited per address and per account; token polling per address.
 - A GitHub login or email matches invitations only within 24 hours of the
@@ -227,19 +192,21 @@ close that and are not built.
    for 30 minutes and five attempts. The full id lets the client refuse an
    answer for any other server, which a host key ground to match a shorter
    prefix could otherwise give.
-2. The owner runs `aether link --claim <code>` or enters the code on the
-   edge's **Add a server** page.
-3. The edge forwards the attempt with a grant. The server compares the
-   secret itself; the edge holds no copy or hash before the attempt.
-4. On success the server creates the admin member with that identity and
-   tells the edge. The edge records the owner, and only then treats the
-   server as claimed. When recording fails, or the server's answer does not
-   arrive, the edge closes the server's control socket; on reconnecting the
-   server is told it is unclaimed and drops the owner it recorded, and the
-   same account claims it again.
+2. The owner runs `aether link --claim <code>`. The client dials
+   `/v1/connect/<server id>/claim` and presents the code inside SSH once the
+   host key has proved the id; the newer plan, section 4, has the steps.
+   The edge has no **Add a server** page.
+3. The server compares the secret itself; the edge never sees it.
+4. On success the server creates the admin member with that identity,
+   approves the claiming device, and reports the claim on its control
+   connection. The edge records the owner from that report only. When
+   recording fails, the edge closes the server's control socket; on
+   reconnecting the server is told it is unclaimed and drops the owner it
+   recorded, and the same account claims it again with a new code.
 
-An unclaimed server may hold a control socket and nothing else. Unclaimed
-registrations are limited per address and dropped after 30 minutes.
+An unclaimed server may hold a control socket and receive claim
+connections, nothing else. Unclaimed registrations are limited per address
+and dropped after 30 minutes.
 
 ### Members and invitations
 
@@ -258,26 +225,23 @@ registrations are limited per address and dropped after 30 minutes.
 
 ### Devices at the server
 
-- The first device of a member is accepted. It is authorized by the claim
-  code or the invitation.
-- With `edge-device-approval` on (default), a later device is recorded as
-  pending and refused with the command that approves it:
-  `aether device approve <code>` from a device that member already uses, an
-  admin doing the same, or `sudo aether-server device approve <code>` on the
-  server.
-- `aether device list`, `aether device revoke`.
-- A revoked device still counts as the member's device, so revoking every
-  device does not reopen the first-device window. Signing out ends a
-  browser's session, not its device: signing in again on that browser
-  needs no approval.
+- A new device key is `registered` and admitted under `edge-access
+  account`, and `pending` and refused under `approved-devices`, a member's
+  first device included. The refusal carries the command that approves it:
+  `aether device approve <code>` from an approved device, SSH key or
+  tailnet connection of that member or an admin, or `sudo aether-server
+  device approve <code>` on the server.
+- `aether device list`, `aether device revoke`, `sudo aether-server device
+  review`.
 
 ### Revocation
 
 | Revoke | Command | Effect |
 | --- | --- | --- |
-| A member | `aether member remove <id>` | Identity, devices and sessions deleted; directory updated; live channels close at the next revalidation |
-| A device or browser | `aether device revoke <id>` | That credential, and a browser's sessions, refused; its connections closed |
+| A member | `aether member remove <id>` | Identities and devices deleted; directory updated; live connections closed at once |
+| A device | `aether device revoke <id>` | That key refused on every path; its connections closed at once |
 | A device token | `aether logout`, edge Devices page | No further splices; live ones closed |
+| An account | `aether logout --delete-account`, edge Account page | Each server removes that identity and its edge devices; see the newer plan, section 11 |
 | An invitation | `aether invite revoke <id>` | Removed from the directory |
 | A server | `aether-server edge leave`, edge Servers page | Unenrolled; members keep direct and tailnet access |
 
@@ -309,10 +273,9 @@ registrations are limited per address and dropped after 30 minutes.
 | Edge restart | Every splice drops. Servers and clients reconnect. Runs are unaffected. The edge sends `drain` first on a clean stop |
 | Server offline | `503 server is not connected to the edge` |
 | Data socket not attached in 10 s | Client closed with `server did not attach` |
-| Certificate issuance fails | Dashboard over the edge unavailable; SSH unaffected; retried with backoff |
 | Edge signing key lost | Every server refuses the edge with both fingerprints until its operator runs `aether-server edge trust` |
 | OAuth provider down | No new sign-ins. Existing device tokens and sessions keep working |
-| Host key lost or rotated | New server id. The server must be claimed again and devices re-linked. `docs/edge.md` covers backing up the key |
+| Host key lost or rotated | New server id. The server must be claimed again and clients linked again. `docs/edge.md` covers backing up the key |
 | Clock skew | Grants allow 30 s |
 
 ## 9. Limits
@@ -320,54 +283,35 @@ registrations are limited per address and dropped after 30 minutes.
 | Limit | Value |
 | --- | --- |
 | Concurrent SSH connections per server | 48, below sshd's relayed handshake budget |
-| Concurrent dashboard connections per server | 48, a budget apart from SSH's, at the edge and at the server |
-| Concurrent dashboard connections per server from one address | 16; IPv6 by /64 |
 | Connections per device | 16 |
 | Unclaimed registrations per address | 3; IPv6 3 per /64, 12 per /56, 48 per /48 |
 | Unclaimed registrations per edge | 10000 |
-| Open connections to `:443` per address | 1024; IPv6 by /64 |
+| Open connections per address | 1024; IPv6 by /64; behind a reverse proxy, requests in progress per forwarded address |
 | Attach deadline | 10 s |
-| ClientHello read | 5 s, 16 KiB |
 | Sign-in, device-code and claim attempts | rate-limited per address; IPv6 by /64, /56 (4x) and /48 (16x). Device-code entry also per account; token polling per address |
 | Monthly egress budget | configured; once reached, every splice together is paced to 256 KiB/s until the UTC month ends |
-| Idle dashboard connection at the server | 30 s |
 
 No idle timeout applies to a spliced stream: an idle terminal is legitimate.
 
 ## 10. Testing
 
 - Unit tests beside each package.
-- `internal/edge/edgetest`: a real edge, a real `sshd` server and a real
-  client in one process, with a fake OAuth provider. It covers:
-  unauthenticated connect; a member of server A refused on server B; a
-  forged, expired, replayed or wrong-server grant; a key that differs from
-  the grant; claim with a wrong, expired and exhausted code; invitation
-  accept, expiry and revoke; member, device and token revocation closing
-  live connections; pending device approval; server reconnect after an edge
-  restart; client fallback to a direct address while the edge is down; the
-  enrollment signature refused as an SSH host signature.
-- The same package drives the dashboard path with a cookie-jar browser
-  against the edge's SNI router and servers holding a test CA's
-  certificate: sign-in, passthrough by SNI, sessions bound to one server,
-  the app return link, pending browsers, revocation and invitations.
-- `internal/server`: an integration test with a real edge and a failing ACME
-  directory shows certificate failure never stops the server.
-- Dashboard: Vitest for the sign-in and device views.
-- Android: unit tests for the return link.
+- `internal/edge/edgetest`: a real edge on its two origins, real `sshd`
+  servers under each access policy and a real client in one process, with
+  a fake OAuth provider and a proxy that plays a compromised edge. It
+  covers what this plan and the newer one promise; `docs/testing.md` lists
+  each test.
+- `TestBehindNginx` (`scripts/edge-nginx-test.sh`) runs the packaged nginx
+  configuration in front of a real edge.
+- Dashboard: Vitest for the device views and the onboarding link step.
 - Existing suites unchanged.
 
 ## 11. Rollout
 
-1. Owner creates the OAuth applications, DNS records and the VPS unit
-   (`packaging/systemd/aether-edge.service`, following the owner checklist in
-   `docs/edge.md`). Nothing in this change touches a live host.
+1. Owner creates the OAuth applications, DNS records, nginx and the VPS
+   unit, following the owner checklist in `docs/edge.md`. Nothing in this
+   change touches a live host.
 2. Release with the edge off on every existing server. `aether-server
-   setup` turns it on, with a notice, on hosts without Tailscale and offers
-   it on hosts with Tailscale.
-3. Per-server hostnames need a wildcard record. They belong on a domain
-   separate from `onaether.dev`, so that a Safe Browsing flag on one server
-   cannot reach the project's site. Let's Encrypt issues 50 new certificates
-   per registered domain per week; the owner requests an increase before
-   announcing the feature.
-4. Later: a second region, graceful splice hand-over on deploy, Google ID
-   tokens verified by the server itself.
+   setup` turns it on, with a notice, on hosts without Tailscale, offers it
+   on hosts with Tailscale, and asks for the access policy.
+3. Later: a second region, graceful splice hand-over on deploy.

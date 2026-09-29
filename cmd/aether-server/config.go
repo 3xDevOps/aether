@@ -93,11 +93,18 @@ func configSet(w io.Writer, path, key, value string) error {
 	if err != nil {
 		return err
 	}
+	was, ok := values[key]
+	if !ok {
+		was = "unset"
+		if def := fs.Lookup(key).DefValue; def != "" {
+			was += ", meaning " + def
+		}
+	}
 	values[key] = value
 	if err := serversetup.WriteConfig(path, values); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "%s: %s = %s\n", path, key, value)
+	_, _ = fmt.Fprintf(w, "%s: %s = %s (was %s)\n", path, key, value, was)
 	_, _ = fmt.Fprintf(w, "apply it with:\n  %s\n", serversetup.RestartCommand)
 	return nil
 }

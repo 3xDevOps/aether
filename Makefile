@@ -175,7 +175,8 @@ test-e2e: build
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
-# a real host, or a real release.
+# a real host, or a real release. edge-nginx-test.sh runs a real nginx on
+# loopback when one is installed, and skips otherwise.
 test-scripts:
 	sh scripts/install-test.sh
 	sh scripts/deploy-test.sh
@@ -183,6 +184,7 @@ test-scripts:
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-changes-test.sh
+	sh scripts/edge-nginx-test.sh
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.
 test-native-hooks:

@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"flag"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,10 +17,11 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/edgeagent"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/store"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestEdgeURLOptionIsValidated(t *testing.T) {
@@ -53,11 +56,10 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := edgeStatus(&out, dir, edgeagent.DefaultURL, time.Now()); err != nil {
+	if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "never connected",
-		"https://" + id + ".<the edge's server domain>/"} {
+	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "never connected", "edge access  approved-devices"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("status lacks %q:\n%s", want, out.String())
 		}
@@ -104,33 +106,65 @@ func TestEdgeIsOffUnlessConfigured(t *testing.T) {
 	if v := installValues(fs)["edge-url"]; v != edgeagent.DefaultURL {
 		t.Fatalf("install --edge-url wrote %q, want %s", v, edgeagent.DefaultURL)
 	}
+	if *o.edgeAccess != accessPolicyValue(edgeproto.PolicyApprovedDevices) {
+		t.Fatalf("edge-access = %q from a config without it, want approved-devices", *o.edgeAccess)
+	}
 }
 
-func TestDashboardText(t *testing.T) {
-	const id = "aaaaaaaaaaaaaaaaaaaaaaaaaa"
-	known := edgeagent.Status{Connected: true, ServerDomain: "servers.example.test"}
-	for _, tc := range []struct {
-		status  edgeagent.Status
-		ran     bool
-		claimed bool
-		want    string
-	}{
-		{known, true, true, "https://" + id + ".servers.example.test/"},
-		{edgeagent.Status{ServerDomain: "servers.example.test"}, true, true, "https://" + id + ".servers.example.test/"},
-		{known, true, false, "https://" + id + ".servers.example.test/ once the server is claimed"},
-		{edgeagent.Status{Connected: true}, true, true, "none; this edge passes no dashboard through"},
-		{edgeagent.Status{}, false, false, "https://" + id + ".<the edge's server domain>/; aether-server edge status shows the address once the server connects"},
+// Turning the edge on at install names a policy; nothing defaults it.
+func TestInstallWithAnEdgeNeedsAnAccessPolicy(t *testing.T) {
+	for args, want := range map[string]string{
+		"--edge-url " + edgeagent.DefaultURL:                             "needs --edge-access",
+		"--edge-url " + edgeagent.DefaultURL + " --edge-access account":  "",
+		"--edge-url= --addr :2300":                                       "",
+		"--addr :2300":                                                   "",
+		"--edge-url " + edgeagent.DefaultURL + " --edge-access=":         "name a policy",
+		"--edge-url " + edgeagent.DefaultURL + " --edge-access everyone": "unknown access policy",
 	} {
-		if got := dashboardText(id, tc.status, tc.ran, tc.claimed); got != tc.want {
-			t.Errorf("dashboardText(%+v, ran %v, claimed %v) = %q, want %q", tc.status, tc.ran, tc.claimed, got, tc.want)
+		fs := flag.NewFlagSet("install", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		serveFlags(fs)
+		err := fs.Parse(strings.Fields(args))
+		if err == nil {
+			err = requireEdgeAccess(installValues(fs))
 		}
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("install %s: %v, want %q", args, err, want)
+		}
+	}
+}
+
+// The policy changes only here, with its previous value shown; an empty
+// value is refused rather than read as a policy.
+func TestConfigSetEdgeAccess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	var out bytes.Buffer
+	if err := configSet(&out, path, "edge-access", ""); err == nil {
+		t.Fatal("config set accepted an empty edge-access")
+	}
+	if err := configSet(&out, path, "edge-access", "account"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "edge-access = account (was unset, meaning approved-devices)") {
+		t.Errorf("first change does not show the previous policy:\n%s", out.String())
+	}
+	out.Reset()
+	if err := configSet(&out, path, "edge-access", "approved-devices"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "edge-access = approved-devices (was account)") {
+		t.Errorf("second change does not show the previous policy:\n%s", out.String())
+	}
+	if _, err := serversetup.Apply(serveFlagSet(), map[string]string{"edge-device-approval": "false"}); err == nil {
+		t.Error("the replaced edge-device-approval option is still accepted")
 	}
 }
 
 func TestEdgeTrustNeedsConfirmation(t *testing.T) {
 	offered, _, _ := ed25519.GenerateKey(rand.Reader)
 	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(edgeproto.EdgeKeyResponse{Key: offered})
+		_ = json.NewEncoder(w).Encode(edgeproto.EdgeInfo{SigninOrigin: "https://auth.example.test", Key: offered,
+			Fingerprint: edgeproto.EdgeKeyFingerprint(offered), Version: edgeproto.Version, MinVersion: edgeproto.MinVersion})
 	}))
 	defer edge.Close()
 	dir := t.TempDir()
@@ -159,37 +193,102 @@ func TestEdgeTrustNeedsConfirmation(t *testing.T) {
 	}
 }
 
-type fakeApprover struct {
-	dev      *domain.Device
-	approved domain.DeviceID
-}
-
-func (f *fakeApprover) GetDeviceByApprovalCode(_ context.Context, code string) (*domain.Device, error) {
-	if f.dev == nil || code != f.dev.ApprovalCode {
-		return nil, store.ErrNotFound
+// newDeviceStore returns a store with octo's github identity bound to a
+// member, and that member's devices of the given statuses.
+func newDeviceStore(t *testing.T, statuses ...domain.DeviceStatus) (*store.DB, []*domain.Device) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return f.dev, nil
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	admin := &domain.Member{DisplayName: "Ada", PublicKey: deviceKey(t), Color: "#e6194b", Role: domain.RoleAdmin}
+	if err = db.CreateMember(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	inv := &domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator, CreatedBy: admin.ID,
+		ExpiresAt: time.Now().Add(time.Hour)}
+	if err = db.CreateInvitation(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	m, err := db.AcceptInvitation(ctx, inv.ID, &domain.Identity{Provider: "github", Subject: "1001", Login: "octo"},
+		&domain.Member{DisplayName: "Octo", Color: "#3cb44b"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var devs []*domain.Device
+	for i, status := range statuses {
+		dev := &domain.Device{Member: m.ID, Provider: "github", Subject: "1001", Credential: deviceKey(t),
+			Label: fmt.Sprintf("device-%d", i), Status: status}
+		if err := db.RegisterDevice(ctx, dev); err != nil {
+			t.Fatal(err)
+		}
+		devs = append(devs, dev)
+	}
+	return db, devs
 }
 
-func (f *fakeApprover) ApproveDevice(_ context.Context, id domain.DeviceID, _ domain.MemberID) error {
-	f.approved = id
-	return nil
-}
-
-func (f *fakeApprover) GetMember(_ context.Context, id domain.MemberID) (*domain.Member, error) {
-	return &domain.Member{ID: id, DisplayName: "Octo"}, nil
+func deviceKey(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return edgeproto.DeviceKeyLine(key)
 }
 
 func TestDeviceApprove(t *testing.T) {
-	db := &fakeApprover{dev: &domain.Device{ID: "d1", Member: "m1", Label: "laptop", ApprovalCode: "ABCD-EFGH"}}
+	db, devs := newDeviceStore(t, domain.DevicePending, domain.DeviceRegistered)
 	var out bytes.Buffer
-	if err := deviceApprove(context.Background(), &out, db, "WRONG"); err == nil || !strings.Contains(err.Error(), "no pending device") {
+	if err := deviceApprove(context.Background(), &out, db, "WRONG"); err == nil || !strings.Contains(err.Error(), "no device is waiting") {
 		t.Fatalf("wrong code: %v", err)
 	}
-	if err := deviceApprove(context.Background(), &out, db, "ABCD-EFGH"); err != nil {
+	for _, dev := range devs {
+		if err := deviceApprove(context.Background(), &out, db, dev.ApprovalCode); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := db.GetDevice(context.Background(), dev.ID)
+		if got.Status != domain.DeviceApproved || got.ApprovedBy != "" {
+			t.Fatalf("device after approval on the machine = %+v", got)
+		}
+	}
+	if !strings.Contains(out.String(), `"device-0" of Octo`) {
+		t.Fatalf("output %q", out.String())
+	}
+}
+
+// The review lists every device awaiting approval with its member and
+// times, acts only on typed answers, and lists the credentials the edge
+// policy does not cover.
+func TestDeviceReview(t *testing.T) {
+	db, devs := newDeviceStore(t, domain.DeviceRegistered, domain.DevicePending, domain.DevicePending, domain.DeviceApproved)
+	var out bytes.Buffer
+	if err := deviceReview(context.Background(), &out, strings.NewReader("a\nmaybe\nr\n\n"), db, edgeproto.PolicyApprovedDevices); err != nil {
 		t.Fatal(err)
 	}
-	if db.approved != "d1" || !strings.Contains(out.String(), `"laptop" of Octo`) {
-		t.Fatalf("approved %q, output %q", db.approved, out.String())
+	ctx := context.Background()
+	for i, want := range []domain.DeviceStatus{domain.DeviceApproved, domain.DeviceRevoked, domain.DevicePending, domain.DeviceApproved} {
+		if got, _ := db.GetDevice(ctx, devs[i].ID); got.Status != want {
+			t.Errorf("device %d = %s, want %s", i, got.Status, want)
+		}
+	}
+	for _, want := range []string{`"device-0" of Octo`, "signed in as github octo", "registered, key SHA256:", "first seen", "last seen never",
+		"SSH key SHA256:", "of Ada", "admin", "aether member remove"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("review does not say %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "device-3") {
+		t.Errorf("review lists an approved device:\n%s", out.String())
+	}
+	for _, dev := range devs[:3] {
+		if strings.Contains(out.String(), dev.ApprovalCode) {
+			t.Errorf("review shows approval code %s", dev.ApprovalCode)
+		}
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,8 +21,8 @@ import (
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/3xDevOps/Aether/internal/edge"
 	"github.com/3xDevOps/Aether/internal/edge/relay"
+	edge "github.com/3xDevOps/Aether/internal/edge/service"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -31,25 +30,29 @@ import (
 // HTTP servers.
 const shutdownTimeout = 10 * time.Second
 
+// commands are aether-edge's top-level commands.
+var commands = map[string]func(args []string) error{
+	"version": func([]string) error {
+		_, err := fmt.Println("aether-edge", version.String())
+		return err
+	},
+	"serve":    serve,
+	"servers":  func(args []string) error { return servers(args, os.Getenv, os.Stdout) },
+	"accounts": func(args []string) error { return accounts(args, os.Getenv, os.Stdout) },
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
 	}
-	switch os.Args[1] {
-	case "version":
-		fmt.Println("aether-edge", version.String())
-	case "serve":
-		exit(serve(os.Args[2:]))
-	case "servers":
-		exit(servers(os.Args[2:], os.Getenv, os.Stdout))
-	case "accounts":
-		exit(accounts(os.Args[2:], os.Getenv, os.Stdout))
-	default:
+	cmd, ok := commands[os.Args[1]]
+	if !ok {
 		_, _ = fmt.Fprintf(os.Stderr, "aether-edge: unknown command %q\n", os.Args[1])
 		usage()
 		os.Exit(2)
 	}
+	exit(cmd(os.Args[2:]))
 }
 
 func exit(err error) {
@@ -83,7 +86,7 @@ func serve(args []string) error {
 	defer stop()
 
 	svc, err := edge.New(edge.Config{
-		DataDir: o.dataDir, Origin: o.origin, ServerDomain: o.serverDomain,
+		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,
 		GitHub: o.github, Google: o.google,
 	})
 	if err != nil {
@@ -96,16 +99,9 @@ func serve(args []string) error {
 	}
 	svc.SetLink(rl)
 
-	mux := http.NewServeMux()
-	rl.Register(mux)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	mux.Handle("/", svc.Handler())
 	// No read or write timeout: relayed streams are long-lived WebSockets.
 	web := &http.Server{
-		Handler:           mux,
+		Handler:           svc.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    64 << 10,
@@ -121,25 +117,31 @@ func serve(args []string) error {
 	go func() { errc <- serveHTTP("metrics", metrics, metricsLn) }()
 
 	var public net.Listener
-	if o.devListen != "" {
+	switch {
+	case o.devListen != "":
 		var ln net.Listener
 		if ln, err = net.Listen("tcp", o.devListen); err != nil {
 			return fmt.Errorf("development listener: %w", err)
 		}
-		slog.Warn("aether-edge: development mode: plain HTTP, no certificates, no browser passthrough", "listen", ln.Addr())
+		slog.Warn("aether-edge: development mode: plain HTTP, no certificates", "listen", ln.Addr())
 		go func() { errc <- serveHTTP("edge", web, ln) }()
-	} else {
-		var tlsConfig *tls.Config
-		if tlsConfig, err = edgeTLS(o); err != nil {
-			return err
+	case o.proxyListen != "":
+		var ln net.Listener
+		if ln, err = net.Listen("tcp", o.proxyListen); err != nil {
+			return fmt.Errorf("proxy listener: %w", err)
 		}
+		web.Handler = rl.Forwarded(web.Handler)
+		slog.Info("aether-edge: behind a reverse proxy: plain HTTP on loopback, client addresses from "+relay.HeaderForwardedFor,
+			"listen", ln.Addr())
+		go func() { errc <- serveHTTP("edge", web, ln) }()
+	default:
+		tlsConfig := edgeTLS(o)
 		if public, err = net.Listen("tcp", o.listen); err != nil {
 			return fmt.Errorf("public listener: %w", err)
 		}
-		go func() { errc <- rl.Serve(public) }()
-		go func() { errc <- serveHTTP("edge", web, tls.NewListener(rl.Listener(), tlsConfig)) }()
+		go func() { errc <- serveHTTP("edge", web, tls.NewListener(rl.Listener(public), tlsConfig)) }()
 	}
-	slog.Info("aether-edge: serving", "origin", o.origin, "server_domain", o.serverDomain, "metrics", metricsLn.Addr())
+	slog.Info("aether-edge: serving", "signin", o.signinOrigin, "relay", o.relayOrigin, "metrics", metricsLn.Addr())
 
 	select {
 	case <-ctx.Done():
@@ -157,24 +159,19 @@ func serve(args []string) error {
 	return errors.Join(err, web.Shutdown(shutdownCtx), metrics.Shutdown(shutdownCtx))
 }
 
-// edgeTLS obtains the certificate for exactly the edge's own host name
-// with TLS-ALPN-01, which the SNI router hands to this listener like any
-// other connection for that name.
-func edgeTLS(o options) (*tls.Config, error) {
-	u, err := url.Parse(o.origin)
-	if err != nil {
-		return nil, fmt.Errorf("--origin: %w", err)
-	}
+// edgeTLS obtains certificates for exactly the edge's two host names with
+// TLS-ALPN-01.
+func edgeTLS(o options) *tls.Config {
 	m := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      autocert.DirCache(filepath.Join(o.dataDir, "acme")),
-		HostPolicy: autocert.HostWhitelist(u.Hostname()),
+		HostPolicy: autocert.HostWhitelist(host(o.signinOrigin), host(o.relayOrigin)),
 		Email:      o.acmeEmail,
 		Client:     &acme.Client{DirectoryURL: o.acmeDirectory},
 	}
 	cfg := m.TLSConfig()
 	cfg.MinVersion = tls.VersionTLS12
-	return cfg, nil
+	return cfg
 }
 
 func serveHTTP(name string, srv *http.Server, ln net.Listener) error {

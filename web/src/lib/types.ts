@@ -447,8 +447,6 @@ export interface DiskUsage {
  * allowlist" on the client.
  */
 export interface GatewayCapabilities {
-  /** `local` for `aether gui`, `server` over the tailnet, `edge` through an
-   * edge relay. */
   gateway: string
   methods: string[]
   ws: string[]
@@ -950,8 +948,10 @@ export interface LinkStatus {
   server_id?: string
 }
 
-/** An account signed in at an edge, as the edge reported it. */
+/** An account signed in at an edge, as the edge reported it: `id` is the
+ * edge's own id for it, the rest the provider identity. */
 export interface EdgeAccount {
+  id: string
   provider: string
   subject: string
   login?: string
@@ -959,10 +959,13 @@ export interface EdgeAccount {
   name?: string
 }
 
-/** edge.login, and edge.status's `login`: the sign-in this gateway runs. */
+/** edge.login, and edge.status's `login`: the sign-in this gateway runs.
+ * `edge` is the relay origin and `signin_origin` the origin whose page
+ * confirms the code. */
 export interface EdgeLogin {
   state: 'pending' | 'signed_in' | 'failed'
   edge: string
+  signin_origin: string
   user_code: string
   verification_uri: string
   account?: EdgeAccount
@@ -971,22 +974,33 @@ export interface EdgeLogin {
 
 /** edge.status: every edge this machine is signed in to. */
 export interface EdgeStatus {
-  edges: { edge: string; account?: EdgeAccount; error?: string }[]
+  edges: { edge: string; signin_origin?: string; account?: EdgeAccount; error?: string }[]
   login?: EdgeLogin
 }
 
-/** A server the signed-in account reaches through the edge. */
+/** A server the signed-in account reaches through the edge. The server
+ * enforces `access_policy`; the edge only reports it. */
 export interface EdgeServer {
   id: string
   name: string
   online: boolean
   role: string
+  access_policy: 'account' | 'approved-devices'
+  kind: 'self-hosted' | 'hosted'
+}
+
+/** edge.hostkey: the host key a server presents through the edge, checked
+ * against its id, read without authenticating. */
+export interface EdgeHostKey {
+  edge: string
+  server_id: string
+  fingerprint: string
 }
 
 /** edge.link and edge.claim: the link just saved. */
 export interface EdgeLinkResult {
   server_id: string
-  /** Answered by edge.claim; the Link step adds it for edge.link. */
+  /** Set by the Link step for a server it linked from the edge's list. */
   server_name?: string
   edge: string
   addr?: string
@@ -994,15 +1008,14 @@ export interface EdgeLinkResult {
   member: { id: string; display_name: string; role: string }
 }
 
-/** member.device.list: a credential a member reaches the server through an
- * edge with. */
+/** member.device.list: a client install a member reaches the server through
+ * an edge with. */
 export interface Device {
   id: string
   member_id: string
-  kind: 'ssh' | 'browser'
   label: string
-  status: 'pending' | 'approved' | 'revoked'
-  fingerprint?: string
+  status: 'registered' | 'pending' | 'approved' | 'revoked'
+  fingerprint: string
   created_at: string
   last_seen_at?: string
   approved_by?: string

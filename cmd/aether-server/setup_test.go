@@ -6,19 +6,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/edgeagent"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 )
 
 // answers builds the stdin an operator would type: one line per prompt, in
 // the order askServerOptions asks them, ending with the write confirmation.
+// Without Tailscale the edge is on, and the last answer before the
+// confirmation chooses its access policy.
 func answers(lines ...string) *strings.Reader {
 	return strings.NewReader(strings.Join(lines, "\n") + "\n")
 }
 
 func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 	var out bytes.Buffer
-	in := answers("", "", "", "", "yes")
+	in := answers("", "", "", "", "2", "yes")
 	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +44,7 @@ func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 
 func TestAskServerOptionsUsesTypedAnswers(t *testing.T) {
 	var out bytes.Buffer
-	in := answers(":2300", "/srv/aether", "true", "true", "yes")
+	in := answers(":2300", "/srv/aether", "true", "true", "1", "yes")
 	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +68,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path, false)
+	values, err := askServerOptions(&out, answers("", "", "", "", "2", "yes"), path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +79,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 
 func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	var out bytes.Buffer
-	in := answers("", "", "not-a-bool", "true", "", "yes")
+	in := answers("", "", "not-a-bool", "true", "", "2", "yes")
 	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +94,7 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 
 func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "no"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(&out, answers("", "", "", "", "2", "no"), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +131,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 		tailnet bool
 		input   []string
 	}{
-		"no tailscaled":       {false, []string{"", "", "", "", "yes"}},
+		"no tailscaled":       {false, []string{"", "", "", "", "2", "yes"}},
 		"tailnet-require-key": {true, []string{"", "", "", "true", "", "yes"}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -149,7 +152,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 
 func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(&out, answers("", "", "", "", "2", "yes"), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,13 +184,64 @@ func TestAskServerOptionsKeepsTheEdgeOffWhenConfigured(t *testing.T) {
 
 func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 	for answer, want := range map[string]string{"": "", "yes": edgeagent.DefaultURL} {
+		input := []string{"", "", "", "", "", answer}
+		if want != "" {
+			input = append(input, "1")
+		}
 		var out bytes.Buffer
-		values, err := askServerOptions(&out, answers("", "", "", "", "", answer, "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+		values, err := askServerOptions(&out, answers(append(input, "yes")...), filepath.Join(t.TempDir(), "absent.conf"), true)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if values["edge-url"] != want {
 			t.Errorf("answer %q: edge-url = %q, want %q", answer, values["edge-url"], want)
 		}
+	}
+}
+
+// The policy question has no default: Enter and anything but 1 or 2 ask
+// again, and input that ends unanswered writes nothing.
+func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
+	var out bytes.Buffer
+	values, err := askServerOptions(&out, answers("", "", "", "", "", "3", "account", "2", "yes"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["edge-access"] != string(edgeproto.PolicyApprovedDevices) {
+		t.Errorf("edge-access = %q, want approved-devices from the answer 2", values["edge-access"])
+	}
+	if n := strings.Count(out.String(), "Choose 1 or 2:"); n != 4 {
+		t.Errorf("asked %d times for three unusable answers and a 2, want 4:\n%s", n, out.String())
+	}
+	for _, want := range []string{"Who may reach this server through the edge?", "1) Account access", "2) Approved devices",
+		"A taken-over\n     account, or a compromised edge, cannot add a device on its own.",
+		"Both leave Tailscale and direct SSH key access as they are.",
+		"aether-server config set edge-access <account|approved-devices>"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("setup does not say %q:\n%s", want, out.String())
+		}
+	}
+
+	out.Reset()
+	values, err = askServerOptions(&out, answers("", "", "", "", ""), filepath.Join(t.TempDir(), "absent.conf"), false)
+	if err == nil || values != nil {
+		t.Fatalf("setup without a policy answer = %v, %v; want refused", values, err)
+	}
+}
+
+// Without Tailscale and with the edge left off, no policy is asked or
+// written.
+func TestAskServerOptionsAsksNoPolicyWithTheEdgeOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := serversetup.WriteConfig(path, map[string]string{"edge-url": ""}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := values["edge-access"]; ok || strings.Contains(out.String(), "Choose 1 or 2") {
+		t.Errorf("policy asked or written with the edge off: %v\n%s", values, out.String())
 	}
 }

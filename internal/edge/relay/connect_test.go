@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/coder/websocket"
 )
 
@@ -117,7 +117,8 @@ func TestSpliceCarriesDataAndCloses(t *testing.T) {
 
 	client, server := e.connect(t, a, token)
 	open := next[edgeproto.Open](t, a)
-	g, err := edgeproto.VerifyGrant(a.ready.EdgeKey, open.Grant, edgeproto.GrantScope{ServerID: a.id, ConnID: open.ConnID, Kind: edgeproto.KindSSH}, time.Now())
+	g, err := edgeproto.VerifyGrant(a.ready.EdgeKey, open.Grant, edgeproto.GrantScope{
+		Issuer: e.origin, ServerID: a.id, ConnID: open.ConnID, Kind: edgeproto.KindSSH}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,9 +446,9 @@ func TestThrottleIsEdgeWide(t *testing.T) {
 	}
 }
 
-// TestThrottleIsFairAcrossServers floods one server with SSH and
-// dashboard splices once the budget is spent: a terminal on another
-// server still gets its turn within about one throttled read.
+// TestThrottleIsFairAcrossServers floods one server with splices from two
+// devices once the budget is spent: a terminal on another server still
+// gets its turn within about one throttled read.
 func TestThrottleIsFairAcrossServers(t *testing.T) {
 	e := newEnvWith(t, 1, &fakeEgress{months: map[string]int64{}})
 	e.r.throttleRate = 32 << 10
@@ -467,16 +468,10 @@ func TestThrottleIsFairAcrossServers(t *testing.T) {
 		}()
 	}
 	_, flooder := e.addDevice(t, acct, "flooder")
+	_, other := e.addDevice(t, acct, "other flooder")
 	for range 8 {
 		flood(e.connect(t, flooded, flooder))
-		c, server, err := e.r.openWeb(flooded.id, "192.0.2.1:50000")
-		if err != nil {
-			t.Fatal(err)
-		}
-		client, peer := net.Pipe()
-		t.Cleanup(func() { _ = peer.Close() })
-		go e.r.splice(c, client, server)
-		flood(peer, flooded.nextData(t))
+		flood(e.connect(t, flooded, other))
 	}
 
 	_, token := e.addDevice(t, acct, "terminal")

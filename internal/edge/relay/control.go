@@ -10,32 +10,39 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/coder/websocket"
 )
 
 // Reasons a control channel closes, sent to the server as the close
 // reason.
 var (
-	errReplaced   = errors.New("replaced by a newer connection of this server")
-	errUnclaimed  = fmt.Errorf("unclaimed for %s: nothing is relayed until the server is claimed", edgeproto.UnclaimedTTL)
-	errDraining   = errors.New("edge is shutting down")
-	errUnenrolled = errors.New("server is no longer enrolled at this edge")
+	errReplaced      = errors.New("replaced by a newer connection of this server")
+	errUnclaimed     = fmt.Errorf("unclaimed for %s: an unclaimed server is relayed only claim connections, for this long", edgeproto.UnclaimedTTL)
+	errDraining      = errors.New("edge is shutting down")
+	errUnenrolled    = errors.New("server is no longer enrolled at this edge")
+	errClaimRecorded = errors.New("claim recorded after this connection enrolled; reconnect to learn it")
 )
 
 // registration is one authenticated control channel.
 type registration struct {
 	id     string
 	name   string
+	policy edgeproto.AccessPolicy
 	addr   netip.Prefix
 	ws     *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelCauseFunc
-	// sshTurn and webTurn hold the one throttled read each kind of this
-	// server's connections may have waiting.
-	sshTurn, webTurn chan struct{}
-	// claimed is guarded by Relay.mu.
-	claimed bool
+	// turn holds the one throttled read this server's connections may
+	// have waiting.
+	turn chan struct{}
+	// claimed, directory and hasDirectory are guarded by Relay.mu.
+	// directory is the latest directory an unclaimed server pushed: it
+	// pushes one as it accepts a claim, which may arrive before the edge
+	// recorded the claim.
+	claimed      bool
+	directory    []edgeproto.DirectoryEntry
+	hasDirectory bool
 }
 
 func (g *registration) send(m edgeproto.Message) error {
@@ -130,7 +137,11 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if err != nil {
 		return nil, err
 	}
-	claimed, err := r.dir.Enroll(ctx, id, hello.Name)
+	policy, err := edgeproto.ParseAccessPolicy(string(hello.AccessPolicy))
+	if err != nil {
+		return nil, err
+	}
+	claimed, err := r.dir.Enroll(ctx, id, hello.Name, policy)
 	var refusal edgeproto.Refusal
 	if errors.As(err, &refusal) {
 		return nil, refusal
@@ -139,8 +150,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, fmt.Errorf("relay: claim state of %s: %w", id, err)
 	}
 
-	reg := &registration{id: id, name: hello.Name, addr: addr, ws: ws, claimed: claimed,
-		sshTurn: make(chan struct{}, 1), webTurn: make(chan struct{}, 1)}
+	reg := &registration{id: id, name: hello.Name, policy: policy, addr: addr, ws: ws, claimed: claimed, turn: make(chan struct{}, 1)}
 	reg.ctx, reg.cancel = context.WithCancelCause(r.ctx)
 	r.mu.Lock()
 	if r.closing {
@@ -164,7 +174,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if claimed {
 		state = edgeproto.StateClaimed
 	}
-	if err := reg.send(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub, ServerDomain: r.domain}); err != nil {
+	if err := reg.send(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub}); err != nil {
 		r.unregister(reg, err)
 		return nil, err
 	}
@@ -226,6 +236,7 @@ func (r *Relay) serveRegistration(reg *registration) {
 	})
 	defer ttl.Stop()
 	go r.keepAlive(reg)
+	go r.deliverDeletions(reg)
 
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), r.idleTimeout)
@@ -242,6 +253,10 @@ func (r *Relay) serveRegistration(reg *registration) {
 				slog.Info("relay: control channel closed", "server", reg.id, "error", err)
 			}
 			r.unregister(reg, err)
+			// Close here too: serveControl drops the connection once this
+			// returns, which would cut short the close that carries the
+			// reason, such as why an ownership report was refused.
+			_ = reg.ws.Close(websocket.StatusNormalClosure, closeReason(context.Cause(reg.ctx)))
 			return
 		}
 	}
@@ -280,36 +295,119 @@ func (r *Relay) handle(reg *registration, m edgeproto.Message) error {
 			}
 		}
 		return nil
-	case edgeproto.ClaimResult:
-		r.mu.Lock()
-		p := r.claims[m.ID]
-		r.mu.Unlock()
-		if p != nil && p.serverID == reg.id {
-			select {
-			case p.result <- m.Error:
-			default:
-			}
-		}
-		return nil
 	case edgeproto.Directory:
 		r.replaceDirectory(reg, m)
 		return nil
-	case edgeproto.WebRedeem:
-		return r.redeem(reg, m)
 	case edgeproto.Claimed:
-		// A server's word on its own owner would let any server skip the
-		// claim code. Ownership comes only from a claim the edge forwarded.
-		return nil
+		return r.claimReported(reg, m)
+	case edgeproto.OwnerTransferred:
+		if !r.claimed(reg) {
+			return reportRefused("this server was never claimed at this edge; claim it first")
+		}
+		return r.recordOwner(reg, func(ctx context.Context) error { return r.dir.TransferOwner(ctx, reg.id, m.Owner) })
+	case edgeproto.Ownerless:
+		if !r.claimed(reg) {
+			return nil
+		}
+		return r.recordOwner(reg, func(ctx context.Context) error { return r.dir.DropOwner(ctx, reg.id) })
 	case edgeproto.Unenroll:
 		return r.leave(reg)
 	}
 	return fmt.Errorf("relay: unexpected %T from server", m)
 }
 
+// reportRefused is an ownership report the edge did not record. The
+// control channel closes with it as the reason; the server, reconnecting,
+// learns from ready whether the edge holds it as claimed.
+func reportRefused(format string, args ...any) error {
+	return fmt.Errorf("ownership report refused: "+format, args...)
+}
+
+// claimReported records the owner a server reported after a claim
+// connection presented its claim code. Only a claim connection the relay
+// opened to this server within claimReportWindow counts, and only for the
+// account that connection was opened for: a server cannot name an owner
+// of its choosing, or report a claim of another server.
+func (r *Relay) claimReported(reg *registration, m edgeproto.Claimed) error {
+	r.mu.Lock()
+	g, ok := r.claims[m.ConnID]
+	if ok && g.serverID == reg.id {
+		delete(r.claims, m.ConnID)
+	}
+	r.mu.Unlock()
+	switch {
+	case !ok || time.Now().After(g.expires):
+		return reportRefused("connection %s is not a claim connection this edge opened in the last %s", m.ConnID, claimReportWindow)
+	case g.serverID != reg.id:
+		return reportRefused("connection %s is not to this server", m.ConnID)
+	case m.Owner != edgeproto.AccountPrincipal(g.account):
+		return reportRefused("the owner is not the account connection %s was opened for", m.ConnID)
+	}
+	return r.recordOwner(reg, func(ctx context.Context) error {
+		return r.dir.RecordClaim(ctx, reg.id, reg.name, reg.policy, g.account)
+	})
+}
+
+// recordOwner runs record and, once it succeeded, treats reg as claimed.
+// A refusal's text becomes the report's refusal reason; any other failure
+// is logged and reported as internal.
+func (r *Relay) recordOwner(reg *registration, record func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(reg.ctx, directoryTimeout)
+	err := record(ctx)
+	cancel()
+	var refusal edgeproto.Refusal
+	switch {
+	case errors.As(err, &refusal):
+		return reportRefused("%s", refusal)
+	case err != nil:
+		slog.Error("relay: ownership report not recorded", "server", reg.id, "error", err)
+		return reportRefused("internal error")
+	}
+	r.mu.Lock()
+	if !reg.claimed {
+		reg.claimed = true
+		if reg.hasDirectory {
+			r.queueDirectoryLocked(reg, reg.directory)
+			reg.directory, reg.hasDirectory = nil, false
+		}
+	}
+	cur := r.servers[reg.id]
+	stale := cur != nil && cur != reg && !cur.claimed
+	r.mu.Unlock()
+	if stale {
+		// The server enrolled again before this report was recorded and
+		// was told it is unclaimed.
+		cur.cancel(errClaimRecorded)
+	}
+	return nil
+}
+
 func (r *Relay) claimed(reg *registration) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return reg.claimed
+}
+
+// deliverDeletions sends reg's server the account deletions it is owed,
+// forgetting each once it was written to the control channel.
+func (r *Relay) deliverDeletions(reg *registration) {
+	ctx, cancel := context.WithTimeout(reg.ctx, directoryTimeout)
+	defer cancel()
+	owed, err := r.dir.PendingDeletions(ctx, reg.id)
+	if err != nil {
+		slog.Warn("relay: account deletions not read; sent at the next enrollment", "server", reg.id, "error", err)
+		return
+	}
+	for _, d := range owed {
+		if err := reg.send(d); err != nil {
+			slog.Info("relay: account deletion not delivered; sent at the next enrollment", "server", reg.id, "error", err)
+			return
+		}
+		if err := r.dir.DeletionDelivered(ctx, reg.id, d); err != nil {
+			slog.Warn("relay: delivered account deletion not forgotten; sent again at the next enrollment", "server", reg.id, "error", err)
+			return
+		}
+	}
 }
 
 // directoryWrite is a claimed server's latest directory push waiting to
@@ -327,11 +425,7 @@ func (r *Relay) replaceDirectory(reg *registration, m edgeproto.Directory) {
 		r.queueDirectoryLocked(reg, m.Entries)
 		return
 	}
-	for _, p := range r.claims {
-		if p.serverID == reg.id {
-			p.directory, p.hasDirectory = m.Entries, true
-		}
-	}
+	reg.directory, reg.hasDirectory = m.Entries, true
 }
 
 func (r *Relay) queueDirectoryLocked(reg *registration, entries []edgeproto.DirectoryEntry) {
@@ -376,8 +470,10 @@ func (r *Relay) storeDirectory(reg *registration, entries []edgeproto.DirectoryE
 		return fmt.Errorf("relay: store directory of %s: %w", reg.id, err)
 	}
 	now := time.Now()
+	// A claim connection is admitted by the server's claim code, not by
+	// the directory, which may predate the claim it makes.
 	r.closeConns(func(c *relayConn) bool {
-		if c.serverID != reg.id || c.kind != edgeproto.KindSSH {
+		if c.serverID != reg.id || c.kind == edgeproto.KindClaim {
 			return false
 		}
 		for _, e := range entries {
@@ -388,28 +484,6 @@ func (r *Relay) storeDirectory(reg *registration, entries []edgeproto.DirectoryE
 		return true
 	}, edgeproto.RefusalNotMember)
 	return nil
-}
-
-func (r *Relay) redeem(reg *registration, m edgeproto.WebRedeem) error {
-	res := edgeproto.WebRedeemResult{ID: m.ID}
-	if r.claimed(reg) {
-		ctx, cancel := context.WithTimeout(reg.ctx, directoryTimeout)
-		grant, err := r.dir.RedeemWebCode(ctx, reg.id, m)
-		cancel()
-		var refusal edgeproto.Refusal
-		switch {
-		case err == nil:
-			res.Grant = grant
-		case errors.As(err, &refusal):
-			res.Error = string(refusal)
-		default:
-			slog.Warn("relay: redeem web sign-in code", "server", reg.id, "error", err)
-			res.Error = "web sign-in failed at the edge"
-		}
-	} else {
-		res.Error = string(edgeproto.RefusalUnknownServer)
-	}
-	return reg.send(res)
 }
 
 func (r *Relay) leave(reg *registration) error {

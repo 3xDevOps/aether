@@ -2,7 +2,6 @@ package edgetest
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,55 +11,15 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/edgeclient"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// waitRole waits until c's server list shows serverID with role, or
-// without serverID when role is empty: the edge has the directory the
-// server pushed after a change.
-func waitRole(t *testing.T, c *client, serverID, role string) {
-	t.Helper()
-	eventually(t, fmt.Sprintf("%s's role on %s to be %q", c.user.Login, serverID, role), func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
-		defer cancel()
-		servers, _, err := c.edge.Servers(ctx)
-		if err != nil {
-			return err
-		}
-		got := ""
-		for _, s := range servers {
-			if s.ID == serverID {
-				got = s.Role
-			}
-		}
-		if got != role {
-			return fmt.Errorf("role %q", got)
-		}
-		return nil
-	})
-}
-
-func invite(t *testing.T, ctl *protocol.Client, p protocol.MemberInvitationCreateParams) string {
-	t.Helper()
-	return call[protocol.MemberInvitationResult](t, ctl, protocol.MethodMemberInvitationCreate, p).Invitation.ID
-}
-
-func memberNamed(t *testing.T, ctl *protocol.Client, name string) protocol.Member {
-	t.Helper()
-	for _, m := range call[protocol.MemberListResult](t, ctl, protocol.MethodMemberList, struct{}{}).Members {
-		if m.DisplayName == name {
-			return m
-		}
-	}
-	t.Fatalf("no member named %s", name)
-	return protocol.Member{}
-}
-
 func TestInvitations(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
-	a := h.newServer()
+	a := h.newServer(edgeproto.PolicyAccount)
 	cs := h.login(alice, bob, carol, dave, erin)
 	al, bo, ca, da, er := cs[0], cs[1], cs[2], cs[3], cs[4]
 	h.claimServer(al, a)
@@ -68,14 +27,9 @@ func TestInvitations(t *testing.T) {
 
 	// By GitHub login: bob sees the server, and his first connection
 	// makes him a member with the invited role and uses the invitation up.
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: bo.user.Login, Role: "collaborator"})
-	waitRole(t, bo, a.id, "collaborator")
-	devices := call[protocol.MemberDeviceListResult](t, h.control(bo, a), protocol.MethodMemberDeviceList, struct{}{})
-	if len(devices.Devices) != 1 || devices.Devices[0].Status != "approved" {
-		t.Fatalf("bob's devices = %+v", devices.Devices)
-	}
-	if m := memberNamed(t, ctl, bo.user.Login); m.Role != "collaborator" {
-		t.Fatalf("bob joined as %q", m.Role)
+	inviteLogin(t, ctl, bo, a.id, "admin")
+	if info := call[protocol.ServerInfoResult](t, h.control(bo, a), protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
+		t.Fatalf("bob joined as %+v", info.Member)
 	}
 	if invs := call[protocol.MemberInvitationListResult](t, ctl, protocol.MethodMemberInvitationList, struct{}{}); len(invs.Invitations) != 0 {
 		t.Fatalf("invitations after bob joined = %+v", invs.Invitations)
@@ -94,12 +48,21 @@ func TestInvitations(t *testing.T) {
 	_, err := h.dial(da, h.link(a))
 	wantRefusal(t, "revoked invitation", err, edgeproto.RefusalNotMember)
 
+	// Its creator demoted: an admin's open invitations go with the role.
+	bctl := h.control(bo, a)
+	invite(t, bctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: er.user.Login, Role: "admin"})
+	waitRole(t, er, a.id, "admin")
+	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "collaborator"})
+	waitRole(t, er, a.id, "")
+	_, err = h.dial(er, h.link(a))
+	wantRefusal(t, "invitation of a demoted admin", err, edgeproto.RefusalNotMember)
+
 	// Expired: the server leaves it out of the directory, so the edge
 	// refuses erin.
-	admin := memberNamed(t, ctl, al.user.Login)
+	admin := a.memberOf(t, alice)
 	if err = a.db.CreateInvitation(context.Background(), &domain.Invitation{
-		Provider: edgeproto.ProviderGitHub, Login: er.user.Login, Role: domain.Role("collaborator"),
-		CreatedBy: domain.MemberID(admin.ID), ExpiresAt: time.Now().Add(-time.Minute),
+		Provider: edgeproto.ProviderGitHub, Login: er.user.Login, Role: domain.RoleCollaborator,
+		CreatedBy: admin.ID, ExpiresAt: time.Now().Add(-time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -126,110 +89,209 @@ func TestInvitations(t *testing.T) {
 	h.proxy.inject(t, a.id, stale, false)
 	waitRole(t, er, a.id, "collaborator")
 	_, err = h.dial(er, h.link(a))
-	if err == nil || !strings.Contains(err.Error(), "is not a member of this server") || strings.Contains(err.Error(), h.frontAddr) {
+	if err == nil || !strings.Contains(err.Error(), "is not a member of this server") || strings.Contains(err.Error(), "refused: ") {
 		t.Fatalf("expired invitation at the server: %v, want the server's own refusal", err)
 	}
 	call[struct{}](t, ctl, protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: id})
 }
 
-// A server that already has members is claimed by an admin who linked
-// their account. The directory the server pushes as it accepts the claim
-// reaches the edge before the edge records the claim, and must not be
-// lost: bob's open invitation is in it.
-func TestClaimKeepsTheDirectoryPushedWithIt(t *testing.T) {
+// A role change reaches the edge's list and the member's live connection.
+func TestRoleChange(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
-	a := h.newServer()
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
 	cs := h.login(alice, bob)
 	al, bo := cs[0], cs[1]
-	ctx := context.Background()
-	admin := &domain.Member{DisplayName: "Admin", Color: "#3cb44b", Role: domain.RoleAdmin,
-		PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey()))}
-	if err := a.db.CreateMember(ctx, admin); err != nil {
-		t.Fatal(err)
-	}
-	expires := time.Now().Add(time.Hour)
-	for _, inv := range []*domain.Invitation{
-		{Provider: edgeproto.ProviderGitHub, Login: al.user.Login, Member: admin.ID, CreatedBy: admin.ID, ExpiresAt: expires},
-		{Provider: edgeproto.ProviderGitHub, Login: bo.user.Login, Role: domain.RoleCollaborator, CreatedBy: admin.ID, ExpiresAt: expires},
-	} {
-		if err := a.db.CreateInvitation(ctx, inv); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h.claimServer(al, a)
-	waitRole(t, bo, a.id, "collaborator")
-	info := call[protocol.ServerInfoResult](t, h.control(bo, a), protocol.MethodServerInfo, struct{}{})
-	if info.Member.Role != string(domain.RoleCollaborator) {
-		t.Fatalf("bob joined as %+v", info.Member)
-	}
-}
-
-// closedWithin reports whether sc closes within waitTimeout.
-func closedWithin(t *testing.T, what string, sc *ssh.Client) {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		_ = sc.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(waitTimeout):
-		t.Fatalf("%s: connection still open after %s", what, waitTimeout)
-	}
-}
-
-func TestRevocationClosesLiveConnections(t *testing.T) {
-	h := newHarness(t)
-	a := h.newServer()
-	cs := h.login(alice, bob, carol, dave)
-	al, bo, ca, da := cs[0], cs[1], cs[2], cs[3]
 	h.claimServer(al, a)
 	ctl := h.control(al, a)
-	live := map[*client]*ssh.Client{}
-	for _, c := range []*client{bo, ca, da} {
-		invite(t, ctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: c.user.Login, Role: "collaborator"})
-		waitRole(t, c, a.id, "collaborator")
-		live[c] = h.mustDial(c, a)
-	}
+	h.join(ctl, bo, a, "viewer")
+	bctl := h.control(bo, a)
+	deniedCall(t, bctl, protocol.MethodMemberInvitationCreate,
+		protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: "someone", Role: "viewer"}, "admin")
 
-	// A member removed.
-	bob := memberNamed(t, ctl, bo.user.Login)
-	call[struct{}](t, ctl, protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: bob.ID})
-	closedWithin(t, "member.remove", live[bo])
-	waitRole(t, bo, a.id, "")
-	_, err := h.dial(bo, h.link(a))
-	wantRefusal(t, "removed member", err, edgeproto.RefusalNotMember)
-
-	// A device revoked on the server.
-	carol := memberNamed(t, ctl, ca.user.Login)
-	var device string
-	for _, d := range call[protocol.MemberDeviceListResult](t, ctl, protocol.MethodMemberDeviceList, struct{}{}).Devices {
-		if d.MemberID == carol.ID {
-			device = d.ID
-		}
+	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "admin"})
+	waitRole(t, bo, a.id, "admin")
+	if info := call[protocol.ServerInfoResult](t, bctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
+		t.Fatalf("bob's live connection sees %+v", info.Member)
 	}
-	call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceRevoke, protocol.MemberDeviceRevokeParams{DeviceID: device})
-	closedWithin(t, "member.device.revoke", live[ca])
-	if _, err = h.dial(ca, h.link(a)); err == nil || !strings.Contains(err.Error(), "was revoked on this server") {
-		t.Fatalf("revoked device: %v", err)
-	}
+	invite(t, bctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: "someone", Role: "viewer"})
+}
 
-	// A device token revoked at the edge, by aether logout.
-	tokens := filepath.Join(da.dir, edgeclient.TokensFile)
-	saved, err := os.ReadFile(tokens)
+// A member of one server reaches no other: the edge refuses, and a grant
+// an attacker at the edge signs for another server's member, or for
+// another server, is refused by the server itself.
+func TestCrossServerIsolation(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a, b := h.newServer(edgeproto.PolicyAccount), h.newServer(edgeproto.PolicyAccount)
+	cs := h.login(alice, bob)
+	al, bo := cs[0], cs[1]
+	h.claimServer(al, a)
+	h.claimServer(bo, b)
+
+	_, err := h.dial(al, h.link(b))
+	wantRefusal(t, "owner of A connecting to B", err, edgeproto.RefusalNotMember)
+	_, err = h.dial(bo, h.link(a))
+	wantRefusal(t, "owner of B connecting to A", err, edgeproto.RefusalNotMember)
+
+	nc, err := h.forge(t, b, forgery{kind: edgeproto.KindSSH, account: alice.account(), key: al.signer(t).PublicKey()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
-	defer cancel()
-	if err = da.edge.Logout(ctx); err != nil {
+	if _, banner, herr := sshOver(nc, b, "aether", al.signer(t)); herr == nil || !strings.Contains(banner, "github account alice is not a member of this server") {
+		t.Fatalf("forged grant for A's owner on B: %v, banner %q", herr, banner)
+	}
+
+	connID := edgeproto.NewConnID()
+	now := time.Now()
+	grant, err := edgeproto.SignGrant(h.edgeKey(), edgeproto.Grant{
+		Issuer: h.relayURL, ServerID: a.id, ConnID: connID, Kind: edgeproto.KindSSH, Account: alice.account(),
+		DeviceID: "forged", DeviceKey: edgeproto.DeviceKeyLine(al.signer(t).PublicKey()), IssuedAt: now, ExpiresAt: now.Add(edgeproto.GrantTTL),
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	closedWithin(t, "aether logout", live[da])
-	if err = os.WriteFile(tokens, saved, 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := h.sendOpen(t, b, edgeproto.Open{ConnID: connID, Ticket: edgeproto.NewToken(), Kind: edgeproto.KindSSH, Grant: grant}); err == nil ||
+		!strings.Contains(err.Error(), edgeproto.ErrGrantServer.Error()) {
+		t.Fatalf("A's grant opened on B: %v", err)
 	}
-	_, err = h.dial(da, h.link(a))
-	wantRefusal(t, "revoked device token", err, edgeproto.RefusalTokenRevoked)
+}
+
+// Removing a member, revoking a device on the server or on its console,
+// revoking a device token at the edge, and deleting an account each close
+// a live connection; deleting the account closes direct ones too, since
+// each server then removes the account's devices. The test logs how long
+// each took.
+func TestRevocationClosesLiveConnections(t *testing.T) {
+	t.Parallel()
+	for _, policy := range policies {
+		t.Run(string(policy), func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			a := h.newServer(policy)
+			cs := h.login(alice, bob, carol, dave, erin, mallory)
+			al, bo, ca, da, er, ma := cs[0], cs[1], cs[2], cs[3], cs[4], cs[5]
+			h.claimServer(al, a)
+			ctl := h.control(al, a)
+			live := map[*client]*ssh.Client{}
+			for _, c := range []*client{bo, ca, da, er, ma} {
+				h.join(ctl, c, a, "collaborator")
+				live[c] = h.mustDial(c, a)
+			}
+
+			start := time.Now()
+			call[struct{}](t, ctl, protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(a.memberOf(t, bob).ID)})
+			closedWithin(t, "member.remove", live[bo], start, 2*time.Second)
+			waitRole(t, bo, a.id, "")
+			_, err := h.dial(bo, h.link(a))
+			wantRefusal(t, "removed member", err, edgeproto.RefusalNotMember)
+
+			start = time.Now()
+			call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceRevoke, protocol.MemberDeviceRevokeParams{DeviceID: string(a.deviceIDOf(t, ca))})
+			closedWithin(t, "member.device.revoke", live[ca], start, 2*time.Second)
+			if _, err = h.dial(ca, h.link(a)); err == nil || !strings.Contains(err.Error(), "was revoked on this server") {
+				t.Fatalf("revoked device: %v", err)
+			}
+
+			// `aether-server device review` revokes from another process,
+			// which the running server notices at its next revalidation.
+			start = time.Now()
+			if err = a.console(t).RevokeDevice(context.Background(), a.deviceIDOf(t, ma)); err != nil {
+				t.Fatal(err)
+			}
+			closedWithin(t, "device revoked on the console", live[ma], start, 5*time.Second)
+
+			// A device token revoked at the edge, by aether logout, closes
+			// the device's relayed connections. Its device key stays
+			// approved on the server, so a direct connection stays open
+			// and a new one is admitted; the direct path takes approved
+			// devices only.
+			for _, c := range []*client{da, er} {
+				h.approveForDirect(ctl, c, a)
+			}
+			direct, err := h.dial(da, directLink(a))
+			if err != nil {
+				t.Fatalf("direct connection: %v", err)
+			}
+			tokens := filepath.Join(da.dir, edgeclient.TokensFile)
+			saved, err := os.ReadFile(tokens)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start = time.Now()
+			if err = da.edge.Logout(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			closedWithin(t, "aether logout", live[da], start, 2*time.Second)
+			if info := call[protocol.ServerInfoResult](t, controlOver(t, direct), protocol.MethodServerInfo, struct{}{}); info.Member.ID == "" {
+				t.Fatal("the direct connection lost its member")
+			}
+			if err = os.WriteFile(tokens, saved, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err = h.dial(da, h.link(a))
+			wantRefusal(t, "revoked device token", err, edgeproto.RefusalTokenRevoked)
+			sc, err := h.dial(da, directLink(a))
+			if err != nil {
+				t.Fatalf("direct connection after logout: %v", err)
+			}
+			_ = sc.Close()
+
+			// An account deleted at the edge.
+			direct, err = h.dial(er, directLink(a))
+			if err != nil {
+				t.Fatalf("direct connection: %v", err)
+			}
+			start = time.Now()
+			h.deleteAccount(er)
+			closedWithin(t, "account deletion (relayed)", live[er], start, 3*time.Second)
+			closedWithin(t, "account deletion (direct)", direct, start, 3*time.Second)
+			if _, err = h.dial(er, directLink(a)); err == nil {
+				t.Fatal("a deleted account's device key still connects directly")
+			}
+		})
+	}
+}
+
+// Revocations made on the server while the edge is down take effect
+// without it, and hold once it is back.
+func TestRevocationWhileTheEdgeIsDown(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
+	cs := h.login(alice, bob, carol)
+	al, bo, ca := cs[0], cs[1], cs[2]
+	h.claimServer(al, a)
+	ctl := h.control(al, a)
+	h.join(ctl, bo, a, "collaborator")
+	h.join(ctl, ca, a, "collaborator")
+	bobID, carolID := a.deviceIDOf(t, bo), a.memberOf(t, carol).ID
+
+	h.stopEdge()
+	bobDirect, err := h.dial(bo, directLink(a))
+	if err != nil {
+		t.Fatalf("bob's direct connection: %v", err)
+	}
+	admin, err := h.dial(al, directLink(a))
+	if err != nil {
+		t.Fatalf("alice's direct connection with the edge down: %v", err)
+	}
+	actl := controlOver(t, admin)
+	start := time.Now()
+	call[protocol.MemberDeviceResult](t, actl, protocol.MethodMemberDeviceRevoke, protocol.MemberDeviceRevokeParams{DeviceID: string(bobID)})
+	closedWithin(t, "member.device.revoke with the edge down", bobDirect, start, 2*time.Second)
+	call[struct{}](t, actl, protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(carolID)})
+
+	h.startEdge()
+	a.waitEnrolled()
+	if _, err = h.dial(bo, h.link(a)); err == nil || !strings.Contains(err.Error(), "was revoked on this server") {
+		t.Fatalf("bob's revoked device after the edge came back: %v", err)
+	}
+	waitRole(t, ca, a.id, "")
+	_, err = h.dial(ca, h.link(a))
+	wantRefusal(t, "carol, removed while the edge was down", err, edgeproto.RefusalNotMember)
+	if _, err = h.dial(bo, directLink(a)); err == nil {
+		t.Fatal("bob's revoked device connects directly")
+	}
+	h.mustDial(al, a)
 }

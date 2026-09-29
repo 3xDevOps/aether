@@ -1,0 +1,23 @@
+{{define "servers"}}{{template "top" .}}
+{{if .Data}}<table>
+<thead><tr><th>Name</th><th>Server id</th><th>Role</th><th>Runs on</th><th>Access</th><th>Status</th><th></th></tr></thead>
+<tbody>
+{{range .Data}}<tr>
+<td>{{.Name}}</td>
+<td><code>{{.ID}}</code></td>
+<td>{{.Role}}</td>
+<td>{{if eq .Kind "hosted"}}Aether's hardware{{else}}its owner's hardware{{end}}</td>
+<td>{{if eq .AccessPolicy "account"}}signing in is enough{{else}}approved devices only{{end}}</td>
+<td>{{if .Online}}online{{else}}not connected{{end}}</td>
+<td>{{if .Owner}}<form method="post" action="/servers/remove">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="server" value="{{.ID}}">
+<button>Remove</button>
+</form>{{end}}</td>
+</tr>
+{{end}}</tbody>
+</table>
+<p>Remove unenrolls a server from this edge. Its members keep any direct or tailnet access. Access is the policy the server announced; the server enforces it.</p>
+{{else}}<p>No servers yet. Claim one with the claim code that <code>aether-server setup</code> printed: run <code>aether link --claim &lt;code&gt;</code> on your computer.</p>{{end}}
+{{template "bottom" .}}{{end}}
+

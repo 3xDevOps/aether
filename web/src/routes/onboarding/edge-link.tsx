@@ -1,8 +1,9 @@
 // The Link step's first choice: reach a server through an edge. Signing in
 // runs the edge's device flow through the local gateway, which keeps the
 // device token to itself; this screen only shows the code, waits for the
-// gateway to report the sign-in, and then links a server the account
-// reaches or claims a new one with the code `aether-server setup` printed.
+// gateway to report the sign-in, and then links a server: by the id its
+// admin gave, from the edge's list after showing what the link will pin,
+// or by claiming a new one with the code `aether-server setup` printed.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -24,8 +25,9 @@ type Phase =
   | { name: 'waiting'; login: EdgeLogin }
   | { name: 'signed-in'; edge: string; account: EdgeAccount }
 
+// Pre-wrapped: a server's refusal lists the commands that fix it, one per line.
 const errorLine =
-  'border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed'
+  'min-w-0 whitespace-pre-wrap break-words border-l-2 border-state-failed/60 bg-state-failed/5 px-3 py-2 text-sm text-state-failed'
 
 export function EdgeSignIn({
   client,
@@ -130,8 +132,8 @@ export function EdgeSignIn({
         <h3 className="text-sm font-semibold">Sign in</h3>
         <p className="text-[13px] leading-5 text-muted-foreground">
           Reach your server through an edge relay, with no VPN, open port or address to set
-          up. Sign in with GitHub or Google, then pick a server your account reaches or add a
-          new one.
+          up. Sign in with GitHub or Google, then link a server by the id its admin gave you,
+          pick one your account reaches, or add a new one.
         </p>
       </div>
       {error && <p className={errorLine}>{error}</p>}
@@ -157,6 +159,10 @@ export function EdgeSignIn({
           <p className="font-mono text-base font-semibold tracking-wider select-all">
             {phase.login.user_code}
           </p>
+          <p className="text-muted-foreground">
+            <span className="font-mono">{edgeHost(phase.login.signin_origin)}</span> signs you in
+            for the edge <span className="font-mono">{edgeHost(phase.login.edge)}</span>.
+          </p>
           <p role="status" className="text-muted-foreground">
             Waiting for you to confirm the code in the browser...
           </p>
@@ -180,7 +186,13 @@ function accountName(account: EdgeAccount): string {
   return `${name} (${provider})`
 }
 
-/** The servers the signed-in account reaches, and the claim form. */
+const policyLine: Record<EdgeServer['access_policy'], string> = {
+  account: 'Account access: signing in is enough',
+  'approved-devices': 'Approved devices: a new device waits for approval',
+}
+
+/** The servers the signed-in account reaches, linking by id, and the claim
+ * form. */
 function ServerPicker({
   client,
   edge,
@@ -197,6 +209,8 @@ function ServerPicker({
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
   const [code, setCode] = useState('')
+  const [serverID, setServerID] = useState('')
+  const [confirming, setConfirming] = useState<EdgeServer | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -239,6 +253,33 @@ function ServerPicker({
           )}
         </div>
       )}
+      <form
+        aria-label="Link by server id"
+        className="min-w-0 space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void link(() => client.localEdgeLink(serverID.trim(), edge))
+        }}
+      >
+        <Label className="block min-w-0 max-w-sm space-y-1">
+          Server id from your admin
+          <Input
+            className="min-w-0 font-mono"
+            autoComplete="off"
+            value={serverID}
+            disabled={busy}
+            onChange={(e) => setServerID(e.target.value)}
+          />
+        </Label>
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          The server&apos;s admin reads it from{' '}
+          <span className="font-mono">aether-server edge status</span>. The link accepts only
+          the server this id names.
+        </p>
+        <Button type="submit" size="sm" disabled={busy || !serverID.trim()}>
+          Link by id
+        </Button>
+      </form>
       {servers?.length === 0 && (
         <p className="text-muted-foreground">
           Your account reaches no servers yet. Add one with its claim code, or ask a
@@ -261,7 +302,13 @@ function ServerPicker({
                   <Chip color="default" variant="tertiary" size="sm">
                     <Chip.Label>{server.role}</Chip.Label>
                   </Chip>
+                  <Chip color="default" variant="tertiary" size="sm">
+                    <Chip.Label>{server.kind}</Chip.Label>
+                  </Chip>
                 </div>
+                <p className="min-w-0 text-xs text-muted-foreground">
+                  {policyLine[server.access_policy]}
+                </p>
                 <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">
                   {server.id}
                 </p>
@@ -271,18 +318,29 @@ function ServerPicker({
                 variant="outline"
                 disabled={busy}
                 aria-label={`Link ${server.name}`}
-                onClick={() =>
-                  void link(async () => ({
-                    ...(await client.localEdgeLink(server.id, edge)),
-                    server_name: server.name,
-                  }))
-                }
+                onClick={() => setConfirming(server)}
               >
                 Link
               </Button>
             </li>
           ))}
         </ul>
+      )}
+      {confirming && (
+        <ConfirmPin
+          key={confirming.id}
+          client={client}
+          edge={edge}
+          server={confirming}
+          busy={busy}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() =>
+            void link(async () => ({
+              ...(await client.localEdgeLink(confirming.id, edge)),
+              server_name: confirming.name,
+            }))
+          }
+        />
       )}
       {adding ? (
         <form
@@ -318,5 +376,77 @@ function ServerPicker({
         </Button>
       )}
     </div>
+  )
+}
+
+/**
+ * What linking a server from the edge's list pins, shown before it does:
+ * the id comes from the edge, so only comparing it with the admin's rules
+ * out an edge that lists a false one.
+ */
+function ConfirmPin({
+  client,
+  edge,
+  server,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  client: Api
+  edge: string
+  server: EdgeServer
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const [fingerprint, setFingerprint] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    client.localEdgeHostKey(server.id, edge).then(
+      (key) => {
+        if (live) setFingerprint(key.fingerprint)
+      },
+      (err: unknown) => {
+        if (live) setError(message(err))
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [client, edge, server.id])
+
+  return (
+    <section
+      aria-label="Confirm server"
+      className="min-w-0 space-y-2 border-l-2 border-border px-3 py-2"
+    >
+      <p className="font-medium">Link {server.name}?</p>
+      <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+        <dt className="text-muted-foreground">Server id</dt>
+        <dd className="min-w-0 break-all font-mono">{server.id}</dd>
+        <dt className="text-muted-foreground">Host key</dt>
+        <dd className="min-w-0 break-all font-mono">
+          {fingerprint ?? (error ? 'not read' : 'reading...')}
+        </dd>
+      </dl>
+      {error && <p className={errorLine}>{error}</p>}
+      <p className="text-[13px] leading-5 text-muted-foreground">
+        This id comes from <span className="font-mono">{edgeHost(edge)}</span>. From now on this
+        link accepts only this host key, directly and through the edge. An edge that lists a
+        false id can send a first link to another server: compare the id with the one the
+        server&apos;s admin gives you, or that{' '}
+        <span className="font-mono">aether-server edge status</span> prints on the server.
+      </p>
+      <div className="flex min-w-0 flex-wrap gap-2">
+        <Button size="sm" disabled={busy || fingerprint === null} onClick={onConfirm}>
+          {busy ? 'Linking...' : 'Link and pin'}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </section>
   )
 }

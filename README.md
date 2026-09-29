@@ -89,9 +89,7 @@ while you sleep.**
 machine, bound to loopback and carried over the same SSH connection as the
 CLI. On a tailnet, the server can optionally host the dashboard over HTTPS with
 `--web-port`; Tailscale WhoIs identifies each request, so a phone needs no
-install or token. Without a tailnet, a phone or browser signs in with GitHub or
-Google through an edge relay and reaches the server's own HTTPS dashboard
-([edge.md](docs/edge.md)). The server-hosted surface has no machine-local verbs or
+install or token. The server-hosted surface has no machine-local verbs or
 onboarding wizard; use local `aether gui` for the one-time directory picker and
 other local filesystem or repository actions.
 

@@ -3,16 +3,16 @@
     <string name="app_name">Aether</string>
 
     <string name="setup_title">Aether server</string>
-    <string name="setup_explainer">Enter where your server hosts the dashboard: its MagicDNS name on your tailnet, or its address through an edge, &lt;server id&gt;.&lt;server domain&gt;. On a tailnet, this phone has to be signed in to the same tailnet. Through an edge, the dashboard signs you in through your browser.</string>
+    <string name="setup_explainer">Your server hosts the dashboard on your tailnet. Enter its MagicDNS name. This phone has to be signed in to the same tailnet.</string>
     <string name="setup_label">Server name</string>
     <string name="setup_hint">my-server.tailnet-name.ts.net</string>
     <string name="setup_open">Open dashboard</string>
-    <string name="setup_privacy">The app stores the server name and, after a sign-in through an edge, the dashboard\'s session cookie. It sends nothing anywhere but that server. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md</string>
+    <string name="setup_privacy">The app stores the server name and sends nothing anywhere but that server. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md</string>
     <string name="setup_licence">Licence: GPL-3.0, https://github.com/3xDevOps/Aether/blob/main/LICENSE. Open source notices: https://github.com/3xDevOps/Aether/blob/main/docs/notices.md</string>
 
-    <string name="address_error_empty">Enter the server\'s tailnet name or edge address, for example my-server.tailnet-name.ts.net</string>
+    <string name="address_error_empty">Enter the server\'s tailnet name, for example my-server.tailnet-name.ts.net</string>
     <string name="address_error_unparseable">Not a server address: %1$s</string>
-    <string name="address_error_https_only">The dashboard is served over HTTPS only. Enter the server\'s name, or an https:// address.</string>
+    <string name="address_error_https_only">The dashboard is served over HTTPS only. Enter the server\'s tailnet name, or an https:// address.</string>
     <string name="address_error_credentials">A server address carries no username or password.</string>
     <string name="address_error_no_host">No server name in \"%1$s\".</string>
     <string name="address_error_port">Port %1$s is not a port.</string>
@@ -20,9 +20,4 @@
     <string name="server_address">Server address</string>
     <string name="server_address_short">Server</string>
     <string name="no_app_for_link">No app on this phone opens %1$s</string>
-
-    <string name="setup_sign_in_without_server">A sign-in link opened the app before a server was set, so it was not used. Enter the server\'s address, open the dashboard and sign in again.</string>
-    <string name="sign_in_link_error_shape">Refused a sign-in link: the edge sends aether://auth/callback with a code and a state and nothing else.</string>
-    <string name="sign_in_link_error_values">Refused a sign-in link: its code or state is not in the form the edge issues.</string>
-    <string name="sign_in_link_error_not_edge">Refused a sign-in link: it completes a sign-in through an edge, and the app is set to %1$s, which is not an edge address.</string>
 </resources>

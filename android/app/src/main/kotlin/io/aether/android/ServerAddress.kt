@@ -15,9 +15,8 @@ class ServerAddressError(@get:StringRes val reason: Int, vararg val detail: Stri
 /**
  * The dashboard URL a typed server address points at.
  *
- * The server hosts the dashboard over HTTPS only, at the root, on the
- * MagicDNS name of its tailnet node (docs/networking.md) or at
- * `<server id>.<server domain>` through an edge (docs/edge.md). So a bare
+ * The server hosts the dashboard on the MagicDNS name of its tailnet node,
+ * over HTTPS only, and answers at the root (docs/networking.md). So a bare
  * name is enough, a pasted URL is accepted, everything after the authority is
  * dropped, and cleartext is refused rather than silently upgraded: a shell
  * that accepted `http://` would carry a member's whole authority in clear.

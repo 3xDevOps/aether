@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edge/edgestore"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
 const testServer = "aaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -39,7 +41,7 @@ func TestOperatorCommands(t *testing.T) {
 	if _, err = s.SignIn(ctx, owner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.ClaimServer(ctx, testServer, "workstation", owner, time.Now()); err != nil {
+	if err = s.RecordClaim(ctx, testServer, "workstation", edgeproto.PolicyAccount, edgeproto.AccountPrincipal(owner), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -67,6 +69,16 @@ func TestOperatorCommands(t *testing.T) {
 		t.Fatalf("second unblock: %v", err)
 	}
 
+	s, err = edgestore.Open(filepath.Join(dir, "edge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RecordClaim(ctx, testServer, "workstation", edgeproto.PolicyAccount, edgeproto.AccountPrincipal(owner), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = run(t, dir, "accounts", "block", "github:42"); err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +87,12 @@ func TestOperatorCommands(t *testing.T) {
 		t.Fatalf("accounts list:\n%s%v", out, err)
 	}
 	out, err = run(t, dir, "accounts", "delete", "github:42")
-	if err != nil || !strings.Contains(out, "deleted account github:42 (octo): 0 devices, 0 owned servers") {
+	if err != nil || !strings.Contains(out, "deleted account github:42 (octo): 0 devices; ownerless now: ["+testServer+"]") {
 		t.Fatalf("accounts delete:\n%s%v", out, err)
+	}
+	out, err = run(t, dir, "servers", "list")
+	if err != nil || !strings.Contains(out, testServer+"  ownerless  workstation  -") {
+		t.Fatalf("servers list after the owner's deletion:\n%s%v", out, err)
 	}
 	if _, err := run(t, dir, "accounts", "delete", "github:42"); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("second delete: %v", err)
@@ -92,6 +108,29 @@ func TestOperatorCommands(t *testing.T) {
 	} {
 		if _, err := run(t, dir, bad...); err == nil {
 			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
+// TestOperatorCommandsOnlyRemoveAndBlock lists every aether-edge command.
+// An operator command may list, remove or block; unblock only lifts the
+// operator's own block. None may grant: approve a device, record an
+// owner, or admit an account to a server. The edge is not a recovery path
+// (docs/plans/2026-09-28-edge-access-policies.md, rule 10). A command
+// added here needs that review.
+func TestOperatorCommandsOnlyRemoveAndBlock(t *testing.T) {
+	for _, tt := range []struct {
+		group string
+		got   []string
+		want  []string
+	}{
+		{"aether-edge", slices.Collect(maps.Keys(commands)), []string{"accounts", "serve", "servers", "version"}},
+		{"aether-edge servers", slices.Collect(maps.Keys(serverCommands)), []string{"block", "list", "remove", "unblock"}},
+		{"aether-edge accounts", slices.Collect(maps.Keys(accountCommands)), []string{"block", "delete", "list", "unblock"}},
+	} {
+		slices.Sort(tt.got)
+		if !slices.Equal(tt.got, tt.want) {
+			t.Errorf("%s commands are %v, reviewed %v", tt.group, tt.got, tt.want)
 		}
 	}
 }

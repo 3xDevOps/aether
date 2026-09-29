@@ -7,7 +7,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
 func init() {
@@ -31,7 +31,7 @@ func runServers(args []string) error {
 	if err != nil {
 		return err
 	}
-	servers, serverDomain, err := client.Servers(context.Background())
+	servers, err := client.Servers(context.Background())
 	if err != nil {
 		return err
 	}
@@ -40,19 +40,27 @@ func runServers(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tNAME\tROLE\tONLINE\tDASHBOARD")
+	_, _ = fmt.Fprintln(tw, "ID\tNAME\tROLE\tONLINE\tKIND\tACCESS")
 	for _, s := range servers {
 		online := "no"
 		if s.Online {
 			online = "yes"
 		}
-		// An edge older than the server domain does not say where
-		// dashboards are.
-		dashboard := "-"
-		if serverDomain != "" {
-			dashboard = "https://" + edgeproto.ServerHostname(s.ID, serverDomain) + "/"
-		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Name, s.Role, online, dashboard)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s: %s\n", s.ID, s.Name, s.Role, online, s.Kind, s.AccessPolicy, policyMeaning(s.AccessPolicy))
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Println("link by the id the server's admin gave you, or that aether-server edge status printed: aether link <id>")
+	fmt.Println("link from this list, which the edge supplies: aether link --from-edge <id>")
+	return nil
+}
+
+// policyMeaning says in a few words what an access policy means for a
+// device that connects for the first time.
+func policyMeaning(p edgeproto.AccessPolicy) string {
+	if p == edgeproto.PolicyAccount {
+		return "signing in is enough"
+	}
+	return "a new device waits for approval"
 }

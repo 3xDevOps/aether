@@ -362,10 +362,9 @@ provider read.
 ## The dashboard gateways
 
 
-The dashboard runs over one of three gateways, which share their handlers and
+The dashboard runs over one of two gateways, which share their handlers and
 differ only in who they trust (`internal/webgate` is the shared core;
-[local-gateway.md](local-gateway.md)). The third, the dashboard through an
-edge, is under [Edge remote access](#edge-remote-access).
+[local-gateway.md](local-gateway.md)). An edge serves no dashboard.
 
 ### `aether gui`, on the user's own machine
 
@@ -403,7 +402,7 @@ shape over that machine's SSH connection to the linked server
 
 With `web-port` set, `aether-server` serves the same dashboard itself
 (`internal/servergw`, [networking.md](networking.md#the-dashboard)). It is the
-only HTTP port the server binds, and it exists only where a tailnet can
+only HTTP listener the server has, and it exists only where a tailnet can
 identify its callers.
 
 - **Tailnet addresses only, HTTPS only.** It binds the host's tailnet
@@ -445,18 +444,7 @@ identify its callers.
   thing of its own it stores is the server's address, beside the WebView's
   ordinary cache of the dashboard's files and the dashboard's local storage
   of view preferences: no token, no cookie jar it shares with anything, no
-  key, and no JavaScript bridge into the app. Through an edge, the WebView's
-  cookie store also holds the server's session cookie. The sign-in runs in
-  the phone's browser and returns on `aether://auth/callback`; the app
-  accepts only a `code` and a `state` of the expected shape, and loads the
-  callback on the saved server's host, never on a host taken from the link.
-  An app that intercepts the link holds neither the state cookie nor the
-  verifier, so the server refuses its code. The remaining case is a sign-in
-  an attacker started on their own device and talked the victim into
-  confirming: a hostile app registered for `aether://` on the victim's phone
-  receives that code, and the attacker's device can redeem it. The edge's
-  confirmation page says to continue only for a dashboard you just opened;
-  verified app links would close the gap and are not built. What leaves
+  key, and no JavaScript bridge into the app. What leaves
   the phone, and where, is [privacy.md](privacy.md). HTTPS is
   pinned in three places, so there is no way to point it at a cleartext
   listener: the address screen refuses a `http://` URL, the app's network
@@ -649,11 +637,12 @@ where the link appeared. Other links keep the normal browser behavior.
 
 ## Edge remote access
 
-The edge ([edge.md](edge.md)) is a trusted identity broker, not a trusted
-authority. The server believes it about who signed in, and about nothing
-else. [edge.md](edge.md#what-the-edge-can-and-cannot-see) tabulates what an
-honest edge, a compromised edge, a stolen device token and a stolen claim
-code can and cannot do; the reasons follow.
+The edge ([edge.md](edge.md)) is an identity broker, not an authority. The
+server believes it about who signed in; whether that admits a new device is
+the server's access policy, and membership, role and device status are
+always the server's own. [edge.md](edge.md#what-an-attacker-can-do)
+tabulates what a taken-over GitHub or Google account and a compromised edge
+can do under each policy, with the tests that show it; the reasons follow.
 
 - **A server uses an edge only when its operator chose one.** `edge-url` is
   empty unless the config file or a flag names an edge. `aether-server
@@ -680,44 +669,81 @@ code can and cannot do; the reasons follow.
 - **Membership stays on the server.** The server maps the account to a
   member itself and checks the device. A compromised edge can forge a grant
   for any account, but that account gets in only as a member or through an
-  open invitation the server holds. With `edge-device-approval` on, it
-  cannot add a device to a member who already has one; it can still become
-  the first device of a member who has none, or accept an open invitation
-  under the invited account.
-- **Device approval is what stops a stolen account.** A member's first
-  device is accepted; every later device key or browser waits until a
-  device the member already uses, an admin, or `sudo aether-server device
-  approve <code>` on the server approves it. Only the new device shows its
-  approval code; `aether device list` and the dashboard's Devices view
-  never do, so approving proves the approver holds the new device or was
-  handed its code. Approve only a code read from a device you are holding.
-  A revoked device still counts as the member's device, so revoking every
-  device does not reopen the first-device window. `sudo aether-server config set
-  edge-device-approval false` approves every new device on first contact.
-  That costs the
-  protection: anyone who signs in to the edge as a member's GitHub or Google
-  account, and a compromised edge naming that account, then connects as
-  that member with a device of their own.
+  open invitation the server holds.
+- **The access policy decides what a grant is worth.** Under `edge-access
+  account`, a grant for a member's account admits a new device of that
+  member: an attacker gets in when either the member's GitHub or Google
+  account or the edge is taken over. Under `approved-devices`, every new
+  device key, a member's first included, waits until a person approves it:
+  the member from an approved device, SSH key or tailnet connection, an
+  admin, or `sudo aether-server device approve <code>` on the server. An
+  attacker then also needs an approver to type the code their device
+  shows. The policy is set only on the server's host, and a missing
+  setting means `approved-devices`. Neither policy assumes OAuth is weaker
+  or SSH keys stronger; they differ in how many parties must fail.
+- **An approved device key is a credential on its own on the direct
+  path.** The direct SSH port admits approved device keys, under both
+  policies, without asking the edge, as it admits a member SSH key.
+  Through the edge the key also needs the device's token or the edge.
+- **Approval codes are typed, not listed.** The code is derived from the
+  device key and shown to that device inside SSH; `aether device list`
+  never carries it, so approving proves the approver was handed the code
+  of the device in front of the person. Approve only a code read from a
+  device you are holding. Two keys can derive one code; such a code
+  approves neither, and `sudo aether-server device review` approves by
+  choosing the device instead. An approval from a connection that signed
+  in with an unapproved device is refused under either policy.
 - **Enrollment signatures cannot become host signatures.** The host key
   signs `aether-edge-enroll-v1\x00`, the edge origin, the server id and a
   nonce. That message is longer than any SSH exchange hash, so an edge that
   collects it cannot use it in a handshake.
-- **Claims need the server's code.** The code is compared on the server,
-  stored there only as a hash, and dies after 30 minutes or five attempts.
-  It carries the whole server id, so `aether link --claim` refuses an edge
-  answer naming any other server, and the edge forwards it only to that
-  server. The code passes through the edge, so a compromised edge that
-  receives it can claim the server for another account. The owner's link
-  then fails with `not a member of this server`, and `sudo aether-server
-  edge status` names the account that claimed it.
+- **Claims travel inside SSH.** `aether link --claim` opens a claim
+  connection through the edge and offers the code, with the account this
+  device signed in as, in the SSH user name. An SSH client sends the user
+  name only after the key exchange has checked the host key, and the
+  client accepts only a host key that derives the server id in the code,
+  so the code reaches that server encrypted and nothing else. The client's
+  SSH signature covers the user name, and the server refuses a claim whose
+  grant names another account before it tries the code. The edge relays
+  the bytes without reading them; to take a claim it would need the code,
+  which only the server's console printed. An edge that also lied to the
+  client about who signed in could make the claim for its own account;
+  `aether login` prints the account the edge reported.
+- **The first link decides which server a client pins.** Every later
+  connection must present a host key that derives the linked id. An id
+  from the server's admin, or from `sudo aether-server edge status`, rules
+  out being sent elsewhere. An id from `aether servers` comes from the edge,
+  and an edge that lists a false id can send that first link to another
+  server; `aether link --from-edge` and the wizard show the id and host key
+  fingerprint and ask before they pin it.
+- **Device tokens go to two origins only.** A token is sent to the relay
+  origin it is stored under and to the sign-in origin that issued it, never
+  to an origin the edge's metadata names later, and the client follows no
+  redirect.
 - **The edge stores bearer secrets hashed** (device tokens, session
-  cookies, device codes, web sign-in codes) and rate-limits sign-in, device
-  codes and claims per address. An IPv6 address counts against its /64,
+  cookies, device codes) and rate-limits sign-in, device
+  codes and claim connections per address; claim connections also per
+  account and per server. An IPv6 address counts against its /64,
   its /56 (4 times the budget) and its /48 (16 times), so one allocation
   cannot spend more than its /48's share; a full limiter evicts the block
   with the most budget left instead of refusing new addresses. Device-code
   entry is also limited per account. The address a relayed connection came from is for
-  logs and rate limits only, never for authentication.
+  logs and rate limits only, never for authentication. Behind a reverse
+  proxy the edge reads the address from the right-most `X-Forwarded-For`
+  entry, and only when the connection comes from a loopback address;
+  a request whose header is missing or not an IP address is refused. The
+  packaged nginx configuration sets the header to the address nginx saw,
+  discarding the client's.
+- **Sign-in and relay are two host names.** The sign-in cookies are
+  `__Host-` cookies with no `Domain` attribute, bound to the sign-in host
+  alone, and each host refuses the other's paths. A server's ownership is
+  recorded only from that server's own report on its control connection,
+  for the account whose claim connection presented the code; no client
+  request or operator command records an owner or approves a device.
+- **Deleting an account needs a fresh sign-in.** The edge deletes an
+  account only within 5 minutes of a sign-in with the provider and with the
+  login or email typed back. A stolen device token or edge session cookie
+  alone cannot delete it: the provider must also confirm the person.
 - **Invitations match only a recently confirmed login or email.** The edge
   learns an account's GitHub login and verified email only when that person
   signs in with the provider in a browser. Signing in takes the login from
@@ -731,48 +757,14 @@ code can and cannot do; the reasons follow.
   carries when the provider last confirmed the account. Within those 24
   hours an old login or email can still match. Members match by the
   provider's immutable subject and are unaffected.
-- **The dashboard through the edge terminates TLS on the server.** The edge
-  routes by SNI and never holds the server's certificate key. But the
-  wildcard DNS name points at the edge, and a CA validates a host name by
-  asking whoever answers on its `:443`. **A compromised edge can therefore
-  obtain its own certificate for a server's dashboard host name**, answer
-  browsers itself, and read and alter that server's dashboard traffic,
-  terminals included, and the session cookies it carries. Every publicly
-  trusted certificate is logged in Certificate Transparency, so the
-  misissue is visible: watch the logs (for example at <https://crt.sh>) for
-  certificates of `<server id>.<server domain>` that your server did not
-  request. SSH, and the CLI and `aether gui` that use it, are not exposed
-  this way.
-- **Browser credentials are cookies of the server, not of the edge.** A
-  browser is a device, identified by `__Host-aether_device`; each sign-in on
-  it is a session, `__Host-aether_session`. Both are random, HttpOnly,
-  Secure, SameSite=Strict and bound to exactly the server's hostname, and
-  the server stores only their hashes. The browser device is approved,
-  listed and revoked like any other device. Signing out ends the session
-  and keeps the device, so signing in again on that browser needs no new
-  approval, while a device cookie presented for another member, or of a
-  revoked device, signs in as a new device. The device cookie therefore
-  carries the device's approval, as a device key does: revoke the browser
-  with `aether device revoke` when it is lost. Revoking the device refuses
-  all of its sessions. An ended session, a revoked device or a removed
-  member is refused on the next request and loses its live WebSockets
-  within 3 seconds. The edge's redirect back to the server is a cross-site
-  navigation that carries no Strict cookie, so `/auth/login` copies the
-  device cookie into the 10-minute `__Host-aether_signin` cookie
-  (SameSite=Lax) for the callback to read. The sign-in code the edge returns
-  is single-use, expires after 2 minutes, and is bound to that server and to
-  the PKCE verifier held in `__Host-aether_signin`, so a code presented to
-  another server, replayed, or opened in a browser without that cookie is
-  refused.
-- **State changes need an Origin.** With a cookie credential, a request
-  without an `Origin` header is the one case the same-origin check cannot
-  judge, so the edge dashboard refuses every non-GET request and WebSocket
-  handshake that lacks one, and any whose `Origin` is not its own host.
-- **Every edge dashboard response** carries HSTS, a CSP of `base-uri
-  'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'`,
-  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-  `Referrer-Policy: no-referrer` (the callback URL carries the code) and
-  `Cross-Origin-Opener-Policy: same-origin`.
+- **Recovering a provider account removes nothing at the edge or on a
+  server.** Device tokens do not expire, so devices signed in while the
+  account was taken over keep working until revoked
+  ([edge.md](edge.md#recovering-a-provider-account)).
+- **Only self-hosted servers exist.** The protocol reserves a `hosted`
+  kind for a workspace Aether would operate. Such a workspace would not be
+  protected end to end against Aether's operators, who would hold its host
+  key and data ([edge.md](edge.md#trust-models)).
 
 What the edge operator does see: server ids and host names, account
 identities, device labels, client addresses, timing and byte counts

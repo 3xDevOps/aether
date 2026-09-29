@@ -28,6 +28,7 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"daemon.install":      (*Gateway).localDaemonInstall,
 	"daemon.status":       (*Gateway).localDaemonStatus,
 	"edge.claim":          (*Gateway).localEdgeClaim,
+	"edge.hostkey":        (*Gateway).localEdgeHostKey,
 	"edge.link":           (*Gateway).localEdgeLink,
 	"edge.login":          (*Gateway).localEdgeLogin,
 	"edge.logout":         (*Gateway).localEdgeLogout,

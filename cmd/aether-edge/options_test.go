@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -11,23 +12,69 @@ func envOf(vars map[string]string) func(string) string {
 	return func(k string) string { return vars[k] }
 }
 
-func TestDevelopmentModeIsLoopbackOnly(t *testing.T) {
-	for _, addr := range []string{"0.0.0.0:8080", ":8080", "localhost:8080", "192.0.2.1:8080", "[::]:8080"} {
-		_, err := parseOptions([]string{"--dev-listen", addr, "--origin", "http://127.0.0.1:8080"}, envOf(nil))
-		if err == nil || !strings.Contains(err.Error(), "loopback") {
-			t.Errorf("--dev-listen %s: %v, want a loopback refusal", addr, err)
+// origins are the two origins of a public edge; devOrigins of a local
+// one, whose loopback hosts differ by name.
+var (
+	origins    = []string{"--signin-origin", "https://auth.example.test", "--relay-origin", "https://edge.example.test"}
+	devOrigins = []string{"--signin-origin", "http://localhost:8080", "--relay-origin", "http://127.0.0.1:8080"}
+)
+
+func TestPlainHTTPIsLoopbackOnly(t *testing.T) {
+	for _, mode := range []struct {
+		flag    string
+		origins []string
+	}{{"--dev-listen", devOrigins}, {"--proxy-listen", origins}} {
+		for _, addr := range []string{"0.0.0.0:8080", ":8080", "localhost:8080", "192.0.2.1:8080", "[::]:8080"} {
+			_, err := parseOptions(append([]string{mode.flag, addr}, mode.origins...), envOf(nil))
+			if err == nil || !strings.Contains(err.Error(), "loopback") {
+				t.Errorf("%s %s: %v, want a loopback refusal", mode.flag, addr, err)
+			}
+		}
+		for _, addr := range []string{"127.0.0.1:8080", "[::1]:8080"} {
+			if _, err := parseOptions(append([]string{mode.flag, addr}, mode.origins...), envOf(nil)); err != nil {
+				t.Errorf("%s %s: %v", mode.flag, addr, err)
+			}
 		}
 	}
-	for _, addr := range []string{"127.0.0.1:8080", "[::1]:8080"} {
-		if _, err := parseOptions([]string{"--dev-listen", addr, "--origin", "http://127.0.0.1:8080"}, envOf(nil)); err != nil {
-			t.Errorf("--dev-listen %s: %v", addr, err)
-		}
-	}
-	if _, err := parseOptions([]string{"--metrics-listen", "0.0.0.0:9464", "--origin", "https://edge.example.test"}, envOf(nil)); err == nil {
+	if _, err := parseOptions(append([]string{"--metrics-listen", "0.0.0.0:9464"}, origins...), envOf(nil)); err == nil {
 		t.Error("metrics on a public address accepted")
 	}
-	if _, err := parseOptions([]string{"--origin", "http://127.0.0.1:8080"}, envOf(nil)); err == nil {
-		t.Error("plain HTTP origin accepted outside development mode")
+	for _, args := range [][]string{
+		devOrigins,
+		append([]string{"--proxy-listen", "127.0.0.1:8443"}, devOrigins...),
+	} {
+		if _, err := parseOptions(args, envOf(nil)); err == nil || !strings.Contains(err.Error(), "must be https://host[:port]") {
+			t.Errorf("%v: %v, want plain HTTP origins refused outside development mode", args, err)
+		}
+	}
+	if _, err := parseOptions(append([]string{"--dev-listen", "127.0.0.1:8080"}, origins...), envOf(nil)); err == nil ||
+		!strings.Contains(err.Error(), "--dev-listen serves plain HTTP, so --signin-origin must be http://") {
+		t.Errorf("https origins in development mode: %v", err)
+	}
+	if _, err := parseOptions(append([]string{"--dev-listen", "127.0.0.1:8080", "--proxy-listen", "127.0.0.1:8443"}, devOrigins...), envOf(nil)); err == nil {
+		t.Error("--dev-listen and --proxy-listen together accepted")
+	}
+}
+
+func TestOriginsAreTwoHosts(t *testing.T) {
+	for _, args := range [][]string{
+		{"--signin-origin", "https://edge.example.test", "--relay-origin", "https://edge.example.test"},
+		{"--signin-origin", "https://edge.example.test:8443", "--relay-origin", "https://EDGE.example.test"},
+	} {
+		if _, err := parseOptions(args, envOf(nil)); err == nil || !strings.Contains(err.Error(), "must name different hosts") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+	if _, err := parseOptions([]string{"--relay-origin", "https://edge.example.test"}, envOf(nil)); err == nil ||
+		!strings.Contains(err.Error(), `--signin-origin must be https://host[:port], not ""`) {
+		t.Errorf("no sign-in origin: %v", err)
+	}
+	o, err := parseOptions(nil, envOf(map[string]string{
+		"AETHER_EDGE_SIGNIN_ORIGIN": "https://auth.example.test", "AETHER_EDGE_RELAY_ORIGIN": "https://edge.example.test",
+		"AETHER_EDGE_PROXY_LISTEN": "127.0.0.1:8443",
+	}))
+	if err != nil || o.signinOrigin != "https://auth.example.test" || o.relayOrigin != "https://edge.example.test" || o.proxyListen != "127.0.0.1:8443" {
+		t.Fatalf("options from the environment: %+v %v", o, err)
 	}
 }
 
@@ -36,7 +83,7 @@ func TestClientSecrets(t *testing.T) {
 	if err := os.WriteFile(file, []byte("fake-secret-from-file\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	base := []string{"--origin", "https://edge.example.test", "--github-client-id", "fake-id"}
+	base := append(slices.Clone(origins), "--github-client-id", "fake-id")
 
 	o, err := parseOptions(append(base, "--github-client-secret-file", file), envOf(nil))
 	if err != nil || o.github == nil || o.github.ClientSecret != "fake-secret-from-file" || o.google != nil {
@@ -60,9 +107,9 @@ func TestClientSecrets(t *testing.T) {
 }
 
 func TestOriginMustNameAHost(t *testing.T) {
-	// The placeholder the environment file ships with.
-	_, err := parseOptions([]string{"--origin", "https://<edge-host>"}, envOf(nil))
-	if err == nil || !strings.Contains(err.Error(), `host "<edge-host>" is not a DNS name or an IP address`) {
+	// The placeholders the environment file ships with.
+	_, err := parseOptions([]string{"--signin-origin", "https://<signin-host>", "--relay-origin", "https://<relay-host>"}, envOf(nil))
+	if err == nil || !strings.Contains(err.Error(), `--signin-origin: edgeproto: edge url "https://<signin-host>": host "<signin-host>" is not a DNS name or an IP address`) {
 		t.Fatalf("placeholder origin: %v", err)
 	}
 }
@@ -81,7 +128,8 @@ func TestOneProviderUnderTheUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := map[string]string{
-		"AETHER_EDGE_ORIGIN":                    "https://edge.example.test",
+		"AETHER_EDGE_SIGNIN_ORIGIN":             "https://auth.example.test",
+		"AETHER_EDGE_RELAY_ORIGIN":              "https://edge.example.test",
 		"AETHER_EDGE_GITHUB_CLIENT_ID":          "fake-id",
 		"AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE": github,
 		"AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE": google,

@@ -692,14 +692,12 @@ Removal also repairs the selection and open route before any refresh awaits.
   reason. A fetch that got no answer at all is `gateway` only on the desktop
   origin, where that process can be restarted; on the server gateway it is
   `tailnet`, because the page came over the tailnet and there is no local
-  process to blame and no wifi advice to give, and on the edge gateway it is
-  `relay`, which names both the edge and the server's edge connection and
-  gives `sudo aether-server edge status`. A local gateway linked through an
-  edge classifies the client's own error text: `edge` (the edge did not
+  process to blame and no wifi advice to give. A local gateway linked through
+  an edge classifies the client's own error text: `edge` (the edge did not
   answer), `edge-server` (the server is not connected to it), `signed-out`
   (no valid device token; gives the `aether login --edge` command),
   `device-revoked` and `device-pending`. `src/store/edge-sync.test.ts` pins
-  the wording those classes match, so a change in `internal/edgeclient` or
+  the wording those classes match, so a change in `internal/edge/client` or
   the sshd banners fails there. The capabilities probe records
   which gateway serves the page before hydration runs, so the first failure
   is classified too. The gateway's message appears in an initially open
@@ -716,15 +714,6 @@ Removal also repairs the selection and open route before any refresh awaits.
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
-- **The edge gateway's refusals replace the shell with a page of their
-  own** (`src/components/edge-access.tsx`). A `401` whose `data.login` is
-  `/auth/login` shows **Sign in**, a plain link to `/auth/login`, so the
-  navigation is top-level and the Android app can hand it to the phone's
-  browser. A `403` carrying `data.approval_code` shows the code, both approve
-  commands, **Check again** and **Sign out**. Both shapes are in
-  [local-gateway.md](local-gateway.md#get-apiv1capabilities); hydration stops
-  retrying once either arrives. **Sign out** also sits in the status bar's
-  details on the edge gateway only; it posts `/auth/logout` and reloads `/`.
 - **The sockets reopen on a foreground or network return.** Both
   `connectEvents` and `connectAttach` subscribe to `visibilitychange`
   (visible) and `online` through `onWake` in `src/lib/stream.ts`. A phone
@@ -2042,13 +2031,15 @@ Room tab count, and neither creates a second action inbox.
 
 ## Devices and invitations
 
-`src/routes/devices/` lists the computers and browsers members reach the
-server with through an edge: the member's own, or every member's for an
-admin. It approves a pending device only by the code typed in from that
-device, which no row shows, and revokes one, showing the server's refusal
-verbatim. It is its own view, not part of Settings, because
-Settings is local-gateway only and the phone on the edge gateway needs it
-most; the sidebar and palette show it whenever the gateway serves
+`src/routes/devices/` lists the computers members reach the server with
+through an edge, with each device key's fingerprint: the member's own, or
+every member's for an admin, and each device's status: `approved`,
+`pending`, `registered` (admitted by signing in under `edge-access
+account`) or `revoked`. It approves a pending or registered device only by
+the code typed in from that device, which no row shows, and revokes one,
+showing the server's refusal verbatim. It is its own view, not part of Settings, because
+Settings is local-gateway only and the tailnet server gateway serves the
+same methods; the sidebar and palette show it whenever the gateway serves
 `member.device.list`.
 
 The Members view carries an admin-only **Invitations** section
@@ -2239,8 +2230,12 @@ elsewhere marks the UI onboarded and clears that wizard state.
 The Link step first offers signing in to an edge
 (`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
 through the local gateway, which keeps the device token, shows the code
-while it polls `edge.status`, then links a server the account reaches or
-claims a new one with the code `aether-server setup` printed. **Link by
+while it polls `edge.status`, then links a server or claims a new one
+with the code `aether-server setup` printed. **Server id from your admin**
+links by an id typed in, which the edge cannot substitute. A server picked
+from the account's list opens a **Confirm server** panel with its id and
+the host key fingerprint `edge.hostkey` read, and links only on **Link and
+pin**, because that id comes from the edge. **Link by
 address** swaps the sign-in for the address form, for a tailnet or SSH
 server, and **Sign in instead** swaps it back; showing one at a time keeps
 the address field above a phone's soft keyboard. The Link step

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/coder/websocket"
 )
 
@@ -23,12 +23,10 @@ import (
 // client receives.
 type relayConn struct {
 	id       string
-	serverID string
 	kind     string
+	serverID string
 	account  edgeproto.Account
 	deviceID string
-	// addr is the client's edgeproto.RateLimitKey block.
-	addr netip.Prefix
 	// reg is the control channel c was admitted on.
 	reg      *registration
 	result   chan string
@@ -42,15 +40,18 @@ type relayConn struct {
 	spliced    bool
 }
 
-type pendingClaim struct {
+// claimGrant is a claim connection the relay opened, which its server
+// may report as claimed until expires.
+type claimGrant struct {
 	serverID string
-	result   chan string
-	// directory is the latest directory the server pushed while the claim
-	// was pending, guarded by Relay.mu. The server pushes one as it
-	// accepts, before the edge has recorded the claim.
-	directory    []edgeproto.DirectoryEntry
-	hasDirectory bool
+	account  edgeproto.Account
+	expires  time.Time
 }
+
+// claimReportWindow is how long after the open a server may report a
+// claim connection as claimed: the grant's lifetime, which covers the
+// attach deadline and the SSH authentication that checks the code.
+const claimReportWindow = edgeproto.GrantTTL
 
 // serverRefusal is a refusal whose text the server chose in OpenResult.
 type serverRefusal string
@@ -61,15 +62,11 @@ func bearer(req *http.Request) (string, bool) {
 	return strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
 }
 
-// clientAddr is the client address an open carries, for the server's logs
-// and rate limits, and the edgeproto.RateLimitKey block it counts
-// against. An unparsable address counts as the zero block.
-func clientAddr(remote string) (string, netip.Prefix) {
-	ap, err := netip.ParseAddrPort(remote)
-	if err != nil {
-		return "", netip.Prefix{}
-	}
-	return ap.String(), edgeproto.RateLimitKey(ap.Addr())
+// clientAddr is the client address of remote, a request's RemoteAddr;
+// the zero AddrPort when it does not parse.
+func clientAddr(remote string) netip.AddrPort {
+	ap, _ := netip.ParseAddrPort(remote)
+	return ap
 }
 
 // refusal counts err and returns the status and text a client receives.
@@ -100,7 +97,9 @@ func (r *Relay) refuse(w http.ResponseWriter, err error) {
 	writeError(w, status, text)
 }
 
-func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request) {
+// serveConnect opens one relayed connection of kind: an ssh connection
+// by a member, or a claim connection to a server without an owner.
+func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request, kind string) {
 	w.Header().Set(edgeproto.HeaderVersion, strconv.Itoa(edgeproto.Version))
 	if v := req.Header.Get(edgeproto.HeaderVersion); v != "" {
 		n, err := strconv.Atoi(v)
@@ -123,15 +122,18 @@ func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	serverID := req.PathValue("server_id")
+	addr := clientAddr(req.RemoteAddr)
 	ctx, cancel := context.WithTimeout(req.Context(), directoryTimeout)
 	account, device, err := r.dir.Authenticate(ctx, token)
 	switch {
 	case err != nil:
 	case device.Key == "":
-		// A browser's token has no device key and cannot carry SSH.
+		// A token without a device key cannot carry SSH.
 		err = edgeproto.RefusalTokenRequired
 	case !edgeproto.ValidServerID(serverID):
 		err = edgeproto.RefusalUnknownServer
+	case kind == edgeproto.KindClaim:
+		err = r.dir.AdmitClaim(ctx, serverID, account, addr.Addr())
 	default:
 		err = r.dir.Admit(ctx, serverID, account)
 	}
@@ -141,7 +143,7 @@ func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	c, open, err := r.register(serverID, edgeproto.KindSSH, account, device, req.RemoteAddr)
+	c, open, err := r.register(kind, serverID, account, device, addr)
 	var server net.Conn
 	if err == nil {
 		server, err = r.attachDevice(req.Context(), c, open, token)
@@ -161,54 +163,40 @@ func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request) {
 	r.splice(c, websocket.NetConn(c.ctx, ws, websocket.MessageBinary), server)
 }
 
-// open asks serverID to attach a data socket for one connection from the
-// client at remote and returns the attached socket.
-func (r *Relay) open(ctx context.Context, serverID, kind string, account edgeproto.Account, device edgeproto.Device, remote string) (*relayConn, net.Conn, error) {
-	c, msg, err := r.register(serverID, kind, account, device, remote)
-	if err != nil {
-		return nil, nil, err
-	}
-	server, err := r.attach(ctx, c, msg)
-	if err != nil {
-		return nil, nil, err
-	}
-	return c, server, nil
-}
-
-// register admits one connection from the client at remote to serverID
-// and returns it with the open to send.
-func (r *Relay) register(serverID, kind string, account edgeproto.Account, device edgeproto.Device, remote string) (*relayConn, edgeproto.Open, error) {
-	addr, block := clientAddr(remote)
+// register admits one connection of kind from the client at addr to
+// serverID and returns it with the open to send.
+func (r *Relay) register(kind, serverID string, account edgeproto.Account, device edgeproto.Device,
+	addr netip.AddrPort) (*relayConn, edgeproto.Open, error) {
 	c := &relayConn{
 		id:       edgeproto.NewConnID(),
-		serverID: serverID,
 		kind:     kind,
+		serverID: serverID,
 		account:  account,
 		deviceID: device.ID,
-		addr:     block,
 		result:   make(chan string, 1),
 		attached: make(chan net.Conn, 1),
 	}
 	ticket := edgeproto.NewToken()
 	c.ticketHash = edgeproto.HashToken(ticket)
-	msg := edgeproto.Open{ConnID: c.id, Ticket: ticket, Kind: kind, ClientAddr: addr}
-	if kind == edgeproto.KindSSH {
-		now := time.Now()
-		grant, err := edgeproto.SignGrant(r.key, edgeproto.Grant{
-			ServerID:    serverID,
-			ConnID:      c.id,
-			Kind:        edgeproto.KindSSH,
-			Account:     account,
-			DeviceID:    device.ID,
-			DeviceKey:   device.Key,
-			DeviceLabel: device.Label,
-			IssuedAt:    now,
-			ExpiresAt:   now.Add(edgeproto.GrantTTL),
-		})
-		if err != nil {
-			return nil, edgeproto.Open{}, err
-		}
-		msg.Grant = grant
+	now := time.Now()
+	grant, err := edgeproto.SignGrant(r.key, edgeproto.Grant{
+		Issuer:      r.origin,
+		ServerID:    serverID,
+		ConnID:      c.id,
+		Kind:        kind,
+		Account:     account,
+		DeviceID:    device.ID,
+		DeviceKey:   device.Key,
+		DeviceLabel: device.Label,
+		IssuedAt:    now,
+		ExpiresAt:   now.Add(edgeproto.GrantTTL),
+	})
+	if err != nil {
+		return nil, edgeproto.Open{}, err
+	}
+	msg := edgeproto.Open{ConnID: c.id, Ticket: ticket, Kind: kind, Grant: grant}
+	if addr.IsValid() {
+		msg.ClientAddr = addr.String()
 	}
 	c.ctx, c.cancel = context.WithCancelCause(r.ctx)
 
@@ -217,6 +205,14 @@ func (r *Relay) register(serverID, kind string, account edgeproto.Account, devic
 	if err == nil {
 		c.reg = reg
 		r.conns[c.id] = c
+		if kind == edgeproto.KindClaim {
+			for id, g := range r.claims {
+				if now.After(g.expires) {
+					delete(r.claims, id)
+				}
+			}
+			r.claims[c.id] = claimGrant{serverID: serverID, account: account, expires: now.Add(claimReportWindow)}
+		}
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -255,38 +251,22 @@ func (r *Relay) attach(ctx context.Context, c *relayConn, msg edgeproto.Open) (n
 }
 
 // admitLocked returns the registration c opens on, or the limit it
-// exceeds. SSH and dashboard passthrough have separate budgets per server,
-// so dashboard connections, which need no sign-in at the edge, cannot use
-// up the ones SSH needs; one client address block holds only a share of
-// the dashboard budget.
+// exceeds. A server that is not claimed takes claim connections only.
 func (r *Relay) admitLocked(c *relayConn) (*registration, error) {
 	reg := r.servers[c.serverID]
-	if r.closing || reg == nil || !reg.claimed {
+	if r.closing || reg == nil || (!reg.claimed && c.kind != edgeproto.KindClaim) {
 		return nil, edgeproto.RefusalNotConnected
 	}
-	perServer, perDevice, perAddr := 0, 0, 0
+	perServer, perDevice := 0, 0
 	for _, o := range r.conns {
-		if o.kind != c.kind {
-			continue
-		}
 		if o.serverID == c.serverID {
 			perServer++
-			if o.addr == c.addr {
-				perAddr++
-			}
 		}
 		if o.deviceID == c.deviceID {
 			perDevice++
 		}
 	}
-	full := false
-	switch c.kind {
-	case edgeproto.KindSSH:
-		full = perServer >= edgeproto.MaxSSHConnsPerServer || perDevice >= edgeproto.MaxConnsPerDevice
-	case edgeproto.KindWeb:
-		full = perServer >= edgeproto.MaxWebConnsPerServer || perAddr >= edgeproto.MaxWebConnsPerAddress
-	}
-	if full {
+	if perServer >= edgeproto.MaxSSHConnsPerServer || perDevice >= edgeproto.MaxConnsPerDevice {
 		return nil, edgeproto.RefusalConnLimit
 	}
 	return reg, nil
@@ -357,129 +337,4 @@ func (r *Relay) serveData(w http.ResponseWriter, req *http.Request) {
 	c.attached <- server
 	<-c.ctx.Done()
 	_ = server.Close()
-}
-
-// ClaimUnsettledError reports a claim attempt that ended with the server
-// possibly holding an owner the edge did not record: the server accepted
-// it but recording failed, or the server's answer never arrived. The
-// relay has closed that server's control channel. When the server
-// reconnects, the edge reports it unclaimed and the server drops the
-// owner, so a new claim starts over.
-type ClaimUnsettledError struct {
-	ServerID string
-	Err      error
-}
-
-func (e *ClaimUnsettledError) Error() string {
-	return fmt.Sprintf("the claim of server %s did not complete: %v. The edge disconnected the server so that it "+
-		"drops this claim when it reconnects; then claim it again, with a new code from "+
-		"`sudo aether-server edge claim-code` if this one is refused", e.ServerID, e.Err)
-}
-
-func (e *ClaimUnsettledError) Unwrap() error { return e.Err }
-
-// Reasons a claim leaves the server's control channel closed.
-var (
-	errClaimUnsettled = errors.New("claim did not complete; reconnect to learn this server's claim state")
-	errClaimRecorded  = errors.New("claim recorded after this connection enrolled; reconnect to learn it")
-)
-
-// Claim forwards a claim attempt by account on device to the connected
-// server whose id the code names and waits for its answer. When the server
-// accepts, Claim calls record with the server's id and name to record
-// account as its owner, and marks the server claimed only once record
-// succeeds. It returns the server's id and name then, an edgeproto.Refusal
-// when the edge or the server refused, and a *ClaimUnsettledError when the
-// server's answer did not arrive or record failed.
-//
-// Once the claim is sent, the attempt no longer follows ctx's
-// cancellation: the server may accept at any moment, so its answer is
-// awaited, and recorded, even if the person has gone.
-func (r *Relay) Claim(ctx context.Context, code string, account edgeproto.Account, device edgeproto.Device,
-	record func(ctx context.Context, serverID, name string) error) (serverID, name string, err error) {
-	normalized, serverID, err := edgeproto.ParseClaimCode(code)
-	if err != nil {
-		return "", "", edgeproto.RefusalClaimWrong
-	}
-	r.mu.Lock()
-	reg := r.servers[serverID]
-	if reg == nil {
-		r.mu.Unlock()
-		return "", "", edgeproto.RefusalNotConnected
-	}
-	if reg.claimed {
-		r.mu.Unlock()
-		return "", "", edgeproto.RefusalClaimed
-	}
-	id := edgeproto.NewConnID()
-	p := &pendingClaim{serverID: reg.id, result: make(chan string, 1)}
-	r.claims[id] = p
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		delete(r.claims, id)
-		r.mu.Unlock()
-	}()
-
-	now := time.Now()
-	grant, err := edgeproto.SignGrant(r.key, edgeproto.Grant{
-		ServerID:    reg.id,
-		ConnID:      id,
-		Kind:        edgeproto.KindClaim,
-		Account:     account,
-		DeviceID:    device.ID,
-		DeviceKey:   device.Key,
-		DeviceLabel: device.Label,
-		IssuedAt:    now,
-		ExpiresAt:   now.Add(edgeproto.GrantTTL),
-	})
-	if err != nil {
-		return "", "", err
-	}
-	if err = reg.send(edgeproto.Claim{ID: id, Code: normalized, Grant: grant}); err != nil {
-		slog.Info("relay: claim not delivered", "server", reg.id, "error", err)
-		return "", "", edgeproto.RefusalNotConnected
-	}
-	deadline := time.NewTimer(r.attachDeadline)
-	defer deadline.Stop()
-	select {
-	case text := <-p.result:
-		if text != "" {
-			return "", "", edgeproto.Refusal(text)
-		}
-	case <-reg.ctx.Done():
-		return "", "", r.unsettle(reg, errors.New("the server disconnected before it answered"))
-	case <-deadline.C:
-		return "", "", r.unsettle(reg, fmt.Errorf("the server did not answer within %s", r.attachDeadline))
-	}
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directoryTimeout)
-	err = record(rctx, reg.id, reg.name)
-	cancel()
-	if err != nil {
-		return "", "", r.unsettle(reg, fmt.Errorf("the server accepted it, but the edge could not record you as its owner: %w", err))
-	}
-	r.mu.Lock()
-	cur := r.servers[reg.id]
-	if cur == reg {
-		reg.claimed = true
-		if p.hasDirectory {
-			r.queueDirectoryLocked(reg, p.directory)
-		}
-	}
-	r.mu.Unlock()
-	if cur != nil && cur != reg {
-		// It enrolled again before the owner was recorded and was told
-		// it is unclaimed.
-		cur.cancel(errClaimRecorded)
-	}
-	return reg.id, reg.name, nil
-}
-
-// unsettle closes reg's control channel after a claim that may have left
-// the server with an owner the edge did not record, and returns the
-// *ClaimUnsettledError for cause.
-func (r *Relay) unsettle(reg *registration, cause error) error {
-	slog.Warn("relay: claim did not complete; disconnecting the server", "server", reg.id, "error", cause)
-	reg.cancel(errClaimUnsettled)
-	return &ClaimUnsettledError{ServerID: reg.id, Err: cause}
 }

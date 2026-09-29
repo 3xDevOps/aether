@@ -1,16 +1,19 @@
 # Privacy policy
 
 Aether is self-hosted software. Nothing about you reaches the people who
-publish it unless you sign in to the edge they run, `edge.onaether.dev`
-([What an edge stores](#what-an-edge-stores)). This page is the privacy
+publish it unless you sign in to the edge they run, at `auth.onaether.dev`
+and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
 policy for the Aether Android app (package `io.aether.android`), whether it
 came from a GitHub release or from Google Play, for the dashboard the app
-shows, and for that edge. Effective 2026-09-27.
+shows, and for that edge. Effective 2026-09-29.
 
 ## Who publishes it
 
 Aether is published by 3xDevOps, <https://github.com/3xDevOps>. Questions
 about this policy go to <https://github.com/3xDevOps/Aether/issues>.
+Privacy requests about what the project's edge holds, such as a copy or a
+deletion, go to <team@onaether.dev>; deleting your own account needs no
+request ([What an edge stores](#what-an-edge-stores)).
 
 ## What the app stores on the phone
 
@@ -28,23 +31,18 @@ about this policy go to <https://github.com/3xDevOps/Aether/issues>.
   nothing reads it but the dashboard, and it lasts until you uninstall the
   app. Both are private to the app.
 
-Over the tailnet, no dashboard account, password, token, cookie or key is
-stored by the Android shell: the phone's Tailscale login identifies it to
-your server ([networking.md](networking.md#the-dashboard)). Through an edge
-([edge.md](edge.md#dashboard-through-the-edge)), the WebView's cookie store
-holds two cookies of your server: a device cookie, which identifies this
-phone as the same device each time you sign in, and a session
-cookie, which keeps you signed in until you sign out or it goes 30 days
-unused. The sign-in itself happens in the phone's browser. An app login in the
-remote development browser is separate server-side state, as described
-below. Uninstalling the app deletes everything stored on the phone.
+No dashboard account, password, token, cookie or key is stored by the Android
+shell. There is no dashboard sign-in: the phone's Tailscale login identifies
+it to your server ([networking.md](networking.md#the-dashboard)). An app
+login in the remote development browser is separate server-side state, as
+described below. Uninstalling the app deletes everything stored on the phone.
 None of it is backed up: the app opts out of Google's cloud backup and of
 device-to-device transfer, so setting up a new phone asks for the server name
 again.
 
 ## What leaves the phone
 
-- **To your server.** Every request the dashboard makes goes
+- **To your server, and only there.** Every request the dashboard makes goes
   over HTTPS to the server whose name you typed, which you or your team run.
   That includes what you type into a terminal, the instructions you send an
   agent, an image you pick from the phone to paste into a terminal, the
@@ -55,19 +53,11 @@ again.
   [security.md](security.md#the-dashboard-gateways). The app refuses a plain
   `http://` address, forbids cleartext for the whole process, and refuses
   mixed content, so nothing travels unencrypted.
-- **Through an edge, if you use one.** Dashboard traffic then passes through
-  the edge you signed in to, encrypted end to end to your server: the edge
-  sees your phone's IP address, the server's id, timing and byte counts,
-  never the content. Signing in there creates an account at that edge with
-  your GitHub or Google identity; the edge that the project runs is operated
-  by the publisher.
-- **Your identity reaches the server through Tailscale or the edge, not
-  through the app.** Over the tailnet the server asks its own tailscaled
-  which tailnet login owns the connecting device; through an edge, the edge
-  tells the server which account signed in. The app sends no name, email, or
-  identifier of its own.
-- **Over the tailnet, your server records you as a member on the app's
-  first request.** From that answer it stores your tailnet login, which is an email address, and a
+- **Your identity reaches the server through Tailscale, not through the
+  app.** The server asks its own tailscaled which tailnet login owns the
+  connecting device. The app sends no name, email, or identifier of its own.
+- **Your server records you as a member on the app's first request.** From
+  that answer it stores your tailnet login, which is an email address, and a
   display name taken from the part before the `@`, and writes one log line
   carrying that login and your device's Tailscale node ID. The record is how
   your administrator approves you and how your teammates see who did what
@@ -83,27 +73,29 @@ again.
   one, is sent to Google. A link that leaves the dashboard opens in the
   phone's browser, under that browser's own policy.
 
-Everything above goes to one server, the one you typed in, and, when you use
-an edge, through that edge. Nothing is sold, and nothing is handed to anyone
-the server's administrator has not made a member of it.
+Everything above goes to one server, the one you typed in, and stops there.
+Nothing is sold, and nothing is handed to anyone the server's administrator
+has not made a member of it.
 
 ## What an edge stores
 
-An **edge** is the relay and sign-in service that lets a phone, browser or
-laptop reach a server without Tailscale ([edge.md](edge.md)). Whoever runs
-it, the publisher for `edge.onaether.dev`, holds the following. The edge
-cannot read terminal, agent, file or dashboard content: SSH is encrypted
-end to end, and dashboard TLS ends on your server.
+An **edge** is the relay and sign-in service that lets a computer running
+`aether` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
+Android app does not use it. Whoever runs an edge, the publisher for
+`auth.onaether.dev` and `edge.onaether.dev`, holds the following. The edge cannot read terminal,
+agent, file or dashboard content: all of it travels inside SSH, which is
+encrypted end to end between your computer and your server.
 
 | What | Why | Kept |
 | --- | --- | --- |
-| Your account: provider (GitHub or Google), the provider's user id, email, login, display name, and when you last signed in with the provider | To sign you in and to match invitations | Until the edge's operator deletes it with `aether-edge accounts delete` |
+| Your account: an account id the edge assigns, provider (GitHub or Google), the provider's user id, email, login, display name, and when you last signed in with the provider | To sign you in and to match invitations | Until you delete it on the edge's Account page or with `aether logout --delete-account`, or its operator deletes it with `aether-edge accounts delete` |
 | Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `aether logout` or the edge's Devices page |
 | Browser sessions at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
 | A pending sign-in from `aether login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
-| Each server you claim: its id, its host name, you as its owner | To route connections and show you your servers | Until the owner removes it, or the edge's operator removes or blocks it |
+| Each server you claim: its id, its host name, the access policy it announces, you as its owner | To route connections and show you your servers | Until the owner removes it, or the edge's operator removes or blocks it. Deleting your account removes you as its owner |
+| Each server the edge let your account connect to: its id, your provider and the provider's user id | To tell every server that may hold your identity when you delete your account | Until you delete your account |
+| A deletion owed to a server that was offline when you deleted your account: that server's id, your provider and the provider's user id | To tell that server to remove your identity | Until it is sent, when the server next connects; at most 1000 per server |
 | Each server's directory: the provider, user id, login, email and role of its members and open invitations | To refuse strangers before they reach the server | Replaced every time the server sends it |
-| One-time dashboard sign-in codes, hashed | To finish a dashboard sign-in | 2 minutes, single use |
 | Bytes relayed per month, not per person | To enforce the operator's bandwidth budget | Indefinitely |
 | A server id the operator blocked, and when | To refuse that server | Until the operator unblocks it |
 | An account the operator blocked: provider, the provider's user id, and when | To refuse its sign-ins and claims | Until the operator unblocks it, also after the account is deleted |
@@ -117,9 +109,15 @@ server logs the IP address of each connection the edge relays to it
 connections.
 
 Revoking your devices removes them from the edge; the account record stays.
-To have it deleted, ask the edge's operator, who runs
-`aether-edge accounts delete` ([edge.md](edge.md#operator-commands)); for
-`edge.onaether.dev`, use the contact above.
+To delete it yourself, open the edge's Account page,
+`https://auth.onaether.dev/account` for the project's edge, or run `aether
+logout --delete-account`; both ask you to sign in with your provider within
+the last 5 minutes and to type your login or email
+([edge.md](edge.md#deleting-an-account)). The edge then deletes the
+account, its devices and sessions, and tells each server it reached to
+remove your identity there; what a server holds is its administrator's.
+You can also ask the edge's operator, `team@onaether.dev` for the
+project's edge, who runs `aether-edge accounts delete`.
 
 ## Remote-development data
 

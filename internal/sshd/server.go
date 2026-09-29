@@ -25,6 +25,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -102,10 +103,11 @@ type Config struct {
 	// disables member.invite and invite-code joins.
 	InvitesDir string
 
-	// EdgeDeviceAutoApprove accepts every new device of a member arriving
-	// through an edge. By default a member's first device is accepted and
-	// a later one waits, pending, for approval.
-	EdgeDeviceAutoApprove bool
+	// EdgeAccess is the access policy for connections an edge relays:
+	// under PolicyAccount a signed-in member's new device is registered
+	// and admitted; under PolicyApprovedDevices, which empty selects, it
+	// waits until a person approves it.
+	EdgeAccess edgeproto.AccessPolicy
 
 	// Profiles is the legacy agent-profile snapshot service. Nil disables
 	// profile.push / profile.status / profile.rollback.
@@ -151,6 +153,9 @@ type Server struct {
 	edgeHandshakes chan struct{}
 	// directoryChanged signals, coalesced, that EdgeDirectory may differ.
 	directoryChanged chan struct{}
+	// edgeOwner records ownership at the edge; nil while no edge agent
+	// runs. Guarded by mu.
+	edgeOwner EdgeOwner
 
 	// wg counts every handler goroutine (per-connection, per-channel, and
 	// per-subsystem); Close waits on it so no handler outlives shutdown.
@@ -217,6 +222,11 @@ func New(cfg Config) (*Server, error) {
 	if cfg.AuthorizationMu == nil {
 		cfg.AuthorizationMu = &sync.Mutex{}
 	}
+	policy, err := edgeproto.ParseAccessPolicy(string(cfg.EdgeAccess))
+	if err != nil {
+		return nil, fmt.Errorf("sshd: %w", err)
+	}
+	cfg.EdgeAccess = policy
 	if cfg.handshakeTimeout <= 0 {
 		cfg.handshakeTimeout = defaultHandshakeTimeout
 	}
@@ -559,6 +569,10 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfi
 	if err := s.checkConnIdentity(connCtx, id); err != nil {
 		slog.Info("sshd: identity revoked during handshake; dropping connection", "member", id.member, "error", err)
 		return
+	}
+	connCtx = context.WithValue(connCtx, connIdentityKey{}, id)
+	if id.device != "" {
+		s.spawn(func() { s.watchDevice(connCtx, id, abortConn) })
 	}
 	member := id.member
 

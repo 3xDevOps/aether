@@ -7,7 +7,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -55,7 +55,7 @@ func runInvite(args []string) error {
 		}
 		inv := res.Invitation
 		fmt.Printf("invited %s as %s until %s (invitation %s)\n", inviteeOf(inv), inv.Role, inv.ExpiresAt, inv.ID)
-		fmt.Println("they sign in with aether login, then find this server in aether servers")
+		fmt.Println("send them this server's id, which sudo aether-server edge status prints; they run aether login, then aether link <server id>")
 		return nil
 	})
 }

@@ -12,8 +12,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edge/edgestore"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
 // The operator commands work on the data directory's database and are
@@ -21,12 +21,17 @@ import (
 // the edge reads the rows they change on every enrollment, sign-in and
 // connection. docs/edge.md#operator-commands says what a change does to
 // connections already open.
+//
+// They list, remove and block. None grants: no command approves a
+// device, records an owner or admits an account to a server, so the
+// edge's operator has no way to let anyone in that the servers did not.
+// TestOperatorCommandsOnlyRemoveAndBlock holds the list.
 
 const serversUsage = `usage: aether-edge servers <command> [--data <dir>] [<server id>]
 
 commands:
   list               claimed and blocked servers
-  remove <id>        forget a claimed server; its owner can claim it again
+  remove <id>        forget a claimed server; its administrator can claim it again
   block <id>         forget the server and refuse its id from now on
   unblock <id>       accept the server id again
 `
@@ -36,8 +41,8 @@ const accountsUsage = `usage: aether-edge accounts <command> [--data <dir>] [<pr
 commands:
   list               accounts and blocked accounts
   block <account>    refuse the account's sign-ins and delete its devices and sessions
-  unblock <account>  accept the account again
-  delete <account>   delete the account and everything tied to it; a block stays
+  unblock <account>  accept the account's sign-ins again
+  delete <account>   delete the account as its account page does; a block stays
 
 <account> is github:<user id> or google:<subject>, as list prints it.
 `
@@ -46,22 +51,26 @@ commands:
 // has been printed.
 var errUsage = errors.New("usage")
 
+var serverCommands = map[string]adminCommand{
+	"list":    {run: listServers},
+	"remove":  {arg: checkServerID, run: removeServer},
+	"block":   {arg: checkServerID, run: blockServer},
+	"unblock": {arg: checkServerID, run: unblockServer},
+}
+
+var accountCommands = map[string]adminCommand{
+	"list":    {run: listAccounts},
+	"block":   {arg: checkAccount, run: blockAccount},
+	"unblock": {arg: checkAccount, run: unblockAccount},
+	"delete":  {arg: checkAccount, run: deleteAccount},
+}
+
 func servers(args []string, getenv func(string) string, out io.Writer) error {
-	return admin("servers", serversUsage, args, getenv, out, map[string]adminCommand{
-		"list":    {run: listServers},
-		"remove":  {arg: checkServerID, run: removeServer},
-		"block":   {arg: checkServerID, run: blockServer},
-		"unblock": {arg: checkServerID, run: unblockServer},
-	})
+	return admin("servers", serversUsage, args, getenv, out, serverCommands)
 }
 
 func accounts(args []string, getenv func(string) string, out io.Writer) error {
-	return admin("accounts", accountsUsage, args, getenv, out, map[string]adminCommand{
-		"list":    {run: listAccounts},
-		"block":   {arg: checkAccount, run: blockAccount},
-		"unblock": {arg: checkAccount, run: unblockAccount},
-		"delete":  {arg: checkAccount, run: deleteAccount},
-	})
+	return admin("accounts", accountsUsage, args, getenv, out, accountCommands)
 }
 
 // adminCommand is one operator command. arg, when set, checks the single
@@ -151,8 +160,11 @@ func listServers(ctx context.Context, s *edgestore.Store, _ string, out io.Write
 	fmt.Fprintln(w, "SERVER ID\tSTATE\tNAME\tOWNER\tOWNER LOGIN OR EMAIL\tSINCE") //nolint:errcheck // Flush reports it
 	for _, r := range rows {
 		state, since, owner := "claimed", r.ClaimedAt, accountKey(r.Owner)
-		if !r.BlockedAt.IsZero() {
+		switch {
+		case !r.BlockedAt.IsZero():
 			state, since, owner = "blocked", r.BlockedAt, ""
+		case owner == "":
+			state = "ownerless"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", r.ID, state, dash(r.Name), dash(owner), //nolint:errcheck // Flush reports it
 			dash(contact(r.Owner)), since.Format(time.RFC3339))
@@ -237,15 +249,16 @@ func unblockAccount(ctx context.Context, s *edgestore.Store, key string, out io.
 
 func deleteAccount(ctx context.Context, s *edgestore.Store, key string, out io.Writer) error {
 	provider, subject, _ := splitAccount(key)
-	d, err := s.DeleteAccount(ctx, provider, subject)
+	d, err := s.DeleteAccount(ctx, provider, subject, time.Now())
 	if errors.Is(err, edgestore.ErrNotFound) {
 		return fmt.Errorf("account %s does not exist at this edge", key)
 	}
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "deleted account %s (%s): %d devices, %d owned servers %v, %d directory entries naming it\n",
-		key, dash(contact(d.Account)), d.Devices, len(d.Servers), d.Servers, d.Entries)
+	_, err = fmt.Fprintf(out, "deleted account %s (%s): %d devices; ownerless now: %v; membership entries removed on: %v; "+
+		"sent the deletion when each next enrolls: %v\n",
+		key, dash(contact(d.Account.Account)), d.Devices, d.Owned, d.Member, d.Notify)
 	return err
 }
 

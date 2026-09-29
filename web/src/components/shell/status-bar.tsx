@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { SignOutButton } from '@/components/edge-access'
 import { Slot } from '@/components/slots'
 import {
   Collapsible,
@@ -45,7 +44,6 @@ const unreachableLabel: Record<UnreachableKind, string> = {
   network: 'this computer is offline - reconnect to wifi or your VPN',
   gateway: 'dashboard gateway is gone - restart aether gui',
   tailnet: 'no answer from your server - check Tailscale and the server host',
-  relay: "no answer through the edge - check the server's edge connection",
   server: 'server unreachable over SSH - check the server and network; retrying',
   edge: 'edge unreachable - check this computer can reach it; retrying',
   'edge-server': 'server not connected to the edge - check aether-server edge status',
@@ -53,7 +51,7 @@ const unreachableLabel: Record<UnreachableKind, string> = {
   'signed-out': 'signed out of the edge - run aether login',
   'not-member': 'not a member of this server - ask an admin to invite you again',
   'device-revoked': 'this device was revoked on the server',
-  'device-pending': 'this device is waiting for approval - run aether device approve',
+  'device-pending': 'this device is waiting for approval - approve its code from another device or on the server',
   refused: 'the gateway refused this device - it is not identified as a member',
   identity: 'the server cannot identify this device - check tailscaled on the server host',
 }
@@ -403,7 +401,6 @@ export function StatusBar() {
                   {info.member.display_name}
                 </span>
               )}
-              <SignOutButton />
               {disk && disk.total_bytes > 0 && (
                 <span
                   className="flex min-h-[var(--status-bar-height)] min-w-0 items-center gap-1 break-words whitespace-normal xl:h-[var(--status-bar-height)] xl:shrink xl:truncate xl:whitespace-nowrap"

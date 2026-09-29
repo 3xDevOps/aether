@@ -1,10 +1,9 @@
 # App access
 
 What to enter under **App content > App access** in the Play Console. Aether
-is a client for a server the user runs themselves, reached on their own
-private Tailscale network (a "tailnet") or through an Aether edge relay with
-a GitHub or Google sign-in. The review path below is the tailnet, so a
-reviewer needs a tailnet to reach a dashboard. Play requires that access:
+is a client for a server the user runs themselves on their own private
+Tailscale network (a "tailnet"), so a reviewer needs a tailnet to reach a
+dashboard. Play requires that access:
 "If your entire app or parts of your app are restricted based on login
 credentials, sign in details, memberships, location, or other forms of
 authentication, you must provide all required details to enable access to your
@@ -39,12 +38,9 @@ for this review.
    a run's terminal, its diff and the approval inbox are all reachable
    from the sidebar.
 
-The app has no accounts and no password of its own. On a tailnet, as
-here, the phone's Tailscale login identifies it and there is no sign-in.
-A server reached through an Aether edge instead signs the member in with
-GitHub or Google in the phone's browser, and the app keeps the session
-cookie the server sets. Either way the server decides what that member
-may do. The server and the dashboard are open source, with documentation at
+The app has no accounts, no sign-in and no password of its own: the phone's
+Tailscale login identifies it, and the server decides what that member may
+do. The server and the dashboard are open source, with documentation at
 https://github.com/3xDevOps/Aether. The app sends nothing to us and only
 ever loads the server named above, over HTTPS.
 ```
@@ -60,14 +56,11 @@ screen only.
 - Any other instructions, paste as is:
 
 ```
-Aether is a client for a server the user runs themselves, on their own
-private Tailscale network (a "tailnet") or through an Aether edge relay.
-The app has no accounts and no password of its own. On a tailnet the
-phone's Tailscale login identifies it, and only devices on the same
-tailnet can reach the server. Through an edge the dashboard signs the
-member in with GitHub or Google in the phone's browser, and the app keeps
-the session cookie the server sets. Instruction set 1 gives an account on
-a tailnet with a server running for this review.
+Aether is a client for a server the user runs themselves on their own
+private Tailscale network (a "tailnet"). The app has no accounts, no
+sign-in and no password: the phone's Tailscale login identifies it, and
+only devices on the same tailnet can reach the server. Instruction set 1
+gives an account on a tailnet with a server running for this review.
 
 What the app does before a server is reached:
 

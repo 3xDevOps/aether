@@ -25,7 +25,7 @@ function seed(self = alice) {
     members: { [alice.id]: alice, [bob.id]: bob },
     presence: [],
     info: { ...serverInfo, member: self },
-    capabilities: { gateway: 'edge', methods: ['*'], ws: ['events'] },
+    capabilities: { gateway: 'local', methods: ['*'], ws: ['events'] },
     route: { name: 'members', params: {} },
   })
 }

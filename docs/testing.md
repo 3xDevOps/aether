@@ -426,58 +426,74 @@ Those tests skip where `bun` is not installed.
 ## The edge suite
 
 `internal/edge/edgetest` runs edge remote access end to end in one process,
-under plain `make test`: a real edge (sign-in service and relay, development
-mode, plus its SNI router on a listener of its own) against a fake GitHub,
-real servers (sshd over a real store, with the edge agent and the edge
-dashboard gateway, whose certificate a test CA signs), the real client
-dialer, and a browser played by an HTTP client with a cookie jar that sends
-every `*.servers.example.test` name to the router. The jar ignores SameSite,
-so the edge's cross-site redirect back to a dashboard carries only the Lax
-sign-in cookie, as a browser's would. A proxy in front of the
-edge records the control channels and injects messages into them, which is
-how the tests play a compromised edge. [edge.md](edge.md) describes the
-edge. It needs no Docker and no network:
+under plain `make test`: a real edge (sign-in service and relay, serving its
+sign-in origin on `localhost` and its relay origin on `127.0.0.1`) against a
+fake GitHub, real servers (sshd over a real store, with the edge agent)
+under each access policy, the real client dialer and the local gateway, and
+a browser played by an HTTP client with a cookie jar for the edge's own
+pages. A proxy in front of the edge records the control channels and, with
+the edge's own signing key, plays a compromised edge: it forges, replays,
+alters, drops and injects control messages and grants, answers the data
+socket of an open it forged, and routes a client's connection to another
+server. Tests read each server's store to check what an attack changed.
+[edge.md](edge.md) describes the edge. It needs no Docker and no network:
 
 ```sh
 go test -race ./internal/edge/edgetest/
-go test -race -run 'TestDashboard' ./internal/edge/edgetest/   # the browser path only
 ```
 
 | Test | Proves |
 | --- | --- |
-| `TestClaimAndAccess` | Expired, wrong and exhausted claim codes refused; a claim, then a control RPC over the relay; the owner of one server refused on another; no token and an unknown token refused; a key other than the grant's device key refused; a second device pending until approved |
-| `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected and wrong-connection grants; `aether-server edge trust` fetches the signing key |
+| `TestAccountAccess` | Under `account` an invited person works with no approval, the device is recorded `registered`, and a registered device approves nothing |
+| `TestApprovedDevices` | Under `approved-devices` every new device, a member's first included, waits: approved from the member's approved device, an admin's, or the console; a waiting device, an admin's included, opens no control channel |
+| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, a grant naming another account on a victim's approved key, a forged invitation acceptance, a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential |
+| `TestMaliciousEdgeSubstitutesTheClaimingAccount` | Under both policies a claim whose grant names another account is refused before the code is tried; no member, owner or spent attempt |
+| `TestMaliciousEdgeAccountAccess` | Against `account` the same forged admin grant is admitted with the admin's role: what that policy trusts the edge with. A key registered to one account still serves no other |
+| `TestTakenOverProviderAccount` | A taken-over GitHub account signs in on its own machine: access under `account`, a waiting device under `approved-devices` |
+| `TestClaim` | Under both policies: an edge that routes a claim to another server never delivers the code; expired, wrong and exhausted codes; the claiming device approved; another account's claim refused |
+| `TestFailedClaimRecordRecovers` | The edge's database refuses to record the owner; the edge closes the server's control channel, the server drops its owner, and a fresh code claims again for the same account only |
+| `TestClaimKeepsTheDirectoryPushedWithIt` | A server with an admin and an open invitation is claimed through the admin's link, and the invitee joins |
+| `TestInvitations` | By login and email; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
+| `TestRoleChange` | A new role reaches the edge's list and the member's live connection |
+| `TestCrossServerIsolation` | A member of one server is refused on another, by the edge and, for forged grants, by the server |
+| `TestRevocationClosesLiveConnections` | Under both policies: member removal, device revocation, console revocation, `aether logout` and account deletion each close a live connection; the test logs how long each took |
+| `TestRevocationWhileTheEdgeIsDown` | Revocations made on the server while the edge is down hold once it is back |
+| `TestDeleteAccountAfterTransfer` | `server.owner.transfer`, then deletion: the server keeps its new owner and every member and role |
+| `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; the console recovers it |
+| `TestAccountDeletionReachesAnOfflineServer` | A deletion reaches a server that was offline when it next enrolls |
+| `TestPolicySwitchToApprovedDevices` | Switching `account` to `approved-devices` refuses registered devices until reviewed; approved devices, member SSH keys and the tailnet dashboard keep working |
+| `TestExistingPathsWithoutTheEdge` | With the edge down, an invite code with an SSH key and the tailnet dashboard's in-process client work |
+| `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected, other-issuer, other-kind and wrong-connection grants; `aether-server edge trust` fetches the signing key |
 | `TestEnrollmentSignatureIsNotAHostSignature` | A server posing with a captured enrollment signature fails the client's handshake |
-| `TestInvitations` | Invitations by login and email, revoked and expired ones refused, and an edge that still lists an expired one overruled by the server |
-| `TestClaimKeepsTheDirectoryPushedWithIt` | A server with an admin and an open invitation is claimed through the admin's link; the directory it pushes as it accepts reaches the edge, so the invitee joins |
-| `TestRevocationClosesLiveConnections` | Member removal, device revocation and `aether logout` each close a live connection |
-| `TestEdgeRestartAndDirectFallback` | A clean edge stop drops relayed connections, the server re-enrolls after the restart, and a link with an address uses it while the edge is down |
-| `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again with a new code |
-| `TestFailedClaimRecordRecovers` | The edge's database refuses to record the owner after the server made the claimant its admin; the claim fails saying to claim again, the edge disconnects the server, on its next enrollment the server drops its owner, another account's claim with a fresh code is refused, and the same account's succeeds with the server's members unchanged |
-| `TestBlockedServerStatusSaysWhy` | A server the operator blocks is refused at its next enrollment, and its status for `aether-server edge status` carries the edge's reason |
-| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone, then reaches it over that link |
-| `TestDashboardSignIn` | 401 naming `/auth/login` before sign-in; the full sign-in round trip; the state cookie cleared; an authenticated call and capabilities `edge`; a POST without `Origin` refused; logout closing the live WebSocket and the next call answering 401 |
-| `TestDashboardPassthroughBySNI` | The browser's handshake completes with the server's own certificate; an unknown id, an unclaimed server, `www.<domain>` and a foreign name are closed |
-| `TestDashboardSessionIsBoundToItsServer` | A member of A refused at B; A's code refused at B; A's session cookie refused at B; a replayed code refused; a state mismatch refused |
-| `TestDashboardAppReturn` | `return=app` produces `aether://auth/callback`; the link opened without the state cookie gets no session; the WebView holding the cookie is signed in |
-| `TestDashboardSignOutKeepsTheDevice` | Signing out ends the session; signing in again on the same browser needs no approval and adds no device |
-| `TestDashboardConnectionsCannotStarveSSH` | 48 dashboard connections from three addresses fill the dashboard budget, a 49th is refused, and SSH still reaches the server |
-| `TestDashboardPendingBrowserAndRevocation` | A second browser's callback sends it to the dashboard, whose calls answer 403 with its approval code; approving it; revoking it closes its WebSocket while the first browser's stays open |
-| `TestDashboardInvitationAndMemberRemoval` | An invited account's first browser sign-in joins with the invited role; `member.remove` closes its WebSocket |
+| `TestNoBootstrapOverTheRelay` | An unclaimed server takes no member from the relay, and an invite code over the relay joins nobody |
+| `TestRelayedFloodDoesNotBlockDirect` | Relayed connections that never finish their handshake fill the relayed budget only; a direct connection still works |
+| `TestEdgeRestartAndDirectFallback` | A clean edge stop drops relayed connections, the server re-enrolls, and a link with an address uses it while the edge is down |
+| `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again |
+| `TestBlockedServerStatusSaysWhy` | A blocked server's status for `aether-server edge status` carries the edge's reason |
+| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone |
 
-Every request reaches the edge from 127.0.0.1, so the suite runs its tests
-one at a time and moves the edge's clock forward to refill the per-address
-rate limits. `TestDashboardConnectionsCannotStarveSSH` alone dials from
-127.0.0.2 to 127.0.0.4, since one address holds at most 16 of a server's
-dashboard connections.
+Every request reaches the edge from 127.0.0.1, so each test moves its
+edge's clock forward to refill the per-address rate limits. Tests run in
+parallel, each with its own edge; the client calls that read the config
+directory from `AETHER_CONFIG_DIR` take turns.
 
-One integration test covers the server's side against a real in-process
-edge whose ACME directory cannot issue: the server learns the server domain,
-starts issuance, keeps retrying in the background, keeps SSH through the
-edge working across an edge restart, and stops cleanly. It needs no Docker:
+### Behind nginx
+
+`scripts/edge-nginx-test.sh`, part of `make test-scripts`, runs
+`TestBehindNginx` (build tag `nginx`) when `nginx` is on `PATH` and skips
+otherwise. It renders
+[`packaging/nginx/aether-edge.conf.example`](../packaging/nginx/aether-edge.conf.example)
+for the host names `localhost` and `127.0.0.1` on a free port with a
+self-signed certificate, checks it with `nginx -t`, and runs a real nginx
+in front of the edge wired as `aether-edge serve --proxy-listen` wires it. A
+real server enrolls through nginx; a client signs in, claims, runs
+`server.info`, holds the relayed connection silent for 75 seconds (past
+nginx's default 60-second read timeout) and runs it again; and requests
+carrying a forged `X-Forwarded-For` are recorded under the address nginx
+saw. It takes about 80 seconds.
 
 ```sh
-go test -race -tags integration -run TestIntegrationEdgeDashboardFailuresKeepServerRunning ./internal/server/
+sh scripts/edge-nginx-test.sh
 ```
 
 ## The dashboard end-to-end suite

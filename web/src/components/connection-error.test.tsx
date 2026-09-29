@@ -91,16 +91,6 @@ describe('ConnectionError', () => {
   })
 
   describe('on a link through an edge', () => {
-    it('sends a browser the edge relays to the server edge connection, never to Tailscale', () => {
-      render(<ConnectionError kind="relay" dead={false} error={null} onRetry={vi.fn()} />)
-
-      expect(
-        screen.getByRole('heading', { name: 'Cannot reach your server through the edge' }),
-      ).toBeDefined()
-      expect(screen.getByText('sudo aether-server edge status')).toBeDefined()
-      expect(screen.queryByText(/Tailscale/)).toBeNull()
-    })
-
     it('names a server with no edge connection and where to see why', () => {
       render(
         <ConnectionError

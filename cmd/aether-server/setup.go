@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeagent"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"golang.org/x/term"
@@ -72,8 +72,8 @@ func setup(args []string) error {
 }
 
 // reportEdge prints what a person needs to reach the server through the
-// edge the written config names: the server id, the pinned edge key, the
-// dashboard address, and a claim code while the server has no owner. It
+// edge the written config names: the server id, the pinned edge key, and
+// a claim code while the server has no owner. It
 // reads the config back because an existing file is kept without --force.
 func reportEdge(w io.Writer, configPath string) error {
 	values, err := serversetup.Load(configPath)
@@ -93,7 +93,7 @@ func reportEdge(w io.Writer, configPath string) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(w, "\nedge: %s\nserver id: %s\n", edgeURL, id)
+	_, _ = fmt.Fprintf(w, "\nedge: %s\nedge access: %s\nserver id: %s\n", edgeURL, fs.Lookup("edge-access").Value, id)
 	state, err := edgeagent.OpenState(dataDir, edgeURL)
 	if err != nil {
 		return err
@@ -111,11 +111,6 @@ func reportEdge(w io.Writer, configPath string) error {
 	if err != nil {
 		return err
 	}
-	status, ran, err := state.Status()
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(w, "dashboard: %s\n", dashboardText(id, status, ran, owner != nil))
 	if owner != nil {
 		_, _ = fmt.Fprintf(w, "owner: %s\n", describeAccount(*owner))
 		return nil
@@ -124,7 +119,7 @@ func reportEdge(w io.Writer, configPath string) error {
 	if err != nil {
 		return err
 	}
-	printClaimCode(w, edgeURL, code, expires)
+	printClaimCode(w, code, expires)
 	return nil
 }
 
@@ -186,6 +181,9 @@ func askServerOptions(w io.Writer, in io.Reader, configPath string, tailnet bool
 	}
 
 	askEdge(p, current, tailnet, values)
+	if values["edge-url"] != "" {
+		askEdgeAccess(p, values)
+	}
 
 	if p.err != nil {
 		return nil, p.err
@@ -223,10 +221,9 @@ func askEdge(p *prompter, current map[string]string, tailnet bool, values map[st
 		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so setup turns on the edge at %s%s.\n", edgeURL, operator)
 	}
 	_, _ = fmt.Fprintln(p.w, "The edge is a relay: this server and your devices both dial out to it, so")
-	_, _ = fmt.Fprintln(p.w, "neither needs an open port. SSH runs end to end through it and the dashboard's")
-	_, _ = fmt.Fprintln(p.w, "TLS ends on this server, so the edge cannot read either. It sees this server's")
-	_, _ = fmt.Fprintln(p.w, "host name, host key and IP address, who signs in, device names,")
-	_, _ = fmt.Fprintln(p.w, "client IP addresses, and when and how much traffic flows.")
+	_, _ = fmt.Fprintln(p.w, "neither needs an open port. SSH runs end to end through it, so the edge cannot")
+	_, _ = fmt.Fprintln(p.w, "read it. It sees this server's host name, host key and IP address, who signs")
+	_, _ = fmt.Fprintln(p.w, "in, device names, client IP addresses, and when and how much traffic flows.")
 	if !tailnet {
 		_, _ = fmt.Fprintln(p.w, `Turn it off with: aether-server config set edge-url ""`)
 		values["edge-url"] = edgeURL
@@ -235,6 +232,52 @@ func askEdge(p *prompter, current map[string]string, tailnet bool, values map[st
 	values["edge-url"] = ""
 	if p.confirm("Reach this server through the edge too", configured != "") {
 		values["edge-url"] = edgeURL
+	}
+}
+
+const edgeAccessQuestion = `
+Who may reach this server through the edge?
+
+  1) Account access
+     Signing in with GitHub or Google is enough. People you invite start on
+     a new device by signing in, and Aether creates and manages the device
+     key. Access is as strong as each person's GitHub or Google account and
+     the edge that vouches for it.
+
+  2) Approved devices
+     Signing in says who someone is. It does not admit a device. Each new
+     device waits until it is approved: by that person from a device they
+     already use, by an admin, or by you on this machine. A taken-over
+     account, or a compromised edge, cannot add a device on its own.
+     Recommended for a team workspace holding code or credentials that
+     must stay protected.
+
+Both leave Tailscale and direct SSH key access as they are.
+Change it on this machine: aether-server config set edge-access <account|approved-devices>
+`
+
+// askEdgeAccess sets edge-access. The question has no default: it repeats
+// until the answer is 1 or 2, and running out of input is an error, so
+// setup never chooses the policy for the operator.
+func askEdgeAccess(p *prompter, values map[string]string) {
+	_, _ = fmt.Fprint(p.w, edgeAccessQuestion)
+	for p.err == nil {
+		_, _ = fmt.Fprint(p.w, "\nChoose 1 or 2: ")
+		line, err := p.lines.ReadString('\n')
+		switch strings.TrimSpace(line) {
+		case "1":
+			values["edge-access"] = string(edgeproto.PolicyAccount)
+			return
+		case "2":
+			values["edge-access"] = string(edgeproto.PolicyApprovedDevices)
+			return
+		}
+		switch {
+		case errors.Is(err, io.EOF):
+			p.err = errors.New("setup: the edge needs an access policy; answer 1 or 2")
+		case err != nil:
+			p.err = err
+		}
 	}
 }
 

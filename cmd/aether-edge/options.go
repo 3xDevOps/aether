@@ -1,19 +1,22 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/acme"
 
-	"github.com/3xDevOps/Aether/internal/edge"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/edge/relay"
+	edge "github.com/3xDevOps/Aether/internal/edge/service"
 )
 
 // options is the edge's configuration. Every option is a flag whose
@@ -23,11 +26,12 @@ import (
 // flag, such as a systemd credential.
 type options struct {
 	listen        string
+	proxyListen   string
 	devListen     string
 	metricsListen string
 	dataDir       string
-	origin        string
-	serverDomain  string
+	signinOrigin  string
+	relayOrigin   string
 	acmeEmail     string
 	acmeDirectory string
 	egressBudget  int64
@@ -47,17 +51,20 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		return fallback
 	}
 	fs.StringVar(&o.listen, "listen", env("AETHER_EDGE_LISTEN", ":443"),
-		"public TLS listener; connections are routed by SNI to the edge itself or passed through to a server")
+		"public TLS listener, with certificates for both origins' hosts")
+	fs.StringVar(&o.proxyListen, "proxy-listen", env("AETHER_EDGE_PROXY_LISTEN", ""),
+		"behind a reverse proxy on this host that terminates TLS: serve plain HTTP on this loopback address instead of --listen, "+
+			"and read client addresses from the proxy's "+relay.HeaderForwardedFor+" header")
 	fs.StringVar(&o.devListen, "dev-listen", env("AETHER_EDGE_DEV_LISTEN", ""),
-		"development mode: serve plain HTTP on this loopback address instead of --listen, without certificates or browser passthrough")
+		"development mode: serve plain HTTP on this loopback address instead of --listen, without certificates")
 	fs.StringVar(&o.metricsListen, "metrics-listen", env("AETHER_EDGE_METRICS_LISTEN", "127.0.0.1:9464"),
 		"loopback address that serves /metrics")
 	fs.StringVar(&o.dataDir, "data", dataDirDefault(getenv),
 		"data directory: edge.db, the signing key edge_key and the ACME cache")
-	fs.StringVar(&o.origin, "origin", env("AETHER_EDGE_ORIGIN", ""),
-		"public URL of this edge, https://host[:port]")
-	fs.StringVar(&o.serverDomain, "server-domain", env("AETHER_EDGE_SERVER_DOMAIN", ""),
-		"domain whose subdomains <server id>.<domain> point at this edge")
+	fs.StringVar(&o.signinOrigin, "signin-origin", env("AETHER_EDGE_SIGNIN_ORIGIN", ""),
+		"public URL people sign in on and clients call, https://host[:port]")
+	fs.StringVar(&o.relayOrigin, "relay-origin", env("AETHER_EDGE_RELAY_ORIGIN", ""),
+		"public URL servers enroll with and clients connect through, https://host[:port], on another host than --signin-origin")
 	fs.StringVar(&o.acmeEmail, "acme-email", env("AETHER_EDGE_ACME_EMAIL", ""),
 		"contact email for the ACME account")
 	fs.StringVar(&o.acmeDirectory, "acme-directory", env("AETHER_EDGE_ACME_DIRECTORY", acme.LetsEncryptURL),
@@ -84,18 +91,34 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	if err = checkLoopback("--metrics-listen", o.metricsListen); err != nil {
 		return options{}, err
 	}
-	if o.devListen != "" {
+	scheme := "https://"
+	switch {
+	case o.devListen != "" && o.proxyListen != "":
+		return options{}, errors.New("--dev-listen and --proxy-listen are two ways to serve plain HTTP; set one")
+	case o.proxyListen != "":
+		if err = checkLoopback("--proxy-listen", o.proxyListen); err != nil {
+			return options{}, err
+		}
+	case o.devListen != "":
 		if err = checkLoopback("--dev-listen", o.devListen); err != nil {
 			return options{}, err
 		}
-		if !strings.HasPrefix(o.origin, "http://") {
-			return options{}, fmt.Errorf("--dev-listen serves plain HTTP, so --origin must be http://<loopback address>:<port>, not %q", o.origin)
-		}
-	} else if !strings.HasPrefix(o.origin, "https://") {
-		return options{}, fmt.Errorf("--origin must be https://host[:port], not %q; for a local plain-HTTP edge use --dev-listen", o.origin)
+		scheme = "http://"
 	}
-	if _, err = edgeproto.Origin(o.origin); err != nil {
-		return options{}, fmt.Errorf("--origin: %w", err)
+	for _, origin := range []struct{ flag, value string }{{"--signin-origin", o.signinOrigin}, {"--relay-origin", o.relayOrigin}} {
+		if !strings.HasPrefix(origin.value, scheme) {
+			if scheme == "http://" {
+				return options{}, fmt.Errorf("--dev-listen serves plain HTTP, so %s must be http://<loopback host>:<port>, not %q", origin.flag, origin.value)
+			}
+			return options{}, fmt.Errorf("%s must be https://host[:port], not %q; for a local plain-HTTP edge use --dev-listen", origin.flag, origin.value)
+		}
+		if _, err = edgeproto.Origin(origin.value); err != nil {
+			return options{}, fmt.Errorf("%s: %w", origin.flag, err)
+		}
+	}
+	if host(o.signinOrigin) == host(o.relayOrigin) {
+		return options{}, fmt.Errorf("--signin-origin %s and --relay-origin %s must name different hosts, such as auth.example.com and edge.example.com",
+			o.signinOrigin, o.relayOrigin)
 	}
 	if o.github, err = oauthApp("github", *githubID, getenv("AETHER_EDGE_GITHUB_CLIENT_SECRET"), *githubSecretFile); err != nil {
 		return options{}, err
@@ -104,6 +127,12 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		return options{}, err
 	}
 	return o, nil
+}
+
+// host is the lowercase host name of a valid origin.
+func host(origin string) string {
+	u, _ := url.Parse(origin) // parseOptions checked it
+	return strings.ToLower(u.Hostname())
 }
 
 // dataDirDefault is the default of --data: AETHER_EDGE_DATA, else the

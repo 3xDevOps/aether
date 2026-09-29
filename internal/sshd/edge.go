@@ -6,17 +6,18 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// deviceIDExtension and deviceKeyExtension carry the edge device a relayed
+// deviceIDExtension and deviceKeyExtension carry the edge device a
 // connection authenticated with, alongside memberIDExtension.
 const (
 	deviceIDExtension  = "aether-device-id"
@@ -24,12 +25,18 @@ const (
 )
 
 // connIdentity is who an authenticated connection is. device and deviceKey
-// are set on connections an edge relayed.
+// are set on connections that authenticated with an edge device key,
+// relayed or direct.
 type connIdentity struct {
 	member    domain.MemberID
 	device    domain.DeviceID
 	deviceKey string
 }
+
+// connIdentityKey carries a connection's connIdentity in the context of its
+// channels. The tailnet dashboard's in-process client (Local) carries none:
+// it acts for a tailnet identity.
+type connIdentityKey struct{}
 
 func (s *Server) identityStore() (store.IdentityStore, error) {
 	ids, ok := s.cfg.Store.(store.IdentityStore)
@@ -39,16 +46,43 @@ func (s *Server) identityStore() (store.IdentityStore, error) {
 	return ids, nil
 }
 
-// ServeEdgeConn serves one SSH connection an edge relayed and returns when
-// it ends. The caller has verified grant: its signature, server id,
-// connection id and expiry.
+// ServeEdgeConn serves one SSH connection an edge relayed for a grant of
+// kind ssh and returns when it ends. The caller has verified grant: its
+// signature, issuer, server id, connection id, kind and expiry.
 //
 // The relayed transport has its own ssh.ServerConfig and its own pre-auth
 // handshake budget. It offers public key authentication only: no "none"
-// method, no tailnet WhoIs, no first-key bootstrap, no invite-code user
-// names. The key offered must be the grant's device key. nc's RemoteAddr
-// is whatever the relay put there and is never read.
+// method, no tailnet WhoIs, no first-key bootstrap, no invite-code or
+// claim user names. The key offered must be the grant's device key. nc's
+// RemoteAddr is whatever the relay put there and is never read.
 func (s *Server) ServeEdgeConn(ctx context.Context, nc net.Conn, grant edgeproto.Grant) {
+	if grant.Kind != edgeproto.KindSSH {
+		slog.Warn("sshd: relayed connection refused: grant is not for an ssh connection", "kind", grant.Kind)
+		_ = nc.Close()
+		return
+	}
+	s.serveRelayed(ctx, nc, s.edgeConfig(ctx, grant))
+}
+
+// ServeEdgeClaim serves one SSH connection an edge relayed for a grant of
+// kind claim. The client presents the claim code as its SSH user name, in
+// the form edgeproto.ClaimUser gives, and authenticates with the grant's
+// device key. attempt spends one attempt of the server's claim code on
+// code; when code is the claim code it runs claim, and on claim's success
+// destroys the code. Its refusals are the edgeproto claim refusals. On
+// success the grant's account becomes the server's admin and the device
+// key is approved, under either access policy, because the code came from
+// this machine's console. The connection then continues as that member's.
+func (s *Server) ServeEdgeClaim(ctx context.Context, nc net.Conn, grant edgeproto.Grant, attempt func(code string, claim func() error) error) {
+	if grant.Kind != edgeproto.KindClaim {
+		slog.Warn("sshd: relayed claim refused: grant is not for a claim", "kind", grant.Kind)
+		_ = nc.Close()
+		return
+	}
+	s.serveRelayed(ctx, nc, s.claimConfig(ctx, grant, attempt))
+}
+
+func (s *Server) serveRelayed(ctx context.Context, nc net.Conn, cfg *ssh.ServerConfig) {
 	if !s.beginHandler() {
 		_ = nc.Close()
 		return
@@ -56,21 +90,26 @@ func (s *Server) ServeEdgeConn(ctx context.Context, nc net.Conn, grant edgeproto
 	defer s.wg.Done()
 	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
 	defer stop()
-	s.serveConn(ctx, nc, s.edgeConfig(ctx, grant), s.edgeHandshakes, edgeConnIdentity)
+	s.serveConn(ctx, nc, cfg, s.edgeHandshakes, edgeConnIdentity)
+}
+
+// grantKeyCallback accepts only the grant's device key. It runs for
+// unsigned probes too, so it only compares keys.
+func grantKeyCallback(grant edgeproto.Grant) func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
+	return func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		if !edgeproto.DeviceKeyMatches(grant.DeviceKey, key) {
+			return nil, &ssh.BannerError{
+				Err:     errors.New("sshd: offered key is not the grant's device key"),
+				Message: "the key offered is not the device key the edge signed this connection in with\n",
+			}
+		}
+		return &ssh.Permissions{}, nil
+	}
 }
 
 func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.ServerConfig {
 	cfg := &ssh.ServerConfig{
-		// Runs for unsigned probes too, so it only compares keys.
-		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			if !edgeproto.DeviceKeyMatches(grant.DeviceKey, key) {
-				return nil, &ssh.BannerError{
-					Err:     errors.New("sshd: offered key is not the grant's device key"),
-					Message: "the key offered is not the device key the edge signed this connection in with\n",
-				}
-			}
-			return &ssh.Permissions{}, nil
-		},
+		PublicKeyCallback: grantKeyCallback(grant),
 		// Runs once the client has signed with the key, so store writes
 		// here cannot be triggered by a key nobody holds, and a refusal
 		// still reaches the client as a banner.
@@ -82,6 +121,66 @@ func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.Ser
 	}
 	cfg.AddHostKey(s.hostKey)
 	return cfg
+}
+
+// claimConfig authenticates a claim connection. The SSH user name holds
+// the claim code, so neither callback logs it or puts it in an error. It
+// also names the account the client is signed in as, under the client's
+// own signature: a grant naming any other account is refused before an
+// attempt is spent, so an edge cannot make the claim for an account of its
+// choosing.
+func (s *Server) claimConfig(ctx context.Context, grant edgeproto.Grant, attempt func(string, func() error) error) *ssh.ServerConfig {
+	keyOK := grantKeyCallback(grant)
+	cfg := &ssh.ServerConfig{
+		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			_, owner, ok := edgeproto.ParseClaimUser(conn.User())
+			if !ok {
+				return nil, &ssh.BannerError{
+					Err:     errors.New("sshd: claim connection without a claim user name"),
+					Message: "this connection claims the server: its SSH user name must carry the claim code and the claiming account\n",
+				}
+			}
+			if owner != edgeproto.AccountPrincipal(grant.Account) {
+				return nil, &ssh.BannerError{
+					Err: fmt.Errorf("sshd: claim for %s %s relayed with a grant for %s", owner.Provider, owner.Subject, accountName(grant.Account)),
+					Message: fmt.Sprintf("this device claims as %s account %s, but the edge signed the connection in as %s; the claim was not attempted\n",
+						owner.Provider, owner.Subject, accountName(grant.Account)),
+				}
+			}
+			return keyOK(conn, key)
+		},
+		// Runs once the client has signed with the device key: an attempt
+		// is spent only by the holder of that key.
+		VerifiedPublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey, _ *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+			code, _, _ := edgeproto.ParseClaimUser(conn.User())
+			authCtx, cancel := context.WithTimeout(ctx, authTimeout)
+			defer cancel()
+			var perms *ssh.Permissions
+			err := attempt(code, func() error {
+				var cerr error
+				perms, cerr = s.claimServer(authCtx, grant, key)
+				return cerr
+			})
+			if err != nil {
+				return nil, claimRefusal(err)
+			}
+			return perms, nil
+		},
+	}
+	cfg.AddHostKey(s.hostKey)
+	return cfg
+}
+
+func claimRefusal(err error) error {
+	var banner *ssh.BannerError
+	if errors.As(err, &banner) {
+		return err
+	}
+	var refusal edgeproto.Refusal
+	if errors.As(err, &refusal) {
+		return &ssh.BannerError{Err: fmt.Errorf("sshd: claim refused: %w", err), Message: string(refusal) + "\n"}
+	}
+	return &ssh.BannerError{Err: fmt.Errorf("sshd: claim: %w", err), Message: "the claim failed on the server: " + err.Error() + "\n"}
 }
 
 func edgeConnIdentity(_ context.Context, sconn *ssh.ServerConn) (connIdentity, error) {
@@ -97,7 +196,16 @@ func edgeConnIdentity(_ context.Context, sconn *ssh.ServerConn) (connIdentity, e
 	return id, nil
 }
 
-// admitEdge maps the grant's account to a member, then admits the device.
+func devicePermissions(member domain.MemberID, dev *domain.Device) *ssh.Permissions {
+	return &ssh.Permissions{Extensions: map[string]string{
+		memberIDExtension:  string(member),
+		deviceIDExtension:  string(dev.ID),
+		deviceKeyExtension: dev.Credential,
+	}}
+}
+
+// admitEdge maps the grant's account to a member, then admits the device
+// under the server's access policy.
 func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.PublicKey) (*ssh.Permissions, error) {
 	ids, err := s.identityStore()
 	if err != nil {
@@ -107,35 +215,64 @@ func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.P
 	if err != nil {
 		return nil, err
 	}
-	keyLine := edgeproto.DeviceKeyLine(key)
-	label := grant.DeviceLabel
-	if label == "" {
-		label = ssh.FingerprintSHA256(key)
-	}
-	dev, err := s.edgeDevice(ctx, ids, m.ID, keyLine, label)
+	dev, err := s.edgeDevice(ctx, ids, m.ID, grant.Account, edgeproto.DeviceKeyLine(key), deviceLabel(grant, key))
 	if err != nil {
 		return nil, err
 	}
-	switch dev.Status {
-	case domain.DeviceApproved:
-	case domain.DevicePending:
-		return nil, &ssh.BannerError{Err: errors.New("sshd: device pending approval"), Message: pendingDeviceBanner(dev)}
-	default:
-		return nil, &ssh.BannerError{
-			Err:     errors.New("sshd: device revoked"),
-			Message: fmt.Sprintf("device %q was revoked on this server\n", dev.Label),
-		}
+	if err := s.deviceRefusal(dev, true); err != nil {
+		return nil, err
 	}
 	if err := ids.TouchDevice(ctx, dev.ID, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("sshd: edge auth: %w", err)
 	}
-	slog.Info("sshd: edge auth", "member", m.ID, "device", dev.ID,
+	slog.Info("sshd: edge auth", "member", m.ID, "device", dev.ID, "status", dev.Status,
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "pending", m.Pending)
-	return &ssh.Permissions{Extensions: map[string]string{
-		memberIDExtension:  string(m.ID),
-		deviceIDExtension:  string(dev.ID),
-		deviceKeyExtension: keyLine,
-	}}, nil
+	return devicePermissions(m.ID, dev), nil
+}
+
+func deviceLabel(grant edgeproto.Grant, key ssh.PublicKey) string {
+	if grant.DeviceLabel != "" {
+		return grant.DeviceLabel
+	}
+	return ssh.FingerprintSHA256(key)
+}
+
+// deviceAdmitted reports whether a connection may use dev: an approved
+// device on any path; one awaiting approval only on a relayed connection
+// under account access, where signing in admits it. The direct path
+// accepts approved device keys only, under either policy: it never checks
+// that the edge still vouches for the account.
+func (s *Server) deviceAdmitted(dev *domain.Device, relayed bool) bool {
+	return dev.Status == domain.DeviceApproved ||
+		(relayed && dev.Status.AwaitsApproval() && s.cfg.EdgeAccess == edgeproto.PolicyAccount)
+}
+
+func (s *Server) deviceRefusal(dev *domain.Device, relayed bool) error {
+	switch {
+	case s.deviceAdmitted(dev, relayed):
+		return nil
+	case dev.Status == domain.DeviceRevoked:
+		return &ssh.BannerError{
+			Err:     errors.New("sshd: device revoked"),
+			Message: fmt.Sprintf("device %q was revoked on this server\n", dev.Label),
+		}
+	}
+	return &ssh.BannerError{Err: fmt.Errorf("sshd: device %s", dev.Status), Message: approvalBanner(dev, relayed)}
+}
+
+// approvalBanner shows a device awaiting approval its code. The code is
+// shown here, inside SSH, and in no list.
+func approvalBanner(dev *domain.Device, relayed bool) string {
+	state := "is waiting for approval"
+	switch {
+	case dev.Status == domain.DeviceRegistered && relayed:
+		state = "was admitted by signing in alone and is waiting for approval: this server now admits approved devices only"
+	case dev.Status == domain.DeviceRegistered:
+		state = "is not approved, and a direct connection accepts approved devices only"
+	}
+	return fmt.Sprintf("device %q %s. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:\n"+
+		"  aether device approve %s\nor on the server:\n  sudo aether-server device approve %s\n",
+		dev.Label, state, dev.ApprovalCode, dev.ApprovalCode)
 }
 
 // directDevice admits an edge device key on a direct or tailnet
@@ -147,48 +284,17 @@ func (s *Server) directDevice(ctx context.Context, key ssh.PublicKey) (*ssh.Perm
 	if !ok || key.Type() != ssh.KeyAlgoED25519 {
 		return nil, false, nil
 	}
-	line := edgeproto.DeviceKeyLine(key)
-	dev, err := ids.GetDeviceByCredential(ctx, line)
+	dev, err := ids.GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(key))
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("sshd: resolve device key: %w", err)
 	}
-	switch {
-	case dev.Kind != domain.DeviceSSH:
-		return nil, false, nil
-	case dev.Status == domain.DevicePending:
-		return nil, true, &ssh.BannerError{Err: errors.New("sshd: device pending approval"), Message: pendingDeviceBanner(dev)}
-	case dev.Status != domain.DeviceApproved:
-		return nil, true, &ssh.BannerError{
-			Err:     errors.New("sshd: device revoked"),
-			Message: fmt.Sprintf("device %q was revoked on this server\n", dev.Label),
-		}
+	if err := s.deviceRefusal(dev, false); err != nil {
+		return nil, true, err
 	}
-	return &ssh.Permissions{Extensions: map[string]string{
-		memberIDExtension:  string(dev.Member),
-		deviceIDExtension:  string(dev.ID),
-		deviceKeyExtension: line,
-	}}, true, nil
-}
-
-func pendingDeviceBanner(dev *domain.Device) string {
-	return fmt.Sprintf("device %q is waiting for approval. From a device this account already uses, or as an admin, run:\n"+
-		"  aether device approve %s\nor on the server:\n  sudo aether-server device approve %s\n",
-		dev.Label, dev.ApprovalCode, dev.ApprovalCode)
-}
-
-// EdgeMember returns the member bound to an account the edge signed in,
-// exactly as a relayed SSH connection is mapped: an unbound account
-// matching an open invitation becomes that invitation's member. An account
-// that is neither is refused with edgeproto.RefusalNotMember.
-func (s *Server) EdgeMember(ctx context.Context, account edgeproto.Account) (*domain.Member, error) {
-	ids, err := s.identityStore()
-	if err != nil {
-		return nil, err
-	}
-	return s.edgeMember(ctx, ids, account)
+	return devicePermissions(dev.Member, dev), true, nil
 }
 
 // edgeMember returns the member bound to account. An unbound account
@@ -218,7 +324,8 @@ func (s *Server) edgeMember(ctx context.Context, ids store.IdentityStore, accoun
 }
 
 // acceptInvitation binds account through inv, creating the member unless
-// inv links an existing one.
+// inv links an existing one. It creates no device: the device connecting
+// is registered by edgeDevice under the server's policy.
 func (s *Server) acceptInvitation(ctx context.Context, ids store.IdentityStore, inv *domain.Invitation, account edgeproto.Account) (*domain.Member, error) {
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
@@ -257,12 +364,20 @@ func matchingInvitations(ctx context.Context, ids store.IdentityStore, account e
 }
 
 // edgeDevice returns the device registered with keyLine, registering it
-// for member on first contact.
-func (s *Server) edgeDevice(ctx context.Context, ids store.IdentityStore, member domain.MemberID, keyLine, label string) (*domain.Device, error) {
+// for account's identity of member on first contact: registered under
+// account access, pending under approved-devices. A new or rotated key is
+// a new device. A key registered through another identity is refused,
+// even another identity of the same member.
+func (s *Server) edgeDevice(ctx context.Context, ids store.IdentityStore, member domain.MemberID, account edgeproto.Account, keyLine, label string) (*domain.Device, error) {
 	dev, err := ids.GetDeviceByCredential(ctx, keyLine)
 	if errors.Is(err, store.ErrNotFound) {
-		dev = &domain.Device{Member: member, Kind: domain.DeviceSSH, Credential: keyLine, Label: label}
-		err = ids.RegisterDevice(ctx, dev, !s.cfg.EdgeDeviceAutoApprove)
+		status := domain.DevicePending
+		if s.cfg.EdgeAccess == edgeproto.PolicyAccount {
+			status = domain.DeviceRegistered
+		}
+		dev = &domain.Device{Member: member, Provider: account.Provider, Subject: account.Subject,
+			Credential: keyLine, Label: label, Status: status}
+		err = ids.RegisterDevice(ctx, dev)
 		if errors.Is(err, store.ErrConflict) {
 			// A concurrent first contact of the same device registered it.
 			dev, err = ids.GetDeviceByCredential(ctx, keyLine)
@@ -274,10 +389,10 @@ func (s *Server) edgeDevice(ctx context.Context, ids store.IdentityStore, member
 	if err != nil {
 		return nil, fmt.Errorf("sshd: edge device: %w", err)
 	}
-	if dev.Member != member || dev.Kind != domain.DeviceSSH {
+	if dev.Member != member || dev.Provider != account.Provider || dev.Subject != account.Subject {
 		return nil, &ssh.BannerError{
-			Err:     errors.New("sshd: device key registered to another member"),
-			Message: "this device key is registered to another member of this server\n",
+			Err:     errors.New("sshd: device key registered to another account"),
+			Message: "this device key is registered to another account on this server\n",
 		}
 	}
 	return dev, nil
@@ -310,39 +425,42 @@ func displayNameOf(a edgeproto.Account) string {
 	return a.Provider + " " + a.Subject
 }
 
-// ClaimByEdge makes account the admin of this server after the edge agent
-// has checked a claim code. On a server with no member it creates that
-// admin. On a server with members, the account must already be an admin's
-// identity (a repeated claim), or match an admin's open link from
-// member.identity.link, which it then consumes: an admin who joined by key
-// or tailnet links the edge account first, then claims. Anything else is
-// refused with edgeproto.RefusalClaimed.
-func (s *Server) ClaimByEdge(ctx context.Context, account edgeproto.Account) (domain.Member, error) {
-	if err := account.Validate(); err != nil {
-		return domain.Member{}, fmt.Errorf("sshd: claim: %w", err)
-	}
+// claimServer makes the grant's account this server's admin after the
+// claim code matched, and approves key as that member's device. On a
+// server with no member it creates that admin. On a server with members,
+// the account must already be an admin's identity (a repeated claim), or
+// match an admin's open link from member.identity.link, which it then
+// consumes: an admin who joined by key or tailnet links the account
+// first, then claims. Anything else is refused with
+// edgeproto.RefusalClaimed. It runs under registerMu, which member.role
+// and member.remove also hold, so the admin checked here stays an admin
+// until the claim is done.
+func (s *Server) claimServer(ctx context.Context, grant edgeproto.Grant, key ssh.PublicKey) (*ssh.Permissions, error) {
 	ids, err := s.identityStore()
 	if err != nil {
-		return domain.Member{}, err
+		return nil, err
 	}
+	account := grant.Account
 	s.registerMu.Lock()
-	m, err := s.claim(ctx, ids, account)
-	s.registerMu.Unlock()
+	defer s.registerMu.Unlock()
+	m, err := s.claimMember(ctx, ids, account)
 	if err != nil {
-		return domain.Member{}, err
+		return nil, err
 	}
 	if m.Role != domain.RoleAdmin {
-		return domain.Member{}, edgeproto.RefusalClaimed
+		return nil, edgeproto.RefusalClaimed
+	}
+	dev, err := s.claimDevice(ctx, ids, m.ID, account, edgeproto.DeviceKeyLine(key), deviceLabel(grant, key))
+	if err != nil {
+		return nil, err
 	}
 	s.notifyDirectory()
-	slog.Info("sshd: claimed through the edge", "member", m.ID,
+	slog.Info("sshd: claimed through the edge", "member", m.ID, "device", dev.ID,
 		"provider", account.Provider, "subject", account.Subject)
-	return *m, nil
+	return devicePermissions(m.ID, dev), nil
 }
 
-// claim runs under registerMu, which member.role and member.remove also
-// hold, so the admin checked here stays an admin until the claim is done.
-func (s *Server) claim(ctx context.Context, ids store.IdentityStore, account edgeproto.Account) (*domain.Member, error) {
+func (s *Server) claimMember(ctx context.Context, ids store.IdentityStore, account edgeproto.Account) (*domain.Member, error) {
 	m, err := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
 	if !errors.Is(err, store.ErrNotFound) {
 		return m, err
@@ -374,6 +492,69 @@ func (s *Server) claim(ctx context.Context, ids store.IdentityStore, account edg
 		return m, nil
 	}
 	return nil, edgeproto.RefusalClaimed
+}
+
+// claimDevice approves the claiming device key for member through
+// account's identity, registering it when new. A key registered through
+// another identity, or revoked, is refused.
+func (s *Server) claimDevice(ctx context.Context, ids store.IdentityStore, member domain.MemberID, account edgeproto.Account, keyLine, label string) (*domain.Device, error) {
+	dev, err := ids.GetDeviceByCredential(ctx, keyLine)
+	if errors.Is(err, store.ErrNotFound) {
+		dev = &domain.Device{Member: member, Provider: account.Provider, Subject: account.Subject,
+			Credential: keyLine, Label: label, Status: domain.DeviceApproved}
+		if err = ids.RegisterDevice(ctx, dev); err != nil {
+			return nil, fmt.Errorf("sshd: claim: register device: %w", err)
+		}
+		return dev, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sshd: claim: %w", err)
+	}
+	if dev.Member != member || dev.Provider != account.Provider || dev.Subject != account.Subject {
+		return nil, &ssh.BannerError{
+			Err:     errors.New("sshd: claim: device key registered to another account"),
+			Message: "this device key is registered to another account on this server\n",
+		}
+	}
+	switch dev.Status {
+	case domain.DeviceRevoked:
+		return nil, &ssh.BannerError{
+			Err:     errors.New("sshd: claim: device revoked"),
+			Message: fmt.Sprintf("device %q was revoked on this server; claim from another device\n", dev.Label),
+		}
+	case domain.DeviceRegistered, domain.DevicePending:
+		if err := ids.ApproveDevice(ctx, dev.ID, ""); err != nil {
+			return nil, fmt.Errorf("sshd: claim: approve device: %w", err)
+		}
+		return ids.GetDevice(ctx, dev.ID)
+	}
+	return dev, nil
+}
+
+// EdgeAccountDeleted handles the edge's notice that the account provider,
+// subject was deleted there: it removes that identity and the devices
+// registered through it, and closes their connections. The notice is the
+// edge's assertion, so it may only take access away: it removes no
+// member, changes no role, deletes no data, and leaves the member's SSH
+// keys, tailnet identity and other identities working.
+func (s *Server) EdgeAccountDeleted(ctx context.Context, provider, subject string) error {
+	ids, err := s.identityStore()
+	if err != nil {
+		return err
+	}
+	member, devices, err := ids.RemoveIdentity(ctx, provider, subject)
+	if errors.Is(err, store.ErrNotFound) {
+		slog.Info("sshd: edge account deleted; no member has that identity", "provider", provider, "subject", subject)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("sshd: edge account deleted: %w", err)
+	}
+	s.closeConns(func(id connIdentity) bool { return slices.Contains(devices, id.device) })
+	s.notifyDirectory()
+	slog.Info("sshd: edge account deleted; removed its identity and edge devices",
+		"member", member, "provider", provider, "subject", subject, "devices", len(devices))
+	return nil
 }
 
 // EdgeDirectory is the directory the edge agent pushes: every member bound
@@ -445,20 +626,6 @@ func (s *Server) notifyDirectory() {
 	}
 }
 
-// CloseEdgeDevice closes every live connection authenticated with
-// deviceKey, an authorized_keys line. The edge agent calls it when the edge
-// reports that device's token revoked; the device itself stays approved on
-// this server.
-func (s *Server) CloseEdgeDevice(deviceKey string) {
-	key, err := edgeproto.ParseDeviceKey(deviceKey)
-	if err != nil {
-		slog.Warn("sshd: close edge device: unparsable key", "error", err)
-		return
-	}
-	line := edgeproto.DeviceKeyLine(key)
-	s.closeConns(func(id connIdentity) bool { return id.deviceKey == line })
-}
-
 func (s *Server) bindConn(c net.Conn, id connIdentity) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -487,8 +654,10 @@ func (s *Server) closeMemberConns(member domain.MemberID) {
 	s.closeConns(func(id connIdentity) bool { return id.member == member })
 }
 
-// checkConnIdentity re-reads that the member exists and, on a relayed
-// connection, that its device is still approved.
+// checkConnIdentity re-reads that the member exists and, on a connection
+// that authenticated with an edge device, that the device still admits
+// it. Only relayed connections ever hold a device awaiting approval, so
+// it is admitted as a relayed one.
 func (s *Server) checkConnIdentity(ctx context.Context, id connIdentity) error {
 	if _, err := s.memberFor(ctx, id.member); err != nil {
 		return err
@@ -504,8 +673,30 @@ func (s *Server) checkConnIdentity(ctx context.Context, id connIdentity) error {
 	if err != nil {
 		return fmt.Errorf("sshd: device %s: %w", id.device, err)
 	}
-	if dev.Status != domain.DeviceApproved {
+	if !s.deviceAdmitted(dev, true) {
 		return fmt.Errorf("sshd: device %s is %s", id.device, dev.Status)
 	}
 	return nil
+}
+
+// watchDevice closes a connection that authenticated with an edge device
+// once the device stops admitting it: revoked or removed by another
+// process, such as `aether-server device review`, which cannot reach this
+// server's connections. A revocation through this server closes them at
+// once instead.
+func (s *Server) watchDevice(ctx context.Context, id connIdentity, abort func()) {
+	ticker := time.NewTicker(s.cfg.revalidateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.checkConnIdentity(ctx, id); err != nil && ctx.Err() == nil {
+				slog.Info("sshd: device no longer admitted; closing connection", "member", id.member, "device", id.device, "error", err)
+				abort()
+				return
+			}
+		}
+	}
 }

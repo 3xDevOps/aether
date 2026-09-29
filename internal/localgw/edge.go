@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/edgeclient"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -22,15 +22,17 @@ const (
 )
 
 // loginView is the gateway's edge sign-in as edge.login and edge.status
-// report it. The device code the gateway polls with and the device token
-// it receives are never part of it.
+// report it: Edge is the relay origin and SigninOrigin the origin whose
+// page confirms the code. The device code the gateway polls with and the
+// device token it receives are never part of it.
 type loginView struct {
-	State           string             `json:"state"`
-	Edge            string             `json:"edge"`
-	UserCode        string             `json:"user_code"`
-	VerificationURI string             `json:"verification_uri"`
-	Account         *edgeproto.Account `json:"account,omitempty"`
-	Error           string             `json:"error,omitempty"`
+	State           string                 `json:"state"`
+	Edge            string                 `json:"edge"`
+	SigninOrigin    string                 `json:"signin_origin"`
+	UserCode        string                 `json:"user_code"`
+	VerificationURI string                 `json:"verification_uri"`
+	Account         *edgeproto.AccountInfo `json:"account,omitempty"`
+	Error           string                 `json:"error,omitempty"`
 }
 
 // edgeLogin is the one edge sign-in the gateway runs at a time. A new
@@ -54,7 +56,7 @@ type loginAttempt struct {
 func (e *edgeLogin) begin(parent context.Context, client *edgeclient.Client, l *edgeclient.Login) loginView {
 	ctx, cancel := context.WithCancel(parent)
 	a := &loginAttempt{cancel: cancel, view: loginView{
-		State: loginPending, Edge: client.URL(), UserCode: l.UserCode, VerificationURI: l.VerificationURI,
+		State: loginPending, Edge: client.URL(), SigninOrigin: l.SigninOrigin, UserCode: l.UserCode, VerificationURI: l.VerificationURI,
 	}}
 	e.mu.Lock()
 	if e.current != nil {
@@ -155,12 +157,14 @@ func (g *Gateway) localEdgeLogin(r *http.Request, body []byte) (any, *protocol.E
 	return g.local.edge.begin(g.ctx, client, login), nil
 }
 
-// signedInEdge is one edge this machine holds a device token for.
+// signedInEdge is one edge this machine holds a device token for, by its
+// relay origin, with the sign-in origin that issued the token.
 type signedInEdge struct {
-	Edge    string             `json:"edge"`
-	Account *edgeproto.Account `json:"account,omitempty"`
-	Device  *edgeproto.Device  `json:"device,omitempty"`
-	Error   string             `json:"error,omitempty"`
+	Edge         string                 `json:"edge"`
+	SigninOrigin string                 `json:"signin_origin,omitempty"`
+	Account      *edgeproto.AccountInfo `json:"account,omitempty"`
+	Device       *edgeproto.Device      `json:"device,omitempty"`
+	Error        string                 `json:"error,omitempty"`
 }
 
 func (g *Gateway) localEdgeStatus(*http.Request, []byte) (any, *protocol.Error) {
@@ -179,7 +183,7 @@ func (g *Gateway) localEdgeStatus(*http.Request, []byte) (any, *protocol.Error) 
 		if err != nil {
 			entry.Error = err.Error()
 		} else {
-			entry.Account, entry.Device = &session.Account, &session.Device
+			entry.SigninOrigin, entry.Account, entry.Device = session.SigninOrigin, &session.Account, &session.Device
 		}
 		edges = append(edges, entry)
 	}
@@ -228,7 +232,7 @@ func (g *Gateway) localEdgeServers(r *http.Request, body []byte) (any, *protocol
 	if perr != nil {
 		return nil, perr
 	}
-	servers, _, err := client.Servers(r.Context())
+	servers, err := client.Servers(r.Context())
 	if err != nil {
 		return nil, edgeError(err)
 	}
@@ -251,12 +255,11 @@ type edgeLinkParams struct {
 
 // edgeLinked is the answer of edge.link and edge.claim.
 type edgeLinked struct {
-	ServerID   string          `json:"server_id"`
-	ServerName string          `json:"server_name,omitempty"`
-	Edge       string          `json:"edge"`
-	Addr       string          `json:"addr,omitempty"`
-	User       string          `json:"user"`
-	Member     protocol.Member `json:"member"`
+	ServerID string          `json:"server_id"`
+	Edge     string          `json:"edge"`
+	Addr     string          `json:"addr,omitempty"`
+	User     string          `json:"user"`
+	Member   protocol.Member `json:"member"`
 }
 
 func (g *Gateway) localEdgeLink(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -274,12 +277,41 @@ func (g *Gateway) localEdgeLink(_ *http.Request, body []byte) (any, *protocol.Er
 	if perr != nil {
 		return nil, perr
 	}
-	return g.linkEdge(client.URL(), params.ServerID, params.edgeLinkParams)
+	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, EdgeURL: client.URL(), ServerID: params.ServerID})
+}
+
+// localEdgeHostKey reads the host key fingerprint of a server through
+// the edge, as aether link --from-edge shows it before asking, without
+// authenticating to the server.
+func (g *Gateway) localEdgeHostKey(r *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		Edge     string `json:"edge"`
+		ServerID string `json:"server_id"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if !edgeproto.ValidServerID(params.ServerID) {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf("server_id %q is not a server id; edge.servers lists them", params.ServerID)}
+	}
+	client, perr := chooseEdge(params.Edge)
+	if perr != nil {
+		return nil, perr
+	}
+	fingerprint, err := cli.HostKeyFingerprint(r.Context(), client.URL(), params.ServerID)
+	if err != nil {
+		return nil, edgeError(err)
+	}
+	return struct {
+		Edge        string `json:"edge"`
+		ServerID    string `json:"server_id"`
+		Fingerprint string `json:"fingerprint"`
+	}{Edge: client.URL(), ServerID: params.ServerID, Fingerprint: fingerprint}, nil
 }
 
 // localEdgeClaim claims a server with the code aether-server setup
 // printed and links it, as aether link --claim does.
-func (g *Gateway) localEdgeClaim(r *http.Request, body []byte) (any, *protocol.Error) {
+func (g *Gateway) localEdgeClaim(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		edgeLinkParams
 		Code string `json:"code"`
@@ -294,24 +326,13 @@ func (g *Gateway) localEdgeClaim(r *http.Request, body []byte) (any, *protocol.E
 	if perr != nil {
 		return nil, perr
 	}
-	claimed, err := client.Claim(r.Context(), params.Code)
-	if err != nil {
-		return nil, edgeError(err)
-	}
-	linked, perr := g.linkEdge(client.URL(), claimed.ServerID, params.edgeLinkParams)
-	if perr != nil {
-		perr.Message = fmt.Sprintf("server %s (%s) is claimed, but linking it failed: %s; retry with edge.link",
-			claimed.Name, claimed.ServerID, perr.Message)
-		return nil, perr
-	}
-	linked.ServerName = claimed.Name
-	return linked, nil
+	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, EdgeURL: client.URL(), Claim: params.Code})
 }
 
-// linkEdge links the gateway to a server through the edge at origin and
-// moves every later request onto it, as link.apply does for an address.
-func (g *Gateway) linkEdge(origin, serverID string, p edgeLinkParams) (*edgeLinked, *protocol.Error) {
-	result, err := cli.Link(cli.LinkOptions{Addr: p.Addr, Name: p.Name, EdgeURL: origin, ServerID: serverID}, g.local.snapshot())
+// linkEdge links the gateway to a server through an edge and moves every
+// later request onto it, as link.apply does for an address.
+func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) {
+	result, err := cli.Link(opts, g.local.snapshot())
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}

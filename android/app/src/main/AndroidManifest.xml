@@ -3,12 +3,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- allowBackup is off because nothing stored is worth restoring and
-         one thing must not travel: the server address, which the first-run
-         screen asks for anyway, and the WebView's cookies, among them an
-         edge dashboard's session. It does not cover device-to-device
-         transfer on Android 12 and newer, so the extraction rules exclude
-         every domain from that too. -->
+    <!-- allowBackup is off because the only stored state is the server
+         address, which the first-run screen asks for anyway. It does not
+         cover device-to-device transfer on Android 12 and newer, so the
+         extraction rules exclude every domain from that too. -->
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -30,9 +28,8 @@
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="false" />
 
-        <!-- singleTask so an aether://run/<id> or aether://auth/callback
-             link reuses the running window instead of stacking another
-             WebView. The config changes are
+        <!-- singleTask so an aether://run/<id> link reuses the running window
+             instead of stacking another WebView. The config changes are
              handled in place: recreating the Activity would reload the
              dashboard and lose the terminal's scrollback on every rotation
              and every switch between light and dark. -->
@@ -54,29 +51,14 @@
                     android:host="run"
                     android:scheme="aether" />
             </intent-filter>
-            <!-- The edge's return from a sign-in opened in the browser. Any
-                 app can claim this link too. The code in it is bound to the
-                 state cookie of the browser that started the sign-in: this
-                 WebView for a sign-in started here, but the attacker's for
-                 one an attacker started and sent to a member. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:host="auth"
-                    android:path="/callback"
-                    android:scheme="aether" />
-            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Exported because the launcher process starts it from the static
-             shortcut. It holds no authority, and the one extra it reads only
-             adds a fixed message: the worst another app can do is show this
-             form. -->
+             shortcut. It reads no intent extras and holds no authority: the
+             worst another app can do is show this form. -->
         <activity
             android:name=".SetupActivity"
             android:exported="true"

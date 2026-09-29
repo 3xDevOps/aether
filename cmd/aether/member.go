@@ -9,21 +9,21 @@ import (
 	"golang.org/x/term"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, set the git identity of, change the role of, link an edge account to, or remove members",
+		short: "list, approve, color, set the git identity of, change the role of, link an edge account to, transfer server ownership to, or remove members",
 		run:   runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|remove>")
+		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|transfer|remove>")
 	}
 	switch args[0] {
 	case "list":
@@ -46,6 +46,8 @@ func runMember(args []string) error {
 		return memberRole(args[1:])
 	case "link":
 		return memberLink(args[1:])
+	case "transfer":
+		return memberTransfer(args[1:])
 	default:
 		return fmt.Errorf("unknown member command %q", args[0])
 	}
@@ -121,6 +123,33 @@ func memberLink(args []string) error {
 		}
 		fmt.Printf("%s can link to member %s until %s: sign in with aether login and connect through the edge\n",
 			inviteeOf(res.Invitation), res.Invitation.MemberID, res.Invitation.ExpiresAt)
+		return nil
+	})
+}
+
+// memberTransfer makes another admin the server's owner at its edge,
+// through one of their edge identities. The server reports it to the
+// edge; the edge records it only from that report.
+func memberTransfer(args []string) error {
+	fs := flag.NewFlagSet("member transfer", flag.ExitOnError)
+	provider := fs.String("provider", "", `the new owner's edge identity to use, "github" or "google", when they have both`)
+	memberID, err := parseLeadingArg(fs, args)
+	if err != nil {
+		return fmt.Errorf("usage: aether member transfer <member-id> [--provider github|google]\nadmins only; the new owner must already be an admin with a linked edge account")
+	}
+	return withControl(func(c *protocol.Client) error {
+		var res protocol.ServerOwnerTransferResult
+		if err := c.Call(protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: memberID, Provider: *provider}, &res); err != nil {
+			return err
+		}
+		who := res.Login
+		if who == "" {
+			who = res.Email
+		}
+		if who == "" {
+			who = res.Subject
+		}
+		fmt.Printf("member %s now owns this server at its edge, as %s account %s\n", res.MemberID, res.Provider, who)
 		return nil
 	})
 }

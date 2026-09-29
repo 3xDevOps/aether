@@ -9,31 +9,41 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 )
 
-const testDomain = "servers.example.test"
-
 type fakeDir struct {
-	mu        sync.Mutex
-	tokens    map[string]tokenEntry
+	mu     sync.Mutex
+	tokens map[string]tokenEntry
+	// owners holds the claimed servers and ownerOf their owners; a
+	// claimed server without one is ownerless.
 	owners    map[string]bool
+	ownerOf   map[string]edgeproto.Principal
+	policies  map[string]edgeproto.AccessPolicy
 	blocked   map[string]bool
 	members   map[string][]edgeproto.Account
 	dirs      map[string][]edgeproto.DirectoryEntry
 	dirWrites int
 	// admitHook, when set, runs once at the start of the next Admit.
 	admitHook  func()
-	webCodes   map[string]string
 	unenrolled []string
+	// claimRefusal, when set, is AdmitClaim's answer; claimAddrs are the
+	// addresses AdmitClaim was called with.
+	claimRefusal error
+	claimAddrs   []netip.Addr
+	// recordErr, when set, is what recording an owner fails with.
+	recordErr error
+	pending   map[string][]edgeproto.AccountDeleted
 }
 
 type tokenEntry struct {
@@ -75,19 +85,84 @@ func (d *fakeDir) Admit(_ context.Context, serverID string, a edgeproto.Account)
 	return edgeproto.RefusalNotMember
 }
 
-func (d *fakeDir) Enroll(_ context.Context, serverID, _ string) (bool, error) {
+func (d *fakeDir) AdmitClaim(_ context.Context, serverID string, _ edgeproto.Account, addr netip.Addr) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.claimAddrs = append(d.claimAddrs, addr)
+	if d.claimRefusal != nil {
+		return d.claimRefusal
+	}
+	if _, ok := d.ownerOf[serverID]; ok {
+		return edgeproto.RefusalClaimed
+	}
+	return nil
+}
+
+func (d *fakeDir) Enroll(_ context.Context, serverID, _ string, policy edgeproto.AccessPolicy) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.blocked[serverID] {
 		return false, edgeproto.RefusalServerBlocked
 	}
+	if d.owners[serverID] {
+		d.policies[serverID] = policy
+	}
 	return d.owners[serverID], nil
 }
 
-func (d *fakeDir) Claimed(_ context.Context, serverID string) (bool, error) {
+func (d *fakeDir) RecordClaim(_ context.Context, serverID, _ string, policy edgeproto.AccessPolicy, owner edgeproto.Account) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.owners[serverID], nil
+	if d.recordErr != nil {
+		return d.recordErr
+	}
+	if _, ok := d.ownerOf[serverID]; ok {
+		return edgeproto.RefusalClaimed
+	}
+	d.owners[serverID] = true
+	d.ownerOf[serverID] = edgeproto.AccountPrincipal(owner)
+	d.policies[serverID] = policy
+	return nil
+}
+
+func (d *fakeDir) TransferOwner(_ context.Context, serverID string, owner edgeproto.Principal) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.recordErr != nil {
+		return d.recordErr
+	}
+	d.ownerOf[serverID] = owner
+	return nil
+}
+
+func (d *fakeDir) DropOwner(_ context.Context, serverID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.recordErr != nil {
+		return d.recordErr
+	}
+	delete(d.ownerOf, serverID)
+	return nil
+}
+
+func (d *fakeDir) PendingDeletions(_ context.Context, serverID string) ([]edgeproto.AccountDeleted, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.pending[serverID]), nil
+}
+
+func (d *fakeDir) DeletionDelivered(_ context.Context, serverID string, del edgeproto.AccountDeleted) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.pending[serverID] = slices.DeleteFunc(d.pending[serverID], func(o edgeproto.AccountDeleted) bool { return o == del })
+	return nil
+}
+
+func (d *fakeDir) owner(serverID string) (edgeproto.Principal, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	p, ok := d.ownerOf[serverID]
+	return p, ok
 }
 
 func (d *fakeDir) ReplaceDirectory(_ context.Context, serverID string, entries []edgeproto.DirectoryEntry) error {
@@ -98,35 +173,11 @@ func (d *fakeDir) ReplaceDirectory(_ context.Context, serverID string, entries [
 	return nil
 }
 
-func (d *fakeDir) RedeemWebCode(_ context.Context, serverID string, m edgeproto.WebRedeem) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	grant, ok := d.webCodes[serverID+" "+m.Code]
-	if !ok {
-		return "", edgeproto.Refusal("web sign-in code is not valid")
-	}
-	return grant, nil
-}
-
 func (d *fakeDir) Unenroll(_ context.Context, serverID string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.unenrolled = append(d.unenrolled, serverID)
 	return nil
-}
-
-// record is the Service's claim recording: it makes the server owned.
-func (e *env) record(_ context.Context, serverID, _ string) error {
-	e.dir.mu.Lock()
-	defer e.dir.mu.Unlock()
-	e.dir.owners[serverID] = true
-	return nil
-}
-
-func (e *env) owned(serverID string) bool {
-	e.dir.mu.Lock()
-	defer e.dir.mu.Unlock()
-	return e.dir.owners[serverID]
 }
 
 func (d *fakeDir) addMember(serverID string, a edgeproto.Account) {
@@ -181,10 +232,12 @@ func newEnvWith(t *testing.T, budget int64, egress *fakeEgress) *env {
 		dir: &fakeDir{
 			tokens:   map[string]tokenEntry{},
 			owners:   map[string]bool{},
+			ownerOf:  map[string]edgeproto.Principal{},
+			policies: map[string]edgeproto.AccessPolicy{},
 			blocked:  map[string]bool{},
 			members:  map[string][]edgeproto.Account{},
 			dirs:     map[string][]edgeproto.DirectoryEntry{},
-			webCodes: map[string]string{},
+			pending:  map[string][]edgeproto.AccountDeleted{},
 		},
 		egress:  egress,
 		edgeKey: key,
@@ -192,7 +245,6 @@ func newEnvWith(t *testing.T, budget int64, egress *fakeEgress) *env {
 	e.origin = "http://localhost:" + strconv.Itoa(port)
 	e.r, err = New(t.Context(), Config{
 		Origin:       e.origin,
-		ServerDomain: testDomain,
 		EdgeKey:      key,
 		Directory:    e.dir,
 		Egress:       e.egress,
@@ -254,6 +306,8 @@ type agent struct {
 	data   chan net.Conn
 	// attach makes run answer every open by attaching a data socket.
 	attach bool
+	// err is what ended run, set before msgs closes.
+	err error
 }
 
 func dialControl(t *testing.T, e *env) *websocket.Conn {
@@ -299,7 +353,8 @@ func helloFor(t *testing.T, signer ssh.Signer, origin string, nonce []byte) edge
 	if err != nil {
 		t.Fatal(err)
 	}
-	return edgeproto.Hello{Version: edgeproto.Version, HostKey: signer.PublicKey().Marshal(), Signature: sig, AgentVersion: "test", Name: "devbox"}
+	return edgeproto.Hello{Version: edgeproto.Version, HostKey: signer.PublicKey().Marshal(), Signature: sig,
+		AgentVersion: "test", Name: "devbox", AccessPolicy: edgeproto.PolicyAccount}
 }
 
 // enroll connects a server with signer and waits for ready.
@@ -320,13 +375,15 @@ func enroll(t *testing.T, e *env, signer ssh.Signer) *agent {
 		msgs: make(chan edgeproto.Message, 64), data: make(chan net.Conn, 64)}
 }
 
-// claimedAgent enrolls a claimed server that attaches every open.
+// claimedAgent enrolls a claimed server, owned by account "owner", that
+// attaches every open.
 func claimedAgent(t *testing.T, e *env) *agent {
 	t.Helper()
 	signer := newSigner(t)
 	id := edgeproto.ServerID(signer.PublicKey())
 	e.dir.mu.Lock()
 	e.dir.owners[id] = true
+	e.dir.ownerOf[id] = edgeproto.AccountPrincipal(account("owner"))
 	e.dir.mu.Unlock()
 	a := enroll(t, e, signer)
 	a.attach = true
@@ -341,6 +398,7 @@ func (a *agent) run() {
 			continue
 		}
 		if err != nil {
+			a.err = err
 			close(a.msgs)
 			return
 		}
@@ -392,6 +450,23 @@ func next[T edgeproto.Message](t *testing.T, a *agent) T {
 	}
 }
 
+// closedWith waits for the relay to close the control channel run reads,
+// and returns the error that ended it.
+func (a *agent) closedWith(t *testing.T) error {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-a.msgs:
+			if !ok {
+				return a.err
+			}
+		case <-timeout:
+			t.Fatal("control channel still open after 5s")
+		}
+	}
+}
+
 func (a *agent) nextData(t *testing.T) net.Conn {
 	t.Helper()
 	select {
@@ -404,10 +479,16 @@ func (a *agent) nextData(t *testing.T) net.Conn {
 	}
 }
 
-// connect opens a relayed connection as a client and returns both ends.
+// connect opens a relayed ssh connection as a client and returns both
+// ends.
 func (e *env) connect(t *testing.T, a *agent, token string) (client, server net.Conn) {
 	t.Helper()
-	ws, _, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.ConnectPath(a.id), &websocket.DialOptions{
+	return e.connectPath(t, a, edgeproto.ConnectPath(a.id), token)
+}
+
+func (e *env) connectPath(t *testing.T, a *agent, path, token string) (client, server net.Conn) {
+	t.Helper()
+	ws, _, err := websocket.Dial(t.Context(), e.wsBase+path, &websocket.DialOptions{
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
 	})
 	if err != nil {
@@ -422,7 +503,12 @@ func (e *env) connect(t *testing.T, a *agent, token string) (client, server net.
 // refusal.
 func (e *env) get(t *testing.T, serverID string, header http.Header) (int, string) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, e.base+edgeproto.ConnectPath(serverID), nil)
+	return e.getPath(t, edgeproto.ConnectPath(serverID), header)
+}
+
+func (e *env) getPath(t *testing.T, path string, header http.Header) (int, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, e.base+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,8 +553,4 @@ func eventually(t *testing.T, what string, cond func() bool) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func sameAccount(a, b edgeproto.Account) bool {
-	return a.Provider == b.Provider && a.Subject == b.Subject
 }

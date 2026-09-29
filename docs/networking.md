@@ -142,18 +142,23 @@ by its id:
 ```sh
 aether login
 aether link --claim <code>     # the owner, with the code aether-server setup printed
-aether link <server id>        # anyone the owner invited, with the id from aether servers
+aether link <server id>        # anyone the owner invited, with the id the owner sent them
 ```
 
 A bare name such as `my-server` is always an SSH address, as on a tailnet;
 only a server id goes through the edge.
 
 The server's host key is checked against its id on every connection, and
-each device holds its own key. Phones and browsers open the dashboard at
-`https://<server id>.<server domain>` and sign in there; the server, not the
-edge, terminates that TLS. [edge.md](edge.md) covers claiming, the
-dashboard, what the edge can see, and running your own; invitations and
-device approval are in [teams.md](teams.md#through-an-edge).
+each device holds its own key. The server's owner chooses, on the machine,
+whether signing in is enough to admit a new device (`edge-access account`)
+or whether each new device waits for a person to approve it
+(`approved-devices`, the default when the setting is missing). Tailnet
+identities and SSH keys work the same under both. The edge serves no
+dashboard in this release: a phone reaches it over the tailnet
+([The dashboard](#the-dashboard)), and a computer through `aether gui`.
+[edge.md](edge.md) covers the two policies, claiming, what the edge can
+see, and running your own; invitations and device approval are in
+[teams.md](teams.md#through-an-edge).
 
 ---
 
@@ -343,8 +348,9 @@ refused here too. `--tailnet-require-key` and `web-port` are mutually
 exclusive: HTTP cannot present a key, so a server set to require one refuses
 to start with the dashboard on.
 
-A server with no tailscaled serves phones through an edge instead
-([edge.md](edge.md#dashboard-through-the-edge)).
+Key-only and invite-code servers - anything with no tailscaled, including
+one reached through an edge - have no phone dashboard in this release.
+`aether gui` is the whole story there.
 
 ### Where it refuses
 

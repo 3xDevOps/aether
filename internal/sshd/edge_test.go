@@ -16,7 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -38,10 +38,14 @@ var octo = edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001"
 func grantFor(account edgeproto.Account, device ssh.Signer, label string) edgeproto.Grant {
 	now := time.Now().UTC()
 	return edgeproto.Grant{
-		ServerID: "wqc4lsjvzdzrwq3k5dabdtajwj", ConnID: edgeproto.NewConnID(), Kind: edgeproto.KindSSH,
+		Issuer: "https://edge.example.test", ServerID: "wqc4lsjvzdzrwq3k5dabdtajwj", ConnID: edgeproto.NewConnID(), Kind: edgeproto.KindSSH,
 		Account: account, DeviceID: "edge-" + label, DeviceKey: edgeproto.DeviceKeyLine(device.PublicKey()),
 		DeviceLabel: label, IssuedAt: now, ExpiresAt: now.Add(edgeproto.GrantTTL),
 	}
+}
+
+func withPolicy(p edgeproto.AccessPolicy) func(*Config) {
+	return func(c *Config) { c.EdgeAccess = p }
 }
 
 // tcpPair returns both ends of a loopback TCP connection. net.Pipe would
@@ -73,11 +77,18 @@ func tcpPair(t *testing.T) (server, client net.Conn) {
 // agent does, and returns the client with the banner it was shown.
 func (e *testEnv) dialEdge(t *testing.T, grant edgeproto.Grant, signer ssh.Signer, user string) (*ssh.Client, string, error) {
 	t.Helper()
+	return dialRelayed(t, func(nc net.Conn) { e.srv.ServeEdgeConn(context.Background(), nc, grant) }, signer, user)
+}
+
+// dialRelayed runs serve on the server end of a relayed connection and
+// dials SSH on the client end.
+func dialRelayed(t *testing.T, serve func(net.Conn), signer ssh.Signer, user string) (*ssh.Client, string, error) {
+	t.Helper()
 	server, client := tcpPair(t)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		e.srv.ServeEdgeConn(context.Background(), relayedConn{server}, grant)
+		serve(relayedConn{server})
 	}()
 	var banner strings.Builder
 	cfg := &ssh.ClientConfig{
@@ -202,17 +213,28 @@ func TestEdgeIgnoresInviteCodeUserAndTailnet(t *testing.T) {
 	if err == nil || !strings.Contains(banner, "not a member") {
 		t.Fatalf("relayed invite-code user = %v, banner %q; want not a member", err, banner)
 	}
-	if _, err := os.Stat(invitePath(dir, code)); err != nil {
+	if _, err = os.Stat(invitePath(dir, code)); err != nil {
 		t.Fatalf("relayed dial burned the invite code: %v", err)
 	}
 	if members, _ := e.store.ListMembers(context.Background()); len(members) != 0 {
 		t.Fatalf("relayed dial registered %d members through tailnet or invite", len(members))
 	}
+	// A claim connection offers no tailnet, bootstrap or invite route either.
+	codes := newFakeClaimCode()
+	_, banner, err = e.dialClaim(t, codes, claimGrantFor(octo, signer), signer, "invite:"+code+":eve")
+	if err == nil || !strings.Contains(banner, "must carry the claim code") || len(codes.attempts) != 0 {
+		t.Fatalf("claim connection with an invite-code user = %v, banner %q", err, banner)
+	}
+	if members, _ := e.store.ListMembers(context.Background()); len(members) != 0 {
+		t.Fatalf("claim connection registered %d members through tailnet or invite", len(members))
+	}
 }
 
+// Under account access signing in is enough, so the invited account's
+// first connection is admitted.
 func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
 	inv := inviteAccount(t, e, domain.Invitation{Email: "octo@example.com", Role: domain.RoleViewer})
 	account := octo
 	account.Email = "octo@example.com"
@@ -261,7 +283,7 @@ func TestEdgeExpiredInvitationRefused(t *testing.T) {
 // not confirmed for a day may belong to someone else by now.
 func TestEdgeStaleIdentityMatchesNoInvitation(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	stale := octo
 	stale.IdentityAt = time.Now().Add(-edgeproto.IdentityMaxAge - time.Minute)
@@ -269,52 +291,80 @@ func TestEdgeStaleIdentityMatchesNoInvitation(t *testing.T) {
 	e.mustDialEdge(t, octo, newSigner(t), "laptop")
 }
 
-func TestEdgeSecondDevicePendingUntilApproved(t *testing.T) {
+// approvalCode reads the code a device awaiting approval was shown.
+func approvalCode(t *testing.T, banner string) string {
+	t.Helper()
+	_, rest, _ := strings.Cut(banner, "aether device approve ")
+	code, _, _ := strings.Cut(rest, "\n")
+	if code == "" || !strings.Contains(banner, "sudo aether-server device approve "+code) {
+		t.Fatalf("approval banner = %q", banner)
+	}
+	return code
+}
+
+// refusedForApproval dials and returns the approval code the refused
+// device was shown.
+func (e *testEnv) refusedForApproval(t *testing.T, account edgeproto.Account, signer ssh.Signer, label string) string {
+	t.Helper()
+	_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, "aether")
+	if err == nil {
+		t.Fatalf("device %s connected without approval", label)
+	}
+	return approvalCode(t, banner)
+}
+
+// Under approved-devices a member's first device waits like any other:
+// accepting the invitation created the member, not access (rules 1 and
+// 5). The device shows its code inside SSH; no list carries it (rule 3).
+func TestEdgeFirstDevicePendingUntilApproved(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
 	laptop, phone := newSigner(t), newSigner(t)
-	first := controlClientOn(t, e.mustDialEdge(t, octo, laptop, "laptop"))
-
-	_, banner, err := e.dialEdge(t, grantFor(octo, phone, "phone"), phone, "aether")
-	if err == nil {
-		t.Fatal("second device connected without approval")
+	code := e.refusedForApproval(t, octo, laptop, "laptop")
+	if code != store.ApprovalCode(edgeproto.DeviceKeyLine(laptop.PublicKey())) {
+		t.Fatalf("approval code %s is not derived from the device key", code)
 	}
-	_, rest, _ := strings.Cut(banner, "aether device approve ")
-	code, _, _ := strings.Cut(rest, "\n")
-	if code == "" || !strings.Contains(banner, "sudo aether-server device approve "+code) {
-		t.Fatalf("pending banner = %q", banner)
+	if m, err := identities(t, e).GetMemberByIdentity(context.Background(), octo.Provider, octo.Subject); err != nil || m.Role != domain.RoleCollaborator {
+		t.Fatalf("invitation acceptance = %+v, %v; want the member created", m, err)
 	}
-	// Only the new device shows its code, so approving it proves the
-	// approver saw that device: the list never carries it.
 	var list json.RawMessage
-	if err = first.Call(protocol.MethodMemberDeviceList, struct{}{}, &list); err != nil {
+	admin := controlClient(t, e)
+	if err := admin.Call(protocol.MethodMemberDeviceList, struct{}{}, &list); err != nil {
 		t.Fatalf("device list: %v", err)
 	}
-	if !strings.Contains(string(list), `"phone"`) || strings.Contains(string(list), code) {
-		t.Fatalf("device list %s: want the pending phone without its approval code", list)
+	if !strings.Contains(string(list), `"laptop"`) || strings.Contains(string(list), code) {
+		t.Fatalf("device list %s: want the pending laptop without its approval code", list)
 	}
 
-	// Another member may not approve it; its own member may.
+	// Another member may not approve it; an admin may.
 	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	var pe *protocol.Error
-	err = controlAs(t, e, bob).Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code}, nil)
+	err := controlAs(t, e, bob).Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("other member approving = %v, want CodeDenied", err)
 	}
 	var approved protocol.MemberDeviceResult
-	if err := first.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: strings.ToLower(code)}, &approved); err != nil {
-		t.Fatalf("approve: %v", err)
+	if err := admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: strings.ToLower(code)}, &approved); err != nil {
+		t.Fatalf("admin approve: %v", err)
 	}
-	if approved.Device.Status != string(domain.DeviceApproved) {
+	if approved.Device.Status != string(domain.DeviceApproved) || approved.Device.ApprovedBy != string(e.member.ID) {
 		t.Fatalf("approved device = %+v", approved.Device)
+	}
+	first := controlClientOn(t, e.mustDialEdge(t, octo, laptop, "laptop"))
+
+	// A new key is a new device, and waits too (rule 7); the member
+	// approves it from the approved one.
+	code = e.refusedForApproval(t, octo, phone, "phone")
+	if err := first.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code}, &approved); err != nil {
+		t.Fatalf("approve from the approved device: %v", err)
 	}
 	e.mustDialEdge(t, octo, phone, "phone")
 }
 
 func TestEdgeDeviceRevokeRefusesAndCloses(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
 	laptop := newSigner(t)
 	live := e.mustDialEdge(t, octo, laptop, "laptop")
@@ -334,7 +384,7 @@ func TestEdgeDeviceRevokeRefusesAndCloses(t *testing.T) {
 
 func TestEdgeMemberRemovalClosesLiveConnections(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
 	live := e.mustDialEdge(t, octo, newSigner(t), "laptop")
 	m := serverInfoMember(t, controlClientOn(t, live))
@@ -354,18 +404,6 @@ func TestEdgeMemberRemovalClosesLiveConnections(t *testing.T) {
 	if _, err := identities(t, e).GetMemberByIdentity(context.Background(), octo.Provider, octo.Subject); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("identity survived member removal: %v", err)
 	}
-}
-
-func TestCloseEdgeDeviceClosesItsConnections(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, func(c *Config) { c.EdgeDeviceAutoApprove = true })
-	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
-	laptop, phone := newSigner(t), newSigner(t)
-	revoked := e.mustDialEdge(t, octo, laptop, "laptop")
-	kept := e.mustDialEdge(t, octo, phone, "phone")
-	e.srv.CloseEdgeDevice(string(ssh.MarshalAuthorizedKey(laptop.PublicKey())))
-	waitClosed(t, revoked)
-	serverInfoMember(t, controlClientOn(t, kept))
 }
 
 func TestEdgeHandshakeFloodKeepsDirectPathOpen(t *testing.T) {
@@ -396,46 +434,198 @@ func TestEdgeHandshakeFloodKeepsDirectPathOpen(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("relayed connection over budget was not shed")
 	}
+	// Claim connections share the relayed budget.
+	server, client = tcpPair(t)
+	defer func() { _ = client.Close() }()
+	shed = make(chan struct{})
+	claim := claimGrantFor(octo, newSigner(t))
+	go func() {
+		e.srv.ServeEdgeClaim(context.Background(), relayedConn{server}, claim, newFakeClaimCode().attempt)
+		close(shed)
+	}()
+	select {
+	case <-shed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("claim connection over the relayed budget was not shed")
+	}
 	serverInfoMember(t, controlClient(t, e))
 }
 
-func TestClaimByEdge(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	e := newFreshTestEnv(t, nil)
-	owner, err := e.srv.ClaimByEdge(ctx, octo)
-	if err != nil || owner.Role != domain.RoleAdmin || owner.DisplayName != "Octo Cat" {
-		t.Fatalf("claim of an empty server = %+v, %v", owner, err)
-	}
-	if again, err := e.srv.ClaimByEdge(ctx, octo); err != nil || again.ID != owner.ID {
-		t.Fatalf("repeated claim = %+v, %v; want the same admin", again, err)
-	}
-	other := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2002", Login: "mallory"}
-	if _, err := e.srv.ClaimByEdge(ctx, other); !errors.Is(err, edgeproto.RefusalClaimed) {
-		t.Fatalf("claim of a claimed server = %v, want %v", err, edgeproto.RefusalClaimed)
-	}
-	e.mustDialEdge(t, octo, newSigner(t), "laptop")
+const testClaimCode = "wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop"
+
+// fakeClaimCode stands in for the edge agent's claim code state: five
+// attempts, and the code destroyed once it claimed.
+type fakeClaimCode struct {
+	mu       sync.Mutex
+	left     int
+	used     bool
+	attempts []string
 }
 
-func TestClaimByEdgeLinksAnExistingAdmin(t *testing.T) {
+func newFakeClaimCode() *fakeClaimCode { return &fakeClaimCode{left: edgeproto.ClaimCodeAttempts} }
+
+func (f *fakeClaimCode) attempt(code string, claim func() error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attempts = append(f.attempts, code)
+	switch {
+	case f.used || f.left == 0:
+		return edgeproto.RefusalClaimExhausted
+	case code != testClaimCode:
+		f.left--
+		return edgeproto.RefusalClaimWrong
+	}
+	f.left--
+	if err := claim(); err != nil {
+		return err
+	}
+	f.used = true
+	return nil
+}
+
+func claimGrantFor(account edgeproto.Account, device ssh.Signer) edgeproto.Grant {
+	g := grantFor(account, device, "laptop")
+	g.Kind = edgeproto.KindClaim
+	return g
+}
+
+// claimUser is the user name a client signed in as a claims with code.
+func claimUser(t *testing.T, code string, a edgeproto.Account) string {
+	t.Helper()
+	user, _, err := edgeproto.ClaimUser(code, edgeproto.AccountPrincipal(a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user
+}
+
+func (e *testEnv) dialClaim(t *testing.T, codes *fakeClaimCode, grant edgeproto.Grant, signer ssh.Signer, user string) (*ssh.Client, string, error) {
+	t.Helper()
+	return dialRelayed(t, func(nc net.Conn) {
+		e.srv.ServeEdgeClaim(context.Background(), nc, grant, codes.attempt)
+	}, signer, user)
+}
+
+// The claim code travels inside SSH as the user name. It makes the
+// grant's account the admin and approves the claiming device key, under
+// approved-devices too: the code came from the machine's console.
+func TestClaimInsideSSH(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	e := newFreshTestEnv(t, nil)
+	codes := newFakeClaimCode()
+	laptop := newSigner(t)
+
+	_, banner, err := e.dialClaim(t, codes, claimGrantFor(octo, laptop), laptop, "aether")
+	if err == nil || !strings.Contains(banner, "must carry the claim code") || len(codes.attempts) != 0 {
+		t.Fatalf("claim without a claim user = %v, banner %q, attempts %d", err, banner, len(codes.attempts))
+	}
+	wrong := testClaimCode[:len(testClaimCode)-1] + "q"
+	_, banner, err = e.dialClaim(t, codes, claimGrantFor(octo, laptop), laptop, claimUser(t, wrong, octo))
+	if err == nil || !strings.Contains(banner, string(edgeproto.RefusalClaimWrong)) {
+		t.Fatalf("wrong claim code = %v, banner %q", err, banner)
+	}
+	// Only the grant's device key reaches the code.
+	other := newSigner(t)
+	before := len(codes.attempts)
+	if _, _, err = e.dialClaim(t, codes, claimGrantFor(octo, laptop), other, claimUser(t, testClaimCode, octo)); err == nil || len(codes.attempts) != before {
+		t.Fatalf("claim with another key = %v, attempts %d -> %d", err, before, len(codes.attempts))
+	}
+
+	c, banner, err := e.dialClaim(t, codes, claimGrantFor(octo, laptop), laptop, claimUser(t, strings.ToUpper(testClaimCode), octo))
+	if err != nil {
+		t.Fatalf("claim: %v (banner %q)", err, banner)
+	}
+	owner := serverInfoMember(t, controlClientOn(t, c))
+	if owner.Role != string(domain.RoleAdmin) || owner.DisplayName != "Octo Cat" {
+		t.Fatalf("claimed member = %+v, want the account as admin", owner)
+	}
+	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
+	if err != nil || dev.Status != domain.DeviceApproved || dev.ApprovedBy != "" {
+		t.Fatalf("claiming device = %+v, %v; want approved by the machine", dev, err)
+	}
+	if got := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, laptop, "laptop"))); got.ID != owner.ID {
+		t.Fatalf("the claiming device connects as %s, want %s", got.ID, owner.ID)
+	}
+	if _, _, err = e.dialClaim(t, codes, claimGrantFor(octo, laptop), laptop, claimUser(t, testClaimCode, octo)); err == nil {
+		t.Fatal("a used claim code claimed again")
+	}
+}
+
+// Another account's claim of a server with members is refused even with
+// the right code: only an admin who linked that account claims there.
+func TestClaimOfAClaimedServerIsRefused(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	mallory := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2002", Login: "mallory", IdentityAt: time.Now()}
+	key := newSigner(t)
+	_, banner, err := e.dialClaim(t, newFakeClaimCode(), claimGrantFor(mallory, key), key, claimUser(t, testClaimCode, mallory))
+	if err == nil || !strings.Contains(banner, string(edgeproto.RefusalClaimed)) {
+		t.Fatalf("claim of a claimed server = %v, banner %q", err, banner)
+	}
+	if _, err := identities(t, e).GetMemberByIdentity(context.Background(), mallory.Provider, mallory.Subject); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("refused claim bound the account: %v", err)
+	}
+}
+
+func TestClaimLinksAnExistingAdmin(t *testing.T) {
+	t.Parallel()
 	e := newTestEnv(t, nil)
 	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada", IdentityAt: time.Now()}
-	if _, err := e.srv.ClaimByEdge(ctx, ada); !errors.Is(err, edgeproto.RefusalClaimed) {
-		t.Fatalf("claim before the admin linked = %v, want refused", err)
+	key := newSigner(t)
+	if _, _, err := e.dialClaim(t, newFakeClaimCode(), claimGrantFor(ada, key), key, claimUser(t, testClaimCode, ada)); err == nil {
+		t.Fatal("claim before the admin linked the account succeeded")
 	}
 	var link protocol.MemberInvitationResult
 	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityLink,
 		protocol.MemberIdentityLinkParams{Provider: "github", Login: "ada"}, &link); err != nil {
 		t.Fatalf("admin link: %v", err)
 	}
-	if link.Invitation.MemberID != string(e.member.ID) {
-		t.Fatalf("link = %+v, want bound to the caller", link.Invitation)
+	c, banner, err := e.dialClaim(t, newFakeClaimCode(), claimGrantFor(ada, key), key, claimUser(t, testClaimCode, ada))
+	if err != nil {
+		t.Fatalf("claim through the admin's link: %v (banner %q)", err, banner)
 	}
-	m, err := e.srv.ClaimByEdge(ctx, ada)
-	if err != nil || m.ID != e.member.ID {
-		t.Fatalf("claim through the admin's link = %+v, %v; want %s", m, err, e.member.ID)
+	if m := serverInfoMember(t, controlClientOn(t, c)); m.ID != string(e.member.ID) {
+		t.Fatalf("claim through the admin's link bound %s, want %s", m.ID, e.member.ID)
+	}
+}
+
+// An edge that puts its own account in a claim grant is refused before
+// the code is tried: the client names its account in the user name it
+// signs. No member is created and no attempt is spent.
+func TestClaimThroughAnEdgeThatSubstitutesTheAccount(t *testing.T) {
+	t.Parallel()
+	e := newFreshTestEnv(t, nil)
+	mallory := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2002", Login: "mallory", IdentityAt: time.Now()}
+	victim := newSigner(t)
+	codes := newFakeClaimCode()
+	_, banner, err := e.dialClaim(t, codes, claimGrantFor(mallory, victim), victim, claimUser(t, testClaimCode, octo))
+	if err == nil || !strings.Contains(banner, "the edge signed the connection in as github account mallory") {
+		t.Fatalf("claim with a substituted account = %v, banner %q", err, banner)
+	}
+	if len(codes.attempts) != 0 {
+		t.Fatalf("substituted claim spent %d attempts", len(codes.attempts))
+	}
+	members, err := e.store.ListMembers(context.Background())
+	if err != nil || len(members) != 0 {
+		t.Fatalf("members after a substituted claim = %+v, %v; want none", members, err)
+	}
+	// The real account still claims with the same code.
+	if _, banner, err := e.dialClaim(t, codes, claimGrantFor(octo, victim), victim, claimUser(t, testClaimCode, octo)); err != nil {
+		t.Fatalf("claim: %v (banner %q)", err, banner)
+	}
+}
+
+// A grant of one kind is never served as the other.
+func TestGrantKindIsServedOnlyAsItself(t *testing.T) {
+	t.Parallel()
+	e := newFreshTestEnv(t, nil)
+	key := newSigner(t)
+	codes := newFakeClaimCode()
+	if _, _, err := e.dialEdge(t, claimGrantFor(octo, key), key, claimUser(t, testClaimCode, octo)); err == nil {
+		t.Fatal("a claim grant was served as a member connection")
+	}
+	if _, _, err := e.dialClaim(t, codes, grantFor(octo, key, "laptop"), key, claimUser(t, testClaimCode, octo)); err == nil || len(codes.attempts) != 0 {
+		t.Fatalf("an ssh grant reached the claim code: %v, %d attempts", err, len(codes.attempts))
 	}
 }
 
@@ -444,7 +634,7 @@ func TestClaimByEdgeLinksAnExistingAdmin(t *testing.T) {
 // member ahead of that person's invitation.
 func TestMemberCannotLinkAnotherAccount(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
 	carolKey, _ := addMember(t, e, "Carol", domain.RoleViewer, false)
 	var pe *protocol.Error
 	err := controlAs(t, e, carolKey).Call(protocol.MethodMemberIdentityLink,
@@ -549,42 +739,53 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 	e.mustRefuseEdge(t, octo, newSigner(t), "laptop", "not a member")
 }
 
-// A device key the server registered through an edge authenticates its
-// member on the direct path too, under the same approval rules.
+// A device key the server approved authenticates its member on the
+// direct path too. The direct path accepts approved device keys only
+// (rule 11), under either policy: it never asks the edge whether the
+// account is still signed in.
 func TestEdgeDeviceKeyOnTheDirectPath(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
-	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
-	laptop, phone := newSigner(t), newSigner(t)
-	if _, err := e.dialWith(laptop, nil); err == nil {
-		t.Fatal("a device key authenticated directly before the server registered it")
-	}
-	e.mustDialEdge(t, octo, laptop, "laptop")
-	direct, err := e.dialWith(laptop, nil)
-	if err != nil {
-		t.Fatalf("direct dial with an approved device key: %v", err)
-	}
-	if m := serverInfoMember(t, controlClientOn(t, direct)); m.DisplayName != octo.Name {
-		t.Fatalf("direct dial authenticated as %+v, want octo's member", m)
-	}
+	for _, policy := range []edgeproto.AccessPolicy{edgeproto.PolicyApprovedDevices, edgeproto.PolicyAccount} {
+		t.Run(string(policy), func(t *testing.T) {
+			t.Parallel()
+			e := newTestEnv(t, withPolicy(policy))
+			inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
+			laptop := newSigner(t)
+			if _, err := e.dialWith(laptop, nil); err == nil {
+				t.Fatal("a device key authenticated directly before the server registered it")
+			}
+			if _, _, err := e.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, "aether"); (err == nil) != (policy == edgeproto.PolicyAccount) {
+				t.Fatalf("first relayed connection under %s: %v", policy, err)
+			}
+			var banner strings.Builder
+			if _, err := e.dialWith(laptop, &banner); err == nil || !strings.Contains(banner.String(), "aether device approve") {
+				t.Fatalf("direct dial with an unapproved device key: %v, banner %q", err, banner.String())
+			}
+			if err := controlClient(t, e).Call(protocol.MethodMemberDeviceApprove,
+				protocol.MemberDeviceApproveParams{Code: approvalCode(t, banner.String())}, nil); err != nil {
+				t.Fatalf("approve: %v", err)
+			}
+			direct, err := e.dialWith(laptop, nil)
+			if err != nil {
+				t.Fatalf("direct dial with an approved device key: %v", err)
+			}
+			if m := serverInfoMember(t, controlClientOn(t, direct)); m.DisplayName != octo.Name {
+				t.Fatalf("direct dial authenticated as %+v, want octo's member", m)
+			}
 
-	e.mustRefuseEdge(t, octo, phone, "phone", "waiting for approval")
-	var banner strings.Builder
-	if _, err = e.dialWith(phone, &banner); err == nil || !strings.Contains(banner.String(), "aether device approve") {
-		t.Fatalf("direct dial with a pending device key: %v, banner %q", err, banner.String())
-	}
-
-	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
-	if err != nil {
-		t.Fatalf("device: %v", err)
-	}
-	if err := controlClient(t, e).Call(protocol.MethodMemberDeviceRevoke,
-		protocol.MemberDeviceRevokeParams{DeviceID: string(dev.ID)}, nil); err != nil {
-		t.Fatalf("revoke: %v", err)
-	}
-	waitClosed(t, direct)
-	banner.Reset()
-	if _, err := e.dialWith(laptop, &banner); err == nil || !strings.Contains(banner.String(), "was revoked") {
-		t.Fatalf("direct dial with a revoked device key: %v, banner %q", err, banner.String())
+			dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
+			if err != nil {
+				t.Fatalf("device: %v", err)
+			}
+			if err := controlClient(t, e).Call(protocol.MethodMemberDeviceRevoke,
+				protocol.MemberDeviceRevokeParams{DeviceID: string(dev.ID)}, nil); err != nil {
+				t.Fatalf("revoke: %v", err)
+			}
+			waitClosed(t, direct)
+			banner.Reset()
+			if _, err := e.dialWith(laptop, &banner); err == nil || !strings.Contains(banner.String(), "was revoked") {
+				t.Fatalf("direct dial with a revoked device key: %v, banner %q", err, banner.String())
+			}
+		})
 	}
 }

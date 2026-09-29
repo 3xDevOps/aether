@@ -2,190 +2,150 @@ package edgetest
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"net"
-	"net/http"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/edge/edgestore"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	"github.com/3xDevOps/Aether/internal/domain"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-func wantRefusal(t *testing.T, what string, err error, want edgeproto.Refusal) {
+// controlOver opens the control channel on a raw SSH connection.
+func controlOver(t *testing.T, sc *ssh.Client) *protocol.Client {
 	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("%s: %v, want %q", what, err, want)
+	ch, reqs, err := sc.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go ssh.DiscardRequests(reqs)
+	ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Subsystem string }{protocol.SubsystemControl}))
+	if err != nil || !ok {
+		t.Fatalf("control subsystem: %v %v", ok, err)
+	}
+	return protocol.NewClient(ch)
+}
+
+// deniedCall asserts that method is refused on ctl with a message
+// containing want.
+func deniedCall(t *testing.T, ctl *protocol.Client, method string, params any, want string) {
+	t.Helper()
+	err := ctl.Call(method, params, nil)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || !strings.Contains(pe.Message, want) {
+		t.Fatalf("%s: %v, want a refusal saying %q", method, err, want)
 	}
 }
 
-func newSigner(t *testing.T) ssh.Signer {
-	t.Helper()
-	_, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := ssh.NewSignerFromKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
-// connectWith asks the edge for a relayed connection with token as the
-// bearer token, and returns the refusal.
-func (h *harness) connectWith(t *testing.T, serverID, token string) (int, string) {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, h.origin+edgeproto.ConnectPath(serverID), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close() //nolint:errcheck // test client
-	var body edgeproto.ErrorBody
-	_ = json.NewDecoder(resp.Body).Decode(&body)
-	return resp.StatusCode, body.Error
-}
-
-var approveCommand = regexp.MustCompile(`aether device approve (\S+)`)
-
-func TestClaimAndAccess(t *testing.T) {
+// Under account access an invited person signs in and works: no
+// approval, and the device is recorded as registered, not approved. The
+// servers list says which policy the server announced.
+func TestAccountAccess(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
-	a, b := h.newServer(), h.newServer()
-	cs := h.login(alice, bob, alice)
-	al, bo, al2 := cs[0], cs[1], cs[2]
-
-	_, err := h.claim(al, a.claimCode(t, time.Now().Add(-edgeproto.ClaimCodeTTL-time.Minute)))
-	wantRefusal(t, "claim with an expired code", err, edgeproto.RefusalClaimExpired)
-
-	code := a.claimCode(t, time.Now())
-	wrong := code[:edgeproto.ServerIDLength+1] + strings.Repeat("a", len(code)-edgeproto.ServerIDLength-1)
-	for range edgeproto.ClaimCodeAttempts - 1 {
-		_, err = h.claim(al, wrong)
-		wantRefusal(t, "claim with a wrong code", err, edgeproto.RefusalClaimWrong)
-	}
-	_, err = h.claim(al, wrong)
-	wantRefusal(t, "last wrong attempt", err, edgeproto.RefusalClaimExhausted)
-	_, err = h.claim(al, code)
-	wantRefusal(t, "right code after the attempts ran out", err, edgeproto.RefusalClaimExhausted)
-
+	a := h.newServer(edgeproto.PolicyAccount)
+	cs := h.login(alice, bob, bob)
+	al, bo, bo2 := cs[0], cs[1], cs[2]
 	h.claimServer(al, a)
-	_, err = h.claim(bo, a.claimCode(t, time.Now()))
-	wantRefusal(t, "second claim of a claimed server", err, edgeproto.RefusalClaimed)
-	h.claimServer(bo, b)
-
-	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
-	defer cancel()
-	servers, domain, err := al.edge.Servers(ctx)
-	if err != nil || len(servers) != 1 || servers[0].ID != a.id || servers[0].Role != "admin" || !servers[0].Online {
-		t.Fatalf("alice's servers = %+v %v, want %s as admin, online", servers, err, a.id)
-	}
-	if domain != serverDomain {
-		t.Fatalf("server domain in the server list = %q, want %q", domain, serverDomain)
-	}
-
-	// A control RPC over the relay: the claim made alice the admin.
 	ctl := h.control(al, a)
-	members := call[protocol.MemberListResult](t, ctl, protocol.MethodMemberList, struct{}{})
-	if len(members.Members) != 1 || members.Members[0].Role != "admin" {
-		t.Fatalf("members after the claim = %+v", members.Members)
+	inviteLogin(t, ctl, bo, a.id, "collaborator")
+
+	info := call[protocol.ServerInfoResult](t, h.control(bo, a), protocol.MethodServerInfo, struct{}{})
+	if info.Member.Role != "collaborator" {
+		t.Fatalf("bob joined as %+v", info.Member)
+	}
+	h.mustDial(bo2, a)
+	for _, c := range []*client{bo, bo2} {
+		if got := a.deviceStatus(t, c); got != domain.DeviceRegistered {
+			t.Fatalf("%s's device is %q, want registered", c.user.Login, got)
+		}
+	}
+	// The claim approved the owner's device: the code came from the
+	// machine's console.
+	if got := a.deviceStatus(t, al); got != domain.DeviceApproved {
+		t.Fatalf("the claiming device is %q, want approved", got)
+	}
+	servers, err := bo.edge.Servers(context.Background())
+	if err != nil || len(servers) != 1 || servers[0].AccessPolicy != edgeproto.PolicyAccount || servers[0].Kind != edgeproto.ServerSelfHosted {
+		t.Fatalf("bob's servers = %+v %v", servers, err)
 	}
 
-	// Cross-server isolation.
-	_, err = h.dial(al, h.link(b))
-	wantRefusal(t, "owner of A connecting to B", err, edgeproto.RefusalNotMember)
-	_, err = h.dial(bo, h.link(a))
-	wantRefusal(t, "owner of B connecting to A", err, edgeproto.RefusalNotMember)
+	// A registered device approves nothing, not even under account
+	// access: an approval by sign-in alone would carry over to
+	// approved-devices.
+	deniedCall(t, h.control(bo, a), protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: "ABCD-EFGH"},
+		"needs an approved device")
+}
 
-	// No token, or a token the edge never issued.
-	if status, msg := h.connectWith(t, a.id, ""); status != http.StatusUnauthorized || msg != string(edgeproto.RefusalTokenRequired) {
-		t.Errorf("connect without a token = %d %q", status, msg)
-	}
-	if status, msg := h.connectWith(t, a.id, edgeproto.NewToken()); status != http.StatusUnauthorized || msg != string(edgeproto.RefusalTokenRevoked) {
-		t.Errorf("connect with an unknown token = %d %q", status, msg)
-	}
-
-	// Alice's device token, but a key other than her device key: the
-	// holder of a stolen token cannot authenticate to the server.
-	nc, err := al.edge.Dial(ctx, a.id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var banner strings.Builder
-	_, _, _, err = ssh.NewClientConn(nc, "edge", &ssh.ClientConfig{
-		User: "aether",
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(newSigner(t))},
-		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			if !edgeproto.HostKeyMatches(key, a.id) {
-				return errors.New("host key is not server " + a.id)
-			}
-			return nil
-		},
-		BannerCallback: func(m string) error { banner.WriteString(m); return nil },
-	})
-	_ = nc.Close()
-	if err == nil || !strings.Contains(banner.String(), "not the device key") {
-		t.Fatalf("handshake with a key other than the grant's: %v, banner %q", err, banner.String())
+// Under approved devices a new device waits until someone approves it:
+// the same member from an approved device, an admin from an approved
+// device, or the machine's administrator on the console. A waiting
+// device completes no handshake, so it approves nothing and calls no
+// method.
+func TestApprovedDevices(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	a := h.newServer(edgeproto.PolicyApprovedDevices)
+	cs := h.login(alice, alice, bob, bob, carol, alice)
+	al, al2, bo, bo2, ca, al3 := cs[0], cs[1], cs[2], cs[3], cs[4], cs[5]
+	h.claimServer(al, a)
+	ctl := h.control(al, a)
+	if got := a.deviceStatus(t, al); got != domain.DeviceApproved {
+		t.Fatalf("the claiming device is %q, want approved", got)
 	}
 
-	// Alice's second device waits for approval from her first.
-	_, err = h.dial(al2, h.link(a))
-	m := approveCommand.FindStringSubmatch(errString(err))
-	if m == nil || !strings.Contains(err.Error(), "waiting for approval") {
-		t.Fatalf("second device: %v, want a pending refusal naming the approval command", err)
-	}
-	approved := call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: m[1]})
-	if approved.Device.Status != "approved" {
+	// Alice's second device, approved from her first.
+	_, err := h.dial(al2, h.link(a))
+	code := waitingCode(t, "alice's second device", err)
+	approved := call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code})
+	if approved.Device.Status != "approved" || approved.Device.ApprovedBy != string(a.memberOf(t, alice).ID) {
 		t.Fatalf("approve: %+v", approved.Device)
 	}
 	h.mustDial(al2, a)
-}
 
-func errString(err error) string {
-	if err == nil {
-		return ""
+	// No first-device exception: bob's first device waits, and the
+	// admin approves it from an approved device.
+	inviteLogin(t, ctl, bo, a.id, "collaborator")
+	_, err = h.dial(bo, h.link(a))
+	code = waitingCode(t, "bob's first device", err)
+	if _, err = h.tryControl(bo, a); err == nil {
+		t.Fatal("bob's waiting device opened a control channel")
 	}
-	return err.Error()
-}
+	call[protocol.MemberDeviceResult](t, ctl, protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code})
+	h.mustDial(bo, a)
 
-// A server the operator blocks, as `aether-edge servers block` does, is
-// refused at its next enrollment, and its status, which
-// `aether-server edge status` prints, says why.
-func TestBlockedServerStatusSaysWhy(t *testing.T) {
-	h := newHarness(t)
-	a := h.newServer()
-	h.claimServer(h.login(alice)[0], a)
-	st, err := edgestore.Open(filepath.Join(h.edgeDir, "edge.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	if err = st.BlockServer(context.Background(), a.id, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	h.proxy.cutServers()
-	h.proxy.restoreServers()
-	eventually(t, "the server's status names the block", func() error {
-		status, _, err := a.state(t).Status()
-		if err == nil && (status.Connected || !strings.Contains(status.Error, string(edgeproto.RefusalServerBlocked))) {
-			err = fmt.Errorf("status %+v", status)
+	// Bob's second device, approved on the machine.
+	_, err = h.dial(bo2, h.link(a))
+	a.consoleApprove(t, waitingCode(t, "bob's second device", err))
+	h.mustDial(bo2, a)
+
+	// Carol's first device waits; nothing it presents lets it approve
+	// itself.
+	inviteLogin(t, ctl, ca, a.id, "admin")
+	_, err = h.dial(ca, h.link(a))
+	carolCode := waitingCode(t, "carol's first device", err)
+	for range 3 {
+		if _, cerr := h.tryControl(ca, a); cerr == nil || !strings.Contains(cerr.Error(), carolCode) {
+			t.Fatalf("carol's waiting device: %v, want its refusal", cerr)
 		}
-		return err
-	})
+	}
+	if got := a.deviceStatus(t, ca); got != domain.DevicePending {
+		t.Fatalf("carol's device is %q after trying, want pending", got)
+	}
+
+	// An admin's new device is refused before any method runs, so an
+	// unapproved credential of an admin cannot invite, change a role,
+	// link an identity or transfer ownership.
+	before := a.snapshot(t)
+	_, err = h.dial(al3, h.link(a))
+	waitingCode(t, "alice's third device", err)
+	if _, err = h.tryControl(al3, a); err == nil {
+		t.Fatal("alice's waiting device opened a control channel")
+	}
+	after := a.snapshot(t)
+	if len(after.members) != len(before.members) || len(after.admins()) != len(before.admins()) {
+		t.Fatalf("members changed while a waiting device tried: %+v -> %+v", before.members, after.members)
+	}
 }

@@ -20,8 +20,8 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/edgeclient"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -407,7 +407,10 @@ func (w *edgeWorld) signIn(t *testing.T, edgeURL string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(map[string]any{"edges": map[string]any{edgeURL: map[string]any{"token": w.token}}})
+	raw, err := json.Marshal(map[string]any{"edges": map[string]any{
+		edgeURL: map[string]any{"token": w.token, "signin_origin": edgeURL,
+			"account": map[string]any{"provider": edgeproto.ProviderGitHub, "subject": "1001", "login": "octo"}},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

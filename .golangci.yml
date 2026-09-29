@@ -3,10 +3,50 @@ version: "2"
 linters:
   default: standard
   enable:
+    - depguard
     - misspell
     - unconvert
     - unparam
   settings:
+    depguard:
+      # The edge runs apart from any Aether server and knows servers only
+      # through the wire contract in internal/edge/proto. An entry ending in
+      # $ matches that package exactly; one ending in / its subpackages.
+      rules:
+        edge:
+          list-mode: lax
+          files:
+            - "**/internal/edge/service/**"
+            - "**/internal/edge/relay/**"
+            - "**/internal/edge/store/**"
+          deny:
+            - pkg: github.com/3xDevOps/Aether/internal/sshd$
+              desc: the edge reaches a server only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/sshd/
+              desc: the edge reaches a server only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/store$
+              desc: the edge keeps its own state in internal/edge/store
+            - pkg: github.com/3xDevOps/Aether/internal/store/
+              desc: the edge keeps its own state in internal/edge/store
+            - pkg: github.com/3xDevOps/Aether/internal/server$
+              desc: the edge reaches a server only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/server/
+              desc: the edge reaches a server only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/cli$
+              desc: the edge reaches a client only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/cli/
+              desc: the edge reaches a client only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/localgw$
+              desc: the edge reaches a client only through internal/edge/proto
+            - pkg: github.com/3xDevOps/Aether/internal/localgw/
+              desc: the edge reaches a client only through internal/edge/proto
+        edge-proto:
+          list-mode: lax
+          files:
+            - "**/internal/edge/proto/**"
+          deny:
+            - pkg: github.com/3xDevOps/Aether/
+              desc: the wire contract is shared by every peer and depends on nothing in this repository
     govet:
       enable:
         - shadow

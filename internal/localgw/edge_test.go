@@ -1,6 +1,8 @@
 package localgw
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +13,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -38,6 +40,16 @@ func newFakeEdge(t *testing.T) *fakeEdge {
 		_ = json.NewEncoder(w).Encode(v)
 	}
 	mux := http.NewServeMux()
+	key, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux.HandleFunc("GET "+edgeproto.PathEdgeInfo, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, http.StatusOK, edgeproto.EdgeInfo{
+			SigninOrigin: e.URL, Key: key, Fingerprint: edgeproto.EdgeKeyFingerprint(key),
+			Version: edgeproto.Version, MinVersion: edgeproto.MinVersion,
+		})
+	})
 	mux.HandleFunc("POST "+edgeproto.PathDeviceStart, func(w http.ResponseWriter, r *http.Request) {
 		var req edgeproto.DeviceStartRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Validate() != nil {
@@ -65,9 +77,12 @@ func newFakeEdge(t *testing.T) *fakeEdge {
 			return
 		}
 		reply(w, http.StatusOK, edgeproto.DeviceTokenResponse{
-			Token:   e.token,
-			Device:  edgeproto.Device{ID: "dev-1", Label: "laptop", Key: key},
-			Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+			Token:  e.token,
+			Device: edgeproto.Device{ID: "dev-1", Label: "laptop", Key: key},
+			Account: edgeproto.AccountInfo{
+				ID:      edgeproto.NewAccountID(),
+				Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "42", Login: "octo"},
+			},
 		})
 	})
 	mux.HandleFunc("GET "+edgeproto.PathServers, func(w http.ResponseWriter, _ *http.Request) {
@@ -144,14 +159,16 @@ func TestEdgeLoginNeverAnswersTheTokenOrDeviceCode(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)
 	}
-	if started.State != loginPending || started.UserCode != "USER-0001" || started.VerificationURI != edge.URL+"/device" || started.Edge != edge.URL {
+	if started.State != loginPending || started.UserCode != "USER-0001" || started.VerificationURI != edge.URL+"/device" ||
+		started.Edge != edge.URL || started.SigninOrigin != edge.URL {
 		t.Fatalf("edge.login = %+v", started)
 	}
 	st, body := awaitLogin(t, g, loginSignedIn)
 	if st.Login.Account == nil || st.Login.Account.Login != "octo" {
 		t.Fatalf("signed-in login = %+v", st.Login)
 	}
-	if len(st.Edges) != 1 || st.Edges[0].Edge != edge.URL || st.Edges[0].Account == nil || st.Edges[0].Device.ID != "dev-1" {
+	if len(st.Edges) != 1 || st.Edges[0].Edge != edge.URL || st.Edges[0].SigninOrigin != edge.URL ||
+		st.Edges[0].Account == nil || st.Edges[0].Device.ID != "dev-1" {
 		t.Fatalf("edges = %+v", st.Edges)
 	}
 	for _, answer := range []string{rec.Body.String(), body} {
@@ -220,7 +237,7 @@ func TestEdgeLogoutRevokesAndForgets(t *testing.T) {
 func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 	edge := newFakeEdge(t)
 	g := edgeGateway(t)
-	for _, verb := range []string{"edge.claim", "edge.link", "edge.login", "edge.logout", "edge.servers", "edge.status"} {
+	for _, verb := range []string{"edge.claim", "edge.hostkey", "edge.link", "edge.login", "edge.logout", "edge.servers", "edge.status"} {
 		if rec := do(g, http.MethodPost, "/local/v1/"+verb, `{"edge":"`+edge.URL+`"}`, false); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s without the token = %d, want 401", verb, rec.Code)
 		}
@@ -229,6 +246,7 @@ func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 		{"edge.link", `{"edge":"` + edge.URL + `","server_id":"not-an-id"}`},
 		{"edge.link", `{"edge":"` + edge.URL + `"}`},
 		{"edge.claim", `{"edge":"` + edge.URL + `","code":"wrong"}`},
+		{"edge.hostkey", `{"edge":"` + edge.URL + `","server_id":"not-an-id"}`},
 		{"edge.login", `{"edge":"http://edge.example.test","label":"laptop"}`},
 		{"edge.servers", `{"edge":"https://edge.example.test/path"}`},
 	} {

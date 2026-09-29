@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
-import type { EdgeLogin, EdgeStatus, GatewayCapabilities, LinkStatus } from '@/lib/types'
+import type { EdgeLogin, EdgeServer, EdgeStatus, GatewayCapabilities, LinkStatus } from '@/lib/types'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore } from '@/store'
 import { fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -12,7 +12,7 @@ const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
   ws: ['events', 'attach', 'terminal'],
-  local: ['link.status', 'edge.login', 'edge.status', 'edge.servers', 'edge.link', 'edge.claim'],
+  local: ['link.status', 'edge.login', 'edge.status', 'edge.servers', 'edge.hostkey', 'edge.link', 'edge.claim'],
 }
 
 const unlinked: LinkStatus = {
@@ -23,16 +23,31 @@ const unlinked: LinkStatus = {
   repo: '',
 }
 
-const account = { provider: 'github', subject: '583231', login: 'octocat' }
+const account = {
+  id: 'acct_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+  provider: 'github',
+  subject: '583231',
+  login: 'octocat',
+}
 
 const pending: EdgeLogin = {
   state: 'pending',
   edge,
+  signin_origin: 'https://auth.example.test',
   user_code: 'WDJB-MJHT',
   verification_uri: `${edge}/device`,
 }
 
 const signedIn: EdgeStatus = { edges: [{ edge, account }] }
+
+const buildBox: EdgeServer = {
+  id: serverID,
+  name: 'build-box',
+  online: true,
+  role: 'admin',
+  access_policy: 'approved-devices',
+  kind: 'self-hosted',
+}
 
 const linkResult = {
   server_id: serverID,
@@ -98,10 +113,7 @@ describe('onboarding link through an edge', () => {
       localLinkStatus: vi.fn(async () => unlinked),
       localEdgeStatus: status,
       localEdgeLogin: vi.fn(async () => pending),
-      localEdgeServers: vi.fn(async () => ({
-        edge,
-        servers: [{ id: serverID, name: 'build-box', online: true, role: 'admin' }],
-      })),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [buildBox] })),
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
@@ -112,6 +124,10 @@ describe('onboarding link through an edge', () => {
       `${edge}/device`,
     )
     expect(open).toHaveBeenLastCalledWith(`${edge}/device`, '_blank', 'noopener,noreferrer')
+    // Both host names, so the person can tell the sign-in page belongs to the edge.
+    expect(screen.getByText(/signs you in/).textContent).toBe(
+      'auth.example.test signs you in for the edge edge.example.test.',
+    )
     expect(screen.getByRole('status').textContent).toContain('Waiting for you to confirm')
 
     await vi.advanceTimersByTimeAsync(2000)
@@ -180,8 +196,9 @@ describe('onboarding link through an edge', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeDefined()
   })
 
-  it('links a server the signed-in account reaches, then continues', async () => {
+  it('links a listed server only after showing what the link pins', async () => {
     seed()
+    const fingerprint = 'SHA256:hostkeyfingerprintexample'
     const client = fakeApi({
       localLinkStatus: vi
         .fn()
@@ -191,17 +208,38 @@ describe('onboarding link through an edge', () => {
       localEdgeServers: vi.fn(async () => ({
         edge,
         servers: [
-          { id: serverID, name: 'build-box', online: true, role: 'admin' },
-          { id: 'zyxwvutsrqponmlkjihgfedcba', name: 'old-box', online: false, role: 'viewer' },
+          buildBox,
+          {
+            id: 'zyxwvutsrqponmlkjihgfedcba',
+            name: 'old-box',
+            online: false,
+            role: 'viewer',
+            access_policy: 'account' as const,
+            kind: 'self-hosted' as const,
+          },
         ],
       })),
+      localEdgeHostKey: vi.fn(async () => ({ edge, server_id: serverID, fingerprint })),
       localEdgeLink: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
     const servers = within(await screen.findByRole('list', { name: 'Your servers' }))
-    expect(servers.getByText('old-box').closest('li')!.textContent).toContain('offline')
+    const oldBox = servers.getByText('old-box').closest('li')!
+    expect(oldBox.textContent).toContain('offline')
+    expect(oldBox.textContent).toContain('Account access: signing in is enough')
+    const box = servers.getByText('build-box').closest('li')!
+    expect(box.textContent).toContain('self-hosted')
+    expect(box.textContent).toContain('Approved devices: a new device waits for approval')
     fireEvent.click(servers.getByRole('button', { name: 'Link build-box' }))
+
+    const confirm = within(await screen.findByRole('region', { name: 'Confirm server' }))
+    expect(await confirm.findByText(fingerprint)).toBeDefined()
+    expect(confirm.getByText(serverID)).toBeDefined()
+    expect(confirm.getByText(/compare the id/).textContent).toContain('aether-server edge status')
+    expect(client.localEdgeHostKey).toHaveBeenCalledWith(serverID, edge)
+    expect(client.localEdgeLink).not.toHaveBeenCalled()
+    fireEvent.click(confirm.getByRole('button', { name: 'Link and pin' }))
 
     const summary = await screen.findByText(/^Linked to/)
     expect(summary.textContent).toBe('Linked to build-box through edge.example.test as Octo (admin).')
@@ -211,13 +249,55 @@ describe('onboarding link through an edge', () => {
     expect(screen.getByRole('listitem', { current: 'step' }).textContent).toContain('Git identity')
   })
 
+  it('offers no link when the host key cannot be read, and cancels', async () => {
+    seed()
+    const refusal = `edge.hostkey: read host key of server ${serverID}: host key SHA256:x is server y, not the listed server ${serverID}`
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [buildBox] })),
+      localEdgeHostKey: vi.fn(() => Promise.reject(new ApiError(503, refusal))),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Link build-box' }))
+    const confirm = within(await screen.findByRole('region', { name: 'Confirm server' }))
+    expect(await confirm.findByText(refusal)).toBeDefined()
+    expect((confirm.getByRole('button', { name: 'Link and pin' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('region', { name: 'Confirm server' })).toBeNull()
+    expect(client.localEdgeLink).not.toHaveBeenCalled()
+  })
+
+  it('links by the server id an admin gave, pinned to that id', async () => {
+    seed()
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+      localEdgeLink: vi.fn(async () => linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.change(await screen.findByLabelText('Server id from your admin'), {
+      target: { value: ` ${serverID} ` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Link by id' }))
+
+    expect((await screen.findByText(/^Linked to/)).textContent).toBe(
+      `Linked to ${serverID} through edge.example.test as Octo (admin).`,
+    )
+    expect(client.localEdgeLink).toHaveBeenCalledWith(serverID, edge)
+    expect(client.localEdgeHostKey).not.toHaveBeenCalled()
+  })
+
   it('claims a new server with the code aether-server setup printed', async () => {
     seed()
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => unlinked),
       localEdgeStatus: vi.fn(async () => signedIn),
       localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
-      localEdgeClaim: vi.fn(async () => ({ ...linkResult, server_name: 'fresh-box' })),
+      localEdgeClaim: vi.fn(async () => linkResult),
     })
     render(<OnboardingRoute params={{}} client={client} />)
 
@@ -227,15 +307,14 @@ describe('onboarding link through an edge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect((await screen.findByText(/^Linked to/)).textContent).toBe(
-      'Linked to fresh-box through edge.example.test as Octo (admin).',
+      `Linked to ${serverID} through edge.example.test as Octo (admin).`,
     )
     expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-example', edge)
   })
 
   it('shows the edge refusal of a claim code verbatim and keeps the form', async () => {
     seed()
-    const refusal =
-      'edge.claim: claim server abcdefgh: edge.example.test refused: claim code is wrong (HTTP 403)'
+    const refusal = `ssh handshake with ${serverID}.edge.aether.invalid: ssh: handshake failed: server said: claim code is wrong`
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => unlinked),
       localEdgeStatus: vi.fn(async () => signedIn),

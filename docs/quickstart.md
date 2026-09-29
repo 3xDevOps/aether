@@ -66,7 +66,9 @@ sudo aether-server setup
 
 It asks for the listen address, data directory, and tailnet policy - plus, on
 a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
-and whether to use the edge (Enter accepts each default) - then prints:
+and whether to use the edge (Enter accepts each default) - and, with the edge
+on, who may reach the server through it, a question with no default. Then it
+prints:
 
 ```sh
 systemctl daemon-reload && systemctl enable --now aether-server
@@ -76,30 +78,28 @@ On a host without tailscaled, setup turns on the **edge**: a relay the Aether
 project runs at `https://edge.onaether.dev` that the server and your machine
 both dial out to, so neither needs an open port ([edge.md](edge.md)). Setup
 prints what the edge can see and `aether-server config set edge-url ""`,
-which turns it off. With the edge on, setup then prints the server's id,
-where its dashboard will be, and a **claim code**, which makes whoever uses
-it first the server's admin:
+which turns it off. It then asks for the **access policy**: `1` (account
+access) lets people you invite in by signing in with GitHub or Google; `2`
+(approved devices) makes each new device wait until a person approves it.
+[edge.md](edge.md#access-policies) compares them. Setup then prints the
+server's id and a **claim code**, which makes whoever uses it first the
+server's admin:
 
 ```
 edge: https://edge.onaether.dev
+edge access: approved-devices
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
-dashboard: https://<server id>.<the edge's server domain>/; aether-server edge status shows the address once the server connects
 claim code: <code> (valid until 3:04PM, 5 attempts)
 claim this server with:
   aether link --claim <code>
-or enter it at https://edge.onaether.dev/servers/add
 ```
 
 Run the activation line and the server is live on `:2222`. The SSH port is
 the only thing it listens on unless you answered the dashboard question; the
 edge connection is outbound. The claim code lasts 30 minutes;
-`sudo aether-server edge claim-code` prints a new one. The edge names its
-dashboard domain when the server first connects; from then on
-`sudo aether-server edge status` prints the full dashboard address,
-`https://<server id>.<server domain>/`, the address a phone opens. Change
-any option later with `aether-server config set <key> <value>`, then
-restart.
+`sudo aether-server edge claim-code` prints a new one. Change any option
+later with `aether-server config set <key> <value>`, then restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
 Ctrl-C. [install.md](install.md) covers unattended installs, running
@@ -118,16 +118,23 @@ aether link --claim <code>
 GitHub or Google, and confirm the code:
 
 ```
-open https://edge.onaether.dev/device and enter the code <user code>
+auth.onaether.dev signs you in for the edge edge.onaether.dev
+open https://auth.onaether.dev/device and enter the code <user code>
 waiting for you to confirm the code...
 signed in to edge.onaether.dev as <login> (github); this device is "<host name>"
-claimed <server name> (<server id>) on edge.onaether.dev
+the device token in <config dir>/edge-tokens.json does not expire and is not refreshed. aether logout revokes it at
+the edge and deletes it here; the edge's Devices page and deleting the account revoke it too. Your links stay:
+the edge path refuses with the edge's reason, and a link's --addr still reaches the server with this device's
+key until the account is deleted, which removes the account's devices on every server. SSH keys and tailnet
+identities are not affected.
+claimed server <server id>
 linked to server <server id> through edge.onaether.dev as <your name> (admin)
 ```
 
 This machine now holds its own device key; no SSH key is involved. The
-server's host key is checked against the server id on every connection, so
-nothing is written to `known_hosts`.
+claim code travels inside SSH, only to a server whose host key derives the
+id in the code. The server's host key is checked against the server id on
+every connection, so nothing is written to `known_hosts`.
 
 **By address**, over a tailnet or to a reachable SSH port:
 
@@ -163,12 +170,6 @@ On first contact by address `aether` records the server's host key in
 `~/.ssh/known_hosts` (`%USERPROFILE%\.ssh\known_hosts` on Windows) and
 prints its fingerprint. Compare that against what the server printed if you
 care to.
-
-**On a phone**, through the edge, open
-`https://<server id>.<server domain>` in the browser or the
-[Android app](install.md#android-app) and tap **Sign in**. The server logs
-the server domain when it connects to the edge
-([edge.md](edge.md#dashboard-through-the-edge)).
 
 Then tell Aether who to put on your commits:
 
@@ -852,7 +853,8 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new code, valid 30 minutes. |
 | `server is not connected to the edge` | The server is stopped or cannot reach the edge. On the server, `sudo aether-server edge status` shows the last connection error. |
 | `not a member of this server` | Your edge account has no membership or open invitation there. An admin runs `aether invite --github <your-login>` ([teams.md](teams.md#through-an-edge)). |
-| `device "<label>" is waiting for approval` | Your account already has a device on this server. Run the `aether device approve <code>` the message prints from that device, or ask an admin. |
+| `device "<label>" is waiting for approval` | The server admits approved devices only (`edge-access approved-devices`), and this one is new. Run the `aether device approve <code>` the message prints from a device, SSH key or tailnet connection you already use, or give the code to an admin or to the machine's administrator (`sudo aether-server device approve <code>`). |
+| `... was admitted by signing in alone and is waiting for approval: this server now admits approved devices only` | The server switched from `account` to `approved-devices`. Approve it the same way. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |

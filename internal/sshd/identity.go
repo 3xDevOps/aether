@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/edgeproto"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -49,12 +49,9 @@ func (s *Server) actingOn(ctx context.Context, caller, owner domain.MemberID, me
 
 func deviceToWire(d *domain.Device) protocol.Device {
 	out := protocol.Device{
-		ID: string(d.ID), MemberID: string(d.Member), Kind: string(d.Kind), Label: d.Label,
-		Status: string(d.Status), ApprovedBy: string(d.ApprovedBy),
-		CreatedAt: d.CreatedAt.UTC().Format(time.RFC3339),
-	}
-	if d.Kind == domain.DeviceSSH {
-		out.Fingerprint = fingerprintOf(d.Credential)
+		ID: string(d.ID), MemberID: string(d.Member), Label: d.Label,
+		Status: string(d.Status), Fingerprint: fingerprintOf(d.Credential),
+		ApprovedBy: string(d.ApprovedBy), CreatedAt: d.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if d.LastSeenAt != nil {
 		out.LastSeenAt = d.LastSeenAt.UTC().Format(time.RFC3339)
@@ -95,11 +92,14 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	return protocol.MemberDeviceListResult{Devices: out}, nil
 }
 
-// memberDeviceApprove approves a pending device for its own member or an
-// admin. The dispatcher already refused pending members, and a pending or
-// revoked device never completes a handshake, so the caller is on a
-// connection this server accepted.
+// memberDeviceApprove approves a device awaiting approval for its own
+// member or an admin. The dispatcher already refused pending members, and
+// requireApprovedCaller refuses a connection that signed in with a device
+// awaiting approval, so a device never approves itself.
 func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberDeviceApprove, true); perr != nil {
+		return nil, perr
+	}
 	ids, perr := s.rpcIdentityStore()
 	if perr != nil {
 		return nil, perr
@@ -109,10 +109,13 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		return nil, perr
 	}
 	dev, err := ids.GetDeviceByApprovalCode(ctx, p.Code)
-	if errors.Is(err, store.ErrNotFound) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("no device is waiting for approval with code %q", p.Code)}
-	}
-	if err != nil {
+	case errors.Is(err, store.ErrConflict):
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
+			"approval code %q names more than one waiting device, so it approves none; approve the right one on the server with `sudo aether-server device review`", p.Code)}
+	case err != nil:
 		return nil, rpcError(err)
 	}
 	if perr := s.actingOn(ctx, member, dev.Member, protocol.MethodMemberDeviceApprove); perr != nil {
@@ -178,6 +181,9 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	if perr := s.requireAdmin(ctx, member, protocol.MethodMemberInvitationCreate); perr != nil {
 		return nil, perr
 	}
+	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberInvitationCreate, false); perr != nil {
+		return nil, perr
+	}
 	ids, perr := s.rpcIdentityStore()
 	if perr != nil {
 		return nil, perr
@@ -203,6 +209,9 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 // someone else's account to theirs.
 func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	if perr := s.requireAdmin(ctx, member, protocol.MethodMemberIdentityLink); perr != nil {
+		return nil, perr
+	}
+	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, false); perr != nil {
 		return nil, perr
 	}
 	ids, perr := s.rpcIdentityStore()

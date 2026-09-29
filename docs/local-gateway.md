@@ -416,8 +416,8 @@ retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
- "local":["daemon.install","daemon.status","edge.claim","edge.link","edge.login",
-          "edge.logout","edge.servers","edge.status","env.harnesses","forward.start",
+ "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.link",
+          "edge.login","edge.logout","edge.servers","edge.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.status","link.switch","pull","pull.switch","repo.fast-forward",
           "repo.push","sync.start","sync.status","sync.stop",
@@ -432,22 +432,6 @@ cannot run verbs on the browser's machine:
 {"gateway":"server","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
-
-The dashboard served through an edge
-([edge.md](edge.md#dashboard-through-the-edge)) answers `"gateway":"edge"`
-and is otherwise the server gateway. It identifies every request by its
-`__Host-aether_session` cookie and refuses in two shapes the SPA reads:
-
-```text
-401 {"error":{"code":-32001,"message":"sign-in required; sign in at /auth/login","data":{"login":"/auth/login"}}}
-403 {"error":{"code":-32001,"message":"This browser is waiting for approval with code ABCD-EFGH. ...","data":{"approval_code":"ABCD-EFGH"}}}
-```
-
-The 401 covers no session and a revoked or expired one, each with its own
-message; the SPA shows its sign-in page when `data.login` is `/auth/login`.
-The 403 is a browser waiting for approval; the SPA shows the code and the
-approval commands from `message`. **Sign out** posts to `/auth/logout`, which
-answers 204.
 
 `methods` is `["*"]` because both transports dispatch every control-channel
 method; `ws` lists the WebSocket surfaces served; `local` is the sorted
@@ -854,11 +838,12 @@ authority.
 | --- | --- | --- |
 | `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
 | `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","edge_url":"...","server_id":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`edge_url` and `server_id` are present only on an edge link; `links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
-| `edge.login` | `{"edge":"https://...","label":"..."}` (both optional) | `{"state":"pending","edge":"https://edge.onaether.dev","user_code":"...","verification_uri":"https://edge.onaether.dev/device"}` |
-| `edge.status` | `{}` | `{"edges":[{"edge":"https://...","account":{"provider":"github","subject":"...","login":"...","email":"...","name":"..."},"device":{"id":"...","label":"...","key":"ssh-ed25519 ..."},"error":"..."}],"login":{"state":"pending"\|"signed_in"\|"failed","edge":"...","user_code":"...","verification_uri":"...","account":{...},"error":"..."}}` (`login` only once `edge.login` ran in this process; an entry's `error` replaces its `account` and `device` when its stored sign-in cannot be read) |
-| `edge.servers` | `{"edge":"https://..."}` (optional) | `{"edge":"https://...","servers":[{"id":"...","name":"...","online":bool,"role":"admin"}]}` |
+| `edge.login` | `{"edge":"https://...","label":"..."}` (both optional) | `{"state":"pending","edge":"https://edge.onaether.dev","signin_origin":"https://auth.onaether.dev","user_code":"...","verification_uri":"https://auth.onaether.dev/device"}` |
+| `edge.status` | `{}` | `{"edges":[{"edge":"https://...","signin_origin":"https://...","account":{"id":"acct_...","provider":"github","subject":"...","login":"...","email":"...","name":"..."},"device":{"id":"...","label":"...","key":"ssh-ed25519 ..."},"error":"..."}],"login":{"state":"pending"\|"signed_in"\|"failed","edge":"...","signin_origin":"...","user_code":"...","verification_uri":"...","account":{...},"error":"..."}}` (`login` only once `edge.login` ran in this process; an entry's `error` replaces its `signin_origin`, `account` and `device` when its stored sign-in cannot be read) |
+| `edge.servers` | `{"edge":"https://..."}` (optional) | `{"edge":"https://...","servers":[{"id":"...","name":"...","online":bool,"role":"admin","access_policy":"account"\|"approved-devices","kind":"self-hosted"\|"hosted"}]}` |
+| `edge.hostkey` | `{"server_id":"...","edge":"https://..."}` (`edge` optional) | `{"edge":"https://...","server_id":"...","fingerprint":"SHA256:..."}` |
 | `edge.link` | `{"server_id":"...","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `server_id` optional) | `{"server_id":"...","edge":"https://...","addr":"...","user":"aether","member":{...}}` |
-| `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link`, plus `"server_name":"..."` |
+| `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link` |
 | `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
@@ -894,13 +879,15 @@ does, with the same files in the config directory:
 | --- | --- |
 | `edge.login` | `aether login` |
 | `edge.servers` | `aether servers` |
+| `edge.hostkey` | the host key `aether link --from-edge` shows before it asks |
 | `edge.link` | `aether link <server id>` |
 | `edge.claim` | `aether link --claim <code>` |
 | `edge.logout` | `aether logout` |
 
-- `edge` names the edge. Without it a verb uses the one edge this machine is
-  signed in to, else `https://edge.onaether.dev`. An address that is not
-  `https://host[:port]`, or `http://` on loopback, answers `-32602`.
+- `edge` names the edge by its relay origin. Without it a verb uses the one
+  edge this machine is signed in to, else `https://edge.onaether.dev`. An
+  address that is not `https://host[:port]`, or `http://` on loopback,
+  answers `-32602`.
 - `edge.login` answers once the edge has registered the sign-in. The person
   opens `verification_uri` and confirms `user_code`; the gateway polls the
   edge in the background and `edge.status` reports `pending`, then
@@ -909,25 +896,37 @@ does, with the same files in the config directory:
   `edge.login` replaces one still pending. The device code the gateway polls
   with and the device token it receives are never in an answer; the token
   goes only to `edge-tokens.json`, mode `0600`.
+- `edge.hostkey` reads the SSH host key the server presents through the
+  edge, refuses one that does not derive `server_id`, and ends the
+  connection before authenticating. The wizard shows its fingerprint, with
+  the server's name and id, before it links a server from the edge's list,
+  and asks for a confirmation; a server id typed from the admin links
+  without one.
 - `edge.link` and `edge.claim` save the link and swap the gateway connection
   in place, as `link.apply` does. `server_id` must be a server id, and the
   server's SSH host key is checked against it before anything is sent.
-  `addr` is an SSH address tried before the edge. A claim that succeeds when
-  the link then fails answers `-32002` naming the claimed server, so the
-  wizard can retry with `edge.link`.
+  `edge.claim` checks the host key against the id in the code before it
+  sends the code, inside SSH. `addr` is an SSH address tried before the
+  edge; a claim never uses it.
 - `edge.logout` revokes the device token at the edge and forgets it, and
   drops a pending `edge.login` for that edge.
 - Errors carry the client's own message. Not signed in, or an edge refusal
-  with a `4xx` status such as a revoked token or a wrong claim code, answers
-  `-32002`. An edge that cannot be reached or answers `5xx` answers `-32004`.
+  with a `4xx` status such as a revoked token or a claimed server, answers
+  `-32002`. An edge that cannot be reached or answers `5xx` answers
+  `-32004`. `edge.link` and `edge.claim` answer `-32002` for any failure of
+  the SSH connection, with what the server said, such as a wrong claim code
+  or a device waiting for approval.
 
 The member's devices and edge invitations are control-channel methods, so
 the dashboard calls them through `POST /api/v1/<method>` like any other:
 `member.device.list`, `member.device.approve` (`{"code":"..."}`),
 `member.device.revoke` (`{"device_id":"..."}`),
 `member.invitation.create`, `member.invitation.list`,
-`member.invitation.revoke` (`{"invitation_id":"..."}`) and
-`member.identity.link`. Their shapes are in `internal/protocol/identity.go`,
+`member.invitation.revoke` (`{"invitation_id":"..."}`),
+`member.identity.link` and `server.owner.transfer`
+(`{"member_id":"...","provider":"github"}`, `provider` only when the member
+has more than one edge identity). Their shapes are in
+`internal/protocol/identity.go`,
 and [edge.md](edge.md) describes what each does.
 
 `workspace.selection` stores only the last selected workspace ID in
@@ -1252,9 +1251,7 @@ per-process token as `Authorization: Bearer` or `?token=` - browsers cannot set
 headers on a WebSocket handshake. A missing or stale local token is refused
 with `401` before the upgrade, so it never becomes a socket; the dashboard's
 capabilities probe catches that case ahead of the stream. The server gateway
-carries no token: WhoIs identifies the request's source address instead. The
-edge gateway takes its session cookie, and refuses a handshake without an
-`Origin` naming its own host.
+carries no token: WhoIs identifies the request's source address instead.
 
 Both transports reconnect on a jittered backoff that caps at 30 seconds, and
 reopen immediately - backoff reset - when the browser fires

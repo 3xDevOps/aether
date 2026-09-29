@@ -6,8 +6,9 @@ const (
 	// MethodMemberDeviceList lists the caller's devices; an admin sees
 	// every member's.
 	MethodMemberDeviceList = "member.device.list"
-	// MethodMemberDeviceApprove approves a pending device by its approval
-	// code: its own member or an admin.
+	// MethodMemberDeviceApprove approves a device awaiting approval by its
+	// approval code: its own member or an admin, on a connection that did
+	// not sign in with a device awaiting approval.
 	MethodMemberDeviceApprove = "member.device.approve"
 	// MethodMemberDeviceRevoke revokes a device and closes its
 	// connections: its own member or an admin.
@@ -24,19 +25,23 @@ const (
 	// MethodMemberIdentityLink names an edge account the caller signs in
 	// with, as an invitation bound to the caller's own member: admin only.
 	MethodMemberIdentityLink = "member.identity.link"
+	// MethodServerOwnerTransfer makes another admin, through one of their
+	// edge identities, the server's owner at its edge: admin only.
+	MethodServerOwnerTransfer = "server.owner.transfer"
 )
 
-// Device is the wire form of a member's device. Fingerprint is the SHA256
-// fingerprint of an ssh device's key; a browser device has none. It never
-// carries a pending device's approval code: only the new device shows it,
-// so approving with it proves the approver saw that device.
+// Device is the wire form of a member's device. Status is one of the edge
+// protocol's device statuses: registered, pending, approved or revoked.
+// Fingerprint is the SHA256 fingerprint of its device key. It never
+// carries the approval code of a device awaiting approval: only that
+// device shows it, so approving with it proves the approver saw that
+// device.
 type Device struct {
 	ID          string `json:"id"`
 	MemberID    string `json:"member_id"`
-	Kind        string `json:"kind"`
 	Label       string `json:"label"`
 	Status      string `json:"status"`
-	Fingerprint string `json:"fingerprint,omitempty"`
+	Fingerprint string `json:"fingerprint"`
 	CreatedAt   string `json:"created_at"`
 	LastSeenAt  string `json:"last_seen_at,omitempty"`
 	ApprovedBy  string `json:"approved_by,omitempty"`
@@ -111,4 +116,22 @@ type MemberInvitationListResult struct {
 // MemberInvitationRevokeParams are the params of member.invitation.revoke.
 type MemberInvitationRevokeParams struct {
 	InvitationID string `json:"invitation_id"`
+}
+
+// ServerOwnerTransferParams are the params of server.owner.transfer.
+// Provider picks one of the member's edge identities and may be left out
+// when the member has exactly one.
+type ServerOwnerTransferParams struct {
+	MemberID string `json:"member_id"`
+	Provider string `json:"provider,omitempty"`
+}
+
+// ServerOwnerTransferResult is the new owner: the member and the edge
+// identity the edge now records as the server's owner.
+type ServerOwnerTransferResult struct {
+	MemberID string `json:"member_id"`
+	Provider string `json:"provider"`
+	Subject  string `json:"subject"`
+	Login    string `json:"login,omitempty"`
+	Email    string `json:"email,omitempty"`
 }

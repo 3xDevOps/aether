@@ -1,7 +1,7 @@
-// Devices: the computers and browsers members reach this server through an
-// edge with. A member sees their own and an admin sees everyone's; both
-// approve a pending device by the code it shows and revoke one. Every
-// refusal is the server's message, shown verbatim.
+// Devices: the computers members reach this server through an edge with. A
+// member sees their own and an admin sees everyone's; both approve a
+// device by the code it shows on its own screen, which no list carries,
+// and revoke one. Every refusal is the server's message, shown verbatim.
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -27,23 +27,16 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useIsAdmin } from '@/store/hooks'
 
-const kindLabel: Record<Device['kind'], string> = {
-  ssh: 'Computer',
-  browser: 'Browser',
-}
-
 const statusColor: Record<Device['status'], 'warning' | 'success' | 'default'> = {
+  registered: 'warning',
   pending: 'warning',
   approved: 'success',
   revoked: 'default',
 }
 
 /** What stops working when a device is revoked, said before it happens. */
-const revokeEffect: Record<Device['kind'], string> = {
-  ssh: 'The server refuses its device key on every path, direct and through the edge, and closes its open connections. aether on that computer stops reaching this server.',
-  browser:
-    'The server ends its dashboard session, closes its open connections and refuses it from now on.',
-}
+const revokeEffect =
+  'The server refuses its device key on every path, direct and through the edge, and closes its open connections. aether on that computer stops reaching this server.'
 
 export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
   const members = useStore((s) => s.members)
@@ -98,11 +91,14 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
           <p className="max-w-3xl text-[13px] leading-5 text-muted-foreground">
-            A device is one computer running aether, or one browser, that reaches this server
-            through an edge. A member&apos;s first device is accepted; later ones stay pending
-            until a device the member already uses, or an admin, approves them. Approve with the
-            code the new device shows on its own screen: a pending device nobody is holding is
-            someone else signed in with the member&apos;s account, so revoke it instead.
+            A device is one computer running aether that reaches this server through an edge.
+            When signing in is enough for this server, a new device is registered on its first
+            connection. When the server admits approved devices only, a new device stays pending,
+            and a registered one is refused, until the member from a device they already use, an
+            admin, or <span className="font-mono">sudo aether-server device approve</span> on the
+            server approves it. Approve with the code the device shows on its own screen: a
+            device nobody is holding is someone else signed in with the member&apos;s account, so
+            revoke it instead.
           </p>
 
           <form
@@ -155,9 +151,6 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                       <span className="min-w-0 break-words text-[13px] font-medium">
                         {device.label}
                       </span>
-                      <Chip color="default" variant="tertiary" size="sm">
-                        <Chip.Label>{kindLabel[device.kind]}</Chip.Label>
-                      </Chip>
                       <Chip color={statusColor[device.status]} variant="soft" size="sm">
                         <Chip.Label>{device.status}</Chip.Label>
                       </Chip>
@@ -174,11 +167,9 @@ export function DevicesRoute({ client = api }: RouteProps & { client?: Api }) {
                         'never seen'
                       )}
                     </p>
-                    {device.fingerprint && (
-                      <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">
-                        {device.fingerprint}
-                      </p>
-                    )}
+                    <p className="min-w-0 break-all font-mono text-xs text-muted-foreground">
+                      {device.fingerprint}
+                    </p>
                   </div>
                   {device.status !== 'revoked' && (
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:justify-end">
@@ -256,7 +247,7 @@ function RevokeDialog({
             {owner ? ` of ${owner}` : ''}?
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {revokeEffect[device.kind]} This cannot be undone.
+            {revokeEffect} This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (

@@ -720,17 +720,13 @@ link replaces this sentence the day the listing goes live. What the app stores
 and sends is in [privacy.md](privacy.md); the licences it ships under are in
 [notices.md](notices.md).
 
-The app is a WebView locked to one HTTPS origin, reached one of two ways:
-
-- **Over the tailnet.** Identity is the phone's own tailnet login, resolved
-  by the server on every request
-  ([networking.md](networking.md#the-dashboard)); the app holds no
-  credential. The server has `web-port` set, and the phone is signed in to
-  the same tailnet.
-- **Through the edge**, at `<server id>.<server domain>`
-  ([edge.md](edge.md#dashboard-through-the-edge)). You sign in with your edge
-  account in the phone's browser, and the WebView keeps the server's session
-  cookie.
+The app holds no logic and no credential. It is a WebView locked to one HTTPS
+origin, so identity stays the phone's own tailnet login, resolved by the server
+on every request ([networking.md](networking.md#the-dashboard)). Two things
+have to be true first: the server has `web-port` set, and the phone is signed
+in to the same tailnet. The app does not use the edge in this release: it
+works over a tailnet exactly as before, whatever the server's `edge-url`
+and `edge-access` say ([edge.md](edge.md#the-dashboard)).
 
 1. Open the release page in the phone's browser and download
    `aether-android.apk`. Check it against its line in `checksums.txt` if you
@@ -738,15 +734,11 @@ The app is a WebView locked to one HTTPS origin, reached one of two ways:
 2. Android asks once for permission to install apps from that browser. Allow
    it, then open the downloaded file.
 3. The first screen asks for the server name. Type its MagicDNS name, for
-   example `my-server.tailnet-name.ts.net`, or its edge name,
-   `<server id>.<server domain>`. A pasted
+   example `my-server.tailnet-name.ts.net`. A pasted
    `https://my-server.tailnet-name.ts.net/` works too, and a port other than
    443 goes on the end: `my-server.tailnet-name.ts.net:8443`. `http://` is
    refused rather than upgraded.
-4. Over the tailnet, the dashboard opens at the board, already identified.
-   Through the edge, **Sign in** opens the edge in the phone's browser; after
-   **Continue** the browser hands `aether://auth/callback` back to the app,
-   which finishes the sign-in on the server.
+4. The dashboard opens at the board, already identified. There is no sign-in.
 
 To change the address later, long-press the app icon and pick **Server
 address**. An address that does not resolve leaves the WebView's own error page
@@ -949,13 +941,16 @@ connections are not required to carry a key, it asks one more question -
 fresh config - which is how a phone on the tailnet reaches the dashboard
 ([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
 on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
-that lets clients and phones reach the server with a GitHub or Google sign-in
+that lets clients reach the server over SSH with a GitHub or Google sign-in
 ([edge.md](edge.md)), and prints what the edge can see and the command that
-turns it off; with tailscaled it asks, defaulting to no. Setup is the only
-thing that turns the edge on: `edge-url` is empty unless the config file or
-a flag names an edge, so an upgrade never enrolls an existing server. With
-the edge on, setup ends by printing the server id, the dashboard address,
-and a claim code for `aether link --claim <code>`.
+turns it off; with tailscaled it asks, defaulting to no. With the edge on
+it asks who may reach the server through it, `1` (account access) or `2`
+(approved devices), and repeats the question until answered
+([edge.md](edge.md#access-policies)). Setup is the only thing that turns
+the edge on: `edge-url` is empty unless the config file or a flag names an
+edge, so an upgrade never enrolls an existing server. With the edge on,
+setup ends by printing the server id and a claim code for `aether link
+--claim <code>`.
 Answering `server` to the install script's question runs it for you; this
 is the same command by hand.
 
@@ -966,7 +961,8 @@ sudo aether-server setup
 For an unattended install, `aether-server install` writes the same files from
 flags instead of questions - any serve option below is accepted, and options
 you leave off keep tracking the binary's defaults across upgrades. The edge
-stays off unless you pass `--edge-url`:
+stays off unless you pass `--edge-url`, which is refused without
+`--edge-access account` or `--edge-access approved-devices`:
 
 ```sh
 sudo aether-server install --addr :2222 --tailnet-auto-join
@@ -1018,8 +1014,7 @@ uses the default; negative values have the semantics in the table.
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
 | `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled. See [edge.md](edge.md). |
-| `--edge-device-approval` | on | Hold a member's later edge devices, browsers included, pending until approved. |
-| `--edge-acme-directory` | Let's Encrypt production | ACME directory that issues the certificate of the dashboard through the edge. |
+| `--edge-access` | `approved-devices` | Who may reach the server through the edge: `account` (signing in is enough) or `approved-devices` (each new device waits until a person approves it). `install` refuses `--edge-url` without it. See [edge.md](edge.md#access-policies). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
@@ -1174,7 +1169,7 @@ automatic.
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
-| `edge/` | Edge enrollment, one directory per edge origin (`https_edge.onaether.dev/`): the pinned edge key, the owner, the claim code's hash, the connection status and dashboard domain. `edge/certs/` holds the dashboard certificate ([edge.md](edge.md#files)). |
+| `edge/` | Edge enrollment, one directory per edge origin (`https_edge.onaether.dev/`): the pinned edge key, the owner, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |

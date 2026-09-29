@@ -8,8 +8,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"github.com/3xDevOps/Aether/internal/edgeproto"
 )
 
 // copyBufferSize bounds what a splice holds per direction: it reads again
@@ -90,24 +88,18 @@ func (p *pacer) reserve(n int, rate int64) time.Duration {
 }
 
 // throttle waits until n bytes of c may be sent at the throttled rate and
-// reports false when c ended first. SSH and dashboard passthrough each
-// get half the rate, so passthrough, which needs no sign-in, cannot slow
-// SSH. Within each, a server's connections take one turn at a time, so a
-// read waits behind at most one read per other server, however many
-// connections that server holds. Opening more connections does not raise
-// the rate.
+// reports false when c ended first. A server's connections take one turn
+// at a time, so a read waits behind at most one read per other server,
+// however many connections that server holds. Opening more connections
+// does not raise the rate.
 func (r *Relay) throttle(c *relayConn, n int) bool {
-	turn, pace := c.reg.sshTurn, &r.sshPace
-	if c.kind == edgeproto.KindWeb {
-		turn, pace = c.reg.webTurn, &r.webPace
-	}
 	select {
-	case turn <- struct{}{}:
+	case c.reg.turn <- struct{}{}:
 	case <-c.ctx.Done():
 		return false
 	}
-	defer func() { <-turn }()
-	return sleep(c.ctx, pace.reserve(n, r.throttleRate/2))
+	defer func() { <-c.reg.turn }()
+	return sleep(c.ctx, r.pace.reserve(n, r.throttleRate))
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {
