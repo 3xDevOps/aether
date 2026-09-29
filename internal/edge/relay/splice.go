@@ -58,7 +58,8 @@ func (r *Relay) pipe(c *relayConn, dst, src net.Conn) {
 			// Counted before the write, so a peer never holds bytes the
 			// budget and the final flush have not seen.
 			r.count(n)
-			if _, werr := dst.Write(p[:n]); werr != nil {
+			if w, werr := dst.Write(p[:n]); werr != nil {
+				r.count(w - n)
 				return
 			}
 		}
@@ -115,8 +116,10 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// count adds n relayed bytes. A negative n gives back bytes a failed write
+// did not deliver.
 func (r *Relay) count(n int) {
-	r.bytes.Add(uint64(n))
+	r.bytes.Add(uint64(int64(n)))
 	r.monthBytes.Add(int64(n))
 	r.unflushed.Add(int64(n))
 }
@@ -152,11 +155,13 @@ func (r *Relay) flushLoop() {
 func (r *Relay) flushEgress(ctx context.Context, now time.Time) error {
 	r.egressMu.Lock()
 	defer r.egressMu.Unlock()
-	if n := r.unflushed.Swap(0); n > 0 {
+	// A negative count is bytes given back after they were saved; it stays
+	// to offset the bytes counted next.
+	if n := r.unflushed.Load(); n > 0 {
 		if err := r.store.AddEgress(ctx, r.month, n); err != nil {
-			r.unflushed.Add(n)
 			return fmt.Errorf("relay: save egress for %s: %w", r.month, err)
 		}
+		r.unflushed.Add(-n)
 	}
 	if m := monthOf(now); m != r.month {
 		used, err := r.store.Egress(ctx, m)
