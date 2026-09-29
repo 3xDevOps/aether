@@ -1,6 +1,7 @@
 # GitHub-only sign-in and an edge container image
 
-**Status:** Implemented in PR #PR_NUMBER_PLACEHOLDER. The sections below
+**Status:** Implemented in PR #252
+(https://github.com/3xDevOps/aether/pull/252). The sections below
 describe what was built; [edge.md](../edge.md) is the operator and user
 guide, and [Implementation notes](#5-implementation-notes) lists where the
 build refined this plan.
