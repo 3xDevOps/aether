@@ -1,0 +1,114 @@
+name: tmp verify edge release steps
+# Throwaway: runs the release's edge verification against the image that the
+# v0.5.2-alpha.4 run published. Never merged.
+on:
+  pull_request:
+permissions:
+  contents: read
+  packages: read
+env:
+  GITHUB_REF_NAME: v0.5.2-alpha.4
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Find what the release published
+        id: found
+        run: |
+          image=ghcr.io/3xdevops/aether-edge
+          digest=$(docker buildx imagetools inspect "$image:v0.5.2-alpha.4" | awk '$1 == "Digest:" { print $2; exit }')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "$image:v0.5.2-alpha.4"
+            echo "$image:e24214d9890fd6261d526c86e19b12d79669271d"
+            echo "$image:sha-e24214d9"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect --raw "$image:v0.5.2-alpha.4" | jq '{mediaType, manifests: [.manifests[] | {digest, platform}]}'
+      - name: Verify and pull both edge image architectures
+        env:
+          TAGS: ${{ steps.found.outputs.tags }}
+          DIGEST: ${{ steps.found.outputs.digest }}
+        run: |
+          image=ghcr.io/3xdevops/aether-edge
+          for ref in $TAGS; do
+            tagged=$(docker buildx imagetools inspect "$ref" | awk '$1 == "Digest:" { print $2; exit }')
+            if [ "$tagged" != "$DIGEST" ]; then
+              echo "::error::$ref is $tagged, not the published $DIGEST"
+              exit 1
+            fi
+          done
+          index=$(docker buildx imagetools inspect --raw "$image@$DIGEST")
+          {
+            echo "### ghcr.io/3xdevops/aether-edge"
+            echo
+            echo "Digest: \`$DIGEST\`"
+            echo
+            echo "| Platform | Immutable reference |"
+            echo "| --- | --- |"
+            for ref in $TAGS; do
+              echo "| linux/amd64, linux/arm64 | \`$ref@$DIGEST\` |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          for arch in amd64 arm64; do
+            platform=$(printf '%s' "$index" | jq -r --arg arch "$arch" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')
+            # The index must carry the image smoke-tested for this
+            # architecture, whether that push was a manifest or an index.
+            tested=$(docker buildx imagetools inspect --raw "$image:$GITHUB_REF_NAME-$arch" | jq -r --arg arch "$arch" \
+              'if .manifests then .manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest else empty end')
+            [ -n "$tested" ] || tested=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME-$arch" | awk '$1 == "Digest:" { print $2; exit }')
+            if [ "$platform" != "$tested" ]; then
+              echo "::error::$image@$DIGEST carries $platform for linux/$arch, not the smoke-tested $tested"
+              exit 1
+            fi
+            # By its own digest only. The tags and the index were resolved
+            # at the registry above, and docker refuses a second pull of
+            # one digest for another platform ("cannot overwrite digest"),
+            # which failed the v0.5.2-alpha.4 release after its image was
+            # published.
+            docker pull "$image@$platform"
+            pulled=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image@$platform")
+            if [ "$pulled" != "linux/$arch" ]; then
+              echo "::error::$image@$platform is $pulled, not linux/$arch"
+              exit 1
+            fi
+            echo "| linux/$arch | \`$image@$platform\` |" >> "$GITHUB_STEP_SUMMARY"
+          done
+      # Not a release failure: the image is published and pullable with
+      # credentials. Until the package is public, users cannot pull it.
+      - name: Check anonymous availability of the edge image
+        run: |
+          config=$(mktemp -d)
+          trap 'rm -rf "$config"' EXIT
+          image="ghcr.io/3xdevops/aether-edge:$GITHUB_REF_NAME"
+          # Asks the registry without pulling, so nothing the steps above
+          # pulled can answer for it.
+          if ! out=$(docker --config "$config" manifest inspect "$image" 2>&1); then
+            printf '%s\n' "$out"
+            echo "::warning title=aether-edge is not public::$image cannot be read anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
+          fi
+
+      - name: Latest would keep the digest
+        env:
+          DIGEST: ${{ steps.found.outputs.digest }}
+        run: |
+          image=ghcr.io/3xdevops/aether-edge
+          would=$(docker buildx imagetools create --dry-run --tag "$image:latest" "$image@$DIGEST" | sha256sum | cut -d' ' -f1)
+          echo "dry run sha256:$would, published $DIGEST"
+          docker buildx imagetools inspect --raw "$image@$DIGEST" | sha256sum
+      - name: Run the published image
+        env:
+          DIGEST: ${{ steps.found.outputs.digest }}
+        run: |
+          image=ghcr.io/3xdevops/aether-edge
+          docker run --rm "$image@$DIGEST" version
+          docker image inspect --format 'user={{.Config.User}} labels={{json .Config.Labels}}' "$image@$DIGEST"
