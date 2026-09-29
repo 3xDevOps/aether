@@ -57,13 +57,9 @@ func (r *Relay) pipe(c *relayConn, dst, src net.Conn) {
 			}
 			// Counted before the write, so a peer never holds bytes the
 			// budget and the final flush have not seen.
-			month := r.months.Load()
-			r.count(n)
+			month := r.count(n)
 			if w, werr := dst.Write(p[:n]); werr != nil {
-				// Given back only within the month that counted them.
-				if r.months.Load() == month {
-					r.count(w - n)
-				}
+				r.giveBack(n-w, month)
 				return
 			}
 		}
@@ -120,16 +116,51 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// count adds n relayed bytes. A negative n gives back bytes a failed write
-// did not deliver.
-func (r *Relay) count(n int) {
-	r.bytes.Add(uint64(int64(n)))
-	r.monthBytes.Add(int64(n))
-	r.unflushed.Add(int64(n))
+// egressMeter counts relayed bytes against a calendar month. One lock
+// covers the month, its usage and the bytes waiting to be saved, so a
+// count, a give-back, a save and a month change never see half of another.
+type egressMeter struct {
+	mu      sync.Mutex
+	month   string
+	changes uint64 // month changes so far
+	used    int64  // bytes of month, saved or not
+	pending int64  // bytes of month not saved; negative after saved bytes were given back
+}
+
+func (m *egressMeter) usage() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.used
+}
+
+// count adds n relayed bytes and returns the month change they were
+// counted in.
+func (r *Relay) count(n int) uint64 {
+	r.bytes.Add(uint64(n))
+	m := &r.egress
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.used += int64(n)
+	m.pending += int64(n)
+	return m.changes
+}
+
+// giveBack takes back n bytes a failed write did not deliver, unless the
+// month changed since they were counted.
+func (r *Relay) giveBack(n int, counted uint64) {
+	r.bytes.Add(^uint64(n - 1))
+	m := &r.egress
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.changes != counted {
+		return
+	}
+	m.used -= int64(n)
+	m.pending -= int64(n)
 }
 
 func (r *Relay) throttled() bool {
-	return r.budget > 0 && r.monthBytes.Load() >= r.budget
+	return r.budget > 0 && r.egress.usage() >= r.budget
 }
 
 func monthOf(t time.Time) string {
@@ -157,26 +188,38 @@ func (r *Relay) flushLoop() {
 // flushEgress adds the bytes counted since the last flush to the stored
 // month and starts a new month's count when the month changed.
 func (r *Relay) flushEgress(ctx context.Context, now time.Time) error {
-	r.egressMu.Lock()
-	defer r.egressMu.Unlock()
-	// A negative count is bytes given back after they were saved; it stays
-	// to offset the bytes counted next.
-	if n := r.unflushed.Load(); n > 0 {
-		if err := r.store.AddEgress(ctx, r.month, n); err != nil {
-			return fmt.Errorf("relay: save egress for %s: %w", r.month, err)
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
+	m := &r.egress
+	m.mu.Lock()
+	month, n := m.month, max(m.pending, 0)
+	m.pending -= n
+	m.mu.Unlock()
+	if n > 0 {
+		if err := r.store.AddEgress(ctx, month, n); err != nil {
+			m.mu.Lock()
+			m.pending += n
+			m.mu.Unlock()
+			return fmt.Errorf("relay: save egress for %s: %w", month, err)
 		}
-		r.unflushed.Add(-n)
 	}
-	if m := monthOf(now); m != r.month {
-		used, err := r.store.Egress(ctx, m)
-		if err != nil {
-			return fmt.Errorf("relay: load egress for %s: %w", m, err)
-		}
-		r.month = m
-		r.months.Add(1)
-		r.monthBytes.Store(used)
-		if r.unflushed.Load() < 0 {
-			r.unflushed.Store(0)
+	next := monthOf(now)
+	if next == month {
+		return nil
+	}
+	used, err := r.store.Egress(ctx, next)
+	if err != nil {
+		return fmt.Errorf("relay: load egress for %s: %w", next, err)
+	}
+	m.mu.Lock()
+	rest := m.pending
+	m.month, m.used, m.pending = next, used, 0
+	m.changes++
+	m.mu.Unlock()
+	// Bytes counted after the save above still belong to the month that ended.
+	if rest > 0 {
+		if err := r.store.AddEgress(ctx, month, rest); err != nil {
+			return fmt.Errorf("relay: save egress for %s: %w", month, err)
 		}
 	}
 	return nil

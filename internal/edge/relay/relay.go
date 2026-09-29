@@ -152,13 +152,8 @@ type Relay struct {
 
 	pace pacer
 
-	egressMu   sync.Mutex
-	month      string
-	monthBytes atomic.Int64
-	unflushed  atomic.Int64
-	// months counts month changes, so a failed write gives bytes back
-	// only to the month that counted them.
-	months      atomic.Uint64
+	flushMu     sync.Mutex // serializes saves and month changes
+	egress      egressMeter
 	bytes       atomic.Uint64
 	refusalsMu  sync.Mutex
 	refusalsMap map[string]uint64
@@ -204,10 +199,9 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		claims:             map[string]claimGrant{},
 		directories:        map[string]*directoryWrite{},
 		addrConns:          map[netip.Prefix]int{},
-		month:              month,
 		refusalsMap:        map[string]uint64{},
 	}
-	r.monthBytes.Store(used)
+	r.egress.month, r.egress.used = month, used
 	r.ctx, r.stop = context.WithCancelCause(context.Background())
 	go r.flushLoop()
 	return r, nil
@@ -273,7 +267,7 @@ func (r *Relay) Metrics() Metrics {
 	}
 	r.mu.Unlock()
 	m.BytesRelayed = r.bytes.Load()
-	m.EgressThisMonth = r.monthBytes.Load()
+	m.EgressThisMonth = r.egress.usage()
 	m.Throttled = r.throttled()
 	r.refusalsMu.Lock()
 	m.Refusals = make(map[string]uint64, len(r.refusalsMap))

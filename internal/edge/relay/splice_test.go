@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,8 +28,8 @@ func TestFailedWriteCountsOnlyDeliveredBytes(t *testing.T) {
 	if got := e.r.Metrics(); got.BytesRelayed != 2 || got.EgressThisMonth != 2 {
 		t.Fatalf("relayed %d, egress %d; want 2 and 2", got.BytesRelayed, got.EgressThisMonth)
 	}
-	if got := e.r.unflushed.Load(); got != 2 {
-		t.Fatalf("unflushed = %d, want 2", got)
+	if got := pending(e.r); got != 2 {
+		t.Fatalf("pending = %d, want 2", got)
 	}
 }
 
@@ -59,7 +60,49 @@ func TestFailedWriteGivesNothingBackToTheNextMonth(t *testing.T) {
 	if got := e.r.Metrics().EgressThisMonth; got != 0 {
 		t.Fatalf("egress of the new month = %d, want 0", got)
 	}
-	if got := e.r.unflushed.Load(); got != 0 {
-		t.Fatalf("unflushed = %d, want 0", got)
+	if got := pending(e.r); got != 0 {
+		t.Fatalf("pending = %d, want 0", got)
+	}
+}
+
+func pending(r *Relay) int64 {
+	r.egress.mu.Lock()
+	defer r.egress.mu.Unlock()
+	return r.egress.pending
+}
+
+func TestEveryCountedByteIsSavedAcrossMonthChanges(t *testing.T) {
+	store := &fakeEgress{months: map[string]int64{}}
+	e := newEnvWith(t, 0, store)
+	const writers, each = 8, 2000
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Go(func() {
+			for range each {
+				e.r.count(1)
+			}
+		})
+	}
+	now := time.Now()
+	for i := range 24 {
+		if err := e.r.flushEgress(t.Context(), now.AddDate(0, i, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wg.Wait()
+	if err := e.r.flushEgress(t.Context(), now.AddDate(0, 23, 0)); err != nil {
+		t.Fatal(err)
+	}
+	var saved int64
+	store.mu.Lock()
+	for _, n := range store.months {
+		saved += n
+	}
+	store.mu.Unlock()
+	if saved != writers*each {
+		t.Fatalf("saved %d bytes of %d counted", saved, writers*each)
+	}
+	if got, want := e.r.Metrics().EgressThisMonth, store.months[monthOf(now.AddDate(0, 23, 0))]; got != want {
+		t.Fatalf("usage of the month = %d, saved for it = %d", got, want)
 	}
 }
