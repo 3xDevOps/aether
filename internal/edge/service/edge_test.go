@@ -26,15 +26,14 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
-// fakeProvider is an OAuth provider that serves both GitHub's and
-// Google's user endpoints. It checks the PKCE verifier on every exchange.
+// fakeProvider is GitHub's OAuth and user API. It checks the PKCE
+// verifier on every exchange.
 type fakeProvider struct {
 	*httptest.Server
 	mu         sync.Mutex
 	challenges map[string]string // code -> PKCE challenge
 	githubUser map[string]any
 	emails     []map[string]any
-	googleInfo map[string]any
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -67,7 +66,6 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	}
 	mux.HandleFunc("GET /user", serve(func() any { return p.githubUser }))
 	mux.HandleFunc("GET /user/emails", serve(func() any { return p.emails }))
-	mux.HandleFunc("GET /v1/userinfo", serve(func() any { return p.googleInfo }))
 	p.Server = httptest.NewServer(mux)
 	t.Cleanup(p.Close)
 	return p
@@ -201,7 +199,6 @@ func newHarness(t *testing.T) *harness {
 		SigninOrigin: testSignin,
 		RelayOrigin:  testRelay,
 		GitHub:       provider.app(),
-		Google:       provider.app(),
 		Clock:        clock.Now,
 	})
 	if err != nil {
@@ -308,16 +305,16 @@ func (b *browser) post(t *testing.T, path string, form url.Values) (*http.Respon
 	return b.do(t, http.MethodPost, path, form, nil)
 }
 
-// signIn signs the browser in with provider, whose fake returns the user
-// the test set on the harness's provider.
-func (b *browser) signIn(t *testing.T, provider string) *http.Response {
+// signIn signs the browser in with GitHub, whose fake returns the user
+// the test set on the harness.
+func (b *browser) signIn(t *testing.T) *http.Response {
 	t.Helper()
-	resp, _ := b.get(t, "/signin/"+provider+"?next=/devices")
+	resp, _ := b.get(t, "/signin/github?next=/devices")
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("start sign-in: %s", resp.Status)
 	}
 	code, state := b.h.provider.authorize(t, resp.Header.Get("Location"))
-	resp, body := b.get(t, "/signin/"+provider+"/callback?"+url.Values{"code": {code}, "state": {state}}.Encode())
+	resp, body := b.get(t, "/signin/github/callback?"+url.Values{"code": {code}, "state": {state}}.Encode())
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("sign-in callback: %s\n%s", resp.Status, body)
 	}
@@ -332,12 +329,6 @@ func (h *harness) setGitHubUser(id int64, login, email string, verified bool) {
 		{"email": "secondary@example.test", "primary": false, "verified": true},
 		{"email": email, "primary": true, "verified": verified},
 	}
-}
-
-func (h *harness) setGoogleUser(sub, email string, verified any) {
-	h.provider.mu.Lock()
-	defer h.provider.mu.Unlock()
-	h.provider.googleInfo = map[string]any{"sub": sub, "email": email, "email_verified": verified, "name": "Test User"}
 }
 
 // apiCall calls the JSON API on the sign-in origin with the current

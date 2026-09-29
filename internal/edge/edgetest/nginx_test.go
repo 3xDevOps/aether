@@ -72,7 +72,7 @@ func TestBehindNginx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	back := &http.Server{Handler: rl.Forwarded(svc.Handler()), ReadHeaderTimeout: 10 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
+	back := &http.Server{Handler: rl.Forwarded(nil, svc.Handler()), ReadHeaderTimeout: 10 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
 	go func() { _ = back.Serve(upstream) }()
 	h.node = &edgeNode{svc: svc, relay: rl, back: back}
 	t.Cleanup(func() {

@@ -11,23 +11,25 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// Sign-in providers. An account is keyed by (provider, subject); nothing
-// merges two accounts by email.
-const (
-	ProviderGitHub = "github"
-	ProviderGoogle = "google"
-)
+// ProviderGitHub is the one sign-in provider. An account is keyed by
+// (provider, subject), the pair servers store, and "github" is the only
+// provider any message may name.
+const ProviderGitHub = "github"
 
-// ValidProvider reports whether p is a supported sign-in provider.
-func ValidProvider(p string) bool {
-	return p == ProviderGitHub || p == ProviderGoogle
+// CheckProvider refuses a provider other than GitHub, such as one an
+// earlier version stored, with the reason.
+func CheckProvider(p string) error {
+	if p != ProviderGitHub {
+		return fmt.Errorf("edgeproto: sign-in provider %q is not supported: Aether signs in with GitHub only", p)
+	}
+	return nil
 }
 
-// Account is a person signed in to the edge. Subject is the provider's
-// immutable user id. Email is set only when the provider verified it.
-// Login is the GitHub login; Google accounts have none. IdentityAt is
-// when the provider last reported Email and Login: the account's last
-// browser sign-in at the edge.
+// Account is a person signed in to the edge. Subject is GitHub's
+// immutable user id. Email is set only when it is the account's verified
+// primary email. Login is the GitHub login. IdentityAt is when GitHub
+// last reported Email and Login: the account's last browser sign-in at
+// the edge.
 type Account struct {
 	Provider   string    `json:"provider"`
 	Subject    string    `json:"subject"`
@@ -47,15 +49,14 @@ func (a Account) IdentityCurrent(now time.Time) bool {
 // a display name with control characters, must be cleaned by the edge
 // before it builds the Account.
 func (a Account) Validate() error {
+	if err := CheckProvider(a.Provider); err != nil {
+		return err
+	}
 	switch {
-	case !ValidProvider(a.Provider):
-		return fmt.Errorf("edgeproto: unknown provider %q", a.Provider)
 	case !validRequiredText(a.Subject, maxShortText):
 		return errors.New("edgeproto: account subject is empty, too long or has control characters")
 	case !validText(a.Email, maxEmail) || (a.Email != "" && !strings.Contains(a.Email, "@")):
 		return fmt.Errorf("edgeproto: invalid account email %q", a.Email)
-	case a.Login != "" && a.Provider != ProviderGitHub:
-		return fmt.Errorf("edgeproto: %s account has a login", a.Provider)
 	case !validText(a.Login, maxIDText):
 		return errors.New("edgeproto: account login is too long or has control characters")
 	case !validText(a.Name, maxShortText):
@@ -85,11 +86,11 @@ func ValidAccountID(id string) bool {
 }
 
 // AccountInfo is an account as the edge's API names it to that account's
-// clients: ID, the internal id the edge assigned it, and the provider
-// identity. Grants and control messages carry the provider identity
-// without ID, because servers key members on (provider, subject) so that
-// a later change of what an account id covers, such as linking a second
-// provider, cannot change who a member is on any server.
+// clients: ID, the internal id the edge assigned it, and the GitHub
+// identity. Grants and control messages carry the GitHub identity without
+// ID, because servers key members on (provider, subject): what an account
+// id covers is the edge's to decide, and cannot change who a member is on
+// any server.
 type AccountInfo struct {
 	ID string `json:"id"`
 	Account
@@ -136,10 +137,10 @@ func AccountPrincipal(a Account) Principal {
 func (p Principal) Validate() error {
 	switch p.Type {
 	case PrincipalAccount:
-		if !ValidProvider(p.Provider) || !validRequiredText(p.Subject, maxShortText) {
+		if !validRequiredText(p.Subject, maxShortText) {
 			return errors.New("edgeproto: an account principal has a provider and a subject")
 		}
-		return nil
+		return CheckProvider(p.Provider)
 	case PrincipalTeam:
 		return errors.New("edgeproto: team principals are reserved and not supported by this version")
 	}
@@ -220,9 +221,9 @@ const (
 
 // DirectoryEntry is one line of the server's directory at the edge. A
 // member is named by Provider and Subject. An invitation names either a
-// GitHub Login (Provider "github") or an Email; an email invitation with an
-// empty Provider matches a verified email from either provider.
-// ExpiresAt is set for invitations only.
+// GitHub Login or a verified Email, with Provider "github"; an email
+// invitation with an empty Provider matches by email alone. ExpiresAt is
+// set for invitations only.
 type DirectoryEntry struct {
 	Kind      string    `json:"kind"`
 	Provider  string    `json:"provider,omitempty"`
@@ -240,10 +241,10 @@ func (e DirectoryEntry) Validate() error {
 	}
 	switch e.Kind {
 	case EntryMember:
-		if !ValidProvider(e.Provider) || !validRequiredText(e.Subject, maxShortText) ||
-			e.Login != "" || e.Email != "" || !e.ExpiresAt.IsZero() {
+		if !validRequiredText(e.Subject, maxShortText) || e.Login != "" || e.Email != "" || !e.ExpiresAt.IsZero() {
 			return errors.New("edgeproto: a member entry has exactly a provider, a subject and a role")
 		}
+		return CheckProvider(e.Provider)
 	case EntryInvitation:
 		if e.Subject != "" || e.ExpiresAt.IsZero() {
 			return errors.New("edgeproto: an invitation entry has an expiry and no subject")
@@ -254,9 +255,11 @@ func (e DirectoryEntry) Validate() error {
 				return fmt.Errorf("edgeproto: invalid login invitation %q", e.Login)
 			}
 		case e.Email != "" && e.Login == "":
-			if (e.Provider != "" && !ValidProvider(e.Provider)) || !validText(e.Email, maxEmail) ||
-				!strings.Contains(e.Email, "@") {
+			if !validText(e.Email, maxEmail) || !strings.Contains(e.Email, "@") {
 				return fmt.Errorf("edgeproto: invalid email invitation %q", e.Email)
+			}
+			if e.Provider != "" {
+				return CheckProvider(e.Provider)
 			}
 		default:
 			return errors.New("edgeproto: an invitation names exactly one of login or email")

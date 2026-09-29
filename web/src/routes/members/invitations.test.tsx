@@ -52,9 +52,16 @@ describe('invitations', () => {
         invitation(),
         invitation({
           id: 'inv_dev',
-          provider: 'google',
           login: undefined,
           email: 'dev@example.com',
+          role: 'viewer',
+        }),
+        // One v0.5.2-alpha.3 stored for Google, which admits nobody now.
+        invitation({
+          id: 'inv_old',
+          provider: 'google',
+          login: undefined,
+          email: 'old@example.com',
           role: 'viewer',
         }),
         invitation({ id: 'inv_link', role: undefined, login: 'bob-gh', member_id: bob.id }),
@@ -66,14 +73,15 @@ describe('invitations', () => {
     const octocat = list.getByText('octocat on GitHub').closest('li')!
     expect(within(octocat).getByText('collaborator')).toBeDefined()
     expect(octocat.textContent).toContain('invited by Alice · expires')
-    expect(list.getByText('dev@example.com on Google')).toBeDefined()
-    expect(list.getByText('viewer')).toBeDefined()
+    expect(list.getByText('dev@example.com on GitHub')).toBeDefined()
+    expect(list.getByText('old@example.com on google')).toBeDefined()
+    expect(list.getAllByText('viewer')).toHaveLength(2)
     expect(list.getByText('links Bob')).toBeDefined()
   })
 
   it('invites by email with the chosen role and re-reads the list', async () => {
     seed()
-    const created = invitation({ id: 'inv_new', login: undefined, provider: '', email: 'new@example.com', role: 'viewer' })
+    const created = invitation({ id: 'inv_new', login: undefined, email: 'new@example.com', role: 'viewer' })
     const list = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([created])
     const client = fakeApi({
       memberInvitationList: list,
@@ -90,7 +98,7 @@ describe('invitations', () => {
     await pickOption(invitations.getByLabelText('Role'), 'viewer')
     fireEvent.click(invitations.getByRole('button', { name: 'Invite account' }))
 
-    expect(await invitations.findByText('new@example.com')).toBeDefined()
+    expect(await invitations.findByText('new@example.com on GitHub')).toBeDefined()
     expect(client.memberInvitationCreate).toHaveBeenCalledWith({
       email: 'new@example.com',
       role: 'viewer',
@@ -108,7 +116,6 @@ describe('invitations', () => {
 
     await vi.waitFor(() =>
       expect(client.memberInvitationCreate).toHaveBeenCalledWith({
-        provider: 'github',
         login: 'octocat',
         role: 'collaborator',
       }),
@@ -142,7 +149,6 @@ describe('invitations', () => {
       'member.invitation.create: login "-x" is not a GitHub login',
     )
     expect(client.memberInvitationCreate).toHaveBeenCalledWith({
-      provider: 'github',
       login: '-x',
       role: 'collaborator',
     })

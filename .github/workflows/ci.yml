@@ -45,18 +45,23 @@ jobs:
   # scripts/ci-classify-changes.sh: a pull request can edit its own copy,
   # and that copy is not what this job runs. A rename is classified by its
   # old path as well as its new one, so a move into docs/ still runs the
-  # code jobs.
+  # code jobs. The edge output follows the same rules with
+  # scripts/ci-classify-edge.sh, and a failure of that classifier alone
+  # also fails open.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
+      edge: ${{ steps.classify.outputs.edge }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
-          sparse-checkout: scripts/ci-classify-changes.sh
+          sparse-checkout: |
+            scripts/ci-classify-changes.sh
+            scripts/ci-classify-edge.sh
           sparse-checkout-cone-mode: false
       - name: Classify changed paths
         id: classify
@@ -66,16 +71,22 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "edge=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
             echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "edge=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(printf '%s\n' "$files" | sh scripts/ci-classify-changes.sh)
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          if ! edge=$(printf '%s\n' "$files" | sh scripts/ci-classify-edge.sh); then
+            edge=true
+          fi
+          echo "edge=$edge" >> "$GITHUB_OUTPUT"
 
   # Runs on every pull request, including a docs-only one. This is the
   # docs-only gate.
@@ -210,7 +221,11 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
+      # internal/sshd takes about 450 seconds here, and go test stops a
+      # package at 600 unless told otherwise.
       - name: Unit tests
+        env:
+          GOFLAGS: -timeout=30m
         run: make test TEST_PKGS="${{ matrix.pkgs }}"
 
   # Only internal/harness needs the agent images, so it is the only job that
@@ -339,6 +354,16 @@ jobs:
           name: browser-image-amd64
           path: ${{ runner.temp }}/aether-browser.tar
           retention-days: 1
+
+  # A pull request runs the edge image build and smoke test only when
+  # scripts/ci-classify-edge.sh says a changed path can affect the image.
+  # A workflow of its own so it can be started by hand on any branch.
+  edge-image:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.edge == 'true') }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/edge-image.yml
 
   # Sharded so the slow server scenarios do not share one runner. Five shards
   # cover internal/server by test name, balanced by the durations -v prints; scheduler is its own package; rest is

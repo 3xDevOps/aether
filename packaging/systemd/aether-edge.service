@@ -11,17 +11,14 @@ Type=simple
 ExecStart=/usr/local/bin/aether-edge serve
 EnvironmentFile=/etc/aether-edge/aether-edge.env
 
-# OAuth client secrets. systemd reads each file as root and hands the
-# service a private copy under %d, so /etc/aether-edge stays root-only.
-# A provider whose file is missing gets the SetCredential= value instead,
-# a single newline, which the edge reads as no secret: an edge offering
-# one provider needs only that provider's file and client id.
+# The GitHub OAuth client secret. systemd reads the file as root and hands
+# the service a private copy under %d, so /etc/aether-edge stays
+# root-only. When the file is missing the service gets the SetCredential=
+# value instead, a single newline, and the edge refuses to start with the
+# reason.
 SetCredential=github-client-secret:\n
-SetCredential=google-client-secret:\n
 LoadCredential=github-client-secret:/etc/aether-edge/github-client-secret
-LoadCredential=google-client-secret:/etc/aether-edge/google-client-secret
 Environment=AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE=%d/github-client-secret
-Environment=AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE=%d/google-client-secret
 
 User=aether-edge
 Group=aether-edge

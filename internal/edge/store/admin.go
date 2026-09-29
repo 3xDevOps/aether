@@ -200,7 +200,9 @@ type DeletedAccount struct {
 	// every few seconds.
 	Reached []string
 	// Notify are the servers, owned, member or reached, now owed an
-	// edgeproto.AccountDeleted.
+	// edgeproto.AccountDeleted. It is empty for an account of a provider
+	// other than GitHub, which no server accepts a deletion for: each
+	// server's admin removes that identity with aether member unlink.
 	Notify []string
 }
 
@@ -244,9 +246,11 @@ func (s *Store) DeleteAccount(ctx context.Context, provider, subject string, now
 		WHERE provider = ? AND subject = ? RETURNING server_id`, provider, subject); err != nil {
 		return DeletedAccount{}, fmt.Errorf("edgestore: delete account: servers reached: %w", err)
 	}
-	out.Notify = append(append(slices.Clone(out.Owned), out.Member...), out.Reached...)
-	slices.Sort(out.Notify)
-	out.Notify = slices.Compact(out.Notify)
+	if provider == edgeproto.ProviderGitHub {
+		out.Notify = append(append(slices.Clone(out.Owned), out.Member...), out.Reached...)
+		slices.Sort(out.Notify)
+		out.Notify = slices.Compact(out.Notify)
+	}
 	for _, sid := range out.Notify {
 		if err = oweDeletion(ctx, tx, sid, provider, subject, now); err != nil {
 			return DeletedAccount{}, fmt.Errorf("edgestore: delete account: owe server %s: %w", sid, err)

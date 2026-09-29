@@ -658,7 +658,7 @@ func TestOwnerForgottenWhenTheEdgeHasNone(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
 	state := OpenState(dir)
-	setOwner(t, state, edge.pub, edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-1", Email: "owner@example.com"})
+	setOwner(t, state, edge.pub, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Email: "owner@example.com"})
 	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
 	run(t, a)
 	edge.nextControl(t)

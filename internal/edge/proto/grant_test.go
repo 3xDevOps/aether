@@ -168,6 +168,7 @@ func TestGrantContentRules(t *testing.T) {
 		{"no device id", func(g *Grant) { g.DeviceID = "" }, false},
 		{"escape in label", func(g *Grant) { g.DeviceLabel = "\x1b]0;x\x07" }, false},
 		{"invalid account", func(g *Grant) { g.Account.Provider = "" }, false},
+		{"google account", func(g *Grant) { g.Account = Account{Provider: "google", Subject: "fake-sub"} }, false},
 	}
 	for _, tt := range tests {
 		g := testGrant(t, now)
@@ -189,8 +190,13 @@ func TestGrantContentRules(t *testing.T) {
 		}
 		raw := base64.RawURLEncoding.EncodeToString(payload) + "." +
 			base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, grantMessage(payload)))
-		if _, err := VerifyGrant(pub, raw, scopeOf(g), now); !errors.Is(err, ErrGrantMalformed) {
+		_, err = VerifyGrant(pub, raw, scopeOf(g), now)
+		if !errors.Is(err, ErrGrantMalformed) {
 			t.Errorf("%s: VerifyGrant of edge-signed invalid grant = %v", tt.name, err)
+		}
+		// An earlier edge that signs a Google account in is told why.
+		if g.Account.Provider == "google" && (err == nil || !strings.Contains(err.Error(), `sign-in provider "google" is not supported: Aether signs in with GitHub only`)) {
+			t.Errorf("%s: VerifyGrant = %v, want the reason", tt.name, err)
 		}
 	}
 }

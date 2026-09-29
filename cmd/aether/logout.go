@@ -46,7 +46,7 @@ func runLogout(args []string) error {
 
 // deleteEdgeAccount shows what deleting the signed-in account touches and
 // where to delete it. The edge deletes an account only from a browser that
-// signed in with the provider moments before, never with a device token.
+// signed in with GitHub moments before, never with a device token.
 func deleteEdgeAccount(ctx context.Context, client *edgeclient.Client, out io.Writer) error {
 	sum, err := client.Account(ctx)
 	if err != nil {
@@ -63,8 +63,8 @@ func deleteEdgeAccount(ctx context.Context, client *edgeclient.Client, out io.Wr
 		"its edge devices. No server loses a member, a role or data: an SSH key or tailnet identity of yours keeps\n"+
 		"working there until an admin removes it. A server left without an owner is claimed again with a code from\n"+
 		"`aether-server edge claim-code` on its machine.\n"+
-		"delete it in a browser at %s%s: sign in with %s there and type %s. Then run `aether logout` here to\n"+
-		"delete this machine's token.\n", session.SigninOrigin, edgeproto.PathAccountPage, sum.Account.Provider, sum.Confirm)
+		"delete it in a browser at %s%s: sign in with GitHub there and type %s. Then run `aether logout` here to\n"+
+		"delete this machine's token.\n", session.SigninOrigin, edgeproto.PathAccountPage, sum.Confirm)
 	return nil
 }
 

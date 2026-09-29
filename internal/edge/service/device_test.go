@@ -38,7 +38,7 @@ func signedInBrowser(t *testing.T, h *harness) *browser {
 	t.Helper()
 	h.setGitHubUser(1, "owner", "owner@example.test", true)
 	b := h.browser(t)
-	b.signIn(t, edgeproto.ProviderGitHub)
+	b.signIn(t)
 	return b
 }
 
@@ -218,7 +218,7 @@ func TestRevokedTokenIsRefused(t *testing.T) {
 	// Another account cannot revoke this account's device.
 	h.setGitHubUser(2, "other", "other@example.test", true)
 	other := h.browser(t)
-	other.signIn(t, edgeproto.ProviderGitHub)
+	other.signIn(t)
 	kept := issue()
 	if resp, _ := other.post(t, "/devices/revoke", url.Values{"device": {kept.Device.ID}}); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("revoke another account's device: %s, want 404", resp.Status)

@@ -73,18 +73,23 @@ func TestEachOriginServesOnlyItsOwnPaths(t *testing.T) {
 	}
 }
 
-// TestOAuthCallbacksAreOnTheSigninOrigin checks the redirect address each
-// provider is sent, which must match the one registered with it.
-func TestOAuthCallbacksAreOnTheSigninOrigin(t *testing.T) {
+// TestOAuthCallbackIsOnTheSigninOrigin checks the redirect address GitHub
+// is sent, which must match the callback URL of the edge's OAuth app.
+// Sign-in with Google, which builds from the v0.5.2-alpha.3 tag offered,
+// has no route.
+func TestOAuthCallbackIsOnTheSigninOrigin(t *testing.T) {
 	h := newHarness(t)
-	for _, p := range []string{edgeproto.ProviderGitHub, edgeproto.ProviderGoogle} {
-		resp, _ := h.browser(t).get(t, "/signin/"+p)
-		loc, err := url.Parse(resp.Header.Get("Location"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got, want := loc.Query().Get("redirect_uri"), testSignin+"/signin/"+p+"/callback"; got != want {
-			t.Errorf("%s redirect_uri = %q, want %q", p, got, want)
+	resp, _ := h.browser(t).get(t, "/signin/github")
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := loc.Query().Get("redirect_uri"), testSignin+"/signin/github/callback"; got != want {
+		t.Errorf("redirect_uri = %q, want %q", got, want)
+	}
+	for _, path := range []string{"/signin/google", "/signin/google/callback?code=x&state=y"} {
+		if resp, _ := h.browser(t).get(t, path); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: %s, want 404", path, resp.Status)
 		}
 	}
 }

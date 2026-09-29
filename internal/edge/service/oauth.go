@@ -1,7 +1,6 @@
 package edge
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
@@ -31,12 +30,9 @@ const (
 	maxEmailLength      = 320
 )
 
-type provider struct {
-	id    string
-	title string
-	conf  oauth2.Config
-	api   string
-}
+// signinPath starts a sign-in with GitHub; GitHub returns to
+// signinPath/callback, the callback URL of the edge's OAuth app.
+const signinPath = "/signin/github"
 
 func withDefault(v, def string) string {
 	if v == "" {
@@ -45,55 +41,23 @@ func withDefault(v, def string) string {
 	return v
 }
 
-func githubProvider(app OAuthApp, origin string) *provider {
-	return &provider{
-		id:    edgeproto.ProviderGitHub,
-		title: "GitHub",
-		api:   strings.TrimSuffix(withDefault(app.APIURL, "https://api.github.com"), "/"),
-		conf: oauth2.Config{
-			ClientID:     app.ClientID,
-			ClientSecret: app.ClientSecret,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  withDefault(app.AuthURL, "https://github.com/login/oauth/authorize"),
-				TokenURL: withDefault(app.TokenURL, "https://github.com/login/oauth/access_token"),
-			},
-			RedirectURL: origin + "/signin/" + edgeproto.ProviderGitHub + "/callback",
-			Scopes:      []string{"user:email"},
+// githubConfig is the OAuth configuration of app on the sign-in origin.
+func githubConfig(app OAuthApp, origin string) oauth2.Config {
+	return oauth2.Config{
+		ClientID:     app.ClientID,
+		ClientSecret: app.ClientSecret,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  withDefault(app.AuthURL, "https://github.com/login/oauth/authorize"),
+			TokenURL: withDefault(app.TokenURL, "https://github.com/login/oauth/access_token"),
 		},
+		RedirectURL: origin + signinPath + "/callback",
+		Scopes:      []string{"user:email"},
 	}
-}
-
-func googleProvider(app OAuthApp, origin string) *provider {
-	return &provider{
-		id:    edgeproto.ProviderGoogle,
-		title: "Google",
-		api:   strings.TrimSuffix(withDefault(app.APIURL, "https://openidconnect.googleapis.com"), "/"),
-		conf: oauth2.Config{
-			ClientID:     app.ClientID,
-			ClientSecret: app.ClientSecret,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  withDefault(app.AuthURL, "https://accounts.google.com/o/oauth2/v2/auth"),
-				TokenURL: withDefault(app.TokenURL, "https://oauth2.googleapis.com/token"),
-			},
-			RedirectURL: origin + "/signin/" + edgeproto.ProviderGoogle + "/callback",
-			Scopes:      []string{"openid", "email", "profile"},
-		},
-	}
-}
-
-func (s *Service) provider(id string) *provider {
-	for _, p := range s.providers {
-		if p.id == id {
-			return p
-		}
-	}
-	return nil
 }
 
 // signinState is what the sign-in cookie carries between the redirect to
-// the provider and the provider's callback.
+// GitHub and GitHub's callback.
 type signinState struct {
-	Provider string `json:"p"`
 	State    string `json:"s"`
 	Verifier string `json:"v"`
 	Next     string `json:"n"`
@@ -110,26 +74,15 @@ func (s *Service) signinPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
-	type link struct{ Title, URL string }
-	var links []link
-	for _, p := range s.providers {
-		links = append(links, link{p.title, "/signin/" + p.id + "?" + url.Values{"next": {next}}.Encode()})
-	}
-	s.render(w, http.StatusOK, "signin", s.view(nil, "Sign in", links))
+	s.render(w, http.StatusOK, "signin", s.view(nil, "Sign in", signinPath+"?"+url.Values{"next": {next}}.Encode()))
 }
 
 func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
-	p := s.provider(r.PathValue("provider"))
-	if p == nil {
-		s.fail(w, r, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
-		return
-	}
 	if !s.signinLimit.allow(addrKeys(r)...) {
 		s.fail(w, r, nil, edgeproto.RefusalTooMany)
 		return
 	}
 	st := signinState{
-		Provider: p.id,
 		State:    edgeproto.NewToken(),
 		Verifier: edgeproto.NewVerifier(),
 		Next:     localPath(r.URL.Query().Get("next")),
@@ -140,15 +93,10 @@ func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCookie(w, signinCookie, base64.RawURLEncoding.EncodeToString(raw), int(signinTTL.Seconds()))
-	http.Redirect(w, r, p.conf.AuthCodeURL(st.State, oauth2.S256ChallengeOption(st.Verifier)), http.StatusFound)
+	http.Redirect(w, r, s.oauth.AuthCodeURL(st.State, oauth2.S256ChallengeOption(st.Verifier)), http.StatusFound)
 }
 
 func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
-	p := s.provider(r.PathValue("provider"))
-	if p == nil {
-		s.fail(w, r, nil, pageErr(http.StatusNotFound, "sign-in with %q is not offered on this edge", r.PathValue("provider")))
-		return
-	}
 	if !s.signinLimit.allow(addrKeys(r)...) {
 		s.fail(w, r, nil, edgeproto.RefusalTooMany)
 		return
@@ -160,36 +108,36 @@ func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	// The state is checked first, so only the provider answering this
-	// browser's own sign-in can put its error text on an edge page.
-	if st.Provider != p.id || !edgeproto.ValidToken(st.State) ||
+	// The state is checked first, so only GitHub answering this browser's
+	// own sign-in can put its error text on an edge page.
+	if !edgeproto.ValidToken(st.State) ||
 		subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(st.State)) != 1 {
 		s.fail(w, r, nil, pageErr(http.StatusBadRequest,
 			"the sign-in response does not belong to the sign-in this browser started; start again"))
 		return
 	}
 	if e := q.Get("error"); e != "" {
-		s.fail(w, r, nil, pageErr(http.StatusForbidden, "%s sign-in failed: %s %s", p.title,
+		s.fail(w, r, nil, pageErr(http.StatusForbidden, "GitHub sign-in failed: %s %s",
 			cleanName(e), cleanName(q.Get("error_description"))))
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), oauth2.HTTPClient, s.client), providerTimeout)
 	defer cancel()
-	tok, err := p.conf.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(st.Verifier))
+	tok, err := s.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(st.Verifier))
 	if err != nil {
-		s.fail(w, r, nil, pageErr(http.StatusBadGateway, "%s sign-in: exchange code: %v", p.title, err))
+		s.fail(w, r, nil, pageErr(http.StatusBadGateway, "GitHub sign-in: exchange code: %v", err))
 		return
 	}
-	account, err := s.fetchAccount(ctx, p, tok.AccessToken)
+	account, err := s.githubAccount(ctx, tok.AccessToken)
 	if err != nil {
-		// An account the edge refuses keeps its 403: only a provider
-		// that failed to answer is a 502, and logged.
+		// An account the edge refuses keeps its 403: only GitHub failing
+		// to answer is a 502, and logged.
 		status := http.StatusBadGateway
 		var refused *statusError
 		if errors.As(err, &refused) {
 			status = refused.status
 		}
-		s.fail(w, r, nil, pageErr(status, "%s sign-in: %v", p.title, err))
+		s.fail(w, r, nil, pageErr(status, "GitHub sign-in: %v", err))
 		return
 	}
 	if err := s.startSession(w, r, account); err != nil {
@@ -242,33 +190,15 @@ func (s *Service) startSession(w http.ResponseWriter, r *http.Request, account e
 	return nil
 }
 
-func (s *Service) fetchAccount(ctx context.Context, p *provider, accessToken string) (edgeproto.Account, error) {
-	var a edgeproto.Account
-	var err error
-	switch p.id {
-	case edgeproto.ProviderGitHub:
-		a, err = s.githubAccount(ctx, p.api, accessToken)
-	case edgeproto.ProviderGoogle:
-		a, err = s.googleAccount(ctx, p.api, accessToken)
-	}
-	if err != nil {
-		return edgeproto.Account{}, err
-	}
-	if err := a.Validate(); err != nil {
-		return edgeproto.Account{}, pageErr(http.StatusForbidden, "the provider returned an account this edge cannot use: %v", err)
-	}
-	return a, nil
-}
-
 // githubAccount reads the GitHub user and keeps only a primary, verified
 // email.
-func (s *Service) githubAccount(ctx context.Context, api, accessToken string) (edgeproto.Account, error) {
+func (s *Service) githubAccount(ctx context.Context, accessToken string) (edgeproto.Account, error) {
 	var user struct {
 		ID    int64  `json:"id"`
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	}
-	if err := s.getJSON(ctx, api+"/user", accessToken, &user); err != nil {
+	if err := s.getJSON(ctx, s.githubAPI+"/user", accessToken, &user); err != nil {
 		return edgeproto.Account{}, err
 	}
 	if user.ID <= 0 {
@@ -282,7 +212,7 @@ func (s *Service) githubAccount(ctx context.Context, api, accessToken string) (e
 		Primary  bool   `json:"primary"`
 		Verified bool   `json:"verified"`
 	}
-	if err := s.getJSON(ctx, api+"/user/emails", accessToken, &emails); err != nil {
+	if err := s.getJSON(ctx, s.githubAPI+"/user/emails", accessToken, &emails); err != nil {
 		return edgeproto.Account{}, err
 	}
 	a := edgeproto.Account{
@@ -296,24 +226,8 @@ func (s *Service) githubAccount(ctx context.Context, api, accessToken string) (e
 			a.Email = cleanEmail(e.Email)
 		}
 	}
-	return a, nil
-}
-
-// googleAccount reads Google's OpenID userinfo and keeps the email only
-// when email_verified is the JSON value true.
-func (s *Service) googleAccount(ctx context.Context, api, accessToken string) (edgeproto.Account, error) {
-	var info struct {
-		Sub           string          `json:"sub"`
-		Email         string          `json:"email"`
-		EmailVerified json.RawMessage `json:"email_verified"`
-		Name          string          `json:"name"`
-	}
-	if err := s.getJSON(ctx, api+"/v1/userinfo", accessToken, &info); err != nil {
-		return edgeproto.Account{}, err
-	}
-	a := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: info.Sub, Name: cleanName(info.Name)}
-	if bytes.Equal(bytes.TrimSpace(info.EmailVerified), []byte("true")) {
-		a.Email = cleanEmail(info.Email)
+	if err := a.Validate(); err != nil {
+		return edgeproto.Account{}, pageErr(http.StatusForbidden, "GitHub returned an account this edge cannot use: %v", err)
 	}
 	return a, nil
 }

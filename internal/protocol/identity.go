@@ -123,22 +123,19 @@ type Invitation struct {
 }
 
 // MemberInvitationCreateParams are the params of member.invitation.create.
-// Exactly one of Login and Email is set. A Login invitation's Provider is
-// "github"; an Email invitation's Provider is "github", "google", or empty
-// for either.
+// Exactly one of Login, a GitHub login, and Email, a verified primary
+// email of a GitHub account, is set.
 type MemberInvitationCreateParams struct {
-	Provider string `json:"provider,omitempty"`
-	Login    string `json:"login,omitempty"`
-	Email    string `json:"email,omitempty"`
-	Role     string `json:"role"`
+	Login string `json:"login,omitempty"`
+	Email string `json:"email,omitempty"`
+	Role  string `json:"role"`
 }
 
 // MemberIdentityLinkParams are the params of member.identity.link, shaped
 // like an invitation without a role.
 type MemberIdentityLinkParams struct {
-	Provider string `json:"provider,omitempty"`
-	Login    string `json:"login,omitempty"`
-	Email    string `json:"email,omitempty"`
+	Login string `json:"login,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // MemberInvitationResult is the result of member.invitation.create and
@@ -193,12 +190,10 @@ type MemberIdentityRemoveResult struct {
 	Revoked []Device `json:"revoked"`
 }
 
-// ServerOwnerTransferParams are the params of server.owner.transfer.
-// Provider picks one of the member's edge identities and may be left out
-// when the member has exactly one.
+// ServerOwnerTransferParams are the params of server.owner.transfer. The
+// member must have exactly one GitHub identity.
 type ServerOwnerTransferParams struct {
 	MemberID string `json:"member_id"`
-	Provider string `json:"provider,omitempty"`
 }
 
 // ServerOwnerTransferResult is the new owner: the member and the edge

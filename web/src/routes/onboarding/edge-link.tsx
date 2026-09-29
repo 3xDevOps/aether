@@ -139,7 +139,7 @@ export function EdgeSignIn({
         <h3 className="text-sm font-semibold">Sign in</h3>
         <p className="text-[13px] leading-5 text-muted-foreground">
           Reach your server through an edge relay, with no VPN, open port or address to set
-          up. Sign in with GitHub or Google, then link a server by the id its admin gave you,
+          up. Sign in with GitHub, then link a server by the id its admin gave you,
           pick one your account reaches, or add a new one.
         </p>
       </div>

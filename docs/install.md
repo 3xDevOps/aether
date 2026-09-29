@@ -416,7 +416,9 @@ aether-windows-amd64.exe    aether-windows-arm64.exe
 
 `aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
 are the client. `aether-edge` is only for running your own edge
-([edge.md](edge.md)); servers and clients do not need it.
+([edge.md](edge.md)); servers and clients do not need it. It also ships as
+the image `ghcr.io/3xdevops/aether-edge:<release-tag>`
+([edge.md](edge.md#in-a-container)).
 
 **Linux and macOS.** Download the one you want, check it against
 `checksums.txt`, `chmod +x`, and drop it on your `PATH` under the name
@@ -941,7 +943,7 @@ connections are not required to carry a key, it asks one more question -
 fresh config - which is how a phone on the tailnet reaches the dashboard
 ([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
 on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
-that lets clients reach the server over SSH with a GitHub or Google sign-in
+that lets clients reach the server over SSH with a GitHub sign-in
 ([edge.md](edge.md)), and prints what the edge can see and the command that
 turns it off; with tailscaled it asks, defaulting to no. With the edge on
 it asks who may reach the server through it, `1` (account access) or `2`
@@ -1362,6 +1364,35 @@ as `v0.5` ends the release in seconds instead of after the whole matrix is
 built - which used to leave the published release with no assets and
 `/releases/latest` pointing at it. Only an admin publisher runs the release
 job on a GitHub-hosted runner; other publishers are skipped.
+
+The workflow also publishes the [edge](edge.md#in-a-container) image
+`ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
+[`images/edge/Dockerfile`](../images/edge/Dockerfile) without a build cache
+and stamped with the release tag and the same short commit as the release
+binaries. Nothing reaches a tag before it is tested:
+
+1. `edge-image` builds each architecture on a native runner, runs
+   `scripts/edge-image-smoke.sh` on it, and only then pushes it as
+   `<tag>-amd64` or `<tag>-arm64`.
+2. `edge-manifest` joins those two under the immutable tags: the release
+   tag, the full commit SHA and `sha-<short-sha>`. It checks that every tag
+   names one index digest and that the index carries the two tested images,
+   pulls each architecture by tag and by digest, and lists the digests in
+   the job summary. The release job waits for it, so a failed edge image
+   uploads no assets.
+3. `edge-latest` moves `latest` to that digest only after the release job
+   has uploaded the assets. A release that fails earlier leaves `latest` on
+   the previous release.
+
+A new GHCR package starts private. The workflow does not fail on that, by
+design: the image is published and pullable with credentials, and only an
+administrator can change the visibility. After the first release that
+publishes `aether-edge`, a repository administrator opens
+<https://github.com/orgs/3xDevOps/packages/container/package/aether-edge>,
+chooses Package settings, and sets Danger Zone > Change visibility to
+Public; if the package page does not show the repository, **Connect
+repository** links it. Until then `edge-manifest` ends with the warning
+`aether-edge is not public` and the release still completes.
 
 `make release` also builds and signs the [Android app](#android-app), the
 APK and the app bundle, in a pinned SDK container, so the release needs

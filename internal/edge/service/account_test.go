@@ -115,12 +115,12 @@ func TestAccountPageDeletes(t *testing.T) {
 	}
 	// The account signing in elsewhere, as its person does every day,
 	// does not let a stolen copy of this browser's cookie delete it.
-	h.browser(t).signIn(t, edgeproto.ProviderGitHub)
+	h.browser(t).signIn(t)
 	if resp, page = f.b.post(t, "/account/delete", url.Values{"confirm": {"owner"}}); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("delete from a stale browser after a sign-in in another: %s\n%s", resp.Status, page)
 	}
 
-	f.b.signIn(t, edgeproto.ProviderGitHub)
+	f.b.signIn(t)
 	for _, typed := range []string{"", "other", "owner@example.test.evil", f.tok.Account.Subject} {
 		if resp, page = f.b.post(t, "/account/delete", url.Values{"confirm": {typed}}); resp.StatusCode != http.StatusBadRequest ||
 			!strings.Contains(page, "the confirmation does not name this account: type owner") {
@@ -157,7 +157,7 @@ func TestDeviceTokenCannotDeleteAccount(t *testing.T) {
 		t.Fatalf("account summary %+v", sum)
 	}
 
-	h.browser(t).signIn(t, edgeproto.ProviderGitHub)
+	h.browser(t).signIn(t)
 	if status, msg := h.apiCall(t, http.MethodPost, "/v1/account/delete", f.tok.Token, map[string]string{"confirm": "owner"}, nil); status != http.StatusNotFound {
 		t.Fatalf("delete with a device token: %d %q", status, msg)
 	}
@@ -166,9 +166,11 @@ func TestDeviceTokenCannotDeleteAccount(t *testing.T) {
 	}
 }
 
+// A GitHub account has no login here once another account signed in
+// holding it, and no email unless its primary email is verified.
 func TestConfirmationOfAnAccountWithoutLoginOrEmail(t *testing.T) {
-	a := edgeproto.AccountInfo{ID: edgeproto.NewAccountID(), Account: edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-1"}}
-	if confirmText(a) != a.ID || !confirms(a, a.ID) || confirms(a, "g-1") || confirms(a, "") {
+	a := edgeproto.AccountInfo{ID: edgeproto.NewAccountID(), Account: edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001"}}
+	if confirmText(a) != a.ID || !confirms(a, a.ID) || confirms(a, "1001") || confirms(a, "") {
 		t.Errorf("an account with neither login nor email is confirmed by its id %s, and only by it", a.ID)
 	}
 }

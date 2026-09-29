@@ -219,3 +219,70 @@ func TestClaimCodeForAnAdminRecoversThatAdmin(t *testing.T) {
 		t.Fatalf("recovery with another member's account = %v, banner %q", err, banner)
 	}
 }
+
+// TestGoogleIdentityFromAnEarlierVersion meets what a build from the
+// v0.5.2-alpha.3 tag could store through an edge that signed people in with
+// Google: an identity with its device, and an email invitation. The directory
+// leaves them out while the listings show them, ownership cannot go to them,
+// and the removal methods remove them.
+func TestGoogleIdentityFromAnEarlierVersion(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
+	ctx := context.Background()
+	ids := identities(t, e)
+	admin := controlClient(t, e)
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	_, bob := addMember(t, e, "Bob", domain.RoleAdmin, false)
+	if err := ids.BindIdentity(ctx, &domain.Identity{Member: bob.ID, Provider: "google", Subject: "g-1", Email: "bob@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	dev := &domain.Device{Member: bob.ID, Provider: "google", Subject: "g-1", Email: "bob@example.com",
+		Credential: edgeproto.DeviceKeyLine(newSigner(t).PublicKey()), Label: "phone", Status: domain.DeviceApproved}
+	if err := ids.RegisterDevice(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+	inv := inviteAccount(t, e, domain.Invitation{Provider: "google", Email: "dana@example.com", Role: domain.RoleViewer})
+
+	entries, err := e.srv.EdgeDirectory(ctx)
+	if err != nil {
+		t.Fatalf("directory with Google rows: %v", err)
+	}
+	for _, en := range entries {
+		if en.Provider == "google" {
+			t.Fatalf("directory carries %+v", en)
+		}
+	}
+	var listed protocol.MemberIdentityListResult
+	if err = admin.Call(protocol.MethodMemberIdentityList, protocol.MemberIdentityListParams{MemberID: string(bob.ID)}, &listed); err != nil ||
+		len(listed.Identities) != 1 || listed.Identities[0].Provider != "google" || listed.Identities[0].Subject != "g-1" ||
+		len(listed.Devices) != 1 || listed.Devices[0].Provider != "google" {
+		t.Fatalf("identities of %s: %+v, %v", bob.ID, listed, err)
+	}
+	var invs protocol.MemberInvitationListResult
+	if err = admin.Call(protocol.MethodMemberInvitationList, nil, &invs); err != nil ||
+		len(invs.Invitations) != 1 || invs.Invitations[0].Provider != "google" {
+		t.Fatalf("invitations: %+v, %v", invs, err)
+	}
+
+	var pe *protocol.Error
+	err = admin.Call(protocol.MethodServerOwnerTransfer, protocol.ServerOwnerTransferParams{MemberID: string(bob.ID)}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState || !strings.Contains(pe.Message, "has no GitHub identity, only google:g-1") {
+		t.Fatalf("transfer to a Google identity = %v, want refused with the reason", err)
+	}
+
+	var removed protocol.MemberIdentityRemoveResult
+	if err = admin.Call(protocol.MethodMemberIdentityRemove,
+		protocol.MemberIdentityRemoveParams{MemberID: string(bob.ID), Provider: "google", Subject: "g-1"}, &removed); err != nil ||
+		len(removed.Revoked) != 1 || removed.Revoked[0].ID != string(dev.ID) {
+		t.Fatalf("unlink the Google identity: %+v, %v", removed, err)
+	}
+	if err = admin.Call(protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: string(inv.ID)}, nil); err != nil {
+		t.Fatalf("revoke the Google invitation: %v", err)
+	}
+	if all, _ := ids.ListIdentities(ctx); len(all) != 0 {
+		t.Fatalf("identities left: %+v", all)
+	}
+	if left, _ := ids.ListInvitations(ctx); len(left) != 0 {
+		t.Fatalf("invitations left: %+v", left)
+	}
+}

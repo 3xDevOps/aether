@@ -41,7 +41,7 @@ func TestInvitations(t *testing.T) {
 	h.mustDial(ca, a)
 
 	// Revoked before use.
-	id := invite(t, ctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: da.user.Login, Role: "collaborator"})
+	id := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: da.user.Login, Role: "collaborator"})
 	waitRole(t, da, a.id, "collaborator")
 	call[struct{}](t, ctl, protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: id})
 	waitRole(t, da, a.id, "")
@@ -50,7 +50,7 @@ func TestInvitations(t *testing.T) {
 
 	// Its creator demoted: an admin's open invitations go with the role.
 	bctl := h.control(bo, a)
-	invite(t, bctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: er.user.Login, Role: "admin"})
+	invite(t, bctl, protocol.MemberInvitationCreateParams{Login: er.user.Login, Role: "admin"})
 	waitRole(t, er, a.id, "admin")
 	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "collaborator"})
 	waitRole(t, er, a.id, "")
@@ -67,7 +67,7 @@ func TestInvitations(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := h.proxy.mark()
-	id = invite(t, ctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: "someone-else", Role: "viewer"})
+	id = invite(t, ctl, protocol.MemberInvitationCreateParams{Login: "someone-else", Role: "viewer"})
 	pushed := h.proxy.await(t, "a directory push", from, func(e logEntry) bool {
 		_, ok := e.msg.(edgeproto.Directory)
 		return ok && !e.fromEdge && e.serverID == a.id
@@ -107,14 +107,14 @@ func TestRoleChange(t *testing.T) {
 	h.join(ctl, bo, a, "viewer")
 	bctl := h.control(bo, a)
 	deniedCall(t, bctl, protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: "someone", Role: "viewer"}, "admin")
+		protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"}, "admin")
 
 	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "admin"})
 	waitRole(t, bo, a.id, "admin")
 	if info := call[protocol.ServerInfoResult](t, bctl, protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
 		t.Fatalf("bob's live connection sees %+v", info.Member)
 	}
-	invite(t, bctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: "someone", Role: "viewer"})
+	invite(t, bctl, protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"})
 }
 
 // A member of one server reaches no other: the edge refuses, and a grant

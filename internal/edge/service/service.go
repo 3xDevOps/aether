@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
@@ -35,18 +37,15 @@ type Config struct {
 	// Each is "https://host[:port]", and their host names differ.
 	SigninOrigin string
 	RelayOrigin  string
-	// GitHub and Google are the OAuth applications; a nil one is not
-	// offered. At least one is required.
+	// GitHub is the OAuth app people sign in with. It is required.
 	GitHub *OAuthApp
-	Google *OAuthApp
 	// Clock is time.Now when nil.
 	Clock func() time.Time
 }
 
-// OAuthApp is one provider's OAuth application. AuthURL, TokenURL and
-// APIURL override the provider's endpoints when set; tests point them at a
-// fake provider. APIURL is the base of GitHub's REST API or of Google's
-// OpenID userinfo endpoint.
+// OAuthApp is a GitHub OAuth app. AuthURL, TokenURL and APIURL, the base
+// of GitHub's REST API, override GitHub's endpoints when set; tests point
+// them at a fake GitHub.
 type OAuthApp struct {
 	ClientID     string
 	ClientSecret string
@@ -87,7 +86,8 @@ type Service struct {
 	store      *edgestore.Store
 	key        ed25519.PrivateKey
 	link       ServerLink
-	providers  []*provider
+	oauth      oauth2.Config
+	githubAPI  string
 	pages      *template.Template
 	client     *http.Client
 
@@ -146,15 +146,11 @@ func New(cfg Config) (*Service, error) {
 		claimAccountLimit: newLimiter[edgeproto.Principal](5, time.Minute, now),
 		claimServerLimit:  newLimiter[string](10, 30*time.Second, now),
 	}
-	if cfg.GitHub != nil {
-		s.providers = append(s.providers, githubProvider(*cfg.GitHub, signin))
+	if cfg.GitHub == nil {
+		return nil, errors.New("edge: no GitHub OAuth app is configured; set --github-client-id and its client secret")
 	}
-	if cfg.Google != nil {
-		s.providers = append(s.providers, googleProvider(*cfg.Google, signin))
-	}
-	if len(s.providers) == 0 {
-		return nil, errors.New("edge: no sign-in provider is configured; configure a GitHub or Google OAuth application")
-	}
+	s.oauth = githubConfig(*cfg.GitHub, signin)
+	s.githubAPI = strings.TrimSuffix(withDefault(cfg.GitHub.APIURL, "https://api.github.com"), "/")
 	if s.pages, err = parsePages(); err != nil {
 		return nil, err
 	}
@@ -206,8 +202,8 @@ func (s *Service) Handler() http.Handler {
 	})
 	pages.HandleFunc("GET /edge.css", serveCSS)
 	pages.HandleFunc("GET /signin", s.signinPage)
-	pages.HandleFunc("GET /signin/{provider}", s.signinStart)
-	pages.HandleFunc("GET /signin/{provider}/callback", s.signinCallback)
+	pages.HandleFunc("GET "+signinPath, s.signinStart)
+	pages.HandleFunc("GET "+signinPath+"/callback", s.signinCallback)
 	pages.HandleFunc("POST /signout", s.signedIn(s.signout))
 	pages.HandleFunc("GET /device", s.signedIn(s.devicePage))
 	pages.HandleFunc("POST /device", s.signedIn(s.deviceLookup))

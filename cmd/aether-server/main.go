@@ -138,7 +138,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"edge that relays SSH for members without a direct or tailnet route (empty = off; aether-server setup offers "+edgeagent.DefaultURL+")")
 	o.edgeAccess = new(accessPolicyValue(edgeproto.PolicyApprovedDevices))
 	fs.Var(o.edgeAccess, "edge-access",
-		"who may reach this server through the edge: account (signing in with GitHub or Google is enough) or approved-devices "+
+		"who may reach this server through the edge: account (signing in with GitHub is enough) or approved-devices "+
 			"(each new device waits until a person approves it); changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,

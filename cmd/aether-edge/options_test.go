@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -86,7 +87,7 @@ func TestClientSecrets(t *testing.T) {
 	base := append(slices.Clone(origins), "--github-client-id", "fake-id")
 
 	o, err := parseOptions(append(base, "--github-client-secret-file", file), envOf(nil))
-	if err != nil || o.github == nil || o.github.ClientSecret != "fake-secret-from-file" || o.google != nil {
+	if err != nil || o.github == nil || o.github.ClientSecret != "fake-secret-from-file" {
 		t.Fatalf("secret from file: %+v %v", o.github, err)
 	}
 	o, err = parseOptions(base, envOf(map[string]string{"AETHER_EDGE_GITHUB_CLIENT_SECRET": "fake-secret-from-env"}))
@@ -114,17 +115,13 @@ func TestOriginMustNameAHost(t *testing.T) {
 	}
 }
 
-// TestOneProviderUnderTheUnit starts as packaging/systemd/aether-edge.service
-// does on an edge that offers GitHub only: both secret variables name a
-// credential, and SetCredential= leaves Google's a single newline.
-func TestOneProviderUnderTheUnit(t *testing.T) {
-	dir := t.TempDir()
-	github := filepath.Join(dir, "github-client-secret")
-	google := filepath.Join(dir, "google-client-secret")
+// TestSecretUnderTheUnit starts as packaging/systemd/aether-edge.service
+// does: the secret variable names a credential, which SetCredential=
+// leaves a single newline when /etc/aether-edge/github-client-secret is
+// missing.
+func TestSecretUnderTheUnit(t *testing.T) {
+	github := filepath.Join(t.TempDir(), "github-client-secret")
 	if err := os.WriteFile(github, []byte("fake-secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(google, []byte("\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	env := map[string]string{
@@ -132,17 +129,88 @@ func TestOneProviderUnderTheUnit(t *testing.T) {
 		"AETHER_EDGE_RELAY_ORIGIN":              "https://edge.example.test",
 		"AETHER_EDGE_GITHUB_CLIENT_ID":          "fake-id",
 		"AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE": github,
-		"AETHER_EDGE_GOOGLE_CLIENT_SECRET_FILE": google,
 	}
 	o, err := parseOptions(nil, envOf(env))
-	if err != nil || o.github == nil || o.github.ClientSecret != "fake-secret" || o.google != nil {
-		t.Fatalf("GitHub only: github %+v, google %+v, %v", o.github, o.google, err)
+	if err != nil || o.github == nil || o.github.ClientSecret != "fake-secret" {
+		t.Fatalf("secret from the credential: %+v, %v", o.github, err)
 	}
 
-	// A client id whose secret file is missing is a mistake, not a
-	// provider left out.
-	env["AETHER_EDGE_GOOGLE_CLIENT_ID"] = "fake-id"
-	if _, err := parseOptions(nil, envOf(env)); err == nil || !strings.Contains(err.Error(), google+", named by --google-client-secret-file, holds no secret") {
-		t.Fatalf("google id without a secret: %v", err)
+	if err := os.WriteFile(github, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseOptions(nil, envOf(env)); err == nil || !strings.Contains(err.Error(), github+", named by --github-client-secret-file, holds no secret") {
+		t.Fatalf("client id without a secret: %v", err)
+	}
+}
+
+func TestTrustedProxies(t *testing.T) {
+	proxy := func(listen, list string) (options, error) {
+		return parseOptions(append([]string{"--proxy-listen", listen, "--trusted-proxies", list}, origins...), envOf(nil))
+	}
+	o, err := proxy("0.0.0.0:8443", "172.18.0.0/16, fd00:18::/64,::ffff:10.0.0.5/128,192.0.2.7/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"172.18.0.0/16", "fd00:18::/64", "10.0.0.5/32", "192.0.2.0/24"}
+	if got := fmt.Sprint(o.trustedProxies); got != fmt.Sprint(want) {
+		t.Errorf("trusted proxies %s, want %v", got, want)
+	}
+	for _, listen := range []string{":8443", "[::]:8443", "172.18.0.5:8443"} {
+		if _, err = proxy(listen, "172.18.0.0/16"); err != nil {
+			t.Errorf("--proxy-listen %s with --trusted-proxies: %v", listen, err)
+		}
+	}
+	for list, want := range map[string]string{
+		"0.0.0.0/0":                  `"0.0.0.0/0" trusts every address`,
+		"172.18.0.0/16,::/0":         `"::/0" trusts every address`,
+		"::ffff:0.0.0.0/96":          `"::ffff:0.0.0.0/96" trusts every address`,
+		"172.18.0.5":                 `"172.18.0.5" is not a network such as 172.18.0.0/16`,
+		"172.18.0.0/16,":             `"" is not a network`,
+		"172.18.0.0/33":              `"172.18.0.0/33" is not a network`,
+		"proxy.internal/32":          `"proxy.internal/32" is not a network`,
+		"fe80::1%eth0/64":            `"fe80::1%eth0/64" is not a network`,
+		"172.18.0.0/16;10.0.0.0/8":   `"172.18.0.0/16;10.0.0.0/8" is not a network`,
+		"172.18.0.0/16 10.0.0.0/8/8": `is not a network`,
+	} {
+		if _, err = proxy("0.0.0.0:8443", list); err == nil || !strings.Contains(err.Error(), "--trusted-proxies: ") || !strings.Contains(err.Error(), want) {
+			t.Errorf("--trusted-proxies %q: %v, want %q", list, err, want)
+		}
+	}
+	if _, err = parseOptions(append([]string{"--trusted-proxies", "172.18.0.0/16"}, origins...), envOf(nil)); err == nil ||
+		!strings.Contains(err.Error(), "set --proxy-listen too") {
+		t.Errorf("--trusted-proxies without --proxy-listen: %v", err)
+	}
+	// Without the option, --proxy-listen stays loopback only, and says how
+	// to trust a proxy elsewhere.
+	if _, err = parseOptions(append([]string{"--proxy-listen", "0.0.0.0:8443"}, origins...), envOf(nil)); err == nil ||
+		!strings.Contains(err.Error(), "must be a loopback address") || !strings.Contains(err.Error(), "--trusted-proxies") {
+		t.Errorf("non-loopback --proxy-listen without --trusted-proxies: %v", err)
+	}
+	o, err = parseOptions(nil, envOf(map[string]string{
+		"AETHER_EDGE_SIGNIN_ORIGIN": "https://auth.example.test", "AETHER_EDGE_RELAY_ORIGIN": "https://edge.example.test",
+		"AETHER_EDGE_PROXY_LISTEN": ":8443", "AETHER_EDGE_TRUSTED_PROXIES": "10.0.0.0/8",
+	}))
+	if err != nil || fmt.Sprint(o.trustedProxies) != "[10.0.0.0/8]" {
+		t.Errorf("--trusted-proxies from the environment: %v %v", o.trustedProxies, err)
+	}
+}
+
+func TestSecretFileErrorsSayWhatToDo(t *testing.T) {
+	dir := t.TempDir()
+	base := append(slices.Clone(origins), "--github-client-id", "fake-id")
+	_, err := parseOptions(append(base, "--github-client-secret-file", filepath.Join(dir, "missing")), envOf(nil))
+	if err == nil || !strings.Contains(err.Error(), "--github-client-secret-file: open "+filepath.Join(dir, "missing")+": no such file or directory; put the secret there") {
+		t.Errorf("missing secret file: %v", err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of any mode")
+	}
+	unreadable := filepath.Join(dir, "unreadable")
+	if err = os.WriteFile(unreadable, []byte("fake-secret\n"), 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err = parseOptions(append(base, "--github-client-secret-file", unreadable), envOf(nil))
+	if err == nil || !strings.Contains(err.Error(), "permission denied; make it readable by uid") {
+		t.Errorf("unreadable secret file: %v", err)
 	}
 }

@@ -130,7 +130,7 @@ See [per-harness setup and limits](docs/harnesses.md) and
 | [Install](docs/install.md) | The install script, systemd, upgrades, data layout. |
 | [Environments](docs/environments.md) | Member images, saving, resetting, and persistence. |
 | [Networking](docs/networking.md) | Tailscale, the edge relay, and plain LAN or VPN. |
-| [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub or Google sign-in, and running your own edge. |
+| [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub sign-in, and running your own edge as a binary or a container. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
 | [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
 | [Harness integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |

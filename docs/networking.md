@@ -12,7 +12,7 @@ How you make that port reachable is up to you. Tailscale is the recommended
 answer, and it is also the recommended identity layer, because it removes SSH
 key management entirely. When neither side can reach the other, an **edge**
 relays the SSH connection instead: server and client both dial out to it, and
-you sign in with GitHub or Google - see [Through an edge](#through-an-edge).
+you sign in with GitHub - see [Through an edge](#through-an-edge).
 
 ---
 
@@ -136,7 +136,7 @@ An edge is a relay both the server and your client dial out to, so neither
 needs an open port, a tailnet or a copied SSH key. The project runs one at
 `https://edge.onaether.dev`, and `aether-server setup` turns it on when the
 host has no tailscaled. SSH still runs end to end: the edge splices bytes and
-cannot read them. You sign in once with GitHub or Google and link the server
+cannot read them. You sign in once with GitHub and link the server
 by its id:
 
 ```sh

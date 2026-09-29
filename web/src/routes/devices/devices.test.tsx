@@ -24,7 +24,6 @@ const pendingDesktop = device({
   id: 'dev_desktop',
   member_id: bob.id,
   account: 'bob@example.com',
-  provider: 'google',
   label: 'desktop',
   status: 'pending',
   fingerprint: 'SHA256:otherfingerprint',
@@ -57,7 +56,17 @@ describe('devices view', () => {
     expect(within(desktop).getByText('SHA256:otherfingerprint')).toBeDefined()
     // An admin reads whose device it is.
     expect(desktop.textContent).toMatch(/Bob · added .+ · never seen/)
-    expect(within(desktop).getByText('signed in as bob@example.com on Google')).toBeDefined()
+    expect(within(desktop).getByText('signed in as bob@example.com on GitHub')).toBeDefined()
+  })
+
+  it('names the provider of a device v0.5.2-alpha.3 signed in with Google', async () => {
+    seed()
+    const old = device({ id: 'dev_old', provider: 'google', account: 'alice@example.com', label: 'old' })
+    const client = fakeApi({ memberDeviceList: vi.fn(async () => [old]) })
+    render(<DevicesRoute params={{}} client={client} />)
+
+    const row = (await screen.findByText('old')).closest('li')!
+    expect(within(row).getByText('signed in as alice@example.com on google')).toBeDefined()
   })
 
   it('names the invitation a device waits on, which has no member yet', async () => {
@@ -105,7 +114,7 @@ describe('devices view', () => {
     const dialog = within(await screen.findByRole('alertdialog'))
     expect(client.memberDeviceLookup).toHaveBeenCalledWith('ABCD-EFGH')
     expect(dialog.getByText('Approve desktop as Bob (admin)?')).toBeDefined()
-    expect(dialog.getByText(/signed in as bob@example.com on Google/)).toBeDefined()
+    expect(dialog.getByText(/signed in as bob@example.com on GitHub/)).toBeDefined()
     expect(dialog.getByText('SHA256:otherfingerprint')).toBeDefined()
     expect(client.memberDeviceApprove).not.toHaveBeenCalled()
 

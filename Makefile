@@ -35,6 +35,10 @@ BROWSER_RUN = docker run --rm --init --user 1000:1000 \
 	--tmpfs /tmp:rw,nosuid,nodev,size=536870912,mode=1777 \
 	--entrypoint node '$(BROWSER_IMAGE)'
 
+# The aether-edge image, built for this machine's architecture with the
+# build arguments the release passes. docs/edge.md, "In a container".
+EDGE_IMAGE ?= aether/edge:test
+
 # The Go version go.mod pins: the `toolchain` line when it names one, else the
 # `go` directive. `toolchain default` is legal and names no version, so only a
 # goX.Y value counts. Assigned lazily - only `lint` reads it.
@@ -135,7 +139,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build browser-image browser-smoke test test-integration test-e2e test-scripts test-native-hooks vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
+.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
 
 all: build
 
@@ -144,6 +148,10 @@ build: dashboard
 
 browser-image:
 	docker build --tag '$(BROWSER_IMAGE)' --file images/browser/Dockerfile .
+
+edge-image:
+	docker build --tag '$(EDGE_IMAGE)' --file images/edge/Dockerfile \
+		--build-arg VERSION='$(VERSION)' --build-arg COMMIT='$(COMMIT)' .
 
 # A working Ubuntu kernel/user-namespace AppArmor policy is a prerequisite;
 # sandbox failures fail this gate, never trigger an unconfined fallback.
@@ -184,6 +192,8 @@ test-scripts:
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-changes-test.sh
+	sh scripts/ci-classify-edge-test.sh
+	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.

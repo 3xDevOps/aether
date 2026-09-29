@@ -18,11 +18,13 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/edge/relay"
 )
 
 // proxy stands between the edge and everything that dials it. It passes
-// every request through unchanged, and additionally decodes the control
-// channels it carries, recording each message. A test makes it act as a
+// every request through unchanged but for the X-Forwarded-For a reverse
+// proxy sets, and additionally decodes the control channels it carries,
+// recording each message. A test makes it act as a
 // compromised edge: it injects messages in either direction, alters or
 // drops them in flight, routes a client's connection to another server,
 // and answers the data sockets of opens it forged itself.
@@ -65,6 +67,7 @@ func (p *proxy) handler(backAddr string) http.Handler {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
 			r.Out.Host = r.In.Host
+			r.SetXForwarded()
 		},
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
@@ -98,8 +101,10 @@ func (p *proxy) serveControl(w http.ResponseWriter, r *http.Request, backAddr st
 	defer cancel()
 	// The edge picks the origin by host name, so the dial keeps the one
 	// the server named.
+	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
 	edgeWS, _, err := websocket.Dial(ctx, "ws://"+backAddr+edgeproto.PathServerControl,
-		&websocket.DialOptions{CompressionMode: websocket.CompressionDisabled, Host: r.Host})
+		&websocket.DialOptions{CompressionMode: websocket.CompressionDisabled, Host: r.Host,
+			HTTPHeader: http.Header{relay.HeaderForwardedFor: {peer}}})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

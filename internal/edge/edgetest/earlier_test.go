@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"strings"
@@ -19,8 +21,9 @@ import (
 )
 
 // TestServerVerifiesGrants plays a compromised or buggy edge that sends
-// the server opens with forged, expired, replayed and misdirected grants:
-// the server refuses each before it dials a data socket.
+// the server opens with forged, expired, replayed and misdirected grants,
+// and a grant for a Google account: the server refuses each before it
+// dials a data socket.
 func TestServerVerifiesGrants(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -87,6 +90,23 @@ func TestServerVerifiesGrants(t *testing.T) {
 		if got := open(id, signed, tc.kind); !strings.Contains(got, tc.want.Error()) {
 			t.Errorf("%s grant: server answered %q, want %q", tc.name, got, tc.want)
 		}
+	}
+	// A grant for a Google account, which an edge built from the
+	// v0.5.2-alpha.3 tag could sign. SignGrant refuses one, so it is signed as
+	// SignGrant documents.
+	google := template
+	google.ConnID = edgeproto.NewConnID()
+	google.IssuedAt = time.Now()
+	google.ExpiresAt = google.IssuedAt.Add(edgeproto.GrantTTL)
+	google.Account = edgeproto.Account{Provider: "google", Subject: "fake-google-subject", Email: alice.Email}
+	payload, err := json.Marshal(google)
+	if err != nil {
+		t.Fatal(err)
+	}
+	googleGrant := base64.RawURLEncoding.EncodeToString(payload) + "." +
+		base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, append([]byte("aether-edge-grant-v1\x00"), payload...)))
+	if got, want := open(google.ConnID, googleGrant, edgeproto.KindSSH), `sign-in provider "google" is not supported: Aether signs in with GitHub only`; !strings.Contains(got, want) {
+		t.Errorf("grant for a Google account: server answered %q, want %q", got, want)
 	}
 	_, signed := grant(key, func(*edgeproto.Grant) {})
 	if got := open(edgeproto.NewConnID(), signed, edgeproto.KindSSH); !strings.Contains(got, edgeproto.ErrGrantConn.Error()) {

@@ -44,14 +44,13 @@ Full detail on tailnet identity, tagged nodes, and revocation is in
 ### Through an edge
 
 For servers enrolled with an edge ([edge.md](edge.md)), the relay that lets
-people sign in with GitHub or Google instead of sharing a network or an SSH
-key. An admin invites the teammate's GitHub login, or an email their
-provider has verified:
+people sign in with GitHub instead of sharing a network or an SSH key. An
+admin invites the teammate's GitHub login, or the verified primary email of
+their GitHub account:
 
 ```sh
 aether invite --github dana --role collaborator
 aether invite --email dana@example.com --role viewer
-aether invite --email dana@example.com --provider google --role viewer
 ```
 
 ```
@@ -61,10 +60,11 @@ Under edge-access approved-devices, the default, their device then shows an appr
 ```
 
 No code changes hands. `--role` is `viewer`, `collaborator` (the default)
-or `admin`. `--provider` limits an email invitation to accounts of that
-provider; without it either provider's verified address matches. The
-invitation is in the directory the server pushes to the edge, so the
-teammate sees the server in `aether servers` after signing in. Send them
+or `admin`. An email invitation matches the account whose primary email
+GitHub reports as verified, whatever its login: use it when you know the
+address but not the login. The invitation is in the directory the server
+pushes to the edge, so the teammate sees the server in `aether servers`
+after signing in. Send them
 the server id as well: linking by an id you gave pins the right server even
 if the edge lists a false one.
 
@@ -85,11 +85,11 @@ the invitation and shows them its approval code; the member is created,
 the account bound and the invitation used up when a person approves that
 device ([Devices](#devices)). An
 invitation matches a login or email only within 24 hours of the
-teammate's last GitHub or Google sign-in at the edge, because a login or
-email can move to someone else; past that, `aether servers` leaves it out
-and connecting is refused with `open this edge in a browser to confirm
-them`. Opening any edge page, including the one `aether login` shows,
-signs them in with the provider again. Invitations expire after 7 days:
+teammate's last GitHub sign-in at the edge, because a login or email can
+move to someone else; past that, `aether servers` leaves it out and
+connecting is refused with `open this edge in a browser to confirm them`.
+Opening any edge page, including the one `aether login` shows, signs them
+in with GitHub again. Invitations expire after 7 days:
 
 ```sh
 aether invite list
@@ -101,11 +101,11 @@ invite code described [below](#by-invite-code-fallback).
 
 #### Linking an existing member
 
-An admin who joined by SSH key or tailnet names their own edge account:
+An admin who joined by SSH key or tailnet names their own GitHub account:
 
 ```sh
 aether member link --github dana
-aether member link --email dana@example.com [--provider github|google]
+aether member link --email dana@example.com
 ```
 
 That account then connects through the edge as the same member. Under
@@ -116,12 +116,12 @@ server that already has members. Only admins can link: nothing proves the caller
 they name. Any other member is invited by an admin with `aether invite
 --github` or `--email`, which creates a new member for that account.
 
-An admin makes another admin with a linked edge account the server's owner
-at its edge, as before deleting their own account
+An admin makes another admin with a linked GitHub account the server's
+owner at its edge, as before deleting their own account
 ([edge.md](edge.md#deleting-an-account)):
 
 ```sh
-aether member transfer <member id> [--provider github|google]
+aether member transfer <member id>
 ```
 
 Demoting an admin (`aether member role <id> collaborator`) revokes the open
@@ -210,8 +210,8 @@ SSH path accepts approved device keys only.
 #### A member's edge accounts
 
 ```sh
-aether member identities <member-id>                    # the member's accounts, and each device with the account it signed in as
-aether member unlink <member-id> <provider>:<subject>   # the identity as identities prints it
+aether member identities <member-id>                  # the member's accounts, and each device with the account it signed in as
+aether member unlink <member-id> github:<user id>     # the identity as identities prints it
 ```
 
 Unlinking removes one account from the member when it was linked while
@@ -222,13 +222,23 @@ account is linked again with `aether member link` by an admin for
 themself, and restored on the machine for an admin who has no other way in
 ([edge.md](edge.md#console-recovery)).
 
+A server built from the `v0.5.2-alpha.3` tag that used an edge with Google
+sign-in, which only such builds had, may list identities as
+`google:<subject>`, and invitations as `google:<email>` in `aether invite
+list`. They admit nobody: the edge directory leaves them
+out, and a grant naming a Google account is refused with `sign-in provider
+"google" is not supported: Aether signs in with GitHub only`. `aether
+member transfer` refuses a member whose only identity is one of them.
+Remove them with `aether member unlink <member-id> google:<subject>` and
+`aether invite revoke <invitation-id>`.
+
 #### Revocation
 
 | Revoke | Command | Effect |
 | --- | --- | --- |
 | A member | `aether member remove <id>` | Identity and devices deleted, directory updated, live connections closed |
 | A device | `aether device revoke <id>` | That device key refused on every path; its connections closed |
-| One edge account of a member | `aether member unlink <member-id> <provider>:<subject>` | Account unbound; the devices that signed in with it revoked and their connections closed; the member stays |
+| One edge account of a member | `aether member unlink <member-id> github:<user id>` | Account unbound; the devices that signed in with it revoked and their connections closed; the member stays |
 | A device token | `aether logout`, or the edge's Devices page | No further relayed connections; live relayed ones closed. The device key stays approved on the server, so a direct connection with it still works |
 | An edge account | The edge's Account page, whose address `aether logout --delete-account` prints | Each server removes that identity and its edge devices and closes their connections, direct ones included; the member, its role and its SSH keys and tailnet identity stay ([edge.md](edge.md#deleting-an-account)) |
 | An invitation | `aether invite revoke <id>` | Removed from the directory |

@@ -13,7 +13,7 @@ import (
 )
 
 // reauthWindow is how recently the browser deleting an account must
-// itself have signed in with the provider. The account's last sign-in
+// itself have signed in with GitHub. The account's last sign-in
 // does not count: a sign-in in any browser refreshes it, so a stolen
 // device token or session cookie could wait for one.
 const reauthWindow = 5 * time.Minute
@@ -23,9 +23,9 @@ const reauthWindow = 5 * time.Minute
 // server reports it.
 const transferCommand = "aether member transfer <member id>"
 
-// confirmText is what a person types to confirm deleting a: the login,
-// else the email, else, for an account the provider gave neither, its
-// account id.
+// confirmText is what a person types to confirm deleting a: the GitHub
+// login, else the email, else its account id. An account has no login
+// once another account signed in holding it, after a rename on GitHub.
 func confirmText(a edgeproto.AccountInfo) string {
 	switch {
 	case a.Login != "":
@@ -49,14 +49,14 @@ func confirms(a edgeproto.AccountInfo, typed string) bool {
 	return (a.Login != "" && strings.EqualFold(typed, a.Login)) || (a.Email != "" && strings.EqualFold(typed, a.Email))
 }
 
-// signedInRecently reports whether the browser v signed in with its
-// provider within reauthWindow of now.
+// signedInRecently reports whether the browser v signed in with GitHub
+// within reauthWindow of now.
 func (s *Service) signedInRecently(v visitor) bool {
 	return s.now().Sub(v.SignedInAt) <= reauthWindow
 }
 
-func (s *Service) reauthURL(a edgeproto.AccountInfo) string {
-	return s.signinOrigin + "/signin/" + a.Provider + "?" + url.Values{"next": {"/account"}}.Encode()
+func (s *Service) reauthURL() string {
+	return s.signinOrigin + signinPath + "?" + url.Values{"next": {"/account"}}.Encode()
 }
 
 func (s *Service) summary(ctx context.Context, a edgeproto.AccountInfo) (edgeproto.AccountSummary, error) {
@@ -77,7 +77,7 @@ func (s *Service) summary(ctx context.Context, a edgeproto.AccountInfo) (edgepro
 }
 
 // deleteAccount deletes the account of the browser v once confirm names
-// it and v signed in with its provider within reauthWindow: its sessions,
+// it and v signed in with GitHub within reauthWindow: its sessions,
 // device tokens and live connections end, the servers it owns become
 // ownerless, and every server it owned or belonged to is sent
 // edgeproto.AccountDeleted, now or when it next connects.
@@ -85,7 +85,7 @@ func (s *Service) deleteAccount(ctx context.Context, v visitor, confirm string) 
 	a := v.Account
 	if !s.signedInRecently(v) {
 		return pageErr(http.StatusForbidden, "deleting an account needs a sign-in in this browser from the last %s: sign in again at %s, then delete it within %s",
-			reauthWindow, s.reauthURL(a), reauthWindow)
+			reauthWindow, s.reauthURL(), reauthWindow)
 	}
 	if !confirms(a, confirm) {
 		return pageErr(http.StatusBadRequest, "the confirmation does not name this account: type %s", confirmText(a))
@@ -117,7 +117,7 @@ func (s *Service) accountPage(w http.ResponseWriter, r *http.Request, v visitor)
 	s.render(w, http.StatusOK, "account_page", s.view(&v, "Account", accountPage{
 		AccountSummary: sum,
 		Fresh:          s.signedInRecently(v),
-		Reauth:         s.reauthURL(v.Account),
+		Reauth:         s.reauthURL(),
 		Window:         reauthWindow,
 		Transfer:       transferCommand,
 	}))
@@ -135,7 +135,7 @@ func (s *Service) accountDelete(w http.ResponseWriter, r *http.Request, v visito
 		page := s.view(&v, "Account", accountPage{
 			AccountSummary: sum,
 			Fresh:          s.signedInRecently(v),
-			Reauth:         s.reauthURL(v.Account),
+			Reauth:         s.reauthURL(),
 			Window:         reauthWindow,
 			Transfer:       transferCommand,
 		})

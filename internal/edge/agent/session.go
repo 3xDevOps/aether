@@ -224,6 +224,12 @@ func (a *Agent) reconcileOwner(s *session, state string) error {
 		return err
 	}
 	if owner != nil {
+		if err := edgeproto.CheckProvider(owner.Provider); err != nil {
+			// A build from the v0.5.2-alpha.3 tag could record a Google
+			// account as the owner, which no edge signs in any more.
+			slog.Warn("edge: forgetting this server's owner", "edge", a.origin, "error", err)
+			return a.disown(s, *owner)
+		}
 		return s.send(edgeproto.OwnerTransferred{ID: edgeproto.NewConnID(), Owner: edgeproto.AccountPrincipal(*owner)})
 	}
 	slog.Warn("edge: the edge records an owner this server does not have for its key; reporting the server ownerless. Claim it with a code from `aether-server edge claim-code`",

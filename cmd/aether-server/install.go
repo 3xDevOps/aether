@@ -34,7 +34,7 @@ func install(args []string) error {
 func requireEdgeAccess(values map[string]string) error {
 	if values["edge-url"] != "" && values["edge-access"] == "" {
 		return errors.New("--edge-url turns the edge on and needs --edge-access: " +
-			"account (signing in with GitHub or Google is enough) or approved-devices (each new device waits until a person approves it)")
+			"account (signing in with GitHub is enough) or approved-devices (each new device waits until a person approves it)")
 	}
 	return nil
 }

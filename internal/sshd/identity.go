@@ -285,15 +285,15 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 // newInvitation checks the account an invitation names exactly as the edge
 // will read it in the directory, with role standing in for a link's
 // member's role.
-func newInvitation(provider, login, email string, role domain.Role, creator domain.MemberID) (*domain.Invitation, *protocol.Error) {
+func newInvitation(login, email string, role domain.Role, creator domain.MemberID) (*domain.Invitation, *protocol.Error) {
 	inv := &domain.Invitation{
-		Provider: provider, Login: strings.TrimSpace(login), Email: strings.TrimSpace(email),
+		Provider: edgeproto.ProviderGitHub, Login: strings.TrimSpace(login), Email: strings.TrimSpace(email),
 		Role: role, CreatedBy: creator, ExpiresAt: time.Now().UTC().Add(edgeproto.InvitationTTL),
 	}
 	entry := edgeproto.DirectoryEntry{Kind: edgeproto.EntryInvitation, Provider: inv.Provider,
 		Login: inv.Login, Email: inv.Email, Role: string(role), ExpiresAt: inv.ExpiresAt}
 	if err := entry.Validate(); err != nil {
-		return nil, invalidParams(err.Error() + `; give a GitHub login with provider "github", or an email with provider "github", "google" or none`)
+		return nil, invalidParams(err.Error() + "; give a GitHub login or the verified primary email of a GitHub account")
 	}
 	return inv, nil
 }
@@ -317,7 +317,7 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	if !role.Valid() {
 		return nil, invalidParams(fmt.Sprintf("unknown role %q; want viewer, collaborator, or admin", p.Role))
 	}
-	inv, perr := newInvitation(p.Provider, p.Login, p.Email, role, member)
+	inv, perr := newInvitation(p.Login, p.Email, role, member)
 	if perr != nil {
 		return nil, perr
 	}
@@ -343,7 +343,7 @@ func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID,
 	if perr != nil {
 		return nil, perr
 	}
-	inv, perr := newInvitation(p.Provider, p.Login, p.Email, domain.RoleAdmin, member)
+	inv, perr := newInvitation(p.Login, p.Email, domain.RoleAdmin, member)
 	if perr != nil {
 		return nil, perr
 	}

@@ -94,6 +94,14 @@ func (s *Service) visitor(r *http.Request) (visitor, bool, error) {
 	if err != nil {
 		return visitor{}, false, err
 	}
+	if err := unsupported(sess.Account.Account); err != nil {
+		// The session ends, so the next page this browser opens offers
+		// a GitHub sign-in.
+		if derr := s.store.DeleteSession(r.Context(), sess.ID); derr != nil {
+			return visitor{}, false, derr
+		}
+		return visitor{}, false, err
+	}
 	return visitor{Session: sess, csrf: csrfToken(c.Value)}, true, nil
 }
 
@@ -114,11 +122,11 @@ func (s *Service) signedIn(h func(http.ResponseWriter, *http.Request, visitor) e
 			http.Redirect(w, r, "/signin?"+url.Values{"next": {next}}.Encode(), http.StatusSeeOther)
 			return
 		}
-		// Invitations match the login and email only while the provider
-		// reported them recently, so a page opened after that asks the
-		// provider again. A form post is left alone: its page just did.
+		// Invitations match the login and email only while GitHub
+		// reported them recently, so a page opened after that asks GitHub
+		// again. A form post is left alone: its page just did.
 		if r.Method == http.MethodGet && !v.Account.IdentityCurrent(s.now()) {
-			http.Redirect(w, r, "/signin/"+v.Account.Provider+"?"+url.Values{"next": {r.URL.RequestURI()}}.Encode(), http.StatusSeeOther)
+			http.Redirect(w, r, signinPath+"?"+url.Values{"next": {r.URL.RequestURI()}}.Encode(), http.StatusSeeOther)
 			return
 		}
 		if r.Method == http.MethodPost {

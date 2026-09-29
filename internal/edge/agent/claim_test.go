@@ -323,7 +323,7 @@ func TestTransferOwner(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()
 	sshd := newFakeSSH()
-	next := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-2", Email: "next@example.com"}
+	next := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2002", Login: "next", Email: "next@example.com"}
 	sshd.entries = []edgeproto.DirectoryEntry{
 		{Kind: edgeproto.EntryMember, Provider: testOwner.Provider, Subject: testOwner.Subject, Role: "admin"},
 		{Kind: edgeproto.EntryMember, Provider: next.Provider, Subject: next.Subject, Role: "admin"},
@@ -395,6 +395,31 @@ func TestOwnerLeavingMakesTheServerOwnerless(t *testing.T) {
 	}
 }
 
+// An owner a build from the v0.5.2-alpha.3 tag recorded through Google is
+// forgotten at enrollment: the edge is told the server is ownerless, and the
+// control channel stays up.
+func TestGoogleOwnerFromAnEarlierVersion(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.state = edgeproto.StateClaimed
+	sshd := newFakeSSH()
+	google := edgeproto.Account{Provider: "google", Subject: "g-1", Email: "owner@example.com"}
+	a := newAgent(t, edge.srv.URL, t.TempDir(), sshd)
+	if err := a.state.Pin(edge.pub); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.state.writeOwner(google); err != nil {
+		t.Fatal(err)
+	}
+	run(t, a)
+	ec := edge.nextControl(t)
+	expect[edgeproto.Ownerless](t, ec)
+	if owner, err := a.state.Owner(); owner != nil || err != nil {
+		t.Fatalf("owner = %+v, %v; want none", owner, err)
+	}
+	ec.send(edgeproto.Ping{})
+	expect[edgeproto.Pong](t, ec)
+}
+
 // A transfer whose answer never came may or may not stand at the edge, so
 // every enrollment with a claimed server reports the server's owner again.
 func TestOwnerIsReportedAgainAtEnrollment(t *testing.T) {
@@ -430,7 +455,7 @@ func TestTransferTakesOnlyItsOwnAnswer(t *testing.T) {
 	edge := newFakeEdge(t)
 	edge.state = edgeproto.StateClaimed
 	sshd := newFakeSSH()
-	next := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-2", Email: "next@example.com"}
+	next := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "2002", Login: "next", Email: "next@example.com"}
 	sshd.entries = []edgeproto.DirectoryEntry{
 		{Kind: edgeproto.EntryMember, Provider: testOwner.Provider, Subject: testOwner.Subject, Role: "admin"},
 		{Kind: edgeproto.EntryMember, Provider: next.Provider, Subject: next.Subject, Role: "admin"},

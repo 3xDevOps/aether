@@ -1,0 +1,8 @@
+# The build context of images/edge/Dockerfile: the Go module's files and
+# nothing else, so no dependency tree, build output or local file in a
+# working tree reaches the builder.
+*
+!go.mod
+!go.sum
+!cmd/aether-edge/
+!internal/

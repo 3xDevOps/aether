@@ -7,14 +7,13 @@ import (
 	"os"
 	"text/tabwriter"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 func init() {
 	register(command{
 		name:  "invite",
-		short: "invite a GitHub or Google account through the edge, or mint a one-time invite code",
+		short: "invite a GitHub account through the edge, or mint a one-time invite code",
 		run:   runInvite,
 	})
 }
@@ -62,7 +61,7 @@ func runInvite(args []string) error {
 }
 
 const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
-	"       aether invite --github <login> | --email <address> [--provider github|google] [--role viewer|collaborator|admin]\n" +
+	"       aether invite --github <login> | --email <address> [--role viewer|collaborator|admin]\n" +
 	"       aether invite list | revoke <invitation-id>"
 
 // parseInviteArgs reads an invite command line: the invitation of an edge
@@ -72,8 +71,7 @@ func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int
 	fs := flag.NewFlagSet("invite", flag.ExitOnError)
 	ttl := fs.Int("ttl", 86400, "lifetime of a one-time invite code in seconds")
 	github := fs.String("github", "", "invite this GitHub login; its first connection through the edge joins under edge-access account, and waits for aether device approve <code> under approved-devices")
-	email := fs.String("email", "", "invite the account with this provider-verified email")
-	provider := fs.String("provider", "", `with --email: accept only "github" or "google" (default either)`)
+	email := fs.String("email", "", "invite the GitHub account whose verified primary email this is")
 	role := fs.String("role", "collaborator", "role of an invited account: viewer, collaborator, or admin")
 	if err := fs.Parse(args); err != nil {
 		return nil, 0, err
@@ -84,18 +82,14 @@ func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int
 	case fs.NArg() != 0:
 		return nil, 0, errors.New(inviteUsage)
 	case *github == "" && *email == "":
-		if set["provider"] || set["role"] {
-			return nil, 0, errors.New("invite: --provider and --role apply to --github and --email; a one-time invite code always joins as a collaborator\n" + inviteUsage)
+		if set["role"] {
+			return nil, 0, errors.New("invite: --role applies to --github and --email; a one-time invite code always joins as a collaborator\n" + inviteUsage)
 		}
 		return nil, *ttl, nil
 	case set["ttl"]:
 		return nil, 0, errors.New("invite: --ttl applies to a one-time invite code; an account invitation expires after 7 days\n" + inviteUsage)
 	}
-	params := &protocol.MemberInvitationCreateParams{Login: *github, Email: *email, Provider: *provider, Role: *role}
-	if *github != "" && *provider == "" {
-		params.Provider = edgeproto.ProviderGitHub
-	}
-	return params, 0, nil
+	return &protocol.MemberInvitationCreateParams{Login: *github, Email: *email, Role: *role}, 0, nil
 }
 
 func inviteCode(ttl int) error {

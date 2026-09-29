@@ -44,7 +44,9 @@ commands:
   unblock <account>  accept the account's sign-ins again
   delete <account>   delete the account as its account page does; a block stays
 
-<account> is github:<user id> or google:<subject>, as list prints it.
+<account> is github:<user id>, as list prints it. An account a build from
+the v0.5.2-alpha.3 tag created with Google, google:<subject>, cannot sign
+in; delete and unblock take it.
 `
 
 // errUsage reports a command line that does not name a command; the usage
@@ -61,8 +63,8 @@ var serverCommands = map[string]adminCommand{
 var accountCommands = map[string]adminCommand{
 	"list":    {run: listAccounts},
 	"block":   {arg: checkAccount, run: blockAccount},
-	"unblock": {arg: checkAccount, run: unblockAccount},
-	"delete":  {arg: checkAccount, run: deleteAccount},
+	"unblock": {arg: checkStoredAccount, run: unblockAccount},
+	"delete":  {arg: checkStoredAccount, run: deleteAccount},
 }
 
 func servers(args []string, getenv func(string) string, out io.Writer) error {
@@ -138,15 +140,29 @@ func checkServerID(id string) error {
 	return nil
 }
 
+// checkAccount checks an account a sign-in can create: github:<user id>.
 func checkAccount(key string) error {
+	provider, _, err := splitAccount(key)
+	if err != nil {
+		return err
+	}
+	if err := edgeproto.CheckProvider(provider); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	return nil
+}
+
+// checkStoredAccount checks an account as list prints it, which may be one
+// a build from the v0.5.2-alpha.3 tag created with Google.
+func checkStoredAccount(key string) error {
 	_, _, err := splitAccount(key)
 	return err
 }
 
 func splitAccount(key string) (provider, subject string, err error) {
 	provider, subject, ok := strings.Cut(key, ":")
-	if !ok || !edgeproto.ValidProvider(provider) || subject == "" {
-		return "", "", fmt.Errorf("%q is not an account: write github:<user id> or google:<subject>, as aether-edge accounts list prints it", key)
+	if !ok || provider == "" || subject == "" {
+		return "", "", fmt.Errorf("%q is not an account: write github:<user id>, as aether-edge accounts list prints it", key)
 	}
 	return provider, subject, nil
 }

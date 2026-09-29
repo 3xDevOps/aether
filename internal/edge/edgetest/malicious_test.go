@@ -112,7 +112,7 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	approve(t, ctl, waitingCode(t, "bob's first device", err))
 	h.mustDial(bo, a)
 	// An open admin invitation, for dave, who has not signed in yet.
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: dave.Login, Role: "admin"})
+	invite(t, ctl, protocol.MemberInvitationCreateParams{Login: dave.Login, Role: "admin"})
 	start := a.snapshot(t)
 	approved := start.approvedKeys()
 
@@ -338,7 +338,7 @@ func TestMaliciousEdgeAccountAccess(t *testing.T) {
 	if info.Member.Role != string(domain.RoleAdmin) || info.Member.ID != string(a.memberOf(t, alice).ID) {
 		t.Fatalf("the forged connection is %+v, want alice's admin member", info.Member)
 	}
-	invite(t, forged, protocol.MemberInvitationCreateParams{Provider: edgeproto.ProviderGitHub, Login: mallory.Login, Role: "admin"})
+	invite(t, forged, protocol.MemberInvitationCreateParams{Login: mallory.Login, Role: "admin"})
 	if d := a.snapshot(t).devices[edgeproto.DeviceKeyLine(attacker.PublicKey())]; !strings.HasSuffix(d, " registered") {
 		t.Fatalf("the attacker's device is %q, want registered and listed", d)
 	}

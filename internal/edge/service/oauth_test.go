@@ -33,7 +33,7 @@ func TestSignInGitHub(t *testing.T) {
 	h := newHarness(t)
 	h.setGitHubUser(4242, "Octo-Cat", "octo@example.test", true)
 	b := h.browser(t)
-	resp := b.signIn(t, edgeproto.ProviderGitHub)
+	resp := b.signIn(t)
 	if got := resp.Header.Get("Location"); got != "/devices" {
 		t.Errorf("redirect after sign-in = %q, want /devices", got)
 	}
@@ -57,24 +57,9 @@ func TestSignInDropsUnverifiedEmail(t *testing.T) {
 	h := newHarness(t)
 	h.setGitHubUser(7, "octo", "unverified@example.test", false)
 	b := h.browser(t)
-	b.signIn(t, edgeproto.ProviderGitHub)
+	b.signIn(t)
 	if got := sessionAccount(t, h, b).Email; got != "" {
 		t.Errorf("GitHub email = %q, want none: the primary email is unverified", got)
-	}
-
-	for _, verified := range []any{false, "true", nil} {
-		h.setGoogleUser("google-sub-1", "person@example.test", verified)
-		g := h.browser(t)
-		g.signIn(t, edgeproto.ProviderGoogle)
-		if got := sessionAccount(t, h, g).Email; got != "" {
-			t.Errorf("Google email with email_verified=%#v = %q, want none", verified, got)
-		}
-	}
-	h.setGoogleUser("google-sub-1", "person@example.test", true)
-	g := h.browser(t)
-	g.signIn(t, edgeproto.ProviderGoogle)
-	if got := sessionAccount(t, h, g).Email; got != "person@example.test" {
-		t.Errorf("Google verified email = %q, want person@example.test", got)
 	}
 }
 
@@ -125,11 +110,11 @@ func TestGitHubLoginBelongsToItsCurrentHolder(t *testing.T) {
 	}
 	h.setGitHubUser(1, "octo", "first@example.test", true)
 	first := h.browser(t)
-	first.signIn(t, edgeproto.ProviderGitHub)
+	first.signIn(t)
 	// The first account renamed itself on GitHub and another took "OCTO".
 	h.setGitHubUser(2, "OCTO", "second@example.test", true)
 	second := h.browser(t)
-	second.signIn(t, edgeproto.ProviderGitHub)
+	second.signIn(t)
 
 	if _, err := h.svc.Admit(context.Background(), id, sessionAccount(t, h, second)); err != nil {
 		t.Errorf("current holder of the login: %v", err)
@@ -145,20 +130,22 @@ func TestGitHubLoginBelongsToItsCurrentHolder(t *testing.T) {
 
 func TestAccountsAreNotMergedByEmail(t *testing.T) {
 	h := newHarness(t)
-	h.setGitHubUser(99, "same", "same@example.test", true)
-	h.setGoogleUser("99", "same@example.test", true)
-	gh, g := h.browser(t), h.browser(t)
-	gh.signIn(t, edgeproto.ProviderGitHub)
-	g.signIn(t, edgeproto.ProviderGoogle)
-	a, b := sessionAccount(t, h, gh), sessionAccount(t, h, g)
-	if a.Provider == b.Provider {
-		t.Fatalf("both sign-ins produced %s accounts", a.Provider)
+	h.setGitHubUser(99, "first", "same@example.test", true)
+	first := h.browser(t)
+	first.signIn(t)
+	// A verified email can move to another GitHub account.
+	h.setGitHubUser(100, "second", "same@example.test", true)
+	second := h.browser(t)
+	second.signIn(t)
+	a, b := sessionAccount(t, h, first), sessionAccount(t, h, second)
+	if a.Subject == b.Subject {
+		t.Fatalf("both sign-ins produced account %s", a.Subject)
 	}
 
 	id := testServerID(t)
 	h.claim(t, id, "srv", a)
 	if _, err := h.svc.Admit(context.Background(), id, b); err != edgeproto.RefusalNotMember {
-		t.Errorf("Google account with the owner's email and subject admitted: %v", err)
+		t.Errorf("account with the owner's email admitted: %v", err)
 	}
 }
 

@@ -266,10 +266,10 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	if left, _ := identities(t, e).ListInvitations(context.Background()); len(left) != 0 {
 		t.Fatalf("invitation %s not consumed: %+v", inv.ID, left)
 	}
-	// The same verified email from another provider is another account,
-	// and the consumed invitation admits nobody else.
-	google := edgeproto.Account{Provider: edgeproto.ProviderGoogle, Subject: "g-7", Email: "octo@example.com", IdentityAt: time.Now()}
-	e.mustRefuseEdge(t, google, newSigner(t), "phone", "google account octo@example.com is not a member of this server")
+	// Another account that now holds the verified email is another
+	// member, and the consumed invitation admits nobody else.
+	other := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "7007", Login: "someone", Email: "octo@example.com", IdentityAt: time.Now()}
+	e.mustRefuseEdge(t, other, newSigner(t), "phone", "github account someone is not a member of this server")
 }
 
 func TestEdgeExpiredInvitationRefused(t *testing.T) {
@@ -596,7 +596,7 @@ func TestClaimLinksAnExistingAdmin(t *testing.T) {
 	}
 	var link protocol.MemberInvitationResult
 	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityLink,
-		protocol.MemberIdentityLinkParams{Provider: "github", Login: "ada"}, &link); err != nil {
+		protocol.MemberIdentityLinkParams{Login: "ada"}, &link); err != nil {
 		t.Fatalf("admin link: %v", err)
 	}
 	c, banner, err := e.dialClaim(t, newFakeClaimCode(), claimGrantFor(ada, key), key, claimUser(t, testClaimCode, ada))
@@ -689,12 +689,12 @@ func TestMemberCannotLinkAnotherAccount(t *testing.T) {
 	carolKey, _ := addMember(t, e, "Carol", domain.RoleViewer, false)
 	var pe *protocol.Error
 	err := controlAs(t, e, carolKey).Call(protocol.MethodMemberIdentityLink,
-		protocol.MemberIdentityLinkParams{Provider: "github", Login: "octo"}, nil)
+		protocol.MemberIdentityLinkParams{Login: "octo"}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("viewer linking another account = %v, want CodeDenied", err)
 	}
 	if err := controlClient(t, e).Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "collaborator"}, nil); err != nil {
+		protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"}, nil); err != nil {
 		t.Fatalf("invitation.create: %v", err)
 	}
 	got := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
@@ -710,7 +710,7 @@ func TestDemotedAdminsInvitationsAreRevoked(t *testing.T) {
 	e := newTestEnv(t, nil)
 	carolKey, carol := addMember(t, e, "Carol", domain.RoleAdmin, false)
 	if err := controlAs(t, e, carolKey).Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "admin"}, nil); err != nil {
+		protocol.MemberInvitationCreateParams{Login: "octo", Role: "admin"}, nil); err != nil {
 		t.Fatalf("invitation.create: %v", err)
 	}
 	if err := controlClient(t, e).Call(protocol.MethodMemberRole,
@@ -733,7 +733,7 @@ func TestInvitationBeyondTheEdgeDirectoryIsRefused(t *testing.T) {
 	}
 	var pe *protocol.Error
 	err := controlClient(t, e).Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "collaborator"}, nil)
+		protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState || !strings.Contains(pe.Message, "the most an edge accepts") {
 		t.Fatalf("invitation past the directory limit = %v, want refused", err)
 	}
@@ -748,15 +748,16 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 	admin := controlClient(t, e)
 	bobKey, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	bob := controlAs(t, e, bobKey)
-	params := protocol.MemberInvitationCreateParams{Provider: "github", Login: "octo", Role: "collaborator"}
+	params := protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"}
 
 	var pe *protocol.Error
 	if err := bob.Call(protocol.MethodMemberInvitationCreate, params, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("collaborator invitation.create = %v, want CodeDenied", err)
 	}
-	bad := protocol.MemberInvitationCreateParams{Provider: "google", Login: "octo", Role: "viewer"}
-	if err := admin.Call(protocol.MethodMemberInvitationCreate, bad, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
-		t.Fatalf("google login invitation = %v, want CodeInvalidParams", err)
+	bad := protocol.MemberInvitationCreateParams{Login: "octo", Email: "octo@example.com", Role: "viewer"}
+	if err := admin.Call(protocol.MethodMemberInvitationCreate, bad, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams ||
+		!strings.Contains(pe.Message, "give a GitHub login or the verified primary email of a GitHub account") {
+		t.Fatalf("invitation naming a login and an email = %v, want CodeInvalidParams", err)
 	}
 	changed := e.srv.EdgeDirectoryChanged()
 	for len(changed) > 0 {
