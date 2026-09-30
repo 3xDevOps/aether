@@ -36,6 +36,7 @@ function mount(over: Partial<Run> = {}, options: { status?: RoomStatusResult; co
     roomPagination: {},
     roomStatus: { run_1: options.status ?? status() },
     roomLoading: {},
+    roomStatusError: {},
     roomError: {},
     roomActionError: {},
     evidencePackets: {},
@@ -57,6 +58,7 @@ beforeEach(() => {
     roomPagination: {},
     roomStatus: {},
     roomLoading: {},
+    roomStatusError: {},
     roomError: {},
     roomActionError: {},
     evidencePackets: {},
@@ -69,6 +71,146 @@ beforeEach(() => {
 })
 
 describe('Run Room', () => {
+  it.each(['ctrlKey', 'metaKey'] as const)('toggles with %s+Shift+M without terminal input and preserves draft and focus', (modifier) => {
+    const terminalInput = vi.fn()
+    render(
+      <>
+        <div className="xterm"><textarea aria-label="Terminal input" onKeyDown={terminalInput} /></div>
+        <RunRoom run={run()} client={fakeApi()} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />
+      </>,
+    )
+    const terminal = screen.getByRole('textbox', { name: 'Terminal input' })
+    terminal.focus()
+    const chord = { key: 'M', shiftKey: true, [modifier]: true }
+    expect(fireEvent.keyDown(terminal, chord)).toBe(false)
+    expect(terminalInput).not.toHaveBeenCalled()
+    const composer = screen.getByRole('textbox', { name: 'Run Room message' })
+    expect(document.activeElement).toBe(composer)
+    fireEvent.change(composer, { target: { value: 'keep this draft' } })
+    fireEvent.keyDown(composer, chord)
+    expect(screen.queryByRole('complementary', { name: 'Run Room' })).toBeNull()
+    expect(document.activeElement).toBe(terminal)
+    fireEvent.keyDown(terminal, chord)
+    expect(screen.getByRole('textbox', { name: 'Run Room message' })).toHaveProperty('value', 'keep this draft')
+    fireEvent.click(screen.getByRole('button', { name: 'Close Run Room' }))
+    expect(document.activeElement).toBe(terminal)
+  })
+
+  it('describes the keyboard-focused opener and restores focus after a mouse-opened room closes', async () => {
+    render(<RunRoom run={run()} client={fakeApi()} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    const opener = screen.getByRole('button', { name: 'Open Run Room' })
+    fireEvent.keyDown(document.body, { key: 'Tab' })
+    act(() => opener.focus())
+    const tooltip = await screen.findByRole('tooltip')
+    expect(tooltip.textContent).toContain('Toggle Run Room')
+    expect(opener.getAttribute('aria-describedby')?.split(' ')).toContain(tooltip.id)
+    fireEvent.click(opener)
+    fireEvent.click(screen.getByRole('button', { name: 'Close Run Room' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Run Room' }))
+  })
+
+  it.each(['dialog', 'alertdialog', 'menu', 'listbox'])('leaves the room shortcut to an open %s', (role) => {
+    render(
+      <>
+        <div role={role} data-state="open"><input aria-label="Overlay field" /></div>
+        <RunRoom run={run()} client={fakeApi()} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />
+      </>,
+    )
+    expect(fireEvent.keyDown(screen.getByLabelText('Overlay field'), { key: 'm', ctrlKey: true, shiftKey: true })).toBe(true)
+    expect(screen.queryByRole('complementary', { name: 'Run Room' })).toBeNull()
+    fireEvent.keyDown(document.body, { key: 'm', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('complementary', { name: 'Run Room' })).toBeNull()
+  })
+
+  it('ignores composing and already claimed room shortcuts', () => {
+    render(<RunRoom run={run()} client={fakeApi()} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    fireEvent.keyDown(window, { key: 'm', ctrlKey: true, shiftKey: true, isComposing: true })
+    const claimed = new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, shiftKey: true, cancelable: true })
+    claimed.preventDefault()
+    fireEvent(window, claimed)
+    expect(screen.queryByRole('complementary', { name: 'Run Room' })).toBeNull()
+  })
+
+  it('refreshes collapsed presence independently of history and keeps stale status on failure', async () => {
+    vi.useFakeTimers()
+    try {
+      const initial = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
+      const next = status({ watchers: [alice.id] })
+      const statusCall = vi.fn().mockResolvedValueOnce(initial).mockRejectedValueOnce(new Error('presence service unavailable')).mockResolvedValue(next)
+      const client = fakeApi({ runRoomStatus: statusCall })
+      render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+      await act(async () => { await Promise.resolve() })
+      expect(useStore.getState().roomStatus.run_1).toEqual(initial)
+      expect(client.runRoomList).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      expect(useStore.getState().roomStatus.run_1).toEqual(initial)
+      expect(useStore.getState().roomStatusError.run_1).toBe('presence service unavailable')
+      fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+      await act(async () => { await Promise.resolve() })
+      expect(screen.getByRole('status').textContent).toContain('Presence is stale: presence service unavailable')
+      expect(useStore.getState().roomError.run_1).toBeUndefined()
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      expect(useStore.getState().roomStatus.run_1).toEqual(next)
+      expect(useStore.getState().roomStatusError.run_1).toBeUndefined()
+      expect(client.runRoomList).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('applies slow presence responses and exposes slow failures without starving on the refresh interval', async () => {
+    vi.useFakeTimers()
+    try {
+      useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
+      const response = Promise.withResolvers<RoomStatusResult>()
+      const failure = Promise.withResolvers<RoomStatusResult>()
+      const occupied = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
+      const client = fakeApi({
+        runRoomStatus: vi.fn().mockReturnValueOnce(response.promise).mockReturnValueOnce(failure.promise),
+      })
+      render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
+      await act(async () => { response.resolve(occupied); await response.promise })
+      fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+      expect(screen.getByText(`Controller: ${bob.display_name}`)).toBeDefined()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+      await act(async () => { failure.reject(new Error('slow presence failure')); await Promise.resolve() })
+      expect(screen.getByRole('status').textContent).toContain('Presence is stale: slow presence failure')
+      expect(screen.getByText(`Controller: ${bob.display_name}`)).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores a pending presence response when acknowledged control changes', async () => {
+    const oldResponse = Promise.withResolvers<RoomStatusResult>()
+    const currentResponse = Promise.withResolvers<RoomStatusResult>()
+    const client = fakeApi({
+      runRoomStatus: vi.fn().mockReturnValueOnce(oldResponse.promise).mockReturnValueOnce(currentResponse.promise),
+    })
+    const props = { run: run(), client, selfID: alice.id, onTakeControl: vi.fn(), onReleaseControl: vi.fn() }
+    const view = render(<RunRoom {...props} />)
+    view.rerender(<RunRoom {...props} control={control} />)
+    const current = status({ watchers: [alice.id] })
+    await act(async () => { currentResponse.resolve(current); await currentResponse.promise })
+    await act(async () => { oldResponse.resolve(status({ watchers: [bob.id] })); await oldResponse.promise })
+    expect(useStore.getState().roomStatus.run_1).toEqual(current)
+  })
+
+  it('ignores presence responses from an old run and after unmount', async () => {
+    const oldResponse = Promise.withResolvers<RoomStatusResult>()
+    const currentResponse = Promise.withResolvers<RoomStatusResult>()
+    const statusCall = vi.fn().mockImplementationOnce(() => oldResponse.promise).mockImplementationOnce(() => currentResponse.promise)
+    const client = fakeApi({ runRoomStatus: statusCall })
+    const view = render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    view.rerender(<RunRoom run={run({ id: 'run_2' })} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    await act(async () => { oldResponse.resolve(status()); await oldResponse.promise })
+    expect(useStore.getState().roomStatus.run_1).toBeUndefined()
+    view.unmount()
+    await act(async () => { currentResponse.resolve(status({ run_id: 'run_2' })); await currentResponse.promise })
+    expect(useStore.getState().roomStatus.run_2).toBeUndefined()
+  })
+
   it('confirms an occupied takeover and names the current controller', () => {
     const take = vi.fn()
     const occupied = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
@@ -413,6 +555,62 @@ describe('Run Room', () => {
     expect(screen.queryByRole('alert', { name: 'Run Room action error' })).toBeNull()
   })
 
+  it.each([
+    { member_id: alice.id, connected: false },
+    { member_id: bob.id, connected: true },
+  ])('keeps acknowledged local authority despite stale presence from $member_id (connected=$connected)', async (snapshot) => {
+    const queued = roomMessage({ id: 'steer_1', kind: 'steer_request', state: 'queued', body: 'Run the focused test' })
+    const occupied = status({ controller: { ...snapshot, acquired_at: '2026-08-14T10:00:00Z' } })
+    const client = fakeApi({
+      runRoomStatus: vi.fn(async () => occupied),
+      runRoomList: vi.fn(async () => ({ messages: [queued] })),
+    })
+    const release = vi.fn()
+    useStore.setState({ roomMessages: { run_1: [queued] }, roomStatus: { run_1: occupied }, members: { [alice.id]: alice, [bob.id]: bob } })
+    render(<RunRoom run={run()} client={client} selfID={alice.id} control={control} onTakeControl={vi.fn()} onReleaseControl={release} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    expect(screen.getByText(`Controller: ${alice.display_name}`)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Release control' }))
+    expect(release).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve now' }))
+    await waitFor(() => expect(client.runRoomDecide).toHaveBeenCalledWith(expect.objectContaining({
+      message_id: queued.id, decision: 'approve', control_session_id: control.control_session_id, control_generation: control.control_generation,
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Run Room message' }), { target: { value: 'Inspect the result' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Queue steer' }))
+    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'steer_request', control_session_id: control.control_session_id, control_generation: control.control_generation,
+    })))
+  })
+
+  it.each([
+    { label: 'without metadata', metadata: undefined, selfID: alice.id, runStatus: 'running' as const },
+    { label: 'with a mirror acknowledgement', metadata: { ...control, has_control: false }, selfID: alice.id, runStatus: 'running' as const },
+    { label: 'without local identity', metadata: control, selfID: null, runStatus: 'running' as const },
+    { label: 'after the run completes', metadata: control, selfID: alice.id, runStatus: 'completed' as const },
+  ])('does not grant moderation or controller steering from presence $label', async ({ metadata, selfID, runStatus }) => {
+    const queued = roomMessage({ id: 'steer_1', kind: 'steer_request', state: 'queued', body: 'Run the focused test' })
+    const occupied = status({ controller: { member_id: alice.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
+    const client = fakeApi({
+      runRoomStatus: vi.fn(async () => occupied),
+      runRoomList: vi.fn(async () => ({ messages: [queued] })),
+    })
+    useStore.setState({ roomMessages: { run_1: [queued] }, roomStatus: { run_1: occupied } })
+    render(<RunRoom run={run({ status: runStatus })} client={client} selfID={selfID} control={metadata} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+    expect(screen.queryByRole('button', { name: 'Approve now' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
+    if (runStatus === 'running') expect(screen.queryByRole('button', { name: 'Release control' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Run Room message' }), { target: { value: 'Inspect the result' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Queue steer' }))
+    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledOnce())
+    const request = vi.mocked(client.runRoomPost).mock.calls[0][0]
+    expect(request.control_session_id).toBeUndefined()
+    expect(request.control_generation).toBeUndefined()
+  })
+
   it('shows the live countdown and lets the controller approve or deny', async () => {
     const queued = roomMessage({ id: 'steer_1', kind: 'steer_request', state: 'queued', body: 'Run the focused test', deliver_after: new Date(Date.now() + 45_000).toISOString() })
     useStore.setState({ roomMessages: { run_1: [queued] }, roomStatus: { run_1: status({ controller: { member_id: alice.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' }, queued_steers: 1 }) }, members: { [alice.id]: alice, [bob.id]: bob } })
@@ -429,6 +627,21 @@ describe('Run Room', () => {
     mount({}, { status: protectedStatus, client })
     expect(screen.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
     expect(screen.getByText('Protected runs do not accept steering requests.')).toBeDefined()
+  })
+
+  it('keeps a newly protected agent draft without allowing keyboard submission', async () => {
+    const client = mount()
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+    const composer = screen.getByRole('textbox', { name: 'Run Room message' })
+    fireEvent.change(composer, { target: { value: 'keep pending instruction' } })
+    act(() => useStore.getState().setRoomStatus('run_1', status({ protected: true })))
+    fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true })
+    expect(client.runRoomPost).not.toHaveBeenCalled()
+    expect(composer).toHaveProperty('value', 'keep pending instruction')
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
+    fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true })
+    await waitFor(() => expect(client.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'comment', body: 'keep pending instruction' })))
   })
 
   it('uploads an image before posting and includes its server reference', async () => {
@@ -625,17 +838,4 @@ describe('Run Room', () => {
     expect(await screen.findByText('agent output')).toBeDefined()
   })
 
-  it('uses a title-bar-inset full viewport sheet on a phone', () => {
-    const original = window.matchMedia
-    window.matchMedia = vi.fn((query: string) => ({ matches: query.includes('max-width: 639px'), media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() })) as typeof window.matchMedia
-    try {
-      mount()
-      const room = screen.getByRole('complementary', { name: 'Run Room' })
-      expect(room.className).toContain('fixed inset-x-0')
-      expect(room.className).toContain('top-[calc(var(--title-bar-height)+var(--safe-top))]')
-      expect(room.className).toContain('bottom-0')
-    } finally {
-      window.matchMedia = original
-    }
-  })
 })

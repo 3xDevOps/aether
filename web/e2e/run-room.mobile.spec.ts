@@ -88,7 +88,6 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
 
     await page.goto(`${alice.url}&run=${run.id}`)
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
-    await expect(page.getByText('Attached', { exact: true })).toBeVisible()
     const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *) > div')
     await expect(rows).toHaveCount(desktopRows)
 
@@ -123,7 +122,6 @@ test('a phone opens Run Room as a full sheet without resizing the run PTY', asyn
     await page.getByRole('button', { name: 'Close Run Room' }).tap()
     await expect(room).toBeHidden()
     await expect(page.getByRole('button', { name: 'Open Run Room' })).toBeVisible()
-    await expect(page.getByText('Attached', { exact: true })).toBeVisible()
     await expect(rows).toHaveCount(desktopRows)
     expect(await sessionGeometry()).toEqual(beforeOpen)
   } finally {

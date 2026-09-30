@@ -148,12 +148,6 @@ export interface UiSlice {
    * back - several times a minute on a phone.
    */
   diffWrap: boolean | null
-  /**
-   * Whether the member has ever taken control of a run. Until they have, the
-   * Terminal tab says what the default attach is, because nothing else on
-   * screen distinguishes a read-only mirror from a steered session.
-   */
-  terminalControlTaken: boolean
   onboarded: boolean
   onboardingStep: OnboardingStep
   /**
@@ -198,7 +192,6 @@ export interface UiSlice {
   setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
   setDiffWrap: (wrap: boolean) => void
-  markTerminalControlTaken: () => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
   setOnboardingStep: (step: OnboardingStep) => void
@@ -224,7 +217,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
   diffWrap: null,
-  terminalControlTaken: false,
   onboarded: false,
   onboardingStep: 'Link',
   onboardingFurthest: 'Link',
@@ -249,7 +241,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
-  markTerminalControlTaken: () => set({ terminalControlTaken: true }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setOnboarded: (onboarded) =>
     set(

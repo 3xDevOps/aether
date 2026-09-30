@@ -50,12 +50,6 @@ describe('terminal zoom', () => {
     expect(rehydrate({}).terminalFontSize).toBe(defaultTerminalFontSize)
   })
 
-  it('takes only a stored true as control having been taken', () => {
-    expect(rehydrate({ terminalControlTaken: true }).terminalControlTaken).toBe(true)
-    expect(rehydrate({ terminalControlTaken: 'yes' }).terminalControlTaken).toBe(false)
-    expect(rehydrate({}).terminalControlTaken).toBe(false)
-  })
-
   it('leaves the other stored preferences alone', () => {
     const hydrated = rehydrate({ theme: 'dark', sidebarWidth: 320, terminalFontSize: 20 })
 

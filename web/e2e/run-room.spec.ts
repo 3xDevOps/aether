@@ -80,33 +80,31 @@ test('two members share comments, moderated steering, and explicit control trans
     await bobPage.goto(`${bob.url}&run=${run.id}`)
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
     await expect(bobPage.getByRole('heading', { name: task, exact: true })).toBeVisible()
-    await expect(page.getByText('Attached', { exact: true })).toBeVisible()
-    await expect(bobPage.getByText('Attached', { exact: true })).toBeVisible()
+    // Both collapsed toolbars must discover the live attach watchers without
+    // opening the room or loading its message history.
+    for (const viewerPage of [page, bobPage]) {
+      await expect(viewerPage.getByRole('complementary', { name: 'Run Room' })).toBeHidden()
+      const viewers = viewerPage.getByRole('group', { name: 'Run viewers', exact: true })
+      await expect(viewers.getByRole('img')).toHaveCount(2)
+      await expect(viewers.getByRole('img', { name: aliceDisplayName, exact: true })).toBeVisible()
+      await expect(viewers.getByRole('img', { name: bobDisplayName, exact: true })).toBeVisible()
+    }
 
-    // Load Bob first so Alice's room status sees both attach watchers.
     await bobPage.getByRole('button', { name: 'Open Run Room' }).click()
     const bobRoom = bobPage.getByRole('complementary', { name: 'Run Room' })
     await expect(bobRoom).toBeVisible()
-    await expect(bobRoom).toContainText('2 watching')
     await expect(bobRoom).toContainText(`Controller: ${aliceDisplayName}`)
     await expect(
       bobRoom.getByRole('img', { name: aliceDisplayName, exact: true }),
-    ).toBeVisible()
-    await expect(
-      bobRoom.getByRole('img', { name: bobDisplayName, exact: true }),
     ).toBeVisible()
     await expect(bobRoom.getByRole('button', { name: 'Take control' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Open Run Room' }).click()
     const aliceRoom = page.getByRole('complementary', { name: 'Run Room' })
     await expect(aliceRoom).toBeVisible()
-    await expect(aliceRoom).toContainText('2 watching')
     await expect(aliceRoom).toContainText(`Controller: ${aliceDisplayName}`)
     await expect(
       aliceRoom.getByRole('img', { name: aliceDisplayName, exact: true }),
-    ).toBeVisible()
-    await expect(
-      aliceRoom.getByRole('img', { name: bobDisplayName, exact: true }),
     ).toBeVisible()
     await expect(page.getByRole('button', { name: 'Release control' })).toBeVisible()
 
@@ -159,30 +157,21 @@ test('two members share comments, moderated steering, and explicit control trans
     )
     await takeover.getByRole('button', { name: 'Take control', exact: true }).click()
 
-    await expect(bobPage.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
-    // Control status is fetched when the room opens. Reopen it after the
-    // takeover so the displayed controller comes from the server's new lease,
-    // not the pre-takeover snapshot.
-    await bobPage.getByRole('button', { name: 'Close Run Room' }).click()
-    await bobPage.getByRole('button', { name: 'Open Run Room' }).click()
-    const bobControlledRoom = bobPage.getByRole('complementary', { name: 'Run Room' })
-    await expect(bobControlledRoom).toContainText(
+    // The open rooms follow the new lease without requiring a close/reopen.
+    await expect(bobRoom).toContainText(
       `Controller: ${bobDisplayName}`,
     )
-    await expect(bobControlledRoom.getByRole('button', { name: 'Release control' })).toBeVisible()
+    await expect(bobRoom.getByRole('button', { name: 'Release control' })).toBeVisible()
     // Alice remains an observer after the server fences her stale writable
     // attach; she must not retain a second input path.
     await expect(aliceRoom.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
 
-    // Bob's lease ends only through an explicit release. Reopening the room
-    // asks the server for the post-release status rather than trusting a stale
-    // controller label in the previous snapshot.
-    await bobControlledRoom.getByRole('button', { name: 'Release control' }).click()
-    await expect(bobControlledRoom.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
-    await bobPage.getByRole('button', { name: 'Close Run Room' }).click()
-    await bobPage.getByRole('button', { name: 'Open Run Room' }).click()
-    const releasedRoom = bobPage.getByRole('complementary', { name: 'Run Room' })
-    await expect(releasedRoom).toContainText('No controller')
+    // Bob's lease ends only through an explicit release, and both browsers
+    // observe the server's post-release controller state in place.
+    await bobRoom.getByRole('button', { name: 'Release control' }).click()
+    await expect(bobRoom.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
+    await expect(bobRoom).toContainText('No controller')
+    await expect(aliceRoom).toContainText('No controller')
 
     await alice.api.rpc('run.room.post', {
       workspace_id: workspaces[0].id,

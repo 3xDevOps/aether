@@ -32,13 +32,19 @@ test('uploads a chosen image and verifies it from the target shell', async ({ pa
   const screen = dock.locator('.xterm-screen')
   await screen.click()
   await page.keyboard.type('sha256sum ')
-  await dock.getByRole('button', { name: 'Upload image to terminal' }).click()
+  const toolsButton = dock.getByRole('button', { name: 'Terminal tools', exact: true })
+  let tools = dock
+  if (await toolsButton.isVisible()) {
+    await toolsButton.click()
+    tools = page.getByRole('dialog')
+  }
+  await tools.getByRole('button', { name: 'Upload image to terminal' }).click()
   await dock.locator('input[type=file]').setInputFiles({
     name: 'chosen.png',
     mimeType: 'image/png',
     buffer: imageBytes,
   })
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Upload image to terminal' })
   await expect(dialog).toContainText('chosen.png')
 
   const uploadResponse = page.waitForResponse(
@@ -81,8 +87,6 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   await page.goto(alice.url)
   await page.getByRole('complementary').getByRole('button', { name: new RegExp(task) }).click()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
-  await expect(page.getByText('Attached')).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByRole('button', { name: 'Steering' })).toBeVisible()
 
   const runDock = page.getByRole('region', { name: 'Terminal dock' })
   await runDock.getByRole('button', { name: 'Expand terminal dock' }).click()
@@ -93,18 +97,25 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   const screen = runDock.locator('.xterm-screen')
   await expect(screen).toBeVisible({ timeout: 60_000 })
   await runDock.getByRole('button', { name: 'Take shell control' }).click()
+  const toolsButton = runDock.getByRole('button', { name: 'Terminal tools', exact: true })
+  let tools = runDock
+  if (await toolsButton.isVisible()) {
+    await toolsButton.click()
+    tools = page.getByRole('dialog')
+  }
   await expect(
-    runDock.getByRole('button', { name: 'Upload image to terminal' }),
+    tools.getByRole('button', { name: 'Upload image to terminal' }),
   ).toBeEnabled({ timeout: 60_000 })
   await screen.click()
   await page.keyboard.type('sha256sum ')
-  await runDock.getByRole('button', { name: 'Upload image to terminal' }).click()
+  if (await toolsButton.isVisible()) await toolsButton.click()
+  await tools.getByRole('button', { name: 'Upload image to terminal' }).click()
   await runDock.locator('input[type=file]').setInputFiles({
     name: 'run-target.png',
     mimeType: 'image/png',
     buffer: imageBytes,
   })
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Upload image to terminal' })
   await expect(dialog).toContainText('run-target.png')
 
   const uploadResponse = page.waitForResponse(

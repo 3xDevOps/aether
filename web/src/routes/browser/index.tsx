@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { RunHeader } from '@/components/run-header'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { DevBrowserNavigateParams, DevBrowserPage, DevBrowserStatusResult, DevController, DevControlFence, DevSurface } from '@/lib/types'
+import { cn, field } from '@/lib/utils'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { EvidenceDrawer } from '@/routes/terminal/evidence-drawer'
 import { runTabPanel } from '@/routes/terminal/tabs'
@@ -182,31 +184,44 @@ function BrowserRoute({ runID }: { runID: string }) {
 
   return <div className="flex h-full min-h-0 min-w-0 flex-col">
     <div hidden={expanded} className="shrink-0"><RunHeader run={run} active="browser" /></div>
-    <section {...runTabPanel('browser', 'flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-2 sm:p-3')}>
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span role="status" hidden={expanded}>Browser: {status?.state ?? (error ? 'Unavailable' : 'Checking')}{status?.session_id ? ` · ${status.session_id}` : ''}</span>
-        <span>{owns ? 'You control this browser' : 'Watch mode'} · Controller: {controllerName}{controller?.expires_at ? ` · expires ${new Date(controller.expires_at).toLocaleTimeString()}` : ''}</span>
-        <span className={expanded ? 'hidden' : 'contents'}>
-          {surface && (!owns || blocked) && <Button size="sm" variant="outline" disabled={busy} onClick={() => acquire(false)}>Acquire control</Button>}
-          {surface && controller && !owns && <Button size="sm" variant="outline" disabled={busy} onClick={() => acquire(true)}>Take over browser</Button>}
-          {surface && fence && <Button size="sm" variant="outline" disabled={busy} onClick={() => void perform(() => release())}>Release control</Button>}
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void perform(async () => { await refresh(); setConnection((value) => value + 1); setBlocked(false) })}>Reconnect</Button>
-          <Button size="sm" variant="ghost" onClick={() => navigate('terminal', { runId: runID })}>Hide browser</Button>
-        </span>
+    <section {...runTabPanel('browser', 'flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3')}>
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-3 text-[13px]">
+        <div className="min-w-0 flex-1 basis-80 space-y-1">
+          <p role="status" hidden={expanded} className="break-words">
+            Browser: {status?.state ?? (error ? 'Unavailable' : 'Checking')}
+            {status?.session_id && <span className="ml-2 break-all text-xs text-muted-foreground">{status.session_id}</span>}
+          </p>
+          <p className="break-words text-xs text-muted-foreground">
+            <span className={owns ? 'font-medium text-[var(--accent-soft-foreground)]' : 'text-foreground'}>{owns ? 'You control this browser' : 'Watch mode'}</span>
+            {' · Controller: '}{controllerName}{controller?.expires_at ? ` · expires ${new Date(controller.expires_at).toLocaleTimeString()}` : ''}
+          </p>
+        </div>
+        <div className={`${expanded ? 'hidden' : 'flex'} flex-wrap items-center gap-2`}>
+          {surface && (!owns || blocked) && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => acquire(false)}>Acquire control</Button>}
+          {surface && controller && !owns && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => acquire(true)}>Take over browser</Button>}
+          {surface && fence && <Button className="coarse:h-11" variant="outline" disabled={busy} onClick={() => void perform(() => release())}>Release control</Button>}
+          <Button className="coarse:h-11" variant="ghost" disabled={busy} onClick={() => void perform(async () => { await refresh(); setConnection((value) => value + 1); setBlocked(false) })}>Reconnect</Button>
+          <Button className="coarse:h-11" variant="ghost" onClick={() => navigate('terminal', { runId: runID })}>Hide browser</Button>
+        </div>
       </div>
       {status?.reason && <p role="alert" className="break-words text-sm text-destructive">{status.reason}</p>}
       {error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}
-      <form className={`${expanded ? 'hidden' : 'flex'} min-w-0 flex-wrap gap-1`} onSubmit={(event) => { event.preventDefault(); if (selectedPage) navigatePage('url'); else open() }}>
-        <Button type="button" size="sm" variant="outline" aria-label="Back" disabled={!writable || !selectedPage} onClick={() => navigatePage('back')}>Back</Button>
-        <Button type="button" size="sm" variant="outline" aria-label="Forward" disabled={!writable || !selectedPage} onClick={() => navigatePage('forward')}>Forward</Button>
-        <Button type="button" size="sm" variant="outline" disabled={!writable || !selectedPage} onClick={() => navigatePage('reload')}>Reload page</Button>
-        <input aria-label="Browser URL" type="url" value={address} onChange={(event) => setAddress(event.target.value)} className="min-w-32 flex-1 rounded border border-input bg-background px-2 py-1 text-base sm:text-sm" />
-        {selectedPage && <Button type="submit" size="sm" disabled={!writable}>Go</Button>}
-        <Button type="button" size="sm" disabled={busy || !status?.available || Boolean(status.session_id && !fence)} onClick={open}>{pages.length ? 'New page' : 'Open browser'}</Button>
+      <form className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-2`} onSubmit={(event) => { event.preventDefault(); if (selectedPage) navigatePage('url'); else open() }}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" className="coarse:h-11" variant="outline" aria-label="Back" disabled={!writable || !selectedPage} onClick={() => navigatePage('back')}>Back</Button>
+          <Button type="button" className="coarse:h-11" variant="outline" aria-label="Forward" disabled={!writable || !selectedPage} onClick={() => navigatePage('forward')}>Forward</Button>
+          <Button type="button" className="coarse:h-11" variant="outline" disabled={!writable || !selectedPage} onClick={() => navigatePage('reload')}>Reload page</Button>
+        </div>
+        <div className="flex min-w-0 flex-1 basis-80 items-center gap-2">
+          <Input aria-label="Browser URL" type="url" value={address} onChange={(event) => setAddress(event.target.value)} className="min-w-0 flex-1" />
+          {selectedPage && <Button type="submit" className="coarse:h-11" disabled={!writable}>Go</Button>}
+          <Button type="button" className="coarse:h-11" disabled={busy || !status?.available || Boolean(status.session_id && !fence)} onClick={open}>{pages.length ? 'New page' : 'Open browser'}</Button>
+        </div>
       </form>
-      <div className={`${expanded ? 'hidden' : 'flex'} flex-wrap items-center gap-2`}>
-        <label className="flex min-w-0 items-center gap-1 text-sm">Page
-          <select aria-label="Browser page" value={selected} disabled={!writable} className="min-w-0 max-w-64 rounded border border-input bg-background p-1" onChange={(event) => {
+      <div className={`${expanded ? 'hidden' : 'flex'} min-w-0 shrink-0 flex-wrap items-center gap-x-3 gap-y-2`}>
+        <label className="flex min-w-0 flex-[1_1_16rem] items-center gap-1 text-[13px]">
+          <span className="w-14 shrink-0">Page</span>
+          <select aria-label="Browser page" value={selected} disabled={!writable} className={cn(field, 'min-w-0 flex-1 coarse:h-11 coarse:min-h-11')} onChange={(event) => {
             const page = pages.find((item) => item.page_id === event.target.value)
             if (!page || !fence) return
             void perform(async () => { await api.devBrowserAction({ run_id: runID, session_id: page.session_id, page_id: page.page_id, page_revision: page.page_revision, ...fence, action: 'select' }); setSelected(page.page_id) })
@@ -215,8 +230,9 @@ function BrowserRoute({ runID }: { runID: string }) {
             {pages.map((page) => <option key={page.page_id} value={page.page_id}>{page.title || page.url || page.page_id}</option>)}
           </select>
         </label>
-        <label className="flex items-center gap-1 text-sm">Viewport
-          <select aria-label="Browser viewport" value={preset} className="rounded border border-input bg-background p-1" disabled={busy || Boolean(selectedPage && !fence)} onChange={(event) => {
+        <label className="flex min-w-0 flex-[1_1_18rem] items-center gap-1 text-[13px]">
+          <span className="w-14 shrink-0">Viewport</span>
+          <select aria-label="Browser viewport" value={preset} className={cn(field, 'min-w-0 flex-1 coarse:h-11 coarse:min-h-11')} disabled={busy || Boolean(selectedPage && !fence)} onChange={(event) => {
             const value = event.target.value
             if (!selectedPage) { setPreset(value); return }
             if (!fence) return
@@ -229,19 +245,25 @@ function BrowserRoute({ runID }: { runID: string }) {
             {!['1280x800', '390x844', '844x390'].includes(preset) && <option value={preset}>Current · {preset.replace('x', ' × ')}</option>}
           </select>
         </label>
-        <Button size="sm" variant="outline" disabled={!selectedPage || busy} onClick={() => {
-          if (!selectedPage) return
-          void perform(async () => { const result = await api.devBrowserScreenshot({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision }); setCapture(result.artifact.id) })
-        }}>Screenshot</Button>
-        <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} />
-        <Button size="sm" variant="outline" disabled={!writable || !selectedPage} onClick={() => {
-          if (!selectedPage || !fence || !window.confirm('Close this shared page for everyone? Other pages and the browser session remain.')) return
-          void perform(async () => { await api.devBrowserClose({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision, ...fence }) })
-        }}>Close page</Button>
-        <Button size="sm" variant="outline" disabled={!surface || !fence || busy} onClick={() => {
-          if (!status?.session_id || !fence || !window.confirm('Reset the shared browser session? All pages, cookies and logins will be lost.')) return
-          void perform(async () => { await api.devBrowserReset({ run_id: runID, session_id: status.session_id!, ...fence }); setPages([]); setController(null); setBlocked(false) })
-        }}>Reset session</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button className="coarse:h-11" variant="outline" disabled={!selectedPage || busy} onClick={() => {
+            if (!selectedPage) return
+            void perform(async () => { const result = await api.devBrowserScreenshot({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision }); setCapture(result.artifact.id) })
+          }}>Screenshot</Button>
+          <div className="[&>section>button]:h-[26px] [&>section>button]:min-h-[26px] [&>section>button]:text-[13px] coarse:[&>section>button]:h-11 coarse:[&>section>button]:min-h-11">
+            <EvidenceDrawer runID={runID} workspaceID={run.workspace_id} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button className="coarse:h-11" variant="outline" disabled={!writable || !selectedPage} onClick={() => {
+            if (!selectedPage || !fence || !window.confirm('Close this shared page for everyone? Other pages and the browser session remain.')) return
+            void perform(async () => { await api.devBrowserClose({ run_id: runID, session_id: selectedPage.session_id, page_id: selectedPage.page_id, page_revision: selectedPage.page_revision, ...fence }) })
+          }}>Close page</Button>
+          <Button className="coarse:h-11" variant="outline" disabled={!surface || !fence || busy} onClick={() => {
+            if (!status?.session_id || !fence || !window.confirm('Reset the shared browser session? All pages, cookies and logins will be lost.')) return
+            void perform(async () => { await api.devBrowserReset({ run_id: runID, session_id: status.session_id!, ...fence }); setPages([]); setController(null); setBlocked(false) })
+          }}>Reset session</Button>
+        </div>
       </div>
       {capture && <p role="status" hidden={expanded} className="break-words text-xs text-muted-foreground">Captured {capture}. Open Evidence and explicitly select captures to retain; nothing has been published.</p>}
       {selectedPage ? <BrowserSurface key={`${selectedPage.session_id}:${selectedPage.page_id}`} runID={runID} page={selectedPage} control={!busy && !blocked ? fence : null} connection={connection}

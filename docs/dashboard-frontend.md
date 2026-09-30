@@ -1304,9 +1304,9 @@ the task.
 ### Run Room and control lease
 
 `RunRoom` is the collaboration view for the current run. It is mounted beside
-`TerminalView` as a collapsed vertical tab; opening it loads the durable room
-timeline and the current room status. The tab count is derived from the
-collaboration slice's unanswered questions and queued steers.
+`TerminalView` as a collapsed vertical tab; opening loads the durable room
+timeline, while presence refreshes even when collapsed. The tab count is
+derived from the collaboration slice's unanswered questions and queued steers.
 
 The server-side lease, reconnect, takeover, steering, protection, attachment,
 and question contract is defined once in
@@ -1315,10 +1315,13 @@ Dashboard changes must preserve that contract rather than restating it here.
 
 The dashboard-specific state wiring is:
 
-- `RunRoom` reads `roomMessages`, pagination, loading and action errors, and
-  `roomStatus` from `src/store/collaboration.ts`; it hydrates history and
-  status through `run.room.list` and `run.room.status`, then merges live room
-  events through the normal store sync.
+- `RunRoom` reads history, pagination, loading, action errors and presence from
+  `src/store/collaboration.ts`. `run.room.list` loads on opening and reconciles
+  every ten seconds while open; live room events merge through normal store
+  sync. `run.room.status` runs on mount, every five seconds and when acknowledged
+  control metadata changes. Late responses from an old scope or request are
+  ignored. Presence errors stay separate from history errors: retained names
+  are marked stale, and unavailable/loading status is not shown as nobody.
 - The composer calls `run.room.post` for comments, questions, replies, and
   steer requests. Approval and denial call `run.room.decide` with the control
   metadata supplied by the terminal attach.
@@ -1332,6 +1335,15 @@ The dashboard-specific state wiring is:
   write intent precedence over that default, with its existing identity and
   authority fences; Take control and Release use acknowledged control frames.
   Ordinary/integrator owner defaults and phone mirrors are unchanged.
+- **Ctrl/Cmd+Shift+M** toggles the room from xterm or the composer; the opener
+  tooltip, room header and shortcut reference show the platform-specific key.
+  The capture handler prevents terminal bytes, focuses the composer on keyboard
+  opening and restores the invoker (or opener) on closing without clearing the
+  draft, mode or attachments. Dialogs, the palette, composition and already
+  handled events take precedence.
+- **Comment** starts selected with a neutral selected segment and a
+  collaborators-only hint. **Send to agent** uses teal and explains the queued
+  instruction and controller approval consequence; colour is not the sole cue.
 
 On desktop the open room is a right-side panel capped at 420px. On a phone it
 is a full-viewport sheet; the terminal and room remain separate surfaces while
@@ -1457,10 +1469,18 @@ The Terminal view is a vertical split. The active terminal renders its
 RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`.
 The agent terminal keeps flexible space above a `RunDock` below it. The first
 header section contains the title and metadata on two lines; the next contains
-tabs and actions on one line. The terminal strip left-aligns connection and
-steering immediately after the search, font, clipboard and image tools, without
-a spacer between the groups. Real gateway errors wrap there rather than being
-truncated.
+tabs and actions on one line. The existing terminal toolbar contains connection,
+control and presence alongside its tools, with no extra viewer/controller row.
+It names the controller and all viewers; the viewer list scrolls horizontally,
+and **Terminal tools** takes utility actions at limited widths. **(this tab)** requires
+live acknowledged local control; **(another session)** distinguishes the same
+member's other controller session. Real gateway errors remain readable.
+At narrow widths key and eye icons identify the controller and viewers; full
+role labels stay accessible, with the session marker also in the controller's
+hover title.
+The viewer scroller is keyboard-focusable.
+Find opens in a temporary row below the strip so it never obscures a matched
+terminal line. Closing Find returns that space to the terminal.
 
 The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
@@ -1471,8 +1491,8 @@ is reachable too. The shell tab strip is a custom manual tab list with one
 keyboard stop and overflow scrolling; it does not use a component-level tab
 primitive.
 
-`TerminalPane` keeps xterm's host geometry intact while layering the shared
-toolbar and Find over it. During a dashboard run's compact current-screen
+`TerminalPane` lays out its shared toolbar and optional Find row above the
+terminal host. During a dashboard run's compact current-screen
 bootstrap it receives `replaying={replaying}`: the xterm host is hidden with
 CSS visibility while each frame-sized operation is parsed through one serial
 xterm write chain. When no saved reading surface covers it, the pane says
@@ -1508,7 +1528,7 @@ output; the headless browser suppresses its own native scrollbar in captures.
 
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
-supplies its connection and steering controls immediately after those tools.
+supplies connection, control and presence in that same toolbar.
 Terminal tools delegate key behavior to the xterm controller and clipboard
 helpers rather than putting those actions in each dock. `useTerminalImage`
 owns the hidden file input, preview dialog, validation, upload call, and
@@ -1579,10 +1599,10 @@ and Ctrl+C, each through `terminal.input` so the replay gate and
 modifier held in the host (`armCtrl`), because a soft keyboard sends
 characters and never a modifier: it rewrites the next character into its
 control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte. On phones **Tools** opens a bounded,
-scrollable popover with named search, text-size, copy, paste and upload
-actions instead of a second permanent toolbar row. Wider touch screens keep
-the inline tools and visible copy labels.
+than spending it on the wrong byte. On phones, and when the run toolbar is too
+narrow for inline tools alongside presence, **Terminal tools** opens a bounded,
+scrollable popover with named search, text-size, copy, paste and upload actions
+instead of a second permanent toolbar row. Wider layouts keep inline tools.
 
 In a run's normal buffer, a downward finger drag pans the live grid to its
 top before handing off continuously to integrated history. Horizontal drags
@@ -1672,10 +1692,13 @@ the terminal with the gateway's own error instead.
   Mission-worker terminals and other members start as mirrors. The server
   grants write only when no controller exists; a second tab cannot become a
   second writer.
-  Until a member has taken control once, a live run opened as a mirror says
-  **Read-only mirror. Take control to type into the agent.** A run that is
-  starting shows its spinner instead; a run that is not steerable says **This
-  run is not running**. Whether a member may steer is the server's answer:
+  A mirror uses the toolbar's controller/viewer names and **Take control**, not
+  a repeated read-only instruction. Live, acknowledged local control adds a
+  quiet teal border with two tapered highlights circulating around its edge.
+  Replay, history reading, disconnect, revocation or a non-steerable run removes
+  it. Reduced motion retains a static teal border without the traveling highlights.
+  Starting runs keep their spinner; ended runs say **This run is not running**.
+  Whether a member may steer is the server's answer:
   `-32001` downgrades the attach to a mirror and disables the toggle. An
   occupied write request is a conflict and needs the Run Room's confirmed
   takeover.
@@ -1765,7 +1788,7 @@ the terminal with the gateway's own error instead.
   capture-phase image listener described above, so an image event is claimed
   only when the current terminal has a live image handler and plain text never
   takes that path. `Ctrl+Shift+F` opens the find bar `TerminalPane`
-  (`src/components/terminal-pane.tsx`) draws over the terminal. Live search uses
+  (`src/components/terminal-pane.tsx`) places above the terminal. Live search uses
   `@xterm/addon-search`; while reading, the same bar delegates to loaded archive
   pages and frozen rows. **No matches** comes from the active surface's answer
   rather than a tracked count. The read surface handles the same find, copy
@@ -1816,6 +1839,11 @@ and other viewers, so it requires control. **Viewport** offers desktop
 1280 × 800, phone 390 × 844 and landscape phone 844 × 390; these change the
 real remote viewport, not just the displayed image. They do not emulate a
 different user agent, operating system or hardware.
+
+The pane uses shared 13px inputs and buttons and native selectors styled with
+`field`: 26px high for mouse input and 44px for coarse pointers. Navigation,
+address/actions, page/viewport, capture and destructive controls wrap in
+responsive groups; long addresses, page titles and errors stay within the pane.
 
 The header identifies the browser incarnation, lifecycle state and current
 member or run-agent controller. **Acquire control** claims an unoccupied
@@ -2635,8 +2663,8 @@ about itself and appears wherever the member is an admin.
   dots bouncing in `--state-working` on board cards, run headers and run lists.
   Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
   The fixed dot box prevents a row shifting when a run starts or stops.
-- **Motion is optional.** The steering signal, working dots and sidebar pulse
-  answer `prefers-reduced-motion: reduce` by removing movement. The original
+- **Motion is optional.** The controlling terminal border, working dots and
+  sidebar pulse stop moving under `prefers-reduced-motion: reduce`. The original
   shooting-star scene appears only at desktop startup and is skipped under
   reduced motion. There is no reveal-flash animation. Spinner and skeleton
   feedback remains available.
@@ -2650,6 +2678,8 @@ about itself and appears wherever the member is an admin.
   controls use bounded 2-4px radii. `Input`, `Textarea` and `SelectTrigger`
   compose the shared `field` style with contrast-tuned `--input` borders,
   readable placeholders and explicit disabled/read-only states.
+  Shared `Label` captions are block-level; stacked caption-to-field gaps must
+  measure 4px, including wrapped inputs, rather than relying on inline margins.
 - **The empty string belongs to the Select placeholder.** Use a named,
   non-empty sentinel for an empty API or filter value, then map it back at
   that boundary. The Select wrapper ignores the empty report Radix can send

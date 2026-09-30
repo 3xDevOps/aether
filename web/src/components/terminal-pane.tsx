@@ -385,24 +385,45 @@ export function TerminalPane({
       host.removeEventListener('focus', blur, true)
     }
   }, [terminal, writable, replaying, readingSurface])
+  const closeFind = () => {
+    if (readingSurface) {
+      readingSurface.current?.cancelFind()
+      readingSurface.current?.focus()
+    } else controller.focusTerminal()
+    controller.setFindOpen(false)
+  }
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-sidebar px-2 coarse:min-h-12">
-        {!controller.findOpen ? (
-          phone ? (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="sm" aria-label="Terminal tools">
-                  <SlidersHorizontal />
-                  Tools
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[min(300px,calc(100vw-16px))] p-1">
-                <TerminalTools controller={controller} image={image} readingSurface={readingSurface} expanded />
-              </PopoverContent>
-            </Popover>
-          ) : <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
-        ) : (
+    <div className="@container/terminal-pane relative flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="relative z-10 flex min-h-9 shrink-0 items-start gap-1 border-b border-border bg-sidebar px-1 coarse:min-h-12 @sm/terminal-pane:gap-2 @sm/terminal-pane:px-2">
+        <div className="flex h-[35px] shrink-0 items-center coarse:h-[47px]">
+          {!controller.findOpen ? (
+            <>
+              <div className={toolbarEnd ? '@[70rem]/terminal-pane:hidden' : '@[42rem]/terminal-pane:hidden'}>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label="Terminal tools">
+                      <SlidersHorizontal />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[min(300px,calc(100vw-16px))] p-1">
+                    <TerminalTools controller={controller} image={image} readingSurface={readingSurface} expanded />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className={toolbarEnd ? 'hidden @[70rem]/terminal-pane:block' : 'hidden @[42rem]/terminal-pane:block'}>
+                <TerminalTools controller={controller} image={image} readingSurface={readingSurface} />
+              </div>
+            </>
+          ) : (
+            <Button variant="ghost" size="icon" aria-label="Close terminal search" onClick={closeFind}>
+              <Search />
+            </Button>
+          )}
+        </div>
+        {toolbarEnd}
+      </div>
+      {controller.findOpen && (
+        <div className="shrink-0 border-b border-border bg-sidebar p-1">
           <FindBar
             search={readingSurface ? {
               findNext: (term) => readingSurface.current?.findNext(term) ?? false,
@@ -410,18 +431,11 @@ export function TerminalPane({
               cancelFind: () => readingSurface.current?.cancelFind(),
             } : controller.search}
             onNavigate={controller.noteViewportInteraction}
-            onClose={() => {
-              if (readingSurface) {
-                readingSurface.current?.cancelFind()
-                readingSurface.current?.focus()
-              } else controller.focusTerminal()
-              controller.setFindOpen(false)
-            }}
+            onClose={closeFind}
           />
-        )}
-        {toolbarEnd}
-      </div>
-      <div className="relative flex min-h-0 min-w-0 flex-1">
+        </div>
+      )}
+      <div className="relative z-0 flex min-h-0 min-w-0 flex-1">
       <div
         ref={controller.hostRef}
         inert={replaying || !!readingSurface}

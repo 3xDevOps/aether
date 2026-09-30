@@ -30,6 +30,7 @@ function shellKeys(launchable: boolean): [string, string][] {
     [shortcutLabel('K'), 'Open the command palette'],
     [shortcutLabel('Shift+P'), 'Open the command palette'],
     [shortcutLabel('B'), 'Toggle the workspace sidebar'],
+    [shortcutLabel('Shift+M'), 'Toggle Run Room (from the terminal or room composer)'],
     ['Shift+/', 'Open this reference'],
     ...(launchable ? ([['n', 'Launch a run']] as [string, string][]) : []),
     ['g then b', 'Go to the board'],
@@ -209,7 +210,7 @@ export function ShortcutsButton() {
           <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
             <DialogTitle>Keyboard shortcuts</DialogTitle>
             <DialogDescription>
-              Keep your hands on the workbench. Shortcuts yield to focused fields and open dialogs.
+              Unmodified shortcuts yield to focused fields. Modified shortcuts work from the terminal; dialogs and menus keep their own keys.
             </DialogDescription>
           </DialogHeader>
           <div
