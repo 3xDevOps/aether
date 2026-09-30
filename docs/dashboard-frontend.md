@@ -1319,7 +1319,12 @@ The dashboard-specific state wiring is:
   `src/store/collaboration.ts`. `run.room.list` loads on opening and reconciles
   every ten seconds while open; live room events merge through normal store
   sync. `run.room.status` runs on mount, every five seconds and when acknowledged
-  control metadata changes. Late responses from an old scope or request are
+  control metadata changes. Refreshes are serialized with an abortable 15-second
+  deadline; polling continues after timeout. Each snapshot retains the exact
+  acknowledged `ControlMetadata` reference: taking then releasing can restore
+  the same generation, so generation values alone cannot establish freshness.
+  A changed reference marks the cached controller **(last known)** until the
+  next response. Late responses from an old scope or timed-out request are
   ignored. Presence errors stay separate from history errors: retained names
   are marked stale, and unavailable/loading status is not shown as nobody.
 - The composer calls `run.room.post` for comments, questions, replies, and
@@ -1362,6 +1367,10 @@ candidates** opens the candidate list for the current workspace, and
 selected packet** adds another exact source; the preparation action remains
 **Prepare candidate**. **Refresh candidates** re-reads the list and
 **Show candidate** loads the selected aggregate.
+
+The evidence drawer uses viewport-fixed positioning on desktop and phone so
+its controls are not clipped by the room or terminal's scroll containers.
+Its body scrolls within the available viewport height.
 
 The review shows the exact ordered inputs, their observation snapshots, target
 and expected revision, candidate revision/state, conflicts and file

@@ -165,7 +165,7 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
   }
 
   return (
-    <section className="relative min-w-0" aria-label="Run evidence">
+    <section className="min-w-0" aria-label="Run evidence">
       <Button
         type="button"
         variant="outline"
@@ -176,8 +176,8 @@ export function EvidenceDrawer({ runID, workspaceID, client = api, onAnswer }: E
         Evidence{packets.length ? ` (${packets.length})` : ''}
       </Button>
       {open && (
-        <div className="fixed inset-x-0 top-[calc(var(--title-bar-height)+var(--safe-top))] bottom-0 z-[80] flex min-h-0 w-full flex-col overflow-hidden border border-border bg-background shadow-lg md:absolute md:inset-x-0 md:top-8 md:right-0 md:bottom-auto md:left-auto md:z-40 md:max-h-[min(38rem,calc(100dvh-5rem))] md:w-[min(38rem,calc(100vw-2rem))]">
-          <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="fixed inset-x-0 top-[calc(var(--title-bar-height)+var(--safe-top))] bottom-0 z-[80] flex min-h-0 w-full flex-col overflow-hidden border border-border bg-background shadow-lg md:top-[calc(var(--title-bar-height)+var(--safe-top)+0.75rem)] md:right-3 md:bottom-auto md:left-auto md:z-40 md:max-h-[min(38rem,calc(100dvh-var(--title-bar-height)-var(--safe-top)-var(--status-bar-height)-1.5rem))] md:w-[min(38rem,calc(100vw-2rem))]">
+          <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
             <div className="min-w-0">
               <h2 className="truncate text-[13px] font-semibold">Retained evidence</h2>
               <p className="text-[11px] text-muted-foreground">Recorded observations, not verification</p>
