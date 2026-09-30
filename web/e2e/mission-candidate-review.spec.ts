@@ -131,9 +131,16 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
     '--expected-integrator-generation', String(mission.integrator_generation),
   ])
   await waitForCoordCLI(started.attempt.run_id, aether.server.dataDir)
+  const inspectWorker = async () => {
+    const shown = await alice.api.rpc<{
+      attempts?: { id: string; takeover_active?: boolean; takeover_member_id?: string }[]
+    }>('mission.show', { mission_id: mission.id })
+    const attempt = shown.attempts?.find((item) => item.id === started.attempt.id)
+    if (!attempt) throw new Error(`mission worker attempt ${started.attempt.id} was not found`)
+    return attempt
+  }
 
-  // Browser-visible worker control: the human takes and then releases the
-  // active worker hold before the fixture submits its result.
+  // Viewing an owned worker must not hold orchestration; explicit control does.
   const workerURL = new URL(alice.url)
   workerURL.searchParams.set('run', started.attempt.run_id)
   await page.goto(workerURL.toString())
@@ -142,10 +149,13 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await page.getByRole('button', { name: 'Open Run Room' }).click()
   const room = page.getByRole('complementary', { name: 'Run Room' })
   await expect(room).toBeVisible()
-  // The owner's initial attach already holds control.
-  await room.getByRole('button', { name: 'Release control', exact: true }).click()
+  const viewing = await inspectWorker()
+  expect(viewing.takeover_active ?? false).toBe(false)
   await room.getByRole('button', { name: 'Take control', exact: true }).click()
   await expect(room.getByRole('button', { name: 'Release control', exact: true })).toBeVisible({ timeout: 30_000 })
+  const controlled = await inspectWorker()
+  expect(controlled.takeover_active).toBe(true)
+  expect(controlled.takeover_member_id).toBe(aliceID)
 
   await page.goto(alice.url)
   await surfaces.getByRole('button', { name: 'Missions', exact: true }).click()
@@ -155,6 +165,8 @@ test('launches a bounded mission, controls a worker, and prepares its accepted c
   await expect(missionView).toContainText('Working')
   await page.getByRole('button', { name: 'Release control', exact: true }).click()
   await expect(page.getByText('Human control released')).toBeVisible({ timeout: 30_000 })
+  const released = await inspectWorker()
+  expect(released.takeover_active ?? false).toBe(false)
 
   // The real worker reports through its mounted CLI. Reconciliation creates
   // the proposed submission; the integrator fixture then accepts it with the
