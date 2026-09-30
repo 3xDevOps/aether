@@ -108,9 +108,17 @@ test('retains finish evidence after the run is cleaned up', async ({ page, aethe
   await expect(evidence.getByText('+hello-from-agent', { exact: false })).toBeVisible()
   await expect(evidence).not.toContainText('Patch unavailable')
 
+  // Keep the drawer wider than the room on a short desktop. Its source controls
+  // must remain clickable outside the room's scroll boundary.
+  await page.setViewportSize({ width: 800, height: 480 })
   // Transcript bytes are a separately retained source and must still expose
   // the fake agent's real terminal output.
   await evidence.getByRole('tab', { name: 'Transcript', exact: true }).click()
   await expect(evidence.getByText('agent-ready', { exact: false })).toBeVisible()
   await expect(evidence).not.toContainText('Transcript unavailable')
+
+  await evidence.getByRole('button', { name: 'Close evidence', exact: true }).click()
+  await expect(evidence.getByRole('heading', { name: 'Retained evidence', exact: true })).toBeHidden()
+  await room.getByRole('button', { name: 'Close Run Room', exact: true }).click()
+  await expect(room).toBeHidden()
 })

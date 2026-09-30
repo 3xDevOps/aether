@@ -69,7 +69,6 @@ const persistedUi = (s: RootState) => ({
   runDockHeight: s.runDockHeight,
   terminalFontSize: s.terminalFontSize,
   diffWrap: s.diffWrap,
-  terminalControlTaken: s.terminalControlTaken,
   activeWorkspace: s.activeWorkspace,
   groupBy: s.groupBy,
   lastHarnessByAccount: s.lastHarnessByAccount,
@@ -163,8 +162,6 @@ export function createRootStore() {
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
-            terminalControlTaken:
-              stored.terminalControlTaken === true || current.terminalControlTaken,
             boardView: stored.boardView === 'map' ? 'map' : 'cards',
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
           }

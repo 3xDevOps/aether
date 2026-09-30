@@ -365,17 +365,20 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
-  aether.installAgent(await memberID(alice), 'claude', 'sleep 600')
+  const aliceID = await memberID(alice)
+  aether.installAgent(aliceID, 'claude', 'sleep 600')
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>(
     'workspace.list',
   )
   const tasks = ['steered run A', 'steered run B']
+  const runIDs: string[] = []
   for (const task of tasks) {
     const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
       workspace_id: workspaces[0].id,
       harness: 'claude',
       task,
     })
+    runIDs.push(run.id)
     // Provisioning must not happen inside the timed switch below, or A's
     // lease could expire and the return would pass as a fresh acquisition.
     await expect
@@ -388,20 +391,33 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
       .toBe('running')
   }
 
+  const controllerFor = async (runID: string) => {
+    const { controller } = await alice.api.rpc<{
+      controller?: { member_id: string; connected: boolean; acquired_at: string }
+    }>('run.room.status', { workspace_id: workspaces[0].id, run_id: runID })
+    return controller
+  }
   await page.goto(alice.url)
   const sidebar = page.getByRole('complementary', { name: 'Runs' })
-  const steering = page.getByRole('button', { name: 'Steering', exact: true })
   const open = async (task: string) => {
     await sidebar.getByRole('button', { name: task }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
   }
   await open(tasks[0])
-  await expect(steering).toBeVisible({ timeout: 60_000 })
+  await expect.poll(() => controllerFor(runIDs[0]), { timeout: 60_000 }).toMatchObject({
+    member_id: aliceID,
+    connected: true,
+  })
+  const originalController = await controllerFor(runIDs[0])
 
   const left = Date.now()
   await open(tasks[1])
   await open(tasks[0])
-  await expect(steering).toBeVisible()
+  await expect.poll(() => controllerFor(runIDs[0])).toMatchObject({
+    member_id: aliceID,
+    connected: true,
+    acquired_at: originalController?.acquired_at,
+  })
   // Only inside the server's 15-second reconnect window does this prove the
   // tab reclaimed its own lease rather than acquiring an expired one.
   expect(Date.now() - left).toBeLessThan(15_000)

@@ -302,14 +302,16 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     }
   }
 
-  return <div className="flex min-h-0 flex-1 flex-col gap-2">
-    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      <span role="status">{live ? `Live frame · ${dimensions}` : 'Waiting for browser frame'}</span>
-      <Button size="sm" variant="outline" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
-      <Button size="sm" variant="outline" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
-      <span>{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only — restore browser controls to acquire control.' : 'Watch only — acquire control to interact.'}</span>
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+      <span role="status" className="min-w-0 break-words">{live ? `Live frame · ${dimensions}` : 'Waiting for browser frame'}</span>
+      <div className="flex items-center gap-2">
+        <Button className="coarse:h-11" variant="outline" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
+        <Button className="coarse:h-11" variant="outline" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
+      </div>
+      <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only — restore browser controls to acquire control.' : 'Watch only — acquire control to interact.'}</span>
     </div>
-    <div className="relative min-h-48 flex-1 overflow-hidden bg-black">
+    <div className="relative min-h-48 min-w-0 flex-1 overflow-hidden bg-black">
       <canvas ref={canvas} aria-label="Shared browser page" tabIndex={props.control ? 0 : -1}
         className="h-full w-full touch-none object-contain outline-none focus-visible:ring-2 focus-visible:ring-primary"
         onFocus={() => keyboard.current?.focus({ preventScroll: true })}

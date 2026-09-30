@@ -30,7 +30,6 @@ test('selected paths preserve unrelated staging, report index failure, and retai
   const workspace = workspaces[0]
   const { run } = await admin.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspace.id, harness: 'claude', task: 'native selected Git transaction' })
   await page.goto(`${admin.url}&run=${run.id}`)
-  await expect(page.getByText('Attached', { exact: true })).toBeVisible()
   const container = runContainer(run.id)
   await exec('docker', ['exec', '-w', '/workspace', container, 'sh', '-c', [
     'git config user.name "Native E2E"',

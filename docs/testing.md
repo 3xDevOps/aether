@@ -792,6 +792,7 @@ covered - WebKit is not installed.
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `run-views.mobile.spec.ts` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
+| `run-evidence.mobile.spec.ts` | Retained evidence at 390x600 with coarse-pointer touch input: tap through Patch and Summary, keep retained file content readable, and close both Evidence and Run Room; the report includes the open evidence sheet |
 | `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
 | `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome |
 
@@ -823,18 +824,18 @@ way, so content stranded behind a real iOS keyboard stays a manual check on a
 phone (`docs/dashboard-frontend.md` has that path).
 
 The phone specs need git; `shell-drawer.mobile.spec.ts`,
-`run-views.mobile.spec.ts` and `terminal-phone.mobile.spec.ts` also need
-Docker, because they open a real run, and skip without it. Run them alone
+`run-views.mobile.spec.ts`, `run-evidence.mobile.spec.ts` and
+`terminal-phone.mobile.spec.ts` also need Docker, because they open a real run,
+and skip without it. Run them alone
 against the binaries `make build` produced:
 
 ```sh
 cd web && bunx playwright test --project=mobile
 ```
 
-They add about 15 seconds to `make test-e2e` and to the `dashboard-e2e` job,
-which stays inside the suite's 30-minute `globalTimeout` unchanged. That job
-uploads its `playwright-report` artifact on a pass as well as a failure, so
-the phone screenshots are on every run.
+These specs run in `make test-e2e` and the `dashboard-e2e` job. The job uploads
+its `playwright-report` artifact on a pass as well as a failure, so the phone
+screenshots are on every run.
 
 Reference screenshots from a Chromium touch audit use synthetic API data
 and a 132x43 terminal: [terminal before/after and keyboard-height input](media/mobile-terminal-scroll.webp),

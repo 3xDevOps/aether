@@ -1,14 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
 import * as presentation from '@/components/terminal-presentation'
 import type * as apiModule from '@/lib/api'
+import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
-import { bob, run, serverInfo } from '@/test/fixtures'
+import { alice, bob, run, serverInfo } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 import { fire } from '@/test/wake'
 import { StubSocket } from '@/test/stub-socket'
@@ -34,7 +35,6 @@ function mount(
   useStore.setState({
     info: serverInfo,
     terminals: { run_1: { ...initialTerminal, ...seed } },
-    terminalControlTaken: false,
   })
   return render(<View params={{ runId: 'run_1' }} />)
 }
@@ -88,7 +88,7 @@ function controlAck(
 
 beforeEach(() => {
   StubSocket.install()
-  useStore.setState({ runs: {} })
+  useStore.setState({ runs: {}, roomStatusControl: {} })
 })
 
 afterEach(() => {
@@ -97,15 +97,109 @@ afterEach(() => {
 })
 
 describe('terminal view', () => {
+  it('shows every named viewer and distinguishes another session owned by this member', async () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    const status = {
+      workspace_id: run().workspace_id,
+      run_id: 'run_1',
+      protected: false,
+      controller: { member_id: alice.id, connected: true, acquired_at: run().created_at },
+      watchers: [alice.id, bob.id, 'mem_unknown', 'mem_four', 'mem_five'],
+      queued_steers: 0,
+    }
+    // Let the initial status fetch finish before supplying a newer room snapshot.
+    await act(async () => {})
+    act(() => useStore.setState({
+      members: { [alice.id]: alice, [bob.id]: bob },
+      roomStatus: { run_1: status },
+      roomStatusError: {},
+    }))
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    expect(presence.getByText('(another session)')).toBeDefined()
+    expect(presence.queryByText('(this tab)')).toBeNull()
+    for (const name of ['Alice', 'Bob', 'mem_unknown', 'mem_four', 'mem_five']) {
+      expect(presence.getAllByText(name)).toHaveLength(name === 'Alice' ? 2 : 1)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
+    expect(presence.queryByText('(this tab)')).toBeNull()
+    controlAck(true, 1, 1)
+    expect(presence.getByText('(this tab)')).toBeDefined()
+    expect(presence.queryByText('(another session)')).toBeNull()
+    act(() => StubSocket.last().onclose?.({ code: 1006, reason: '' }))
+    expect(presence.queryByText('(this tab)')).toBeNull()
+    view.unmount()
+  })
+
+  it('does not invent another controller session from pre-release presence', async () => {
+    const occupied = {
+      workspace_id: run().workspace_id,
+      run_id: 'run_1',
+      protected: false,
+      controller: { member_id: alice.id, connected: true, acquired_at: run().created_at },
+      watchers: [alice.id, bob.id],
+      queued_steers: 0,
+    }
+    const status = vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupied)
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    await act(async () => {})
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    const refresh = Promise.withResolvers<typeof occupied>()
+    status.mockReturnValue(refresh.promise)
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
+    controlAck(true, 1, 1)
+    expect(presence.getByText('(this tab)')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    controlAck(false, 2, 1)
+    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('(last known)')).toBeDefined()
+    await act(async () => {
+      refresh.reject(new Error('presence service unavailable'))
+      await Promise.resolve()
+    })
+    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('(last known)')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
+    view.unmount()
+  })
+
+  it('keeps unloaded and unavailable presence distinct from an empty room', async () => {
+    const view = mount({}, { member_id: bob.id })
+    await act(async () => {})
+    act(() => useStore.setState({ roomStatus: {}, roomStatusError: {} }))
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    expect(presence.getAllByText('Loading…')).toHaveLength(2)
+    expect(presence.queryByText('Nobody')).toBeNull()
+    act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
+    expect(presence.getAllByText('Unavailable')).toHaveLength(2)
+    expect(presence.queryByText('Nobody')).toBeNull()
+    act(() => useStore.setState({
+      roomStatus: { run_1: {
+        workspace_id: run().workspace_id,
+        run_id: 'run_1',
+        protected: false,
+        watchers: [],
+        queued_steers: 0,
+      } },
+      roomStatusError: {},
+    }))
+    expect(presence.getByText('Nobody')).toBeDefined()
+    expect(presence.getByText('None')).toBeDefined()
+    expect(presence.queryByText('Unavailable')).toBeNull()
+    act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
+    expect(presence.getByText('Last known presence')).toBeDefined()
+    view.unmount()
+  })
+
   it('steers by default and lets the user return to a mirror', () => {
     const view = mount()
     attached()
 
     expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
-    expect(screen.getByText('Attached')).toBeDefined()
-    expect(screen.getByText('Steering')).toBeDefined()
 
-    fireEvent.click(screen.getByText('Steering'))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(StubSocket.opened).toHaveLength(1)
     expect(useStore.getState().terminals.run_1.write).toBe(true)
     expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
@@ -129,9 +223,8 @@ describe('terminal view', () => {
     controlAck(true, 1, 1)
 
     expect(useStore.getState().terminals.run_1.write).toBe(true)
-    expect(screen.getByText('Steering')).toBeDefined()
 
-    fireEvent.click(screen.getByText('Steering'))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(StubSocket.opened).toHaveLength(opened)
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 2, write: false })
     controlAck(false, 2, 1)
@@ -148,35 +241,16 @@ describe('terminal view', () => {
 
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     expect(screen.getByText('Take control')).toBeDefined()
-    expect(screen.queryByText('Steering')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
     view.unmount()
   })
 
-  it('says what a mirror is until the member has taken control once', () => {
-    const view = mount({}, { member_id: bob.id })
-    attached()
-
-    const hint = 'Read-only mirror. Take control to type into the agent.'
-    expect(screen.getByText(hint)).toBeDefined()
-
-    // Asking is not being granted optimistically: the flag changes only after
-    // the ordered control response acknowledges the lease.
-    fireEvent.click(screen.getByText('Take control'))
-    expect(useStore.getState().terminalControlTaken).toBe(false)
-    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
-    controlAck(true, 1, 1)
-
-    expect(useStore.getState().terminalControlTaken).toBe(true)
-    expect(screen.queryByText(hint)).toBeNull()
-    view.unmount()
-  })
   it('downgrades a displaced writer to a mirror without permanent denial', () => {
     const view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
     controlAck(true, 1, 1)
-    expect(screen.getByText('Steering')).toBeDefined()
 
     act(() => StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' }))
     expect(screen.getByText('Take control')).toBeDefined()
@@ -187,19 +261,8 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('does not count an owner run automatic steer as taking control', () => {
-    const view = mount()
-    attached()
 
-    // The owner's attach asks for write on its own and the server grants it.
-    // Nobody pressed anything, so the hint is still owed to them on the first
-    // run they only watch.
-    expect(screen.getByText('Steering')).toBeDefined()
-    expect(useStore.getState().terminalControlTaken).toBe(false)
-    view.unmount()
-  })
-
-  it('keeps the mirror hint when the server refuses the request', () => {
+  it('reports when the server refuses the control request', () => {
     const view = mount({}, { member_id: bob.id })
     attached()
 
@@ -219,7 +282,6 @@ describe('terminal view', () => {
       }),
     )
 
-    expect(useStore.getState().terminalControlTaken).toBe(false)
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
@@ -229,7 +291,6 @@ describe('terminal view', () => {
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
     attached()
 
-    expect(screen.getByText('Steering')).toBeDefined()
     expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
     view.unmount()
   })
@@ -307,7 +368,7 @@ describe('terminal view', () => {
     const socket = StubSocket.last()
     attached()
 
-    fireEvent.click(screen.getByText('Steering'))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
     controlAck(false, 1, 1)
 
@@ -354,7 +415,7 @@ describe('terminal view', () => {
     })
     attached()
 
-    const toggle = screen.getByText('Steering') as HTMLButtonElement
+    const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(false)
     expect(screen.queryByText('no live terminal')).toBeNull()
     expect(screen.queryByText('Retry')).toBeNull()
@@ -858,7 +919,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('preserves existing terminal output when Steering is released', async () => {
+  it('preserves existing terminal output when control is released', async () => {
     const reset = vi.spyOn(Terminal.prototype, 'reset')
     const write = vi.spyOn(Terminal.prototype, 'write')
     const view = mount()
@@ -874,7 +935,7 @@ describe('terminal view', () => {
     const resetCount = reset.mock.calls.length
     const writeCount = write.mock.calls.length
 
-    fireEvent.click(screen.getByText('Steering'))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(StubSocket.opened).toHaveLength(1)
     const release = StubSocket.last()
     expect(release.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
@@ -1002,7 +1063,6 @@ describe('terminal view', () => {
 
     expect(StubSocket.opened).toHaveLength(1)
     expect(screen.queryByText("Starting the run's container")).toBeNull()
-    expect(screen.getByText('Attached')).toBeDefined()
     view.unmount()
   })
 
@@ -1110,7 +1170,7 @@ describe('terminal view', () => {
     const view = mount({}, { status: 'needs-attention' })
     attached()
 
-    const toggle = screen.getByText('Steering') as HTMLButtonElement
+    const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(false)
     expect(screen.queryByText('This run is not running')).toBeNull()
     view.unmount()
@@ -1188,7 +1248,6 @@ describe('the terminal on a phone', () => {
     expect(socket.frames()[0]).toMatchObject({ follow: true, cols: 80, rows: 24 })
     expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
     controlAck(true, 1, 1)
-    expect(screen.getByText('Steering')).toBeDefined()
     view.unmount()
   })
 
@@ -1247,7 +1306,7 @@ describe('the terminal on a phone', () => {
     const view = mount()
     attached()
 
-    fireEvent.click(screen.getByText('Steering'))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(StubSocket.opened).toHaveLength(1)
     const released = StubSocket.last()
     expect(released.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })

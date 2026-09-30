@@ -142,7 +142,6 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const setTerminal = useStore((store) => store.setTerminal)
   const setWriteIntent = useStore((store) => store.setTerminalWriteIntent)
   const clearWriteIntent = useStore((store) => store.clearTerminalWriteIntent)
-  const markControlTaken = useStore((store) => store.markTerminalControlTaken)
   const setControlSession = useStore((store) => store.setTerminalControlSession)
   const clearControlSession = useStore((store) => store.clearTerminalControlSession)
   const [replaying, setReplaying] = useState(false)
@@ -290,10 +289,9 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     (metadata: ControlMetadata) => {
       setControlMetadata(metadata)
       setTerminal(runID, { write: metadata.has_control })
-      if (metadata.has_control && explicitWriteRef.current === true) markControlTaken()
       rememberControlSession(metadata.control_session_id)
     },
-    [markControlTaken, rememberControlSession, runID, setTerminal],
+    [rememberControlSession, runID, setTerminal],
   )
 
   const onControlResult = useCallback(

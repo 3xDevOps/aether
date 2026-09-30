@@ -67,6 +67,9 @@ Use compact workbench geometry rather than landing-page ornament:
   according to real content.
 - 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
   gaps, 16px content gutters and 12px compact gutters.
+  Shared `Label` captions are block-level: stacked caption-to-field spacing
+  must measure 4px, including wrapped fields, rather than relying on margins
+  on inline text.
 - Adjoining panes, sections, rows, run cards and tab strips have zero radius.
   Compact controls and chips use 2px; fields, buttons, popups and dialogs use at
   most 4px. Full circles are reserved for actual avatars, status dots, radio
@@ -86,6 +89,13 @@ page never gains horizontal overflow; text and code may scroll inside their
 own surfaces. Shared buttons, inputs and selectors use 40-44px touch targets
 under `coarse:` while retaining desktop density. Floating menus stay inside
 the available viewport and scroll to their last action.
+
+The run Browser uses shared 13px controls at 26px for mouse input and 44px
+for coarse pointers, including native selects. Navigation, address, selectors,
+capture and destructive actions wrap as groups rather than stretching the page.
+Run-terminal controller and viewer names stay in the existing toolbar, never
+in an extra presence row. Keep all viewers in a horizontally scrollable list;
+use the existing **Terminal tools** popover when inline tools crowd the names.
 
 Route roots own the shell's bounded height; their content regions use
 `min-h-0` and vertical overflow. On phones Diff scrolls its local controls
@@ -137,9 +147,13 @@ presentation state. Domain status enums remain unchanged.
 lists. The labeled run-status chip reserves the full width of all three dots
 before its text; compact unlabeled surfaces keep the fixed dot box so state
 changes do not shift their columns. Sidebar rows pulse one dot and palette rows
-remain static. The steering signal, working dots and sidebar pulse stop moving
-under `prefers-reduced-motion: reduce`; state meaning remains available as text
-and labels. Loading spinners and delayed skeletons remain functional feedback.
+remain static. A live, acknowledged local controller gets two tapered teal
+highlights circulating around a quiet terminal border, not a pulsing control
+button. The border disappears during replay, history reading, disconnect or
+loss of control. Under
+`prefers-reduced-motion: reduce` the border stays static, while working dots and
+sidebar pulses stop moving; labels retain the state meaning. Loading spinners
+and delayed skeletons remain functional feedback.
 
 The desktop first-launch splash is a finite branded handoff, not a loading
 screen. Its dark sky, grain, clouds, twinkling field and shooting stars stay

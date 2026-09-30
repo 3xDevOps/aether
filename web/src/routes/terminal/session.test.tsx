@@ -196,7 +196,6 @@ describe('useRunTerminalSession', () => {
       }),
     )
     expect(result.current.state.write).toBe(true)
-    expect(useStore.getState().terminalControlTaken).toBe(true)
 
     act(() => {
       result.current.send('x')

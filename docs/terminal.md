@@ -137,14 +137,37 @@ owner or an administrator must acquire control again before typing. Disabling
 protection does not restore a controller or a cancelled request.
 
 The **Run Room** is the collaboration surface for this run. It starts as a
-collapsed vertical tab on the right of the terminal. The tab count includes
-unanswered questions and queued steer requests. Opening it loads the durable,
-per-run attributed message timeline and the current watcher and controller
-status. Presence is a live view of attached members and does not decide who
-may type.
+collapsed vertical tab on the right of the terminal; its count includes
+unanswered questions and queued steer requests. The existing terminal toolbar
+names the controller and every viewer even while the room is collapsed. Viewer
+names scroll horizontally instead of adding a row; at limited widths, terminal
+tools move into **Terminal tools**. **(this tab)** means this live attach has
+acknowledged control; the same member controlling elsewhere is **(another session)**.
+Narrow toolbars use key and eye icons for controller and viewers, retaining
+accessible role labels. Session markers stay in the controller's hover title
+and screen-reader text instead of wrapping onto another row.
+Two teal highlights travel around the terminal border while this tab has live
+input control. The border disappears during replay, history reading or disconnect;
+reduced motion replaces the traveling highlights with a static teal border.
 
-**Comment** writes to that timeline for people watching the run and never sends
-anything to the agent. **Send to agent** creates a steer request. A request
+Presence refreshes on mount, every five seconds and after acknowledged control
+changes, independently of room history. A stalled refresh times out after 15
+seconds; later polls retry automatically. A controller name from before a
+control change, or after a failed refresh, is marked **(last known)** until a
+fresh response arrives. Loading or unavailable presence is not an empty room.
+Presence never decides who may type. Opening the room loads its durable
+attributed timeline; history refreshes only while it is open.
+
+**Ctrl+Shift+M** (**Cmd+Shift+M** on macOS) toggles the room from the terminal or
+composer. The opener tooltip, room header and shortcut reference show the key.
+Keyboard opening focuses the composer; closing restores the invoking control
+or the room opener. Toggling preserves the draft, mode and attachments and never
+sends terminal input. Dialogs and the command palette take precedence.
+
+**Comment** is the default selected composer segment; its hint says it is shared
+with collaborators, not sent to the agent. **Send to agent** is teal and explains
+that it queues an instruction the controller can approve or deny. **Comment**
+writes only to the timeline; **Send to agent** creates a steer request. A request
 made by the current controller session, with its current lease, is eligible for
 immediate PTY delivery. A request from another session, or from a run with no
 current controller, is queued with a **45-second countdown**. The current

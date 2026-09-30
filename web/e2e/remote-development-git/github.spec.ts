@@ -52,7 +52,6 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
   const { run } = await admin.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspaceID, harness: 'claude', task: 'remote GitHub fork acceptance' })
   await page.goto(admin.url)
   await page.getByRole('button', { name: 'remote GitHub fork acceptance · claude', exact: true }).click()
-  await expect(page.getByText('Attached', { exact: true })).toBeVisible()
   const sourceBeforePublish = await admin.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: workspaceID })
   expect(sourceBeforePublish.source_url).toBe(`https://github.com/${baseRepository}.git`)
   expect(sourceBeforePublish.accepted_commit).toMatch(/^[a-f0-9]{40}$/)

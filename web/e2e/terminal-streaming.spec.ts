@@ -152,6 +152,7 @@ done
   let outputSockets = 0
   let binaryBytes = 0
   const frames: Array<{ type?: string; write?: boolean; request_id?: number }> = []
+  let controlAck: { type?: string; ok?: boolean; has_control?: boolean } | undefined
   await page.routeWebSocket(/\/ws\/attach\//, (socket) => {
     outputSockets++
     const server = socket.connectToServer()
@@ -168,6 +169,10 @@ done
     })
     server.onMessage((message) => {
       if (typeof message !== 'string') binaryBytes += message.length
+      else {
+        const frame = JSON.parse(message) as NonNullable<typeof controlAck>
+        if (frame.type === 'control') controlAck = frame
+      }
       socket.send(message)
     })
   })
@@ -182,8 +187,8 @@ done
   const socketsBeforeControl = outputSockets
   const bytesBeforeControl = binaryBytes
 
-  await page.getByRole('button', { name: 'Steering', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Release', exact: true }).click()
+  await expect.poll(() => controlAck).toMatchObject({ ok: true, has_control: false })
   await expect
     .poll(() => frames.filter((frame) => frame.type === 'control' && frame.write === false).length)
     .toBe(1)
@@ -198,7 +203,7 @@ done
   expect(await rows.textContent()).not.toContain('CONTROL-ECHO:read-only-check')
 
   await page.getByRole('button', { name: 'Take control', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
+  await expect.poll(() => controlAck).toMatchObject({ ok: true, has_control: true })
   await expect
     .poll(() => frames.filter((frame) => frame.type === 'control' && frame.write === true).length)
     .toBe(1)
@@ -373,7 +378,6 @@ test('scrolling reaches every retained page and prepends without moving visible 
     const live = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible')
     await expect(live).toContainText('LONG-CURRENT', { timeout: 30_000 })
     await expect(live).not.toContainText('EARLIEST-LONG')
-    await expect(page.getByRole('button', { name: 'Steering', exact: true })).toBeVisible()
     // Centering the whole mirrored screen makes Playwright scroll its hidden
     // host. Target a visible cell, as a real pointer does.
     await page.locator('.xterm-screen:not([data-aether-frozen-view] *):visible')
@@ -489,6 +493,8 @@ test('scrolling reaches every retained page and prepends without moving visible 
       await page.mouse.up()
       const selected = await page.evaluate(() => window.getSelection()?.toString() ?? '')
       expect(selected).toContain('EARLIEST-LONG')
+      const tools = page.getByRole('button', { name: 'Terminal tools', exact: true })
+      if (await tools.isVisible()) await tools.click()
       await page.getByRole('button', { name: 'Copy terminal selection', exact: true }).click()
       await expect.poll(() => clipboard.evaluate((native) => native.readText())).toBe(selected)
 
@@ -503,8 +509,14 @@ test('scrolling reaches every retained page and prepends without moving visible 
       })
       const screenText = (await visibleHistory(scroller)).rows.map((row) => row.text ?? '').join('\n')
       expect(screenText).toContain('EARLIEST-LONG')
+      if (await tools.isVisible() && await tools.getAttribute('aria-expanded') === 'false') {
+        await tools.click()
+      }
       await page.getByRole('button', { name: 'Copy last screen', exact: true }).click()
       await expect.poll(() => clipboard.evaluate((native) => native.readText())).toBe(screenText)
+      if (await tools.isVisible() && await tools.getAttribute('aria-expanded') === 'true') {
+        await tools.click()
+      }
     } finally {
       await page.evaluate(() => { Reflect.deleteProperty(navigator, 'clipboard') })
       await clipboard.dispose()
@@ -514,6 +526,24 @@ test('scrolling reaches every retained page and prepends without moving visible 
     await page.keyboard.press('PageDown')
     await expect.poll(async () => (await visibleHistory(scroller)).rows[0]?.index)
       .toBeGreaterThan(earliest.rows[0].index)
+
+    // Recorded output must not intercept Find's pointer targets.
+    await page.keyboard.press('Control+Shift+F')
+    const find = page.getByRole('textbox', { name: 'Find in terminal', exact: true })
+    await find.click()
+    await find.fill('EARLIEST-LONG')
+    await page.getByRole('button', { name: 'Find previous', exact: true }).click()
+    await expect.poll(async () => (await visibleHistory(scroller)).rows[0]?.text)
+      .toContain('EARLIEST-LONG')
+    await expect.poll(async () => {
+      const field = await find.boundingBox()
+      const history = await scroller.boundingBox()
+      return field !== null && history !== null && history.y >= field.y + field.height
+    }).toBe(true)
+    await page.getByRole('button', { name: 'Close find', exact: true }).click()
+    await expect(find).toBeHidden()
+    await expect(scroller).toBeFocused()
+
     const pagesAtOldest = completedPages
     await wheelUntil(page, scroller, 6000, async () => {
       const first = (await visibleHistory(scroller)).rows[0]
