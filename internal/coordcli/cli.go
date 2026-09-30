@@ -187,7 +187,9 @@ Send one durable message. A body file of "-" reads standard input.
 `,
 	"inbox": `usage: aether-internal inbox [--wait <seconds>] [--ack <token>]
 
-Read one bounded inbox batch. Supplying --ack acknowledges the previous batch.
+Read one bounded inbox batch. It stays frozen until its ack_token is acknowledged;
+new arrivals wait behind it. After processing, use --ack with that token to read
+the next batch. --wait does not bypass an unacknowledged batch.
 `,
 	"ask": `usage: aether-internal ask --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
 
@@ -425,7 +427,8 @@ native omp/pi/OpenCode integrations can also wake a live idle session.
 Check the inbox before waiting or reporting. Wait without reporting an outcome:
   aether-internal inbox --wait 30
 Process the batch before acknowledging it: on the next inbox call pass
---ack with that batch's ack_token. Without acknowledgement it may repeat.
+--ack with that batch's ack_token. Until then the same frozen batch repeats;
+new steering waits behind it. Acknowledge processed batches before waiting.
 Read the inbox once more before a terminal report:
   aether-internal report --help
 Success and failure are terminal worker outcomes: success submits the attempt

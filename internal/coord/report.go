@@ -16,8 +16,8 @@ import (
 const maxReportReason = 256
 
 // ReportSink is where run.report lands: the scheduler, which is the single
-// writer of run statuses. It uses the same bounded transport budget as other
-// coordination methods, but is not authorized against the radar.
+// writer of run statuses. Lifecycle traffic has its own bounded transport
+// budget and is not authorized against the radar.
 type ReportSink interface {
 	ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error
 }

@@ -35,8 +35,8 @@ const (
 )
 
 // requestBurst/refill bound transport work independently of mutation effects.
-// Native hook status has its own equally bounded budget so frequent hooks
-// cannot starve explicit coordination (or vice versa).
+// Native observations and lifecycle reports have independent bounded budgets
+// so background helpers cannot starve foreground coordination.
 const (
 	requestBurst  = 30
 	requestRefill = time.Second
@@ -182,12 +182,13 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
 	task, taskBytes, taskTruncated := boundStatusText(self.Task)
-	policyCapabilities := coordinationCapabilities
-	if assignment != nil {
-		policyCapabilities = assignment.Capabilities
-	}
-	for _, capability := range policyCapabilities {
+	for _, capability := range coordinationCapabilities {
 		capabilities = appendCapability(capabilities, capability)
+	}
+	if assignment != nil {
+		for _, capability := range assignment.Capabilities {
+			capabilities = appendCapability(capabilities, capability)
+		}
 	}
 	return protocol.CoordStatusResult{
 		WireVersion: protocol.CoordWireVersion, RunID: string(self.ID),
@@ -274,19 +275,26 @@ func missionRPCError(method string, err error) *protocol.Error {
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
-func (s *Service) transportAllowed(run domain.RunID, hook bool) bool {
+func (s *Service) transportAllowed(run domain.RunID, method string) bool {
 	buckets := s.requestBuckets
-	if hook {
+	switch method {
+	case protocol.MethodCoordHookStatus:
 		buckets = s.hookBuckets
+	case protocol.MethodRunReport:
+		buckets = s.lifecycleBuckets
 	}
 	return s.spend(buckets, run, requestBurst, requestRefill)
 }
 
-func transportRateError(hook bool) *protocol.Error {
+func transportRateError(method string) *protocol.Error {
 	budget := "transport"
 	code := protocol.CodeConflict
-	if hook {
+	switch method {
+	case protocol.MethodCoordHookStatus:
 		budget = "hook"
+		code = protocol.CodeUnavailable
+	case protocol.MethodRunReport:
+		budget = "lifecycle"
 		code = protocol.CodeUnavailable
 	}
 	return &protocol.Error{

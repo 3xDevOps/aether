@@ -37,6 +37,8 @@ export default function (omp: ExtensionAPI) {
   let contextCalls = 0
   let halted = false
   let userInput = false
+  let ready = false
+  let outcome: 'completed' | 'error' | 'aborted' = 'completed'
   let lastError = ''
   let detachSignal: (() => void) | undefined
   const detachAgent: (() => void)[] = []
@@ -99,6 +101,7 @@ export default function (omp: ExtensionAPI) {
   function pause() {
     if (!owns()) return
     scope.paused = true
+    ready = false
     userInput = false
     scope.queued = false // Native Stop owns clearing its own queue.
     cancel()
@@ -124,9 +127,12 @@ export default function (omp: ExtensionAPI) {
   async function receive(controller: AbortController, epoch: number) {
     const { signal } = controller
     let failures = 0
-    while (owns() && generation === epoch && !signal.aborted && !scope.paused && !approvals.size) {
+    let first = true
+    while (owns() && generation === epoch && !signal.aborted && !scope.paused && !approvals.size && ready) {
       try {
-        const raw = await helper('wake', { seen_message_ids: scope.observed, wait_seconds: 30 }, signal)
+        if (!context?.isIdle()) return
+        const raw = await helper('wake', { seen_message_ids: scope.observed, wait_seconds: first ? 0 : 30 }, signal)
+        first = false
         if (!owns() || generation !== epoch || signal.aborted) return
         const reply = JSON.parse(raw)
         if (reply.wait_supported !== true) {
@@ -144,6 +150,7 @@ export default function (omp: ExtensionAPI) {
         for (const id of scope.notified) if (!current.has(id)) scope.notified.delete(id)
         failures = 0
         lastError = ''
+        if (!ready || !context?.isIdle()) return
         if (!reply.wake_admitted || !reply.context || scope.queued ||
             !scope.observed.some(id => !scope.notified.has(id))) continue
         if (main?.session?.agent.isAborting) { pause(); return }
@@ -152,8 +159,8 @@ export default function (omp: ExtensionAPI) {
         const dispatchSessionID = scope.sessionID
         const dispatchMain = main
         scope.queued = true
-        // A trusted hidden pointer only. The native follow-up queue owns busy
-        // ordering; this never types into the terminal or acknowledges mail.
+        ready = false
+        // Never leave a follow-up behind work that can consume the mail itself.
         try {
           omp.sendMessage({ customType: WAKE_TYPE, content: reply.context, attribution: 'agent', display: false }, {
             triggerTurn: true, deliverAs: 'followUp',
@@ -161,7 +168,10 @@ export default function (omp: ExtensionAPI) {
         } catch (error) {
           // Leave rejected IDs eligible, but do not blindly retry native input.
           // A later lifecycle boundary must obtain fresh helper admission.
-          if (owns() && generation === epoch && !signal.aborted) scope.queued = false
+          if (owns() && generation === epoch && !signal.aborted) {
+            scope.queued = false
+            ready = true
+          }
           report(error)
           return
         }
@@ -182,12 +192,30 @@ export default function (omp: ExtensionAPI) {
   }
 
   function start() {
-    if (!owns() || scope.paused || halted || approvals.size || contextCalls || receiver) return
+    if (!owns() || !ready || !context?.isIdle() || scope.paused || halted || approvals.size || contextCalls || receiver) return
     const controller = receiver = new AbortController()
     const epoch = generation
     void receive(controller, epoch).catch(report).finally(() => {
       if (receiver === controller) receiver = undefined
     })
+  }
+
+  function settled(ctx: ExtensionContext) {
+    if (!owns(ctx) || scope.paused) return
+    ready = false
+    cancel()
+    if (outcome !== 'completed') { pause(); return }
+    const epoch = generation
+    const session = main?.session
+    if (!session) return
+    // Never await the session's drain from a callback that drain itself awaits.
+    void session.waitForIdle().then(() => {
+      if (!owns(ctx) || generation !== epoch || scope.paused || !ctx.isIdle()) return
+      scope.queued = false
+      ready = true
+      context = ctx
+      start()
+    }).catch(error => { if (owns(ctx) && generation === epoch) report(error) })
   }
 
   function bind(ctx: ExtensionContext, replacement = false) {
@@ -213,12 +241,22 @@ export default function (omp: ExtensionAPI) {
     scope.sessionID = ctx.sessionManager.getSessionId()
     scope.active = true
     approvals.clear()
+    ready = ctx.isIdle() && !scope.queued
     // OMP's ExtensionContext has no signal. These removable public Main-agent
     // hooks expose the exact run signal, including tools and queue continuations.
     const agent = main?.session?.agent
     if (agent) {
       detachAgent.push(agent.addBeforeModelCallHook(watchSignal))
       detachAgent.push(agent.addBeforeQueuedMessageDequeueHook(watchSignal))
+    }
+    if (main?.session) {
+      detachAgent.push(main.session.subscribe(event => {
+        if (!owns(ctx) || event.type !== 'agent_end') return
+        // The public event is deferred through prompt cleanup; extension
+        // agent_end is earlier and includes native retries/todo continuations.
+        if (event.isTerminal === false) { ready = false; cancel(); return }
+        settled(ctx)
+      }))
     }
     start()
   }
@@ -247,12 +285,16 @@ export default function (omp: ExtensionAPI) {
   omp.on('agent_start', (_event, ctx) => {
     if (!owns(ctx)) return
     context = ctx
-    start()
+    ready = false
+    outcome = 'completed'
+    cancel()
   })
   omp.on('message_end', (event, ctx) => {
-    if (!owns(ctx)) return
-    // OMP's agent_end contains retained history, including earlier aborted turns.
-    if (event.message.role === 'assistant' && event.message.stopReason === 'aborted') pause()
+    if (!owns(ctx) || event.message.role !== 'assistant') return
+    // Retained agent_end history can contain an earlier, unrelated abort.
+    outcome = event.message.stopReason === 'aborted' ? 'aborted' :
+      event.message.stopReason === 'error' ? 'error' : 'completed'
+    if (outcome === 'aborted') pause()
   })
   omp.on('message_start', (event, ctx) => {
     if (!owns(ctx)) return

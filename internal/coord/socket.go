@@ -209,6 +209,7 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.inboxBuckets, run)
 	delete(s.requestBuckets, run)
 	delete(s.hookBuckets, run)
+	delete(s.lifecycleBuckets, run)
 	delete(s.reportLocks, run)
 	delete(s.runs, run)
 	s.mu.Unlock()
@@ -427,14 +428,16 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		if s.isRunClosing(run) {
 			return
 		}
-		// Parse the bounded envelope once. Only the exact, valid read-only
-		// hook method gets the separate budget; malformed and unknown
-		// requests still spend ordinary transport allowance.
+		// Only valid envelopes for the exact background methods get their
+		// own budgets. Malformed and unknown requests spend foreground allowance.
 		req, resp, valid := protocol.ParseRequest(line)
-		hook := valid && req.Method == protocol.MethodCoordHookStatus
-		if !s.transportAllowed(run, hook) {
+		method := ""
+		if valid {
+			method = req.Method
+		}
+		if !s.transportAllowed(run, method) {
 			var ok bool
-			resp, ok = rateLimitedResponse(resp, hook)
+			resp, ok = rateLimitedResponse(resp, method)
 			if !ok {
 				return
 			}
@@ -656,12 +659,12 @@ func isMissionMethod(method string) bool {
 		return false
 	}
 }
-func rateLimitedResponse(resp protocol.Response, hook bool) (protocol.Response, bool) {
+func rateLimitedResponse(resp protocol.Response, method string) (protocol.Response, bool) {
 	if len(resp.ID) == 0 || bytes.Equal(bytes.TrimSpace(resp.ID), []byte("null")) {
 		return protocol.Response{}, false
 	}
 	resp.Result = nil
-	resp.Error = transportRateError(hook)
+	resp.Error = transportRateError(method)
 	return resp, true
 }
 

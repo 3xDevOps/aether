@@ -43,15 +43,20 @@ func TestStatusCombinesIndependentDevelopmentAndMissionAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []string{protocol.MethodCoordStatus, protocol.MethodDevTerminalList}
-			if !disabled {
-				want = append(want, protocol.MethodTaskShow)
+			for _, capability := range []string{
+				protocol.MethodCoordStatus, protocol.MethodDevTerminalList,
+				protocol.MethodCoordSend, protocol.MethodCoordInbox, protocol.MethodCoordAsk,
+				protocol.MethodCoordReply, protocol.MethodCoordReport, protocol.MethodTaskShow,
+			} {
+				want := !disabled || capability == protocol.MethodCoordStatus || capability == protocol.MethodDevTerminalList
+				if slices.Contains(status.Capabilities, capability) != want {
+					t.Errorf("capability %s advertised=%t, want %t", capability, !want, want)
+				}
 			}
-			if !slices.Equal(status.Capabilities, want) {
-				t.Fatalf("capabilities = %v, want %v", status.Capabilities, want)
-			}
-			if status.Assignment != nil && !slices.Equal(status.Assignment.Capabilities, []string{protocol.MethodCoordStatus, protocol.MethodTaskShow}) {
-				t.Fatalf("mission advertised authority outside its allowlist: %v", status.Assignment.Capabilities)
+			for _, forbidden := range []string{protocol.MethodTaskAccept, protocol.MethodDevBrowserOpen, "dev.terminal.unknown", "run.git.push"} {
+				if slices.Contains(status.Capabilities, forbidden) {
+					t.Errorf("unavailable authority advertised: %s", forbidden)
+				}
 			}
 			if disabled && (status.Assignment != nil || len(status.Peers) != 0 || status.Unread != 0) {
 				t.Fatalf("disabled status leaked mission/mailbox authority: %+v", status)

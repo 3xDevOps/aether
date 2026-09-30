@@ -104,6 +104,10 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 		s.markAttemptUnknown(ctx, attempt, err.Error())
 		return nil, err
 	}
+	if bindErr := s.cfg.Missions.BindAttemptRun(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration); bindErr != nil {
+		return nil, bindErr
+	}
+	attempt.State = domain.AttemptLaunching
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: attempt.RunID, ActorRunID: run,
 		RunOwnerID: attempt.RunOwnerID, AccountOwner: attempt.AccountOwnerID,
@@ -113,11 +117,16 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 		s.markAttemptUnknown(ctx, attempt, err.Error())
 		return nil, err
 	}
-	if bindErr := s.cfg.Missions.BindAttemptRun(ctx, attempt.ID, launched.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration); bindErr != nil {
-		return nil, bindErr
+	if stateErr := s.confirmAttemptRunning(ctx, attempt, launched); stateErr != nil {
+		return nil, stateErr
 	}
-	attempt.RunID = launched.ID
-	_ = s.publishMissionChanged(ctx, m.ID)
+	attempt, err = s.cfg.Missions.GetAttempt(ctx, attempt.ID)
+	if err != nil {
+		return nil, err
+	}
+	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		return nil, publishErr
+	}
 	return protocol.WorkerStartResult{Attempt: attemptWire(attempt)}, nil
 }
 

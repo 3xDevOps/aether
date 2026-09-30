@@ -1326,6 +1326,12 @@ The dashboard-specific state wiring is:
   `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
   the agent terminal and exposes its own control action without duplicating
   room state.
+- `TerminalRoute` excludes `run.mission_role === 'worker'` from desktop owner
+  automatic write requests. Opening a subsession therefore starts as a mirror,
+  not a human takeover. `useRunTerminalSession` still gives deliberate per-run
+  write intent precedence over that default, with its existing identity and
+  authority fences; Take control and Release use acknowledged control frames.
+  Ordinary/integrator owner defaults and phone mirrors are unchanged.
 
 On desktop the open room is a right-side panel capped at 420px. On a phone it
 is a full-viewport sheet; the terminal and room remain separate surfaces while
@@ -1662,8 +1668,10 @@ the terminal with the gateway's own error instead.
   normalized output through `terminal.history`, independently of the attach.
   The dashboard does not download the raw archive.
 - **Controller lease and compact bootstrap.** A desktop owner's first attach
-  asks for write; the server grants it only when no controller exists. Other
-  members enter as mirrors, and a second tab cannot become a second writer.
+  asks for write for ordinary and integrator runs, not mission workers.
+  Mission-worker terminals and other members start as mirrors. The server
+  grants write only when no controller exists; a second tab cannot become a
+  second writer.
   Until a member has taken control once, a live run opened as a mirror says
   **Read-only mirror. Take control to type into the agent.** A run that is
   starting shows its spinner instead; a run that is not steerable says **This

@@ -19,6 +19,8 @@ async function fixture(harness, inheritedOwner, settings = {}) {
   const beforeModel = new Set()
   const beforeQueue = new Set()
   const terminalInput = new Set()
+  const sessionListeners = new Set()
+  let idleBarrier = Promise.resolve()
   let idle = true
   let timerID = 0
   let active = 0
@@ -42,7 +44,12 @@ async function fixture(harness, inheritedOwner, settings = {}) {
     addBeforeModelCallHook: handler => { beforeModel.add(handler); return () => beforeModel.delete(handler) },
     addBeforeQueuedMessageDequeueHook: handler => { beforeQueue.add(handler); return () => beforeQueue.delete(handler) },
   }
-  let main = { session: { sessionManager: manager, agent } }
+  const session = {
+    sessionManager: manager, agent,
+    subscribe: listener => { sessionListeners.add(listener); return () => sessionListeners.delete(listener) },
+    waitForIdle: () => idleBarrier,
+  }
+  let main = { session }
   const api = {
     on: (name, handler) => {
       if (!handlers.has(name)) handlers.set(name, [])
@@ -146,28 +153,51 @@ async function fixture(harness, inheritedOwner, settings = {}) {
     controller.abort()
     await flush()
   }
+  async function publicEnd(isTerminal = true, messages = []) {
+    for (const listener of sessionListeners) listener({ type: 'agent_end', isTerminal, messages })
+    await flush()
+  }
   async function finishTurn(stopReason = 'stop', history = []) {
     const message = { role: 'assistant', stopReason, content: [] }
     await emit('message_end', { message })
     await emit('turn_end', { message, toolResults: [] })
     await emit('agent_end', { messages: [...history, message] })
-    // Core finishRun clears its signal before session retry/maintenance/settlement.
     signal = undefined
-    await emit('agent_before_settle', { outcome: stopReason === 'error' ? 'error' : stopReason === 'aborted' ? 'aborted' : 'completed' })
-    idle = true
-    await emit('agent_settled')
+    if (harness === 'omp') {
+      // OMP's public end follows prompt cleanup, unlike its extension notification.
+      idle = true
+      await publicEnd(true, [...history, message])
+    } else {
+      await emit('agent_before_settle', { outcome: stopReason === 'error' ? 'error' : stopReason === 'aborted' ? 'aborted' : 'completed' })
+      idle = true
+      await emit('agent_settled')
+    }
   }
   load()
   return {
     api, ctx, calls, sent, errors, timers, handlers, begin, emit, reply, pending, load, humanStart, abort, finishTurn,
+    publicEnd,
+    deferIdle: () => {
+      let release
+      idleBarrier = new Promise(resolve => { release = resolve })
+      return async () => { release(); await flush() }
+    },
     setIdle: value => { idle = value },
     clearSignal: () => { signal = undefined },
     interrupt: () => { for (const handler of terminalInput) assert.equal(handler('configured-interrupt'), undefined) },
     setSession: (id, file) => { sessionID = id; sessionFile = file },
-    replaceMain: () => { main = { session: { sessionManager: manager, agent } } },
+    replaceMain: () => { main = { session } },
     get maximumActive() { return maximumActive },
     async close() { await emit('session_shutdown', { reason: 'quit' }) },
   }
+}
+
+async function contextBoundary(f, content) {
+  const result = f.emit('context', { messages: [{ role: 'user', content: 'continue work' }] })
+  await flush()
+  assert.equal(f.pending().action, 'context')
+  f.pending().finish(content)
+  await result
 }
 
 for (const harness of ['omp', 'pi']) {
@@ -192,20 +222,13 @@ for (const harness of ['omp', 'pi']) {
     const f = await fixture(harness)
     await f.begin()
     await f.reply(['a'])
-    if (harness === 'omp') {
-      await f.reply(['a', 'b'])
-      await f.reply(['a', 'b', 'c'])
-    } else {
-      assert.equal(f.pending(), undefined, 'busy pi leaves mail durable until settlement')
-    }
+    assert.equal(f.pending(), undefined, 'busy mail stays durable until settlement')
     assert.equal(f.sent.length, 1)
     await f.emit('message_start', { message: { role: 'custom', ...f.sent[0].message } })
     await f.finishTurn()
     await f.reply(['a', 'b', 'c'])
     assert.equal(f.sent.length, 2)
-    if (harness === 'omp') await f.reply(['a', 'b', 'c'])
-    else assert.equal(f.pending(), undefined)
-    assert.equal(f.sent.length, 2)
+    assert.equal(f.pending(), undefined)
     await f.close()
   })
 
@@ -727,3 +750,144 @@ for (const harness of ['omp', 'pi']) {
     await f.close()
   })
 }
+
+test('omp: repeated busy inbox consumption leaves no stale turn and new idle mail still wakes', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  await f.reply([])
+  for (let round = 0; round < 3; round++) {
+    await f.humanStart()
+    // Mail arrives during work. The old receiver accepts a native follow-up
+    // before the foreground inbox consumer reads and acknowledges this batch.
+    if (f.pending()) await f.reply([`busy-${round}`])
+    await contextBoundary(f, pointer)
+    // Foreground consumption/ack removes the batch before the final response.
+    if (f.pending()) await f.reply([])
+    await contextBoundary(f, '')
+    await f.finishTurn()
+    await f.reply([])
+    assert.equal(f.sent.length, round, 'acknowledged busy mail must not leave an automatic empty turn')
+    await f.reply([`idle-${round}`])
+    assert.equal(f.sent.length, round + 1, 'genuinely new idle mail must still wake')
+    await f.emit('message_start', { message: { role: 'custom', ...f.sent.at(-1).message } })
+    await f.finishTurn()
+    await f.reply([])
+  }
+  assert.equal(f.maximumActive, 1)
+  await f.close()
+})
+
+test('omp: unread busy mail waits for public terminal end, cleanup and fresh admission', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  await f.reply(['deferred'], false)
+  await f.humanStart()
+  await contextBoundary(f, pointer)
+  const release = f.deferIdle()
+  const message = { role: 'assistant', stopReason: 'stop', content: [] }
+  await f.emit('message_end', { message })
+  await f.emit('agent_end', { messages: [message] })
+  assert.equal(f.pending(), undefined, 'extension agent_end is not settled idle')
+  f.setIdle(true)
+  await f.publicEnd()
+  assert.equal(f.pending(), undefined, 'pending native cleanup must finish before observation')
+  await release()
+  await f.reply(['deferred'], false)
+  assert.equal(f.sent.length, 0, 'native idle is not server admission')
+  await f.reply(['deferred'])
+  assert.equal(f.sent.length, 1)
+  await f.finishTurn()
+  await f.reply(['deferred'])
+  assert.equal(f.sent.length, 1, 'accepted unacknowledged mail is not another wake')
+  await f.close()
+})
+
+test('omp: native automatic continuations cannot be mistaken for an idle mailbox boundary', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  await f.humanStart()
+  await f.emit('agent_end', { messages: [], willContinue: true })
+  f.setIdle(true) // Native recovery can have an idle-looking gap between loops.
+  await f.publicEnd(false)
+  if (f.pending()) await f.reply(['during-recovery'])
+  assert.equal(f.sent.length, 0, 'retry/todo continuation owns the next turn, not the mailbox')
+  f.setIdle(false)
+  await f.emit('agent_start')
+  await f.finishTurn()
+  await f.reply(['during-recovery'])
+  assert.equal(f.sent.length, 1)
+  await f.close()
+})
+
+test('omp: Stop during native cleanup fences the late idle completion', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  await f.humanStart()
+  const release = f.deferIdle()
+  await f.finishTurn()
+  await f.abort()
+  await release()
+  await f.finishTurn('aborted')
+  assert.equal(f.pending(), undefined)
+  assert.equal(f.sent.length, 0)
+  await f.humanStart('extension')
+  await f.finishTurn()
+  assert.equal(f.pending(), undefined, 'an extension cannot undo human Stop')
+  await f.humanStart()
+  await f.finishTurn()
+  await f.reply(['after-human-resume'])
+  assert.equal(f.sent.length, 1)
+  await f.close()
+})
+
+test('omp: approval resolution during work does not enqueue already consumed mail', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  await f.humanStart()
+  await f.emit('tool_approval_requested', { toolCallId: 'approval' })
+  await f.emit('tool_approval_resolved', { toolCallId: 'approval', approved: true })
+  if (f.pending()) await f.reply(['approved-work-mail'])
+  await contextBoundary(f, pointer)
+  await f.finishTurn()
+  await f.reply([])
+  assert.equal(f.sent.length, 0, 'resolving approval resumes work, not an automatic follow-up')
+  await f.reply(['later-idle-mail'])
+  assert.equal(f.sent.length, 1)
+  await f.close()
+})
+
+test('omp: manual and managed replacement discard the outgoing native cleanup completion', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  await f.humanStart()
+  const release = f.deferIdle()
+  await f.finishTurn()
+  await f.emit('session_before_switch', { reason: 'new' })
+  f.setSession('replacement', '/replacement.jsonl')
+  await f.emit('session_switch', { reason: 'new', previousSessionFile: '/root.jsonl' })
+  f.load()
+  await f.emit('session_start')
+  const replacement = f.pending()
+  await release()
+  assert.equal(f.pending(), replacement, 'old settlement cannot cancel the successor observer')
+  assert.equal(replacement.killed, false)
+  await f.reply(['replacement-mail'])
+  assert.equal(f.sent.length, 1)
+  assert.equal(f.maximumActive, 1)
+  await f.close()
+})
+
+test('omp: admission crossing a busy transition cannot dispatch a stale follow-up', async () => {
+  const f = await fixture('omp')
+  await f.begin()
+  f.setIdle(false) // Prompt setup can claim the session before agent_start.
+  await f.reply(['consumed-during-setup'])
+  assert.equal(f.sent.length, 0, 'an idle-era helper frame cannot authorize busy native delivery')
+  await f.humanStart()
+  await f.finishTurn()
+  await f.reply([])
+  assert.equal(f.sent.length, 0)
+  await f.reply(['new-idle-mail'])
+  assert.equal(f.sent.length, 1)
+  await f.close()
+})

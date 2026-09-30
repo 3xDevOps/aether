@@ -205,6 +205,15 @@ native load errors, and verify a real event in the intended root session.
 Never edit trust records or remove an intentional disable setting to make
 the checker green.
 
+For OMP, `unverified (modified/unknown source at ...)` describes only the
+named manual file's mismatch with the CLI's embedded asset. An older
+context-only extension can produce that result while a managed launch names
+`-e /run/aether`. Inspect the live launch arguments and
+`/run/aether/aether.ts` separately; neither the manual mismatch nor a matching
+managed file proves which handlers executed. Compare with
+`aether-internal hook file omp.ts`, preserve custom code and disable settings,
+then verify a real context boundary and idle wake before claiming activation.
+
 ### Managed native loading
 
 For the shipped `pi`, `omp`, and `opencode` profiles, Aether stages native
@@ -219,8 +228,11 @@ For pi, the server stages `/run/aether/aether.ts` and adds
 `-e /run/aether`, using the native directory loader. Both retain the
 separate `/run/aether/status.ts` reporter. Managed loading skips
 `--no-extensions` / `-ne` and does not change persistent user/project
-configuration. Duplicate manual/managed copies share one receiver rather
-than starting independent watchers.
+configuration. Current manual/managed copies share one receiver rather than
+starting independent watchers. If an older context-only copy is also loaded,
+it can still execute its own context helper; it does not acquire the current
+receiver's shared lifecycle. A manual-source warning is not an instruction to
+add another copy or overwrite that file.
 
 Pi's explicit-file loader would otherwise bypass resource exclusions, so
 the managed copy reads settings through pi's public `SettingsManager`.
@@ -333,12 +345,24 @@ accounts for `OMP_PROFILE` / `PI_PROFILE` and `PI_CODING_AGENT_DIR`; CLI
 `--profile`, `--config`, and `-e` overrides require checking the live launch.
 Restart OMP after installation.
 
-Only the main agent handles `context` and native wake. Admitted notices use
-`sendMessage` with `triggerTurn: true` and `deliverAs: "followUp"`, allowing
-the native queue to preserve busy-turn ordering. Stop/abort cancels the
-receiver until actual non-extension input starts a turn or an explicit
-session switch/branch replaces it. Tool-approval prompts suspend observation
-until resolved.
+Only the main agent handles `context` and native wake. `sendMessage` uses
+`triggerTurn: true` and `deliverAs: "followUp"` **only while idle**. Busy work
+suspends the wake receiver; context hooks still point to the durable inbox.
+Mail read and acknowledged during that work must not leave a follow-up queued
+after its final response. Mail still unread at settlement receives fresh
+server admission before a single deferred wake.
+
+OMP 18.3.1's [extension `agent_end`](https://github.com/can1357/oh-my-pi/blob/v18.3.1/packages/coding-agent/src/extensibility/shared-events.ts)
+can precede prompt cleanup and carry `willContinue: true` for native retries
+or todo reminders. It is not the idle
+boundary. The receiver observes the owning `AgentSession`'s public terminal
+`agent_end`, waits for `waitForIdle()` outside that callback, rechecks
+`ExtensionContext.isIdle()` and session generation, then requests an immediate
+fresh mailbox snapshot. It does not use pi's `agent_settled` events.
+Stop/abort cancels the receiver and any pending settlement observation until
+actual non-extension input starts a turn or an explicit session switch/branch
+replaces it. Tool-approval prompts suspend observation until resolved; their
+resolution does not authorize queuing a turn while work remains busy.
 
 Honor `--no-extensions` and
 `disabledExtensions: [extension-module:aether]`. On OMP 18.3.1, directory
