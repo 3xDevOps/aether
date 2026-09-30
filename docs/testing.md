@@ -429,15 +429,82 @@ such credentials, so those stay a manual check. Every one of them skips when
 its variable is unset, and the no-login test skips as a whole rather than
 reporting a pass with nothing run.
 
-`pi` and `omp` have no smoke test: neither is in the smoke image, so
-nothing pins their templates. Adding one is an install line and a map
-entry each.
+`pi` and `omp` have no template smoke in that image. The native mailbox
+lifecycle checks below are separate from template acceptance and authenticated
+TUI smoke.
 
 The status extension those two load, `internal/agentstatus/status.ts`, is
 the one shipped file the Go build never executes. `internal/agentstatus`
 runs it under `bun` against a recording stand-in for the server binary, so
 a turn's reports are proven to come out in order and to end exactly once.
 Those tests skip where `bun` is not installed.
+
+### Native mailbox lifecycle and idle-wake smoke
+
+Run the shipped adapters against deterministic SDK-shaped lifecycle fixtures
+with Node 22.13 or newer:
+
+```sh
+make test-native-hooks
+node --experimental-vm-modules --test --test-name-pattern='omp:' \
+  internal/coordhooks/native_pi_omp_lifecycle_test.mjs
+```
+
+The OMP fixture separates extension `agent_end`, public terminal `agent_end`,
+and the session's asynchronous `waitForIdle()` drain. OMP 18.3.1 does not emit
+pi's `agent_before_settle` or `agent_settled`. Regressions exercise repeated
+busy consumption/ack followed by fresh idle mail, unread busy mail deferred
+through cleanup and fresh admission, native automatic continuations,
+approval resolution during work, Stop during cleanup, replacement, and
+admission crossing a busy transition. The shared suite retains rejected-send,
+reentrant acceptance, duplicate-loading and owning-root cases. These are
+adapter checks, not evidence of an authenticated model turn.
+
+For real native proof, use an isolated coordinated TUI run with an authorized
+peer and the exact CLI/server/extension versions under investigation. Do not
+edit a live production hook, credentials, trust state or disable settings to
+obtain evidence. Record the managed launch arguments separately from manual
+file inspection; see [activation](harnesses.md#installation-and-activation).
+
+1. Finish or block outstanding harness todos and confirm no native retry,
+   approval prompt or pending input remains. End the normal model turn without
+   a terminal worker report, active `inbox --wait`, polling loop or scheduled
+   prompt. Observe at least two 30-second receiver waits with no new model turn.
+2. Send one uniquely identified peer message using
+   `aether-internal send --to <receiver-run> --body <nonce> --idempotency-key <key>`.
+   Record the durable message ID, fresh admitted helper response, native API
+   acceptance, model turn start, exact inbox body, and explicit
+   `aether-internal inbox --ack <ack_token>`. After settlement, two more quiet
+   observer waits must produce no extra model turn.
+3. During ordinary foreground work, send another message. Let the agent read
+   and acknowledge it before its final response. Repeat this sequence; each
+   fresh idle snapshot must find no remaining mail and schedule no follow-up.
+   In a separate round, leave mail unread through completion and require one
+   deferred native wake after successful cleanup and fresh admission.
+4. Test frozen batches separately: read a batch without acknowledging it, send
+   steering, and read again. The old batch must repeat. Acknowledge its token
+   only after handling it; the next batch must expose the steering. This is
+   expected inbox behavior, not evidence of a missed native wake.
+5. Exercise approval waits, Stop, protection/takeover and release, replacement,
+   duplicate manual/managed loading, rejected native input and process exit.
+   No busy or stale root may receive an automatic turn. Stop requires accepted
+   human input to resume; releasing server control alone does not undo it.
+
+Capture session/root identity, generation, message IDs, acknowledgement,
+helper admission, native turn boundaries and visible output. A final-looking
+assistant message, hidden inbox pointer, status reporter event, or empty inbox
+alone cannot identify the initiator. OMP's own todo/retry continuation may
+encounter legitimate integrator mission-refresh context; that context does
+not start the turn. Name missing instrumentation and unexercised cases.
+
+In the actual dashboard, open an owned mission-worker terminal without touching
+control: it must remain a read-only mirror and request no write lease. Explicit
+**Take control** must acquire through its acknowledged control response;
+**Release control** must return to viewing, including after navigation. Check
+ordinary and integrator owner defaults, phone mirrors, foreign/protected runs
+and stale generations separately. The authoritative control/hold contract is
+in [Run control](terminal.md#run-control-and-the-run-room), not duplicated by a
+test-only permission model.
 
 ## The edge suite
 

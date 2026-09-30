@@ -36,10 +36,15 @@ expecting a reply: it receives the original attributed bodies and the batch's
 `ack_token`, ahead of any native wake observer.
 
 After the agent handles the batch, its next inbox call supplies the returned
-token with `--ack`. Do not acknowledge in the hook, observer, or on receiving
-a send receipt. An unacknowledged batch may be delivered again after errors
-or restarts. A successful send means **durably accepted**, not read,
-understood, or acted upon. See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries)
+token with `--ack`, optionally with `--wait 30`. The batch is frozen until
+acknowledged: new mail, including steering, waits behind it. Reading again
+without `--ack` repeats that batch rather than refreshing it. Process and
+acknowledge each batch before waiting for newer instructions.
+
+Do not acknowledge in the hook, observer, or on receiving a send receipt.
+An unacknowledged batch may be delivered again after errors or restarts.
+A successful send means **durably accepted**, not read, understood, or acted
+upon. See [delivery semantics](coordination.md#delivery-acknowledgement-and-retries)
 for the envelope, idempotency, bounds, and error codes.
 
 These commands are already usable without any automatic integration. Never
@@ -84,6 +89,13 @@ Empty stdout means no added context. Keep errors on stderr or the host's
 error surface, not in model context, and do not turn failures into success
 hints.
 
+Integrator mission-refresh guidance can appear even with an empty inbox. It
+asks an integrator to read durable plan decisions and worker attempts; it
+does not itself schedule an OMP turn. An OMP todo reminder or native retry
+can independently continue a session and then encounter this guidance.
+Distinguish the initiating native event from the context added to that event;
+a final prose response is not a durable mission-state transition.
+
 A boundary hook **cannot wake a later-idle harness**. It runs only when the
 host calls it. Do not put `generic.sh` on a timer or wrap it in a background
 polling loop and claim native support.
@@ -93,9 +105,11 @@ polling loop and claim native support.
 Add wake only if the harness exposes a supported API to start a turn in a
 specific live session and lifecycle events that let you cancel on Stop,
 shutdown, and session replacement. Busy-turn behavior must be documented.
-Use a real follow-up queue only when its Stop/cancellation semantics have
-been verified; otherwise defer mail until confirmed successful settlement
-and request fresh wake admission, even if the host exposes a queue API.
+Busy follow-up queues can outlive the mail they announce: a foreground inbox
+read and acknowledgement cannot remove an already queued native message.
+Defer automatic mail until successful native settlement and fresh wake
+admission, even when the host exposes a queue API. A context filter removes
+old hints from model input, not the native turn that dequeued them.
 Never invent queue arguments, abort current work to deliver mail, or bypass
 permission/question waits.
 
@@ -166,6 +180,12 @@ halt. Do not blindly resend or apply a native-send retry timer. Later eligible
 native activity—OMP context/agent/approval boundaries or pi successful idle
 settlement/manual compaction—can request fresh helper/server admission for
 the same unread IDs. Stop still requires accepted human input to resume.
+OMP uses its owning public session's terminal `agent_end` and a detached
+`waitForIdle()` drain, then rechecks `isIdle()`; extension `agent_end` with
+`willContinue` is not settlement. Pi uses its separate `agent_settled`
+contract. Neither starts new wake observations after busy context calls.
+Every newly eligible idle period begins with `wait_seconds: 0`, so already
+observed unread IDs get fresh admission without another full wait.
 Normal return is SDK acceptance, not proof of model receipt or acknowledgement.
 
 OpenCode's asynchronous prompt APIs reserve newly eligible IDs before awaiting

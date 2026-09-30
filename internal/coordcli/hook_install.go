@@ -111,7 +111,7 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 			profile = value
 		}
 	}
-	ompNote := "CLI --profile/--config/-e and --no-extensions are not observable; confirm the active destination with omp config path."
+	ompNote := "Manual-path result only; managed TUI launches may specify -e /run/aether separately. A source mismatch here does not prove native wake is unavailable. CLI --profile/--config/-e and --no-extensions are not observable; confirm the active destination with omp config path."
 	if profile != "" && profile != "default" {
 		if filepath.Base(profile) == profile && profile != "." && profile != ".." {
 			omp = filepath.Join(ompRoot, "profiles", profile, "agent")
