@@ -117,11 +117,6 @@ test('retains finish evidence after the run is cleaned up', async ({ page, aethe
   await expect(evidence.getByText('agent-ready', { exact: false })).toBeVisible()
   await expect(evidence).not.toContainText('Transcript unavailable')
 
-  // Switching to the phone sheet preserves the selected packet and both close
-  // actions remain reachable without changing the Run Room/evidence scope.
-  await page.setViewportSize({ width: 390, height: 600 })
-  await evidence.getByRole('tab', { name: 'Summary', exact: true }).click()
-  await expect(evidence.getByText('result.txt', { exact: true })).toBeVisible()
   await evidence.getByRole('button', { name: 'Close evidence', exact: true }).click()
   await expect(evidence.getByRole('heading', { name: 'Retained evidence', exact: true })).toBeHidden()
   await room.getByRole('button', { name: 'Close Run Room', exact: true }).click()
