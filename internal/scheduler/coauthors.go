@@ -26,7 +26,9 @@ var coAuthorsPath = path.Join(coordtransport.MountDir, coord.CoAuthorsName)
 var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
 	". It holds one Co-authored-by trailer per person other than the run owner who has steered this run," +
 	" and it changes while you work. End every commit message you write, and the description of any pull" +
-	" request you open, with exactly those lines. If the file is missing or empty, add nothing."
+	" request you open, with exactly those lines. If the file is missing or empty, add nothing." +
+	" After those lines, end every pull request description with \"Opened from Aether run <run id>\", using the run_id" +
+	" aether-internal status reports."
 
 // coordinationInstruction is deliberately one short, assignment-agnostic
 // launch hint. The CLI fetches the actual assignment and role from live

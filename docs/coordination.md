@@ -601,6 +601,10 @@ to avoid duplicate or wrong-base PRs. Follow the assignment's approval and
 mission integration boundaries; discovery does not authorize PR merging,
 automatic screenshot publication, or disabling commit signing.
 
+Every pull request description ends with `Opened from Aether run <run id>`;
+`skill git` prints that line with the run's `run_id` from `status` filled in.
+The count of agent-made pull requests is derived from this line.
+
 Custom or argv-overridden harnesses still receive the staged CLI and run socket
 but no guessed vendor startup flags. In taskless mode their authors must invoke
 `aether-internal skill` through their own native startup mechanism or manually.

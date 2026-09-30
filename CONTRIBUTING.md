@@ -333,6 +333,12 @@ getters, or the same contract at several layers.
 Commit messages and pull request titles follow Conventional Commits; the
 rules are in the Commits section of [AGENTS.md](AGENTS.md).
 
+An agent working inside an Aether run ends every pull request description
+with `Opened from Aether run <run id>`, using the `run_id` that
+`aether-internal status` reports; `aether-internal skill git` prints the line
+with the ID filled in. The count of agent-made pull requests is derived from
+this line.
+
 ### AI assistance
 
 AI tools are welcome under the [AI contributions policy](AI_POLICY.md). In
