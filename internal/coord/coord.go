@@ -159,22 +159,23 @@ type Service struct {
 	stop     context.CancelFunc
 	sub      events.Subscription
 
-	mu             sync.Mutex
-	listeners      map[socketKey]*net.UnixListener
-	buckets        map[domain.RunID]*bucket
-	inboxBuckets   map[domain.RunID]*bucket
-	requestBuckets map[domain.RunID]*bucket
-	hookBuckets    map[domain.RunID]*bucket
-	inboxWaiters   map[domain.RunID]*inboxWaiter
-	hookWaiters    map[domain.RunID]map[*hookWaiter]struct{}
-	inboxConsumers map[domain.RunID]int
-	reportLocks    map[domain.RunID]*sync.Mutex
-	reportPackets  map[string]protocol.EvidencePacket
-	runs           map[domain.RunID]*runLifecycle
-	reportCursor   store.CoordOutboxCursor
-	auditCursor    store.CoordOutboxCursor
-	closed         bool
-	wg             sync.WaitGroup
+	mu               sync.Mutex
+	listeners        map[socketKey]*net.UnixListener
+	buckets          map[domain.RunID]*bucket
+	inboxBuckets     map[domain.RunID]*bucket
+	requestBuckets   map[domain.RunID]*bucket
+	hookBuckets      map[domain.RunID]*bucket
+	lifecycleBuckets map[domain.RunID]*bucket
+	inboxWaiters     map[domain.RunID]*inboxWaiter
+	hookWaiters      map[domain.RunID]map[*hookWaiter]struct{}
+	inboxConsumers   map[domain.RunID]int
+	reportLocks      map[domain.RunID]*sync.Mutex
+	reportPackets    map[string]protocol.EvidencePacket
+	runs             map[domain.RunID]*runLifecycle
+	reportCursor     store.CoordOutboxCursor
+	auditCursor      store.CoordOutboxCursor
+	closed           bool
+	wg               sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -210,22 +211,23 @@ func New(cfg Config) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		cfg:            cfg,
-		radar:          newRadar(cfg.Peers, cfg.Grace, cfg.now),
-		now:            cfg.now,
-		serveCtx:       ctx,
-		stop:           cancel,
-		listeners:      make(map[socketKey]*net.UnixListener),
-		buckets:        make(map[domain.RunID]*bucket),
-		inboxBuckets:   make(map[domain.RunID]*bucket),
-		requestBuckets: make(map[domain.RunID]*bucket),
-		hookBuckets:    make(map[domain.RunID]*bucket),
-		inboxWaiters:   make(map[domain.RunID]*inboxWaiter),
-		hookWaiters:    make(map[domain.RunID]map[*hookWaiter]struct{}),
-		inboxConsumers: make(map[domain.RunID]int),
-		reportLocks:    make(map[domain.RunID]*sync.Mutex),
-		reportPackets:  make(map[string]protocol.EvidencePacket),
-		runs:           make(map[domain.RunID]*runLifecycle),
+		cfg:              cfg,
+		radar:            newRadar(cfg.Peers, cfg.Grace, cfg.now),
+		now:              cfg.now,
+		serveCtx:         ctx,
+		stop:             cancel,
+		listeners:        make(map[socketKey]*net.UnixListener),
+		buckets:          make(map[domain.RunID]*bucket),
+		inboxBuckets:     make(map[domain.RunID]*bucket),
+		requestBuckets:   make(map[domain.RunID]*bucket),
+		hookBuckets:      make(map[domain.RunID]*bucket),
+		lifecycleBuckets: make(map[domain.RunID]*bucket),
+		inboxWaiters:     make(map[domain.RunID]*inboxWaiter),
+		hookWaiters:      make(map[domain.RunID]map[*hookWaiter]struct{}),
+		inboxConsumers:   make(map[domain.RunID]int),
+		reportLocks:      make(map[domain.RunID]*sync.Mutex),
+		reportPackets:    make(map[string]protocol.EvidencePacket),
+		runs:             make(map[domain.RunID]*runLifecycle),
 	}, nil
 }
 
