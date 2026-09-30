@@ -103,9 +103,10 @@ the radar active/grace authorization described below.
 
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
 IDs, the recorded task, each currently authorized peer, and the six base
-coordination capabilities when conflict coordination is enabled, plus the
-live development and assignment-scoped capabilities that are actually
-available. The sender is never a parameter. An ordinary run can message
+coordination capabilities when conflict coordination is enabled. Assignment
+capabilities extend that baseline; they do not replace it. Development
+capabilities come from the live development service, not the assignment.
+The sender is never a parameter. An ordinary run can message
 only a peer in the same workspace that the radar currently marks as
 overlapping, or a peer in its ten-minute overlap grace period. A mission run
 can message those same radar peers plus its current assignment peers, so a
@@ -133,10 +134,13 @@ also enforces these bounds:
 - ordinary requests have a per-run transport budget of 30 requests per burst,
   refilling at one request per second. Malformed envelopes and unknown methods
   consume this budget too;
-- valid `coord.hook.status` requests use a separate per-run budget with the
-  same limits, so automatic checks cannot starve explicit inbox, status, send,
-  or report commands. The server parses the bounded envelope once to select
-  the budget, then admits or rejects it before method-specific work;
+- valid `coord.hook.status` and `run.report` envelopes each use their own
+  per-run budget with the same limits. Native inbox observations and lifecycle
+  reports cannot spend foreground orchestration allowance or each other's
+  allowance; reconnecting does not reset any budget. Malformed envelopes and
+  unknown methods still spend the ordinary budget. Admission happens before
+  method-specific work, so repeated lifecycle reports remain bounded even
+  when the scheduler has no state change to persist;
 - `wait_seconds` is a server-side wait from 0 through 30 seconds;
 - each run socket accepts at most 16 concurrent connections, and inactive
   connections are reaped after five minutes;
@@ -157,6 +161,12 @@ so the same batch and token can be delivered again. Supplying the token on the
 next read acknowledges exactly that batch while fetching the next batch. An
 empty inbox has no token. Tokens are durable across server restarts while the
 run's container and coordination data are retained.
+
+The batch is frozen until acknowledged. New arrivals can increase `status`
+unread counts or native observer IDs without changing the current inbox batch.
+Handle that batch, then pass its exact token to `inbox --ack`; the returned
+next batch includes later arrivals. Re-reading without `--ack`, including with
+`--wait`, does not advance past an outstanding batch.
 
 `coord.send`, `coord.ask`, `coord.reply`, and `coord.report` are mutations and
 require an explicit idempotency key on the wire. Repeating a mutation with the
@@ -222,8 +232,13 @@ boundary is busy, wake is suppressed rather than queued behind its holder.
 The receiver updates observed IDs without adding notified IDs, so a later
 bounded observation can reconsider mail without losing or acknowledging it.
 
-This includes changing an attached read-only mirror to **Write**: the
-interactive control grant commits the mission takeover hold only after the
+Opening a mission worker's dashboard terminal defaults to read-only viewing;
+viewing alone does not acquire human control. Use **Take control** to request
+write access and **Release** to return control. Ordinary owner terminals keep
+their existing automatic write behavior.
+
+Changing an attached read-only mirror to **Write** commits the mission
+takeover hold only after the
 live terminal is ready, inside the same admission boundary. An explicit
 release (`Write=false` on the interactive control stream) clears the hold
 only after read-only readiness succeeds. A failed transition retains the
@@ -248,6 +263,13 @@ workspace timeline. **Durable acceptance**, **an admitted wake**, and
 hook execution, nor native API acceptance proves model receipt or processing.
 Only the agent's later `inbox --ack` acknowledges the returned batch; there is
 no terminal-delivery stamp.
+
+For a native-trigger investigation, retain separate evidence of the send
+receipt/message ID, helper wake admission, native follow-up acceptance, the
+resulting model turn, and the agent's explicit inbox read and acknowledgement.
+A reply after a manually supplied prompt proves messaging, not an idle wake.
+Configured files or a helper-only check do not prove that the root harness
+loaded the integration or received the turn.
 
 ## `aether-internal` CLI
 
@@ -680,9 +702,10 @@ accountable human, who answers on the Missions page or with
 answers with `reply`. They are separate mailboxes.
 
 `mission plan show` returns the phase, plan version, integrator generation,
-open question count, and the feedback of the most recent request for changes,
-plus every question and review round. `--wait` asks the server to wait up to 30
-seconds for one of those to change; it returns unchanged when the wait elapses.
+`plan.accepted_set_version` (including zero), open question count, and the
+feedback of the most recent request for changes, plus every question and
+review round. `--wait` asks the server to wait up to 30 seconds for a change,
+including an accepted-set version change; it returns unchanged on timeout.
 A value outside 0 through 30 is a usage error before any request is sent.
 Waiting for a human is not being blocked: do not report an outcome while
 waiting.
@@ -805,10 +828,16 @@ Task revisions are bounded JSON specifications. Pass them with
 `accept-submission`, and `abandon`) requires a stable `--idempotency-key`;
 integrator mutations also require the observed
 `--expected-integrator-generation`. Accepting a submission additionally
-requires `--expected-accepted-set-version`. If the server's exact submission
-result reports non-empty `ScopeViolations`, the caller must explicitly assess
-those deviations by passing `--scope-disposition '<reason>'`; the client does
-not generate or infer a path list, and an empty reason is not an assessment.
+requires `--expected-accepted-set-version`. Read its exact value from
+`aether-internal mission plan show` at `result.plan.accepted_set_version`;
+do not infer it from worker counts, plan versions, or an assumed zero.
+Acceptance advances this compare-and-swap version. After a stale-version
+refusal, inspect the current plan and submissions before choosing a new
+operation; an uncertain retry keeps its original key and inputs.
+If the server's exact submission result reports non-empty `ScopeViolations`,
+the caller must explicitly assess those deviations by passing
+`--scope-disposition '<reason>'`; the client does not generate or infer a
+path list, and an empty reason is not an assessment.
 
 Both `task propose --help` and `task revise --help` describe the author-supplied
 fields of the protocol's `TaskRevision`. The minimal valid revision has
@@ -883,6 +912,19 @@ dispatch key is also the idempotency key for that operation, so replaying the
 same command cannot create a second attempt. Worker cancellation requires its
 own `--idempotency-key` and the observed
 `--expected-integrator-generation`.
+
+A worker attempt remains `launching` while its run is queued or provisioning.
+Once the scheduler confirms `running` or `needs-attention`, the attempt is
+persisted as `running` with `started_at`, and `worker start`, `worker inspect`,
+and `worker list` return that durable state. Recovery can confirm an existing
+live attempt without relaunching it; an observation error or uncertain owner
+does not establish that execution started. Attempt state is not a model
+readiness signal: `running` does not prove that the model read its assignment.
+
+Worker completion and mission phase are separate. A read-only investigation
+can finish all worker attempts while its approved mission remains `active`;
+there is no automatic mission-completion transition or agent mission-close
+command. Do not submit a fake integration candidate just to change the phase.
 
 ### Ask a question and reply
 

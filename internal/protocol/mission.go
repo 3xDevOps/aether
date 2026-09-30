@@ -120,6 +120,7 @@ type MissionPlanState struct {
 	Phase                string `json:"phase"`
 	PlanVersion          uint64 `json:"plan_version"`
 	IntegratorGeneration uint64 `json:"integrator_generation"`
+	AcceptedSetVersion   uint64 `json:"accepted_set_version"`
 	OpenQuestions        int    `json:"open_questions"`
 	LatestFeedback       string `json:"latest_feedback,omitempty"`
 }

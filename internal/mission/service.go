@@ -322,6 +322,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 	if admission.Account.ID != req.AccountOwner {
 		return errors.New("mission: recovered account attribution changed")
 	}
+	var worker *domain.Attempt
 	if req.MissionID != "" {
 		current, missionErr := s.cfg.Missions.GetMission(ctx, req.MissionID)
 		if missionErr != nil {
@@ -354,6 +355,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 				attempt.Mode != req.Mode {
 				return fmt.Errorf("%w: recovered worker assignment changed", store.ErrMissionStale)
 			}
+			worker = attempt
 		}
 	}
 	if s.cfg.Cost != nil {
@@ -363,8 +365,31 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 	}
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
-	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), req)
-	return err
+	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), req)
+	if err != nil {
+		return err
+	}
+	return s.confirmAttemptRunning(ctx, worker, launched)
+}
+
+// A launch receipt or an active scheduler observation confirms execution;
+// neither a reservation nor a queued/provisioning row does.
+func (s *Service) confirmAttemptRunning(ctx context.Context, attempt *domain.Attempt, run *domain.Run) error {
+	if attempt == nil || run == nil || attempt.CancelRequestedAt != nil {
+		return nil
+	}
+	if run.ID != attempt.RunID {
+		return fmt.Errorf("%w: worker launch identity changed", store.ErrMissionStale)
+	}
+	if run.Status != domain.RunRunning && run.Status != domain.RunNeedsAttention {
+		return nil
+	}
+	switch attempt.State {
+	case domain.AttemptReserved, domain.AttemptLaunching, domain.AttemptUnknown:
+		return s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptRunning, "")
+	default:
+		return nil
+	}
 }
 
 func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Attempt, run *domain.Run, obs MissionRunObservation) error {
@@ -469,6 +494,23 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			if observeErr != nil {
 				slog.Warn("mission: observe attempt", "attempt", attempt.ID, "error", observeErr)
 				continue
+			}
+			if obs.State == MissionRunActive && (current.Status == domain.RunRunning || current.Status == domain.RunNeedsAttention) &&
+				attempt.State != domain.AttemptRunning && attempt.CancelRequestedAt == nil {
+				s.cfg.AuthorizationMu.Lock()
+				_, assigned, stateErr := s.resolveWorkerAssignment(ctx, attempt.RunID, mission)
+				if stateErr == nil {
+					current, stateErr = s.cfg.Store.GetRun(ctx, attempt.RunID)
+					if stateErr == nil {
+						stateErr = s.confirmAttemptRunning(ctx, assigned, current)
+					}
+				}
+				s.cfg.AuthorizationMu.Unlock()
+				if stateErr != nil {
+					slog.Warn("mission: confirm worker execution", "attempt", attempt.ID, "error", stateErr)
+				} else if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
+					return publishErr
+				}
 			}
 			if settleErr := s.settleObservedAttempt(ctx, attempt, current, obs); settleErr != nil {
 				slog.Warn("mission: settle attempt", "attempt", attempt.ID, "error", settleErr)

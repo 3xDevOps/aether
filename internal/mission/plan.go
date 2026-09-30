@@ -31,6 +31,7 @@ type planSnapshot struct {
 	phase                domain.MissionPhase
 	planVersion          uint64
 	integratorGeneration uint64
+	acceptedSetVersion   uint64
 	answered             int
 	latestDecision       domain.MissionPlanDecision
 }
@@ -225,6 +226,7 @@ func (s *Service) planShowResult(ctx context.Context, missionID domain.MissionID
 	snapshot := planSnapshot{
 		phase: domain.MissionPhase(state.Phase), planVersion: state.PlanVersion,
 		integratorGeneration: state.IntegratorGeneration, answered: answered,
+		acceptedSetVersion: state.AcceptedSetVersion,
 	}
 	if len(reviews) > 0 {
 		snapshot.latestDecision = reviews[len(reviews)-1].Decision
@@ -250,7 +252,8 @@ func (s *Service) planState(ctx context.Context, missionID domain.MissionID) (pr
 	return protocol.MissionPlanState{
 		MissionID: string(m.ID), Phase: string(m.Phase), PlanVersion: m.PlanVersion,
 		IntegratorGeneration: m.IntegratorGeneration, OpenQuestions: m.OpenQuestions,
-		LatestFeedback: latestReviseFeedback(reviews),
+		AcceptedSetVersion: m.AcceptedSetVersion,
+		LatestFeedback:     latestReviseFeedback(reviews),
 	}, questions, reviews, nil
 }
 
