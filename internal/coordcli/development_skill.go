@@ -184,7 +184,7 @@ func writeDevelopmentSkill(out io.Writer, status *protocol.CoordStatusResult, to
 			}
 		}
 	}
-	text := nativeGitSkill
+	text := nativeGitSkill + "End every pull request description with this line:\n  Opened from Aether run " + boundedSkillField(status.RunID) + "\n"
 	switch topic {
 	case "terminal":
 		text = terminalSkill + captureSkill

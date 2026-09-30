@@ -110,3 +110,14 @@ func TestDevelopmentSkillUsesLiveCapabilitySubset(t *testing.T) {
 		}
 	}
 }
+
+func TestDevelopmentSkillGitMarksPullRequestsWithRunID(t *testing.T) {
+	s := newCLISocket(t, func(protocol.Request) protocol.Response {
+		data, _ := json.Marshal(protocol.CoordStatusResult{RunID: "run-7", Capabilities: []string{protocol.MethodDevTerminalStart}})
+		return protocol.Response{Result: data}
+	})
+	code, raw := runCLI(t, s.path, []string{"skill", "git"}, "")
+	if code != ExitOK || !strings.Contains(raw, "\n  Opened from Aether run run-7\n") {
+		t.Fatalf("git skill lost the pull request run marker: %d %s", code, raw)
+	}
+}
