@@ -85,6 +85,7 @@ function TerminalRoute({ params }: RouteProps) {
   const automaticWrite =
     !phone &&
     steerable &&
+    run?.mission_role !== 'worker' &&
     run?.member_id === self.id
   const authorityKey = [
     self.id,

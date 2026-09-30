@@ -59,14 +59,22 @@ second tab or connection from the same member is a different session, not a
 second writer. Development terminals have separate, surface-scoped leases.
 
 On a desktop, the owner's first run-terminal attach asks for control
-automatically. The server grants it only when the run is unoccupied. Other
-members start as read-only mirrors. A write request that cannot acquire the
-lease is refused rather than silently becoming a second writer. `aether attach`
-asks for control by default; use `aether attach --read-only <run>` to watch
-deliberately. An occupied attach does not silently displace the current
-controller. Open the Run Room and confirm **Take control** to perform an
-occupied takeover. The confirmation names the current controller; takeover ends
-that writable session and notifies it.
+automatically **except for mission workers**. A mission worker is a subsession
+assigned work by an integrator; its terminal starts as a read-only mirror even
+for its owner. Merely viewing that worker must not create an orchestration
+hold. Use **Take control** to type, and release control to return to viewing.
+A deliberate per-run control choice survives same-tab navigation under the
+identity and authority fences below. Ordinary and integrator owner terminals
+keep automatic acquisition; other members and phones start as mirrors.
+
+The server grants an unoccupied lease only with Steer permission. A write
+request that cannot acquire the lease is refused rather than silently becoming
+a second writer. `aether attach` asks for control by default; use
+`aether attach --read-only <run>` to watch deliberately. An occupied attach
+does not silently displace the current controller. Open the Run Room and
+confirm **Take control** to perform an occupied takeover. The confirmation
+names the current controller; takeover ends that writable session and notifies
+it.
 
 The development shell dock does not compete for the primary harness lease.
 Each shell has its own controller, named in the dock, and starts as a watcher.
@@ -372,10 +380,11 @@ and opening the keyboard never change the shared PTY size.
 The menu scrolls when the keyboard leaves too little room for every action.
 Closing it restores that space to the terminal.
 
-On a phone every run - including one you own - opens as a read-only mirror,
-where on a desktop an unoccupied owner's first attach may already have
-acquired control. **Take control** is a tap. While it is a mirror the terminal
-takes no input, so tapping it does not raise the keyboard.
+On a phone every run - including one you own - opens as a read-only mirror.
+On desktop, an owner's unoccupied ordinary or integrator terminal may already
+have acquired control; mission-worker terminals start as mirrors on both.
+**Take control** is a tap. While it is a mirror the terminal takes no input,
+so tapping it does not raise the keyboard.
 
 ### Paste or upload an image
 
