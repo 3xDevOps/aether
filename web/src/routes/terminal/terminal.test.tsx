@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Terminal } from '@xterm/xterm'
 import * as presentation from '@/components/terminal-presentation'
 import type * as apiModule from '@/lib/api'
+import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
@@ -87,7 +88,7 @@ function controlAck(
 
 beforeEach(() => {
   StubSocket.install()
-  useStore.setState({ runs: {} })
+  useStore.setState({ runs: {}, roomStatusControl: {} })
 })
 
 afterEach(() => {
@@ -128,6 +129,39 @@ describe('terminal view', () => {
     expect(presence.queryByText('(another session)')).toBeNull()
     act(() => StubSocket.last().onclose?.({ code: 1006, reason: '' }))
     expect(presence.queryByText('(this tab)')).toBeNull()
+    view.unmount()
+  })
+
+  it('does not invent another controller session from pre-release presence', async () => {
+    const occupied = {
+      workspace_id: run().workspace_id,
+      run_id: 'run_1',
+      protected: false,
+      controller: { member_id: alice.id, connected: true, acquired_at: run().created_at },
+      watchers: [alice.id, bob.id],
+      queued_steers: 0,
+    }
+    const status = vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupied)
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    await act(async () => {})
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    const refresh = Promise.withResolvers<typeof occupied>()
+    status.mockReturnValue(refresh.promise)
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
+    controlAck(true, 1, 1)
+    expect(presence.getByText('(this tab)')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    controlAck(false, 2, 1)
+    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('(last known)')).toBeDefined()
+    await act(async () => {
+      refresh.reject(new Error('presence service unavailable'))
+      await Promise.resolve()
+    })
+    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('(last known)')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
     view.unmount()
   })
 

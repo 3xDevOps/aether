@@ -76,6 +76,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   const error = useStore((state) => state.roomError[runID])
   const actionError = useStore((state) => state.roomActionError[runID])
   const status = useStore((state) => state.roomStatus[runID])
+  const statusControl = useStore((state) => state.roomStatusControl[runID])
   const statusError = useStore((state) => state.roomStatusError[runID])
   const initializePagination = useStore((state) => state.initializeRoomPagination)
   const setLoading = useStore((state) => state.setRoomLoading)
@@ -111,6 +112,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
   const count = questions.length + Math.max(status?.queued_steers ?? 0, queued.length)
   const controller = status?.controller
   const watchers = status?.watchers ?? []
+  const staleController = statusControl !== control || Boolean(statusError)
   const ownsControl = Boolean(selfID && control?.has_control)
   const controllerID = ownsControl ? selfID : controller?.member_id
   const controllerName = controllerID ? memberLabel(controllerID, members) : null
@@ -246,28 +248,38 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
       if (current.active) setLoading(runID, false)
     }
   }
-  const controlKey = control
-    ? `${control.control_session_id}:${control.control_generation}:${control.has_control ? 'held' : 'mirror'}`
-    : 'none'
-
   // Presence stays live even with the room collapsed. It must never gate
   // history, reset a draft, or let an older response replace newer metadata.
   useEffect(() => {
     let active = true
-    let inFlight = false
+    let pending: AbortController | undefined
+    let deadline: number | undefined
     const refresh = async () => {
-      if (inFlight) return
-      inFlight = true
+      if (pending) return
+      const controller = new AbortController()
+      pending = controller
+      // Race cancellation as well as aborting fetch: injected clients may
+      // ignore the signal, but must not hold the polling guard forever.
+      const aborted = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true })
+      })
+      deadline = window.setTimeout(() => {
+        controller.abort(new Error('Presence request timed out after 15 seconds'))
+      }, 15_000)
       try {
-        const next = await client.runRoomStatus({ workspace_id: workspaceID, run_id: runID })
+        const next = await Promise.race([
+          client.runRoomStatus({ workspace_id: workspaceID, run_id: runID }, controller.signal),
+          aborted,
+        ])
         if (!active) return
-        setStatus(runID, next)
+        setStatus(runID, next, control)
         setStatusError(runID)
       } catch (cause) {
         if (!active) return
         setStatusError(runID, cause instanceof Error ? cause.message : String(cause))
       } finally {
-        inFlight = false
+        window.clearTimeout(deadline)
+        pending = undefined
       }
     }
     void refresh()
@@ -275,8 +287,10 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
     return () => {
       active = false
       window.clearInterval(timer)
+      window.clearTimeout(deadline)
+      pending?.abort()
     }
-  }, [runID, workspaceID, controlKey, client, setStatus, setStatusError])
+  }, [runID, workspaceID, control, client, setStatus, setStatusError])
 
 
   useEffect(() => {
@@ -483,7 +497,7 @@ export function RunRoom({ run, client = api, selfID, control, onTakeControl, onR
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-1.5">
                 {controllerID && <MemberAvatar member={members[controllerID]} fallback={controllerName ?? controllerID} className="size-5 shrink-0 text-[9px]" />}
-                <span className="min-w-0 break-words">{controllerName ? `Controller: ${controllerName}` : status ? 'No controller' : statusError ? 'Controller unavailable' : 'Loading presence…'}</span>
+                <span className="min-w-0 break-words">{controllerName ? <>Controller: {controllerName}{!ownsControl && staleController && <span className="text-muted-foreground"> (last known)</span>}</> : status ? staleController ? 'Controller unknown' : 'No controller' : statusError ? 'Controller unavailable' : 'Loading presence…'}</span>
               </div>
               {ownsControl ? <Button type="button" size="sm" variant="outline" disabled={!isLive} onClick={onReleaseControl}>Release control</Button> : <Button type="button" size="sm" variant="outline" disabled={!isLive} onClick={() => controller && !ownsControl ? setConfirmTakeover(true) : onTakeControl(false)}>Take control</Button>}
             </div>

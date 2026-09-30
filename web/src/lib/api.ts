@@ -589,8 +589,8 @@ export const api = {
     before?: string
     limit?: number
   }) => call<RoomMessageListResult>('run.room.list', params),
-  runRoomStatus: (params: { workspace_id: string; run_id: string }) =>
-    call<RoomStatusResult>('run.room.status', params),
+  runRoomStatus: (params: { workspace_id: string; run_id: string }, signal?: AbortSignal) =>
+    call<RoomStatusResult>('run.room.status', params, signal),
   runRoomPost: (params: {
     workspace_id: string
     run_id: string

@@ -3,6 +3,7 @@ import type {
   RoomMessage,
   RoomStatusResult,
 } from '@/lib/types'
+import type { ControlMetadata } from '@/routes/terminal/attach'
 import type { SliceCreator } from '@/store/slice'
 
 export interface PaginationState {
@@ -15,6 +16,8 @@ export interface CollaborationSlice {
   roomNextBefore: Record<string, string | undefined>
   roomPagination: Record<string, PaginationState>
   roomStatus: Record<string, RoomStatusResult | undefined>
+  /** Exact acknowledged state: taking then releasing can restore the same generation. */
+  roomStatusControl: Record<string, ControlMetadata | undefined>
   roomStatusError: Record<string, string | undefined>
   roomLoading: Record<string, boolean | undefined>
   /** Errors reading room history; presence and action failures live separately. */
@@ -32,7 +35,7 @@ export interface CollaborationSlice {
   setRoomActionError: (runID: string, error?: string) => void
   setRoomPage: (runID: string, messages: RoomMessage[], nextBefore?: string, append?: boolean) => void
   upsertRoomMessage: (message: RoomMessage) => void
-  setRoomStatus: (runID: string, status: RoomStatusResult) => void
+  setRoomStatus: (runID: string, status: RoomStatusResult, control: ControlMetadata | undefined) => void
   setRoomStatusError: (runID: string, error?: string) => void
   initializeEvidencePagination: (runID: string) => void
   setEvidenceLoading: (runID: string, loading: boolean) => void
@@ -124,6 +127,7 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
   roomNextBefore: {},
   roomPagination: {},
   roomStatus: {},
+  roomStatusControl: {},
   roomStatusError: {},
   roomLoading: {},
   roomError: {},
@@ -188,8 +192,11 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
         ),
       },
     })),
-  setRoomStatus: (runID, status) =>
-    set((state) => ({ roomStatus: { ...state.roomStatus, [runID]: status } })),
+  setRoomStatus: (runID, status, control) =>
+    set((state) => ({
+      roomStatus: { ...state.roomStatus, [runID]: status },
+      roomStatusControl: { ...state.roomStatusControl, [runID]: control },
+    })),
   initializeEvidencePagination: (runID) =>
     set((state) => ({
       evidencePackets: state.evidencePackets[runID]

@@ -36,6 +36,7 @@ function mount(over: Partial<Run> = {}, options: { status?: RoomStatusResult; co
     roomPagination: {},
     roomStatus: { run_1: options.status ?? status() },
     roomLoading: {},
+    roomStatusControl: {},
     roomStatusError: {},
     roomError: {},
     roomActionError: {},
@@ -58,6 +59,7 @@ beforeEach(() => {
     roomPagination: {},
     roomStatus: {},
     roomLoading: {},
+    roomStatusControl: {},
     roomStatusError: {},
     roomError: {},
     roomActionError: {},
@@ -182,15 +184,54 @@ describe('Run Room', () => {
     }
   })
 
+  it.each(['success', 'failure'] as const)('recovers after a hung presence request and ignores its late %s', async (outcome) => {
+    vi.useFakeTimers()
+    try {
+      const hung = Promise.withResolvers<RoomStatusResult>()
+      const recovery = Promise.withResolvers<RoomStatusResult>()
+      const occupied = status({ controller: { member_id: bob.id, connected: true, acquired_at: '2026-08-14T10:00:00Z' } })
+      const recovered = status({ watchers: [alice.id] })
+      useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob }, roomStatus: { run_1: occupied } })
+      const statusCall = vi.fn().mockReturnValueOnce(hung.promise).mockReturnValueOnce(recovery.promise)
+      const client = fakeApi({ runRoomStatus: statusCall })
+      const view = render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Open Run Room' }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(14_999) })
+      expect(statusCall).toHaveBeenCalledTimes(1)
+      expect(useStore.getState().roomStatusError.run_1).toBeUndefined()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(statusCall.mock.calls[0][1].aborted).toBe(true)
+      expect(screen.getByRole('status').textContent).toContain('Presence is stale: Presence request timed out after 15 seconds')
+      expect(screen.getByText(`Controller: ${bob.display_name}`)).toBeDefined()
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      expect(statusCall).toHaveBeenCalledTimes(2)
+      await act(async () => { recovery.resolve(recovered); await recovery.promise })
+      expect(useStore.getState().roomStatus.run_1).toEqual(recovered)
+      expect(useStore.getState().roomStatusError.run_1).toBeUndefined()
+      expect(screen.queryByText(/Presence is stale/)).toBeNull()
+      await act(async () => {
+        if (outcome === 'success') hung.resolve(occupied)
+        else hung.reject(new Error('late presence failure'))
+        await Promise.resolve()
+      })
+      expect(useStore.getState().roomStatus.run_1).toEqual(recovered)
+      expect(useStore.getState().roomStatusError.run_1).toBeUndefined()
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('ignores a pending presence response when acknowledged control changes', async () => {
     const oldResponse = Promise.withResolvers<RoomStatusResult>()
     const currentResponse = Promise.withResolvers<RoomStatusResult>()
-    const client = fakeApi({
-      runRoomStatus: vi.fn().mockReturnValueOnce(oldResponse.promise).mockReturnValueOnce(currentResponse.promise),
-    })
+    const statusCall = vi.fn().mockReturnValueOnce(oldResponse.promise).mockReturnValueOnce(currentResponse.promise)
+    const client = fakeApi({ runRoomStatus: statusCall })
     const props = { run: run(), client, selfID: alice.id, onTakeControl: vi.fn(), onReleaseControl: vi.fn() }
     const view = render(<RunRoom {...props} />)
     view.rerender(<RunRoom {...props} control={control} />)
+    expect(statusCall.mock.calls[0][1].aborted).toBe(true)
+    expect(statusCall.mock.calls[1][1].aborted).toBe(false)
     const current = status({ watchers: [alice.id] })
     await act(async () => { currentResponse.resolve(current); await currentResponse.promise })
     await act(async () => { oldResponse.resolve(status({ watchers: [bob.id] })); await oldResponse.promise })
@@ -204,9 +245,11 @@ describe('Run Room', () => {
     const client = fakeApi({ runRoomStatus: statusCall })
     const view = render(<RunRoom run={run()} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
     view.rerender(<RunRoom run={run({ id: 'run_2' })} client={client} selfID={alice.id} onTakeControl={vi.fn()} onReleaseControl={vi.fn()} />)
+    expect(statusCall.mock.calls[0][1].aborted).toBe(true)
     await act(async () => { oldResponse.resolve(status()); await oldResponse.promise })
     expect(useStore.getState().roomStatus.run_1).toBeUndefined()
     view.unmount()
+    expect(statusCall.mock.calls[1][1].aborted).toBe(true)
     await act(async () => { currentResponse.resolve(status({ run_id: 'run_2' })); await currentResponse.promise })
     expect(useStore.getState().roomStatus.run_2).toBeUndefined()
   })
@@ -635,7 +678,7 @@ describe('Run Room', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
     const composer = screen.getByRole('textbox', { name: 'Run Room message' })
     fireEvent.change(composer, { target: { value: 'keep pending instruction' } })
-    act(() => useStore.getState().setRoomStatus('run_1', status({ protected: true })))
+    act(() => useStore.getState().setRoomStatus('run_1', status({ protected: true }), undefined))
     fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true })
     expect(client.runRoomPost).not.toHaveBeenCalled()
     expect(composer).toHaveProperty('value', 'keep pending instruction')

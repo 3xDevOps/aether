@@ -151,10 +151,12 @@ input control. The border disappears during replay, history reading or disconnec
 reduced motion replaces the traveling highlights with a static teal border.
 
 Presence refreshes on mount, every five seconds and after acknowledged control
-changes, independently of room history. Loading or unavailable presence is not
-an empty room; a failed refresh keeps the last known names marked stale. Presence
-never decides who may type. Opening the room loads its durable attributed
-timeline; history refreshes only while it is open.
+changes, independently of room history. A stalled refresh times out after 15
+seconds; later polls retry automatically. A controller name from before a
+control change, or after a failed refresh, is marked **(last known)** until a
+fresh response arrives. Loading or unavailable presence is not an empty room.
+Presence never decides who may type. Opening the room loads its durable
+attributed timeline; history refreshes only while it is open.
 
 **Ctrl+Shift+M** (**Cmd+Shift+M** on macOS) toggles the room from the terminal or
 composer. The opener tooltip, room header and shortcut reference show the key.

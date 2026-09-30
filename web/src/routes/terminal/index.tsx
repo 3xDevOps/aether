@@ -70,6 +70,7 @@ function TerminalRoute({ params }: RouteProps) {
   const terminalCacheEpoch = useStore((s) => s.terminalCacheEpoch)
   const members = useStore((s) => s.members)
   const roomStatus = useStore((s) => s.roomStatus[runID])
+  const roomStatusControl = useStore((s) => s.roomStatusControl[runID])
   const roomStatusError = useStore((s) => s.roomStatusError[runID])
   const phone = useMediaQuery(phoneScreen)
   const known = run !== undefined
@@ -149,14 +150,16 @@ function TerminalRoute({ params }: RouteProps) {
 
   const { state, replaying, controlMetadata, sessionMissing } = session
   const replaySpinner = replaying
+  const roomControl = state.connection === 'live' && steerable && !state.steerDenied ? controlMetadata : undefined
+  const stalePresence = roomStatusControl !== roomControl || Boolean(roomStatusError)
   const localControl = state.connection === 'live' && state.write &&
     controlMetadata?.has_control === true && steerable && !state.steerDenied
   const liveWritable = localControl && !replaying && !readingHistory
   const controllerID = localControl ? self.id : roomStatus?.controller?.member_id
   const controllerMember = controllerID ? members[controllerID] : undefined
   const controllerName = controllerMember?.display_name || controllerID
-  const anotherSession = !localControl && state.connection === 'live' &&
-    controlMetadata?.has_control === false && controllerID === self.id
+  const controllerNote = localControl ? 'this tab' : stalePresence ? 'last known' :
+    state.connection === 'live' && controlMetadata?.has_control === false && controllerID === self.id ? 'another session' : null
   const takeControl = (takeover = false) => session.takeControl(takeover)
   const releaseControl = () => session.releaseControl()
   const toggleWrite = () => {
@@ -178,7 +181,7 @@ function TerminalRoute({ params }: RouteProps) {
         <div role="group" aria-label="Run presence" className="flex h-full min-w-0 flex-1 items-center gap-2 text-[12px]">
           <div
             className="flex min-w-5 max-w-[50%] items-center gap-1 whitespace-nowrap"
-            title={controllerID ? `Controller: ${controllerName}${localControl ? ' (this tab)' : anotherSession ? ' (another session)' : ''}` : undefined}
+            title={controllerID ? `Controller: ${controllerName}${controllerNote ? ` (${controllerNote})` : ''}` : undefined}
           >
             <KeyRound aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground @[56rem]/terminal-pane:hidden" />
             <span className="sr-only text-muted-foreground @[56rem]/terminal-pane:not-sr-only">Controller</span>
@@ -186,11 +189,10 @@ function TerminalRoute({ params }: RouteProps) {
               <span className="inline-flex min-w-0 items-center gap-1">
                 <MemberAvatar member={controllerMember} fallback={controllerID} className="size-4 text-[8px]" />
                 <span className="min-w-0 truncate font-medium text-foreground">{controllerName}</span>
-                {localControl && <span className="sr-only shrink-0 text-[var(--accent-soft-foreground)] @[56rem]/terminal-pane:not-sr-only">(this tab)</span>}
-                {anotherSession && <span className="sr-only shrink-0 text-muted-foreground @[56rem]/terminal-pane:not-sr-only">(another session)</span>}
+                {controllerNote && <span className={cn('sr-only shrink-0 @[56rem]/terminal-pane:not-sr-only', localControl ? 'text-[var(--accent-soft-foreground)]' : 'text-muted-foreground')}>({controllerNote})</span>}
               </span>
             ) : (
-              <span className="truncate text-muted-foreground">{roomStatus ? 'Nobody' : roomStatusError ? 'Unavailable' : 'Loading…'}</span>
+              <span className="truncate text-muted-foreground">{roomStatus ? stalePresence ? 'Unknown' : 'Nobody' : roomStatusError ? 'Unavailable' : 'Loading…'}</span>
             )}
           </div>
           <div
@@ -308,7 +310,7 @@ function TerminalRoute({ params }: RouteProps) {
         key={runID}
         run={run}
         selfID={self.id}
-        control={state.connection === 'live' && steerable && !state.steerDenied ? controlMetadata : undefined}
+        control={roomControl}
         onTakeControl={takeControl}
         onReleaseControl={releaseControl}
       />
