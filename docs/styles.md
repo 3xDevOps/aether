@@ -125,7 +125,8 @@ under the titlebar, max 600px, with compact rows and no giant scrim-heavy card.
 The status Slot remains mounted once for team refresh and other live
 contributors, including shortcuts. At narrow widths secondary status details
 use a bounded, keyboard-reachable popup while connection and theme controls stay
-available.
+available. Wrapped readouts in that popup use a 1.5 line height so Saira's
+glyphs fit inside each row; the wide status bar keeps its 22px rows.
 
 `focusRing` and `field` remain signature-compatible shared utilities. Preserve
 their keyboard outline, inset behavior for full-bleed rows, readable
