@@ -29,11 +29,20 @@ A copy of the Apache-2.0 text ships inside the APK at
 
 ## In the dashboard bundle
 
-The dashboard ships two fonts, which the Play listing's feature graphic is
-drawn with as well. Both are under the SIL Open Font License 1.1: VT323
-([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt))
-and `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono
-([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
+The dashboard ships three fonts under the SIL Open Font License 1.1:
+
+- Saira for UI text
+  ([`web/public/fonts/LICENSE-saira.txt`](../web/public/fonts/LICENSE-saira.txt)).
+  The normal-width variable WOFF2 files cover weights 100–900 in Latin,
+  Latin extended and Vietnamese subsets, downloaded from
+  [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
+- VT323 for the wordmark
+  ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
+- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for terminal
+  output and code
+  ([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
+
+The Play listing's feature graphic uses VT323 and JetBrainsMono NFM.
 
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the
