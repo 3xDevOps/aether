@@ -363,7 +363,7 @@ export function StatusBar() {
             className="block min-w-0 data-[state=closed]:hidden xl:h-[var(--status-bar-height)] xl:flex-1"
           >
             <div
-              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-4 shadow-lg xl:static xl:flex xl:h-[var(--status-bar-height)] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
+              className="fixed inset-x-2 bottom-[calc(var(--status-bar-height)_+_0.375rem_+_env(safe-area-inset-bottom))] z-50 mb-1 flex max-h-[70dvh] min-w-0 max-w-md flex-col items-stretch gap-1 overflow-y-auto rounded-sm border border-border bg-popover p-2 text-popover-foreground leading-normal shadow-lg xl:static xl:flex xl:h-[var(--status-bar-height)] xl:w-full xl:min-w-0 xl:max-w-none xl:flex-1 xl:flex-row xl:items-center xl:gap-2 xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:text-muted-foreground xl:leading-none xl:shadow-none"
             >
               {unreachable !== null && (
                 // needs-attention has no HeroUI colour of its own, so the

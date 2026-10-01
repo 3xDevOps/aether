@@ -9,11 +9,15 @@ routes, run-state colours and capabilities. Adjoining panes are flat and
 quiet: do not add saturated accent colours, arbitrary gradients, blurred cards or
 elevated nested panels.
 
-The UI uses the native system stack: `system-ui, Ubuntu, Droid Sans, sans-serif`
-at 13px with a 1.4 line height; supporting copy is 12px. JetBrainsMono NFM is
-retained for terminal output, commands and code. VT323 remains only for the
-Aether wordmark and the original startup splash. Do not use the brand face for
-body copy.
+The UI uses Saira at 13px with a 1.4 line height; supporting copy is 12px.
+The font stack is `'Saira', system-ui, sans-serif`. Normal-width variable
+WOFF2 files cover weights 100–900 and Latin, Latin extended and Vietnamese
+characters. They ship in `web/public/fonts/` with their SIL Open Font License;
+`web/src/index.css` declares Unicode ranges and `font-display: swap`, so the
+browser fetches only the subsets it needs, without contacting Google.
+JetBrainsMono NFM is retained for terminal output, commands and code. VT323
+remains only for the Aether wordmark and the original startup splash. Do not
+use the brand face for body copy.
 
 ## Semantic palette
 
@@ -121,7 +125,8 @@ under the titlebar, max 600px, with compact rows and no giant scrim-heavy card.
 The status Slot remains mounted once for team refresh and other live
 contributors, including shortcuts. At narrow widths secondary status details
 use a bounded, keyboard-reachable popup while connection and theme controls stay
-available.
+available. Wrapped readouts in that popup use a 1.5 line height so Saira's
+glyphs fit inside each row; the wide status bar keeps its 22px rows.
 
 `focusRing` and `field` remain signature-compatible shared utilities. Preserve
 their keyboard outline, inset behavior for full-bleed rows, readable
