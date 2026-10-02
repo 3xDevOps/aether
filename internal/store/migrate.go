@@ -1406,6 +1406,11 @@ CREATE UNIQUE INDEX idx_coord_reports_active_terminal
 	ON coord_reports(run_id)
 	WHERE outcome IN ('success', 'failure') AND superseded_at IS NULL;
 `,
+	// v47: outcome_unseen marks a run an agent's report finished that its
+	// owner has not opened yet.
+	`
+ALTER TABLE runs ADD COLUMN outcome_unseen INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

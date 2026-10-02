@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -34,6 +35,9 @@ type closeSpec struct {
 	reason   string
 	retained string
 	commit   string
+	// reported marks the close an agent's report causes, which leaves the
+	// outcome unseen by the run's owner.
+	reported bool
 }
 
 func humanClose(outcome domain.RunStatus, actor domain.MemberID) closeSpec {
@@ -46,9 +50,9 @@ func humanClose(outcome domain.RunStatus, actor domain.MemberID) closeSpec {
 
 func reportedClose(outcome domain.RunStatus) closeSpec {
 	if outcome == domain.RunCompleted {
-		return closeSpec{outcome: outcome, reason: reportedSuccessReason, retained: reportedSuccessRetainedReason, commit: "aether: "}
+		return closeSpec{outcome: outcome, reason: reportedSuccessReason, retained: reportedSuccessRetainedReason, commit: "aether: ", reported: true}
 	}
-	return closeSpec{outcome: outcome, reason: reportedFailureReason, retained: reportedFailureRetainedReason, commit: "wip: "}
+	return closeSpec{outcome: outcome, reason: reportedFailureReason, retained: reportedFailureRetainedReason, commit: "wip: ", reported: true}
 }
 
 // retainedReason reports whether a terminal row promises a retained,
@@ -82,7 +86,9 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 
 // relabelLocked rewrites a terminal run's reason without changing its
 // status, which the lifecycle table only allows for merged and abandoned.
-// The caller must hold s.mu.
+// The row keeps its outcome_unseen flag, and the event carries it. The
+// caller must hold s.mu, which Seen also holds, so the flag read here is
+// the one this event reports.
 func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, status domain.RunStatus, reason string, actor domain.MemberID) error {
 	if !status.Terminal() {
 		return fmt.Errorf("%w: relabel %s", ErrInvalidTransition, status)
@@ -91,13 +97,51 @@ func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspa
 	if err := s.cfg.Store.UpdateRunStatus(ctx, run, status, public, nil, nil); err != nil {
 		return err
 	}
+	row, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
 	s.publish(ctx, events.Event{
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public},
+		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: row.OutcomeUnseen},
 	})
 	return nil
+}
+
+// Seen clears a run's outcome_unseen flag once its owner has opened it.
+// Only the current owner may clear it. Clearing a clear flag returns the
+// run and publishes nothing. s.mu orders the clear and its event against
+// the run.status events that also carry the flag.
+func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
+	current, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if current.MemberID != actor {
+		return nil, fmt.Errorf("%w: only the run's owner can mark its outcome seen", permissions.ErrDenied)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed, err := s.cfg.Store.ClearRunOutcomeUnseen(ctx, run, actor)
+	if err != nil {
+		return nil, err
+	}
+	fresh, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		s.publish(ctx, events.Event{
+			WorkspaceID: fresh.WorkspaceID,
+			RunID:       run,
+			ActorID:     actor,
+			Payload:     events.RunOutcomeSeenPayload{},
+		})
+		s.publishTimeline(ctx, fresh.WorkspaceID, run, actor, events.TimelineNote, "outcome seen by owner")
+	}
+	return fresh, nil
 }
 
 // FinishReported arms a live run to finish with the outcome its agent

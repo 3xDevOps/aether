@@ -244,6 +244,20 @@ func (s *Server) runArchive(ctx context.Context, member domain.MemberID, params 
 	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
 }
 
+// runSeen clears a run's outcome_unseen flag. The guard only resolves the
+// run (View); the scheduler denies everyone but the run's owner.
+func (s *Server) runSeen(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.RunSeenParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	run, err := s.cfg.Runs.Seen(ctx, domain.RunID(p.RunID), member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.RunResult{Run: protocol.RunFromDomain(run)}, nil
+}
+
 func (s *Server) runPause(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	return s.runAct(ctx, member, params, s.cfg.Runs.Pause)
 }

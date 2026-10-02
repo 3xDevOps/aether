@@ -175,15 +175,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	}
 
 	var (
-		to     domain.RunStatus
-		reason string
-		actor  domain.MemberID
+		to       domain.RunStatus
+		reason   string
+		actor    domain.MemberID
+		byReport bool
 	)
 	switch {
 	case killed:
 		to, reason, actor = domain.RunAbandoned, "killed", killActor
 	case reported != "":
-		to, reason = reported, reportedClose(reported).reason
+		to, reason, byReport = reported, reportedClose(reported).reason, true
 	case code == 0:
 		to, reason = domain.RunCompleted, "agent exited; results committed"
 	default:
@@ -193,9 +194,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// A Kill accepted after the snapshot above still owns the outcome: the
 	// caller was told the kill succeeded.
 	if entry.killRequested {
-		to, reason, actor = domain.RunAbandoned, "killed", entry.killActor
+		to, reason, actor, byReport = domain.RunAbandoned, "killed", entry.killActor, false
 	}
-	err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor)
+	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, byReport)
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, ErrInvalidTransition) {
 		slog.Warn("scheduler: record exit status", "run", entry.runID, "error", err)

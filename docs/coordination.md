@@ -1040,7 +1040,9 @@ What a report does depends on the run:
   `agent reported success; retained container` or
   `agent reported failure; retained container`; a headless run, or a TUI run
   with a negative `--run-container-ttl`, records `agent reported success` or
-  `agent reported failure`. A Close or Kill that lands first wins, and Close
+  `agent reported failure`. The finished run carries `outcome_unseen: true`
+  until its owner opens it (`run.seen`) or a status change such as Close or
+  relaunch clears it. A Close or Kill that lands first wins, and Close
   still re-labels a finished run as merged or abandoned. Blocked moves the run
   to **Needs you** with the reason `blocked: <summary>` the next time it parks
   (the end of the turn, or a stall), until the agent resumes.

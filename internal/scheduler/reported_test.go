@@ -8,6 +8,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -79,13 +80,13 @@ func TestReportedSuccessFinishesTUIRunAtTurnEnd(t *testing.T) {
 	}
 
 	p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted)
-	if p.Reason != reportedSuccessRetainedReason || p.From != domain.RunRunning {
-		t.Fatalf("finish event = %+v, want running -> completed because %q", p, reportedSuccessRetainedReason)
+	if p.Reason != reportedSuccessRetainedReason || p.From != domain.RunRunning || !p.OutcomeUnseen {
+		t.Fatalf("finish event = %+v, want running -> completed because %q, outcome unseen", p, reportedSuccessRetainedReason)
 	}
 	expectNoStatusEvent(t, sub, run.ID, "a finished run")
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Reason != reportedSuccessRetainedReason {
-		t.Fatalf("stored reason = %q, want %q", row.Reason, reportedSuccessRetainedReason)
+	if row.Reason != reportedSuccessRetainedReason || !row.OutcomeUnseen {
+		t.Fatalf("stored row = %q, unseen %v; want %q, unseen", row.Reason, row.OutcomeUnseen, reportedSuccessRetainedReason)
 	}
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: add OAuth login" {
 		t.Fatalf("commits = %v, want one aether: commit", got)
@@ -98,12 +99,16 @@ func TestReportedSuccessFinishesTUIRunAtTurnEnd(t *testing.T) {
 		t.Fatalf("finished sidecar = %+v, %v; want a retained, paused container", sc, err)
 	}
 
-	// A human can still decide the finished run's disposition.
+	// A human can still decide the finished run's disposition, which
+	// settles the unseen outcome.
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun after reported finish: %v", err)
 	}
-	if merged := e.waitStoreStatus(t, run.ID, domain.RunMerged); merged.Reason != retainedCloseReason {
-		t.Fatalf("merged reason = %q, want %q", merged.Reason, retainedCloseReason)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunMerged); p.OutcomeUnseen {
+		t.Fatalf("close event = %+v, want outcome_unseen clear", p)
+	}
+	if merged := e.waitStoreStatus(t, run.ID, domain.RunMerged); merged.Reason != retainedCloseReason || merged.OutcomeUnseen {
+		t.Fatalf("merged row = %q, unseen %v; want %q, seen", merged.Reason, merged.OutcomeUnseen, retainedCloseReason)
 	}
 }
 
@@ -120,18 +125,25 @@ func TestReportedFailureFinishesAtDeadlineAndRelaunches(t *testing.T) {
 	e.expireReportDeadline(t, run.ID)
 
 	row := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if row.Reason != reportedFailureRetainedReason {
-		t.Fatalf("stored reason = %q, want %q", row.Reason, reportedFailureRetainedReason)
+	if row.Reason != reportedFailureRetainedReason || !row.OutcomeUnseen {
+		t.Fatalf("stored row = %q, unseen %v; want %q, unseen", row.Reason, row.OutcomeUnseen, reportedFailureRetainedReason)
 	}
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "wip: fix flaky test" {
 		t.Fatalf("commits = %v, want one wip: commit", got)
 	}
+	sub := e.subscribe(t)
 	reopened, err := e.sched.Relaunch(ctx, run.ID, e.member.ID)
 	if err != nil {
 		t.Fatalf("Relaunch failed run: %v", err)
 	}
 	if reopened.Status != domain.RunRunning || e.rt.byName(string(run.ID)) != container {
 		t.Fatalf("relaunched = %+v, want the same running run and container", reopened)
+	}
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning); p.OutcomeUnseen {
+		t.Fatalf("relaunch event = %+v, want outcome_unseen clear", p)
+	}
+	if fresh, err := e.db.GetRun(ctx, run.ID); err != nil || fresh.OutcomeUnseen {
+		t.Fatalf("relaunched row = %+v, %v; want outcome_unseen clear", fresh, err)
 	}
 }
 
@@ -152,8 +164,8 @@ func TestReportedSuccessOutranksTheExitCode(t *testing.T) {
 	e.rt.byName(string(run.ID)).exitNow(1)
 
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Reason != reportedSuccessReason {
-		t.Fatalf("stored reason = %q, want %q", row.Reason, reportedSuccessReason)
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen {
+		t.Fatalf("stored row = %q, unseen %v; want %q, unseen", row.Reason, row.OutcomeUnseen, reportedSuccessReason)
 	}
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: write docs" {
 		t.Fatalf("commits = %v, want one aether: commit", got)
@@ -180,8 +192,8 @@ func TestHumanDecisionOutranksAReportedFinish(t *testing.T) {
 		e.expireReportDeadlineAfterClose(t, run.ID)
 		expectNoStatusEvent(t, sub, run.ID, "an armed finish after a human close")
 		row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
-		if row.Reason != retainedCloseReason {
-			t.Fatalf("reason = %q, want the human close %q", row.Reason, retainedCloseReason)
+		if row.Reason != retainedCloseReason || row.OutcomeUnseen {
+			t.Fatalf("row = %q, unseen %v; want the human close %q, seen", row.Reason, row.OutcomeUnseen, retainedCloseReason)
 		}
 		if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "wip: close first" {
 			t.Fatalf("commits = %v, want only the close's wip: commit", got)
@@ -213,8 +225,8 @@ func TestHumanDecisionOutranksAReportedFinish(t *testing.T) {
 			defer e.sched.mu.Unlock()
 			return !entry.reportFinishing
 		})
-		if row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned); row.Reason != "killed" {
-			t.Fatalf("reason after the armed finish = %q, want killed", row.Reason)
+		if row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned); row.Reason != "killed" || row.OutcomeUnseen {
+			t.Fatalf("row after the armed finish = %q, unseen %v; want killed, seen", row.Reason, row.OutcomeUnseen)
 		}
 	})
 }
@@ -381,13 +393,78 @@ func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 	e.sched.runs[run.ID].retainedUntil = &past
 	e.sched.mu.Unlock()
 
+	sub := e.subscribe(t)
 	e.sched.sweepRetained(ctx)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted); p.Reason != reportedSuccessReason || !p.OutcomeUnseen {
+		t.Fatalf("expiry relabel event = %+v, want %q with the outcome still unseen", p, reportedSuccessReason)
+	}
 	waitFor(t, "expired container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Reason != reportedSuccessReason {
-		t.Fatalf("expired reason = %q, want %q", row.Reason, reportedSuccessReason)
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen {
+		t.Fatalf("expired row = %q, unseen %v; want %q, unseen", row.Reason, row.OutcomeUnseen, reportedSuccessReason)
 	}
 	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Relaunch after expiry = %v, want ErrInvalidTransition", err)
+	}
+}
+
+// TestSeenClearsTheUnseenOutcomeForItsOwner: only the owner clears the
+// flag, the first clear publishes run.outcome_seen and a timeline note,
+// and a repeat returns the run without publishing again.
+func TestSeenClearsTheUnseenOutcomeForItsOwner(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "review me")
+	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted); err != nil {
+		t.Fatalf("FinishReported: %v", err)
+	}
+	e.expireReportDeadline(t, run.ID)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); !row.OutcomeUnseen {
+		t.Fatal("reported finish left outcome_unseen clear")
+	}
+	sub := e.subscribe(t)
+
+	other := newSteerer(t, e, "Cody", "", "")
+	if _, err := e.sched.Seen(ctx, run.ID, other.ID); !errors.Is(err, permissions.ErrDenied) {
+		t.Fatalf("Seen by a non-owner = %v, want ErrDenied", err)
+	}
+	seen, err := e.sched.Seen(ctx, run.ID, e.member.ID)
+	if err != nil || seen.OutcomeUnseen {
+		t.Fatalf("Seen by the owner = %+v, %v; want outcome_unseen clear", seen, err)
+	}
+	again, err := e.sched.Seen(ctx, run.ID, e.member.ID)
+	if err != nil || again.OutcomeUnseen {
+		t.Fatalf("repeat Seen = %+v, %v; want the run, flag clear", again, err)
+	}
+	if _, err := e.sched.Seen(ctx, "run_missing", e.member.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Seen on a missing run = %v, want ErrNotFound", err)
+	}
+
+	seenEvents, notes := 0, 0
+	deadline := time.After(200 * time.Millisecond)
+	for done := false; !done; {
+		select {
+		case ev := <-sub.Events():
+			if ev.RunID != run.ID {
+				continue
+			}
+			switch p := ev.Payload.(type) {
+			case events.RunOutcomeSeenPayload:
+				seenEvents++
+				if ev.ActorID != e.member.ID {
+					t.Fatalf("run.outcome_seen actor = %s, want the owner", ev.ActorID)
+				}
+			case events.TimelinePayload:
+				if p.Kind == events.TimelineNote {
+					notes++
+				}
+			}
+		case <-deadline:
+			done = true
+		}
+	}
+	if seenEvents != 1 || notes != 1 {
+		t.Fatalf("published %d run.outcome_seen and %d notes, want one of each", seenEvents, notes)
 	}
 }

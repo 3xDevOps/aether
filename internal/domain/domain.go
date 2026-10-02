@@ -623,7 +623,11 @@ type Run struct {
 	// is not archived. Only a Final run can be archived, and it is the
 	// single source the deletion sweep will use for ArchiveRetention.
 	ArchivedAt *time.Time
-	CreatedAt  time.Time
+	// OutcomeUnseen is true while a run an agent's report finished
+	// (completed or failed) has not been opened by its owner. Any later
+	// status change clears it.
+	OutcomeUnseen bool
+	CreatedAt     time.Time
 	// StartedAt is when the run entered running; nil while queued or
 	// provisioning.
 	StartedAt *time.Time

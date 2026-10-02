@@ -101,6 +101,15 @@ func publicRunStatusReason(reason string) string {
 // publishes the run.status event. The caller must hold s.mu; from must be
 // the run's current status.
 func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID) error {
+	return s.transitionOutcomeLocked(ctx, run, workspace, from, to, reason, actor, false)
+}
+
+// transitionOutcomeLocked is transitionLocked that, when reported, records
+// the transition an agent's terminal report causes and marks the outcome
+// unseen by the run's owner. The event's OutcomeUnseen equals reported:
+// only completed and failed rows carry the flag, and neither has a legal
+// same-status transition that would keep it.
+func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID, reported bool) error {
 	if !legalTransition(from, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
 	}
@@ -113,7 +122,11 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)
-	if err := s.cfg.Store.UpdateRunStatus(ctx, run, to, public, startedAt, finishedAt); err != nil {
+	write := s.cfg.Store.UpdateRunStatus
+	if reported {
+		write = s.cfg.Store.FinishRunReported
+	}
+	if err := write(ctx, run, to, public, startedAt, finishedAt); err != nil {
 		return err
 	}
 	if e := s.runs[run]; e != nil {
@@ -126,7 +139,7 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public},
+		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public, OutcomeUnseen: reported},
 	})
 	return nil
 }

@@ -860,7 +860,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 				}
 				return persistErr
 			}
-			transitionErr := s.transitionLocked(ctx, run, workspace, status, outcome, closeReason, actor)
+			transitionErr := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, closeReason, actor, spec.reported)
 			if transitionErr == nil {
 				entry.status = outcome
 				entry.paused = true
@@ -912,7 +912,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 	// terminal work before stopping the runtime; a failed capture retains the
 	// owner for the bounded retry sweep.
 	s.mu.Lock()
-	err := s.transitionLocked(ctx, run, workspace, status, outcome, spec.reason, actor)
+	err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, spec.reason, actor, spec.reported)
 	if err == nil && entry != nil {
 		entry.evidenceIdentity = "none"
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {

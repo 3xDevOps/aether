@@ -1356,3 +1356,116 @@ func TestTerminalPersistence(t *testing.T) {
 		t.Fatalf("GetTerminal after delete error = %v, want ErrNotFound", err)
 	}
 }
+
+// A database at v46 gains outcome_unseen clear on every existing run.
+func TestRunOutcomeUnseenMigrationFromV46(t *testing.T) {
+	t.Parallel()
+	const previous = 46
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, execErr := raw.Exec(`CREATE TABLE schema_migrations (
+		version    INTEGER PRIMARY KEY,
+		applied_at INTEGER NOT NULL
+	)`); execErr != nil {
+		t.Fatalf("create schema_migrations: %v", execErr)
+	}
+	for v := 1; v <= previous; v++ {
+		if _, execErr := raw.Exec(migrations[v-1]); execErr != nil {
+			t.Fatalf("apply v%d: %v", v, execErr)
+		}
+		if _, execErr := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, v); execErr != nil {
+			t.Fatalf("record v%d: %v", v, execErr)
+		}
+	}
+	if _, execErr := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, color, role, created_at)
+			VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
+		INSERT INTO workspaces (id, name, created_at, environment, base_branch, steer_others, origin)
+			VALUES ('w1', 'proj', 1, '{}', 'main', '', '');
+		INSERT INTO runs (id, workspace_id, member_id, account_member_id, task, harness, mode, status, branch, worktree, created_at)
+			VALUES ('r1', 'w1', 'm1', 'm1', 'a', 'claude', 'tui', 'completed', 'b', 'w', 1);
+	`, testKey(t, "")); execErr != nil {
+		t.Fatalf("seed rows: %v", execErr)
+	}
+	if closeErr := raw.Close(); closeErr != nil {
+		t.Fatalf("close raw: %v", closeErr)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (outcome_unseen migration): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	got, err := db.GetRun(context.Background(), "r1")
+	if err != nil || got.OutcomeUnseen {
+		t.Fatalf("migrated run = %+v, %v; want outcome_unseen clear", got, err)
+	}
+}
+
+// FinishRunReported sets outcome_unseen with the status; a same-status
+// write keeps it; a status change through UpdateRunStatus or UpdateRun
+// clears it; ClearRunOutcomeUnseen clears it only for the owner, once.
+func TestRunOutcomeUnseen(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	unseen := func(want bool, what string) {
+		t.Helper()
+		got, err := db.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatalf("%s: GetRun: %v", what, err)
+		}
+		if got.OutcomeUnseen != want {
+			t.Fatalf("%s: outcome_unseen = %v, want %v", what, got.OutcomeUnseen, want)
+		}
+	}
+
+	now := time.Now().UTC()
+	if err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", nil, &now); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	unseen(true, "reported finish")
+	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent reported success; retained container", nil, nil); err != nil {
+		t.Fatalf("relabel: %v", err)
+	}
+	unseen(true, "same-status relabel")
+
+	if changed, err := db.ClearRunOutcomeUnseen(ctx, run.ID, "someone-else"); err != nil || changed {
+		t.Fatalf("non-owner clear = %v, %v; want unchanged", changed, err)
+	}
+	unseen(true, "non-owner clear")
+	if changed, err := db.ClearRunOutcomeUnseen(ctx, run.ID, member.ID); err != nil || !changed {
+		t.Fatalf("owner clear = %v, %v; want changed", changed, err)
+	}
+	unseen(false, "owner clear")
+	if changed, err := db.ClearRunOutcomeUnseen(ctx, run.ID, member.ID); err != nil || changed {
+		t.Fatalf("repeat clear = %v, %v; want unchanged", changed, err)
+	}
+
+	if err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", nil, nil); err != nil {
+		t.Fatalf("FinishRunReported again: %v", err)
+	}
+	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "closed", nil, nil); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	unseen(false, "status change")
+
+	if err := db.FinishRunReported(ctx, run.ID, domain.RunFailed, "agent reported failure", nil, nil); err != nil {
+		t.Fatalf("FinishRunReported failure: %v", err)
+	}
+	row, err := db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	row.Status, row.Reason = domain.RunRunning, ""
+	if err := db.UpdateRun(ctx, row); err != nil {
+		t.Fatalf("UpdateRun: %v", err)
+	}
+	unseen(false, "relaunch through UpdateRun")
+}
