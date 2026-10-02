@@ -3,10 +3,15 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -491,6 +496,50 @@ func TestContainerConfigAdditionalMounts(t *testing.T) {
 		t.Errorf("profile mount = %+v", prof)
 	}
 }
+
+// A subpath mount reaches Docker as a volume of the base directory with a
+// volume subpath, never as a bind of the joined path, and bind mounts are
+// unchanged beside it.
+func TestContainerConfigSubpathMount(t *testing.T) {
+	d := &Docker{namePrefix: defaultNamePrefix}
+	spec := validSpec()
+	spec.Mounts = []Mount{
+		{HostPath: "/srv/aether/homes/m1", ContainerPath: "/root"},
+		{HostPath: "/srv/aether/homes/m2", Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"},
+	}
+	_, hostCfg := d.containerConfig(spec)
+	if len(hostCfg.Mounts) != 3 {
+		t.Fatalf("Mounts = %v, want worktree + 2 additional", hostCfg.Mounts)
+	}
+	wantBind := mount.Mount{
+		Type:        mount.TypeBind,
+		Source:      "/srv/aether/homes/m1",
+		Target:      "/root",
+		BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate},
+	}
+	if got := hostCfg.Mounts[1]; !reflect.DeepEqual(got, wantBind) {
+		t.Errorf("home mount = %+v, want %+v", got, wantBind)
+	}
+	sum := sha256.Sum256([]byte("/srv/aether/homes/m2"))
+	wantVolume := mount.Mount{
+		Type:   mount.TypeVolume,
+		Source: "aether-home-" + hex.EncodeToString(sum[:])[:32],
+		Target: "/root/.claude/.credentials.json",
+		VolumeOptions: &mount.VolumeOptions{
+			NoCopy:  true,
+			Subpath: ".claude/.credentials.json",
+			Labels:  map[string]string{labelManaged: "true"},
+			DriverConfig: &mount.Driver{
+				Name:    "local",
+				Options: map[string]string{"type": "none", "o": "bind", "device": "/srv/aether/homes/m2"},
+			},
+		},
+	}
+	if got := hostCfg.Mounts[2]; !reflect.DeepEqual(got, wantVolume) {
+		t.Errorf("login mount = %+v, want %+v", got, wantVolume)
+	}
+}
+
 func writeExecFrame(w io.Writer, stream stdcopy.StdType, payload []byte) error {
 	var header [8]byte
 	header[0] = byte(stream)
@@ -570,5 +619,93 @@ func TestHijackStdinCancellationDoesNotCloseSharedConnection(t *testing.T) {
 	}
 	if got := <-read; got != "second" {
 		t.Fatalf("later read = %q, want second", got)
+	}
+}
+
+// fakeDockerAPI answers ping as an engine speaking engineAPI and records
+// every create request's version path and body.
+type fakeDockerAPI struct {
+	mu      sync.Mutex
+	creates []string
+	bodies  []string
+}
+
+func (f *fakeDockerAPI) serve(t *testing.T, engineAPI string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Api-Version", engineAPI)
+		switch {
+		case r.URL.Path == "/_ping":
+			_, _ = io.WriteString(w, "OK")
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			body, _ := io.ReadAll(r.Body)
+			f.mu.Lock()
+			f.creates = append(f.creates, r.URL.Path)
+			f.bodies = append(f.bodies, string(body))
+			f.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"Id":"c1","Warnings":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A subpath mount is created only when both the engine and the version the
+// request is sent at honour it: an older engine, or a client pinned below
+// 1.45, would mount the owner's whole home, so no create request is sent.
+func TestCreateSubpathMountNeedsAPI145(t *testing.T) {
+	subpath := validSpec()
+	subpath.Mounts = []Mount{{HostPath: "/srv/aether/homes/m2", Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"}}
+	for _, tc := range []struct {
+		name, engine, pin string
+		spec              Spec
+		refused           string
+	}{
+		{"engine 1.44", "1.44", "", subpath, `docker engine API "1.44" cannot mount a path beneath a member home`},
+		{"client pinned to 1.44", "1.56", "1.44", subpath, `docker client sends API "1.44"`},
+		{"engine 1.45", "1.45", "", subpath, ""},
+		{"engine 1.56", "1.56", "", subpath, ""},
+		{"no subpath on engine 1.44", "1.44", "", validSpec(), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeDockerAPI{}
+			srv := api.serve(t, tc.engine)
+			opts := []client.Opt{client.WithHost("tcp://" + srv.Listener.Addr().String())}
+			if tc.pin != "" {
+				opts = append(opts, client.WithAPIVersion(tc.pin))
+			}
+			cli, err := client.New(opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cli.Close() })
+			d := &Docker{cli: cli, waitClient: cli, namePrefix: defaultNamePrefix}
+			id, err := d.Create(t.Context(), tc.spec)
+			api.mu.Lock()
+			creates, bodies := slices.Clone(api.creates), slices.Clone(api.bodies)
+			api.mu.Unlock()
+			if tc.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.refused) {
+					t.Fatalf("Create = %q, %v; want refusal %q", id, err, tc.refused)
+				}
+				if len(creates) != 0 {
+					t.Fatalf("create requests sent after refusal: %v", creates)
+				}
+				return
+			}
+			if err != nil || id != "c1" || len(creates) != 1 {
+				t.Fatalf("Create = %q, %v with requests %v; want c1 from one request", id, err, creates)
+			}
+			if want := "/v" + tc.engine + "/containers/create"; creates[0] != want {
+				t.Fatalf("create sent to %s, want %s", creates[0], want)
+			}
+			if len(tc.spec.Mounts) > 0 && !strings.Contains(bodies[0], `"Subpath":".claude/.credentials.json"`) {
+				t.Fatalf("create body %s lacks the volume subpath", bodies[0])
+			}
+		})
 	}
 }

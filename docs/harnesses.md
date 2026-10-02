@@ -13,8 +13,9 @@ Two rules shape everything below:
    install the executable into `~/.local/bin`.
 2. **Aether does not copy vendor credentials to clients or synchronize them.**
    Logins happen through the vendor's own flow in an Aether terminal.
-   Credentials remain in the member home; an explicit account share mounts that
-   whole home into a recipient's run. For the read-only subscription quota
+   Credentials remain in the member home; an explicit account share mounts only
+   the harness's login path (the **Login state** column below) from that home
+   into a recipient's run, a whole directory for `omp`. For the read-only subscription quota
    indicator, the server may read supported native Claude Code and Codex
    subscription credentials in that home and call the vendor's fixed HTTPS
    usage endpoint. Credential bytes and provider responses are never sent to
@@ -48,16 +49,24 @@ window has passed without a new measurement.
 
 | `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `~/.claude` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes |
-| `codex` | OpenAI Codex CLI | `~/.codex` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes |
-| `pi` | pi | `~/.pi` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes |
-| `omp` | oh-my-pi | `~/.omp` | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no |
-| `opencode` | opencode | `~/.local/share/opencode` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no |
+| `claude` | Claude Code | `~/.claude/.credentials.json` | `~/.claude` | `ANTHROPIC_API_KEY` | `IS_SANDBOX=1` | hooks (`--settings`) | PTY | yes |
+| `codex` | OpenAI Codex CLI | `~/.codex/auth.json` | `~/.codex` | `OPENAI_API_KEY` | - | notify (`-c notify=[...]`) | PTY | yes |
+| `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes |
+| `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | no |
+| `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.local/share/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no |
 | `custom` | deployment-supplied | - | - | - | - | - | PTY | no |
 
 Paths are inside the run container, relative to the run user's home (`/root`,
-or `/home/aether` for a non-root image user).
+or `/home/aether` for a non-root image user). **Login state** is the path an
+account share mounts from the owner's home into a recipient's run
+(`harness.Profile.CredentialPaths`); everything else there is the launcher's.
+`omp` shares a directory because its login is a SQLite WAL database beside its
+settings, MCP configuration, extensions, and sessions. omp loads extensions and
+MCP server commands from that directory, so a recipient's run can plant code
+that runs in the owner's own omp sessions, and the owner's extensions run in
+the recipient's run; share an `omp` account only with someone you would give
+your home to ([security.md](security.md#account-sharing)).
 
 The `config.roots` response used by the dashboard carries a `runtime_ignores`
 list for each configuration root. These are root-relative paths, and the
@@ -857,8 +866,24 @@ The local dashboard's **I've installed and logged in** button checks `agent.list
 before confirming installation. The Agents page shows **Installed** or
 **Not installed** for your account. These checks verify the executable;
 the agent verifies its vendor login when it starts. Shipped agents need no
-separate registration record. Other members can use the installation only
-after you share your account; see [teams.md](teams.md#agent-accounts).
+separate registration record. Your installation is used only by runs you
+launch. Sharing your account lends other members your login, not your
+installation: each recipient installs the agent in their own environment
+([teams.md](teams.md#agent-accounts)).
+
+`agent.list` with `account_member_id` set to a shared account still reports
+the caller's own agents and installations, and says why a launch of one on
+that account would be refused, resolving the name as a launch does:
+`login_missing: true` when the account owner has no login at its **Login
+state** path (a missing or empty file), `own_account_only: true` when it
+resolves to the caller's own member-defined agent, which runs only on the
+caller's own account, and `unavailable` with the launch's own error when the
+login is there but cannot be shared (a symlink in its path, a file with
+another hard link, or neither a file nor a directory). At most one is set. A
+member-defined name that is also a server-wide
+definition resolves to the server-wide one, so it can report
+`login_missing`. The launch dialog does not offer a refused agent on that
+account, and the server refuses such a launch.
 
 For an unshipped name the command asks for interactive and headless launch
 templates first (`<name> {task}` and `<name> -p {task}` by default). Install the
@@ -886,7 +911,7 @@ Three things to know:
   running `aether gui` or the CLI.
 - **Logins belong to one member account.** They reach another member's run only
   through the account owner's explicit grant described in
-  [teams.md](teams.md#agent-accounts).
+  [teams.md](teams.md#agent-accounts), and then only the **Login state** path.
 - If you skip the login part, the agent's own login prompt simply appears in
   the run's PTY. Attach with `aether attach <run>` and complete it there; it
   persists the same way.
@@ -895,9 +920,12 @@ Three things to know:
 
 Inside `aether terminal`, start the CLI and use its `/login` slash command,
 which prints a URL to open in your own browser and takes a code back. `/status`
-shows which credential is active. Credentials land in `~/.claude` and remain
-in the member's persistent home. The browser configuration import skips known
-credential names before upload.
+shows which credential is active. Credentials land in
+`~/.claude/.credentials.json` and remain in the member's persistent home. The
+browser configuration import skips known credential names before upload.
+Once you share your account, `/logout` in your own containers revokes the
+login but leaves the file in place; see
+[security.md](security.md#account-sharing).
 
 For an API key instead of a subscription, set `ANTHROPIC_API_KEY` in the
 server's environment (`/etc/aether/aether-server.env` with the shipped systemd
@@ -975,6 +1003,12 @@ Custom launch definitions come from two places, resolved in this order:
    member's own containers and never affects anyone else. Shipped names and
    the reserved names `custom` and `fake` cannot be registered.
 
+A member's own definition runs only on that member's own account. On a
+shared account, only a shipped harness or a server-wide definition is
+launched, and its `CredentialPaths` are the login paths the share mounts from
+the owner's home. A launch is refused when a credential path is the home
+itself.
+
 Both forms carry the same fields and pass the same validation. The
 administrator JSON is an object keyed by harness name. Each definition must
 name the executable and provide both interactive and headless argv. `{task}`
@@ -998,7 +1032,7 @@ generic denylist knows about:
     "HeadlessArgs": ["omp", "-p", "{task}"],
     "Executable": "omp",
     "ProfileRoot": "/home/aether/.omp",
-    "CredentialPaths": ["/home/aether/.omp"],
+    "CredentialPaths": ["/home/aether/.omp/agent"],
     "DenyNames": ["agent.db", "agent.db-wal", "agent.db-shm"]
   }
 }
@@ -1069,11 +1103,13 @@ or symlinks, so a newly imported script may need `chmod` in the remote terminal.
 
 The imported files are written into your authenticated member's persistent
 configuration home. That home is mounted read-write in your environment
-terminal and in runs using your account, so the change is immediately visible
-to existing and future runs (an agent may need to reload its configuration).
-An account share gives another member's run the same home; it does not create
-an isolated per-run profile. A snapshot pin records launch provenance, not an
-isolated writable copy or a promise that home changes wait for later runs.
+terminal and in runs you launch, so the change is immediately visible to
+existing and future runs (an agent may need to reload its configuration). It
+is not an isolated per-run profile. A share of your account does not expose
+it, except the `~/.omp/agent` directory an `omp` share mounts: a recipient's
+run uses the recipient's configuration. A snapshot pin
+records launch provenance, not an isolated writable copy or a promise that
+home changes wait for later runs.
 Changing configuration does not rebuild the installed-agent image.
 
 After import, open **Files** to browse your own member configuration alongside
@@ -1124,7 +1160,7 @@ or update this CLI snapshot history. Configuration persists in the member HOME
 even when no snapshot exists.
 
 Manual `push` and `rollback` overlay the snapshot's files into that same shared
-HOME, making those writes visible to active and future runs using the account.
+HOME, making those writes visible to the member's active and future runs.
 They do not create isolated per-run copies. Rollback is not an exact-tree
 restore: files absent from the chosen snapshot are not deleted. A run's snapshot
 pin is optional launch provenance, not a guarantee that its current home still

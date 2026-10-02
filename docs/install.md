@@ -402,6 +402,29 @@ it for you; the banner below is what is left when that rebuild was skipped
 `AETHER_BIN`. It is not tied to a release being available, because the usual
 way to get there is to have just updated.
 
+### Account share migration
+
+A run on a shared agent account now uses its launcher's image and home and
+mounts only the agent's login from the account owner's home
+([security.md](security.md#account-sharing)). Recipients install the agent in
+their own environment (**Agents** > **Add agent**, or `aether agent add`) and
+connect their own GitHub (**Connect GitHub** in the local dashboard's
+onboarding, or `aether github connect`); they no longer get the owner's tools,
+image, GitHub login, or files. Runs on a shared account, and every container
+that mounts a sharing owner's home (their runs, their environment terminal,
+and candidate verification started by them or by their runs), need Docker
+Engine 26.0 or newer; on an older engine Aether refuses them with `runtime:
+docker engine API "1.44" cannot mount a path beneath a member home; that needs
+API 1.45 (Docker Engine 26.0) or newer`. A member-defined agent no longer
+launches on a shared account. Containers created before the upgrade still
+mount the owner's whole home until they end, and relaunching one is refused;
+stop shared runs before or after upgrading to end that exposure immediately
+(**Kill** in the run's header, or `aether kill <run-id>`). A member who
+already shares stops and reopens their environment terminal once after the
+upgrade, so a Claude Code login refreshed there reaches recipients' runs:
+**Stop environment**, then **Open**, in the terminal dock on the Board, or
+`aether terminal stop`, then `aether terminal`.
+
 ## Manual install
 
 Every release publishes bare binaries plus `checksums.txt`:
@@ -776,7 +799,12 @@ Building the APK from a checkout is in
 - **Linux.** Windows and macOS are client platforms.
 - **Docker**, running, with the server's user able to reach its socket. Every
   environment terminal and run is a container. Agent installation happens in
-  the member's environment terminal.
+  the member's environment terminal. Runs on a shared agent account
+  ([teams.md](teams.md#agent-accounts)), and every container that mounts a
+  sharing owner's home - their runs, their environment terminal, and
+  candidate verification started by them or by their runs - need Docker
+  Engine 26.0 or newer (API 1.45);
+  `docker version --format '{{.Server.Version}}'` prints yours.
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
 - **`ssh-keygen`** on the host, from the OpenSSH client package
   (`openssh-client` on Debian and Ubuntu). Git uses it to sign the commits
@@ -1189,9 +1217,11 @@ keys, and mirror deploy private keys. Encrypt them, restrict access, and do not
 publish or paste them into issue reports.
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
-Each member home is mounted only in that member's environment terminal and
-runs using their account, including runs launched through an explicit
-account share.
+Each member home is mounted as `$HOME` only in that member's environment
+terminal and the runs they launch. An account share additionally mounts the
+shared agent's login path from it, the whole `~/.omp/agent` for `omp`, into
+the recipient's runs, through a Docker volume named `aether-home-<hash>`
+([security.md](security.md#account-sharing)).
 
 Three consequences worth knowing:
 
@@ -1237,6 +1267,8 @@ sudo systemctl daemon-reload
 
 # 2. Containers. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
+# Volumes for shared agent accounts. Removing one does not delete a home.
+sudo docker volume rm $(sudo docker volume ls -q --filter label=aether.managed=true)
 # Remove the standard image and saved member images according to your Docker
 # image retention policy.
 
@@ -1252,7 +1284,9 @@ unit. Every container the server creates carries `aether.managed=true`; the
 label filter includes the browser companions as well as run containers.
 Filtering only `--filter name=^/aether-run-` misses companions. Use
 `docker ps -a`, not `docker ps`: a crashed run can leave an exited container
-behind. Remove companion images according to the same Docker image retention
+behind. The `aether-home-<hash>` volumes carry the same label; remove them
+after the containers, since Docker refuses to remove a volume a container
+still uses. Remove companion images according to the same Docker image retention
 policy as standard and saved member images.
 
 The server writes no log files. Its output goes to the journal, so

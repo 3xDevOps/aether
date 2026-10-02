@@ -16,11 +16,13 @@ type profileService interface {
 	PinRun(ctx context.Context, runID domain.RunID, id domain.ProfileSnapshotID) error
 }
 
+// pinLatestProfile pins the launcher's latest snapshot: the run mounts the
+// launcher's home, so the harness config root it uses is the launcher's.
 func (s *Scheduler) pinLatestProfile(ctx context.Context, run *domain.Run) error {
 	if s.cfg.Profiles == nil {
 		return nil
 	}
-	snap, err := s.cfg.Profiles.Latest(ctx, string(run.AccountMember()), run.Harness)
+	snap, err := s.cfg.Profiles.Latest(ctx, string(run.MemberID), run.Harness)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil

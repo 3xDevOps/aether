@@ -873,8 +873,19 @@ export interface WorkspaceSelector {
 export interface AgentInfo {
   name: string
   source: 'shipped' | 'member'
-  /** Whether the account's persistent environment contains the executable. */
+  /** Whether the caller's persistent environment contains the executable. */
   installed?: boolean
+  /** For a shared account: a launch on that account is refused because its
+   * owner has no login for this agent. */
+  login_missing?: boolean
+  /** For a shared account: a launch on that account is refused because the
+   * agent is the caller's own definition, which runs only on their own
+   * account. */
+  own_account_only?: boolean
+  /** For a shared account: the launch's own refusal when the owner's login
+   * exists but cannot be shared. At most one of login_missing,
+   * own_account_only and unavailable is set. */
+  unavailable?: string
   /** Vendor installer command for shipped harnesses, when available. */
   install_script?: string
 }

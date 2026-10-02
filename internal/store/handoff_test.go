@@ -72,13 +72,18 @@ func TestCompletedHandoffDoesNotRetainMemberForeignKeys(t *testing.T) {
 	workspace := mustCreateWorkspace(t, db)
 	from := mustCreateMember(t, db)
 	to := mustCreateMember(t, db)
+	// The run is launched by to, so its container mounts to's home and the
+	// row itself does not keep from in use.
 	run := &domain.Run{
-		WorkspaceID: workspace.ID, MemberID: from.ID, AccountMemberID: to.ID,
+		WorkspaceID: workspace.ID, MemberID: to.ID,
 		Task: "transfer ownership", Harness: "claude", Mode: domain.LaunchTUI,
 		Status: domain.RunRunning,
 	}
 	if err := db.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := db.TransferRun(ctx, run.ID, from.ID); err != nil {
+		t.Fatalf("TransferRun: %v", err)
 	}
 	h := &HandoffOutbox{
 		ID: "handoff-former-member", WorkspaceID: workspace.ID, RunID: run.ID,

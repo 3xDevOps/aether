@@ -9,7 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// ShareAccount grants grantee use of owner's agent environment. Repeating an
+// ShareAccount grants grantee use of owner's agent login. Repeating an
 // existing grant is idempotent so dashboard retries cannot turn success into
 // an error.
 func (d *DB) ShareAccount(ctx context.Context, owner, grantee domain.MemberID) error {

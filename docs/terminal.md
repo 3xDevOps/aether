@@ -191,7 +191,7 @@ action inbox.
 
 Room image attachments use the terminal upload rules: each message may include
 up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than 8 MiB.
-Aether validates and stores the bytes in the target account's persistent home,
+Aether validates and stores the bytes in the home the run's container mounts,
 then records the generated container-visible
 path with the room message. A local filesystem path from clipboard text is not
 an upload. An attachment is a persistent file reference, not a second input
@@ -595,7 +595,8 @@ Stopping the environment stops its container and all tab processes. The member
 home is not deleted. The next CLI or dashboard open starts a new container with
 the same home.
 
-Uploaded images are kept in the target account's persistent member home under
+Uploaded images are kept in the persistent member home the target container
+mounts (your own for the environment terminal, the launcher's for a run) under
 `$HOME/.aether/terminal-images/`. The server generates a name such as
 `image-<random>.png`, writes the original bytes with private permissions, and
 returns the absolute path visible inside that target container. The path is

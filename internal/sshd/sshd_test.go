@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -361,6 +362,11 @@ type fakeRuns struct {
 	calls           []string
 	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
+	// sharedLaunches is what CheckSharedLaunch reports, keyed by
+	// "member:account:harness"; absent means launchable. sharedRefusals is
+	// the refusal it reports with the same key.
+	sharedLaunches map[string]scheduler.SharedLaunch
+	sharedRefusals map[string]string
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -424,6 +430,13 @@ func (f *fakeRuns) LaunchOptions() []domain.LaunchOptions {
 
 func (f *fakeRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	return f.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
+}
+
+func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := fmt.Sprintf("%s:%s:%s", member, account, harness)
+	return f.sharedLaunches[key], f.sharedRefusals[key], nil
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {

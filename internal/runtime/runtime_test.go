@@ -51,6 +51,15 @@ func TestSpecValidate(t *testing.T) {
 		{"valid mount", func(s *Spec) {
 			s.Mounts = []Mount{{HostPath: "/srv/homes/m1", ContainerPath: "/root/.claude", ReadOnly: true}}
 		}, ""},
+		{"valid subpath mount", func(s *Spec) {
+			s.Mounts = []Mount{{HostPath: "/srv/homes/m1", Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"}}
+		}, ""},
+		{"escaping subpath", func(s *Spec) {
+			s.Mounts = []Mount{{HostPath: "/srv/homes/m1", Subpath: "../m2/.claude", ContainerPath: "/root/.claude"}}
+		}, "subpath"},
+		{"absolute subpath", func(s *Spec) {
+			s.Mounts = []Mount{{HostPath: "/srv/homes/m1", Subpath: "/etc", ContainerPath: "/root/.claude"}}
+		}, "subpath"},
 		{"named user", func(s *Spec) { s.User = "node" }, "numeric uid:gid"},
 		{"bare uid user", func(s *Spec) { s.User = "1000" }, "numeric uid:gid"},
 		{"valid user", func(s *Spec) { s.User = "1000:1000" }, ""},

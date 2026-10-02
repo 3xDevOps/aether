@@ -27,6 +27,7 @@ import {
   replayGate,
   standardGeometry,
 } from '@/routes/terminal/attach'
+import { StopEnvironmentDialog } from '@/routes/board/stop-environment-dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import {
@@ -87,11 +88,9 @@ export function TerminalDock({
   const sendLine = useStore((s) => s.sendLine)
   const [confirmingStop, setConfirmingStop] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
-  const [stopping, setStopping] = useState(false)
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [savedConfirmation, setSavedConfirmation] = useState(false)
-  const [stopError, setStopError] = useState<string | null>(null)
   const [resetError, setResetError] = useState<string | null>(null)
   const [statusAttempt, setStatusAttempt] = useState(0)
   const [attachedTab, setAttachedTab] = useState<string | null>(null)
@@ -418,23 +417,6 @@ export function TerminalDock({
     }
   }
 
-  const stop = async () => {
-    if (stopping) return
-    setStopping(true)
-    setStopError(null)
-    try {
-      await rpc.terminalStop()
-      const status = useStore.getState().envTerminal.status
-      setConfirmingStop(false)
-      reset()
-      setStatus({ ...status, running: false, tabs: [] })
-    } catch (err) {
-      setStopError(message(err))
-    } finally {
-      setStopping(false)
-    }
-  }
-
   const tabs = dock.tabs.map((tab) => ({ id: tab, label: tab, permanent: tab === 'main' }))
   const empty = dock.tabs.length === 0 && dock.status?.running !== true
   const loading = dock.status === null && dock.statusError === null
@@ -497,11 +479,7 @@ export function TerminalDock({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  onClick={() => {
-                    setStopError(null)
-                    setConfirmingStop(true)
-                  }}
-                  disabled={stopping}
+                  onClick={() => setConfirmingStop(true)}
                 >
                   Stop environment
                 </Button>
@@ -594,42 +572,7 @@ export function TerminalDock({
         </div>
       </Dock>
       {confirmingStop && (
-        <AlertDialog
-          open
-          onOpenChange={(open) => {
-            // A failed stop is reported in here, so Escape stays off until
-            // the call settles.
-            if (!stopping) setConfirmingStop(open)
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Stop your environment?</AlertDialogTitle>
-              <AlertDialogDescription>
-                The environment container stops now. Your home files and your
-                saved image remain, and a later open starts it again.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            {stopError && (
-              <p role="alert" className="text-sm text-state-failed">
-                {stopError}
-              </p>
-            )}
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={stopping}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="default"
-                onClick={(event) => {
-                  event.preventDefault()
-                  void stop()
-                }}
-                disabled={stopping}
-              >
-                {stopping ? 'Stopping...' : 'Stop environment'}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <StopEnvironmentDialog client={rpc} onClose={() => setConfirmingStop(false)} />
       )}
       {confirmingReset && (
         <AlertDialog

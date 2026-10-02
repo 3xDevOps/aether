@@ -304,3 +304,71 @@ func TestValidateMountsDockerSocket(t *testing.T) {
 		})
 	}
 }
+
+// A subpath mount is checked against its base, which must be an owned
+// directory, while its subpath must stay below that base; containment rules
+// compare the mounted path, and nothing may nest beneath it.
+func TestValidateMountsSubpath(t *testing.T) {
+	e := newMountEnv(t)
+	owner := filepath.Join(e.root, "owner")
+	if err := os.MkdirAll(filepath.Join(owner, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	regular := filepath.Join(owner, ".claude", ".credentials.json")
+	if err := os.WriteFile(regular, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := Mount{HostPath: e.credDir, ContainerPath: "/root"}
+	login := func(sub, target string) Mount {
+		return Mount{HostPath: owner, Subpath: sub, ContainerPath: target}
+	}
+	nested := func(targets ...string) MountPolicy {
+		p := e.policy()
+		p.AllowedNestings = make(map[string]string)
+		for _, target := range targets {
+			p.AllowedNestings[target] = "/root"
+		}
+		return p
+	}
+
+	accepted := []Mount{home, login(".claude/.credentials.json", "/root/.claude/.credentials.json")}
+	if err := ValidateMounts(accepted, nested("/root/.claude/.credentials.json")); err != nil {
+		t.Fatalf("ValidateMounts(login under home) = %v, want nil", err)
+	}
+	if accepted[1].Subpath != ".claude/.credentials.json" {
+		t.Fatalf("validation rewrote the subpath to %q", accepted[1].Subpath)
+	}
+
+	tests := []struct {
+		name    string
+		mounts  []Mount
+		policy  MountPolicy
+		wantErr string
+	}{
+		{"escaping subpath", []Mount{login("../member", "/mnt/x")}, e.policy(), "subpath"},
+		{"absolute subpath", []Mount{login("/etc", "/mnt/x")}, e.policy(), "subpath"},
+		{"unclean subpath", []Mount{login(".claude/../.ssh", "/mnt/x")}, e.policy(), "subpath"},
+		{"dot subpath", []Mount{login(".", "/mnt/x")}, e.policy(), "subpath"},
+		{"backslash subpath", []Mount{login(`.claude\x`, "/mnt/x")}, e.policy(), "subpath"},
+		{"NUL subpath", []Mount{login(".claude\x00", "/mnt/x")}, e.policy(), "subpath"},
+		{"regular-file base", []Mount{{HostPath: regular, Subpath: "x", ContainerPath: "/mnt/x"}}, e.policy(), "not a directory"},
+		{"base outside owned roots", []Mount{{HostPath: e.outside, Subpath: "x", ContainerPath: "/mnt/x"}}, e.policy(), "outside every aether-owned root"},
+		{"unapproved login nesting", []Mount{home, login(".claude/.credentials.json", "/root/.claude/.credentials.json")}, e.policy(), "without approval"},
+		{"mount nested under a subpath mount", []Mount{
+			login(".claude", "/root/.claude"),
+			{HostPath: e.credDir, ContainerPath: "/root/.claude/x"},
+		}, MountPolicy{OwnedRoots: []string{e.root}, AllowedNestings: map[string]string{"/root/.claude/x": "/root/.claude"}}, "subpath mount"},
+		{"read-only base containing the mounted path", []Mount{
+			login(".claude", "/a"),
+			{HostPath: owner, ContainerPath: "/b", ReadOnly: true},
+		}, e.policy(), "read-only"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateMounts(tt.mounts, tt.policy)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateMounts = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}

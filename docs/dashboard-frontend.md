@@ -437,8 +437,8 @@ The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
-All runs using the member's account and the environment terminal mount one
-shared read-write persistent HOME, so accepted configuration imports and saves
+All runs the member launches and the environment terminal mount one shared
+read-write persistent HOME, so accepted configuration imports and saves
 are visible to active and future runs; a tool may need to reload. Browser
 imports and Files edits do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
@@ -1064,8 +1064,25 @@ it.
 
 The launch form asks for an account, a task, an agent and a mode. `account.list`
 puts the caller first, followed by accounts explicitly shared with them. A
-shared selection makes `agent.list` return that account's custom definitions
-and sends its ID as `account_member_id` on `run.launch`. The task is optional in
+shared selection sends its ID as `account_member_id` on `agent.list` and
+`run.launch`. `agent.list` still returns the caller's own agents and
+installations, since the run executes in the caller's environment, and marks
+with `login_missing` each agent the account's owner has no login for, with
+`own_account_only` each name that resolves to the caller's own
+member-defined agent, which runs only on the caller's own account, and with
+`unavailable` the launch's own error for each agent whose owner login exists
+but cannot be shared. The form takes the reason from those three fields,
+never from `source`: a member-defined name that is also a server-wide
+definition launches the server-wide one, so it can be `login_missing`. It
+lists the first as disabled "(not logged in)" entries and says "<owner> is
+not logged in to <agent>", that the owner logs in from the terminal dock on
+their own Board, and to press **Refresh agents** then; the second as "(your
+account only)" entries with "Your own agent definitions run only on your own
+account" and which **Account** entry launches them; the third as
+"(unavailable)" entries with "<agent> cannot launch on this account: " and
+the server's error unchanged; the swarm grid disables their worker rows the same way and
+drops a ticked worker whose agent stops being launchable when the lists
+refresh. The task is optional in
 interactive mode - a taskless launch drops the member into the agent's TUI
 with no seeded prompt - and required in headless, which has no interactive
 surface, so the form disables Launch and says why rather than sending a
@@ -1077,13 +1094,16 @@ no way back to that state once one is. Under it are the installed entries from
 `agent.list`, then `custom`, the escape hatch that `agent.list` never returns
 and that only launches where the deployment pinned a harness with
 `--harness-definitions`. `agent.list` reports installation from the
-selected account's persistent `~/.local/bin`; uninstalled shipped entries
+caller's persistent `~/.local/bin`; uninstalled shipped entries
 remain visible on the Agents page so setup can install them. The launch form
 also remembers the most recently used installed agent for each account and
 falls back to the first installed entry. With nothing installed nothing is
 preselected, so Launch stays disabled until the member picks one: "No agent is
-installed in this account." and a **Set up an agent** button sit beside the
-field rather than replacing it, and the button opens the Agents view. A failed
+installed in your environment." and a **Set up an agent** button sit beside the
+field rather than replacing it, and the button opens the Agents view. On a
+shared account the note adds that the run starts the agent installed in the
+caller's environment with the owner's login, so the caller installs it
+without logging in. A failed
 list request shows its error and no setup button - nothing here can fix a
 gateway that did not answer - and Launch stays disabled there too. **Refresh
 agents** retries discovery after a connection failure or an installation
@@ -1694,6 +1714,16 @@ environment container**, which is the wait Docker's container start accounts
 for; a second tab, a tab switch or an expanded dock is **Connecting to your
 environment**, with no container to start. A refused or failed start replaces
 the terminal with the gateway's own error instead.
+
+The same stop confirmation (`StopEnvironmentDialog`) backs the Members
+page's notice after a member's first account share: containers started
+before that share lack the in-place mount of Claude Code's login file
+([security.md](security.md#account-sharing)), so when the store's
+`envTerminal.status`, re-read with `terminal.status` at the share, says the
+terminal is running, or that re-read fails, **Your agent account** says so
+(that the terminal could not be checked, on a failed read) and offers **Stop
+environment**. A share while another grant already exists shows nothing,
+because the page cannot tell whether the terminal predates the first one.
 
 - **The socket is `attach.ts`**, framework-free. It reuses `backoff()` from
   `src/lib/stream.ts`, splits paste input below the gateway's 64 KiB frame cap,

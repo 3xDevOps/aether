@@ -101,6 +101,10 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		// normal recovery, otherwise a natural exit leaves the row stranded.
 		s.startSupervision(entry)
 	}
+	if old.HomeMemberID == "" && old.MemberID != old.AccountMember() {
+		return nil, fmt.Errorf("%w: run %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new run",
+			ErrInvalidTransition, run)
+	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
@@ -822,6 +826,12 @@ func (s *Scheduler) admitDestroyPendingOwner(ctx context.Context, r *domain.Run,
 			return nil, false
 		}
 		current = sc
+		// Without a sidecar nothing says whether the container mounts the
+		// account owner's login, so a narrowed shared run holds it until the
+		// container is gone. That never blocks the owner's own containers.
+		if fresh.HomeMemberID != "" && fresh.AccountMember() != fresh.HomeMember() {
+			current.LoginMember = string(fresh.AccountMember())
+		}
 	}
 	if current.RunUser == "" {
 		current.RunUser = sc.RunUser
@@ -1457,7 +1467,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		workspaceID: r.WorkspaceID,
 		containerID: runtime.ID(sc.ContainerID),
 		task:        r.Task,
-		memberID:    r.AccountMember(),
+		memberID:    r.HomeMember(),
+		loginMember: domain.MemberID(sc.LoginMember),
 		// The reporter and the last report both come off the sidecar,
 		// because only the live server saw either: which reporter the
 		// container was actually given, and whether the agent parked this

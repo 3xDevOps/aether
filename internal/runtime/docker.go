@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 )
 
 const (
@@ -107,6 +109,17 @@ func (d *Docker) Close() error { return d.cli.Close() }
 func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
+	}
+	if slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" }) {
+		// Negotiating here settles the version the create request is sent
+		// at, so ClientVersion reports it rather than the client's maximum.
+		ping, err := d.cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
+		if err != nil {
+			return "", fmt.Errorf("runtime: read docker engine API version: %w", err)
+		}
+		if err := requireSubpathAPI(ping.APIVersion, d.cli.ClientVersion()); err != nil {
+			return "", err
+		}
 	}
 	cfg, hostCfg := d.containerConfig(spec)
 	var name string
@@ -200,9 +213,60 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 		})}
 	}
 	for _, m := range spec.Mounts {
+		if m.Subpath != "" {
+			hostCfg.Mounts = append(hostCfg.Mounts, subpathMount(m))
+			continue
+		}
 		hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 	}
 	return cfg, hostCfg
+}
+
+// minSubpathAPI is the first Docker API version whose engine honours a volume
+// subpath. An older engine, or a request sent at an older version, ignores
+// the field and mounts the whole base, so a subpath mount is refused there
+// instead of sent.
+const minSubpathAPI = "1.45"
+
+// requireSubpathAPI checks both the engine's API version and the one the
+// client sends requests at. Negotiation never sends below the engine's, so a
+// lower client version is a DOCKER_API_VERSION pin.
+func requireSubpathAPI(engine, sent string) error {
+	if engine == "" || versions.LessThan(engine, minSubpathAPI) {
+		return fmt.Errorf("runtime: docker engine API %q cannot mount a path beneath a member home; that needs API %s (Docker Engine 26.0) or newer", engine, minSubpathAPI)
+	}
+	if versions.LessThan(sent, minSubpathAPI) {
+		return fmt.Errorf("runtime: docker client sends API %q (DOCKER_API_VERSION), which cannot mount a path beneath a member home; that needs API %s or newer", sent, minSubpathAPI)
+	}
+	return nil
+}
+
+// subpathMount translates a Subpath mount into a volume mount of the base
+// directory with a volume subpath. A plain bind of HostPath/Subpath would be
+// resolved by path at every container start, following any symlink a
+// container sharing the base planted after validation. The engine instead
+// resolves a volume subpath beneath the volume root at every start: a
+// symlink that stays inside the base is followed, one that leaves it is
+// refused (Docker API 1.45 or later). The volume name is derived from the
+// base so every run mounting one base reuses one volume.
+func subpathMount(m Mount) mount.Mount {
+	sum := sha256.Sum256([]byte(m.HostPath))
+	return mount.Mount{
+		Type:     mount.TypeVolume,
+		Source:   "aether-home-" + hex.EncodeToString(sum[:])[:32],
+		Target:   m.ContainerPath,
+		ReadOnly: m.ReadOnly,
+		VolumeOptions: &mount.VolumeOptions{
+			// Never copy image content into the base directory.
+			NoCopy:  true,
+			Subpath: m.Subpath,
+			Labels:  map[string]string{labelManaged: "true"},
+			DriverConfig: &mount.Driver{
+				Name:    "local",
+				Options: map[string]string{"type": "none", "o": "bind", "device": m.HostPath},
+			},
+		},
+	}
 }
 
 // bindMount translates one Mount into Docker create arguments using only
