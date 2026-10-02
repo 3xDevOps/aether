@@ -59,10 +59,11 @@ the signing key, SSH files, shell history, harness configuration (settings,
 hooks, MCP servers, history), installed executables, imported configuration,
 terminal image uploads, and the profile snapshot pin are all the launcher's.
 Candidate verification started by a run's agent runs in the home that run's
-container mounts; a handoff (`aether handoff`) changes the run's owner but not
-that home. On a shared account, Aether additionally mounts only that harness's
-login path from the owner's home over the same path in the launcher's home,
-read-write. The **Login state** column of
+container mounts, which Aether records on the run when it is launched; a
+handoff (`aether handoff`) changes the run's owner but not that home, and
+verification does not need the run's container to still be alive. On a shared
+account, Aether additionally mounts only that harness's login path from the
+owner's home over the same path in the launcher's home, read-write. The **Login state** column of
 [harnesses.md](harnesses.md#shipped-harnesses) lists each path; for `claude`
 it is `~/.claude/.credentials.json`. Except for `omp`, no executable of the
 owner's runs in the recipient's container.
@@ -123,8 +124,10 @@ path at launch, but the owner's own containers can plant one afterwards,
 before a start or restart, and so redirect the mount to another file in the
 owner's own home, never outside it.
 
-This needs Docker Engine 26.0 or newer (API 1.45), for runs on a shared
-account and for the sharing owner's own runs and environment terminal. An
+This needs Docker Engine 26.0 or newer (API 1.45) for every container that
+mounts a path beneath a member home: runs on a shared account, and every
+container that mounts a sharing owner's home - their runs, their environment
+terminal, and candidate verification started by them or by their runs. An
 older engine ignores the subpath and would mount the owner's whole home, so
 Aether reads the engine's API version first and refuses:
 
@@ -163,10 +166,16 @@ nothing are unaffected.
 own uid before it starts. The owner's containers are never refused because of
 a recipient's run. A recipient's launch is refused while its uid differs from
 that of the owner's live containers, or of another recipient's live run, on
-that login; the error names `the login <member-id> shares is held by`. If the
-owner starts a container with a different non-root uid while a recipient's
-run is live, the owner's container takes the login file back and that run
-loses access to it.
+that login; the error names `the login <member-id> shares is held by`. The
+handover is checked again against those containers when it happens, so a
+recipient launch that the owner's container overtakes is refused rather than
+taking the login back. If the owner starts a container with a different
+non-root uid while a recipient's run is live, the owner's container takes the
+login back and that run loses access to it. A profile push or rollback by the
+owner (`aether profile push`, `aether profile rollback`) re-owns every entry
+under that harness's profile root in the owner's home, the login included, to
+the uid:gid of the owner's home directory unless that is the server's own
+uid, and a recipient's live run with another uid loses access the same way.
 
 Revoking a grant blocks later launches and relaunches. It does not stop an
 already-running container or remove the login mounted into it. Stop those
@@ -460,10 +469,11 @@ disposable verification tree; candidate inputs and retained evidence are not
 re-read from a mutable live checkout. The isolation protects the source tree
 and post-execution integrity check, not the credentials of the environment it
 runs in. A human's verification runs in their own environment; a run actor's
-runs in the home that run's live container mounts, which a handoff does not
-change; with no live container the verification fails. That home's gh login,
-signing key, and other files are available to the verification, so do not
-treat it as a per-candidate credential boundary.
+runs in the home that run's container mounts, recorded on the run at launch,
+which a handoff does not change; it runs whether or not that container is
+still alive. That home's gh login, signing key, and other files are available
+to the verification, so do not treat it as a per-candidate credential
+boundary.
 
 Delivery to a local workspace target is an expected-old atomic ref update.
 Delivery to a mirrored target must use the `proposal` action: it creates a

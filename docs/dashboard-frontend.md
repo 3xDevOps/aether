@@ -1061,8 +1061,11 @@ shared selection sends its ID as `account_member_id` on `agent.list` and
 `run.launch`. `agent.list` still returns the caller's own agents and
 installations, since the run executes in the caller's environment, and marks
 with `login_missing` each agent the account's owner has no login for, and
-each of the caller's own member-defined agents, which run only on the
-caller's own account. The form lists the first as disabled "(not logged in)"
+with `own_account_only` each name that resolves to the caller's own
+member-defined agent, which runs only on the caller's own account. The form
+takes the reason from those two flags, never from `source`: a member-defined
+name that is also a server-wide definition launches the server-wide one, so
+it can be `login_missing`. It lists the first as disabled "(not logged in)"
 entries and says "<owner> is not logged in to <agent>", and the second as
 "(your account only)" entries with "Your own agent definitions run only on
 your own account"; the swarm grid disables their worker rows the same way and

@@ -872,11 +872,15 @@ installation: each recipient installs the agent in their own environment
 ([teams.md](teams.md#agent-accounts)).
 
 `agent.list` with `account_member_id` set to a shared account still reports
-the caller's own agents and installations, plus `login_missing: true` for an
-agent whose account owner has no login at its **Login state** path (a missing
-or empty file), and for the caller's own member-defined agents, which run only
-on the caller's own account. The launch dialog does not offer that agent on
-that account, and the server refuses such a launch.
+the caller's own agents and installations, and says why a launch of one on
+that account would be refused, resolving the name as a launch does:
+`login_missing: true` when the account owner has no login at its **Login
+state** path (a missing or empty file), and `own_account_only: true` when it
+resolves to the caller's own member-defined agent, which runs only on the
+caller's own account. A member-defined name that is also a server-wide
+definition resolves to the server-wide one, so it can report
+`login_missing`. The launch dialog does not offer a refused agent on that
+account, and the server refuses such a launch.
 
 For an unshipped name the command asks for interactive and headless launch
 templates first (`<name> {task}` and `<name> -p {task}` by default). Install the

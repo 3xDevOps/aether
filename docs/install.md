@@ -409,13 +409,15 @@ mounts only the agent's login from the account owner's home
 ([security.md](security.md#account-sharing)). Recipients install the agent in
 their own environment and run `aether github connect` themselves; they no
 longer get the owner's tools, image, GitHub login, or files. Runs on a shared
-account, and a sharing owner's own runs and environment terminal, need Docker
-Engine 26.0 or newer; on an older engine Aether refuses them with
-`runtime: docker engine API "1.44" cannot mount a path beneath a member home;
-that needs API 1.45 (Docker Engine 26.0) or newer`. A member-defined agent no
-longer launches on a shared account. Containers created before the upgrade still mount
-the owner's whole home until they end, and relaunching one is refused; stop
-shared runs before or after upgrading to end that exposure immediately.
+account, and every container that mounts a sharing owner's home (their runs,
+their environment terminal, and candidate verification started by them or by
+their runs), need Docker Engine 26.0 or newer; on an older engine Aether
+refuses them with `runtime: docker engine API "1.44" cannot mount a path
+beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer`. A
+member-defined agent no longer launches on a shared account. Containers
+created before the upgrade still mount the owner's whole home until they end,
+and relaunching one is refused; stop shared runs before or after upgrading to
+end that exposure immediately.
 
 ## Manual install
 
@@ -792,8 +794,10 @@ Building the APK from a checkout is in
 - **Docker**, running, with the server's user able to reach its socket. Every
   environment terminal and run is a container. Agent installation happens in
   the member's environment terminal. Runs on a shared agent account
-  ([teams.md](teams.md#agent-accounts)), and a sharing owner's own runs and
-  environment terminal, need Docker Engine 26.0 or newer (API 1.45);
+  ([teams.md](teams.md#agent-accounts)), and every container that mounts a
+  sharing owner's home - their runs, their environment terminal, and
+  candidate verification started by them or by their runs - need Docker
+  Engine 26.0 or newer (API 1.45);
   `docker version --format '{{.Server.Version}}'` prints yours.
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
 - **`ssh-keygen`** on the host, from the OpenSSH client package

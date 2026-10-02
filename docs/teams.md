@@ -309,11 +309,12 @@ attach is re-checked every few seconds and dropped when steer goes away -
 and destroys that member's environment terminal, then deletes the member row
 and erases their member home. If cleanup fails, the command returns the
 runtime error and leaves the member in place so an admin can retry. **It
-refuses while any row still references the member** - runs, schedules and
-pushed profile snapshots reference members with no cascade, so the delete
-returns `in use` - and an admin deletes those first; what a run wrote stays
-in the data directory until the run is deleted. A successful removal ends
-every attach and live sync of theirs.
+refuses while any row still references the member** - runs (including one
+the member launched and handed off, since its container mounted their home),
+schedules and pushed profile snapshots reference members with no cascade, so
+the delete returns `in use` - and an admin deletes those first; what a run
+wrote stays in the data directory until the run is deleted. A successful
+removal ends every attach and live sync of theirs.
 
 Setting someone to the role they already hold is a harmless no-op, and a
 pending member's role can be changed before they are approved - approval and
@@ -605,9 +606,10 @@ The timeline and Run Room record the handoff actor, outgoing owner, and incoming
 owner. A system entry points to the handoff evidence packet, or says that
 evidence is unavailable when preservation did not succeed. The transfer does
 not switch the selected agent account or its cost attribution, and the run's
-container keeps the home it was created with: the previous owner's. Candidate
-verification the run's agent starts runs in that same home, never the
-incoming owner's.
+container keeps the home it was created with: the launcher's. Candidate
+verification the run's agent starts runs in that same home, which Aether
+records on the run at launch, never the incoming owner's; it does not need
+the run's container to still be alive.
 
 Aether captures an evidence packet automatically when a run is handed off and
 when it finishes. The finish capture happens before automatic checkout or
@@ -835,8 +837,10 @@ After sharing, the owner runs `aether terminal stop` and reopens the
 terminal, so a Claude Code login refreshed there reaches recipients' runs
 ([security.md](security.md#account-sharing) explains why).
 
-Runs on a shared account, and the sharing owner's own runs and terminal, need
-Docker Engine 26.0 or newer (API 1.45) on the server. On an older engine
+Runs on a shared account, and every container that mounts a sharing owner's
+home - their runs, their environment terminal, and candidate verification
+started by them or by their runs - need Docker Engine 26.0 or newer (API 1.45)
+on the server. On an older engine
 Aether refuses them: `runtime: docker engine API "1.44" cannot mount a path
 beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
 
@@ -853,9 +857,13 @@ With a non-root image, a shared run hands the owner's login path to the run's
 uid. The owner's own runs and terminal are never refused because of it. A
 recipient's launch is refused while its uid differs from that of the owner's
 live containers or of another recipient's live run on that login, with an
-error naming `the login <member-id> shares is held by`. If the owner starts a
-container with a different non-root uid while a recipient's run is live, that
-run loses access to the login.
+error naming `the login <member-id> shares is held by`, also when the
+owner's container is admitted while the recipient's launch is still handing
+the login over. If the owner starts a container with a different non-root uid
+while a recipient's run is live, that run loses access to the login. So does
+the owner's profile push or rollback of that harness (`aether profile push`,
+`aether profile rollback`) while the owner's home is owned by a uid other
+than the run's.
 
 Sharing is directional. It does not let the recipient open the owner's
 environment terminal, and admins get no implicit account access. Revocation
