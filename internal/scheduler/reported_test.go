@@ -70,10 +70,10 @@ func TestReportedSuccessFinishesTUIRunAtTurnEnd(t *testing.T) {
 	sub := e.subscribe(t)
 	ctx := t.Context()
 
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported replay: %v", err)
 	}
 	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.ReportedOutcome != domain.RunCompleted {
@@ -123,7 +123,7 @@ func TestReportedFailureFinishesAtDeadlineAndRelaunches(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, container := e.launchFake(t, "fix flaky test")
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunFailed, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunFailed, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -162,7 +162,7 @@ func TestReportedSuccessOutranksTheExitCode(t *testing.T) {
 		t.Fatalf("Launch: %v", err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.rt.byName(string(run.ID)).exitNow(1)
@@ -186,7 +186,7 @@ func TestHumanDecisionOutranksAReportedFinish(t *testing.T) {
 		e := newTestEnv(t, nil)
 		ctx := t.Context()
 		run, _ := e.launchFake(t, "close first")
-		if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+		if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 			t.Fatalf("FinishReported: %v", err)
 		}
 		if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
@@ -208,7 +208,7 @@ func TestHumanDecisionOutranksAReportedFinish(t *testing.T) {
 		e := newTestEnv(t, nil)
 		ctx := t.Context()
 		run, _ := e.launchFake(t, "kill first")
-		if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+		if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 			t.Fatalf("FinishReported: %v", err)
 		}
 		e.sched.mu.Lock()
@@ -309,7 +309,7 @@ func TestRecoveryFinishesAnArmedRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "restart in between")
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	if err := e.sched.Close(); err != nil {
@@ -343,7 +343,7 @@ func TestRelaunchedRunReportsAgain(t *testing.T) {
 	if err := e.db.AppendCoordReport(ctx, first); err != nil {
 		t.Fatalf("first report: %v", err)
 	}
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -365,7 +365,7 @@ func TestRelaunchedRunReportsAgain(t *testing.T) {
 	if err := e.db.AppendCoordReport(ctx, second); err != nil {
 		t.Fatalf("second report after relaunch: %v", err)
 	}
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported after relaunch: %v", err)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -381,7 +381,7 @@ func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "expire me")
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -420,7 +420,7 @@ func TestSeenClearsTheUnseenOutcomeForItsOwner(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "review me")
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -478,7 +478,7 @@ func TestSeenClearsTheUnseenOutcomeForItsOwner(t *testing.T) {
 // retained owner settled.
 func (e *testEnv) finishByDeadline(t *testing.T, run domain.RunID) {
 	t.Helper()
-	if err := e.sched.FinishReported(t.Context(), run, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(t.Context(), run, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.expireReportDeadline(t, run)
@@ -501,7 +501,7 @@ func TestOnlyATurnEndWaitFinishesAnArmedRun(t *testing.T) {
 	run, _ := e.launchReporting(t)
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	sub := e.subscribe(t)
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 
@@ -540,7 +540,7 @@ func TestTurnEndHarnessIsNotCutOffByTheDeadline(t *testing.T) {
 	run, _ := e.launchReporting(t)
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	sub := e.subscribe(t)
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -688,7 +688,7 @@ func TestStaleReportNeverArmsAReopenedRun(t *testing.T) {
 		t.Fatalf("Relaunch: %v", err)
 	}
 
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, before); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, before); err != nil {
 		t.Fatalf("stale FinishReported: %v", err)
 	}
 	if err := e.sched.ReportBlocked(ctx, run.ID, "report-old-blocked", "old blocker", before); err != nil {
@@ -830,8 +830,9 @@ func TestFailedRelaunchKeepsTheReportAndUnseenOutcome(t *testing.T) {
 
 // TestReportAfterExitOverridesTheExitOutcome: a report whose hand-off was
 // deferred reaches the scheduler after the headless process already exited
-// and recorded its exit code. The report still decides the run, unless it
-// is older than the launch the exit ended.
+// and recorded its exit code. The report still decides the run, even one
+// finalized while the run was provisioning, unless a relaunch superseded
+// it.
 func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 	t.Parallel()
 	exited := func(t *testing.T, e *testEnv, task string, code int, want domain.RunStatus) *domain.Run {
@@ -846,6 +847,14 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 		waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 		return row
 	}
+	reported := func(t *testing.T, e *testEnv, run domain.RunID, outcome store.CoordOutcome) *store.CoordReport {
+		t.Helper()
+		report := &store.CoordReport{WorkspaceID: e.ws.ID, RunID: run, Outcome: outcome, Summary: "reported", IdempotencyKey: "report-1"}
+		if err := e.db.AppendCoordReport(t.Context(), report); err != nil {
+			t.Fatalf("AppendCoordReport: %v", err)
+		}
+		return report
+	}
 
 	t.Run("override", func(t *testing.T) {
 		t.Parallel()
@@ -855,8 +864,9 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 		if row.Reason != "agent exited 1" {
 			t.Fatalf("exit reason = %q, want agent exited 1", row.Reason)
 		}
+		report := reported(t, e, row.ID, store.CoordOutcomeSuccess)
 		sub := e.subscribe(t)
-		if err := e.sched.FinishReported(ctx, row.ID, domain.RunCompleted, time.Now()); err != nil {
+		if err := e.sched.FinishReported(ctx, row.ID, report.ID, domain.RunCompleted, *report.FinalizedAt); err != nil {
 			t.Fatalf("FinishReported after exit: %v", err)
 		}
 		p := expectOnlyStatusEvent(t, sub, row.ID, domain.RunCompleted)
@@ -867,18 +877,36 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 		if err != nil || got.Status != domain.RunCompleted || got.Reason != reportedSuccessReason || !got.OutcomeUnseen {
 			t.Fatalf("row = %+v, %v; want completed because %q, outcome unseen", got, err, reportedSuccessReason)
 		}
-		if err := e.sched.FinishReported(ctx, row.ID, domain.RunCompleted, time.Now()); err != nil {
+		if err := e.sched.FinishReported(ctx, row.ID, report.ID, domain.RunCompleted, *report.FinalizedAt); err != nil {
 			t.Fatalf("replayed FinishReported: %v", err)
 		}
 		expectNoStatusEvent(t, sub, row.ID, "a replayed report")
 	})
-	t.Run("stale report", func(t *testing.T) {
+	t.Run("report finalized while provisioning", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		ctx := t.Context()
+		row := exited(t, e, "early report", 1, domain.RunFailed)
+		report := reported(t, e, row.ID, store.CoordOutcomeSuccess)
+		if err := e.sched.FinishReported(ctx, row.ID, report.ID, domain.RunCompleted, row.StartedAt.Add(-time.Second)); err != nil {
+			t.Fatalf("early FinishReported: %v", err)
+		}
+		got, err := e.db.GetRun(ctx, row.ID)
+		if err != nil || got.Status != domain.RunCompleted || got.Reason != reportedSuccessReason || !got.OutcomeUnseen {
+			t.Fatalf("row = %+v, %v; want completed because %q, outcome unseen", got, err, reportedSuccessReason)
+		}
+	})
+	t.Run("superseded report is ignored", func(t *testing.T) {
 		t.Parallel()
 		e := newTestEnv(t, nil)
 		ctx := t.Context()
 		row := exited(t, e, "old report", 0, domain.RunCompleted)
-		if err := e.sched.FinishReported(ctx, row.ID, domain.RunFailed, row.StartedAt.Add(-time.Second)); err != nil {
-			t.Fatalf("stale FinishReported: %v", err)
+		report := reported(t, e, row.ID, store.CoordOutcomeFailure)
+		if err := e.db.SupersedeCoordTerminalReport(ctx, row.ID); err != nil {
+			t.Fatalf("SupersedeCoordTerminalReport: %v", err)
+		}
+		if err := e.sched.FinishReported(ctx, row.ID, report.ID, domain.RunFailed, time.Now()); err != nil {
+			t.Fatalf("superseded FinishReported: %v", err)
 		}
 		got, err := e.db.GetRun(ctx, row.ID)
 		if err != nil || got.Status != domain.RunCompleted || got.Reason != exitedCompletedReason || got.OutcomeUnseen {
@@ -898,7 +926,7 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 			t.Fatalf("Kill: %v", err)
 		}
 		e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
-		if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+		if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 			t.Fatalf("FinishReported after kill: %v", err)
 		}
 		if got, err := e.db.GetRun(ctx, run.ID); err != nil || got.Status != domain.RunAbandoned || got.Reason != "killed" {
@@ -923,7 +951,7 @@ func TestReportAfterTheTurnEndedFinishesAtOnce(t *testing.T) {
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	sub := e.subscribe(t)
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted)
@@ -941,7 +969,7 @@ func TestReportAfterTheTurnEndedFinishesAtOnce(t *testing.T) {
 		t.Fatalf("Relaunch: %v", err)
 	}
 	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported after relaunch: %v", err)
 	}
 	e.sched.mu.Lock()
@@ -993,7 +1021,7 @@ func TestFailedReportedFinishIsRetried(t *testing.T) {
 					t.Fatalf("turn-end wait: %v", err)
 				}
 			}
-			if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+			if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 				t.Fatalf("FinishReported: %v", err)
 			}
 			if !tc.parkedBefore {
@@ -1035,7 +1063,7 @@ func TestReportFinalizedWhileProvisioningStillArms(t *testing.T) {
 	if err := e.sched.ReportBlocked(ctx, run.ID, "report-blocked-1", "need the staging key", early); err != nil {
 		t.Fatalf("ReportBlocked: %v", err)
 	}
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, early); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, early); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
 	e.sched.mu.Lock()
@@ -1052,9 +1080,10 @@ func TestReportFinalizedWhileProvisioningStillArms(t *testing.T) {
 // finalize is still running.
 type exitOverrideBus struct {
 	events.Bus
-	sched atomic.Pointer[Scheduler]
-	once  sync.Once
-	err   error
+	sched    atomic.Pointer[Scheduler]
+	reportID atomic.Value
+	once     sync.Once
+	err      error
 }
 
 func (b *exitOverrideBus) Publish(ctx context.Context, ev events.Event) (events.Event, error) {
@@ -1063,7 +1092,7 @@ func (b *exitOverrideBus) Publish(ctx context.Context, ev events.Event) (events.
 		strings.HasPrefix(p.Reason, exitedFailedReasonPrefix) {
 		if s := b.sched.Load(); s != nil {
 			// publish runs under s.mu, which overrideExitLocked needs.
-			b.once.Do(func() { b.err = s.overrideExitLocked(ctx, ev.RunID, domain.RunCompleted, time.Now()) })
+			b.once.Do(func() { b.err = s.overrideExitLocked(ctx, ev.RunID, b.reportID.Load().(string), domain.RunCompleted) })
 		}
 	}
 	return out, err
@@ -1087,6 +1116,11 @@ func TestFinishEvidenceFollowsAnOverriddenExit(t *testing.T) {
 		t.Fatalf("Launch: %v", err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	report := &store.CoordReport{WorkspaceID: e.ws.ID, RunID: run.ID, Outcome: store.CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "report-1"}
+	if err := e.db.AppendCoordReport(ctx, report); err != nil {
+		t.Fatalf("AppendCoordReport: %v", err)
+	}
+	bus.reportID.Store(report.ID)
 	e.rt.byName(string(run.ID)).exitNow(1)
 	waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 	if bus.err != nil {
@@ -1110,16 +1144,36 @@ func TestFinishEvidenceFollowsAnOverriddenExit(t *testing.T) {
 
 // TestStalledArmedRunFinishesAtTheDeadline: a hook that never delivers the
 // turn end leaves a run on a reporter harness armed. Once it stalls into
-// needs-attention it is not working, so the deadline finishes it.
+// needs-attention it is not working, so the deadline finishes it. A
+// permission prompt after the report is mid-turn: the deadline leaves it
+// for the owner to answer.
 func TestStalledArmedRunFinishesAtTheDeadline(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, func(cfg *Config) { cfg.StallThreshold = time.Millisecond })
 	ctx := t.Context()
 	run, _ := e.launchReporting(t)
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
-	if err := e.sched.FinishReported(ctx, run.ID, domain.RunCompleted, time.Now()); err != nil {
+	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
 		t.Fatalf("FinishReported: %v", err)
 	}
+	sub := e.subscribe(t)
+	permission := agentstatus.Report{State: agentstatus.Waiting, Reason: agentstatus.ReasonPermission}
+	if err := e.sched.ReportAgentState(ctx, run.ID, permission); err != nil {
+		t.Fatalf("permission wait: %v", err)
+	}
+	expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
+	e.expireReportDeadline(t, run.ID)
+	expectNoStatusEvent(t, sub, run.ID, "an overdue arm parked at a permission prompt")
+	e.sched.mu.Lock()
+	finishing := e.sched.runs[run.ID].reportFinishing
+	e.sched.mu.Unlock()
+	if finishing {
+		t.Fatal("the deadline started finishing a run parked at a permission prompt")
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
+		t.Fatalf("working: %v", err)
+	}
+	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
 	waitFor(t, "the run to stall", func() bool {
 		e.sched.checkStalls(ctx)
 		r, err := e.db.GetRun(ctx, run.ID)

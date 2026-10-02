@@ -31,8 +31,9 @@ var ErrCoordPeerLimit = errors.New("store: coordination peer limit reached")
 var ErrCoordReportConflict = errors.New("store: run already has a terminal coordination report")
 
 // ErrCoordReportSuperseded means a retry reused the idempotency key of a
-// terminal report a relaunch superseded. The reopened run reports again
-// under a new key.
+// terminal report a relaunch superseded, or a capture tried to finalize a
+// reservation a relaunch superseded. The reopened run reports again under
+// a new key.
 var ErrCoordReportSuperseded = errors.New("store: coordination report was superseded by a relaunch")
 
 // ErrCoordReportIdempotencyConflict means a retry reused a report key with
@@ -230,9 +231,11 @@ type MessageStore interface {
 	MarkCoordReportPublished(ctx context.Context, id, eventID string) error
 }
 
-// CoordTerminalReportStore frees a run's terminal report slot.
+// CoordTerminalReportStore frees a run's terminal report slot and reads a
+// report back to see whether a relaunch superseded it.
 type CoordTerminalReportStore interface {
 	SupersedeCoordTerminalReport(ctx context.Context, run domain.RunID) error
+	GetCoordReport(ctx context.Context, id string) (*CoordReport, error)
 }
 
 var _ CoordTerminalReportStore = (*DB)(nil)
@@ -818,7 +821,8 @@ func CoordReportEventID(reportID string) string {
 
 // FinalizeCoordReport atomically turns a pending reservation into an
 // externally accepted report. It returns true only for the transition that
-// won the finalization race.
+// won the finalization race, and ErrCoordReportSuperseded for a
+// reservation a relaunch superseded while its evidence was captured.
 func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error) {
 	if err := validateCoordReport(report); err != nil {
 		return false, err
@@ -843,7 +847,8 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 	res, err := tx.ExecContext(ctx,
 		`UPDATE coord_reports
 		 SET evidence_refs = ?, state = ?, finalized_at = ?, published_at = NULL
-		 WHERE id = ? AND run_id = ? AND idempotency_key = ? AND state = ?`,
+		 WHERE id = ? AND run_id = ? AND idempotency_key = ? AND state = ?
+		   AND superseded_at IS NULL`,
 		refs, CoordReportFinalized, finalizedAt, report.ID, report.RunID,
 		report.IdempotencyKey, CoordReportPending)
 	if err != nil {
@@ -879,6 +884,9 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 	}
 	if qerr != nil {
 		return false, qerr
+	}
+	if prior.SupersededAt != nil {
+		return false, fmt.Errorf("%w: run %s, idempotency key %q", ErrCoordReportSuperseded, report.RunID, report.IdempotencyKey)
 	}
 	*report = *prior
 	return false, nil

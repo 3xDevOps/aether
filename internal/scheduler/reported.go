@@ -18,8 +18,8 @@ import (
 
 // reportFinishDeadline is how long an armed run on a harness with no status
 // reporter waits before the poll loop finishes it: that harness never says
-// its turn ended. The poll loop also finishes an armed run parked at
-// needs-attention, or retries the failed finish of one whose turn ended,
+// its turn ended. The poll loop also finishes an armed run a stall parked
+// at needs-attention, or retries the failed finish of one whose turn ended,
 // once this long has passed since the arm or the failure.
 const reportFinishDeadline = 2 * time.Minute
 
@@ -152,16 +152,16 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 }
 
 // FinishReported arms a live run to finish with the outcome its agent
-// reported through coord.report: completed for success, failed for failure.
-// The run finishes on the agent's next turn-end wait, at once when that
-// wait already came, at reportFinishDeadline when the harness cannot
+// reported through coord.report reportID: completed for success, failed for
+// failure. The run finishes on the agent's next turn-end wait, at once when
+// that wait already came, at reportFinishDeadline when the harness cannot
 // report one, or when the process exits, whichever is first. reportedAt is
 // when the report was finalized: a report finalized before the run's last
 // relaunch speaks for a launch that relaunch ended and is ignored. A run
 // whose process exited first takes the reported outcome over the exit's
 // (see overrideExitLocked). A run with no live owner that is not terminal
 // yet returns an error so the caller retries.
-func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error {
+func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error {
 	if outcome != domain.RunCompleted && outcome != domain.RunFailed {
 		return fmt.Errorf("%w: reported outcome must be completed or failed, got %q", ErrInvalidTransition, outcome)
 	}
@@ -169,7 +169,7 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, outcom
 	defer s.mu.Unlock()
 	entry := s.runs[run]
 	if entry == nil || entry.status.Terminal() {
-		return s.overrideExitLocked(ctx, run, outcome, reportedAt)
+		return s.overrideExitLocked(ctx, run, reportID, outcome)
 	}
 	if reportedAt.Before(entry.relaunchedAt) || entry.reported == outcome {
 		return nil
@@ -189,9 +189,9 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, outcom
 	return nil
 }
 
-// overrideExitLocked records a reported outcome on a run whose process
-// exited before the report reached the scheduler, so the exit wrote the
-// row first. Invariant: the agent's report outranks its exit code, as it
+// overrideExitLocked records the outcome of report reportID on a run whose
+// process exited before the report reached the scheduler, so the exit wrote
+// the row first. Invariant: the agent's report outranks its exit code, as it
 // does in finalize. That is the only reason this write skips
 // legalTransition, which refuses failed -> completed, so it is reachable
 // only from FinishReported and rewrites only an ordinary run's row whose
@@ -200,10 +200,12 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, outcom
 // mission run are left alone. The commit the exit already published keeps
 // the exit's aether: or wip: prefix; rewriting published history would be
 // worse, so the row and the report are the source of truth. With no owner
-// there is no launch generation, so a stale report is told apart by the
-// row's StartedAt; that only matters after a relaunch, whose old launch's
-// report can be handed off late. The caller must hold s.mu.
-func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error {
+// there is no launch generation to compare, and the report may predate the
+// row's StartedAt because the agent can report while the run provisions.
+// Relaunch supersedes the terminal report under s.mu, so a report this
+// re-read finds unsuperseded belongs to the launch whose exit wrote the
+// row. The caller must hold s.mu.
+func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus) error {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
@@ -216,8 +218,20 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, ou
 	}
 	exited := (r.Status == domain.RunCompleted && r.Reason == exitedCompletedReason) ||
 		(r.Status == domain.RunFailed && strings.HasPrefix(r.Reason, exitedFailedReasonPrefix))
-	if !exited || r.MissionID != "" || (r.StartedAt != nil && reportedAt.Before(*r.StartedAt)) {
+	if !exited || r.MissionID != "" {
 		return nil
+	}
+	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
+		report, err := reports.GetCoordReport(ctx, reportID)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("scheduler: finish reported run %s: read report %s: %w", run, reportID, err)
+		}
+		if report.SupersededAt != nil {
+			return nil
+		}
 	}
 	reason := publicRunStatusReason(reportedClose(outcome).reason)
 	if err := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, nil, nil); err != nil {
@@ -300,10 +314,11 @@ func (s *Scheduler) startReportedFinishLocked(entry *supervised) {
 
 // finishOverdueReports finishes armed runs on harnesses that cannot say
 // their turn ended, retries the finish of an armed run whose turn ended, and
-// finishes an armed run parked at needs-attention for any reason: a stall
-// means its hook never said the turn ended, and nothing else will. A running
-// run on a harness that can say so is finished by that report alone, so an
-// agent that keeps working after it reported is not cut off.
+// finishes an armed run parked at needs-attention by a stall: its hook never
+// said the turn ended, and nothing else will. A run parked at a permission
+// or answer prompt is mid-turn and waits for its owner. A running run on a
+// harness that can say so is finished by that report alone, so an agent
+// that keeps working after it reported is not cut off.
 func (s *Scheduler) finishOverdueReports() {
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -311,11 +326,18 @@ func (s *Scheduler) finishOverdueReports() {
 	for _, entry := range s.runs {
 		if entry.reported != "" && !entry.status.Terminal() &&
 			(entry.reporter == harness.ReporterNone || entry.turnEnded() ||
-				entry.status == domain.RunNeedsAttention) &&
+				(entry.status == domain.RunNeedsAttention && !entry.atPrompt())) &&
 			now.Sub(entry.reportedAt) >= reportFinishDeadline {
 			s.startReportedFinishLocked(entry)
 		}
 	}
+}
+
+// atPrompt reports whether the agent's last word is a permission or answer
+// wait, which parks a run mid-turn. The caller must hold s.mu.
+func (e *supervised) atPrompt() bool {
+	return e.agentReport.State == agentstatus.Waiting &&
+		(e.agentReport.Reason == agentstatus.ReasonPermission || e.agentReport.Reason == agentstatus.ReasonAnswer)
 }
 
 // turnEnded reports whether the agent's last word is the wait that ends a

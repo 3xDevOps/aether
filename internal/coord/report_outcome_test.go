@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -28,14 +29,14 @@ type recordingOutcomes struct {
 	reportedAt []time.Time
 }
 
-func (o *recordingOutcomes) FinishReported(_ context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error {
+func (o *recordingOutcomes) FinishReported(_ context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.err != nil {
 		return o.err
 	}
 	o.reportedAt = append(o.reportedAt, reportedAt)
-	o.calls = append(o.calls, outcomeCall{run: run, status: outcome})
+	o.calls = append(o.calls, outcomeCall{run: run, status: outcome, reportID: reportID})
 	return nil
 }
 
@@ -85,12 +86,12 @@ func TestCoordReportDrivesAnOrdinaryRun(t *testing.T) {
 	run := h.run(0)
 
 	blocked := report(t, h, run, protocol.CoordOutcomeBlocked, "need\nthe staging key", "blocked-1")
-	report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
+	success := report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
 	report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
 
 	want := []outcomeCall{
 		{run: run, reason: "need the staging key", reportID: blocked.ReportID},
-		{run: run, status: domain.RunCompleted},
+		{run: run, status: domain.RunCompleted, reportID: success.ReportID},
 	}
 	if got := outcomes.recorded(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("scheduler calls = %+v, want %+v", got, want)
@@ -127,7 +128,7 @@ func TestCoordReportOutboxRetriesTheFinish(t *testing.T) {
 	if _, _, drainErr := h.svc.drainOutboxPage(ctx); drainErr != nil {
 		t.Fatalf("drain: %v", drainErr)
 	}
-	if got := outcomes.recorded(); len(got) != 1 || got[0] != (outcomeCall{run: run, status: domain.RunFailed}) {
+	if got := outcomes.recorded(); len(got) != 1 || got[0] != (outcomeCall{run: run, status: domain.RunFailed, reportID: result.ReportID}) {
 		t.Fatalf("scheduler calls after retry = %+v, want one failed finish", got)
 	}
 	pub, err = h.db.GetCoordReportPublication(ctx, result.ReportID)
@@ -195,8 +196,56 @@ func TestCoordReportRefusesASupersededKey(t *testing.T) {
 		!strings.Contains(rpcErr.Message, "superseded") || !strings.Contains(rpcErr.Message, "new idempotency key") {
 		t.Fatalf("reused superseded key = %+v, want a conflict naming the relaunch and a new key", rpcErr)
 	}
-	report(t, h, run, protocol.CoordOutcomeSuccess, "done again", "success-2")
-	if got := outcomes.recorded(); len(got) != 2 || got[1] != (outcomeCall{run: run, status: domain.RunCompleted}) {
+	again := report(t, h, run, protocol.CoordOutcomeSuccess, "done again", "success-2")
+	if got := outcomes.recorded(); len(got) != 2 || got[1] != (outcomeCall{run: run, status: domain.RunCompleted, reportID: again.ReportID}) {
 		t.Fatalf("scheduler calls = %+v, want a second finish for the new key", got)
+	}
+}
+
+// relaunchingCapture supersedes the run's terminal report while its
+// evidence is captured, as a relaunch landing mid-capture does.
+type relaunchingCapture struct {
+	coordReportEvidenceCapture
+	db *store.DB
+}
+
+func (c *relaunchingCapture) Capture(ctx context.Context, req evidence.Request) (protocol.EvidencePacket, error) {
+	if err := c.db.SupersedeCoordTerminalReport(ctx, req.RunID); err != nil {
+		return protocol.EvidencePacket{}, err
+	}
+	return c.coordReportEvidenceCapture.Capture(ctx, req)
+}
+
+// TestCoordReportRefusesAReservationSupersededDuringCapture: a relaunch
+// that supersedes the reservation while its evidence is captured leaves
+// nothing to finalize. The agent is told to report again under a new key,
+// and the scheduler never sees the stale report.
+func TestCoordReportRefusesAReservationSupersededDuringCapture(t *testing.T) {
+	ctx := context.Background()
+	outcomes := &recordingOutcomes{}
+	capture := &relaunchingCapture{coordReportEvidenceCapture: coordReportEvidenceCapture{id: "ev_mid_capture"}}
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = capture
+		c.Outcomes = outcomes
+	})
+	capture.db = h.db
+	run := h.run(0)
+
+	_, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1",
+	})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeConflict ||
+		!strings.Contains(rpcErr.Message, "superseded") || !strings.Contains(rpcErr.Message, "new idempotency key") {
+		t.Fatalf("report superseded mid-capture = %+v, want a conflict naming the relaunch and a new key", rpcErr)
+	}
+	stored, err := h.db.GetCoordReportByIdempotency(ctx, run, "success-1")
+	if err != nil || stored.State != store.CoordReportPending || stored.FinalizedAt != nil {
+		t.Fatalf("superseded reservation = %+v, %v; want it left pending", stored, err)
+	}
+	if _, _, err := h.svc.drainOutboxPage(ctx); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if got := outcomes.recorded(); len(got) != 0 {
+		t.Fatalf("scheduler calls = %+v, want none", got)
 	}
 }

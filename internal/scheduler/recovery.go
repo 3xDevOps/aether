@@ -340,7 +340,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	}
 	// The terminal report is superseded only once nothing can roll the
 	// relaunch back, so a failed relaunch leaves the run's report standing.
-	// A late hand-off of the old report is older than relaunchedAt.
+	// A late hand-off of the old report is older than relaunchedAt, and
+	// once the reopened run exits, overrideExitLocked finds it superseded;
+	// both rely on this write happening under s.mu.
 	if reports, ok := s.cfg.Store.(store.CoordTerminalReportStore); ok {
 		if supersedeErr := reports.SupersedeCoordTerminalReport(ctx, run); supersedeErr != nil {
 			s.mu.Unlock()

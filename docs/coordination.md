@@ -1028,7 +1028,8 @@ report. Relaunching the run (**Relaunch** on its card, or `aether relaunch
 <run>`) supersedes the terminal report, including one whose evidence capture
 failed and was never accepted, so the reopened agent can report again under a
 new idempotency key; the superseded report's key then fails with
-`CodeConflict`. **Blocked is
+`CodeConflict`, as does a report whose evidence capture was still running
+when the relaunch landed. **Blocked is
 nonterminal**: a run may file any number of blocked reports, before or after
 one another.
 
@@ -1043,11 +1044,14 @@ What a report does depends on the run:
   A harness without a status reporter never says its turn ended, so there
   the first `--poll-interval` check two minutes after the report finishes
   the run; a harness with one is finished by the turn end alone, however
-  long the agent keeps working, unless the run is in **Needs you** (stalled,
-  or at a prompt) at that check, which then finishes it. A finish that fails
-  is retried by the same check two minutes later. If the agent process exits
-  first, the run takes the reported status, whatever its exit code, even
-  when the report reaches the server after the exit; the commit the exit
+  long the agent keeps working, unless the run stalled into **Needs you** by
+  that check, which then finishes it. A run parked at a permission or
+  question prompt is never finished by the check; it waits for the owner's
+  answer and its turn end. A finish that fails is retried by the same check
+  two minutes later. If the agent process exits first, the run takes the
+  reported status, whatever its exit code, even when the report reaches the
+  server after the exit or was made while the run was still starting; a
+  report a relaunch superseded never changes the run. The commit the exit
   already published keeps the exit's `aether:` or `wip:` prefix, and the
   run's status and report are the record. A TUI run keeps its paused
   container for relaunch, exactly like a closed run, with the reason

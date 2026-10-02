@@ -309,7 +309,8 @@ func TestCoordReportTerminalSlot(t *testing.T) {
 // TestCoordReportSupersedeRetiresAPendingReservation: a reservation whose
 // evidence capture failed holds the terminal slot. A relaunch supersedes it
 // too, so the reopened agent can report under a new key, and a retry of the
-// old key gets the superseded-key conflict.
+// old key gets the superseded-key conflict. A capture that finishes after
+// the relaunch cannot finalize the superseded reservation either.
 func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -329,6 +330,17 @@ func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
 	}
 	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.State != CoordReportPending || got.SupersededAt == nil {
 		t.Fatalf("pending report after supersede = %+v, %v; want it pending and superseded", got, err)
+	}
+	late := *pending
+	late.EvidenceRefs = []string{"evidence-late"}
+	if finalized, err := db.FinalizeCoordReport(ctx, &late); finalized || !errors.Is(err, ErrCoordReportSuperseded) {
+		t.Fatalf("finalize after supersede = %v, %v; want ErrCoordReportSuperseded", finalized, err)
+	}
+	if got, err := db.GetCoordReport(ctx, pending.ID); err != nil || got.State != CoordReportPending || got.FinalizedAt != nil {
+		t.Fatalf("superseded reservation after a late finalize = %+v, %v; want it still pending", got, err)
+	}
+	if _, err := db.GetCoordReportPublication(ctx, pending.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("publication of the superseded reservation = %v, want ErrNotFound", err)
 	}
 	retry := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess, Summary: "done", IdempotencyKey: "success-1"}
 	if _, err := db.ReserveCoordReport(ctx, retry); !errors.Is(err, ErrCoordReportSuperseded) {

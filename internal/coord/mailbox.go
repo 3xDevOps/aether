@@ -623,6 +623,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		WorkspaceID: self.WorkspaceID, RunID: run, Outcome: store.CoordOutcome(p.Outcome),
 		Summary: summary, NextAction: nextAction, EvidenceRefs: refs, IdempotencyKey: p.IdempotencyKey,
 	}
+	supersededMessage := fmt.Sprintf("%s: the report under idempotency_key %q was superseded when the run was relaunched; report again with a new idempotency key", method, p.IdempotencyKey)
 	_, err := s.cfg.Mail.ReserveCoordReport(ctx, report)
 	if errors.Is(err, store.ErrCoordReportConflict) ||
 		errors.Is(err, store.ErrCoordReportIdempotencyConflict) ||
@@ -632,7 +633,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		case errors.Is(err, store.ErrCoordReportIdempotencyConflict):
 			message = fmt.Sprintf("%s: idempotency_key %q was used with different report inputs", method, p.IdempotencyKey)
 		case errors.Is(err, store.ErrCoordReportSuperseded):
-			message = fmt.Sprintf("%s: the report under idempotency_key %q was superseded when the run was relaunched; report again with a new idempotency key", method, p.IdempotencyKey)
+			message = supersededMessage
 		}
 		return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: message}
 	}
@@ -673,7 +674,11 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		report.EvidenceRefs = append(report.EvidenceRefs, packet.ID)
 	}
 	if report.State == store.CoordReportPending {
-		if _, err = s.cfg.Mail.FinalizeCoordReport(ctx, report); err != nil {
+		_, err = s.cfg.Mail.FinalizeCoordReport(ctx, report)
+		if errors.Is(err, store.ErrCoordReportSuperseded) {
+			return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: supersededMessage}
+		}
+		if err != nil {
 			return protocol.CoordReportResult{}, internalError(method, err)
 		}
 	}

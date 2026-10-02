@@ -30,11 +30,13 @@ type ReportSink interface {
 // or failure asks the scheduler to finish the run; a blocked summary becomes
 // its needs-attention reason. reportedAt is when the report was finalized,
 // which lets the scheduler ignore a report older than the run's current
-// launch, and reportID lets it ignore a replayed blocked report. A run that
+// launch. reportID lets it ignore a replayed blocked report, and re-read a
+// terminal report it applies after the run exited, when no launch is left
+// to compare against. A run that
 // is already terminal or gone is not an error; any error leaves the
 // publication pending for retry.
 type OutcomeSink interface {
-	FinishReported(ctx context.Context, run domain.RunID, outcome domain.RunStatus, reportedAt time.Time) error
+	FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error
 	ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error
 }
 
@@ -62,9 +64,9 @@ func (s *Service) applyRunOutcome(ctx context.Context, report *store.CoordReport
 	var err error
 	switch report.Outcome {
 	case store.CoordOutcomeSuccess:
-		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, domain.RunCompleted, reportedAt)
+		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, report.ID, domain.RunCompleted, reportedAt)
 	case store.CoordOutcomeFailure:
-		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, domain.RunFailed, reportedAt)
+		err = s.cfg.Outcomes.FinishReported(ctx, report.RunID, report.ID, domain.RunFailed, reportedAt)
 	case store.CoordOutcomeBlocked:
 		err = s.cfg.Outcomes.ReportBlocked(ctx, report.RunID, report.ID, reportReason(report.Summary), reportedAt)
 	}
