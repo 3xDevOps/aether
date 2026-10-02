@@ -30,9 +30,8 @@ var (
 )
 
 type attachControlLease struct {
-	sessionID  string
-	generation uint64
-	attachID   uint64
+	control.Snapshot
+	attachID uint64
 }
 
 type controlAttach struct {
@@ -270,8 +269,8 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		}
 		record.ControlGeneration = current.Generation
 		record.HasControl = local != nil &&
-			local.sessionID == current.SessionID &&
-			local.generation == current.Generation
+			local.SessionID == current.SessionID &&
+			local.Generation == current.Generation
 	}
 	sendControlResult := func(record protocol.DashAttachControl) {
 		leaseMu.Lock()
@@ -322,7 +321,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				return acquireErr
 			}
 			controlSnap, controlHeld = acquired, true
-			lease := &attachControlLease{sessionID: req.ControlSessionID, generation: acquired.Generation}
+			lease := &attachControlLease{Snapshot: acquired}
 			leaseMu.Lock()
 			controlLease = lease
 			leaseMu.Unlock()
@@ -334,7 +333,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				leaseMu.Unlock()
 			}
 			s.attachControlAck(ack, controlSnap, true)
-			attachID, registerErr := s.registerControlAttach(req.RunID, lease.sessionID, acquired.Generation, revoke, fence)
+			attachID, registerErr := s.registerControlAttach(req.RunID, lease.SessionID, acquired.Generation, revoke, fence)
 			leaseMu.Lock()
 			current := controlLease
 			registered := registerErr == nil && current == lease
@@ -346,10 +345,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			}
 			leaseMu.Unlock()
 			if !registered {
-				s.unregisterControlAttach(req.RunID, lease.sessionID, attachID)
+				s.unregisterControlAttach(req.RunID, lease.SessionID, attachID)
 				if registerErr == nil {
 					registerErr = control.ErrStale
-					_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+					_ = s.cfg.Control.Release(req.RunID, member, lease.SessionID, lease.Generation)
 				}
 				controlAcquireErr = registerErr
 				return registerErr
@@ -427,7 +426,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			}
 			var admissionErr error
 			err := s.cfg.Control.AdmitMember(
-				req.RunID, member, lease.sessionID, lease.generation,
+				req.RunID, member, lease.SessionID, lease.Generation,
 				func() error {
 					admissionErr = admit()
 					if admissionErr != nil {
@@ -457,7 +456,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		if lease == nil {
 			return
 		}
-		revokedGeneration = lease.generation
+		revokedGeneration = lease.Generation
 		revokedInputErr = err
 	}
 	makeInteractiveFence = func(lease *attachControlLease) func() {
@@ -466,25 +465,26 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			once.Do(func() {
 				leaseMu.Lock()
 				current := controlLease
-				if current == nil || current.sessionID != lease.sessionID || current.generation != lease.generation {
+				if current != lease {
 					leaseMu.Unlock()
 					return
 				}
 				controlLease = nil
 				controlFence = nil
-				if revokedGeneration != lease.generation {
+				if revokedGeneration != lease.Generation {
 					recordRevoked(lease, control.ErrStale)
 				}
-				s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+				s.unregisterControlAttach(req.RunID, lease.SessionID, lease.attachID)
 				_ = applyControlReady(true)
-				leaseMu.Unlock()
 				record := protocol.DashAttachControl{
 					Type: protocol.DashAttachControlFrame, OK: false,
 					Error:             "run control was revoked",
 					ControlSessionID:  req.ControlSessionID,
-					ControlGeneration: lease.generation,
+					ControlGeneration: lease.Generation,
+					RevocationReason:  string(lease.RevocationReason()),
 				}
 				_ = conn.sendControl(record)
+				leaseMu.Unlock()
 			})
 		}
 	}
@@ -494,14 +494,14 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		leaseMu.Lock()
 		lease = controlLease
 		if lease != nil && s.cfg.Control != nil {
-			_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+			_ = s.cfg.Control.RevokeMember(req.RunID, member, lease.SessionID, lease.Generation)
 			recordRevoked(lease, reason)
 			if notify {
 				fence = controlFence
 			} else {
 				controlLease = nil
 				controlFence = nil
-				s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+				s.unregisterControlAttach(req.RunID, lease.SessionID, lease.attachID)
 			}
 		}
 		leaseMu.Unlock()
@@ -540,7 +540,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			leaseMu.Lock()
 			lease := controlLease
 			err := control.ErrStale
-			if lease != nil && lease.generation == ctl.ControlGeneration {
+			if lease != nil && lease.Generation == ctl.ControlGeneration {
 				err = nil
 			} else if revokedGeneration == ctl.ControlGeneration && revokedInputErr != nil {
 				err = revokedInputErr
@@ -609,18 +609,18 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 					leaseMu.Unlock()
 					return
 				}
-				lease := &attachControlLease{sessionID: req.ControlSessionID, generation: acquired.Generation}
+				lease := &attachControlLease{Snapshot: acquired}
 				fence := makeInteractiveFence(lease)
 				controlLease = lease
 				controlFence = fence
 				leaseMu.Unlock()
-				attachID, registerErr := s.registerControlAttach(req.RunID, lease.sessionID, lease.generation, revoke, fence)
+				attachID, registerErr := s.registerControlAttach(req.RunID, lease.SessionID, lease.Generation, revoke, fence)
 				needFence := false
 				leaseMu.Lock()
 				current := controlLease
 				registered := registerErr == nil && current == lease
 				if registered {
-					if validateErr := s.cfg.Control.Validate(req.RunID, lease.sessionID, lease.generation); validateErr != nil {
+					if validateErr := s.cfg.Control.Validate(req.RunID, lease.SessionID, lease.Generation); validateErr != nil {
 						registerErr = validateErr
 						registered = false
 						needFence = current == lease
@@ -650,10 +650,10 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				if needFence {
 					fence()
 				}
-				s.unregisterControlAttach(req.RunID, lease.sessionID, attachID)
+				s.unregisterControlAttach(req.RunID, lease.SessionID, attachID)
 				if registerErr == nil {
 					registerErr = control.ErrStale
-					_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+					_ = s.cfg.Control.Release(req.RunID, member, lease.SessionID, lease.Generation)
 				}
 				record.Code, record.Error = attachControlError(registerErr)
 				sendControlResult(record)
@@ -701,8 +701,8 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			controlFence = nil
 			recordRevoked(lease, control.ErrStale)
 			leaseMu.Unlock()
-			if lease != nil && lease.generation == ctl.ControlGeneration {
-				s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+			if lease != nil && lease.Generation == ctl.ControlGeneration {
+				s.unregisterControlAttach(req.RunID, lease.SessionID, lease.attachID)
 			}
 			record.OK = true
 			record.ControlGeneration = ctl.ControlGeneration
@@ -722,19 +722,19 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 		if lease == nil {
 			return
 		}
-		s.unregisterControlAttach(req.RunID, lease.sessionID, lease.attachID)
+		s.unregisterControlAttach(req.RunID, lease.SessionID, lease.attachID)
 		if errors.Is(context.Cause(attachCtx), errAttachMembershipRevoked) {
-			_ = s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation)
+			_ = s.cfg.Control.Release(req.RunID, member, lease.SessionID, lease.Generation)
 			return
 		}
 		if conn.okWritten() {
 			// Disconnect/expiry cleanup must never clear a durable mission
 			// takeover; only the explicit Release control commit does that.
-			s.cfg.Control.Disconnect(req.RunID, lease.sessionID, lease.generation)
+			s.cfg.Control.Disconnect(req.RunID, lease.SessionID, lease.Generation)
 			return
 		}
-		if err := s.cfg.Control.Release(req.RunID, member, lease.sessionID, lease.generation); err != nil {
-			s.cfg.Control.Disconnect(req.RunID, lease.sessionID, lease.generation)
+		if err := s.cfg.Control.Release(req.RunID, member, lease.SessionID, lease.Generation); err != nil {
+			s.cfg.Control.Disconnect(req.RunID, lease.SessionID, lease.Generation)
 		}
 	}()
 	// Close before authority cleanup so a blocked control write is released
@@ -751,7 +751,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				if lease == nil {
 					return control.ErrStale
 				}
-				return s.cfg.Control.Validate(req.RunID, lease.sessionID, lease.generation)
+				return s.cfg.Control.Validate(req.RunID, lease.SessionID, lease.Generation)
 			}
 			inputAdmission = func(accept func() error) error {
 				leaseMu.Lock()
@@ -760,7 +760,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				if lease == nil {
 					return control.ErrStale
 				}
-				return s.cfg.Control.AdmitMember(req.RunID, member, lease.sessionID, lease.generation, func() error {
+				return s.cfg.Control.AdmitMember(req.RunID, member, lease.SessionID, lease.Generation, func() error {
 					if err := checkSteer(ctx, s.cfg.Store, member, run.ID); err != nil {
 						return err
 					}
@@ -775,8 +775,9 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 				}
 				leaseMu.Lock()
 				lease := controlLease
+				fence := controlFence
 				err := control.ErrStale
-				if lease != nil && lease.generation == ctl.ControlGeneration {
+				if lease != nil && lease.Generation == ctl.ControlGeneration {
 					err = nil
 				} else if revokedGeneration == ctl.ControlGeneration && revokedInputErr != nil {
 					err = revokedInputErr
@@ -800,6 +801,9 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 					return nil
 				}
 				if err != nil {
+					if errors.Is(err, control.ErrStale) && fence != nil {
+						fence()
+					}
 					conn.reportPendingInputError(err)
 					if errors.Is(err, control.ErrStale) ||
 						errors.Is(err, permissions.ErrDenied) ||
@@ -921,7 +925,7 @@ func (s *Server) serveAttach(ctx context.Context, member domain.MemberID, st *se
 			})
 		} else if lease != nil {
 			s.spawn(func() {
-				s.revokeOnControlChange(attachCtx, revoke, string(run.ID), lease.sessionID, lease.generation)
+				s.revokeOnControlChange(attachCtx, revoke, string(run.ID), lease.SessionID, lease.Generation)
 			})
 		}
 		attachErr = <-errCh

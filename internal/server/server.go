@@ -139,8 +139,8 @@ type Config struct {
 	// file changes before it parks at needs-attention; PollInterval is how
 	// often that is checked. CheckoutTTL is how long a finished run's
 	// checkout is kept before the GC reclaims it (negative disables GC).
-	// RunContainerTTL is how long an explicitly closed TUI run's container
-	// is retained for reopening (negative disables retention).
+	// RunContainerTTL retains exact containers after TUI Close or mission-run
+	// completion (negative disables retention). Completed workers never reopen.
 	// MinFreeDiskBytes is the free-space floor below which new runs are
 	// refused (negative disables the floor).
 	StallThreshold   time.Duration

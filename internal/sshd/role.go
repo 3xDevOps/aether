@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -102,7 +103,7 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	} else {
 		updated := false
 		for _, run := range activeRuns {
-			if _, uerr := s.cfg.Control.AdmitRevoke(string(run.ID), func() error {
+			if _, uerr := s.cfg.Control.AdmitRevoke(string(run.ID), control.RevocationPermission, func() error {
 				if updated {
 					return nil
 				}

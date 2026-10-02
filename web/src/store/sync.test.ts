@@ -466,7 +466,6 @@ describe('hydrate', () => {
       members: s.members,
       acked: s.acked,
       pausedRuns: s.pausedRuns,
-      pending: new Set<string>(),
     })
     const working = columns.find((c) => c.key === 'working')
     expect(working?.cards.find((c) => c.run.id === 'run_1')?.paused).toBe(true)
@@ -723,6 +722,28 @@ describe('applyEvent', () => {
     expect(record.reason).toBe('plan review')
     expect(record.stateChangedAt).toBe('2026-08-14T11:00:00Z')
     expect(store.getState().lastSeq).toBe(5)
+  })
+
+  it('applies input for an unseen run and protects the cleared set from a late snapshot', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => []) }))
+    const question = { id: 'q1', session_id: 'foreground', kind: 'question' as const }
+    const permission = { id: 'q1', session_id: 'background', kind: 'permission' as const }
+    const stale = run({ pending_inputs: [question, permission] })
+    const client = fakeApi({ runGet: vi.fn(async () => stale) })
+    const input = (seq: number, pending_inputs: Run['pending_inputs']) =>
+      applyEvent(store, statusEvent({ seq, type: 'run.input', payload: { pending_inputs } }), client)
+    await input(1, [question, permission])
+    const changedAt = store.getState().runs.run_1.stateChangedAt
+    await input(2, [permission])
+    expect(store.getState().runs.run_1.pending_inputs).toEqual([permission])
+    await input(3, [])
+    store.getState().upsertRun(stale)
+    expect(store.getState().runs.run_1.pending_inputs).toEqual([])
+    expect(store.getState().runs.run_1.status).toBe('running')
+    expect(store.getState().runs.run_1.stateChangedAt).toBe(changedAt)
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [run({ pending_inputs: [question] })]) }))
+    expect(store.getState().runs.run_1.pending_inputs).toEqual([question])
   })
 
   it('stamps finished_at on a terminal transition', async () => {
@@ -1293,6 +1314,25 @@ describe('connect', () => {
   function deliver(socket: StubSocket, ev: Event) {
     socket.onmessage?.({ data: JSON.stringify(ev) })
   }
+
+  it('applies queued input closure after an older hydration snapshot', async () => {
+    const store = createRootStore()
+    const listed = Promise.withResolvers<Run[]>()
+    const runList = vi.fn(() => listed.promise)
+    const stop = connect(store, fakeApi({ runList }))
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(runList).toHaveBeenCalled())
+      deliver(socket, statusEvent({ seq: 1, type: 'run.input', payload: { pending_inputs: [] } }))
+      listed.resolve([run({ pending_inputs: [{ id: 'closed', session_id: 'session-1', kind: 'question' }] })])
+      await vi.waitFor(() => expect(store.getState().lastSeq).toBe(1))
+      expect(store.getState().runs.run_1.pending_inputs).toEqual([])
+      expect(store.getState().runs.run_1.status).toBe('running')
+    } finally {
+      listed.resolve([])
+      stop()
+    }
+  })
 
   it('coalesces mission hints without delaying run events or overwriting their state', async () => {
     const store = createRootStore()

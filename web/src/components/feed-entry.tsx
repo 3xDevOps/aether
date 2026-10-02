@@ -74,6 +74,9 @@ export function FeedEntry({ event, runLink = false }: { event: Event; runLink?: 
  */
 const describers: Record<EventType, (p: Record<string, unknown>) => ReactNode> = {
   'run.status': (p) => join([p.to, p.reason]),
+  'run.input': (p) => Array.isArray(p.pending_inputs) && p.pending_inputs.length > 0
+    ? `${p.pending_inputs.length} outstanding input request${p.pending_inputs.length === 1 ? '' : 's'}`
+    : 'input requests resolved',
   'run.deleted': () => 'record removed',
   'run.protected': (p) => (p.protected ? 'protected' : 'unprotected'),
   'run.archived': (p) => (p.archived_at ? 'archived' : 'restored'),

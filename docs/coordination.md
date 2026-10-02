@@ -1022,9 +1022,11 @@ accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 
 A worker's **success or failure** report is one-shot and terminal. Success
-submits the attempt and the server then stops that worker. Failure fails the
-attempt without treating it as a task result. **Blocked is nonterminal**: it is
-a durable observation and does not stop the worker or submit the task.
+submits the attempt and the server then pauses and retains that worker's exact
+container. Failure does the same without treating the attempt as a task result.
+Capacity is released only after execution has stopped and retention/evidence
+cleanup has settled. **Blocked is nonterminal**: it is a durable observation and
+does not stop the worker or submit the task.
 Waiting on a peer uses ask/inbox, never report; waiting on human review uses
 the plan wait command, not an outcome. Read the inbox once more before a
 terminal report and take no new work afterwards.
@@ -1090,9 +1092,16 @@ serialized PTY input path and records the delivery separately.
 
 ## Retention and shutdown
 
-Active runs and explicitly retained terminal TUI runs keep their socket,
-unread mailbox, and timeline entries through a server restart. Recovery
-rebinds `coord3.sock` for those runs. When a run's container is destroyed,
+Active runs, explicitly closed TUI runs, and completed mission runs keep their
+socket, unread mailbox, and timeline entries through a server restart.
+Completed workers retain their exact paused (or already exited) container,
+checkout, row, and member account for `--run-container-ttl` (default 7 days).
+The dashboard run detail, transcript, diff, evidence, and worker inspection
+surfaces remain available; retention does not grant live input or wake authority.
+Completed workers cannot be relaunched, including after a human relabels their
+outcome. Explicit Kill, Delete, and worker cancellation still destroy the
+container; a negative TTL requests immediate cleanup. Recovery rebinds
+`coord3.sock` for retained runs. When a run's container is destroyed,
 Aether releases the coordination directory and mailbox after any required
 evidence capture has completed. With `--conflict-coordination=false`, runs
 still receive their identity socket and per-launch discovery hint.

@@ -24,6 +24,8 @@ type Type string
 const (
 	// TypeRunStatus signals a run lifecycle transition.
 	TypeRunStatus Type = "run.status"
+	// TypeRunInput replaces the correlated pending native interaction set.
+	TypeRunInput Type = "run.input"
 	// TypeRunDeleted tells clients that a run's durable record was removed.
 	TypeRunDeleted       Type = "run.deleted"
 	TypeWorkspaceDeleted Type = "workspace.deleted"
@@ -108,6 +110,14 @@ type RunStatusPayload struct {
 	// Reason is an optional human-readable cause, e.g. "agent exited 1".
 	Reason string `json:"reason,omitempty"`
 }
+
+// RunInputPayload carries the complete pending set, including [] on last close.
+// It is independent of RunStatusPayload: work and input may coexist.
+type RunInputPayload struct {
+	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
+}
+
+func (RunInputPayload) EventType() Type { return TypeRunInput }
 
 // RunDeletedPayload signals that a run's durable record was removed.
 type RunDeletedPayload struct{}
@@ -400,6 +410,7 @@ func decodeAs[P Payload](data []byte) (Payload, error) {
 
 var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeRunStatus:      decodeAs[RunStatusPayload],
+	TypeRunInput:       decodeAs[RunInputPayload],
 	TypeRunDeleted:     decodeAs[RunDeletedPayload],
 	TypeRunTitle:       decodeAs[RunTitlePayload],
 	TypeRunDiff:        decodeAs[RunDiffPayload],

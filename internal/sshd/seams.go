@@ -75,6 +75,9 @@ type RunController interface {
 	// Paused reports whether the run's container is currently frozen;
 	// unknown or finished runs report false.
 	Paused(run domain.RunID) bool
+	// PendingInputs returns an independent snapshot of unresolved requests;
+	// unknown or terminated run lifetimes return an empty list.
+	PendingInputs(run domain.RunID) []domain.RunInputRequest
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, message string) error
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)

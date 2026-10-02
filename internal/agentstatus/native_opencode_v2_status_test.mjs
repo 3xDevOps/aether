@@ -5,6 +5,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 
 const flush = () => new Promise(resolve => setImmediate(resolve))
+const request = (id, session_id, kind) => ({ id, session_id, kind })
 
 async function reporter() {
   const process = new EventEmitter()
@@ -13,35 +14,30 @@ async function reporter() {
   const permissions = new Map()
   let waiter
   let child
+  let listError
   const warnings = []
-  const sandbox = vm.createContext({ process, AbortController, console: { error: (...args) => warnings.push(args) } })
+  const sandbox = vm.createContext({ process, AbortController, AbortSignal, console: { error: (...args) => warnings.push(args) } })
   const source = await readFile(new URL('opencode-status-v2.js', import.meta.url), 'utf8')
   const module = new vm.SourceTextModule(source, { context: sandbox })
   await module.link(specifier => {
-    if (specifier !== 'node:child_process') throw new Error(`Standalone plugin cannot resolve ${specifier}`)
-    const exports = {
-      spawn(_file, args) {
-        const report = Object.fromEntries(args.slice(2).reduce((pairs, value, index, list) => {
-          if (index % 2 === 0) pairs.push([value.slice(2), list[index + 1]])
-          return pairs
-        }, []))
-        reports.push(report)
+    assert.equal(specifier, 'node:child_process')
+    return new vm.SyntheticModule(['spawn'], function () {
+      this.setExport('spawn', (_file, args) => {
+        reports.push(JSON.parse(args[3]))
         child = new EventEmitter()
         child.stderr = new EventEmitter()
         child.stderr.setEncoding = () => {}
-        child.kill = () => { child.killed = true; child.emit('close') }
+        child.kill = () => { child.killed = true; child.closed = true; child.emit('close') }
         return child
-      },
-    }
-    return new vm.SyntheticModule(Object.keys(exports), function () {
-      for (const [name, value] of Object.entries(exports)) this.setExport(name, value)
+      })
     }, { context: sandbox })
   })
   await module.evaluate()
   const dispose = module.namespace.default.setup({
     location: { directory: '/workspace' },
     permission: { async list({ sessionID }) {
-      return [...permissions.values()].filter(request => request.sessionID === sessionID)
+      if (listError) throw listError
+      return [...permissions.values()].filter(item => item.sessionID === sessionID)
     } },
     event: { async *subscribe({ signal }) {
       while (!signal.aborted) {
@@ -57,125 +53,119 @@ async function reporter() {
   return {
     reports, warnings, dispose, permissions,
     get child() { return child },
+    failList(error) { listError = error },
     async emit(type, data, directory = '/workspace') {
-      if (type === 'permission.asked') permissions.set(data.id, data)
-      if (type === 'permission.replied') permissions.delete(data.requestID)
+      if (type === 'permission.asked') permissions.set(JSON.stringify([data.sessionID, data.id]), data)
+      if (type === 'permission.replied') permissions.delete(JSON.stringify([data.sessionID, data.requestID]))
       events.push({ type, data, location: { directory } })
       waiter?.resolve()
       await flush()
     },
-    async finishReport() { child.emit('close'); await flush() },
+    async drain() {
+      await flush()
+      while (child && !child.closed) {
+        child.closed = true
+        child.emit('close')
+        await flush()
+      }
+    },
   }
 }
 
-test('V2 nested execution cannot clear outstanding permission or form waits', async t => {
+function latest(h, state, requests) {
+  assert.equal(h.reports.at(-1).state, state)
+  assert.deepEqual(h.reports.at(-1).input_updates, [{ operation: 'replace', requests }])
+}
+
+test('V2 execution and multiple correlated requests remain independent', async t => {
   const h = await reporter()
   t.after(h.dispose)
   await h.emit('session.execution.started', { sessionID: 'root' })
-  await h.finishReport()
-  await h.emit('permission.asked', { id: 'permission', sessionID: 'root' })
-  await h.finishReport()
+  await h.emit('permission.asked', { id: 'same', sessionID: 'root', metadata: { password: 'secret' } })
   await h.emit('session.execution.started', { sessionID: 'child' })
-  await h.emit('form.created', { form: { id: 'question', sessionID: 'child' } })
-  assert.deepEqual(h.reports, [
-    { event: 'session.status', status: 'busy' },
-    { event: 'permission.asked' },
-  ])
-  await h.emit('permission.replied', { requestID: 'permission', sessionID: 'root' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'question.asked' })
+  await h.emit('form.created', { form: { id: 'same', sessionID: 'child', title: 'private', fields: [] } })
+  await h.drain()
+  latest(h, 'working', [request('same', 'root', 'permission'), request('same', 'child', 'form')])
   await h.emit('session.execution.succeeded', { sessionID: 'root' })
-  await h.emit('form.replied', { id: 'question', sessionID: 'child', answer: {} })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.status', status: 'busy' })
-  await h.emit('session.execution.interrupted', { sessionID: 'child', reason: 'user' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.idle' })
+  await h.emit('form.replied', { id: 'same', sessionID: 'unrelated', answer: { token: 'private' } })
+  await h.drain()
+  latest(h, 'working', [request('same', 'root', 'permission'), request('same', 'child', 'form')])
+  await h.emit('permission.replied', { requestID: 'same', sessionID: 'root' })
+  await h.emit('session.execution.failed', { sessionID: 'child' })
+  await h.drain()
+  latest(h, 'waiting', [request('same', 'child', 'form')])
+  await h.emit('form.cancelled', { id: 'same', sessionID: 'child' })
+  await h.drain()
+  latest(h, 'waiting', [])
+  assert.ok(!JSON.stringify(h.reports).includes('private'))
+  assert.ok(!JSON.stringify(h.reports).includes('secret'))
 })
 
-test('V2 replies after execution ends park rather than falsely resume', async t => {
+test('V2 interruption reconciles only vanished permissions, not live forms', async t => {
   const h = await reporter()
   t.after(h.dispose)
   await h.emit('session.execution.started', { sessionID: 'root' })
-  await h.finishReport()
-  await h.emit('form.created', { form: { id: 'question', sessionID: 'root' } })
-  await h.finishReport()
-  await h.emit('session.execution.failed', { sessionID: 'root' })
-  assert.deepEqual(h.reports.at(-1), { event: 'question.asked' })
-  await h.emit('form.cancelled', { id: 'question', sessionID: 'root' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.idle' })
+  await h.emit('permission.asked', { id: 'gone', sessionID: 'root' })
+  await h.emit('permission.asked', { id: 'live', sessionID: 'root' })
+  await h.emit('permission.asked', { id: 'gone', sessionID: 'child' })
+  await h.emit('form.created', { form: { id: 'f', sessionID: 'root' } })
+  h.permissions.delete(JSON.stringify(['root', 'gone']))
+  await h.emit('session.execution.interrupted', { sessionID: 'root' })
+  await h.drain()
+  latest(h, 'waiting', [request('live', 'root', 'permission'), request('gone', 'child', 'permission'), request('f', 'root', 'form')])
+  await h.emit('session.deleted', { sessionID: 'root' })
+  await h.drain()
+  latest(h, 'waiting', [request('gone', 'child', 'permission')])
 })
 
-test('V2 deletion releases only that session and ignores unrelated locations', async t => {
+test('V2 failed reconciliation preserves request evidence and reports the error', async t => {
   const h = await reporter()
   t.after(h.dispose)
-  await h.emit('session.execution.started', { sessionID: 'elsewhere' }, '/other')
+  await h.emit('permission.asked', { id: 'p', sessionID: 'root' })
+  h.failList(new Error('permission list unavailable'))
+  await h.emit('session.execution.interrupted', { sessionID: 'root' })
+  await h.drain()
+  latest(h, 'waiting', [request('p', 'root', 'permission')])
+  assert.match(String(h.warnings), /permission list unavailable/)
+})
+
+test('V2 ignores other locations and unidentified requests', async t => {
+  const h = await reporter()
+  t.after(h.dispose)
+  await h.emit('session.execution.started', { sessionID: 'other' }, '/other')
   assert.deepEqual(h.reports, [])
-  await h.emit('session.execution.started', { sessionID: 'root' })
-  await h.finishReport()
-  await h.emit('session.execution.started', { sessionID: 'child' })
-  await h.emit('permission.asked', { id: 'request', sessionID: 'child' })
-  await h.finishReport()
-  await h.emit('session.deleted', { sessionID: 'child' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.status', status: 'busy' })
-  await h.emit('session.execution.succeeded', { sessionID: 'root' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.idle' })
+  await h.emit('permission.asked', { sessionID: 'root' })
+  await h.emit('form.created', { form: { id: 'f' } })
+  await h.drain()
+  assert.deepEqual(h.reports, [])
 })
 
-test('V2 report ordering is serialized and unload cancels queued reports', async () => {
+test('V2 serializes snapshots and unload cancels queued reporting', async () => {
   const h = await reporter()
   await h.emit('session.execution.started', { sessionID: 'root' })
   const first = h.child
-  await h.emit('permission.asked', { id: 'request', sessionID: 'root' })
-  await h.emit('permission.replied', { requestID: 'request', sessionID: 'root' })
-  assert.deepEqual(h.reports, [{ event: 'session.status', status: 'busy' }])
-  await h.finishReport()
-  assert.deepEqual(h.reports[1], { event: 'permission.asked' })
+  await h.emit('permission.asked', { id: 'p', sessionID: 'root' })
+  await h.emit('permission.replied', { requestID: 'p', sessionID: 'root' })
+  assert.equal(h.reports.length, 1)
+  first.closed = true
+  first.emit('close')
+  await flush()
+  latest(h, 'working', [request('p', 'root', 'permission')])
   const active = h.child
   h.dispose()
   await flush()
   assert.equal(active.killed, true)
   assert.equal(first.killed, undefined)
-  assert.equal(h.reports.length, 2, 'queued working report must not run after unload')
+  assert.equal(h.reports.length, 2)
 })
 
-test('V2 Stop removes vanished permission waits without requiring a reply event', async t => {
+test('V2 input-only callbacks preserve unknown execution rather than invent a turn', async t => {
   const h = await reporter()
   t.after(h.dispose)
-  await h.emit('session.execution.started', { sessionID: 'root' })
-  await h.finishReport()
-  await h.emit('permission.asked', { id: 'request', sessionID: 'root' })
-  await h.finishReport()
-  // Permission.assert's interruption finalizer removes this live request but
-  // does not publish permission.replied.
-  h.permissions.delete('request')
-  await h.emit('session.execution.interrupted', { sessionID: 'root', reason: 'user' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.idle' })
-  await h.emit('session.execution.started', { sessionID: 'root' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.status', status: 'busy' })
-})
-
-test('V2 terminal reconciliation preserves genuinely live permissions and forms', async t => {
-  const h = await reporter()
-  t.after(h.dispose)
-  await h.emit('session.execution.started', { sessionID: 'root' })
-  await h.finishReport()
-  await h.emit('permission.asked', { id: 'cancelled', sessionID: 'root' })
-  await h.finishReport()
-  await h.emit('permission.asked', { id: 'live', sessionID: 'root' })
-  await h.emit('form.created', { form: { id: 'question', sessionID: 'root' } })
-  h.permissions.delete('cancelled')
-  await h.emit('session.execution.interrupted', { sessionID: 'root', reason: 'user' })
-  assert.deepEqual(h.reports.at(-1), { event: 'permission.asked' })
-  await h.emit('permission.replied', { requestID: 'live', sessionID: 'root' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'question.asked' })
-  await h.emit('form.cancelled', { id: 'question', sessionID: 'root' })
-  await h.finishReport()
-  assert.deepEqual(h.reports.at(-1), { event: 'session.idle' })
+  await h.emit('form.created', { form: { id: 'f', sessionID: 'root' } })
+  await h.drain()
+  latest(h, undefined, [request('f', 'root', 'form')])
+  await h.emit('form.replied', { id: 'f', sessionID: 'root', answer: {} })
+  await h.drain()
+  latest(h, undefined, [])
 })

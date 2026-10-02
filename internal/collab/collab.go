@@ -688,7 +688,7 @@ func (s *Service) Protect(ctx context.Context, runID domain.RunID, by domain.Mem
 		return err
 	}
 	if s.cfg.Control != nil {
-		if _, err := s.cfg.Control.AdmitRevoke(string(runID), commit); err != nil {
+		if _, err := s.cfg.Control.AdmitRevoke(string(runID), control.RevocationPermission, commit); err != nil {
 			return err
 		}
 	} else if err := commit(); err != nil {
@@ -729,7 +729,7 @@ func (s *Service) cancelQueued(ctx context.Context, runID domain.RunID, by domai
 		return err
 	}
 	if s.cfg.Control != nil {
-		if _, err := s.cfg.Control.AdmitRevoke(string(runID), commit); err != nil {
+		if _, err := s.cfg.Control.AdmitRevoke(string(runID), control.RevocationRevoked, commit); err != nil {
 			return err
 		}
 	} else if err := commit(); err != nil {

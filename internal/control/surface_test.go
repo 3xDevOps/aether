@@ -178,13 +178,13 @@ func TestRunRevocationFencesSurfacesAndFailedRevocationPreservesThem(t *testing.
 	first := acquireTestSurface(t, s, "run", surface, principal, "shell")
 	other := acquireTestSurface(t, s, "other", surface, principal, "shell")
 	denied := errors.New("permission withdrawn")
-	if _, err := s.AdmitRevoke("run", func() error { return denied }); !errors.Is(err, denied) {
+	if _, err := s.AdmitRevoke("run", RevocationPermission, func() error { return denied }); !errors.Is(err, denied) {
 		t.Fatal(err)
 	}
 	if err := s.AdmitSurface("run", surface, principal, first.SessionID, first.Generation, allowSurface); err != nil {
 		t.Fatalf("failed revocation changed surface: %v", err)
 	}
-	if _, err := s.AdmitRevoke("run", allowSurface); err != nil {
+	if _, err := s.AdmitRevoke("run", RevocationPermission, allowSurface); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AdmitSurface("run", surface, principal, first.SessionID, first.Generation, allowSurface); !errors.Is(err, ErrStale) {
@@ -411,7 +411,7 @@ func TestSurfaceCleanupCoversReleaseDisconnectAndRevocation(t *testing.T) {
 			case "run lifecycle":
 				_, err = s.RevokeRunSurfaces("run", allowSurface)
 			case "permission revoke":
-				_, err = s.AdmitRevoke("run", allowSurface)
+				_, err = s.AdmitRevoke("run", RevocationPermission, allowSurface)
 			case "fence":
 				s.Fence("run")
 			}

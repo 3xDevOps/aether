@@ -2,12 +2,27 @@
 // pi: it hands the extension a pi object that records handlers, fires
 // events at them the way the harness does, and waits for the report chain
 // to drain before exiting.
+import { readFileSync } from 'node:fs'
 const scenario = process.argv[2]
-const handlers: Record<string, Array<(event?: any, ctx?: any) => void>> = {}
+const manager = { getSessionId: () => 'root' }
+const idle = { isIdle: () => true, sessionManager: manager }
+const busy = { isIdle: () => false, sessionManager: manager }
+const background = Promise.withResolvers<void>()
+let terminal: ((event: { type: string; isTerminal: boolean }) => void) | undefined
+const main = {
+  sessionManager: manager,
+  waitForIdle: () => background.promise,
+  subscribe(handler) { terminal = handler; return () => { terminal = undefined } },
+}
+type Context = { isIdle?: () => boolean; sessionManager?: { getSessionId: () => string } }
+const handlers: Record<string, Array<(event?: unknown, ctx?: Context) => void>> = {}
 const pi = {
-  on(event: string, handler: (event?: any, ctx?: any) => void) {
+  on(event: string, handler: (event?: unknown, ctx?: Context) => void) {
     ;(handlers[event] ||= []).push(handler)
   },
+  ...(scenario === 'omp-background' ? { pi: {
+    MAIN_AGENT_ID: 'main', AgentRegistry: { global: () => ({ get: () => ({ session: main }) }) },
+  } } : {}),
 }
 
 // This driver represents a new top-level agent, not a descendant of the
@@ -25,12 +40,10 @@ for (const copy of copies) {
   load.default(pi)
 }
 
-function fire(event: string, payload?: any, ctx?: any): void {
+function fire(event: string, payload?: unknown, ctx: Context = idle): void {
   for (const handler of handlers[event] || []) handler(payload, ctx)
 }
 
-const idle = { isIdle: () => true }
-const busy = { isIdle: () => false }
 // Busy on the first two checks, idle on the third: the agent kept working
 // past agent_end and then went quiet, with no agent_settled to say so.
 let checks = 0
@@ -86,6 +99,37 @@ switch (scenario) {
     fire('message_end')
     fire('agent_end', {}, idle)
     break
+  case 'requests':
+    fire('agent_start')
+    fire('tool_call', { toolName: 'ask', toolCallId: 'same', input: { secret: 'private' } })
+    fire('tool_execution_start', { toolName: 'ask', toolCallId: 'same' })
+    fire('tool_approval_requested', { sessionId: 'child', toolName: 'bash', toolCallId: 'same' })
+    fire('tool_execution_end', { sessionId: 'unrelated', toolName: 'ask', toolCallId: 'same' })
+    fire('tool_execution_end', { toolName: 'ask', toolCallId: 'same', result: { password: 'secret' } })
+    fire('tool_approval_resolved', { sessionId: 'child', toolCallId: 'same', approved: false })
+    fire('agent_settled')
+    break
+  case 'ui-prompt':
+    fire('agent_start')
+    fire('ui_prompt_start', { kind: 'input', title: 'Enter a secret' })
+    fire('ui_prompt_start', { kind: 'input', title: 'Enter a secret' })
+    fire('agent_settled')
+    fire('ui_prompt_end', { kind: 'input', title: 'Enter a secret' })
+    break
+  case 'omp-background': {
+    fire('session_start')
+    fire('agent_start')
+    fire('session_start', {}, { isIdle: () => true, sessionManager: { getSessionId: () => 'child' } })
+    fire('agent_end', {}, { isIdle: () => true, sessionManager: { getSessionId: () => 'child' } })
+    fire('agent_end', {}, idle)
+    terminal?.({ type: 'agent_end', isTerminal: true })
+    await new Promise(done => setTimeout(done, 50))
+    await globalThis['__aetherStatusReports'].posts
+    const reports = readFileSync(process.argv[3], 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    if (reports.at(-1)?.state !== 'working') throw new Error('parked before background drain')
+    background.resolve()
+    break
+  }
   default:
     throw new Error('unknown scenario ' + scenario)
 }

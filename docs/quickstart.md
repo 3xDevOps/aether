@@ -761,6 +761,12 @@ aether relaunch <run-id>
 Relaunch does not create a new run or container and expired or unavailable runs
 cannot be relaunched. Kill and Delete remain immediate cleanup operations.
 
+Mission workers also retain their exact containers for the same default
+7 days after a success/failure report or container exit, without continuing
+work or holding attempt capacity after retention settles. Inspect their
+transcript, diff, evidence and worker details normally. Unlike explicitly
+closed ordinary TUI runs, completed workers cannot be relaunched.
+
 The local daemon is optional. It fetches server-owned run branches as agents
 commit and can push your local base branch in **local-only** workspaces. It
 does not watch agent configuration directories; configuration is imported

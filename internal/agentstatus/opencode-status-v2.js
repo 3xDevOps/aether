@@ -2,6 +2,8 @@
 // reports UI state only and never admits, reads, or acknowledges mailbox work.
 import { spawn } from 'node:child_process'
 
+const key = (session, kind, id) => JSON.stringify([session, kind, id])
+
 // The 2.0.18 loader accepts { id, setup } directly; Plugin.define only returns
 // its input. Avoid a runtime SDK dependency for the standalone mounted file.
 export default {
@@ -16,6 +18,7 @@ export default {
     let child
     let warned = false
     let last
+    let executionKnown = false
     const warn = error => {
       if (warned || lifetime.signal.aborted) return
       warned = true
@@ -30,14 +33,15 @@ export default {
     process.once('exit', dispose)
 
     function report() {
-      // A child starting work must not clear another session's permission or
-      // question. These canonical events reuse FromOpenCodeEvent's wire map.
-      const permission = [...pending.values()].some(request => request.type === 'permission')
-      const event = permission ? 'permission.asked' : pending.size ? 'question.asked' : busy.size ? 'session.status' : 'session.idle'
-      if (event === last) return
-      last = event
-      const args = ['report', 'opencode', '--event', event]
-      if (event === 'session.status') args.push('--status', 'busy')
+      const working = busy.size > 0
+      const body = JSON.stringify({
+        ...(executionKnown ? { state: working ? 'working' : 'waiting' } : {}),
+        ...(executionKnown && !working ? { reason: 'agent idle' } : {}),
+        input_updates: [{ operation: 'replace', requests: [...pending.values()] }],
+      })
+      if (body === last) return
+      last = body
+      const args = ['report', 'opencode', '--json', body]
       queue = queue.then(() => {
         if (lifetime.signal.aborted) return
         return new Promise(resolve => {
@@ -57,14 +61,21 @@ export default {
       }).catch(warn)
     }
 
+    function open(session, kind, id) {
+      if (typeof session !== 'string' || !session || typeof id !== 'string' || !id) return false
+      pending.set(key(session, kind, id), { id, session_id: session, kind })
+      return true
+    }
+
     async function reconcilePermissions(sessionID) {
-      const requests = [...pending].filter(([, request]) => request.type === 'permission' && request.sessionID === sessionID)
+      const requests = [...pending].filter(([, request]) => request.kind === 'permission' && request.session_id === sessionID)
       if (!requests.length) return
-      // Permission.assert removes interrupted requests during cleanup without
-      // publishing permission.replied. Terminal execution events follow cleanup.
-      const live = await ctx.permission.list({ sessionID }, { signal: lifetime.signal })
+      // Released 2.0.18 exposes permission.list, but no session.form.list.
+      // Interrupted permission cleanup can omit permission.replied.
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)])
+      const live = await ctx.permission.list({ sessionID }, { signal })
       if (lifetime.signal.aborted) return
-      const ids = new Set(live.map(request => `permission:${request.id}`))
+      const ids = new Set(live.map(request => key(request.sessionID, 'permission', request.id)))
       for (const [id] of requests) if (!ids.has(id)) pending.delete(id)
     }
 
@@ -77,12 +88,16 @@ export default {
           case 'location.shutdown':
             return dispose()
           case 'session.execution.started':
+            if (!data.sessionID) break
+            executionKnown = true
             busy.add(data.sessionID)
             report()
             break
           case 'session.execution.succeeded':
           case 'session.execution.failed':
           case 'session.execution.interrupted':
+            if (!data.sessionID) break
+            executionKnown = true
             busy.delete(data.sessionID)
             await reconcilePermissions(data.sessionID).catch(warn)
             if (lifetime.signal.aborted) return
@@ -90,23 +105,23 @@ export default {
             break
           case 'session.deleted':
             busy.delete(data.sessionID)
-            for (const [id, request] of pending) if (request.sessionID === data.sessionID) pending.delete(id)
+            for (const [id, request] of pending) if (request.session_id === data.sessionID) pending.delete(id)
             report()
             break
           case 'permission.asked':
-            pending.set(`permission:${data.id}`, { sessionID: data.sessionID, type: 'permission' })
-            report()
+            if (open(data.sessionID, 'permission', data.id)) report()
             break
           case 'permission.replied':
-            if (pending.delete(`permission:${data.requestID}`)) report()
+            if (!pending.delete(key(data.sessionID, 'permission', data.requestID))) break
+            await reconcilePermissions(data.sessionID).catch(warn)
+            report()
             break
           case 'form.created':
-            pending.set(`form:${data.form.id}`, { sessionID: data.form.sessionID, type: 'form' })
-            report()
+            if (open(data.form?.sessionID, 'form', data.form?.id)) report()
             break
           case 'form.replied':
           case 'form.cancelled':
-            if (pending.delete(`form:${data.id}`)) report()
+            if (pending.delete(key(data.sessionID, 'form', data.id))) report()
             break
         }
       }

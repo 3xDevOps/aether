@@ -568,6 +568,10 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 	return f.paused[run]
 }
 
+func (f *fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest {
+	return []domain.RunInputRequest{}
+}
+
 func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

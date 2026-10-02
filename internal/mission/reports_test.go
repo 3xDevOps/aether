@@ -23,6 +23,11 @@ func (c *recordingCanceller) CancelMission(_ context.Context, run domain.RunID) 
 	return c.err
 }
 
+func (c *recordingCanceller) CompleteMission(_ context.Context, run domain.RunID, _ domain.RunStatus) error {
+	c.runs = append(c.runs, run)
+	return c.err
+}
+
 type recordingBus struct {
 	mu     sync.Mutex
 	calls  int
@@ -113,7 +118,7 @@ func setupReconcileReportFor(t *testing.T, outcome store.CoordOutcome, integrato
 	bus := &recordingBus{}
 	svc, err := New(Config{
 		Store: db, Missions: db, Evidence: &mutableEvidenceReader{packet: packet},
-		Cancel: canceller, Bus: bus, AuthorizationMu: &sync.Mutex{},
+		Cancel: canceller, Complete: canceller, Bus: bus, AuthorizationMu: &sync.Mutex{},
 		Now: func() time.Time { return clock },
 	})
 	if err != nil {
@@ -189,7 +194,7 @@ func TestReconcileReportBlockedKeepsWorkerRunning(t *testing.T) {
 	}
 }
 
-func TestReconcileReportFailureMarksAttemptAndCancels(t *testing.T) {
+func TestReconcileReportFailureRetainsBeforeReleasingAttempt(t *testing.T) {
 	ctx := context.Background()
 	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
 	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
@@ -214,7 +219,7 @@ func TestReconcileReportFailureMarksAttemptAndCancels(t *testing.T) {
 	}
 }
 
-func TestReconcileReportFailureReturnsCancelError(t *testing.T) {
+func TestReconcileReportFailureKeepsCapacityOnRetentionError(t *testing.T) {
 	ctx := context.Background()
 	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
 	fix.canceller.err = errors.New("scheduler unavailable")
@@ -226,8 +231,8 @@ func TestReconcileReportFailureReturnsCancelError(t *testing.T) {
 	if getErr != nil {
 		t.Fatalf("get attempt: %v", getErr)
 	}
-	if attempt.State != domain.AttemptFailed {
-		t.Fatalf("attempt state after cancel error = %q, want failed", attempt.State)
+	if !attempt.State.HoldsConcurrency() {
+		t.Fatalf("attempt state after retention error = %q, want capacity held", attempt.State)
 	}
 	if len(fix.canceller.runs) != 1 || fix.canceller.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", fix.canceller.runs, fix.attempt.RunID)
@@ -243,7 +248,7 @@ type settlingCanceller struct {
 	runs    []domain.RunID
 }
 
-func (c *settlingCanceller) CancelMission(ctx context.Context, run domain.RunID) error {
+func (c *settlingCanceller) CompleteMission(ctx context.Context, run domain.RunID, _ domain.RunStatus) error {
 	c.runs = append(c.runs, run)
 	if c.db == nil || c.attempt == nil {
 		return nil
@@ -304,11 +309,11 @@ func TestReconcileReportFailureCancelsBeforePublishError(t *testing.T) {
 	}
 }
 
-func TestReconcileReportFailureKeepsReportedOutcomeAcrossCancel(t *testing.T) {
+func TestReconcileReportFailurePreservesConcurrentCancellation(t *testing.T) {
 	ctx := context.Background()
 	fix, report := setupReconcileReport(t, store.CoordOutcomeFailure)
 	settler := &settlingCanceller{db: fix.db, attempt: fix.attempt}
-	fix.svc.cfg.Cancel = settler
+	fix.svc.cfg.Complete = settler
 	if err := fix.svc.ReconcileReport(ctx, fix.attempt.RunID, report, fix.packet); err != nil {
 		t.Fatalf("ReconcileReport failure: %v", err)
 	}
@@ -316,11 +321,8 @@ func TestReconcileReportFailureKeepsReportedOutcomeAcrossCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get attempt: %v", err)
 	}
-	if attempt.State != domain.AttemptFailed {
-		t.Fatalf("attempt state after raced cancel = %q, want failed", attempt.State)
-	}
-	if attempt.LastError != report.Summary {
-		t.Fatalf("attempt detail = %q, want %q", attempt.LastError, report.Summary)
+	if attempt.State != domain.AttemptCancelled {
+		t.Fatalf("attempt state after raced cancel = %q, want cancelled", attempt.State)
 	}
 	if len(settler.runs) != 1 || settler.runs[0] != fix.attempt.RunID {
 		t.Fatalf("CancelMission calls = %v, want [%s]", settler.runs, fix.attempt.RunID)
@@ -359,7 +361,7 @@ type reportAdmissionCanceller struct {
 	authorizationMu *sync.Mutex
 }
 
-func (c reportAdmissionCanceller) CancelMission(context.Context, domain.RunID) error {
+func (c reportAdmissionCanceller) CompleteMission(context.Context, domain.RunID, domain.RunStatus) error {
 	if !c.authorizationMu.TryLock() {
 		return errors.New("report cancellation retained mission authorization")
 	}
@@ -409,7 +411,7 @@ func TestReconcileReportDefersContendedTerminalTransition(t *testing.T) {
 				t.Fatalf("contended report lost its durable retry: %+v, %v", pending, err)
 			}
 			unlock()
-			f.svc.cfg.Cancel = reportAdmissionCanceller{authorizationMu: mu}
+			f.svc.cfg.Complete = reportAdmissionCanceller{authorizationMu: mu}
 			if err = f.svc.ReconcileReport(ctx, f.attempt.RunID, report, f.packet); err != nil {
 				t.Fatalf("retry after admission release: %v", err)
 			}

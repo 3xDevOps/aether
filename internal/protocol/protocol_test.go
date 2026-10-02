@@ -259,15 +259,15 @@ func TestRunWireShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"id", "workspace_id", "member_id", "account_member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused", "unanswered_questions"} {
+	for _, k := range []string{"id", "workspace_id", "member_id", "account_member_id", "task", "title", "harness", "mode", "status", "branch", "created_at", "started_at", "finished_at", "paused", "unanswered_questions", "pending_inputs"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("run wire form missing key %q", k)
 		}
 	}
-	// paused and unanswered_questions remain present on modern gateways even
-	// when their values are false/zero; an older gateway may omit the latter.
-	if len(m) != 15 {
-		t.Errorf("run wire form has %d keys, want 15: %v", len(m), m)
+	// A current gateway exposes an explicit empty input set, so a fresh
+	// snapshot can clear requests learned from an earlier lifetime.
+	if inputs, ok := m["pending_inputs"].([]any); !ok || len(inputs) != 0 {
+		t.Errorf("pending_inputs = %#v, want []", m["pending_inputs"])
 	}
 	if m["title"] != "Run title" {
 		t.Errorf("title = %v, want Run title", m["title"])

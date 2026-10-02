@@ -121,6 +121,20 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 		if startedAt != nil {
 			e.startedAt = now
 		}
+		if to.Terminal() {
+			e.agentReport = agentstatus.Report{}
+			if len(e.pendingInputs) != 0 {
+				// The terminal row is the durable invalidation. A stale sidecar
+				// cannot restore this set, including after a retained relaunch.
+				e.pendingInputs = nil
+				s.publish(ctx, events.Event{
+					WorkspaceID: workspace,
+					RunID:       run,
+					ActorID:     actor,
+					Payload:     events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}},
+				})
+			}
+		}
 	}
 	s.publish(ctx, events.Event{
 		WorkspaceID: workspace,
@@ -162,6 +176,7 @@ type sidecar struct {
 	ContainerID     string            `json:"container_id"`
 	WorkspaceID     string            `json:"workspace_id"`
 	Mode            domain.LaunchMode `json:"mode,omitempty"`
+	MissionAssigned bool              `json:"mission_assigned,omitempty"`
 	Paused          bool              `json:"paused"`
 	KillRequested   bool              `json:"kill_requested"`
 	Retained        bool              `json:"retained,omitempty"`
@@ -172,26 +187,37 @@ type sidecar struct {
 	Home            string            `json:"home,omitempty"`
 	// LoginMember is the account owner whose login paths the container
 	// mounts, empty when it mounts none.
-	LoginMember      string            `json:"login_member,omitempty"`
-	Reporter         harness.Reporter  `json:"reporter,omitempty"`
-	AgentState       agentstatus.State `json:"agent_state,omitempty"`
-	AgentReason      string            `json:"agent_reason,omitempty"`
-	ExitObserved     bool              `json:"exit_observed"`
-	ExitCode         int               `json:"exit_code"`
-	EvidenceIdentity string            `json:"evidence_identity,omitempty"`
-	BridgeDigest     string            `json:"bridge_digest,omitempty"`
-	BridgePath       string            `json:"bridge_path,omitempty"`
-	CoordDir         string            `json:"coord_dir,omitempty"`
-	GitAuthorEmail   string            `json:"git_author_email,omitempty"`
+	LoginMember      string                   `json:"login_member,omitempty"`
+	Reporter         harness.Reporter         `json:"reporter,omitempty"`
+	AgentState       agentstatus.State        `json:"agent_state,omitempty"`
+	AgentReason      string                   `json:"agent_reason,omitempty"`
+	PendingInputs    []domain.RunInputRequest `json:"pending_inputs,omitempty"`
+	InputStartedAt   *time.Time               `json:"input_started_at,omitempty"`
+	ExitObserved     bool                     `json:"exit_observed"`
+	ExitCode         int                      `json:"exit_code"`
+	EvidenceIdentity string                   `json:"evidence_identity,omitempty"`
+	BridgeDigest     string                   `json:"bridge_digest,omitempty"`
+	BridgePath       string                   `json:"bridge_path,omitempty"`
+	CoordDir         string                   `json:"coord_dir,omitempty"`
+	GitAuthorEmail   string                   `json:"git_author_email,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
 func (e *supervised) sidecar() sidecar {
+	var inputStartedAt *time.Time
+	pendingInputs := e.pendingInputs
+	if len(pendingInputs) != 0 && !e.status.Terminal() && !e.exitObserved && !e.retained && !e.destroyPending {
+		started := e.startedAt
+		inputStartedAt = &started
+	} else {
+		pendingInputs = nil
+	}
 	return sidecar{
 		RunID:            string(e.runID),
 		ContainerID:      string(e.containerID),
 		WorkspaceID:      string(e.workspaceID),
 		Mode:             e.launchMode,
+		MissionAssigned:  e.missionAssigned,
 		Paused:           e.paused,
 		KillRequested:    e.killRequested,
 		Retained:         e.retained,
@@ -204,6 +230,8 @@ func (e *supervised) sidecar() sidecar {
 		Reporter:         e.reporter,
 		AgentState:       e.agentReport.State,
 		AgentReason:      e.agentReport.Reason,
+		PendingInputs:    pendingInputs,
+		InputStartedAt:   inputStartedAt,
 		ExitObserved:     e.exitObserved,
 		ExitCode:         e.exitCode,
 		EvidenceIdentity: e.evidenceIdentity,

@@ -30,9 +30,8 @@ func (s *Service) ValidateReport(ctx context.Context, run domain.RunID) error {
 
 // ReconcileReport is called for every finalized report outbox row, including
 // ordinary runs and historical mission identities. Only the current worker
-// assignment can create a mission submission. A failure report still cancels
-// that worker after the attempt is terminal so cancellation and publication
-// can retry; other identities remain no-ops.
+// assignment can create a mission submission. A failure report retains that
+// worker before releasing its attempt capacity; other identities remain no-ops.
 func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report *store.CoordReport, packet protocol.EvidencePacket) error {
 	if report == nil {
 		return errors.New("mission: report is required for worker reconciliation")
@@ -110,7 +109,7 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 		}
 		return nil
 	case store.CoordOutcomeFailure:
-		// A replay finds the attempt already failed and only re-cancels.
+		// Replays finish any incomplete retention without creating a submission.
 		return s.failAssignedWorker(ctx, m, attempt, report.Summary)
 	case store.CoordOutcomeSuccess:
 	default:
@@ -176,14 +175,24 @@ func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.Run
 	return s.failAssignedWorker(ctx, m, attempt, report.Summary)
 }
 
-// A concurrent replay can find an already-failed attempt; cancellation remains
+// A concurrent replay can find an already-failed attempt; retention remains
 // idempotent even when the state transition lost the race.
 func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, detail string) error {
 	if m == nil || attempt == nil || attempt.RunID == "" {
 		return errors.New("mission: failed worker assignment is required")
 	}
-	if s.cfg.Cancel == nil {
-		return errors.New("mission: scheduler cancel unavailable")
+	if s.cfg.Complete == nil {
+		return errors.New("mission: scheduler completion unavailable")
+	}
+	// Never release attempt capacity while the worker can still execute.
+	// Do not hold authorization during scheduler cleanup: report processing
+	// owns a coordination reference and cleanup can need that admission.
+	if !s.cfg.AuthorizationMu.TryLock() {
+		return fmt.Errorf("%w: mission report admission is busy", store.ErrConflict)
+	}
+	s.cfg.AuthorizationMu.Unlock()
+	if completeErr := s.cfg.Complete.CompleteMission(s.operationContext(ctx), attempt.RunID, domain.RunFailed); completeErr != nil {
+		return fmt.Errorf("mission: retain failed worker %s: %w", attempt.RunID, completeErr)
 	}
 	if attempt.State.HoldsConcurrency() {
 		if !s.cfg.AuthorizationMu.TryLock() {
@@ -194,9 +203,6 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 		if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 			return stateErr
 		}
-	}
-	if cancelErr := s.cfg.Cancel.CancelMission(s.operationContext(ctx), attempt.RunID); cancelErr != nil {
-		return fmt.Errorf("mission: cancel failed worker %s: %w", attempt.RunID, cancelErr)
 	}
 	return s.publishMissionChanged(ctx, m.ID)
 }

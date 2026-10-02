@@ -30,6 +30,7 @@ import { useCapability } from '@/store/hooks'
 /** The event types worth offering as a filter; empty means everything. */
 const filterTypes: EventType[] = [
   'run.status',
+  'run.input',
   'run.title',
   'run.agent',
   'run.diff',

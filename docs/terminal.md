@@ -106,8 +106,11 @@ dashboard terminal sends a text frame such as
 A refused duplicate acquisition does not revoke a lease the session still owns.
 An unsolicited lease revocation is also a
 `type:"control"` frame, but has no `request_id`; it reports the exact revoked
-generation, and the displaced interactive session remains a read-only mirror.
-The same-socket notification is used when an interactive attach loses **Steer**:
+generation and `control_session_id`, and the displaced interactive session
+remains a read-only mirror. Its `revocation_reason` identifies an actual lease
+replacement (`takeover`), lost steering authority (`permission`), or other
+fencing (`revoked`). A successful voluntary-release acknowledgement has no
+revocation reason. The same-socket notification is used when an interactive attach loses **Steer**:
 the terminal stays open and input is disabled. Raw legacy attaches retain the
 named close (`1008`, `steer permission withdrawn`) instead. Input frames carry
 the current `control_generation`, and stale input is rejected. Taking or
@@ -140,19 +143,29 @@ The **Run Room** is the collaboration surface for this run. It starts as a
 collapsed vertical tab on the right of the terminal; its count includes
 unanswered questions and queued steer requests. The existing terminal toolbar
 names the controller and every viewer even while the room is collapsed. Viewer
-names scroll horizontally instead of adding a row; at limited widths, terminal
-tools move into **Terminal tools**. **(this tab)** means this live attach has
+names scroll horizontally instead of adding a row. Desktop terminal tools
+(search, text size, copy, paste, and upload) stay directly visible, including
+in environment and development terminals. At narrower desktop widths the tools
+wrap and presence/control use a separate row rather than a hidden menu.
+Phones keep secondary tools in **Terminal tools**, with **Take control** /
+**Release** directly accessible. **(this tab)** means this live attach has
 acknowledged control; the same member controlling elsewhere is **(another session)**.
 Narrow toolbars use key and eye icons for controller and viewers, retaining
 accessible role labels. Session markers stay in the controller's hover title
 and screen-reader text instead of wrapping onto another row.
 Live local ownership is shown by the toolbar's **(this tab)** controller marker
-and **Release** action. A thin, static teal outline surrounds the terminal
-only while this tab has live input. It disappears during replay, while reading
-history, after disconnecting or releasing control, and whenever input access is
-lost; a read-only mirror never shows it. The outline does not move or animate,
-including when reduced motion is enabled. The toolbar's controller markers and
-**Take control** / **Release** actions remain unchanged.
+and **Release** action. A thin teal border traces only the terminal viewport,
+never the toolbar, search bar, or UI above it. After this tab acknowledges live
+input, the border propagates from the left and right side midpoints, splitting
+up and down to meet at the top and bottom centers. An acknowledged voluntary
+release reverses that path. An explicit server takeover notification for this
+session's current lease first fades the visible border to red, then retracts
+along the same reverse path. Presence names never trigger takeover feedback.
+Input is fenced immediately; the exit animation is decoration, not authority.
+Replay, recorded history, disconnects, permission loss, and other fencing hide
+the border without takeover feedback. A fresh read-only mirror has no border.
+Reduced motion makes ownership changes instant. Resizing preserves the viewport
+boundary, and a rapid control change reverses from the currently visible point.
 
 Presence refreshes on mount, every five seconds and after acknowledged control
 changes, independently of room history. A stalled refresh times out after 15
@@ -184,7 +197,7 @@ same message identity, so they do not create a second request.
 
 Questions appear in the Run Room where they apply. **Answer** posts a
 correlated reply. The server includes each run's unanswered-question count in
-the normal run snapshot, so a fresh dashboard places that run in **Needs you**
+the normal run snapshot, so a fresh dashboard places that run in **Idle**
 before anyone opens its room. The card names the run owner and points to the
 Run Room as the action. Questions and queued steers do not create a second
 action inbox.

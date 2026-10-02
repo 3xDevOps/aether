@@ -6,7 +6,6 @@ import { runState, type PresentationState } from '@/lib/status'
 import type { Member, Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { isUnseen, type Ack } from '@/store/board'
-import { usePendingApprovalRuns } from '@/store/hooks'
 import { isArchivable, type RunRecord } from '@/store/runs'
 
 export type Bucket = 'needs-you' | 'working' | 'done'
@@ -37,20 +36,18 @@ export interface BoardInput {
   members: Record<string, Member>
   acked: Record<string, Ack>
   pausedRuns: Record<string, boolean>
-  /** Runs holding a pending approval, pre-derived so its identity is stable. */
-  pending: Set<string>
 }
 
 export const bucketLabel: Record<Bucket, string> = {
-  'needs-you': 'Needs you',
+  'needs-you': 'Idle',
   working: 'Working',
   done: 'Done',
 }
 
 /**
- * Lifecycle to bucket. `needs-attention` covers both stalls and pending
- * approvals - the reason string on the card tells them apart. A clean exit
- * presents as `completed`, which lands in Done, not here.
+ * Lifecycle to bucket. `needs-attention` covers turn-end idle and stalls;
+ * outstanding requests are a separate indicator, never a bucket override.
+ * A clean exit presents as `completed`, which lands in Done, not here.
  */
 export function bucketOf(state: PresentationState): Bucket {
   switch (state) {
@@ -82,10 +79,7 @@ export function board(s: BoardInput): BoardData {
 
   for (const run of Object.values(s.runs)) {
     if (s.workspace && run.workspace_id !== s.workspace) continue
-    const state = runState(
-      run.status,
-      s.pending.has(run.id) || (run.unanswered_questions ?? 0) > 0,
-    )
+    const state = runState(run.status)
     const card: BoardCard = {
       run,
       state,
@@ -125,10 +119,9 @@ export function useBoard(): BoardData {
   const members = useStore((s) => s.members)
   const acked = useStore((s) => s.acked)
   const pausedRuns = useStore((s) => s.pausedRuns)
-  const pending = usePendingApprovalRuns()
   return useMemo(
     () =>
-      board({ workspace, workspaces, runs, members, acked, pausedRuns, pending }),
-    [workspace, workspaces, runs, members, acked, pausedRuns, pending],
+      board({ workspace, workspaces, runs, members, acked, pausedRuns }),
+    [workspace, workspaces, runs, members, acked, pausedRuns],
   )
 }

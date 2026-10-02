@@ -44,7 +44,7 @@
         ]
       }
     ],
-    "PermissionRequest": [
+    "Elicitation": [
       {
         "hooks": [
           {
@@ -55,7 +55,7 @@
         ]
       }
     ],
-    "Notification": [
+    "ElicitationResult": [
       {
         "hooks": [
           {
@@ -76,6 +76,15 @@
           }
         ]
       }
+    ],
+    "PermissionDenied": [
+      { "hooks": [{ "type": "command", "command": "/opt/aether/aether-server report claude", "timeout": 5 }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "/opt/aether/aether-server report claude", "timeout": 5 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "/opt/aether/aether-server report claude", "timeout": 5 }] }
     ],
     "StopFailure": [
       {

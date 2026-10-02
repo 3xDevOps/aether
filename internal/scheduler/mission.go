@@ -66,8 +66,11 @@ func (s *Scheduler) ObserveMissionRun(ctx context.Context, run domain.RunID) (Mi
 			s.mu.Unlock()
 			return MissionRunObservation{State: MissionRunActive}, nil
 		default:
+			settled := entry.retained && !entry.finalizing && !entry.evidencePending &&
+				(entry.paused || entry.exitObserved) && s.cfg.RunContainerTTL >= 0 &&
+				entry.retainedUntil != nil && time.Now().UTC().Before(*entry.retainedUntil)
 			s.mu.Unlock()
-			return MissionRunObservation{State: MissionRunRetained}, nil
+			return MissionRunObservation{State: MissionRunRetained, RetentionSettled: settled}, nil
 		}
 	}
 	s.mu.Unlock()
@@ -86,6 +89,8 @@ func (s *Scheduler) ObserveMissionRun(ctx context.Context, run domain.RunID) (Mi
 		if sc.DestroyPending {
 			return MissionRunObservation{State: MissionRunDestroyPending}, nil
 		}
+		settled := sc.Retained && sc.RetainedUntil != nil && s.cfg.RunContainerTTL >= 0 &&
+			time.Now().UTC().Before(*sc.RetainedUntil)
 		if sc.ContainerID != "" {
 			probeCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 			_, waitErr := s.cfg.Runtime.Wait(probeCtx, runtime.ID(sc.ContainerID))
@@ -93,12 +98,12 @@ func (s *Scheduler) ObserveMissionRun(ctx context.Context, run domain.RunID) (Mi
 			switch {
 			case waitErr == nil:
 				if runExists {
-					return MissionRunObservation{State: MissionRunRetained}, nil
+					return MissionRunObservation{State: MissionRunRetained, RetentionSettled: settled && r.Status.Terminal()}, nil
 				}
 				return MissionRunObservation{State: MissionRunUnknown}, nil
 			case errors.Is(waitErr, context.DeadlineExceeded), errors.Is(waitErr, context.Canceled):
 				if runExists && r != nil && r.Status.Terminal() {
-					return MissionRunObservation{State: MissionRunRetained}, nil
+					return MissionRunObservation{State: MissionRunRetained, RetentionSettled: settled && sc.Paused}, nil
 				}
 				return MissionRunObservation{State: MissionRunActive}, nil
 			}
@@ -160,6 +165,25 @@ func sameReservedRun(existing, requested *domain.Run) bool {
 // The durable mission decision remains the actor's authority record.
 func (s *Scheduler) CancelMission(ctx context.Context, run domain.RunID) error {
 	return s.Kill(ctx, run, "")
+}
+
+// CompleteMission quiesces an assigned worker and retains its exact container.
+// Cancellation is deliberately separate and remains destructive.
+func (s *Scheduler) CompleteMission(ctx context.Context, run domain.RunID, outcome domain.RunStatus) error {
+	if outcome != domain.RunCompleted && outcome != domain.RunFailed {
+		return fmt.Errorf("%w: worker outcome must be completed or failed", ErrInvalidTransition)
+	}
+	if err := s.closeRun(ctx, run, "", outcome, true); err != nil {
+		return err
+	}
+	observed, err := s.ObserveMissionRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	if !observed.RetentionSettled {
+		return fmt.Errorf("%w: worker retention is not settled", ErrInvalidTransition)
+	}
+	return nil
 }
 
 // LaunchMission provisions one preassigned mission run. Mission admission is

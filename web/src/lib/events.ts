@@ -5,6 +5,7 @@
 /** One entry per type `describe` in `components/feed-entry.tsx` handles. */
 export const eventLabel = {
   'run.status': 'Run status',
+  'run.input': 'Run input',
   'run.title': 'Run title',
   'run.deleted': 'Run deleted',
   'run.protected': 'Run protection',

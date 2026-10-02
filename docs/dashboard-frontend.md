@@ -246,12 +246,12 @@ lives in
 `src/store/selectors.ts` as pure functions over a narrow input type, wrapped by
 memoizing hooks in `src/store/hooks.ts`. Selectors that build new arrays must
 not be passed to `useStore` directly. A view that owns its own derived shape
-keeps it beside the view instead (`src/routes/board/selectors.ts`). The
-sidebar and board inputs carry the pending-approval run set rather than the
-raw inbox: `usePendingApprovalRuns` derives it once, subscribing on a stable
-string key, so a run holding a pending request presents as needs-attention
-everywhere the selectors are read - the sidebar, the palette, and the run
-lists - while a byte-identical inbox refetch re-renders nothing.
+keeps it beside the view instead (`src/routes/board/selectors.ts`). Execution
+grouping reads only the run lifecycle. `useRunInput` combines structured native
+requests, pending Aether approvals and unanswered Run Room questions for the
+independent **Needs input** indicator. `usePendingApprovalRuns` derives a stable
+run set for the sidebar's request count; an unchanged inbox refetch does not
+invalidate execution grouping.
 
 **Slots** (`src/components/slots.tsx`). Where a route registry is too coarse -
 something belongs *inside* a surface another ticket owns - the surface renders
@@ -274,8 +274,8 @@ independent host in `AppShell`.
 
 Card slot content may render its own links and buttons; the article's pointer
 handler ignores interactive descendants, so those controls stay interactive.
-Conflict chips, watcher avatars and approval badges belong in these slots, not
-in `run-card.tsx`.
+Conflict chips and watcher avatars belong in these slots. The shared
+**Needs input** control includes approvals rather than adding a second badge.
 
 ## Sidebar
 
@@ -350,9 +350,10 @@ way.
   `sidebarGroups` assembles the sidebar's swarm trees. An empty scope shows
   every run until hydration names a workspace.
 - **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
-- **The attention badge counts, it does not navigate.** The runs below are
-  already sorted worst-first, so the number is for a scrolled sidebar or a
-  stall that landed while the member was elsewhere in the app.
+- **The attention badge counts runs with unresolved input requests, not idle
+  runs.** Each affected row has a compact request icon and count with its
+  question/permission source in the accessible name and tooltip. The row
+  still opens the terminal, and execution grouping is unchanged.
 - **The header carries New run and the grouping.** New run opens the launch
   form (gated on `canLaunch`). Grouping is a two-segment control, Status and
   Member, with `aria-pressed` on the current one, so the pressed segment is
@@ -830,13 +831,12 @@ forever.
 rail's **Board** home icon. Its header shows the active workspace, run count,
 New run, Mark all seen and a **Cards / Map** segmented layout control.
 
-**Cards** arranges runs in three status buckets. `needs-attention` is Needs
-You: the agent is waiting for you, or the run stalled, and the reason strip
-says which. `queued`/`provisioning`/`running` is Working; `completed` and final
-statuses are Done. An active run with a pending approval also presents as
-needs-attention on the board and in the sidebar: `runState` takes a pending
-flag from the approval inbox because the domain status alone does not show
-the pause. Cards sort by last state change, newest first. The flat bordered
+**Cards** arranges runs in three status buckets. `needs-attention` is Idle:
+the agent's turn ended or a run stalled; the reason strip retains that context.
+`queued`/`provisioning`/`running` is Working; `completed` and final statuses
+are Done. Outstanding requests do not override these buckets: a run can be
+**Working** and **Needs input** at the same time. Cards sort by last execution
+state change, newest first. The flat bordered
 columns stack on narrow screens and sit side by side from the `lg`/1024px
 breakpoint.
 
@@ -957,9 +957,9 @@ toast: "Archived N runs", or "Archived N, M failed: " plus the message of
 the first failure in Done order (newest first), regardless of which call
 settled first.
 
-### Reason and paused on the wire
+### Execution, input and paused on the wire
 
-**The Needs you reason survives a fetch.** `protocol.Run` carries `reason` -
+**The Idle reason survives a fetch.** `protocol.Run` carries `reason` -
 the last `run.status` reason, persisted with the run and sanitized
 server-side - so a run that was already in needs-attention when the tab
 loaded still says why: `waiting for your input` and its siblings when the
@@ -967,9 +967,30 @@ agent reported it, `stalled: ...` when the silence heuristic parked it.
 `toRecord` in `src/store/runs.ts` prefers the wire reason and falls back to
 the previously stored one only when the fetch omits it and the status has
 not changed (a legacy gateway); a live `run.status` event still overwrites
-it with the event payload's reason. An approval pause keeps its fallback: a
-card with an empty reason uses its oldest pending request's action as the
-summary.
+it with the event payload's reason. A pending approval's action or unanswered
+room question remains the card's actionable summary.
+
+**Idle is a display rename, not a new lifecycle.** The persisted/wire status
+remains `needs-attention`. Turn completion, silence, failure, and prose such as
+the legacy `waiting for your input` reason are not evidence of a request.
+
+**Needs input is independent of execution.** A run snapshot's `pending_inputs`
+contains native request identities (`id`, `session_id`, and `kind`: `question`,
+`permission`, `form`, or `extension_ui`), never prompt bodies or answers.
+The durable `run.input` event replaces that set via `{pending_inputs: [...]}`;
+an empty list clears it immediately. Closing one request leaves the others
+visible. Run headers, cards, lists and sidebar rows combine this set with
+pending Aether approvals and unanswered Run Room questions, including room
+questions after execution finishes. Counts and tooltips name the source.
+Use the existing Terminal for native prompts, Approvals for Aether approvals,
+or open Run Room from Terminal for room questions; no new answer transport is
+introduced. Unsupported native integrations show no inferred request.
+
+Hydration is authoritative and queues live events until its snapshot lands.
+Ordinary run upserts preserve a known input set, including an empty one, so
+an older route, room or launch response cannot resurrect a closed request.
+Mission relationship refreshes replace only relationship fields. Input events
+for unknown runs follow the existing fetch-first and ordered-cursor rules.
 
 **The paused badge hydrates from the same snapshot.** With `paused` on the
 wire (above), a reload shows the badge for a run paused earlier, and the
@@ -1379,9 +1400,9 @@ The dashboard-specific state wiring is:
 
 On desktop the open room is a right-side panel capped at 420px. On a phone it
 is a full-viewport sheet; the terminal and room remain separate surfaces while
-sharing the same server state. Questions and queued steers therefore appear in
-the existing run-level count and **Needs you** grouping instead of creating a
-second dashboard inbox.
+sharing the same server state. Questions and queued steers contribute to the
+Run Room count; unanswered questions also contribute to **Needs input** without
+changing the run's execution group or creating a second dashboard inbox.
 
 ### Candidate review in Run evidence
 
@@ -2064,9 +2085,9 @@ routes (`approvals`, `timeline`), reached from the sidebar nav and the palette
 like every other view, and gated on the same method the nav gates them on.
 
 The approval inbox is for agent permission and plan approvals. Run Room
-questions and queued steer requests stay contextual to their run. Questions
-contribute to the existing **Needs you** projection, both contribute to the Run
-Room tab count, and neither creates a second action inbox.
+questions and queued steer requests stay contextual to their run. Unanswered
+questions contribute to **Needs input**; both contribute to the Run Room
+count, and neither creates a second action inbox.
 
 - **They refresh from the event cursor, not a timer.** Every event the store
   applies advances `lastSeq`, and that is the only signal available that a
