@@ -194,7 +194,7 @@ output is committed. Maskable icons and the iOS icon are square and full-bleed
 because the platform applies its own mask; the rest carry the rounded tile.
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in `web/.bun-version`)
-in jobs that run `make build` or `make release`, plus a dashboard job that
+in jobs that run `make build` or `make release-binaries`, plus a dashboard job that
 typechecks and tests the SPA on its own.
 
 ## The three extension seams
