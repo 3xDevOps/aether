@@ -68,7 +68,7 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 	}
 
 	run := &domain.Run{ID: "run-1", Worktree: checkout}
-	if err := e.sched.applyRunOwnership(e.ws, run, mounts, "1000:1000"); err != nil {
+	if err := e.sched.applyRunOwnership(e.ws, run, e.member.ID, mounts, "1000:1000"); err != nil {
 		t.Fatalf("applyRunOwnership: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 
 	// A second pass for a concurrent run of the same member+harness is a
 	// no-op with the same mapping.
-	if err := e.sched.applyRunOwnership(e.ws, run, mounts, "1000:1000"); err != nil {
+	if err := e.sched.applyRunOwnership(e.ws, run, e.member.ID, mounts, "1000:1000"); err != nil {
 		t.Fatalf("second applyRunOwnership: %v", err)
 	}
 	if st := stat(movedLink); st.Uid != 0 {
@@ -123,7 +123,7 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 func TestApplyRunOwnershipRootIsNoop(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, nil, ""); err != nil {
+	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, e.member.ID, nil, ""); err != nil {
 		t.Fatalf("applyRunOwnership(root): %v", err)
 	}
 }

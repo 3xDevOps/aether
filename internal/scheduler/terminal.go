@@ -158,7 +158,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		s.releaseTerminalCoordination(member)
 		return nil, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
 	}
-	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, plan.Mounts, plan.User); ownershipErr != nil {
+	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, member, plan.Mounts, plan.User); ownershipErr != nil {
 		s.releaseTerminalCoordination(member)
 		s.releaseTerminalReservation(terminalReservation)
 		return nil, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)

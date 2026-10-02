@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -525,6 +526,109 @@ func TestSharedLoginChownAfterTheOwnerReservesIsRefused(t *testing.T) {
 	}
 	if got := ownerOf(t, login); got != 2000 {
 		t.Fatalf("late login chown handed the owner's login to %d", got)
+	}
+}
+
+// startLoginChown starts a recipient's login pass, as 1000:1000, over an omp
+// login directory in the owner's home deep and large enough to take a while.
+// It returns once the pass has chowned the directory and has not yet reached
+// last, its final entry, together with the pass's result.
+func (e *shareEnv) startLoginChown(t *testing.T) (done <-chan error, login, last string) {
+	t.Helper()
+	login = filepath.Join(e.ownerHome, ".omp", "agent")
+	deepest := filepath.Join(login, strings.Repeat("d/", 40))
+	if err := os.MkdirAll(deepest, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const files = 5000
+	for i := range files {
+		if err := os.WriteFile(filepath.Join(deepest, fmt.Sprintf("%04d", i)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last = filepath.Join(deepest, fmt.Sprintf("%04d", files-1))
+	entry := &supervised{runID: "recipient", memberID: e.member.ID}
+	mounts := []runtime.Mount{{HostPath: e.ownerHome, Subpath: ".omp/agent", ContainerPath: "/home/aether/.omp/agent"}}
+	result := make(chan error, 1)
+	go func() { result <- e.sched.applyLoginOwnership(entry, e.owner.ID, mounts, "1000:1000") }()
+	for ownerOf(t, login) != 1000 {
+		select {
+		case err := <-result:
+			t.Fatalf("login pass ended before it chowned the login: %v", err)
+		default:
+		}
+	}
+	if ownerOf(t, last) != 0 {
+		t.Fatal("login pass finished before it could be observed in progress")
+	}
+	return result, login, last
+}
+
+// A long chown of one member's shared login holds that member's home, and
+// nothing else: the rest of the scheduler keeps working during the walk.
+func TestLoginChownHoldsOnlyTheOwnersHome(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() != 0 {
+		t.Skip("ownership pass needs root to chown")
+	}
+	e := newShareEnv(t, nil)
+	done, _, last := e.startLoginChown(t)
+	if _, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "beside the chown", "fake", domain.LaunchTUI); err != nil {
+		t.Fatalf("launch during another member's login chown: %v", err)
+	}
+	lock := e.sched.homeLock(e.owner.ID)
+	held := !lock.TryLock()
+	if !held {
+		lock.Unlock()
+	}
+	// Read last: still unchowned, so both checks above ran during the walk.
+	if ownerOf(t, last) != 0 {
+		t.Fatal("the launch waited for another member's login chown")
+	}
+	if !held {
+		t.Fatal("the login chown runs without the owner's home lock")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("login chown: %v", err)
+	}
+}
+
+// The owner's own ownership pass waits for a recipient's login chown in
+// progress on the owner's home, then takes the login back.
+func TestOwnerPassWaitsForARecipientsLoginChown(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() != 0 {
+		t.Skip("ownership pass needs root to chown")
+	}
+	e := newShareEnv(t, nil)
+	done, login, last := e.startLoginChown(t)
+	owner := make(chan error, 1)
+	go func() {
+		owner <- e.sched.applyRunOwnership(nil, &domain.Run{}, e.owner.ID,
+			[]runtime.Mount{{HostPath: e.ownerHome, ContainerPath: "/home/aether"}}, "2000:2000")
+	}()
+	for finished := false; !finished; {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("login chown: %v", err)
+			}
+			finished = true
+		default:
+			// Read in this order: last is still unchowned after home was
+			// read, so the recipient's walk was in progress at that read.
+			if ownerOf(t, e.ownerHome) == 2000 && ownerOf(t, last) == 0 {
+				t.Fatal("the owner's pass ran during the recipient's login chown")
+			}
+		}
+	}
+	if err := <-owner; err != nil {
+		t.Fatalf("owner's pass: %v", err)
+	}
+	for _, name := range []string{login, last} {
+		if got := ownerOf(t, name); got != 2000 {
+			t.Fatalf("%s owned by %d after the owner's pass, want 2000", name, got)
+		}
 	}
 }
 

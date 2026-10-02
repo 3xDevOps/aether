@@ -188,6 +188,9 @@ type Scheduler struct {
 	archiveMu sync.Mutex
 	// workspaceLocks fence launch and retained relaunch during deletion.
 	workspaceLocks map[domain.WorkspaceID]*sync.RWMutex
+	// homeLocks serialize the ownership passes that chown inside one
+	// member's home, so a long walk there never holds mu.
+	homeLocks map[domain.MemberID]*sync.Mutex
 	// pending marks runs whose row exists but whose checkout/provisioning
 	// handoff has not reached runs yet. Delete waits for this short window so
 	// it cannot remove a row while its checkout is still being created; Kill

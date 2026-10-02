@@ -166,7 +166,9 @@ dead tokens are cleared on the next refresh. Members who share nothing are
 unaffected.
 
 **Non-root images.** With a non-root image, a run hands the login path to its
-own uid before it starts. The owner's containers are never refused because of
+own uid before it starts. For `omp` that is the whole `~/.omp/agent`, so a
+large or deeply nested one slows non-root launches on that account, the
+owner's own included, but not the rest of the server. The owner's containers are never refused because of
 a recipient's run. A recipient's launch is refused while its uid differs from
 that of the owner's live containers, or of another recipient's live run, on
 that login; the error names `the login <member-id> shares is held by`. The

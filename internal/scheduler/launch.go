@@ -389,7 +389,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
 		return reserveErr
 	}
-	if ownErr := s.applyRunOwnership(ws, run, plan.Mounts, plan.User); ownErr != nil {
+	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
 		return fmt.Errorf("apply run ownership: %w", ownErr)
 	}
 	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {

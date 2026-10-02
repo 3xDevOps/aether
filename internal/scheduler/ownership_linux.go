@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -42,7 +43,7 @@ type inodeKey struct{ dev, ino uint64 }
 // live run on it loses access. Subpath mounts are skipped: a login pinned in
 // the member's own home is chowned with that home, and a login mounted from
 // another member's home is applyLoginOwnership's.
-func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mounts []runtime.Mount, user string) error {
+func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, home domain.MemberID, mounts []runtime.Mount, user string) error {
 	if user == "" {
 		return nil
 	}
@@ -59,6 +60,9 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mou
 			return err
 		}
 	}
+	lock := s.homeLock(home)
+	lock.Lock()
+	defer lock.Unlock()
 	for _, m := range mounts {
 		if m.ReadOnly || m.Subpath != "" {
 			continue
@@ -71,12 +75,8 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mou
 }
 
 // applyLoginOwnership hands the login paths entry's container mounts from
-// login's home to user. s.mu is held from the reservation check to the end
-// of the chown, and every reservation is made under s.mu: either this chown
-// finishes before a container of login's reserves that home, whose own
-// ownership pass then takes the login back, or that reservation is seen
-// here and the launch is refused. The check alone, as made when entry
-// reserved, would let this chown land after the owner's pass.
+// login's home to user, after rechecking the reservations: the check made
+// when entry reserved would let this chown land after the owner's own pass.
 func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID, mounts []runtime.Mount, user string) error {
 	if user == "" || login == "" {
 		return nil
@@ -89,10 +89,18 @@ func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID
 	if err != nil {
 		return fmt.Errorf("scheduler: resolve account home: %w", err)
 	}
+	// Every container reserves under s.mu before its own ownership pass takes
+	// this lock: either the owner's reservation is seen here and the launch
+	// is refused, or the owner's pass starts after this chown and takes the
+	// login back.
+	lock := s.homeLock(login)
+	lock.Lock()
+	defer lock.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
-	if err := s.reservationConflictLocked(entry.memberID, login, user, "live run "+string(entry.runID)); err != nil {
+	err = s.reservationConflictLocked(entry.memberID, login, user, "live run "+string(entry.runID))
+	s.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	for _, m := range mounts {
@@ -104,6 +112,22 @@ func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID
 		}
 	}
 	return nil
+}
+
+// homeLock returns the lock every ownership pass holds while it chowns inside
+// member's home. Take it before s.mu, never while holding s.mu.
+func (s *Scheduler) homeLock(member domain.MemberID) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.homeLocks == nil {
+		s.homeLocks = make(map[domain.MemberID]*sync.Mutex)
+	}
+	lock := s.homeLocks[member]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.homeLocks[member] = lock
+	}
+	return lock
 }
 
 // chownSubpath chowns only what a subpath mount exposes: base/sub, and
