@@ -951,7 +951,8 @@ server serializes the writes behind the mutex in `SetArchived`
 the cap keeps a full Done column from holding one gateway request per run
 while they queue there. A failure does not stop the rest. A `CodeNotFound`
 refusal counts as success (the run is already gone) and removes the run
-locally instead of retrying. Once every call has settled it reports one
+locally as soon as that call settles, instead of retrying. Once every call
+has settled it reports one
 toast: "Archived N runs", or "Archived N, M failed: " plus the message of
 the first failure in Done order (newest first), regardless of which call
 settled first.

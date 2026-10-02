@@ -186,40 +186,31 @@ export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
 ): Promise<void> {
-  const failures = new Map<RunRecord, unknown>()
+  // One slot per run, so the failures read back in Done order however the
+  // calls settle.
+  const errors = new Array<string | undefined>(eligible.length)
   let next = 0
   const worker = async () => {
     while (next < eligible.length) {
-      const run = eligible[next++]
+      const i = next++
       try {
-        await deps.api.runArchive(run.id, true)
+        await deps.api.runArchive(eligible[i].id, true)
       } catch (err) {
-        failures.set(run, err)
+        if (err instanceof ApiError && err.code === codeRunNotFound) {
+          deps.removeRun(eligible[i].id)
+        } else {
+          errors[i] = message(err)
+        }
       }
     }
   }
   await Promise.all(
     Array.from({ length: Math.min(clearDoneConcurrency, eligible.length) }, worker),
   )
-  let archived = 0
-  let failed = 0
-  let firstError: string | undefined
-  for (const run of eligible) {
-    if (!failures.has(run)) {
-      archived++
-      continue
-    }
-    const err = failures.get(run)
-    if (err instanceof ApiError && err.code === codeRunNotFound) {
-      deps.removeRun(run.id)
-      archived++
-      continue
-    }
-    failed++
-    firstError ??= message(err)
-  }
-  if (failed > 0) {
-    toast.error(`Archived ${archived}, ${failed} failed: ${firstError}`)
+  const failures = errors.filter((error) => error !== undefined)
+  const archived = eligible.length - failures.length
+  if (failures.length > 0) {
+    toast.error(`Archived ${archived}, ${failures.length} failed: ${failures[0]}`)
   } else {
     toast.success(`Archived ${archived} ${archived === 1 ? 'run' : 'runs'}`)
   }

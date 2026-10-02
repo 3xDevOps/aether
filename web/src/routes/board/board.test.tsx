@@ -1023,11 +1023,15 @@ describe('Clear done', () => {
     seedAs(alice, [kept, gone])
     render(<Board />)
 
-    // Only the older run is gone, so a removal keyed to the wrong settled
-    // result would drop `kept` instead.
-    vi.mocked(api.runArchive).mockImplementation(async (id: string) => {
-      if (id === gone.id) throw new ApiError(404, 'run.archive: not found', -32000)
-      return run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' })
+    // Only the older run is gone, so a removal keyed to the wrong call
+    // would drop `kept` instead.
+    let resolveKept: (() => void) | undefined
+    vi.mocked(api.runArchive).mockImplementation((id: string) => {
+      if (id === gone.id) return Promise.reject(new ApiError(404, 'run.archive: not found', -32000))
+      return new Promise((resolve) => {
+        resolveKept = () =>
+          resolve(run({ id, status: 'merged', archived_at: '2026-08-14T11:00:00Z' }))
+      })
     })
 
     fireEvent.click(column('Done').getByRole('button', { name: 'Clear done' }))
@@ -1035,8 +1039,13 @@ describe('Clear done', () => {
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive 2' }),
     )
 
+    // The gone run leaves the board without waiting on the pending archive.
+    await waitFor(() => expect(useStore.getState().runs[gone.id]).toBeUndefined())
+    expect(useStore.getState().runs[kept.id]).toBeDefined()
+    expect(toast.success).not.toHaveBeenCalled()
+
+    resolveKept?.()
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Archived 2 runs'))
-    expect(useStore.getState().runs[gone.id]).toBeUndefined()
     expect(useStore.getState().runs[kept.id]).toBeDefined()
   })
 
