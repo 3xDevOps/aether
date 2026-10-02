@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -321,10 +322,10 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatal(perr)
 	}
 	shared := func(name string) string { return string(grantee.ID) + ":" + string(owner.ID) + ":" + name }
-	s.cfg.Runs = &fakeRuns{missingLogins: map[string]bool{
-		shared("claude"): true,
-		shared("ownbot"): true,
-		string(grantee.ID) + ":" + string(grantee.ID) + ":claude": true,
+	s.cfg.Runs = &fakeRuns{sharedLaunches: map[string]scheduler.SharedLaunch{
+		shared("claude"): scheduler.SharedLoginMissing,
+		shared("ownbot"): scheduler.SharedOwnDefinitionOnly,
+		string(grantee.ID) + ":" + string(grantee.ID) + ":claude": scheduler.SharedLoginMissing,
 	}}
 	list := func(params []byte) map[string]protocol.AgentInfo {
 		t.Helper()
@@ -355,8 +356,8 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 	}
 	for name, want := range map[string]protocol.AgentInfo{
 		"claude": {Name: "claude", Source: "shipped", Installed: false, LoginMissing: true},
-		"codex":  {Name: "codex", Source: "shipped", Installed: true, LoginMissing: false},
-		"ownbot": {Name: "ownbot", Source: "member", Installed: true, LoginMissing: true},
+		"codex":  {Name: "codex", Source: "shipped", Installed: true},
+		"ownbot": {Name: "ownbot", Source: "member", Installed: true, OwnAccountOnly: true},
 	} {
 		got := agents[name]
 		got.InstallScript = ""
@@ -370,8 +371,8 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatalf("own account agents = %+v, want only the grantee's installations and definitions", agents)
 	}
 	for _, agent := range agents {
-		if agent.LoginMissing {
-			t.Fatalf("own account %s reports a missing login", agent.Name)
+		if agent.LoginMissing || agent.OwnAccountOnly {
+			t.Fatalf("own account %s reports a refusal: %+v", agent.Name, agent)
 		}
 	}
 }

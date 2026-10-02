@@ -207,7 +207,7 @@ describe('launch dialog', () => {
   it('says the caller\'s own definition runs only on their own account', async () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
-      ? [agentInfo(), agentInfo({ name: 'myagent', source: 'member', login_missing: true })]
+      ? [agentInfo(), agentInfo({ name: 'myagent', source: 'member', own_account_only: true })]
       : [agentInfo()])
     await open()
 
@@ -218,6 +218,26 @@ describe('launch dialog', () => {
     expect(screen.queryByText(/not logged in/)).toBeNull()
     await openSelect(screen.getByLabelText('Agent'))
     expect(screen.getByRole('option', { name: 'myagent (your account only)' }).getAttribute('aria-disabled')).toBe('true')
+    await closeList()
+  })
+
+  // The caller's own definition named like a server-wide one: a launch runs
+  // the server-wide definition, so the server reports the owner's missing
+  // login, and the dialog says that whatever the listed source.
+  it('takes the server\'s reason for the caller\'s definition named like a server-wide one', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+      ? [agentInfo(), agentInfo({ name: 'aider', source: 'member', login_missing: true })]
+      : [agentInfo()])
+    await open()
+
+    await pickOption(screen.getByLabelText('Account'), 'Bob (shared)')
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(
+      'Bob is not logged in to aider, so it cannot launch on this account. Bob logs in from their own environment terminal.',
+    ))
+    expect(screen.queryByText(/your own account/)).toBeNull()
+    await openSelect(screen.getByLabelText('Agent'))
+    expect(screen.getByRole('option', { name: 'aider (not logged in)' }).getAttribute('aria-disabled')).toBe('true')
     await closeList()
   })
 
@@ -369,13 +389,25 @@ describe('launch dialog', () => {
     it('says a worker on the caller\'s own definition runs only on their own account', async () => {
       vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
       vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
-        ? [agentInfo({ name: 'myagent', source: 'member', login_missing: true })]
+        ? [agentInfo({ name: 'myagent', source: 'member', own_account_only: true })]
         : [agentInfo()])
       await openSwarm()
 
       const worker = await screen.findByRole('checkbox', { name: /Bob · myagent/ }) as HTMLInputElement
       expect(worker.disabled).toBe(true)
       expect(worker.closest('label')?.textContent).toBe('Bob · myagent · your own definition runs only on your own account')
+    })
+
+    it('takes the server\'s reason for a worker on the caller\'s definition named like a server-wide one', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+      vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+        ? [agentInfo({ name: 'aider', source: 'member', login_missing: true })]
+        : [agentInfo()])
+      await openSwarm()
+
+      const worker = await screen.findByRole('checkbox', { name: /Bob · aider/ }) as HTMLInputElement
+      expect(worker.disabled).toBe(true)
+      expect(worker.closest('label')?.textContent).toBe('Bob · aider · Bob is not logged in to aider')
     })
 
     it('sends the same choices in the same order, under the same key, after a re-tick', async () => {

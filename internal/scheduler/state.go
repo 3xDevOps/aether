@@ -170,10 +170,6 @@ type sidecar struct {
 	EvidencePending bool              `json:"evidence_pending,omitempty"`
 	RunUser         string            `json:"run_user,omitempty"`
 	Home            string            `json:"home,omitempty"`
-	// HomeMember is whose persistent home the container mounts. A file
-	// without it was written before account shares were narrowed, when a
-	// container mounted the run account's whole home.
-	HomeMember string `json:"home_member,omitempty"`
 	// LoginMember is the account owner whose login paths the container
 	// mounts, empty when it mounts none.
 	LoginMember      string            `json:"login_member,omitempty"`
@@ -191,13 +187,8 @@ type sidecar struct {
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
 func (e *supervised) sidecar() sidecar {
-	var homeMember string
-	if !e.legacyHome {
-		homeMember = string(e.memberID)
-	}
 	return sidecar{
 		RunID:            string(e.runID),
-		HomeMember:       homeMember,
 		ContainerID:      string(e.containerID),
 		WorkspaceID:      string(e.workspaceID),
 		Mode:             e.launchMode,

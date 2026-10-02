@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -361,9 +362,9 @@ type fakeRuns struct {
 	calls           []string
 	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
-	// missingLogins names the harnesses LoginMissing reports, keyed by
-	// "member:account:harness".
-	missingLogins map[string]bool
+	// sharedLaunches is what CheckSharedLaunch reports, keyed by
+	// "member:account:harness"; absent means launchable.
+	sharedLaunches map[string]scheduler.SharedLaunch
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -429,10 +430,10 @@ func (f *fakeRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, mem
 	return f.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
 }
 
-func (f *fakeRuns) LoginMissing(_ context.Context, member, account domain.MemberID, harness string) (bool, error) {
+func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.missingLogins[fmt.Sprintf("%s:%s:%s", member, account, harness)], nil
+	return f.sharedLaunches[fmt.Sprintf("%s:%s:%s", member, account, harness)], nil
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {

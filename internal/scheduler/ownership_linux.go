@@ -22,8 +22,7 @@ import (
 type inodeKey struct{ dev, ino uint64 }
 
 // applyRunOwnership hands writable host surfaces (a run checkout when
-// present, the member's persistent home, and only the login paths an
-// account share mounts from the owner's home) to the resolved non-root
+// present, plus the member's persistent home) to the resolved non-root
 // container user before the container is created. Root containers (user == "")
 // need no pass: the v1 default stance is a root agent and a root server.
 //
@@ -40,7 +39,9 @@ type inodeKey struct{ dev, ino uint64 }
 // live containers use one uid:gid mapping, so this pass cannot flip ownership
 // back and forth. A shared login is not held against its owner: an owner's
 // container with another uid takes the login back here, and a recipient's
-// live run on it loses access.
+// live run on it loses access. Subpath mounts are skipped: a login pinned in
+// the member's own home is chowned with that home, and a login mounted from
+// another member's home is applyLoginOwnership's.
 func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mounts []runtime.Mount, user string) error {
 	if user == "" {
 		return nil
@@ -59,16 +60,46 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mou
 		}
 	}
 	for _, m := range mounts {
-		if m.ReadOnly {
-			continue
-		}
-		if m.Subpath != "" {
-			if err := chownSubpath(m.HostPath, m.Subpath, uid, gid); err != nil {
-				return err
-			}
+		if m.ReadOnly || m.Subpath != "" {
 			continue
 		}
 		if err := chownTree(m.HostPath, uid, gid, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyLoginOwnership hands the login paths entry's container mounts from
+// login's home to user. s.mu is held from the reservation check to the end
+// of the chown, and every reservation is made under s.mu: either this chown
+// finishes before a container of login's reserves that home, whose own
+// ownership pass then takes the login back, or that reservation is seen
+// here and the launch is refused. The check alone, as made when entry
+// reserved, would let this chown land after the owner's pass.
+func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID, mounts []runtime.Mount, user string) error {
+	if user == "" || login == "" {
+		return nil
+	}
+	uid, gid, err := parseNumericUser(user)
+	if err != nil {
+		return err
+	}
+	loginHome, err := s.cfg.Homes.Path(login)
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve account home: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncRunUserReservationsLocked()
+	if err := s.reservationConflictLocked(entry.memberID, login, user, "live run "+string(entry.runID)); err != nil {
+		return err
+	}
+	for _, m := range mounts {
+		if m.ReadOnly || m.Subpath == "" || m.HostPath != loginHome {
+			continue
+		}
+		if err := chownSubpath(m.HostPath, m.Subpath, uid, gid); err != nil {
 			return err
 		}
 	}

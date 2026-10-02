@@ -595,6 +595,12 @@ type Run struct {
 	// run ownership or actor attribution. Empty rows from older schemas fall
 	// back to MemberID.
 	AccountMemberID MemberID
+	// HomeMemberID is whose persistent home the run's container mounts. It
+	// is set to the launcher when the run is created; a handoff changes
+	// MemberID, never this. It is empty on rows created before account
+	// shares were narrowed, whose containers mounted the account's whole
+	// home.
+	HomeMemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
 	// Title is the latest terminal title reported by the agent.
@@ -663,6 +669,14 @@ func (r *Run) AccountMember() MemberID {
 		return r.AccountMemberID
 	}
 	return r.MemberID
+}
+
+// HomeMember returns whose persistent home the run's container mounts.
+func (r *Run) HomeMember() MemberID {
+	if r.HomeMemberID != "" {
+		return r.HomeMemberID
+	}
+	return r.AccountMember()
 }
 
 // AccountShare grants Grantee permission to launch agents with Owner's

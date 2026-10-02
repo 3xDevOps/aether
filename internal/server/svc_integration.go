@@ -205,10 +205,11 @@ func integrationCleanup(svc *integration.Service) func(context.Context) error {
 
 // integrationEnvironment is the only place where the candidate service gets
 // an execution environment. It resolves the authenticated human directly,
-// while an agent actor gets the home its run's live container mounts, never
-// the run's current owner: a handoff changes the owner without the
-// recipient's consent while the container keeps the launcher's home. No
-// request field can select a member or grant access to another account.
+// while an agent actor gets the home its run's container mounts, recorded on
+// the run row at launch, never the run's current owner: a handoff changes the
+// owner without the recipient's consent while the container keeps the
+// launcher's home. No request field can select a member or grant access to
+// another account.
 func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *domain.Workspace, string) (runtime.Spec, error) {
 	return func(ctx context.Context, actor integration.Actor, ws *domain.Workspace, checkout string) (runtime.Spec, error) {
 		if d.Store == nil || d.Runs == nil {
@@ -220,14 +221,14 @@ func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *do
 
 		memberID := actor.MemberID
 		if actor.RunID != "" {
-			live, err := d.Runs.ResolveLiveRun(ctx, actor.RunID, true)
+			run, err := d.Store.GetRun(ctx, actor.RunID)
 			if err != nil {
-				return runtime.Spec{}, fmt.Errorf("integration: resolve the home run %q mounts: %w", actor.RunID, err)
+				return runtime.Spec{}, fmt.Errorf("integration: resolve run %q: %w", actor.RunID, err)
 			}
-			if live.Run.WorkspaceID != ws.ID {
+			if run.WorkspaceID != ws.ID {
 				return runtime.Spec{}, fmt.Errorf("integration: run %q does not belong to workspace %q", actor.RunID, ws.ID)
 			}
-			memberID = live.HomeMember
+			memberID = run.HomeMember()
 		}
 		if memberID == "" {
 			return runtime.Spec{}, fmt.Errorf("integration: authenticated member is required")

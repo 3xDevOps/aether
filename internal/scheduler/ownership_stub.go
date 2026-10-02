@@ -18,3 +18,9 @@ func (s *Scheduler) applyRunOwnership(_ *domain.Workspace, _ *domain.Run, _ []ru
 	}
 	return errors.New("scheduler: non-root run users require a linux host")
 }
+
+// applyLoginOwnership has nothing to do here: applyRunOwnership already
+// refused a non-root user.
+func (s *Scheduler) applyLoginOwnership(_ *supervised, _ domain.MemberID, _ []runtime.Mount, _ string) error {
+	return nil
+}

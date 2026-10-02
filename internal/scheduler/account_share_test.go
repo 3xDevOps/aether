@@ -2,6 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -184,9 +187,12 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		if err != nil || info.IsDir() != tc.dir {
 			t.Fatalf("%s: launcher mountpoint = %v, %v; want dir=%v", tc.harness, info, err, tc.dir)
 		}
+		if run.HomeMemberID != e.member.ID {
+			t.Fatalf("%s: run home member = %q, want the launcher %s", tc.harness, run.HomeMemberID, e.member.ID)
+		}
 		sc, err := e.sched.readSidecar(run.ID)
-		if err != nil || sc.HomeMember != string(e.member.ID) || sc.LoginMember != string(e.owner.ID) {
-			t.Fatalf("%s: sidecar = %+v, %v; want home %s and login %s", tc.harness, sc, err, e.member.ID, e.owner.ID)
+		if err != nil || sc.LoginMember != string(e.owner.ID) {
+			t.Fatalf("%s: sidecar = %+v, %v; want login %s", tc.harness, sc, err, e.owner.ID)
 		}
 	}
 
@@ -488,6 +494,64 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	}
 }
 
+// A recipient's chown of the owner's login runs after its reservation. When
+// the owner's container reserves the owner's home with another uid in
+// between and takes the login back, that late chown is refused instead of
+// handing the login back to the recipient under the owner's live container.
+func TestSharedLoginChownAfterTheOwnerReservesIsRefused(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() != 0 {
+		t.Skip("ownership pass needs root to chown")
+	}
+	e := newShareEnv(t, withImageUsers(map[string]string{launcherImage: "1000:1000", ownerImage: "2000:2000"}))
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	run, err := e.launch(t, "claude")
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err = e.ownerLaunch(t); err != nil {
+		t.Fatalf("owner Launch: %v", err)
+	}
+	login := filepath.Join(e.ownerHome, ".claude", ".credentials.json")
+	if got := ownerOf(t, login); got != 2000 {
+		t.Fatalf("owner's login owned by %d after the owner's run, want 2000", got)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	err = e.sched.applyLoginOwnership(entry, e.owner.ID, e.rt.byName(string(run.ID)).spec.Mounts, "1000:1000")
+	if err == nil || !strings.Contains(err.Error(), "the login "+string(e.owner.ID)+" shares is held by live run") {
+		t.Fatalf("late login chown = %v, want the login conflict", err)
+	}
+	if got := ownerOf(t, login); got != 2000 {
+		t.Fatalf("late login chown handed the owner's login to %d", got)
+	}
+}
+
+// A recipient's run on the owner's login never blocks the owner's
+// environment terminal with another mapping: not when a surviving terminal's
+// metadata is resolved, and not when its ownership is rechecked. The
+// recipient's own home stays held against a terminal of theirs.
+func TestOwnerTerminalIsNotBlockedByARecipientsLogin(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	e.sched.mu.Lock()
+	e.sched.syncRunUserReservationsLocked()
+	e.sched.credentialUsers[&credentialUserReservation{home: e.member.ID, login: e.owner.ID, user: "1000:1000", owner: "live run recipient"}] = struct{}{}
+	e.sched.mu.Unlock()
+	owner := &terminalSupervision{member: e.owner.ID}
+	if err := e.sched.resolveTerminalMetadata(owner, "2000:2000", "/home/aether"); err != nil || owner.ownershipBlocked {
+		t.Fatalf("owner's terminal metadata beside a recipient's run = %v (blocked %v), want accepted", err, owner.ownershipBlocked)
+	}
+	if err := e.sched.checkTerminalOwnership(owner); err != nil {
+		t.Fatalf("owner's terminal ownership beside a recipient's run: %v", err)
+	}
+	recipient := &terminalSupervision{member: e.member.ID}
+	if err := e.sched.resolveTerminalMetadata(recipient, "2000:2000", "/home/aether"); err == nil || !recipient.ownershipBlocked {
+		t.Fatalf("recipient's terminal with another mapping = %v, want a conflict", err)
+	}
+}
+
 // Two recipients' runs on one login must share a mapping, so neither flips
 // the login's owner under the other.
 func TestSharedLaunchRecipientsShareOneMapping(t *testing.T) {
@@ -564,9 +628,62 @@ func TestRecoveredSharedRunReservations(t *testing.T) {
 	}
 }
 
+// A shared run whose sidecar is lost gets a synthetic one at restart. Its
+// owner holds the launcher's home, recorded on the run row, and never the
+// account owner's, so the owner's own containers still start.
+func TestRecoveredSharedRunWithoutSidecarHoldsTheLaunchersHome(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	ctx := t.Context()
+	closed, err := e.launch(t, "fake")
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err = e.sched.CloseRun(ctx, closed.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	unstarted, err := e.launch(t, "fake")
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.db.UpdateRunStatus(ctx, unstarted.ID, domain.RunProvisioning, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []*domain.Run{closed, unstarted} {
+		if err = os.Remove(e.sched.sidecarPath(run.ID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = &creationKeyFailureRuntime{Runtime: e.rt, findErr: errors.New("runtime API unavailable")}
+	if err = s2.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	for _, run := range []*domain.Run{closed, unstarted} {
+		s2.mu.Lock()
+		entry := s2.runs[run.ID]
+		s2.mu.Unlock()
+		if entry == nil || !entry.destroyPending || entry.memberID != e.member.ID || entry.loginMember != "" {
+			t.Fatalf("synthetic owner of %s = %+v, want it on the launcher's home %s", run.ID, entry, e.member.ID)
+		}
+	}
+	if err = s2.reserveRunUser(&supervised{runID: "run-owner", memberID: e.owner.ID}, "2000:2000", true); err != nil {
+		t.Fatalf("owner's own container beside the synthetic owners: %v", err)
+	}
+	err = s2.reserveRunUser(&supervised{runID: "run-home", memberID: e.member.ID}, "2000:2000", true)
+	if err == nil || !strings.Contains(err.Error(), "home "+string(e.member.ID)+" is reserved") {
+		t.Fatalf("launcher's home beside the synthetic owners = %v, want reservation refusal", err)
+	}
+}
+
 // A container created before account shares were narrowed mounts the
 // owner's whole home: it stays supervised against that home, but it is never
-// relaunched. A narrowed shared run relaunches normally.
+// relaunched, across restarts and whatever its sidecar says, including a
+// home_member key an earlier build wrote. A narrowed shared run relaunches
+// normally.
 func TestLegacySharedRunIsNotRelaunched(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
@@ -588,31 +705,71 @@ func TestLegacySharedRunIsNotRelaunched(t *testing.T) {
 	if err = e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
-	sc, err := e.sched.readSidecar(legacy.ID)
+	e.clearHomeMember(t, legacy.ID)
+	path := e.sched.sidecarPath(legacy.ID)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc.HomeMember, sc.LoginMember = "", ""
-	if err = e.sched.writeSidecar(sc); err != nil {
+	var fields map[string]any
+	if err = json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["home_member"] = string(e.member.ID)
+	if data, err = json.Marshal(fields); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	s2 := e.newScheduler(t, e.rt, newFakePTY())
-	_, err = s2.Relaunch(t.Context(), legacy.ID, e.member.ID)
-	if err == nil || !strings.Contains(err.Error(), "predates the narrowed account share") {
-		t.Fatalf("Relaunch legacy = %v, want refusal", err)
+	var last *Scheduler
+	for restart := 1; restart <= 2; restart++ {
+		s := e.newScheduler(t, e.rt, newFakePTY())
+		if err = s.recoverRuns(t.Context()); err != nil {
+			t.Fatalf("restart %d: recoverRuns: %v", restart, err)
+		}
+		_, err = s.Relaunch(t.Context(), legacy.ID, e.member.ID)
+		if err == nil || !strings.Contains(err.Error(), "predates the narrowed account share") {
+			t.Fatalf("restart %d: Relaunch legacy = %v, want refusal", restart, err)
+		}
+		s.mu.Lock()
+		entry := s.runs[legacy.ID]
+		var werr error
+		if entry != nil {
+			werr = s.writeSidecar(entry.sidecar())
+		}
+		s.mu.Unlock()
+		if entry == nil || entry.memberID != e.owner.ID {
+			t.Fatalf("restart %d: legacy entry = %+v, want it supervised against the owner's home", restart, entry)
+		}
+		if werr != nil {
+			t.Fatal(werr)
+		}
+		last = s
+		if restart == 1 {
+			if err = s.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	s2.mu.Lock()
-	entry := s2.runs[legacy.ID]
-	s2.mu.Unlock()
-	if entry == nil || entry.memberID != e.owner.ID || entry.loginMember != "" {
-		t.Fatalf("legacy entry = %+v, want it supervised against the owner's home", entry)
-	}
-	if sc, err := s2.readSidecar(legacy.ID); err != nil || sc.HomeMember != "" {
-		t.Fatalf("legacy sidecar = %+v, %v; want it still without a home member", sc, err)
-	}
-	if _, err := s2.Relaunch(t.Context(), narrowed.ID, e.member.ID); err != nil {
+	if _, err := last.Relaunch(t.Context(), narrowed.ID, e.member.ID); err != nil {
 		t.Fatalf("Relaunch narrowed: %v", err)
+	}
+}
+
+// clearHomeMember makes run a row from before account shares were narrowed
+// (store migration v46), when a run's container mounted its account's whole
+// home.
+func (e *testEnv) clearHomeMember(t *testing.T, run domain.RunID) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", filepath.Join(filepath.Dir(e.cfg.StateDir), "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err = raw.ExecContext(t.Context(), `UPDATE runs SET home_member_id = NULL WHERE id = ?`, run); err != nil {
+		t.Fatal(err)
 	}
 }
 

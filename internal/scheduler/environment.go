@@ -231,24 +231,40 @@ func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, 
 		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName)
 }
 
-// LoginMissing reports whether member's launch of harnessName on account
-// would be refused over the account owner's login: the harness is member's
-// own definition, or its login paths are missing from the owner's home or
-// cannot be shared. It resolves exactly as a launch does, but changes
-// nothing in either home.
-func (s *Scheduler) LoginMissing(ctx context.Context, member, account domain.MemberID, harnessName string) (bool, error) {
+// SharedLaunch is whether a launch on another member's shared account would
+// start, and if not, why.
+type SharedLaunch int
+
+const (
+	SharedLaunchable SharedLaunch = iota
+	// SharedLoginMissing: the account owner has no login for the harness at
+	// any declared path, or one that cannot be shared.
+	SharedLoginMissing
+	// SharedOwnDefinitionOnly: the harness resolves to member's own
+	// definition, which runs only on member's own account.
+	SharedOwnDefinitionOnly
+)
+
+// CheckSharedLaunch reports whether member's launch of harnessName on
+// account would be refused over the harness or the owner's login, resolving
+// the harness exactly as a launch does. It changes no file in either home;
+// reading the owner's home creates it, empty, if it does not exist yet. On
+// member's own account a launch is always SharedLaunchable here.
+func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harnessName string) (SharedLaunch, error) {
 	if account == member || s.cfg.Homes == nil {
-		return false, nil
+		return SharedLaunchable, nil
 	}
 	profile, _, _, err := s.launchProfile(ctx, member, account, harnessName)
 	if errors.Is(err, errMemberDefinitionOnly) {
-		return true, nil
+		return SharedOwnDefinitionOnly, nil
 	}
 	if err != nil {
-		return false, err
+		return SharedLaunchable, err
 	}
-	_, err = s.accountLogins(ctx, account, profile)
-	return err != nil, nil
+	if _, err = s.accountLogins(ctx, account, profile); err != nil {
+		return SharedLoginMissing, nil
+	}
+	return SharedLaunchable, nil
 }
 
 // pinnedLogins mounts each login file of a PinLogin harness in member's own

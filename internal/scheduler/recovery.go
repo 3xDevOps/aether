@@ -101,7 +101,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		// normal recovery, otherwise a natural exit leaves the row stranded.
 		s.startSupervision(entry)
 	}
-	if entry.legacyHome && old.MemberID != old.AccountMember() {
+	if old.HomeMemberID == "" && old.MemberID != old.AccountMember() {
 		return nil, fmt.Errorf("%w: run %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new run",
 			ErrInvalidTransition, run)
 	}
@@ -1437,15 +1437,6 @@ func containerHome(env []string) string {
 	return ""
 }
 
-// sidecarHomeMember is whose home sc's container mounts: a sidecar without
-// HomeMember predates narrowed shares and mounts the run account's home.
-func sidecarHomeMember(r *domain.Run, sc sidecar) domain.MemberID {
-	if sc.HomeMember != "" {
-		return domain.MemberID(sc.HomeMember)
-	}
-	return r.AccountMember()
-}
-
 func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	started := time.Now().UTC()
 	if r.StartedAt != nil {
@@ -1470,8 +1461,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		workspaceID: r.WorkspaceID,
 		containerID: runtime.ID(sc.ContainerID),
 		task:        r.Task,
-		memberID:    sidecarHomeMember(r, sc),
-		legacyHome:  sc.HomeMember == "",
+		memberID:    r.HomeMember(),
 		loginMember: domain.MemberID(sc.LoginMember),
 		// The reporter and the last report both come off the sidecar,
 		// because only the live server saw either: which reporter the

@@ -1,9 +1,7 @@
 package server
 
 import (
-	"context"
-	"encoding/json"
-	"os"
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -16,21 +14,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// keyedRuntime finds every run's container under one ID; building an
-// environment for a member without a saved image touches nothing else.
-type keyedRuntime struct{ runtime.Runtime }
-
-func (keyedRuntime) FindByCreationKey(context.Context, string) (runtime.ID, error) {
-	return "c1", nil
-}
-
-// A run agent verifies in the home its own container mounts. A handoff
-// rewrites the run's owner but not that container, so verification keeps
-// the launcher's home and never gets the new owner's or the account owner's.
+// A run agent verifies in the home its run's container mounts, recorded on
+// the run row at launch. A handoff rewrites the run's owner but not that
+// home, so verification keeps the launcher's home and never gets the new
+// owner's or the account owner's. No container or sidecar is consulted: the
+// runtime panics on any call.
 func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "state.db"))
+	dbPath := filepath.Join(dir, "state.db")
+	db, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +53,9 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stateDir := filepath.Join(dir, "scheduler")
 	sched, err := scheduler.New(scheduler.Config{
-		Store: db, Bus: bus, Homes: homes, StateDir: stateDir,
-		Runtime: keyedRuntime{}, Git: struct{ scheduler.GitEngine }{}, PTY: struct{ scheduler.PTYHost }{},
+		Store: db, Bus: bus, Homes: homes, StateDir: filepath.Join(dir, "scheduler"),
+		Runtime: struct{ runtime.Runtime }{}, Git: struct{ scheduler.GitEngine }{}, PTY: struct{ scheduler.PTYHost }{},
 		StandardImage: "busybox:1.36", WorktreeMount: "/workspace",
 	})
 	if err != nil {
@@ -73,23 +65,6 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	environment := integrationEnvironment(Deps{Store: db, Runs: sched})
 	checkout := filepath.Join(dir, "checkout")
 
-	if _, err = environment(ctx, integration.Actor{RunID: run.ID}, ws, checkout); err == nil {
-		t.Fatal("a run with no live container or sidecar got a verification environment")
-	}
-
-	writeSidecar := func(fields map[string]string) {
-		t.Helper()
-		data, marshalErr := json.Marshal(fields)
-		if marshalErr != nil {
-			t.Fatal(marshalErr)
-		}
-		if mkdirErr := os.MkdirAll(stateDir, 0o700); mkdirErr != nil {
-			t.Fatal(mkdirErr)
-		}
-		if writeErr := os.WriteFile(filepath.Join(stateDir, string(run.ID)+".json"), data, 0o600); writeErr != nil {
-			t.Fatal(writeErr)
-		}
-	}
 	wantOnlyHome := func(stage string, member domain.MemberID) {
 		t.Helper()
 		spec, envErr := environment(ctx, integration.Actor{RunID: run.ID}, ws, checkout)
@@ -105,7 +80,6 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 		}
 	}
 
-	writeSidecar(map[string]string{"run_id": string(run.ID), "container_id": "c1", "home_member": string(launcher.ID), "login_member": string(owner.ID)})
 	wantOnlyHome("before handoff", launcher.ID)
 
 	if err = db.TransferRun(ctx, run.ID, recipient.ID); err != nil {
@@ -113,6 +87,15 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	}
 	wantOnlyHome("after handoff", launcher.ID)
 
-	writeSidecar(map[string]string{"run_id": string(run.ID), "container_id": "c1"})
-	wantOnlyHome("legacy sidecar", owner.ID)
+	// A row from before account shares were narrowed has no home member;
+	// its container mounted the account's whole home.
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err = raw.ExecContext(ctx, `UPDATE runs SET home_member_id = NULL WHERE id = ?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	wantOnlyHome("legacy row", owner.ID)
 }

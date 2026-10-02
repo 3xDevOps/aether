@@ -1365,6 +1365,13 @@ CREATE INDEX idx_member_devices_identity ON member_devices(provider, subject);
 CREATE INDEX idx_member_devices_approval_code
 	ON member_devices(approval_code) WHERE approval_code <> '';
 `,
+	// v46: whose persistent home a run's container mounts, fixed at launch;
+	// a handoff changes member_id, never this. No backfill: NULL marks a row
+	// from before account shares were narrowed, when a run's container
+	// mounted its account's whole home.
+	`
+ALTER TABLE runs ADD COLUMN home_member_id TEXT REFERENCES members(id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

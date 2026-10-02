@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -89,9 +90,12 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		}
 		info := protocol.AgentInfo{Name: name, Source: source, Installed: installed, InstallScript: installScript}
 		if account != member {
-			if info.LoginMissing, err = s.cfg.Runs.LoginMissing(ctx, member, account, name); err != nil {
+			shared, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, name)
+			if err != nil {
 				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", name, err)
 			}
+			info.LoginMissing = shared == scheduler.SharedLoginMissing
+			info.OwnAccountOnly = shared == scheduler.SharedOwnDefinitionOnly
 		}
 		return info, nil
 	}

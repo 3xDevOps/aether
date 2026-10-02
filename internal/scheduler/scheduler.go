@@ -264,15 +264,9 @@ type supervised struct {
 	workspaceID domain.WorkspaceID
 	containerID runtime.ID
 	task        string
-	// memberID identifies the persistent home the container mounts, shared
-	// by every live container of that member: the launcher's, or for a
-	// container created before account shares were narrowed, the account
-	// owner's.
+	// memberID identifies the persistent home the container mounts
+	// (domain.Run.HomeMember), shared by every live container of that member.
 	memberID domain.MemberID
-	// legacyHome marks a container whose sidecar predates HomeMember: it
-	// mounts the run account's whole home. It keeps the sidecar without
-	// HomeMember so a later restart still knows.
-	legacyHome bool
 	// loginMember is the account owner whose login paths the container
 	// mounts and the ownership pass therefore also changes; empty when
 	// nothing of another member's is mounted.

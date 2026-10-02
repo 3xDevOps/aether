@@ -204,15 +204,16 @@ func TestRevokedShareDropsThePin(t *testing.T) {
 	}
 }
 
-// LoginMissing answers as a launch would, without touching either home.
-func TestLoginMissingMatchesLaunch(t *testing.T) {
+// CheckSharedLaunch answers as a launch would, and says why a launch would
+// be refused, without touching a file in either home.
+func TestCheckSharedLaunchMatchesLaunch(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
-	missing := func(member, account domain.MemberID, name string) bool {
+	check := func(member, account domain.MemberID, name string) SharedLaunch {
 		t.Helper()
-		got, err := e.sched.LoginMissing(t.Context(), member, account, name)
+		got, err := e.sched.CheckSharedLaunch(t.Context(), member, account, name)
 		if err != nil {
-			t.Fatalf("LoginMissing(%s): %v", name, err)
+			t.Fatalf("CheckSharedLaunch(%s): %v", name, err)
 		}
 		return got
 	}
@@ -221,42 +222,47 @@ func TestLoginMissingMatchesLaunch(t *testing.T) {
 		TUIArgs: []string{"aider", "{task}"}, HeadlessArgs: []string{"aider", "-p", "{task}"},
 	}
 	storeMemberDefinition(t, e.testEnv, e.member.ID, aider)
+	// The launcher's own definition named like a server-wide one: a launch
+	// resolves the server-wide claude, so its refusal is the owner's login.
+	ownClaude := aider
+	ownClaude.Name = "claude"
+	storeMemberDefinition(t, e.testEnv, e.member.ID, ownClaude)
 
-	if !missing(e.member.ID, e.owner.ID, "claude") {
-		t.Fatal("claude without the owner's login is not reported missing")
+	if got := check(e.member.ID, e.owner.ID, "claude"); got != SharedLoginMissing {
+		t.Fatalf("claude without the owner's login = %v, want SharedLoginMissing", got)
 	}
-	if _, err := e.launch(t, "claude"); err == nil {
-		t.Fatal("launch without the owner's login was accepted")
+	if _, err := e.launch(t, "claude"); err == nil || !strings.Contains(err.Error(), "is not logged in to claude") {
+		t.Fatalf("launch without the owner's login = %v, want the not-logged-in refusal", err)
 	}
-	if !missing(e.member.ID, e.owner.ID, "aider") {
-		t.Fatal("the launcher's own definition on a shared account is not reported missing")
+	if got := check(e.member.ID, e.owner.ID, "aider"); got != SharedOwnDefinitionOnly {
+		t.Fatalf("the launcher's own definition on a shared account = %v, want SharedOwnDefinitionOnly", got)
 	}
-	if missing(e.member.ID, e.member.ID, "aider") {
-		t.Fatal("the launcher's own definition on their own account reports a missing login")
+	if got := check(e.member.ID, e.member.ID, "aider"); got != SharedLaunchable {
+		t.Fatalf("the launcher's own definition on their own account = %v, want SharedLaunchable", got)
 	}
-	if missing(e.member.ID, e.owner.ID, "fake") || missing(e.member.ID, e.member.ID, "claude") {
-		t.Fatal("a harness without login paths, or the caller's own account, reports a missing login")
+	if check(e.member.ID, e.owner.ID, "fake") != SharedLaunchable || check(e.member.ID, e.member.ID, "claude") != SharedLaunchable {
+		t.Fatal("a harness without login paths, or the caller's own account, is refused")
 	}
-	if _, err := e.sched.LoginMissing(t.Context(), e.member.ID, e.owner.ID, "nosuch"); err == nil {
+	if _, err := e.sched.CheckSharedLaunch(t.Context(), e.member.ID, e.owner.ID, "nosuch"); err == nil {
 		t.Fatal("unknown harness resolved")
 	}
 
 	writeHomeFiles(t, e.ownerHome, claudeLogin, ".aider/auth.json")
 	aider.CredentialPaths = []string{"/root/.aider/auth.json"}
 	storeMemberDefinition(t, e.testEnv, e.owner.ID, aider)
-	if missing(e.member.ID, e.owner.ID, "claude") {
-		t.Fatal("claude with the owner's login reported missing")
+	if got := check(e.member.ID, e.owner.ID, "claude"); got != SharedLaunchable {
+		t.Fatalf("claude with the owner's login = %v, want SharedLaunchable", got)
 	}
-	if !missing(e.member.ID, e.owner.ID, "aider") {
-		t.Fatal("the launcher's own definition is launchable because the owner defined one too")
+	if got := check(e.member.ID, e.owner.ID, "aider"); got != SharedOwnDefinitionOnly {
+		t.Fatalf("the launcher's own definition the owner also defined = %v, want SharedOwnDefinitionOnly", got)
 	}
 	if _, err := os.Lstat(filepath.Join(e.adaHome, ".claude")); !os.IsNotExist(err) {
-		t.Fatalf("LoginMissing created .claude in the launcher's home: %v", err)
+		t.Fatalf("CheckSharedLaunch created .claude in the launcher's home: %v", err)
 	}
 
 	replaceWithLink(t, filepath.Join(e.ownerHome, claudeLogin), filepath.Join(e.ownerHome, ".aider/auth.json"))
-	if !missing(e.member.ID, e.owner.ID, "claude") {
-		t.Fatal("symlinked owner login is not reported missing")
+	if got := check(e.member.ID, e.owner.ID, "claude"); got != SharedLoginMissing {
+		t.Fatalf("symlinked owner login = %v, want SharedLoginMissing", got)
 	}
 }
 
@@ -273,8 +279,8 @@ func TestSharerPlaceholderIsNotALogin(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "is not logged in to claude") {
 		t.Fatalf("recipient launch on the placeholder = %v, want the not-logged-in refusal", err)
 	}
-	if missing, err := e.sched.LoginMissing(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || !missing {
-		t.Fatalf("LoginMissing on the placeholder = %v, %v; want true", missing, err)
+	if got, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginMissing {
+		t.Fatalf("CheckSharedLaunch on the placeholder = %v, %v; want SharedLoginMissing", got, err)
 	}
 	if got := subpathMounts(e.terminal(t)); !slices.Equal(got, []runtime.Mount{e.pin()}) {
 		t.Fatalf("sharer terminal subpath mounts = %+v, want the pin", got)
@@ -297,8 +303,8 @@ func TestSharerHardLinkedLoginIsRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "hard link") {
 		t.Fatalf("recipient launch on a hard-linked login = %v, want a hard-link refusal", err)
 	}
-	if missing, err := e.sched.LoginMissing(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || !missing {
-		t.Fatalf("LoginMissing on a hard-linked login = %v, %v; want true", missing, err)
+	if got, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginMissing {
+		t.Fatalf("CheckSharedLaunch on a hard-linked login = %v, %v; want SharedLoginMissing", got, err)
 	}
 	if got := subpathMounts(e.ownRun(t)); len(got) != 0 {
 		t.Fatalf("sharer run subpath mounts = %+v, want none", got)
