@@ -3,13 +3,12 @@
 // templates for tui and headless modes (auto/full-permission flags applied
 // by default), the environment variables that pass plain API keys from
 // server-side config into run containers and the fixed ones the CLI needs to
-// start there at all, the container-side paths holding the harness's native
-// login state (persisted per member under <data>/homes/<member-id>/ and
-// bind-mounted read-write into every run), an explicit numeric uid:gid
-// mapping for images whose configured user is named rather than numeric,
-// and the short runtime-scoped discovery mechanism that points the agent at
-// the staged coordination CLI. Lifecycle status reporting remains a
-// separate per-launch profile capability.
+// start there at all, the home-relative login paths an account share exposes
+// from the account owner's home, an explicit numeric uid:gid mapping for
+// images whose configured user is named rather than numeric, and the short
+// runtime-scoped discovery mechanism that points the agent at the staged
+// coordination CLI. Lifecycle status reporting remains a separate per-launch
+// profile capability.
 //
 // The registry is a map and a few functions, not a plugin system.
 
@@ -19,6 +18,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -258,11 +258,17 @@ type Profile struct {
 	// value: they state a launch requirement of the CLI itself, so a
 	// workspace variable never overrides them.
 	Env map[string]string
-	// CredentialPaths are home-relative paths holding the harness's native
-	// login state (e.g. ".claude"). They are persisted in the member's
-	// shared home and available read-write in every run. This is the
-	// login-home list; it is independent of LocalRoot.
+	// CredentialPaths is the explicit allowlist of paths an account share
+	// exposes from the account owner's home: each is a file or directory
+	// holding the harness's native login state. Everything else in a shared
+	// run is the launcher's. Resolve them with LoginPaths.
 	CredentialPaths []string
+	// PinLogin means the CLI replaces its login file by rename instead of
+	// rewriting it, so once the member has shared their account the file is
+	// mounted in place in their own containers too; the rename then fails
+	// with EBUSY and the CLI's own in-place fallback keeps every writer on
+	// the inode recipients' runs hold. Definitions never set it.
+	PinLogin bool
 	// LocalRoot is the home-relative directory captured as the agent
 	// profile (e.g. ".claude"). Empty means no profile sync (custom).
 	// The container target is filepath.ToSlash(path.Join(HomeDir(user), LocalRoot)).
@@ -384,10 +390,14 @@ var profiles = map[string]Profile{
 		// environment declares a sandbox. The run container is that
 		// sandbox.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
-		CredentialPaths: []string{".claude"},
-		LocalRoot:       ".claude",
-		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
-		DiscoveryArgs:   []string{"--append-system-prompt", DiscoveryInstruction},
+		CredentialPaths: []string{".claude/.credentials.json"},
+		// Claude Code writes the login to a temporary file and renames it
+		// over the old one, and rewrites it in place only when that rename
+		// fails with EXDEV, EPERM, EEXIST or EBUSY.
+		PinLogin:      true,
+		LocalRoot:     ".claude",
+		DenyNames:     []string{".credentials.json", "credentials", ".claude.json"},
+		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
 		// Claude Code runs a command on every lifecycle event a settings
 		// file registers, and --settings merges one more settings document
 		// over the member's own for this launch alone.
@@ -402,7 +412,7 @@ var profiles = map[string]Profile{
 		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
 		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},
-		CredentialPaths: []string{".codex"},
+		CredentialPaths: []string{".codex/auth.json"},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
 		// Codex's developer_instructions config key is a one-launch
@@ -429,7 +439,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs: []string{"pi", "-p", TaskPlaceholder},
 		// pi has no permission prompt, so there is no bypass flag to apply.
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
-		CredentialPaths: []string{".pi"},
+		CredentialPaths: []string{".pi/agent/auth.json"},
 		LocalRoot:       ".pi",
 		// pi stores provider keys and OAuth tokens under ~/.pi/agent/.
 		DenyNames:     []string{"auth.json", "oauth.json"},
@@ -449,11 +459,13 @@ var profiles = map[string]Profile{
 	// omp is a fork of pi and takes the same extension. It has a
 	// permission prompt of its own, which --auto-approve bypasses.
 	"omp": {
-		Name:            "omp",
-		TUIArgs:         []string{"omp", "--auto-approve", TaskPlaceholder},
-		HeadlessArgs:    []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
-		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
-		CredentialPaths: []string{".omp"},
+		Name:           "omp",
+		TUIArgs:        []string{"omp", "--auto-approve", TaskPlaceholder},
+		HeadlessArgs:   []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		// omp keeps its login in a SQLite WAL database beside its config,
+		// and a WAL database cannot be shared file by file.
+		CredentialPaths: []string{".omp/agent"},
 		LocalRoot:       ".omp",
 		// omp keeps provider keys and OAuth tokens in the SQLite database
 		// under ~/.omp/agent/, so the write-ahead log holds them too.
@@ -471,7 +483,7 @@ var profiles = map[string]Profile{
 		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
 		HeadlessArgs:    []string{"opencode", "run", TaskPlaceholder},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
-		CredentialPaths: []string{".local/share/opencode"},
+		CredentialPaths: []string{".local/share/opencode/auth.json"},
 		LocalRoot:       ".local/share/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
 		// The TUI accepts steered text into its editor on the first
@@ -650,6 +662,22 @@ func HomeRelative(p string) string {
 		return "."
 	}
 	return clean
+}
+
+// LoginPaths returns CredentialPaths relative to the container home. A
+// definition carries absolute /root or /home/aether paths; whatever the
+// spelling, each result is a clean local path strictly below the home, so a
+// share can never expose the home itself or anything outside it.
+func (p Profile) LoginPaths() ([]string, error) {
+	out := make([]string, 0, len(p.CredentialPaths))
+	for _, raw := range p.CredentialPaths {
+		rel := HomeRelative(raw)
+		if path.Clean(raw) != raw || rel == "." || !filepath.IsLocal(rel) || strings.ContainsAny(rel, "\\\x00") {
+			return nil, fmt.Errorf("harness: %s login path %q is not a path below the home", p.Name, raw)
+		}
+		out = append(out, rel)
+	}
+	return out, nil
 }
 
 // ContainerLocalRoot is the absolute container path of the profile

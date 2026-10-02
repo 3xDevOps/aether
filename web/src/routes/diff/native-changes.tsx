@@ -208,7 +208,7 @@ export function NativeChanges({ run, wrap, client = api }: { run: Run; wrap: boo
         {status && <>
           <dl className="grid gap-2 break-all sm:grid-cols-2">
             <div><dt className="text-muted-foreground">Branch / HEAD</dt><dd className="font-mono">{status.branch || '(detached)'} / {status.head || '(unborn)'}</dd></div>
-            <div><dt className="text-muted-foreground">Selected run account</dt><dd>{status.account_name || status.account_member_id} <code>{status.account_member_id}</code></dd></div>
+            <div><dt className="text-muted-foreground">Agent account</dt><dd>{status.account_name || status.account_member_id} <code>{status.account_member_id}</code></dd></div>
             <div><dt className="text-muted-foreground">GitHub identity</dt><dd>{status.identity || 'Unavailable'}</dd></div>
             <div><dt className="text-muted-foreground">Checkout upstream</dt><dd>{status.upstream ? `${status.upstream.remote}/${status.upstream.branch}` : 'None'}</dd></div>
           </dl>
@@ -274,7 +274,7 @@ export function NativeChanges({ run, wrap, client = api }: { run: Run; wrap: boo
             <Button size="sm" variant="outline" disabled={busy || !expected || !targetComplete || !caps.hasMethod('run.pr.status')} onClick={() => void perform(discoverPR)}>{uncertain ? 'Reconcile PR read-only' : 'Discover existing PR'}</Button>
             {uncertain && <p role="alert">Creation outcome is uncertain. Keep this exact target and reconcile read-only; creation will not be retried.</p>}
             {currentPRReview && <>
-              <p className="break-all">Reviewed GitHub identity: <strong>{currentPRReview.result.identity || 'Unavailable'}</strong> · Account: {currentPRReview.result.account_member_id}</p>
+              <p className="break-all">Reviewed GitHub identity: <strong>{currentPRReview.result.identity || 'Unavailable'}</strong> · Agent account: {currentPRReview.result.account_member_id}</p>
               <Actual actual={currentPRReview.result.actual} /><Diagnostics output={currentPRReview.result.output} error={currentPRReview.result.error} />
               {pr ? <div className="space-y-1 break-all"><a className="underline" href={pr.url} target="_blank" rel="noreferrer">#{pr.number}: {pr.title}</a><p>{pr.state}{pr.draft ? ' · Draft' : ''} · {pr.head_repository}:{pr.head_branch} → {pr.repository}:{pr.base_branch}</p><p className="font-mono">PR head: {pr.head_oid}</p></div> : !currentPRReview.result.error && <p>No existing PR for this exact repository, base and head.</p>}
             </>}
@@ -347,7 +347,7 @@ function PRFeedback({ run, feedback, client }: { run: Run; feedback: RunPRFeedba
   }
 
   return <section aria-label="PR feedback" className="space-y-3">
-    <p>Feedback identity: {feedback.identity || 'Unavailable'} · Account: {feedback.account_member_id}</p>
+    <p>Feedback identity: {feedback.identity || 'Unavailable'} · Agent account: {feedback.account_member_id}</p>
     <Actual actual={feedback.actual} /><Diagnostics output={feedback.output} error={feedback.error} />
     {feedback.truncated && <p role="alert">Feedback is truncated; open GitHub for the complete discussion.</p>}
     {entries.map((entry) => <article key={entry.key} className="space-y-1 border p-2">

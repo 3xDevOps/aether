@@ -105,7 +105,7 @@ func Rollback(c *protocol.Client, harness, snapshotID string) (protocol.ProfileS
 
 func FormatStatus(res protocol.ProfileStatusResult) string {
 	const notice = "Profile snapshots are optional recorded history and launch provenance, not isolated writable run copies.\n" +
-		"Configuration changes in persistent member HOME survive run teardown and are visible to all runs sharing the account (agents may need to reload).\n" +
+		"Configuration changes in persistent member HOME survive run teardown and are visible to every run you launch (agents may need to reload).\n" +
 		"Home edits never automatically update snapshot history or sync back to your laptop.\n" +
 		"Browser imports and Files edits do not create profile snapshots."
 	if res.Snapshot == nil {

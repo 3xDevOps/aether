@@ -5,6 +5,7 @@ package scheduler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 	}
 
 	run := &domain.Run{ID: "run-1", Worktree: checkout}
-	if err := e.sched.applyRunOwnership(e.ws, run, mounts, "1000:1000"); err != nil {
+	if err := e.sched.applyRunOwnership(e.ws, run, e.member.ID, mounts, "1000:1000"); err != nil {
 		t.Fatalf("applyRunOwnership: %v", err)
 	}
 
@@ -110,7 +111,7 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 
 	// A second pass for a concurrent run of the same member+harness is a
 	// no-op with the same mapping.
-	if err := e.sched.applyRunOwnership(e.ws, run, mounts, "1000:1000"); err != nil {
+	if err := e.sched.applyRunOwnership(e.ws, run, e.member.ID, mounts, "1000:1000"); err != nil {
 		t.Fatalf("second applyRunOwnership: %v", err)
 	}
 	if st := stat(movedLink); st.Uid != 0 {
@@ -122,7 +123,91 @@ func TestApplyRunOwnershipHardlinkSafe(t *testing.T) {
 func TestApplyRunOwnershipRootIsNoop(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, nil, ""); err != nil {
+	if err := e.sched.applyRunOwnership(e.ws, &domain.Run{}, e.member.ID, nil, ""); err != nil {
 		t.Fatalf("applyRunOwnership(root): %v", err)
+	}
+}
+
+// A subpath mount hands only base/sub to the run user - a file, or a
+// directory and everything beneath it - never the rest of base, and refuses
+// to reach through a symlink planted in base.
+func TestChownSubpathOnly(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() != 0 {
+		t.Skip("ownership pass needs root to chown")
+	}
+	owner := filepath.Join(t.TempDir(), "homes", "owner")
+	for _, dir := range []string{".claude", ".omp/agent/sessions", ".ssh"} {
+		if err := os.MkdirAll(filepath.Join(owner, dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{".claude/.credentials.json", ".claude/settings.json", ".omp/agent/agent.db", ".omp/agent/sessions/1", ".ssh/id", ".gitconfig"} {
+		if err := os.WriteFile(filepath.Join(owner, file), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sub := range []string{".claude/.credentials.json", ".omp/agent"} {
+		if err := chownSubpath(owner, sub, 1000, 1000); err != nil {
+			t.Fatalf("chownSubpath %s: %v", sub, err)
+		}
+	}
+	uid := func(rel string) uint32 {
+		t.Helper()
+		info, err := os.Lstat(filepath.Join(owner, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Sys().(*syscall.Stat_t).Uid
+	}
+	for _, rel := range []string{".claude/.credentials.json", ".omp/agent", ".omp/agent/agent.db", ".omp/agent/sessions/1"} {
+		if got := uid(rel); got != 1000 {
+			t.Errorf("%s owned by %d, want 1000", rel, got)
+		}
+	}
+	for _, rel := range []string{".", ".claude", ".claude/settings.json", ".omp", ".ssh", ".ssh/id", ".gitconfig"} {
+		if got := uid(rel); got != 0 {
+			t.Errorf("%s chowned to %d", rel, got)
+		}
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, ".credentials.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(owner, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(owner, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := chownSubpath(owner, ".claude/.credentials.json", 2000, 2000); err == nil {
+		t.Fatal("ownership pass followed a symlinked directory")
+	}
+	info, err := os.Lstat(filepath.Join(outside, ".credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Sys().(*syscall.Stat_t).Uid; got != 0 {
+		t.Fatalf("file outside the base chowned to %d", got)
+	}
+
+	if err := os.Remove(filepath.Join(owner, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(owner, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(owner, ".ssh/id"), filepath.Join(owner, ".claude/.credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := chownSubpath(owner, ".claude/.credentials.json", 2000, 2000); err == nil || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("ownership pass on a hard-linked login = %v, want a refusal", err)
+	}
+	if got := uid(".ssh/id"); got != 0 {
+		t.Fatalf("file hard-linked to the login chowned to %d", got)
 	}
 }

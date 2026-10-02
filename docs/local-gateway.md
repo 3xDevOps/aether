@@ -497,6 +497,7 @@ unavailable owned source remains the server's protocol error.
 | `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
+| `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","source":"shipped"\|"member","installed":true,"login_missing":false,"own_account_only":false,"unavailable":"","install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
@@ -551,8 +552,9 @@ command palette, and as an action on **Agents**, whenever `config.roots` and
 workspace or onboarding prerequisite; local onboarding is another optional
 entrypoint to the same importer. A server-hosted page can read local files
 explicitly selected in the browser directory picker.
-All runs using the member's account and the environment terminal mount one
-shared read-write persistent HOME. A file edit, configuration import, or
+All runs the member launches and the environment terminal mount one shared
+read-write persistent HOME; an account share exposes only the agent login
+from it, except that an `omp` share exposes the whole `~/.omp/agent`. A file edit, configuration import, or
 manual CLI profile operation is therefore visible to active and future runs,
 although a tool may need to reload its configuration.
 Configuration saves and imports bind inherited permissions to the observed
@@ -757,8 +759,9 @@ An HTTP body over the 12 MiB image cap is still rejected before dispatch as a
 Omit `run_id` to target the authenticated caller's live environment terminal;
 that terminal must already be running. Supplying `run_id` targets that run's
 live supervised container and requires the caller's `Steer` capability. The
-server stores the generated file in the target account member's persistent
-home and returns its absolute path as mounted at `$HOME` in that container.
+server stores the generated file in the persistent member home that container
+mounts (the run's launcher's, also on a shared account) and returns its
+absolute path as mounted at `$HOME` there.
 The path and filename are server-generated; callers cannot choose a host path
 or ask this method to read an arbitrary path.
 

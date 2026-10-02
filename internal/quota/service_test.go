@@ -234,6 +234,10 @@ func TestCredentialParsingRecognizesAPIKeysScopesAndMalformedJSON(t *testing.T) 
 		{"Claude malformed", []byte(`{"claudeAiOauth":{"accessToken":"super-secret"`), "error"},
 		{"Codex API key", []byte(`{"OPENAI_API_KEY":"api-key"}`), "unsupported"},
 		{"Codex missing account", []byte(`{"tokens":{"access_token":"token"}}`), "unauthenticated"},
+		// An account share leaves an empty mountpoint file in a launcher's
+		// home that never logged in.
+		{"Claude empty mountpoint", []byte{}, "unauthenticated"},
+		{"Codex empty mountpoint", []byte{}, "unauthenticated"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

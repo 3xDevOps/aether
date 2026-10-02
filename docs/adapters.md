@@ -22,7 +22,7 @@ one entry to the `profiles` map:
 | `HeadlessArgs` | Argv for the machine-readable mode. Same placeholder. |
 | `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
 | `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
-| `CredentialPaths` | Home-relative directories holding native login state. Persisted with the member account and mounted read-write into every run using that account. Directories, not files. |
+| `CredentialPaths` | Home-relative files or directories holding native login state, strictly below the home. They persist in the member home like everything else there. An account share mounts exactly these paths, read-write, from the owner's home into a recipient's run, so name the login file itself, not its configuration directory. |
 | `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Configuration** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the harness has no configuration root. |
 | `DenyNames` | Basenames the browser import skips before upload and the manual profile path excludes - credential files, token caches, keychains. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
@@ -34,17 +34,18 @@ Rules that are easy to get wrong:
   the default stance: the container is the isolation boundary, and an agent
   stopping to ask for approval in a headless fleet is a hang, not a safeguard.
 - **`CredentialPaths` and `DenyNames` are two different lists.** The first says
-  what to *persist* across runs; the second says what configuration import and
-  explicit profile commands must never *upload*. A credential file usually
-  appears in both, from opposite directions.
+  what an account share *mounts* into another member's run; the second says
+  what configuration import and explicit profile commands must never
+  *upload*. A credential file usually appears in both, from opposite
+  directions.
 - **Nothing under `LocalRoot` may be assumed private.** Browser import sends
   ordinary remaining bytes to the server for scanning. Known credential names
   are skipped locally, but scanner findings are a server-side boundary, not a
   promise that all secret content stays local.
 - **Configuration changes the shared member HOME.** The repeatable browser
   directory picker on **Configuration** and the **Files** editor write the
-  authenticated member's persistent home, visible to active and future runs
-  using that account. Configuration is available from Agents and shared
+  authenticated member's persistent home, visible to that member's active and
+  future runs. Configuration is available from Agents and shared
   navigation/palette on both gateways when `config.roots` and `config.import`
   are advertised, without a workspace or onboarding prerequisite. Onboarding
   optionally uses the same importer. No daemon watches `LocalRoot` or

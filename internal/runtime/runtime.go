@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -22,13 +23,19 @@ type ID string
 // FindByCreationKey when no container carries the key.
 var ErrNotFound = errors.New("runtime: container not found")
 
-// Mount is one additional bind mount into a run container. Host paths are
+// Mount is one additional mount into a run container. Host paths are
 // validated against Aether-owned roots by the mount validator (see
 // mounts.go) before a spec reaches any runtime; the runtime itself only
-// requires both paths to be absolute.
+// requires both paths to be absolute and a Subpath to be local.
 type Mount struct {
-	// HostPath is the absolute host path of the bind source.
+	// HostPath is the absolute host path of the bind source, or with
+	// Subpath set, the directory the subpath is resolved beneath.
 	HostPath string
+	// Subpath, when set, mounts only HostPath/Subpath. The engine resolves
+	// it at every container start and refuses a path that leaves HostPath
+	// through a symlink, so the content of HostPath may be controlled by an
+	// agent.
+	Subpath string
 	// ContainerPath is the absolute path inside the container.
 	ContainerPath string
 	// ReadOnly mounts the bind read-only.
@@ -150,6 +157,11 @@ func (s Spec) Validate() error {
 		if !path.IsAbs(m.ContainerPath) {
 			errs = append(errs, fmt.Errorf("mount %d container path %q must be absolute", i, m.ContainerPath))
 		}
+		if m.Subpath != "" {
+			if err := validateSubpath(m.Subpath); err != nil {
+				errs = append(errs, fmt.Errorf("mount %d: %w", i, err))
+			}
+		}
 	}
 	if s.User != "" {
 		if uid, gid, ok := strings.Cut(s.User, ":"); !ok || !allDigits(uid) || !allDigits(gid) {
@@ -158,6 +170,15 @@ func (s Spec) Validate() error {
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("runtime: invalid spec: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
+// validateSubpath accepts only a clean relative path strictly below its
+// base directory.
+func validateSubpath(sub string) error {
+	if sub == "." || path.Clean(sub) != sub || !filepath.IsLocal(sub) || strings.ContainsAny(sub, "\\\x00") {
+		return fmt.Errorf("subpath %q must be a clean relative path below its base", sub)
 	}
 	return nil
 }

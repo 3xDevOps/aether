@@ -158,7 +158,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		s.releaseTerminalCoordination(member)
 		return nil, fmt.Errorf("scheduler: reserve terminal user: %w", reserveErr)
 	}
-	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, plan.Mounts, plan.User); ownershipErr != nil {
+	if ownershipErr := s.applyRunOwnership(nil, &domain.Run{}, member, plan.Mounts, plan.User); ownershipErr != nil {
 		s.releaseTerminalCoordination(member)
 		s.releaseTerminalReservation(terminalReservation)
 		return nil, fmt.Errorf("scheduler: apply terminal ownership: %w", ownershipErr)
@@ -382,10 +382,7 @@ func (s *Scheduler) resolveTerminalMetadata(sup *terminalSupervision, user, home
 		sup.runUser = user
 	}
 	for other := range s.credentialUsers {
-		if other == reservation || other.memberID != sup.member {
-			continue
-		}
-		if other.user != user {
+		if other != reservation && other.blocks(sup.member, "", user) {
 			sup.ownershipBlocked = true
 			s.mu.Unlock()
 			return terminalOwnershipConflict(sup.member, other, user)
@@ -408,10 +405,7 @@ func (s *Scheduler) checkTerminalOwnership(sup *terminalSupervision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for other := range s.credentialUsers {
-		if other == sup.userReservation || other.memberID != sup.member {
-			continue
-		}
-		if other.user != sup.runUser {
+		if other != sup.userReservation && other.blocks(sup.member, "", sup.runUser) {
 			return terminalOwnershipConflict(sup.member, other, sup.runUser)
 		}
 	}
@@ -431,7 +425,7 @@ func (s *Scheduler) retainTerminalReservation(entry *terminalSupervision, user s
 	}
 	s.syncRunUserReservationsLocked()
 	reservation := &credentialUserReservation{
-		memberID: entry.member,
+		home:     entry.member,
 		user:     user,
 		owner:    "environment terminal " + string(entry.member),
 		terminal: entry,

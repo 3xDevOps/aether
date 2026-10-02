@@ -277,7 +277,7 @@ func TestArgvOverrideRespectsHarnessCommand(t *testing.T) {
 			s := &Scheduler{harnesses: map[string]HarnessSpec{
 				name: {TUIArgs: []string{shim, harness.TaskPlaceholder}},
 			}}
-			argv, profile, err := s.command(t.Context(), "", name, domain.LaunchTUI, "add OAuth login")
+			argv, profile, err := s.command(t.Context(), "", "", name, domain.LaunchTUI, "add OAuth login")
 			if err != nil {
 				t.Fatalf("command: %v", err)
 			}

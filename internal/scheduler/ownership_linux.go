@@ -3,15 +3,19 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/rootfs"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -34,8 +38,12 @@ type inodeKey struct{ dev, ino uint64 }
 // (including object directories, so the run can add new objects),
 // unprotected files, and member homes - is chowned normally. The member's
 // live containers use one uid:gid mapping, so this pass cannot flip ownership
-// back and forth.
-func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mounts []runtime.Mount, user string) error {
+// back and forth. A shared login is not held against its owner: an owner's
+// container with another uid takes the login back here, and a recipient's
+// live run on it loses access. Subpath mounts are skipped: a login pinned in
+// the member's own home is chowned with that home, and a login mounted from
+// another member's home is applyLoginOwnership's.
+func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, home domain.MemberID, mounts []runtime.Mount, user string) error {
 	if user == "" {
 		return nil
 	}
@@ -52,13 +60,113 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, mou
 			return err
 		}
 	}
+	lock := s.homeLock(home)
+	lock.Lock()
+	defer lock.Unlock()
 	for _, m := range mounts {
-		if m.ReadOnly {
+		if m.ReadOnly || m.Subpath != "" {
 			continue
 		}
 		if err := chownTree(m.HostPath, uid, gid, nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// applyLoginOwnership hands the login paths entry's container mounts from
+// login's home to user, after rechecking the reservations: the check made
+// when entry reserved would let this chown land after the owner's own pass.
+func (s *Scheduler) applyLoginOwnership(entry *supervised, login domain.MemberID, mounts []runtime.Mount, user string) error {
+	if user == "" || login == "" {
+		return nil
+	}
+	uid, gid, err := parseNumericUser(user)
+	if err != nil {
+		return err
+	}
+	loginHome, err := s.cfg.Homes.Path(login)
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve account home: %w", err)
+	}
+	// Every container reserves under s.mu before its own ownership pass takes
+	// this lock: either the owner's reservation is seen here and the launch
+	// is refused, or the owner's pass starts after this chown and takes the
+	// login back.
+	lock := s.homeLock(login)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	s.syncRunUserReservationsLocked()
+	err = s.reservationConflictLocked(entry.memberID, login, user, "live run "+string(entry.runID))
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, m := range mounts {
+		if m.ReadOnly || m.Subpath == "" || m.HostPath != loginHome {
+			continue
+		}
+		if err := chownSubpath(m.HostPath, m.Subpath, uid, gid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// homeLock returns the lock every ownership pass holds while it chowns inside
+// member's home. Take it before s.mu, never while holding s.mu.
+func (s *Scheduler) homeLock(member domain.MemberID) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.homeLocks == nil {
+		s.homeLocks = make(map[domain.MemberID]*sync.Mutex)
+	}
+	lock := s.homeLocks[member]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.homeLocks[member] = lock
+	}
+	return lock
+}
+
+// chownSubpath chowns only what a subpath mount exposes: base/sub, and
+// everything beneath it when it is a directory. base belongs to another
+// member, whose containers control every entry inside it, so each component
+// of sub is pinned without following a symlink.
+func chownSubpath(base, sub string, uid, gid int) error {
+	home, err := os.OpenRoot(base)
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
+	}
+	defer func() { _ = home.Close() }()
+	parent, err := rootfs.OpenRoot(home, path.Dir(sub))
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
+	}
+	defer func() { _ = parent.Close() }()
+	leaf := path.Base(sub)
+	info, err := parent.Lstat(leaf)
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
+	}
+	switch {
+	case info.Mode().IsRegular() && info.Sys().(*syscall.Stat_t).Nlink > 1:
+		err = errors.New("has another hard link, which the chown would also hand over")
+	case info.Mode().IsRegular():
+		err = parent.Lchown(leaf, uid, gid)
+	case info.IsDir():
+		var dir *os.Root
+		dir, err = rootfs.OpenRoot(parent, leaf)
+		if err == nil {
+			err = chownRoot(dir, uid, gid, nil)
+			_ = dir.Close()
+		}
+	default:
+		err = errors.New("neither a regular file nor a directory")
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: chown %s in %s: %w", sub, base, err)
 	}
 	return nil
 }
@@ -125,12 +233,19 @@ func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error 
 		return fmt.Errorf("scheduler: chown %s: %w", dir, err)
 	}
 	defer func() { _ = root.Close() }()
-	err = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+	if err := chownRoot(root, uid, gid, protected); err != nil {
+		return fmt.Errorf("scheduler: chown %s: %w", dir, err)
+	}
+	return nil
+}
+
+func chownRoot(root *os.Root, uid, gid int, protected map[inodeKey]struct{}) error {
+	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.Type().IsRegular() && len(protected) > 0 {
-			info, ierr := root.Lstat(path)
+			info, ierr := root.Lstat(name)
 			if ierr != nil {
 				return ierr
 			}
@@ -139,10 +254,6 @@ func chownTree(dir string, uid, gid int, protected map[inodeKey]struct{}) error 
 				return nil
 			}
 		}
-		return root.Lchown(path, uid, gid)
+		return root.Lchown(name, uid, gid)
 	})
-	if err != nil {
-		return fmt.Errorf("scheduler: chown %s: %w", dir, err)
-	}
-	return nil
 }

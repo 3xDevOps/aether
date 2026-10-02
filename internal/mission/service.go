@@ -28,7 +28,7 @@ type Launcher interface {
 // persisted, an integrator the scheduler has no command for: a harness whose
 // definition the account no longer has, or one without an interactive command.
 type launchValidator interface {
-	ValidateMissionLaunch(ctx context.Context, account domain.MemberID, harness string, mode domain.LaunchMode) error
+	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode) error
 }
 
 type Canceller interface {
@@ -769,7 +769,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MissionCreateResult{}, err
 	}
-	if validateErr := s.validateIntegratorLaunch(ctx, admission.Account.ID, choice); validateErr != nil {
+	if validateErr := s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice); validateErr != nil {
 		// A retry of a create that already succeeded replays its result, even
 		// if the harness has since become unlaunchable.
 		replay, receiptErr := s.cfg.Missions.MissionCreateRecorded(ctx, domain.WorkspaceID(p.WorkspaceID), p.IdempotencyKey)
@@ -878,7 +878,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
-	if validateErr := s.validateIntegratorLaunch(ctx, admission.Account.ID, choice); validateErr != nil {
+	if validateErr := s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice); validateErr != nil {
 		replay, receiptErr := s.cfg.Missions.IntegratorReplacementRecorded(ctx, m.ID, p.IdempotencyKey)
 		if receiptErr != nil {
 			return protocol.MissionReplaceIntegratorResult{}, receiptErr
@@ -934,14 +934,14 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
 }
 
-// validateIntegratorLaunch resolves the integrator's command for the account
-// the launch runs under, when the launcher can.
-func (s *Service) validateIntegratorLaunch(ctx context.Context, account domain.MemberID, choice domain.MissionIntegrator) error {
+// validateIntegratorLaunch resolves the integrator's command for its run
+// owner on the account the launch runs under, when the launcher can.
+func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account domain.MemberID, choice domain.MissionIntegrator) error {
 	v, ok := s.cfg.Runs.(launchValidator)
 	if !ok {
 		return nil
 	}
-	if err := v.ValidateMissionLaunch(ctx, account, choice.Harness, choice.Mode); err != nil {
+	if err := v.ValidateMissionLaunch(ctx, owner, account, choice.Harness, choice.Mode); err != nil {
 		return invalidMissionParams(fmt.Sprintf("integrator harness %s cannot launch in %s mode: %v", choice.Harness, choice.Mode, err))
 	}
 	return nil

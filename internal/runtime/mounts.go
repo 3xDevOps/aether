@@ -36,10 +36,9 @@ type MountPolicy struct {
 	WorktreeHostPath  string
 	WorktreeMountPath string
 	// AllowedNestings maps an approved child container path to its parent
-	// container path: the single registry-credential-under-profile
-	// exception. The caller vouches for the pair's provenance (both paths
-	// come from the harness registry, never from user input); the child
-	// must appear after its parent in the mount list.
+	// container path: an account share's login path under the home. The
+	// caller vouches for the pair's provenance; the child must appear after
+	// its parent in the mount list.
 	AllowedNestings map[string]string
 }
 
@@ -47,8 +46,9 @@ type MountPolicy struct {
 // violation. It rejects sources that do not resolve (after symlinks) under
 // an Aether-owned root, sources that are or contain the Docker control
 // socket under any alias, sources that are neither directories nor regular
-// files, duplicate targets, nested targets except the approved
-// child-after-parent pairs, targets under the reserved /run/aether, /opt/aether,
+// files, subpath mounts whose subpath is not a clean local path or whose
+// base is not a directory, duplicate targets, nested targets except the
+// approved child-after-parent pairs (never beneath a subpath mount), targets under the reserved /run/aether, /opt/aether,
 // and /usr/local/bin/aether-internal surfaces, root targets, collisions with the
 // worktree bind on either side, and read-only sources containing another
 // mount's source (Docker's per-bind read-only flag is not recursive and no
@@ -129,11 +129,23 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		if err != nil {
 			return fmt.Errorf("runtime: mount %d: source %q: %w", i, m.HostPath, err)
 		}
-		if !info.IsDir() && !info.Mode().IsRegular() {
+		// A subpath is resolved by the engine beneath its base, so only the
+		// base is inspected here; every containment rule below compares the
+		// mounted path, base joined with subpath.
+		mounted := source
+		if m.Subpath != "" {
+			if err := validateSubpath(m.Subpath); err != nil {
+				return fmt.Errorf("runtime: mount %d: %w", i, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("runtime: mount %d: subpath base %q is not a directory", i, m.HostPath)
+			}
+			mounted = filepath.Join(source, filepath.FromSlash(m.Subpath))
+		} else if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("runtime: mount %d: source %q is neither a directory nor a regular file", i, m.HostPath)
 		}
-		if worktreeHost != "" && (source == worktreeHost ||
-			withinHost(source, worktreeHost) || withinHost(worktreeHost, source)) {
+		if worktreeHost != "" && (mounted == worktreeHost ||
+			withinHost(mounted, worktreeHost) || withinHost(worktreeHost, mounted)) {
 			return fmt.Errorf("runtime: mount %d: source %q collides with the worktree checkout %q", i, m.HostPath, policy.WorktreeHostPath)
 		}
 
@@ -145,6 +157,9 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 				if policy.AllowedNestings[target] != targets[j] {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d target %q without approval", i, target, j, targets[j])
 				}
+				if mounts[j].Subpath != "" {
+					return fmt.Errorf("runtime: mount %d: target %q nests under subpath mount %d", i, target, j)
+				}
 				if info, err := os.Lstat(sources[j]); err != nil || !info.IsDir() {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d whose source %q is not a directory", i, target, j, mounts[j].HostPath)
 				}
@@ -152,14 +167,14 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 			if underSlash(targets[j], target) {
 				return fmt.Errorf("runtime: mount %d: target %q contains mount %d target %q; a nested mount must be ordered after its parent", i, target, j, targets[j])
 			}
-			if mounts[j].ReadOnly && withinHost(source, sources[j]) && source != sources[j] {
+			if mounts[j].ReadOnly && withinHost(mounted, sources[j]) && mounted != sources[j] {
 				return fmt.Errorf("runtime: mount %d: source %q nests inside read-only mount %d source %q", i, m.HostPath, j, mounts[j].HostPath)
 			}
-			if m.ReadOnly && withinHost(sources[j], source) && source != sources[j] {
+			if m.ReadOnly && withinHost(sources[j], mounted) && mounted != sources[j] {
 				return fmt.Errorf("runtime: mount %d: read-only source %q contains mount %d source %q", i, m.HostPath, j, mounts[j].HostPath)
 			}
 		}
-		targets[i], sources[i] = target, source
+		targets[i], sources[i] = target, mounted
 		mounts[i].HostPath = source
 	}
 	return nil

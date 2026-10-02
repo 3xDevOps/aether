@@ -588,11 +588,19 @@ type Run struct {
 	WorkspaceID WorkspaceID
 	// MemberID is the owning member (transferable via handoff).
 	MemberID MemberID
-	// AccountMemberID owns the environment, credentials, profile, and vendor
-	// quota used by this run. It normally equals MemberID; a different value
-	// records an explicit account-share launch without changing run ownership
-	// or actor attribution. Empty rows from older schemas fall back to MemberID.
+	// AccountMemberID owns the vendor login and quota used by this run. It
+	// normally equals MemberID; a different value records an explicit
+	// account-share launch, which mounts only the harness's login paths from
+	// this member's home into the launcher's environment, without changing
+	// run ownership or actor attribution. Empty rows from older schemas fall
+	// back to MemberID.
 	AccountMemberID MemberID
+	// HomeMemberID is whose persistent home the run's container mounts. It
+	// is set to the launcher when the run is created; a handoff changes
+	// MemberID, never this. It is empty on rows created before account
+	// shares were narrowed, whose containers mounted the account's whole
+	// home.
+	HomeMemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
 	// Title is the latest terminal title reported by the agent.
@@ -663,9 +671,18 @@ func (r *Run) AccountMember() MemberID {
 	return r.MemberID
 }
 
+// HomeMember returns whose persistent home the run's container mounts.
+func (r *Run) HomeMember() MemberID {
+	if r.HomeMemberID != "" {
+		return r.HomeMemberID
+	}
+	return r.AccountMember()
+}
+
 // AccountShare grants Grantee permission to launch agents with Owner's
-// environment and vendor account. The authenticated grantee remains the run
-// owner and the actor recorded in the timeline.
+// vendor login: the harness's declared login paths from Owner's home, inside
+// Grantee's own environment. The authenticated grantee remains the run owner
+// and the actor recorded in the timeline.
 type AccountShare struct {
 	Owner     MemberID
 	Grantee   MemberID

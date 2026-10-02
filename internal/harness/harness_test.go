@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path"
@@ -57,10 +58,8 @@ func TestProfileDefaults(t *testing.T) {
 		if len(p.CredentialPaths) == 0 {
 			t.Errorf("%s: no credential paths", name)
 		}
-		for _, cp := range p.CredentialPaths {
-			if strings.HasPrefix(cp, "/") || strings.HasPrefix(cp, "..") {
-				t.Errorf("%s credential path %q must be home-relative", name, cp)
-			}
+		if logins, err := p.LoginPaths(); err != nil || !slices.Equal(logins, p.CredentialPaths) {
+			t.Errorf("%s login paths = %v, %v; want the home-relative %v", name, logins, err, p.CredentialPaths)
 		}
 	}
 }
@@ -547,6 +546,24 @@ func TestDashboardListsEveryShippedHarness(t *testing.T) {
 			if !listed.MatchString(string(source)) {
 				t.Errorf("%s does not list the shipped harness %q", file, p.Name)
 			}
+		}
+	}
+}
+
+// LoginPaths is the one place a login path is checked: whatever spelling a
+// definition uses, only a clean path strictly below the home is shareable.
+func TestLoginPaths(t *testing.T) {
+	got, err := Profile{Name: "aider", CredentialPaths: []string{"/root/.aider/auth.json", "/home/aether/.config/aider", ".aider.key"}}.LoginPaths()
+	if err != nil {
+		t.Fatalf("LoginPaths: %v", err)
+	}
+	if want := []string{".aider/auth.json", ".config/aider", ".aider.key"}; !slices.Equal(got, want) {
+		t.Fatalf("LoginPaths = %v, want %v", got, want)
+	}
+	for _, bad := range []string{"/root", "/home/aether", "/root/", ".", "..", "../other/.ssh", "/root/../etc", "/etc/passwd", "a/../b", "./a", `a\b`, "a\x00b"} {
+		_, err := Profile{Name: "aider", CredentialPaths: []string{".aider/auth.json", bad}}.LoginPaths()
+		if err == nil || !strings.Contains(err.Error(), "aider") || !strings.Contains(err.Error(), fmt.Sprintf("%q", bad)) {
+			t.Errorf("LoginPaths(%q) = %v, want an error naming the harness and path", bad, err)
 		}
 	}
 }
