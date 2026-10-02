@@ -24,7 +24,8 @@ second sandbox inside it.
 Each member's persistent home is mounted as `$HOME` only into that member's
 own containers: their environment terminal and the runs they launch. An
 account share is the one exception, and it reaches only the owner's agent
-login; see [Account sharing](#account-sharing).
+login, except that an `omp` share reaches the owner's whole `~/.omp/agent`;
+see [Account sharing](#account-sharing).
 
 Real names and email addresses cross into the container with the run. The
 git identity of the member who launched it is baked into the container's
@@ -56,29 +57,46 @@ A run always starts from its launcher's saved image, or the standard image,
 with the launcher's home as `$HOME`. Git identity, `.gitconfig`, the gh login,
 the signing key, SSH files, shell history, harness configuration (settings,
 hooks, MCP servers, history), installed executables, imported configuration,
-terminal image uploads, the profile snapshot pin, and the candidate
-verification environment are all the launcher's. On a shared account, Aether
-additionally mounts only that harness's login path from the owner's home over
-the same path in the launcher's home, read-write. The **Login state** column
-of [harnesses.md](harnesses.md#shipped-harnesses) lists each path; for
-`claude` it is `~/.claude/.credentials.json`. No executable of the owner's runs
-in the recipient's container.
+terminal image uploads, and the profile snapshot pin are all the launcher's.
+Candidate verification started by a run's agent runs in the home that run's
+container mounts; a handoff (`aether handoff`) changes the run's owner but not
+that home. On a shared account, Aether additionally mounts only that harness's
+login path from the owner's home over the same path in the launcher's home,
+read-write. The **Login state** column of
+[harnesses.md](harnesses.md#shipped-harnesses) lists each path; for `claude`
+it is `~/.claude/.credentials.json`. Except for `omp`, no executable of the
+owner's runs in the recipient's container.
 
 `omp` is the exception. It keeps its login in a SQLite WAL database,
 `agent.db`, beside `config.yml`, `mcp.json`, its extensions, usage tables, and
 `sessions/`, and a WAL database cannot be shared file by file. An `omp` share
-therefore exposes the owner's whole `~/.omp/agent` directory read-write: the
-owner's omp settings, MCP configuration, and extensions run in the recipient's
-container, and the recipient's run can read the owner's omp sessions and
-change any of it.
+therefore mounts the owner's whole `~/.omp/agent` directory read-write, and
+omp loads extensions, MCP server commands, and settings from it. That cuts
+both ways:
 
-For a member-defined harness, the launcher's definition supplies the command
-and the owner's definition of the same name supplies the login paths
-(`credential_paths`), so a launcher cannot name what is taken from the owner's
-home. A launch is refused when the owner has no definition of that name, when
-a definition's login path is the home itself or outside it, when the owner has
-no login at any declared path, and when any component of that path in the
-owner's home is a symlink.
+- The recipient's run can plant an extension or MCP server command there that
+  runs in the owner's next omp session, inside the owner's environment with
+  the owner's whole home, gh token, and signing key. Against a recipient who
+  does that, an `omp` share is as broad as sharing your home.
+- The owner's extensions and MCP servers run in the recipient's container,
+  with the recipient's GitHub login. The recipient's run can also read the
+  owner's omp sessions.
+
+Share an `omp` account only with someone you would give your home to.
+
+Only the shipped harnesses and server-wide definitions
+([harnesses.md](harnesses.md#custom-agents)) declare a login path to share. A
+member's own definition (`aether agent add`) runs only on that member's own
+account; a launch of it on a shared account is refused:
+
+```
+scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares
+```
+
+A launch is also refused when a definition's login path is the home itself,
+when the owner has no login at any declared path (a missing or empty file is
+no login), when any component of that path in the owner's home is a symlink,
+and when the login file has another hard link.
 
 What a share still hands over: the recipient's run holds the owner's login
 itself, including the refresh token. Root in that run can copy it, and
@@ -86,22 +104,39 @@ revoking the share does not recall a copied token; the owner rotates it by
 logging out and in again. The login is writable because a token refresh
 rewrites it, so a recipient's run can also overwrite it, log out (`/logout` in
 Claude Code and `codex logout` revoke the owner's session at the vendor), or
-replace it (`codex login` in a shared run replaces it with the recipient's).
-That is loss of the login, not access to anything else in the owner's home.
+replace it: `/login` in Claude Code or `codex login` in a shared run writes
+the recipient's own login into the owner's file. For the file logins
+(`claude`, `codex`, `pi`, `opencode`) that is loss of the login, not access to
+anything else in the owner's home. For `omp`, see above.
 
 **How the path is mounted.** The owner's own containers control every path
 inside the owner's home, so a plain bind of a path in it could be swapped for
 a symlink between Aether's check and container start, exposing another
 member's home or a host path. Aether instead mounts the login path as a
 Docker volume subpath of the owner's home, which the engine resolves beneath
-the home with `openat2` `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS` at every
-container start. This needs Docker Engine 26.0 or newer (API 1.45), for runs
-on a shared account and for the sharing owner's own containers. An older
-engine ignores the subpath and would mount the owner's whole home, so Aether
-reads the engine's API version first and refuses:
+the home at every container start. On Docker Engine 28.0.4, a symlink in the
+path that leaves the owner's home is refused at container start (`path
+concatenation escapes the base directory` or `cannot access path`), including
+one swapped in after the container was created or stopped; a symlink that
+stays inside the owner's home is followed. Aether refuses any symlink in the
+path at launch, but the owner's own containers can plant one afterwards,
+before a start or restart, and so redirect the mount to another file in the
+owner's own home, never outside it.
+
+This needs Docker Engine 26.0 or newer (API 1.45), for runs on a shared
+account and for the sharing owner's own runs and environment terminal. An
+older engine ignores the subpath and would mount the owner's whole home, so
+Aether reads the engine's API version first and refuses:
 
 ```
 runtime: docker engine API "1.44" cannot mount a path beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer
+```
+
+A `DOCKER_API_VERSION` below 1.45 in the server's environment is refused the
+same way, because requests sent at it ignore the subpath too:
+
+```
+runtime: docker client sends API "1.44" (DOCKER_API_VERSION), which cannot mount a path beneath a member home; that needs API 1.45 or newer
 ```
 
 Aether creates one volume per sharing owner, named
@@ -114,12 +149,24 @@ fails, so a refresh in the owner's own container would leave recipients'
 runs holding the old file. Once a member has shared their account, Aether
 therefore also mounts that file in place in the member's own runs and
 environment terminal, creating an empty file when none exists, so every
-writer updates the one file recipients' runs hold. A container the owner
-started before sharing, typically the long-lived environment terminal, lacks
-that mount: run `aether terminal stop` after sharing and reopen it. In a
-container with the mount, Claude's `/logout` revokes the login at Anthropic
-and reports success but cannot delete the file; the dead tokens are cleared
-on the next refresh. Members who share nothing are unaffected.
+writer updates the one file recipients' runs hold. The empty file is not a
+login: until the owner logs in, a recipient's `claude` launch is refused. A
+login file with another hard link is neither mounted in place nor shared. A
+container the owner started before sharing, typically the long-lived
+environment terminal, lacks that mount: run `aether terminal stop` after
+sharing and reopen it. In a container with the mount, Claude's `/logout`
+revokes the login at Anthropic and reports success but cannot delete the
+file; the dead tokens are cleared on the next refresh. Members who share
+nothing are unaffected.
+
+**Non-root images.** With a non-root image, a run hands the login path to its
+own uid before it starts. The owner's containers are never refused because of
+a recipient's run. A recipient's launch is refused while its uid differs from
+that of the owner's live containers, or of another recipient's live run, on
+that login; the error names `the login <member-id> shares is held by`. If the
+owner starts a container with a different non-root uid while a recipient's
+run is live, the owner's container takes the login file back and that run
+loses access to it.
 
 Revoking a grant blocks later launches and relaunches. It does not stop an
 already-running container or remove the login mounted into it. Stop those
@@ -138,9 +185,12 @@ immediately.
 
 This narrows what an account share exposes. It does not change the role
 model: a collaborator can still steer another member's live run
-([teams.md](teams.md#roles)), which runs with that run owner's home, and a
+([teams.md](teams.md#roles)) and reach the home its container mounts, and a
 handoff transfers a run whose container keeps the home it was created with.
-The share boundary is not a per-member sandbox.
+The development terminal and run repository gates still also check access to
+the run's account, as before; that check is not what protects a run owner's
+home. The Steer capability is. The share boundary is not a per-member
+sandbox.
 
 ### GitHub credentials and signing keys
 
@@ -194,7 +244,9 @@ first on the container's `PATH`, so the next `aether github connect` - or
 the `gh --version` the dashboard's GitHub step runs on its own to check
 that environment - runs the agent's program instead of gh. An account share
 does not extend this reach: a recipient's run has the recipient's own home,
-token, and key, never the owner's.
+token, and key, never the owner's. An `omp` share is the exception: code the
+recipient's run plants in the owner's `~/.omp/agent` runs in the owner's own
+omp sessions ([Account sharing](#account-sharing)).
 
 Aether signs its own end-of-run commits with that key while still treating
 the home as hostile. It opens the key through a root-confined open on the
@@ -408,7 +460,8 @@ disposable verification tree; candidate inputs and retained evidence are not
 re-read from a mutable live checkout. The isolation protects the source tree
 and post-execution integrity check, not the credentials of the environment it
 runs in. A human's verification runs in their own environment; a run actor's
-runs in its run owner's, also on a shared account. That home's gh login,
+runs in the home that run's live container mounts, which a handoff does not
+change; with no live container the verification fails. That home's gh login,
 signing key, and other files are available to the verification, so do not
 treat it as a per-candidate credential boundary.
 
@@ -694,7 +747,8 @@ own home; an admin cannot select another member or account.
 The imported and edited files are in the member's shared read-write home,
 mounted into that member's environment terminal and the active and future
 runs they launch, including runs on a shared account. A member's account
-share does not expose them; only the agent login path is shared
+share does not expose them, except the `~/.omp/agent` directory an `omp`
+share mounts; otherwise only the agent login path is shared
 ([Account sharing](#account-sharing)). The home is not a per-run isolated
 configuration copy. A snapshot pin records
 optional launch provenance, not an isolation boundary or a promise that home

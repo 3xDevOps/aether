@@ -349,8 +349,8 @@ from `source_url`. Set it to `""` to leave the workspace without an external
 push destination. GitHub SSH origins are normalized to HTTPS just as with
 `workspace.origin`. Mirror deploy keys only read source: they neither grant
 push permission nor configure a run's GitHub authentication. Publishing uses
-the native Git/`gh` credentials in the run owner's home, also on a shared
-agent account, independently of the mirror and of local repository linking.
+the native Git/`gh` credentials in the home the run's container mounts (its
+launcher's, also on a shared agent account and after a handoff), independently of the mirror and of local repository linking.
 
 ### Optional: configure source control
 
@@ -686,7 +686,8 @@ discovery and feedback refresh are explicit. No background PR watcher, automatic
 merge, force push, branch switch or automatic mutation retry is performed.
 GitHub discovery, creation and feedback need a working native `gh`, network
 access, and the run's GitHub login's permissions on the explicit upstream/fork:
-the run owner's `gh` login, also on a shared agent account.
+the `gh` login in the home the run's container mounts: its launcher's, also on
+a shared agent account and after a handoff.
 Review and merge on GitHub according to your repository's policy.
 
 ### Optional: pull into a local clone

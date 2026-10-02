@@ -605,7 +605,9 @@ The timeline and Run Room record the handoff actor, outgoing owner, and incoming
 owner. A system entry points to the handoff evidence packet, or says that
 evidence is unavailable when preservation did not succeed. The transfer does
 not switch the selected agent account or its cost attribution, and the run's
-container keeps the home it was created with: the previous owner's.
+container keeps the home it was created with: the previous owner's. Candidate
+verification the run's agent starts runs in that same home, never the
+incoming owner's.
 
 Aether captures an evidence packet automatically when a run is handed off and
 when it finishes. The finish capture happens before automatic checkout or
@@ -798,33 +800,35 @@ authenticated launcher and runs in the launcher's environment: their saved
 image, home, git identity, GitHub login, installed agents, and configuration.
 The selected account supplies only the agent's login file, read-write, plus
 vendor quota and cost attribution. `omp` is the exception: it shares the
-owner's whole `~/.omp/agent` directory. [security.md](security.md#account-sharing)
-lists exactly what is shared and what a recipient's run can still do with the
-login.
+owner's whole `~/.omp/agent` directory, from which omp loads extensions and
+MCP server commands, so a recipient's run can plant code that runs in the
+owner's own omp sessions with the owner's home, gh token, and signing key.
+Share an `omp` account only with someone you would give your home to.
+[security.md](security.md#account-sharing) lists exactly what is shared and
+what a recipient's run can still do with the login.
 
 Before launching on a shared account, the recipient:
 
 - Installs the agent in their own environment: `aether agent add <name>`,
   then installs it in `aether terminal`. The vendor login is not needed for
   an agent they only borrow. The owner's executables never run in the
-  recipient's container.
+  recipient's container, except an `omp` owner's extensions and MCP servers.
 - Connects their own GitHub with `aether github connect`
   ([environment-home.md](environment-home.md#connect-github)); the run pushes
   and opens pull requests as the recipient.
 
-For a member-defined agent, both members need a definition of that name: the
-recipient's supplies the command, the owner's names the login paths. Without
-the owner's, the launch is refused:
+A member-defined agent (`aether agent add`) runs only on its member's own
+account; a launch of it on a shared account is refused:
 
 ```
-scheduler: harness "<name>" is your own definition, and the shared account <member-id> has none of that name to say which login paths it shares; its owner adds one with: aether agent add <name>
+scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --harness-definitions) can declare the login it shares
 ```
 
-A launch on a shared account whose owner has no login for that agent fails
-with a reason like:
+A launch on a shared account whose owner has no login for that agent, or
+only an empty file at its login path, fails with a reason like:
 
 ```
-provisioning: scheduler: Grace is not logged in to claude: none of ~/.claude/.credentials.json exists in their home; Grace logs in from their own environment terminal (aether terminal)
+provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in from their own environment terminal (aether terminal)
 ```
 
 After sharing, the owner runs `aether terminal stop` and reopens the
@@ -837,15 +841,21 @@ Aether refuses them: `runtime: docker engine API "1.44" cannot mount a path
 beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
 
 The login file is mounted over the same path in the recipient's home, so an
-empty file can remain there after the run ends; the recipient logging in to
-that agent replaces it. If the recipient logs in to that agent, or deletes that
-file, from another of their own containers while a shared run is live, the
-kernel detaches the mount and that run continues on the recipient's own
-login. With a non-root image, a shared run takes ownership of the owner's
-login path for the run's uid and reserves both homes, so an owner and a
-recipient whose images use different non-root uids cannot run on that login
-at the same time; the second launch is refused with an error ending
-`concurrent containers for the same member must share one uid:gid mapping`.
+empty file can remain there after the run ends. Aether treats an empty login
+file as no login, and the recipient logging in to that agent from their own
+terminal replaces it. Logging in inside the shared run (`/login` in Claude
+Code, `codex login`) instead writes the recipient's login into the owner's
+file. If the recipient logs in to that agent, or deletes that file, from
+another of their own containers while a shared run is live, the kernel
+detaches the mount and that run continues on the recipient's own login.
+
+With a non-root image, a shared run hands the owner's login path to the run's
+uid. The owner's own runs and terminal are never refused because of it. A
+recipient's launch is refused while its uid differs from that of the owner's
+live containers or of another recipient's live run on that login, with an
+error naming `the login <member-id> shares is held by`. If the owner starts a
+container with a different non-root uid while a recipient's run is live, that
+run loses access to the login.
 
 Sharing is directional. It does not let the recipient open the owner's
 environment terminal, and admins get no implicit account access. Revocation
@@ -996,8 +1006,8 @@ Record these roles separately:
 The actor is not rewritten as the authorizing human, run owner, or account
 owner merely because the operation was performed on somebody's behalf. A
 mission's finite concurrency and total-attempt limits bound Aether admission;
-they do not narrow what the run owner's home credentials and the selected
-agent login can do inside the container.
+they do not narrow what the credentials in the home the run's container
+mounts and the selected agent login can do inside the container.
 
 Release B rechecks the current member role, account-sharing authority,
 mission assignment, and control/assignment generation at each consequential

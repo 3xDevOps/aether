@@ -1060,10 +1060,14 @@ puts the caller first, followed by accounts explicitly shared with them. A
 shared selection sends its ID as `account_member_id` on `agent.list` and
 `run.launch`. `agent.list` still returns the caller's own agents and
 installations, since the run executes in the caller's environment, and marks
-each agent the account's owner has no login for with `login_missing`. The
-form lists those as disabled "(not logged in)" entries and says "<owner> is
-not logged in to <agent>"; the swarm grid disables their worker rows the same
-way. The task is optional in
+with `login_missing` each agent the account's owner has no login for, and
+each of the caller's own member-defined agents, which run only on the
+caller's own account. The form lists the first as disabled "(not logged in)"
+entries and says "<owner> is not logged in to <agent>", and the second as
+"(your account only)" entries with "Your own agent definitions run only on
+your own account"; the swarm grid disables their worker rows the same way and
+drops a ticked worker whose agent stops being launchable when the lists
+refresh. The task is optional in
 interactive mode - a taskless launch drops the member into the agent's TUI
 with no seeded prompt - and required in headless, which has no interactive
 surface, so the form disables Launch and says why rather than sending a

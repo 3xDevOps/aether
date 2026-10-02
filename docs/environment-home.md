@@ -33,7 +33,8 @@ step only offer agents whose executable is installed in your own
 installed they say so and offer **Set up an agent** rather than a launch the
 server would refuse; the Agents page still lists uninstalled shipped agents so
 you can set them up. On a shared account, an agent whose owner has no login
-for it is not offered either. The server-hosted dashboard has no onboarding
+for it is not offered either, nor is your own member-defined agent, which
+runs only on your own account. The server-hosted dashboard has no onboarding
 wizard.
 
 Discovery follows relative symlinks and absolute links under `/root` or
@@ -273,7 +274,8 @@ The import writes the authenticated member's own persistent home. Because that
 home is mounted read-write in the environment terminal and in every run the
 member launches, imported or edited files are visible immediately, including
 to active runs; the agent may need to reload. It is not an isolated per-run
-profile, and a share of your agent account does not expose it. A snapshot
+profile, and a share of your agent account does not expose it, except the
+`~/.omp/agent` directory an `omp` share mounts. A snapshot
 pin is audit metadata, not a private writable copy, and changing configuration
 does not rebuild an installed-agent image.
 

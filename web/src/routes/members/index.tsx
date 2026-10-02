@@ -384,8 +384,11 @@ export function MembersRoute({ client = api }: RouteProps & { client?: Api }) {
                 <ul className="border-y border-border text-xs text-muted-foreground">
                   <li className="border-b border-border px-3 py-1.5">
                     Your agent logins and vendor quota are shared; your environment,
-                    files, and GitHub login are not. Their runs can use, refresh, or
-                    log out those logins.
+                    files, and GitHub login are not, except through omp: an omp share
+                    hands over your whole ~/.omp/agent, where their runs can plant code
+                    that your own omp sessions run with your home. Share omp only with
+                    someone you would give your home to. Their runs can use, refresh,
+                    replace, or log out those logins.
                   </li>
                   <li className="px-3 py-1.5">
                     Their runs remain attributed to them; running agents are not stopped.

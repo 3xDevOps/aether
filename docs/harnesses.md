@@ -15,7 +15,7 @@ Two rules shape everything below:
    Logins happen through the vendor's own flow in an Aether terminal.
    Credentials remain in the member home; an explicit account share mounts only
    the harness's login path (the **Login state** column below) from that home
-   into a recipient's run. For the read-only subscription quota
+   into a recipient's run, a whole directory for `omp`. For the read-only subscription quota
    indicator, the server may read supported native Claude Code and Codex
    subscription credentials in that home and call the vendor's fixed HTTPS
    usage endpoint. Credential bytes and provider responses are never sent to
@@ -62,8 +62,11 @@ or `/home/aether` for a non-root image user). **Login state** is the path an
 account share mounts from the owner's home into a recipient's run
 (`harness.Profile.CredentialPaths`); everything else there is the launcher's.
 `omp` shares a directory because its login is a SQLite WAL database beside its
-settings, MCP configuration, extensions, and sessions; see
-[security.md](security.md#account-sharing).
+settings, MCP configuration, extensions, and sessions. omp loads extensions and
+MCP server commands from that directory, so a recipient's run can plant code
+that runs in the owner's own omp sessions, and the owner's extensions run in
+the recipient's run; share an `omp` account only with someone you would give
+your home to ([security.md](security.md#account-sharing)).
 
 The `config.roots` response used by the dashboard carries a `runtime_ignores`
 list for each configuration root. These are root-relative paths, and the
@@ -870,9 +873,10 @@ installation: each recipient installs the agent in their own environment
 
 `agent.list` with `account_member_id` set to a shared account still reports
 the caller's own agents and installations, plus `login_missing: true` for an
-agent whose account owner has no login at its **Login state** path. The
-launch dialog does not offer that agent on that account, and the server
-refuses such a launch.
+agent whose account owner has no login at its **Login state** path (a missing
+or empty file), and for the caller's own member-defined agents, which run only
+on the caller's own account. The launch dialog does not offer that agent on
+that account, and the server refuses such a launch.
 
 For an unshipped name the command asks for interactive and headless launch
 templates first (`<name> {task}` and `<name> -p {task}` by default). Install the
@@ -992,10 +996,11 @@ Custom launch definitions come from two places, resolved in this order:
    member's own containers and never affects anyone else. Shipped names and
    the reserved names `custom` and `fake` cannot be registered.
 
-On a shared account, the launcher's definition supplies the command and the
-account owner's definition of the same name supplies the credential paths
-that the share mounts. The launch is refused when the owner has no definition
-of that name, or when a credential path is the home itself or outside it.
+A member's own definition runs only on that member's own account. On a
+shared account, only a shipped harness or a server-wide definition is
+launched, and its `CredentialPaths` are the login paths the share mounts from
+the owner's home. A launch is refused when a credential path is the home
+itself.
 
 Both forms carry the same fields and pass the same validation. The
 administrator JSON is an object keyed by harness name. Each definition must
@@ -1094,7 +1099,8 @@ configuration home. That home is mounted read-write in your environment
 terminal and in runs you launch, so the change is immediately visible to
 existing and future runs (an agent may need to reload its configuration). It
 is not an isolated per-run profile. A share of your account does not expose
-it: a recipient's run uses the recipient's configuration. A snapshot pin
+it, except the `~/.omp/agent` directory an `omp` share mounts: a recipient's
+run uses the recipient's configuration. A snapshot pin
 records launch provenance, not an isolated writable copy or a promise that
 home changes wait for later runs.
 Changing configuration does not rebuild the installed-agent image.

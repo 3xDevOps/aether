@@ -749,8 +749,8 @@ so a swarm whose choices are all headless can still get an interactive
 integrator. Both refuse, with `-32602` and `integrator harness <name> cannot
 launch in tui mode: <cause>`, a harness the integrator's run owner cannot
 start in `tui` on that account, such as one whose definition the run owner no
-longer has, or a member-defined harness the shared account's owner has no
-definition of. Workers may
+longer has, or the run owner's own member-defined harness on another
+member's account, where it never runs. Workers may
 still run headless. If the integrator's
 harness has already exited, the line lands in the shell left on its terminal
 and is read as a command line there.
