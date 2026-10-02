@@ -231,7 +231,7 @@ func TestSharedLaunchWithoutOwnerLogin(t *testing.T) {
 	if err == nil {
 		t.Fatal("shared claude launch without the owner's login was accepted")
 	}
-	for _, want := range []string{"Grace", "claude", "~/.claude/.credentials.json", "aether terminal"} {
+	for _, want := range []string{"Grace", "claude", "~/.claude/.credentials.json", "environment terminal"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("refusal %q does not name %q", err, want)
 		}
@@ -629,8 +629,9 @@ func TestRecoveredSharedRunReservations(t *testing.T) {
 }
 
 // A shared run whose sidecar is lost gets a synthetic one at restart. Its
-// owner holds the launcher's home, recorded on the run row, and never the
-// account owner's, so the owner's own containers still start.
+// owner holds the launcher's home, recorded on the run row, and the account
+// owner's login, never the account owner's home, so the owner's own
+// containers still start.
 func TestRecoveredSharedRunWithoutSidecarHoldsTheLaunchersHome(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
@@ -666,8 +667,8 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheLaunchersHome(t *testing.T) {
 		s2.mu.Lock()
 		entry := s2.runs[run.ID]
 		s2.mu.Unlock()
-		if entry == nil || !entry.destroyPending || entry.memberID != e.member.ID || entry.loginMember != "" {
-			t.Fatalf("synthetic owner of %s = %+v, want it on the launcher's home %s", run.ID, entry, e.member.ID)
+		if entry == nil || !entry.destroyPending || entry.memberID != e.member.ID || entry.loginMember != e.owner.ID {
+			t.Fatalf("synthetic owner of %s = %+v, want it on the launcher's home %s and the login of %s", run.ID, entry, e.member.ID, e.owner.ID)
 		}
 	}
 	if err = s2.reserveRunUser(&supervised{runID: "run-owner", memberID: e.owner.ID}, "2000:2000", true); err != nil {
@@ -676,6 +677,97 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheLaunchersHome(t *testing.T) {
 	err = s2.reserveRunUser(&supervised{runID: "run-home", memberID: e.member.ID}, "2000:2000", true)
 	if err == nil || !strings.Contains(err.Error(), "home "+string(e.member.ID)+" is reserved") {
 		t.Fatalf("launcher's home beside the synthetic owners = %v, want reservation refusal", err)
+	}
+}
+
+// A shared run whose sidecar is lost, and whose container the runtime cannot
+// yet confirm gone, keeps the owner's login from another recipient's uid. The
+// owner's own run and terminal still start, and the login is released once
+// the container is confirmed gone.
+func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() != 0 {
+		t.Skip("ownership pass needs root to chown")
+	}
+	e := newShareEnv(t, withImageUsers(map[string]string{launcherImage: "1000:1000", ownerImage: "2000:2000", recipientImage: "3000:3000"}))
+	lin := e.addRecipient(t)
+	ctx := t.Context()
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	closed, err := e.launch(t, "claude")
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err = e.sched.CloseRun(ctx, closed.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	unstarted, err := e.launch(t, "claude")
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.db.UpdateRunStatus(ctx, unstarted.ID, domain.RunProvisioning, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	runs := []*domain.Run{closed, unstarted}
+	for _, run := range runs {
+		if err = os.Remove(e.sched.sidecarPath(run.ID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retry := &creationKeyFailureRuntime{Runtime: e.rt, findErr: errors.New("runtime API unavailable")}
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = struct {
+		runtime.Runtime
+		imageUserResolver
+	}{retry, e.cfg.Runtime.(imageUserResolver)}
+	if err = s2.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+
+	_, err = s2.Launch(ctx, e.ws.ID, lin.ID, e.owner.ID, "second", "claude", domain.LaunchTUI)
+	if err == nil || !strings.Contains(err.Error(), "shares is held by live run") {
+		t.Fatalf("second recipient beside the recovered runs = %v, want reservation refusal", err)
+	}
+	// The probe uses the owner's mapping, so once the owner's containers run
+	// only the recovered owners block it.
+	probe := func() error {
+		return s2.reserveRunUser(&supervised{runID: "run-probe", memberID: lin.ID, loginMember: e.owner.ID}, "2000:2000", true)
+	}
+	if err = probe(); err == nil || !strings.Contains(err.Error(), "shares is held by live run") {
+		t.Fatalf("login beside the recovered runs = %v, want reservation refusal", err)
+	}
+
+	// The owner's terminal and run look up their own creation keys. Nothing
+	// retries the recovered owners until the sweep below.
+	retry.setFindErr(nil)
+	if _, err = s2.EnsureTerminal(ctx, e.owner.ID); err != nil {
+		t.Fatalf("owner terminal beside the recovered runs: %v", err)
+	}
+	if _, err = s2.Launch(ctx, e.ws.ID, e.owner.ID, e.owner.ID, "own", "claude", domain.LaunchTUI); err != nil {
+		t.Fatalf("owner launch beside the recovered runs: %v", err)
+	}
+	s2.mu.Lock()
+	recovered := s2.runs[closed.ID] != nil && s2.runs[unstarted.ID] != nil
+	s2.mu.Unlock()
+	if !recovered {
+		t.Fatal("recovered owners released before the sweep")
+	}
+
+	s2.sweepRetained(ctx)
+	waitFor(t, "recovered owners released", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		return s2.runs[closed.ID] == nil && s2.runs[unstarted.ID] == nil
+	})
+	for _, run := range runs {
+		if e.rt.byName(string(run.ID)) != nil {
+			t.Fatalf("container of %s survived its release", run.ID)
+		}
+	}
+	if err = probe(); err != nil {
+		t.Fatalf("login after the recovered containers are gone: %v", err)
 	}
 }
 

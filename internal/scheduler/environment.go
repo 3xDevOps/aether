@@ -227,8 +227,8 @@ func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, 
 	for i, rel := range paths {
 		shown[i] = "~/" + rel
 	}
-	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: no login at %s in their home; %s logs in from their own environment terminal (aether terminal)",
-		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName)
+	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: no login at %s in their home; %s logs in to %s in their own environment terminal",
+		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName, profile.Name)
 }
 
 // SharedLaunch is whether a launch on another member's shared account would

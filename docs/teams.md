@@ -830,7 +830,7 @@ A launch on a shared account whose owner has no login for that agent, or
 only an empty file at its login path, fails with a reason like:
 
 ```
-provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in from their own environment terminal (aether terminal)
+provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in to claude in their own environment terminal
 ```
 
 After sharing, the owner runs `aether terminal stop` and reopens the

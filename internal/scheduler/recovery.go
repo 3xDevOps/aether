@@ -826,6 +826,12 @@ func (s *Scheduler) admitDestroyPendingOwner(ctx context.Context, r *domain.Run,
 			return nil, false
 		}
 		current = sc
+		// Without a sidecar nothing says whether the container mounts the
+		// account owner's login, so a narrowed shared run holds it until the
+		// container is gone. That never blocks the owner's own containers.
+		if fresh.HomeMemberID != "" && fresh.AccountMember() != fresh.HomeMember() {
+			current.LoginMember = string(fresh.AccountMember())
+		}
 	}
 	if current.RunUser == "" {
 		current.RunUser = sc.RunUser
