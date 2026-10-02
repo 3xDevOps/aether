@@ -103,6 +103,7 @@ type serveOptions struct {
 	edgeURL              *edgeURLValue
 	edgeAccess           *accessPolicyValue
 	conflictCoordination *bool
+	harnessUpdate        *bool
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
 	checkoutTTL          *time.Duration
@@ -141,6 +142,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"who may reach this server through the edge: account (signing in with GitHub is enough) or approved-devices "+
 			"(each new device waits until a person approves it); changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
+	o.harnessUpdate = fs.Bool("harness-update", true, "update a shipped agent installed in the member home before launching it")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
 	o.pollInterval = fs.Duration("poll-interval", 0, "how often stalls are checked (0 = 30s)")
@@ -188,6 +190,9 @@ func serve(args []string) error {
 		EdgeAccess: edgeproto.AccessPolicy(*o.edgeAccess),
 
 		CoordinationDisabled: !*o.conflictCoordination,
+
+		HarnessUpdateDisabled: !*o.harnessUpdate,
+
 		// The one place a process is granted the right to replace itself
 		// and to ask systemd for a restart. Nothing else supplies it, so
 		// no test binary can reach the host's service manager.

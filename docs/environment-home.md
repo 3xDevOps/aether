@@ -61,6 +61,10 @@ After setup, every run you launch sees the same executable and login state.
 A member-defined agent also records its launch arguments for later runs.
 The terminal command ships in this release series.
 
+Aether keeps a shipped agent installed in `~/.local/bin` current: before a
+launch it runs the agent's own update command against this home, at most every
+6 hours. See [harnesses.md](harnesses.md#updates-before-launch).
+
 ## Connect GitHub
 
 Connect GitHub once and every run you launch, including on another member's

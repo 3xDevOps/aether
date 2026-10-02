@@ -330,6 +330,11 @@ type Profile struct {
 	// member's terminal (aether terminal). It must install into ~/.local/bin.
 	// A failed install leaves the member in the terminal to install manually.
 	InstallScript string
+	// UpdateScript brings the CLI installed in ~/.local/bin current and is a
+	// cheap no-op when it already is. The scheduler runs it with /bin/sh -c
+	// before a launch. It updates the program only, never the member's
+	// plugins, extensions, channel or configuration.
+	UpdateScript string
 }
 
 // SteerSuffix returns the bytes that follow a steering message: the
@@ -339,6 +344,32 @@ func (p Profile) SteerSuffix() string {
 		return "\r"
 	}
 	return p.SteerSubmit
+}
+
+// npmUpdateScript updates a CLI installed by npm into ~/.local. The new
+// version is installed beside the old one and its package directory swapped
+// in with two renames, so an agent starting meanwhile never runs a
+// half-written install; the bin symlink npm made is relative and survives
+// the swap. installed is a case pattern matching "<exe> --version" output
+// for the version in $latest. A stage left by a stopped update is removed
+// only while the package directory exists, so it cannot hold the only copy.
+func npmUpdateScript(pkg, exe, installed string, extra ...string) string {
+	return strings.NewReplacer("{pkg}", pkg, "{exe}", exe, "{installed}", installed,
+		"{extra}", strings.Join(append([]string{""}, extra...), " ")).Replace(
+		`dir="$HOME/.local/lib/node_modules/{pkg}"
+[ -d "$dir" ] || { echo "{exe} in ~/.local/bin was not installed with npm, so Aether cannot update it" >&2; exit 1; }
+command -v npm >/dev/null 2>&1 || { echo "npm is not in this environment's PATH, and {exe} updates through npm" >&2; exit 1; }
+latest=$(npm view {pkg} version --fetch-retries=0) && [ -n "$latest" ] || exit 1
+case "$({exe} --version)" in {installed}) exit 0 ;; esac
+rm -rf "$HOME/.local/lib/.{exe}-update."*
+stage=$(mktemp -d "$HOME/.local/lib/.{exe}-update.XXXXXX") || exit 1
+trap 'rm -rf "$stage"' EXIT
+npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
+mv "$dir" "$stage/previous" || exit 1
+if ! mv "$stage/lib/node_modules/{pkg}" "$dir"; then
+	mv "$stage/previous" "$dir"
+	exit 1
+fi`)
 }
 
 // profiles is the shipped registry. "custom" is the escape hatch: its
@@ -374,6 +405,7 @@ var profiles = map[string]Profile{
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
 		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
+		UpdateScript:  "claude update",
 	},
 	"codex": {
 		Name:            "codex",
@@ -397,6 +429,9 @@ var profiles = map[string]Profile{
 		// member's persistent home. Without npm in the image the member
 		// installs manually, as before.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" @openai/codex",
+		// Not "codex update": it installs into the image's global npm
+		// prefix, outside the home.
+		UpdateScript: npmUpdateScript("@openai/codex", "codex", `*" $latest"`),
 	},
 	"pi": {
 		Name:         "pi",
@@ -417,6 +452,9 @@ var profiles = map[string]Profile{
 		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
+		// Not "pi update --self": it replaces files in place, under a
+		// running or starting pi.
+		UpdateScript: npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"),
 	},
 	// omp is a fork of pi and takes the same extension. It has a
 	// permission prompt of its own, which --auto-approve bypasses.
@@ -438,6 +476,7 @@ var profiles = map[string]Profile{
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		NativeCoordination: true,
 		InstallScript:      "curl -fsSL https://omp.sh/install | sh",
+		UpdateScript:       "omp update",
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -469,6 +508,8 @@ var profiles = map[string]Profile{
 		},
 		DiscoveryFiles: map[string][]byte{DiscoveryFileName: []byte(DiscoveryInstruction + "\n")},
 		InstallScript:  "curl -fsSL https://opencode.ai/install | bash",
+		// No UpdateScript: an upgrade can cross a major version that the
+		// managed OpenCode launch wrapper refuses.
 	},
 	"custom": {Name: "custom"},
 }

@@ -395,6 +395,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {
 		return fmt.Errorf("apply login ownership: %w", ownErr)
 	}
+	s.updateHarness(ctx, run, plan, profile)
 	var native harness.NativeLaunch
 	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
 		run.Mode == domain.LaunchTUI && run.Task != "" {

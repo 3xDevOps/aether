@@ -10,7 +10,9 @@ Two rules shape everything below:
 
 1. **Aether does not install agents for you.** A member runs the displayed
    vendor install command in their environment terminal. The command should
-   install the executable into `~/.local/bin`.
+   install the executable into `~/.local/bin`. Once a shipped agent is
+   installed there, Aether keeps it current; see
+   [Updates before launch](#updates-before-launch).
 2. **Aether does not copy vendor credentials to clients or synchronize them.**
    Logins happen through the vendor's own flow in an Aether terminal.
    Credentials remain in the member home; an explicit account share mounts only
@@ -1048,6 +1050,74 @@ the explicit browser import writes selected configuration there, and the
 definition resolves argv for that member. The terminal is the only setup
 transport for installation and login.
 
+## Updates before launch
+
+Before it launches a run, the server updates the shipped agent installed in
+the member home's `~/.local/bin`. It runs the agent's own update command in a
+short-lived container with the run's image, user, environment, and member
+home. The first launch per member home and agent checks for an update; after
+that, a launch checks again once 6 hours have passed, or 15 minutes after a
+failed update. Concurrent launches on one home, such as a swarm, share one
+update.
+
+| Agent | Update command |
+| --- | --- |
+| `claude` | `claude update` |
+| `codex` | reads the latest version with `npm view @openai/codex version`; when `codex --version` differs, runs `npm install -g --prefix <stage> "@openai/codex@<version>"` |
+| `pi` | reads the latest version with `npm view @earendil-works/pi-coding-agent version`; when `pi --version` differs, runs `npm install -g --prefix <stage> --ignore-scripts "@earendil-works/pi-coding-agent@<version>"` |
+| `omp` | `omp update` |
+
+For `codex` and `pi`, npm installs the new version into a stage directory
+beside the old one in `~/.local/lib`, and the package directory is then
+swapped in with two renames, so an agent starting meanwhile never sees a
+half-written install. Their own updaters are not used: `codex update`
+installs into the image's global npm prefix, outside the member home, and
+`pi update --self` replaces files in place. A `codex` or `pi` in
+`~/.local/bin` that npm did not install is not updated, and the update
+reports, for example, `codex in ~/.local/bin was not installed with npm, so
+Aether cannot update it`.
+
+Nothing else is touched: no agent configuration, plugins, extensions, or
+release channel. These are never updated:
+
+- an agent defined by a member, or a shipped name an administrator overrides
+  with `--harness-definitions`;
+- `opencode`, because an upgrade can cross a major version that the managed
+  OpenCode wrapper refuses (see [Managed native loading](#managed-native-loading));
+- an agent installed in the image rather than in `~/.local/bin` of the member
+  home.
+
+A launch waits at most 25 seconds for the update. If it is still running, the
+agent starts on whatever is installed at that moment, the update finishes in
+the background, and the run's timeline in the dashboard shows:
+
+```text
+starting the installed version 2.1.288 (Claude Code) while claude updates
+```
+
+The update's result appears on the timeline of the run that started it, also
+when it finishes after the agent started. A new version reads
+`updated <agent> from <old> to <new>`, or `to an unknown version` when the
+new `--version` cannot be read; an unchanged one adds nothing. A
+failure, including a vendor release server that cannot be reached, never
+stops a launch; the timeline shows the real cause:
+
+```text
+could not update claude from 2.1.288 (Claude Code): the updater exited 1: <updater output>
+```
+
+An updater still running after 10 minutes is stopped and reported as
+`the updater did not finish within 10m0s`. Killing the run or closing the
+dashboard does not stop an update.
+
+A newer CLI may migrate its own state in the member home on first start, and
+Aether does not roll an update back. Relaunching a retained run reuses its
+container and does not update. `omp` and Claude Code keep the files of
+previous versions in the member home; Aether does not prune them.
+
+To turn updates off for the whole server, start it with
+`aether-server serve --harness-update=false`.
+
 ## Agent configuration: import and Files
 
 Open **Configuration** from the Agents page, the shared navigation rail, or
@@ -1169,7 +1239,10 @@ matches those bytes. No path automatically synchronizes later local changes.
 ## Adding a harness
 
 The registry defines argv templates for both modes, credential/configuration
-roots, denylist, API-key passthrough, taskless discovery, and status reporting.
+roots, denylist, API-key passthrough, taskless discovery, status reporting,
+the install command (`InstallScript`), and the optional pre-launch update
+command (`UpdateScript`), which must be a cheap no-op when the CLI is current
+and must update only the program.
 An output adapter is optional; see [adapters.md](adapters.md).
 Inbox support is a separate capability: follow the
 [harness integration guide](harness-integration.md) for the durable CLI,
