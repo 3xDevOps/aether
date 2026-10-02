@@ -172,35 +172,45 @@ export function clearDonePlan(
 // outcome Clear done was trying to reach anyway.
 const codeRunNotFound = -32000
 
+// A full Done column must not open one gateway request per run: the server
+// serializes the writes, but only after every request holds a connection.
+const clearDoneConcurrency = 6
+
 /**
- * Archives every eligible run one at a time: the server has a single SQLite
- * writer. Each call's own `run.archived` event moves the run in every
- * connected dashboard, this one included, so the count below comes from the
- * resolved calls, not from re-applying what the RPC returned.
+ * Archives every eligible run, `clearDoneConcurrency` calls at a time. Each
+ * call's own `run.archived` event moves the run in every connected
+ * dashboard, this one included, so the count below comes from the settled
+ * calls, not from re-applying what the RPC returned.
  */
 export async function runClearDone(
   eligible: RunRecord[],
   deps: Pick<CommandDeps, 'api' | 'removeRun'>,
 ): Promise<void> {
-  let archived = 0
-  let failed = 0
-  let firstError: string | undefined
-  for (const run of eligible) {
-    try {
-      await deps.api.runArchive(run.id, true)
-      archived++
-    } catch (err) {
-      if (err instanceof ApiError && err.code === codeRunNotFound) {
-        deps.removeRun(run.id)
-        archived++
-        continue
+  // One slot per run, so the failures read back in Done order however the
+  // calls settle.
+  const errors = new Array<string | undefined>(eligible.length)
+  let next = 0
+  const worker = async () => {
+    while (next < eligible.length) {
+      const i = next++
+      try {
+        await deps.api.runArchive(eligible[i].id, true)
+      } catch (err) {
+        if (err instanceof ApiError && err.code === codeRunNotFound) {
+          deps.removeRun(eligible[i].id)
+        } else {
+          errors[i] = message(err)
+        }
       }
-      failed++
-      firstError ??= message(err)
     }
   }
-  if (failed > 0) {
-    toast.error(`Archived ${archived}, ${failed} failed: ${firstError}`)
+  await Promise.all(
+    Array.from({ length: Math.min(clearDoneConcurrency, eligible.length) }, worker),
+  )
+  const failures = errors.filter((error) => error !== undefined)
+  const archived = eligible.length - failures.length
+  if (failures.length > 0) {
+    toast.error(`Archived ${archived}, ${failures.length} failed: ${failures[0]}`)
   } else {
     toast.success(`Archived ${archived} ${archived === 1 ? 'run' : 'runs'}`)
   }
