@@ -207,6 +207,8 @@ type EvidencePacket struct {
 	RetainedRevision      string
 	ChangedFiles          []ChangedFileFact
 	Sources               []EvidenceSourceFact
+	Captures              []DevelopmentArtifact
+	VerificationNotes     string
 	RelatedRoomMessageIDs []string
 	UnresolvedFacts       []string
 	NextAction            string
@@ -336,7 +338,7 @@ type CollaborationStore interface {
 var _ CollaborationStore = (*DB)(nil)
 
 const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at`
-const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at`
+const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at, captures, verification_notes`
 
 func marshalCollaborationJSON(v any, empty string) (string, error) {
 	b, err := json.Marshal(v)
@@ -609,9 +611,6 @@ func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by
 		return nil, fmt.Errorf("store: cancel queued steer requests: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, lockErr := tx.ExecContext(ctx, `UPDATE room_messages SET updated_at = updated_at WHERE run_id = ? AND kind = ? AND state = ?`, run, RoomMessageSteerRequest, RoomMessageQueued); lockErr != nil {
-		return nil, fmt.Errorf("store: cancel queued steer requests: lock: %w", lockErr)
-	}
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, id`, run, RoomMessageSteerRequest, RoomMessageQueued)
 	if err != nil {
 		return nil, fmt.Errorf("store: cancel queued steer requests: select: %w", err)
@@ -656,8 +655,8 @@ func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by
 
 // SetRunProtectedAndCancelQueuedSteerRequests changes protection and, when
 // enabling it, settles every still-deliverable steer in the same transaction.
-// The run update acquires SQLite's writer lock before candidate selection, so
-// no claimant can commit between the protection decision and cancellation.
+// The transaction holds SQLite's write lock from its start, so no claimant
+// can commit between the protection decision and cancellation.
 func (d *DB) SetRunProtectedAndCancelQueuedSteerRequests(ctx context.Context, run domain.RunID, protected bool, by domain.MemberID, decidedAt time.Time) ([]*RoomMessage, error) {
 	if run == "" {
 		return nil, errors.New("store: protect run: run is required")

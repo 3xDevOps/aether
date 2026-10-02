@@ -13,6 +13,7 @@ import (
 
 func init() {
 	registerMethod(protocol.MethodWorkspaceAdd, (*Server).workspaceAdd)
+	registerMethod(protocol.MethodWorkspaceDelete, (*Server).workspaceDelete)
 	registerMethod(protocol.MethodMemberInvite, (*Server).memberInvite)
 	registerMethod(protocol.MethodMemberRemove, (*Server).memberRemove)
 }
@@ -36,6 +37,14 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if perr != nil {
 		return nil, perr
 	}
+	w, err := s.createWorkspace(ctx, p, "")
+	if err != nil {
+		return nil, err
+	}
+	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
+}
+
+func (s *Server) createWorkspace(ctx context.Context, p protocol.WorkspaceAddParams, origin string) (*domain.Workspace, *protocol.Error) {
 	if p.Name == "" || !p.Environment.Valid() {
 		return nil, invalidParams("name and valid environment are required")
 	}
@@ -43,18 +52,53 @@ func (s *Server) workspaceAdd(ctx context.Context, member domain.MemberID, param
 	if base == "" {
 		base = domain.DefaultBaseBranch
 	}
-	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Environment: domain.WorkspaceEnvironment{
+	w := &domain.Workspace{Name: p.Name, BaseBranch: base, Origin: origin, Environment: domain.WorkspaceEnvironment{
 		Variables:   p.Environment.Variables,
 		SetupPolicy: domain.SetupPolicy{Script: p.Environment.SetupPolicy.Script},
 	}}
 	if err := s.cfg.Store.CreateWorkspace(ctx, w); err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.WorkspaceAddResult{Workspace: protocol.WorkspaceFromDomain(w)}, nil
+	return w, nil
+}
+
+func (s *Server) workspaceDelete(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
+		return nil, err
+	}
+	p, perr := decodeParams[protocol.WorkspaceDeleteParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.WorkspaceID == "" {
+		return nil, invalidParams("workspace_id is required")
+	}
+	lock := s.workspaceLock(domain.WorkspaceID(p.WorkspaceID))
+	if !lock.TryLock() {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "workspace operations are in progress; retry deletion when they finish"}
+	}
+	defer lock.Unlock()
+	if !s.authorizationMu.TryLock() {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: "run or mission admission is in progress; retry workspace deletion when it finishes"}
+	}
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceDelete); err != nil {
+		return nil, err
+	}
+	if s.cfg.DeleteWorkspace == nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace deletion is not configured"}
+	}
+	if err := s.cfg.DeleteWorkspace(ctx, domain.WorkspaceID(p.WorkspaceID), member); err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.WorkspaceDeleteResult{OK: true}, nil
 }
 
 func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	if err := s.requireAdmin(ctx, member, protocol.MethodMemberInvite); err != nil {
+		return nil, err
+	}
+	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberInvite, true); err != nil {
 		return nil, err
 	}
 	if s.cfg.InvitesDir == "" {
@@ -151,6 +195,8 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			}
 		}
 	}
+	s.closeMemberConns(id)
+	s.notifyDirectory()
 	if s.cfg.Homes != nil {
 		if err := s.cfg.Homes.Remove(id); err != nil {
 			slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)

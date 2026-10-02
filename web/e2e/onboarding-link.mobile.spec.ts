@@ -16,6 +16,7 @@ test('the Link step stays usable at the height a keyboard leaves', async ({
   const alice = await aether.member('alice')
   const wizard = await OnboardingWizard.open(page, alice.url)
 
+  await wizard.link.byAddress().tap()
   const address = wizard.link.section.getByLabel('Server address')
   await address.tap()
   const restoreViewport = await shrinkToKeyboardHeight(page)

@@ -18,12 +18,13 @@ export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
   const unreachable = useStore((s) => s.unreachable)
+  const edge = useStore((s) => s.linkStatus?.edge_url)
   const hydrated = useStore((s) => s.hydrated)
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
   const epoch = useStore((s) => s.connectionEpoch)
   const resetConnection = useStore((s) => s.resetConnection)
   const drafts = useStore((s) => s.drafts)
-  const importPending = useStore((s) => s.onboardingImportPending)
+  const importPending = useStore((s) => s.configImportPending)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)
@@ -77,6 +78,7 @@ export function App() {
               kind={unreachable}
               dead={streamDead}
               error={hydrationError}
+              edge={edge}
               onRetry={retry}
             />
           ) : (

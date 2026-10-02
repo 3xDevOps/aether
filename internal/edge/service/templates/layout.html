@@ -1,0 +1,35 @@
+{{define "top"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} - Aether edge</title>
+<link rel="stylesheet" href="/edge.css">
+</head>
+<body>
+<header>
+<strong>Aether edge</strong>
+{{if .Account}}<nav>
+<a href="/servers">Servers</a>
+<a href="/devices">Devices</a>
+<a href="/device">Sign in a device</a>
+<a href="/account">Account</a>
+<form method="post" action="/signout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out</button></form>
+</nav>
+<p class="who">Signed in with GitHub as {{template "account" .Account}}</p>{{end}}
+</header>
+<main>
+<h1>{{.Title}}</h1>
+{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{end}}
+
+{{define "bottom"}}</main>
+</body>
+</html>
+{{end}}
+
+{{define "account"}}{{if .Login}}{{.Login}}{{else if .Email}}{{.Email}}{{else}}{{.Name}}{{end}}{{end}}
+
+{{define "error"}}{{template "top" .}}
+<p><a href="/servers">Back to your servers</a></p>
+{{template "bottom" .}}{{end}}

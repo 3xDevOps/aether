@@ -1,0 +1,66 @@
+import { expect, test } from '../fixtures'
+import type { Workspace, WorkspaceMirrorResult } from '../../src/lib/types'
+
+// A real credential-free HTTPS repository reachable by the server. No route
+// interception, fabricated mirror response, or local repository link is used.
+const source = process.env.AETHER_E2E_GIT_SOURCE_URL ?? 'https://github.com/3xDevOps/Aether.git'
+const branch = process.env.AETHER_E2E_GIT_SOURCE_BRANCH ?? 'main'
+
+test('remote import retains the initial candidate until an administrator adopts its generation', async ({ page, aether }) => {
+  const admin = await aether.member('Import administrator')
+  await admin.api.local('link.apply', { addr: aether.server.addr, name: admin.name })
+  await page.goto(admin.url)
+  await page.getByRole('button', { name: 'Commands', exact: true }).click()
+  await page.getByPlaceholder('Search commands, runs, workspaces...').fill('Manage workspaces')
+  await page.getByRole('option', { name: 'Manage workspaces' }).click()
+  await page.getByRole('button', { name: 'Import repository', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import repository' })
+  await dialog.getByLabel('Workspace name', { exact: true }).fill('remote-only')
+  await dialog.getByLabel('Source URL', { exact: true }).fill(source!)
+  await dialog.getByLabel('Source / base branch').fill(branch)
+  await expect(dialog.getByLabel('Checkout Origin (optional)')).toHaveValue('')
+  await dialog.getByRole('button', { name: 'Import repository', exact: true }).click()
+  await expect(dialog.getByRole('region', { name: 'Import outcome' })).toContainText('Created: yes')
+  const { workspaces } = await admin.api.rpc<{ workspaces: Workspace[] }>('workspace.list')
+  const workspace = workspaces.find((entry) => entry.name === 'remote-only')!
+  expect(workspace.origin ?? '').toBe('')
+  const pending = await admin.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: workspace.id })
+  expect(pending.status).toBe('pending')
+  expect(pending.observed_commit).toMatch(/^[a-f0-9]{40,64}$/)
+  expect(pending.accepted_commit ?? '').toBe('')
+  await dialog.getByRole('button', { name: 'Continue to Source control' }).click()
+  const mirror = page.getByRole('dialog', { name: 'Workspace Source' })
+  await expect(mirror).toContainText(pending.observed_commit!)
+  await mirror.getByRole('button', { name: 'Adopt candidate', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Adopt candidate', exact: true }).click()
+  await expect(mirror.getByTestId('mirror-state')).toHaveText('ready')
+  const accepted = await admin.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: workspace.id })
+  expect(accepted.accepted_commit).toBe(pending.observed_commit)
+  await page.screenshot({ path: test.info().outputPath('remote-import-adopted.png'), fullPage: true })
+})
+
+test('a failed fetch keeps the created workspace and repair flow instead of replaying import', async ({ page, aether }) => {
+  const admin = await aether.member('Import administrator')
+  await admin.api.local('link.apply', { addr: aether.server.addr, name: admin.name })
+  await page.goto(admin.url)
+  await page.getByRole('button', { name: 'Commands', exact: true }).click()
+  await page.getByPlaceholder('Search commands, runs, workspaces...').fill('Manage workspaces')
+  await page.getByRole('option', { name: 'Manage workspaces' }).click()
+  await page.getByRole('button', { name: 'Import repository', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Import repository' })
+  await dialog.getByLabel('Workspace name', { exact: true }).fill('retained-fetch-failure')
+  await dialog.getByLabel('Source URL', { exact: true }).fill(source!)
+  await dialog.getByLabel('Source / base branch').fill(`missing-e2e-${crypto.randomUUID()}`)
+  await dialog.getByRole('button', { name: 'Import repository', exact: true }).click()
+  const result = dialog.getByRole('region', { name: 'Import outcome' })
+  await expect(result).toContainText('Created: yes')
+  await expect(result.getByRole('alert')).toBeVisible()
+  const { workspaces } = await admin.api.rpc<{ workspaces: Workspace[] }>('workspace.list')
+  expect(workspaces.map((entry) => entry.name)).toEqual(['retained-fetch-failure'])
+  await expect(result).toContainText(workspaces[0].id)
+  await expect(dialog.getByRole('button', { name: 'Import repository', exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Continue to Source control' }).click()
+  const mirror = page.getByRole('dialog', { name: 'Workspace Source' })
+  await expect(mirror).toBeVisible()
+  await expect(mirror.getByRole('button', { name: /Verify|Refresh/ })).toBeEnabled()
+})

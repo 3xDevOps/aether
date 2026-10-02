@@ -18,15 +18,93 @@ import { useStore } from '@/store'
 // xterm allocates scrollback rows as output arrives; this is its supported
 // maximum, not a preallocated browser buffer.
 const maxTerminalScrollback = 4_294_967_295
+const maxAdaptiveTerminalCells = 1_000_000
+
+function adaptiveScrollback(cols: number, rows: number, requested: number): number {
+  if (requested >= maxTerminalScrollback) return requested
+  const width = Math.max(1, Math.floor(cols))
+  const viewportRows = Math.max(1, Math.floor(rows))
+  // Count normal scrollback plus both copies of the viewport (normal and
+  // alternate buffers) against the per-run cap.
+  const available = Math.floor(maxAdaptiveTerminalCells / width) - viewportRows * 2
+  return Math.max(0, Math.min(requested, available))
+}
+
+/**
+ * Suppress query responders at the parser, never at onData: that event also
+ * carries real keyboard, paste and mouse input. Rendering commands fall through.
+ */
+function installServerResponder(terminal: Terminal, ownsResponses: () => boolean) {
+  const parser = terminal.parser
+  const registrations = [
+    ...[
+      { final: 'c' },
+      { prefix: '>', final: 'c' },
+      { final: 'n' },
+      { prefix: '?', final: 'n' },
+      { intermediates: '$', final: 'p' },
+      { prefix: '?', intermediates: '$', final: 'p' },
+    ].map((id) => parser.registerCsiHandler(id, ownsResponses)),
+    parser.registerCsiHandler({ final: 't' }, (params) =>
+      ownsResponses() && [14, 16, 18, 20, 21].includes(Number(params[0]))),
+    parser.registerDcsHandler({ intermediates: '$', final: 'q' }, ownsResponses),
+  ]
+  // OSC permits setters and queries in a single command. The public parser API
+  // cannot delegate a modified payload synchronously. Use the pinned xterm
+  // InputHandler only for these four color setters, preserving its color parser
+  // and event ordering rather than implementing a second palette/emulator.
+  interface ColorInputHandler {
+    setOrReportIndexedColor(data: string): boolean
+    setOrReportFgColor(data: string): boolean
+    setOrReportBgColor(data: string): boolean
+    setOrReportCursorColor(data: string): boolean
+  }
+  // xterm's pinned implementation exposes InputHandler through its core.
+  const internal = terminal as unknown as { _core: { _inputHandler: ColorInputHandler } }
+  const input = internal._core._inputHandler
+  registrations.push(parser.registerOscHandler(4, (data) => {
+    if (!ownsResponses()) return false
+    const slots = data.split(';')
+    const setters: string[] = []
+    for (let index = 0; index + 1 < slots.length; index += 2) {
+      if (slots[index + 1] !== '?') setters.push(slots[index], slots[index + 1])
+    }
+    if (setters.length) input.setOrReportIndexedColor(setters.join(';'))
+    return true
+  }))
+  const setters = [
+    input.setOrReportFgColor.bind(input),
+    input.setOrReportBgColor.bind(input),
+    input.setOrReportCursorColor.bind(input),
+  ]
+  setters.forEach((set, index) => {
+    registrations.push(parser.registerOscHandler(10 + index, (data) => {
+      if (!ownsResponses()) return false
+      // Empty slots are invalid colors (no-op), and keep following setters at
+      // their original foreground/background/cursor offsets.
+      set(data.split(';').map((slot) => slot === '?' ? '' : slot).join(';'))
+      return true
+    }))
+  })
+  return () => registrations.forEach((registration) => registration.dispose())
+}
 
 export interface XtermOptions {
   enabled?: boolean
   /** Follow the shared PTY without contributing this pane's size. */
   follow?: boolean
+  /** Read synchronously by parser hooks; set from the attach ACK before replay. */
+  serverOwnedResponder?: () => boolean
+  /** Maximum number of rows retained in xterm's normal scrollback. */
+  scrollback?: number
   onData?: (data: string) => void
+  /** Legacy mouse reports contain raw bytes, not UTF-8 text. */
+  onBinary?: (data: string) => void
   onResize?: (cols: number, rows: number) => void
-  /** Called synchronously before a terminal hyperlink opens. Return true to handle it. */
+  /** Called synchronously before a terminal hyperlink opens. Return true to handle. */
   onLink?: (uri: string) => boolean
+  /** Capture a mounted terminal's presentation before its renderer is disposed. */
+  onBeforeDispose?: (terminal: Terminal) => void
 }
 
 export interface XtermController {
@@ -43,11 +121,13 @@ export interface XtermController {
   /** The pane's requested geometry, independent of the shared PTY grid. */
   geometry: () => { cols: number; rows: number }
   /** Apply an attach reset or server resize in order with terminal output. */
-  setGeometry: (cols: number, rows: number, reset?: boolean) => void
+  setGeometry: (cols: number, rows: number, reset?: boolean) => void | Promise<void>
   /** Backs the find bar `TerminalPane` draws over this terminal. */
   search: SearchAddon | null
   findOpen: boolean
   setFindOpen: (open: boolean) => void
+  /** Record viewport navigation that must supersede a pending restoration. */
+  noteViewportInteraction?: () => void
   /** Focuses xterm now, or records the focused action owner until it mounts. */
   focusTerminal: () => void
   /**
@@ -57,7 +137,61 @@ export interface XtermController {
    */
   ctrlArmed: boolean
   armCtrl: (armed: boolean) => void
+  /** Capture this pane's viewport before a structural reset/replay. */
+  beginStructuralReplay?: () => number
+  /** Abandon a structural replay without restoring its captured viewport. */
+  cancelStructuralReplay?: (generation: number) => void | Promise<void>
+  /** Restore compatible viewport intent after every ordered replay operation. */
+  finishStructuralReplay?: (generation: number) => void | Promise<void>
+  /** Changes protocol ownership synchronously, before any queued output parses. */
+  setServerOwnedResponder?: (owned: boolean) => void
 }
+type BufferType = 'normal' | 'alternate'
+
+interface ViewportIntent {
+  buffer: BufferType
+  followBottom: boolean
+  bottomOffset: number
+  interactionRevision: number
+}
+
+interface StructuralReplay {
+  generation: number
+  terminal: Terminal
+  intent: ViewportIntent
+}
+
+function activeBufferType(terminal: Terminal): BufferType {
+  return terminal.buffer.active === terminal.buffer.alternate ? 'alternate' : 'normal'
+}
+
+function captureViewport(terminal: Terminal, interactionRevision: number): ViewportIntent {
+  const buffer = terminal.buffer.active
+  const bottomOffset = Math.max(0, buffer.baseY - buffer.viewportY)
+  return {
+    buffer: activeBufferType(terminal),
+    followBottom: bottomOffset === 0,
+    bottomOffset,
+    interactionRevision,
+  }
+}
+function restoreViewport(
+  terminal: Terminal,
+  intent: ViewportIntent,
+  interactionRevision: number,
+): void {
+  if (
+    interactionRevision !== intent.interactionRevision ||
+    activeBufferType(terminal) !== intent.buffer
+  ) return
+  if (intent.followBottom) {
+    terminal.scrollToBottom()
+  } else {
+    terminal.scrollToLine(Math.max(0, terminal.buffer.active.baseY - intent.bottomOffset))
+  }
+  terminal.refresh(0, Math.max(0, terminal.rows - 1))
+}
+
 
 /**
  * The control code one character carries under Ctrl, or null when it has
@@ -169,14 +303,20 @@ function paint(host: HTMLDivElement, terminal: Terminal): void {
 export function useXterm({
   enabled = true,
   follow = false,
+  serverOwnedResponder,
+  scrollback = maxTerminalScrollback,
   onData,
+  onBinary,
   onResize,
   onLink,
+  onBeforeDispose,
 }: XtermOptions = {}): XtermController {
   const [host, setHost] = useState<HTMLDivElement | null>(null)
   const onDataRef = useRef(onData)
+  const onBinaryRef = useRef(onBinary)
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
+  const onBeforeDisposeRef = useRef(onBeforeDispose)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const liveTerminal = useRef<Terminal | null>(null)
   const [search, setSearch] = useState<SearchAddon | null>(null)
@@ -189,13 +329,27 @@ export function useXterm({
   const [ctrlArmed, setCtrlArmed] = useState(false)
   const ctrlArmedRef = useRef(false)
   const followRef = useRef(follow)
+  const responderOption = useRef(serverOwnedResponder)
+  responderOption.current = serverOwnedResponder
+  const serverOwned = useRef(false)
+  const setServerOwnedResponder = useCallback((owned: boolean) => {
+    serverOwned.current = owned
+  }, [])
   const serverSize = useRef<{ cols: number; rows: number } | null>(null)
   const requestedSize = useRef(standardGeometry)
   const resizeRef = useRef<(() => void) | null>(null)
+  const viewportInteractionRevision = useRef(0)
+  const structuralGeneration = useRef(0)
+  const structuralReplay = useRef<StructuralReplay | null>(null)
   followRef.current = follow
   onDataRef.current = onData
+  onBinaryRef.current = onBinary
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  onBeforeDisposeRef.current = onBeforeDispose
+  const noteViewportInteraction = useCallback(() => {
+    viewportInteractionRevision.current++
+  }, [])
   const armCtrl = useCallback((armed: boolean) => {
     ctrlArmedRef.current = armed
     setCtrlArmed(armed)
@@ -215,12 +369,90 @@ export function useXterm({
   )
   const setGeometry = useCallback((cols: number, rows: number, reset = false) => {
     serverSize.current = { cols, rows }
-    terminal?.write('', () => {
-      if (liveTerminal.current !== terminal) return
-      if (reset) terminal.reset()
-      terminal.resize(cols, rows)
+    const current = terminal
+    if (!current || liveTerminal.current !== current) return Promise.resolve()
+    const reflowGeneration = structuralGeneration.current
+    const reflowIntent =
+      !reset && current.cols !== cols && structuralReplay.current === null
+        ? captureViewport(current, viewportInteractionRevision.current)
+        : null
+    return new Promise<void>((resolve, reject) => {
+      try {
+        current.write('', () => {
+          try {
+            if (liveTerminal.current === current) {
+              if (scrollback < maxTerminalScrollback) {
+                current.options.scrollback = adaptiveScrollback(cols, rows, Math.floor(scrollback))
+              }
+              if (reset) current.reset()
+              current.resize(cols, rows)
+            }
+            if (
+              liveTerminal.current === current &&
+              reflowIntent &&
+              structuralGeneration.current === reflowGeneration &&
+              structuralReplay.current === null
+            ) {
+              restoreViewport(current, reflowIntent, viewportInteractionRevision.current)
+            }
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      } catch (error) {
+        reject(error)
+      }
     })
+  }, [scrollback, terminal])
+  const beginStructuralReplay = useCallback(() => {
+    const generation = ++structuralGeneration.current
+    const current = terminal
+    structuralReplay.current =
+      current && liveTerminal.current === current
+        ? {
+            generation,
+            terminal: current,
+            intent: captureViewport(current, viewportInteractionRevision.current),
+          }
+        : null
+    return generation
   }, [terminal])
+  const cancelStructuralReplay = useCallback((generation: number) => {
+    const replay = structuralReplay.current
+    if (!replay || replay.generation !== generation) return Promise.resolve()
+    structuralReplay.current = null
+    if (liveTerminal.current !== replay.terminal) return Promise.resolve()
+    return new Promise<void>((resolve) => replay.terminal.write('', resolve))
+  }, [])
+  const finishStructuralReplay = useCallback((generation: number) => {
+    const replay = structuralReplay.current
+    if (!replay || replay.generation !== generation) return Promise.resolve()
+    const current = replay.terminal
+    if (liveTerminal.current !== current) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      try {
+        current.write('', () => {
+          try {
+            const active = structuralReplay.current
+            if (
+              active?.generation === generation &&
+              active.terminal === current &&
+              liveTerminal.current === current
+            ) {
+              structuralReplay.current = null
+              restoreViewport(current, active.intent, viewportInteractionRevision.current)
+            }
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }, [])
   useEffect(() => {
     const intent = focusIntent.current
     if (!intent || !terminal) return
@@ -258,6 +490,8 @@ export function useXterm({
     serverSize.current = null
     requestedSize.current = standardGeometry
 
+    viewportInteractionRevision.current = 0
+    structuralReplay.current = null
     // The DOM renderer, deliberately: @xterm/addon-webgl 0.19.0 reuses stale
     // glyph-atlas positions under heavy glyph churn, garbling scrolled rows
     // until a forced refresh (xtermjs/xterm.js#6038; the fix is unreleased).
@@ -267,15 +501,19 @@ export function useXterm({
       window.open(uri, '_blank', 'noopener,noreferrer')
     }
     const created = new Terminal({
+      allowProposedApi: true,
       // Read rather than watched: rebuilding the terminal on a zoom step
       // would throw its scrollback away, so the size is applied below.
       fontSize: (appliedFontSize.current = useStore.getState().terminalFontSize),
       fontFamily: terminalFontFamily,
-      scrollback: maxTerminalScrollback,
+      scrollback: Math.max(0, Math.floor(scrollback)),
       scrollOnEraseInDisplay: true,
       cursorBlink: false,
       linkHandler: { activate: (_event, uri) => openLink(uri) },
     })
+    const disposeResponder = installServerResponder(
+      created, () => serverOwned.current || responderOption.current?.() === true,
+    )
 
     let active = true
     let teardown: (() => void) | null = null
@@ -286,8 +524,10 @@ export function useXterm({
       created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
       const searchAddon = new SearchAddon()
       created.loadAddon(searchAddon)
+      setSearch(searchAddon)
       created.open(host)
       liveTerminal.current = created
+      setTerminal(created)
 
       // xterm keeps a single custom key handler, so zoom, find and the
       // clipboard shortcuts are one chain: the first to claim the event stops
@@ -295,6 +535,12 @@ export function useXterm({
       const clipboard = clipboardKeys(created)
       created.attachCustomKeyEventHandler((ev) => {
         if (ev.type !== 'keydown') return clipboard(ev)
+        if (
+          ev.shiftKey &&
+          (ev.code === 'PageUp' || ev.code === 'PageDown' || ev.code === 'Home' || ev.code === 'End')
+        ) {
+          viewportInteractionRevision.current++
+        }
         const zoom = terminalZoomKey(ev)
         if (zoom) {
           ev.preventDefault()
@@ -332,23 +578,20 @@ export function useXterm({
       resizeRef.current = resize
       resize()
 
-      // At a fixed size the grid is larger than the pane, so the row being
-      // written on can sit outside it: a pane that never followed the
-      // cursor would leave new output below the fold. A tap matters for
-      // the same reason - it is what raises the keyboard over the rows.
-      // `scrollIntoView` is absent in jsdom, and the cursor cell only
-      // exists once a renderer has drawn one.
-      const showCursor = () => {
-        if (!followRef.current) return
-        requestAnimationFrame(() => {
-          host
-            .querySelector('.xterm-cursor')
-            ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-        })
+      // xterm owns vertical history. Track only browser gestures that can
+      // change its viewport; parser-driven scrolling from ordinary writes is
+      // deliberately not an interaction and keeps xterm's native pin/follow
+      // behavior intact.
+      const noteViewportInteraction = () => {
+        viewportInteractionRevision.current++
       }
-      host.addEventListener('focusin', showCursor)
-      const cursor = created.onCursorMove(showCursor)
-
+      const noteScrollbarInteraction = (event: PointerEvent) => {
+        if (event.target instanceof Element &&
+          event.target.closest('.xterm-scrollable-element > .scrollbar')) noteViewportInteraction()
+      }
+      host.addEventListener('wheel', noteViewportInteraction, { passive: true })
+      host.addEventListener('touchmove', noteViewportInteraction, { passive: true })
+      host.addEventListener('pointerdown', noteScrollbarInteraction)
       const input = created.onData((data) => {
         if (!ctrlArmedRef.current) {
           onDataRef.current?.(data)
@@ -365,32 +608,39 @@ export function useXterm({
         armCtrl(false)
         onDataRef.current?.(held)
       })
+      const binary = created.onBinary((data) => onBinaryRef.current?.(data))
       const observer = new ResizeObserver(resize)
       observer.observe(host)
       teardown = () => {
-        cursor.dispose()
-        host.removeEventListener('focusin', showCursor)
+        host.removeEventListener('wheel', noteViewportInteraction)
+        host.removeEventListener('touchmove', noteViewportInteraction)
+        host.removeEventListener('pointerdown', noteScrollbarInteraction)
         observer.disconnect()
         themeWatch.disconnect()
         input.dispose()
+        binary.dispose()
         resizeRef.current = null
       }
-      setTerminal(created)
-      setSearch(searchAddon)
     })
 
     return () => {
-      active = false
-      liveTerminal.current = null
-      armCtrl(false)
-      cancelFontWait()
-      teardown?.()
-      created.dispose()
-      setTerminal(null)
-      setSearch(null)
-      setFindOpen(false)
+      try {
+        if (liveTerminal.current === created) onBeforeDisposeRef.current?.(created)
+      } finally {
+        active = false
+        liveTerminal.current = null
+        if (structuralReplay.current?.terminal === created) structuralReplay.current = null
+        armCtrl(false)
+        cancelFontWait()
+        teardown?.()
+        disposeResponder()
+        created.dispose()
+        setTerminal(null)
+        setSearch(null)
+        setFindOpen(false)
+      }
     }
-  }, [armCtrl, enabled, host])
+  }, [armCtrl, enabled, host, scrollback])
 
   useEffect(() => {
     resizeRef.current?.()
@@ -402,9 +652,13 @@ export function useXterm({
   // size zoom only changes how much of the same grid fits on screen.
   useEffect(() => {
     if (!terminal || appliedFontSize.current === fontSize) return
+    // Font changes the cell size without rebuilding the buffer. Keep the row
+    // the user was reading; xterm otherwise paints the new metrics at the bottom.
+    const intent = captureViewport(terminal, viewportInteractionRevision.current)
     appliedFontSize.current = fontSize
     terminal.options.fontSize = fontSize
     resizeRef.current?.()
+    restoreViewport(terminal, intent, viewportInteractionRevision.current)
   }, [fontSize, terminal])
 
   return {
@@ -418,6 +672,11 @@ export function useXterm({
     setFindOpen,
     focusTerminal,
     ctrlArmed,
+    noteViewportInteraction,
     armCtrl,
+    beginStructuralReplay,
+    cancelStructuralReplay,
+    finishStructuralReplay,
+    setServerOwnedResponder,
   }
 }

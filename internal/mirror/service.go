@@ -183,6 +183,10 @@ func (s *Service) finishDisabling(ctx context.Context, row domain.WorkspaceMirro
 	return nil
 }
 
+// Configure prepares a server-owned source without requiring a seeded workspace
+// repository. It leaves the source pending. For an empty workspace, callers
+// must refresh to observe its first candidate, then explicitly adopt it.
+// Checkout Origin is independent and is never read or changed by this service.
 func (s *Service) Configure(ctx context.Context, workspace domain.WorkspaceID, req ConfigureRequest) (Result, error) {
 	unlock := s.workspaceLock(workspace)
 	defer unlock()
@@ -343,7 +347,7 @@ func (s *Service) Refresh(ctx context.Context, workspace domain.WorkspaceID) (Re
 	m.LastError = ""
 	m.LastSuccessAt = now
 	if err := s.store.SetWorkspaceMirror(ctx, m); err != nil {
-		return Result{}, err
+		return s.result(*m, s.publicKey(workspace, *m)), fmt.Errorf("mirror: persist fetched Git state: %w", err)
 	}
 	return s.result(*m, s.publicKey(workspace, *m)), nil
 }
@@ -381,7 +385,7 @@ func (s *Service) Adopt(ctx context.Context, workspace domain.WorkspaceID, gener
 	m.LastError = ""
 	m.LastAttemptAt, m.LastSuccessAt = now, now
 	if err := s.store.SetWorkspaceMirror(ctx, m); err != nil {
-		return Result{}, err
+		return s.result(*m, s.publicKey(workspace, *m)), fmt.Errorf("mirror: persist adopted Git state: %w", err)
 	}
 	return s.result(*m, s.publicKey(workspace, *m)), nil
 }
@@ -441,6 +445,27 @@ func (s *Service) Disable(ctx context.Context, workspace domain.WorkspaceID) (Re
 	return result, nil
 }
 
+// PurgeWorkspace retires every mirror key generation before the repository is
+// removed. Remote deploy-key revocation remains the administrator's job.
+func (s *Service) PurgeWorkspace(ctx context.Context, workspace domain.WorkspaceID) error {
+	unlock := s.workspaceLock(workspace)
+	defer unlock()
+	if _, err := s.store.GetWorkspaceMirror(ctx, workspace); err == nil {
+		if disableErr := s.git.DisableWorkspaceMirror(ctx, workspace); disableErr != nil {
+			return disableErr
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err := retireWorkspaceSecrets(s.root, string(workspace)); err != nil {
+		return err
+	}
+	if err := s.store.DeleteWorkspaceMirror(ctx, workspace); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
 // Capture strictly refreshes a configured mirror unless cachedCommit is
 // supplied. A local-only workspace reads its normal base branch directly and
 // never makes a network claim. Cached mode verifies both persisted consent and
@@ -453,7 +478,10 @@ func (s *Service) Capture(ctx context.Context, workspace domain.WorkspaceID, cac
 		if cachedCommit != "" {
 			return CaptureResult{WorkspaceID: workspace, Cached: true}, &gitengine.MirrorError{Kind: gitengine.MirrorErrorInvalidRequest, WorkspaceID: workspace}
 		}
-		branch := s.workspaceBranch(ctx, workspace)
+		branch, branchErr := s.workspaceBranch(ctx, workspace)
+		if branchErr != nil {
+			return CaptureResult{WorkspaceID: workspace}, branchErr
+		}
 		commit, commitErr := s.git.WorkspaceBranchCommit(ctx, workspace, branch)
 		if commitErr != nil {
 			return CaptureResult{WorkspaceID: workspace, Branch: branch}, commitErr
@@ -537,7 +565,7 @@ func (s *Service) refreshLocked(ctx context.Context, workspace domain.WorkspaceI
 	}
 	current.LastError, current.LastSuccessAt = "", now
 	if err := s.store.SetWorkspaceMirror(ctx, &current); err != nil {
-		return Result{}, err
+		return s.result(current, s.publicKey(workspace, current)), fmt.Errorf("mirror: persist fetched Git state: %w", err)
 	}
 	return s.result(current, s.publicKey(workspace, current)), nil
 }
@@ -551,7 +579,7 @@ func (s *Service) persistFailure(ctx context.Context, current domain.WorkspaceMi
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mirrorRollbackTimeout)
 	defer cancel()
 	if err := s.store.SetWorkspaceMirror(persistCtx, &current); err != nil {
-		return Result{}, err
+		return s.result(current, s.publicKey(current.WorkspaceID, current)), errors.Join(failure, fmt.Errorf("mirror: persist failure: %w", err))
 	}
 	return s.result(current, s.publicKey(current.WorkspaceID, current)), failure
 }
@@ -601,15 +629,19 @@ func (s *Service) restoreGitPolicy(ctx context.Context, workspace domain.Workspa
 	return err
 }
 
-func (s *Service) workspaceBranch(ctx context.Context, workspace domain.WorkspaceID) string {
+func (s *Service) workspaceBranch(ctx context.Context, workspace domain.WorkspaceID) (string, error) {
 	if provider, ok := s.store.(interface {
 		GetWorkspace(context.Context, domain.WorkspaceID) (*domain.Workspace, error)
 	}); ok {
-		if w, err := provider.GetWorkspace(ctx, workspace); err == nil && w.BaseBranch != "" {
-			return w.BaseBranch
+		w, err := provider.GetWorkspace(ctx, workspace)
+		if err != nil {
+			return "", err
+		}
+		if w.BaseBranch != "" {
+			return w.BaseBranch, nil
 		}
 	}
-	return domain.DefaultBaseBranch
+	return domain.DefaultBaseBranch, nil
 }
 
 func captureResult(workspace domain.WorkspaceID, commit, branch, source string, checked time.Time, configured, cached bool) CaptureResult {

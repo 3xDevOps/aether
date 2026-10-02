@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/overlay"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/syncd"
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
 
@@ -24,47 +25,57 @@ import (
 // repository and SSH key, so only the local gateway offers them. The
 // capabilities endpoint advertises exactly the verbs dispatched here.
 var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *protocol.Error){
-	"daemon.install":    (*Gateway).localDaemonInstall,
-	"daemon.status":     (*Gateway).localDaemonStatus,
-	"env.harnesses":     (*Gateway).localEnvHarnesses,
-	"forward.start":     (*Gateway).localForwardStart,
-	"forward.status":    (*Gateway).localForwardStatus,
-	"forward.stop":      (*Gateway).localForwardStop,
-	"git.identity":      (*Gateway).localGitIdentity,
-	"link.apply":        (*Gateway).localLinkApply,
-	"link.repo":         (*Gateway).localLinkRepo,
-	"link.status":       (*Gateway).localLinkStatus,
-	"link.switch":       (*Gateway).localLinkSwitch,
-	"pull":              (*Gateway).localPull,
-	"pull.switch":       (*Gateway).localPullSwitch,
-	"repo.fast-forward": (*Gateway).localRepoFastForward,
-	"repo.push":         (*Gateway).localRepoPush,
-	"sync.start":        (*Gateway).localSyncStart,
-	"sync.status":       (*Gateway).localSyncStatus,
-	"sync.stop":         (*Gateway).localSyncStop,
-	"update.apply":      (*Gateway).localUpdateApply,
-	"update.check":      (*Gateway).localUpdateCheck,
-	"update.status":     (*Gateway).localUpdateStatus,
+	"daemon.install":      (*Gateway).localDaemonInstall,
+	"daemon.status":       (*Gateway).localDaemonStatus,
+	"edge.claim":          (*Gateway).localEdgeClaim,
+	"edge.hostkey":        (*Gateway).localEdgeHostKey,
+	"edge.link":           (*Gateway).localEdgeLink,
+	"edge.login":          (*Gateway).localEdgeLogin,
+	"edge.logout":         (*Gateway).localEdgeLogout,
+	"edge.servers":        (*Gateway).localEdgeServers,
+	"edge.status":         (*Gateway).localEdgeStatus,
+	"env.harnesses":       (*Gateway).localEnvHarnesses,
+	"forward.start":       (*Gateway).localForwardStart,
+	"forward.status":      (*Gateway).localForwardStatus,
+	"forward.stop":        (*Gateway).localForwardStop,
+	"git.identity":        (*Gateway).localGitIdentity,
+	"link.apply":          (*Gateway).localLinkApply,
+	"link.repo":           (*Gateway).localLinkRepo,
+	"link.status":         (*Gateway).localLinkStatus,
+	"link.switch":         (*Gateway).localLinkSwitch,
+	"pull":                (*Gateway).localPull,
+	"pull.switch":         (*Gateway).localPullSwitch,
+	"repo.fast-forward":   (*Gateway).localRepoFastForward,
+	"repo.push":           (*Gateway).localRepoPush,
+	"sync.start":          (*Gateway).localSyncStart,
+	"sync.status":         (*Gateway).localSyncStatus,
+	"sync.stop":           (*Gateway).localSyncStop,
+	"update.apply":        (*Gateway).localUpdateApply,
+	"update.check":        (*Gateway).localUpdateCheck,
+	"update.status":       (*Gateway).localUpdateStatus,
+	"workspace.selection": (*Gateway).localWorkspaceSelection,
 }
 
 var localVerbs = slices.Sorted(maps.Keys(localHandlers))
 
 // localState is the mutable client-machine state behind /local/v1:
-// the saved link config (link.repo updates it) and the background sync
-// sessions.
+// the saved link config (link.repo updates it), the background sync
+// sessions, and the edge sign-in in progress.
 type localState struct {
 	mu      sync.Mutex
 	cfg     cli.Config
 	mtime   time.Time
+	backend Backend
 	sync    *localops.SyncManager
 	forward *localops.ForwardManager
+	edge    edgeLogin
 }
 
 // newLocalState seeds the verb state from the gateway config. It never
 // fails: an unlinked (zero) cli.Config simply reports linked:false and
 // refuses the verbs that need a repo.
 func newLocalState(cfg Config) *localState {
-	state := &localState{cfg: cfg.CLI, sync: localops.NewSyncManager(), forward: localops.NewForwardManager()}
+	state := &localState{cfg: cfg.CLI, backend: cfg.Backend, sync: localops.NewSyncManager(), forward: localops.NewForwardManager()}
 	if path, err := cli.Path(); err == nil {
 		if info, err := os.Stat(path); err == nil {
 			state.mtime = info.ModTime()
@@ -105,7 +116,15 @@ func (s *localState) snapshot() cli.Config {
 					}
 					cfg = named
 				}
+				// Repo and profile metadata do not affect Dial; keep live
+				// streams up when only those fields changed.
+				relink := s.cfg.Addr != cfg.Addr || s.cfg.User != cfg.User ||
+					s.cfg.Key != cfg.Key || s.cfg.KnownHosts != cfg.KnownHosts ||
+					s.cfg.EdgeURL != cfg.EdgeURL || s.cfg.ServerID != cfg.ServerID
 				s.cacheConfig(cfg)
+				if relink && s.backend != nil {
+					s.backend.Relink(cfg, nil)
+				}
 			}
 		}
 	}
@@ -185,10 +204,12 @@ func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) 
 		Addr             string    `json:"addr"`
 		User             string    `json:"user"`
 		Repo             string    `json:"repo"`
+		EdgeURL          string    `json:"edge_url,omitempty"`
+		ServerID         string    `json:"server_id,omitempty"`
 		Links            []linkRef `json:"links,omitempty"`
 		Active           string    `json:"active,omitempty"`
-	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
-		Links: namedLinks(cfg), Active: cfg.Active}, nil
+	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "" || cfg.ServerID != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
+		EdgeURL: cfg.EdgeURL, ServerID: cfg.ServerID, Links: namedLinks(cfg), Active: cfg.Active}, nil
 }
 
 func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -212,21 +233,30 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
-	cfg := result.Config
-	if err := cli.Save(cfg); err != nil {
-		_ = result.Conn.Close()
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	if perr := g.adoptLink(result); perr != nil {
+		return nil, perr
 	}
-	g.local.mu.Lock()
-	g.local.cacheConfig(cfg)
-	g.local.mu.Unlock()
-	g.cfg.Backend.Relink(cfg, result.Conn)
+	cfg := result.Config
 	return struct {
 		Addr         string          `json:"addr"`
 		User         string          `json:"user"`
 		Member       protocol.Member `json:"member"`
 		KeyGenerated string          `json:"key_generated,omitempty"`
 	}{Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member, KeyGenerated: result.KeyGenerated}, nil
+}
+
+// adoptLink saves a new link and swaps the gateway onto its connection,
+// so later API and WebSocket requests reach the new server.
+func (g *Gateway) adoptLink(result cli.LinkResult) *protocol.Error {
+	if err := cli.Save(result.Config); err != nil {
+		_ = result.Conn.Close()
+		return &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	g.local.mu.Lock()
+	g.local.cacheConfig(result.Config)
+	g.local.mu.Unlock()
+	g.cfg.Backend.Relink(result.Config, result.Conn)
+	return nil
 }
 
 // localLinkSwitch always refuses. link.apply relinks in place because the
@@ -511,7 +541,7 @@ func checkRemoteWorkspace(cfg cli.Config, ws protocol.Workspace) *protocol.Error
 		// moment later, in the user's own terms.
 		return nil
 	}
-	if want := cli.GitURL(cfg.User, cfg.Addr, ws.ID); url != "" && url != want {
+	if want := cli.GitURL(cfg.User, cfg.GitHost(), ws.ID); url != "" && url != want {
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: "the aether remote in " + cfg.Repo +
 			" points at " + url + ", not workspace " + ws.Name + "; add the remote for this workspace first"}
 	}
@@ -544,7 +574,7 @@ func (g *Gateway) localPull(r *http.Request, body []byte) (any, *protocol.Error)
 	if err = json.Unmarshal(result, &coords); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "decode pull coordinates: " + err.Error()}
 	}
-	pullResult, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
+	pullResult, err := localops.Pull(cfg.Repo, cfg.User, cfg.GitHost(), coords)
 	if perr := repoGitError(err); perr != nil {
 		return nil, perr
 	}
@@ -751,7 +781,13 @@ func (g *Gateway) localDaemonInstall(_ *http.Request, body []byte) (any, *protoc
 	// The daemon dials the same server as this gateway, so it needs the
 	// key `aether link --key` chose; without it the unit falls back to
 	// ~/.ssh/id_ed25519 and cannot authenticate.
-	unitPath, note, err := localops.InstallDaemon(params.Server, repo, linked.Key)
+	link := syncd.Config{Server: params.Server, RepoPath: repo, KeyPath: linked.Key}
+	if linked.ServerID != "" {
+		// An edge link's daemon dials the way the link does: its address,
+		// if any, then the edge, with the host key pinned to the server id.
+		link.Server, link.EdgeURL, link.ServerID = linked.Addr, linked.EdgeURL, linked.ServerID
+	}
+	unitPath, note, err := localops.InstallDaemon(link)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}

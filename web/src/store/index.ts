@@ -17,8 +17,10 @@ import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
+import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import {
   createUiSlice,
+  normalizeBoardMapViewports,
   onboardingSteps,
   type OnboardingStep,
   type UiSlice,
@@ -55,6 +57,7 @@ export type RootState = ServerSlice &
   DiffSlice &
   CollaborationSlice &
   LocalSlice &
+  MissionsSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
@@ -66,10 +69,11 @@ const persistedUi = (s: RootState) => ({
   runDockHeight: s.runDockHeight,
   terminalFontSize: s.terminalFontSize,
   diffWrap: s.diffWrap,
-  terminalControlTaken: s.terminalControlTaken,
   activeWorkspace: s.activeWorkspace,
   groupBy: s.groupBy,
   lastHarnessByAccount: s.lastHarnessByAccount,
+  boardView: s.boardView,
+  boardMapViewports: s.boardMapViewports,
   dismissedUpdates: s.dismissedUpdates,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
@@ -109,6 +113,7 @@ export function createRootStore() {
         ...createFilesSlice(...a),
         ...createCollaborationSlice(...a),
         ...createLocalSlice(...a),
+        ...createMissionsSlice(...a),
         ...createUiSlice(...a),
       }),
       {
@@ -157,8 +162,8 @@ export function createRootStore() {
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
-            terminalControlTaken:
-              stored.terminalControlTaken === true || current.terminalControlTaken,
+            boardView: stored.boardView === 'map' ? 'map' : 'cards',
+            boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
           }
         },
         // Only view preferences survive a reload; server data is re-hydrated.

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -154,64 +155,31 @@ func (s *Scheduler) publishTimeline(ctx context.Context, workspace domain.Worksp
 // unknown fields, so it decodes here unchanged, and the run's workspace
 // is read off the run row (entryFromSidecar) rather than this file.
 type sidecar struct {
-	RunID         string            `json:"run_id"`
-	ContainerID   string            `json:"container_id"`
-	WorkspaceID   string            `json:"workspace_id"`
-	Mode          domain.LaunchMode `json:"mode,omitempty"`
-	Paused        bool              `json:"paused"`
-	KillRequested bool              `json:"kill_requested"`
-	Retained      bool              `json:"retained,omitempty"`
-	RetainedUntil *time.Time        `json:"retained_until,omitempty"`
-	// DestroyPending is durable ownership for a container whose destruction
-	// was attempted but not confirmed. Such an owner is retried by the
-	// bounded cleanup sweep before the run is terminalized.
-	DestroyPending bool `json:"destroy_pending,omitempty"`
-	// EvidencePending means terminalization or recovery could not complete
-	// required capture. The sidecar remains as a retryable source of truth.
-	EvidencePending bool `json:"evidence_pending,omitempty"`
-	// RunUser is the resolved numeric "uid:gid" the run's container and
-	// ownership pass use; empty means root. Recovered so the
-	// credential-home ownership guard still sees live runs across a
-	// server restart.
-	RunUser string `json:"run_user,omitempty"`
-	Home    string `json:"home,omitempty"`
-	// Reporter is how much the status reporter this run's container was
-	// actually given can say about its own state. Recorded rather than
-	// recomputed on recovery: a headless run, a run with coordination off,
-	// an argv override and a member's own harness definition all get no
-	// reporter whatever the registry says about the harness name, and only
-	// the launch saw that. Absent in a sidecar written before runs had
-	// reporters, which reads as "none" - the behavior that build had.
-	Reporter harness.Reporter `json:"reporter,omitempty"`
-	// AgentState and AgentReason are the last thing the agent said about
-	// itself, in the same text form the state travels in on the wire. The
-	// run row carries the status the report produced but not who asked for
-	// it, and only the report tells a run the agent parked for its member
-	// from one that stalled - so without these a recovered run is released
-	// by the first thing its agent repaints. Absent, or anything but a
-	// state this build knows, reads as "no report yet".
-	AgentState  agentstatus.State `json:"agent_state,omitempty"`
-	AgentReason string            `json:"agent_reason,omitempty"`
-	// ExitObserved is set after Runtime.Wait returns successfully, before
-	// finalize. Recovery uses it to resume exit handling without re-attaching.
-	ExitObserved bool `json:"exit_observed"`
-	ExitCode     int  `json:"exit_code"`
-	// EvidenceIdentity is the stable published-commit (or persisted fallback)
-	// identity used by finish capture. Keeping it in the sidecar lets a
-	// retry after a crash reuse the same packet key.
-	EvidenceIdentity string `json:"evidence_identity,omitempty"`
-	// before the container is created. BridgeDigest and BridgePath name the
-	// staged MCP bridge binary and are the reference that keeps it from being
-	// collected; CoordDir is the provisioned coordination directory,
-	// and its presence is what "this run has coordination" means. All empty
-	// for a run launched with coordination off.
-	BridgeDigest string `json:"bridge_digest,omitempty"`
-	BridgePath   string `json:"bridge_path,omitempty"`
-	CoordDir     string `json:"coord_dir,omitempty"`
-	// GitAuthorEmail is the address baked into the container's
-	// GIT_AUTHOR_EMAIL when it was created, kept so a restart still knows
-	// who the agent's own commits are.
-	GitAuthorEmail string `json:"git_author_email,omitempty"`
+	RunID string `json:"run_id"`
+	// TerminalMember identifies a member-terminal reference kept outside the
+	// run sidecar directory. It is never populated for run supervision.
+	TerminalMember   string            `json:"terminal_member,omitempty"`
+	ContainerID      string            `json:"container_id"`
+	WorkspaceID      string            `json:"workspace_id"`
+	Mode             domain.LaunchMode `json:"mode,omitempty"`
+	Paused           bool              `json:"paused"`
+	KillRequested    bool              `json:"kill_requested"`
+	Retained         bool              `json:"retained,omitempty"`
+	RetainedUntil    *time.Time        `json:"retained_until,omitempty"`
+	DestroyPending   bool              `json:"destroy_pending,omitempty"`
+	EvidencePending  bool              `json:"evidence_pending,omitempty"`
+	RunUser          string            `json:"run_user,omitempty"`
+	Home             string            `json:"home,omitempty"`
+	Reporter         harness.Reporter  `json:"reporter,omitempty"`
+	AgentState       agentstatus.State `json:"agent_state,omitempty"`
+	AgentReason      string            `json:"agent_reason,omitempty"`
+	ExitObserved     bool              `json:"exit_observed"`
+	ExitCode         int               `json:"exit_code"`
+	EvidenceIdentity string            `json:"evidence_identity,omitempty"`
+	BridgeDigest     string            `json:"bridge_digest,omitempty"`
+	BridgePath       string            `json:"bridge_path,omitempty"`
+	CoordDir         string            `json:"coord_dir,omitempty"`
+	GitAuthorEmail   string            `json:"git_author_email,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -254,6 +222,72 @@ func (sc sidecar) agentReport() agentstatus.Report {
 
 func (s *Scheduler) sidecarPath(run domain.RunID) string {
 	return filepath.Join(s.cfg.StateDir, string(run)+".json")
+}
+func (s *Scheduler) terminalSidecarDir() string {
+	return filepath.Join(s.cfg.StateDir, "terminals")
+}
+
+func (s *Scheduler) terminalSidecarPath(member domain.MemberID) string {
+	return filepath.Join(s.terminalSidecarDir(), string(member)+".json")
+}
+
+func (s *Scheduler) writeTerminalSidecar(sc sidecar) error {
+	if sc.TerminalMember == "" || filepath.Base(sc.TerminalMember) != sc.TerminalMember {
+		return errors.New("scheduler: terminal sidecar requires a plain member")
+	}
+	dir := s.terminalSidecarDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("scheduler: create terminal sidecar dir: %w", err)
+	}
+	data, err := json.Marshal(sc)
+	if err != nil {
+		return fmt.Errorf("scheduler: encode terminal sidecar: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+sc.TerminalMember+"-*")
+	if err != nil {
+		return fmt.Errorf("scheduler: write terminal sidecar: %w", err)
+	}
+	_, werr := tmp.Write(data)
+	if werr == nil {
+		werr = tmp.Sync()
+	}
+	cerr := tmp.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), s.terminalSidecarPath(domain.MemberID(sc.TerminalMember)))
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("scheduler: write terminal sidecar: %w", werr)
+	}
+	if err := fsyncDir(dir); err != nil {
+		return err
+	}
+	return fsyncDir(s.cfg.StateDir)
+}
+
+func (s *Scheduler) readTerminalSidecar(member domain.MemberID) (sidecar, error) {
+	data, err := os.ReadFile(s.terminalSidecarPath(member))
+	if err != nil {
+		return sidecar{}, err
+	}
+	var sc sidecar
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return sidecar{}, fmt.Errorf("scheduler: decode terminal sidecar for %s: %w", member, err)
+	}
+	return sc, nil
+}
+
+func (s *Scheduler) removeTerminalSidecar(member domain.MemberID) {
+	if err := os.Remove(s.terminalSidecarPath(member)); err != nil && !os.IsNotExist(err) {
+		slog.Warn("scheduler: remove terminal sidecar failed", "member", member, "error", err)
+		return
+	}
+	if err := fsyncDir(s.terminalSidecarDir()); err != nil && !os.IsNotExist(err) {
+		slog.Warn("scheduler: fsync terminal sidecar dir failed", "member", member, "error", err)
+	}
 }
 
 // writeSidecar writes atomically: temp file in the same directory, fsync,

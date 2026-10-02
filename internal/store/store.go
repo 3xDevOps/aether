@@ -21,6 +21,9 @@ var (
 	// ErrInUse is returned when a delete is blocked by rows that still
 	// reference the target (e.g. a workspace with runs).
 	ErrInUse = errors.New("store: in use")
+	// ErrLimit is returned when a write would exceed a bound on rows (e.g.
+	// devices waiting for approval on one account).
+	ErrLimit = errors.New("store: limit reached")
 )
 
 // Store is the persistence contract the rest of the system consumes.
@@ -36,7 +39,8 @@ var (
 // Member public keys are canonicalized to "type base64" (options, comment,
 // and surrounding whitespace stripped) on write and lookup, so equality
 // follows the physical key rather than the authorized_keys line. A member
-// may have an empty PublicKey or an empty TailnetLogin, never both.
+// has a PublicKey, a TailnetLogin or an edge identity (IdentityStore), and
+// may have any of them.
 type Store interface {
 	CreateWorkspace(ctx context.Context, w *domain.Workspace) error
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
@@ -126,6 +130,19 @@ type Store interface {
 	AddRunSteerer(ctx context.Context, run domain.RunID, member domain.MemberID) (bool, error)
 	// ListRunSteerers returns those members, ordered by member ID.
 	ListRunSteerers(ctx context.Context, run domain.RunID) ([]*domain.Member, error)
+
+	// Integration candidates are durable aggregate envelopes with indexed
+	// idempotency bindings and optimistic version checks. Candidate payloads
+	// are independent of source runs so run deletion cannot cascade them.
+	CreateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate) error
+	GetIntegrationCandidate(ctx context.Context, id string) (*IntegrationCandidate, error)
+	GetIntegrationCandidateByKey(ctx context.Context, workspace domain.WorkspaceID, actorKey, idempotencyKey string) (*IntegrationCandidate, error)
+	UpdateIntegrationCandidate(ctx context.Context, c *IntegrationCandidate, expectedVersion int64) error
+	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, limit int) ([]*IntegrationCandidateSummary, error)
+	ListIntegrationCleanupCandidates(ctx context.Context, now time.Time, limit int) ([]*IntegrationCandidate, error)
+	ListIntegrationCleanupCandidatesAfter(ctx context.Context, now time.Time, afterID string, limit int) ([]*IntegrationCandidate, error)
+	ListIntegrationCandidateIDs(ctx context.Context, workspace domain.WorkspaceID) ([]string, error)
+	DeleteIntegrationCandidate(ctx context.Context, id string, expectedVersion int64) error
 
 	// Profile snapshots are content-addressed per member+harness.
 	// SaveProfileSnapshot assigns ID/CreatedAt when zero; if the digest

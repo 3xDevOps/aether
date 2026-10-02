@@ -29,6 +29,9 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 	if err := s.requireAdmin(ctx, member, protocol.MethodMemberRole); err != nil {
 		return nil, err
 	}
+	if err := s.requireApprovedCaller(ctx, protocol.MethodMemberRole, false); err != nil {
+		return nil, err
+	}
 	p, perr := decodeParams[protocol.MemberRoleParams](params)
 	if perr != nil {
 		return nil, perr
@@ -70,6 +73,18 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 		}
 	}
 	was := m.Role
+	// An invitation grants its role when accepted, and only admins create
+	// them, so a demoted admin's open invitations go with the role.
+	// createInvitation and acceptInvitation hold registerMu too.
+	if was == domain.RoleAdmin {
+		ids, perr := s.rpcIdentityStore()
+		if perr != nil {
+			return nil, perr
+		}
+		if err := ids.DeleteInvitationsBy(ctx, m.ID); err != nil {
+			return nil, rpcError(err)
+		}
+	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {
 		var listErr error
@@ -106,6 +121,7 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 			}
 		}
 	}
+	s.notifyDirectory()
 	slog.Info("sshd: member role changed",
 		"actor", member, "member", m.ID, "from", was, "to", role)
 	return protocol.MemberRoleResult{Member: protocol.MemberFromDomain(m)}, nil

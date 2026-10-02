@@ -216,11 +216,6 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 }
 
-// The gate is wired into copyRawStreams by the replay count openAttach
-// reads off the server's ack. Turning either off - the count or the
-// install - puts an attach back to forwarding what the terminal answers
-// the replay with, so the wiring is driven here rather than the pieces
-// under it.
 func TestCopyRawStreamsMutesTheAnnouncedReplay(t *testing.T) {
 	const replay = "\x1b[c\x1b]11;?\x07"
 	const answers = "\x1b[?1;2c\x1b]11;rgb:0/0/0\x07"
@@ -240,6 +235,7 @@ func TestCopyRawStreamsMutesTheAnnouncedReplay(t *testing.T) {
 				<-answered
 				return copy(p, replay), nil
 			}
+			close(replayed)
 			<-typed
 			return 0, io.EOF
 		}),
@@ -250,9 +246,9 @@ func TestCopyRawStreamsMutesTheAnnouncedReplay(t *testing.T) {
 		writes++
 		switch writes {
 		case 1:
-			defer close(answered)
 			return copy(p, answers), nil
 		case 2:
+			close(answered)
 			<-replayed
 			return copy(p, "ls\r"), nil
 		}
@@ -261,37 +257,15 @@ func TestCopyRawStreamsMutesTheAnnouncedReplay(t *testing.T) {
 	})
 
 	var output syncBuffer
-	watcher := &gateWatcher{w: &output, at: len(replay), done: replayed, once: &sync.Once{}}
-	err := copyRawStreams(stream, input, watcher, len(replay))
+	err := copyRawStreams(stream, input, &output, len(replay))
 	if err != nil {
 		t.Fatalf("copyRawStreams: %v", err)
 	}
 	sent := stream.Writer.(*syncBuffer)
-	waitFor(t, func() bool { return sent.String() == "ls\r" })
 	if got := sent.String(); got != "ls\r" {
 		t.Errorf("stream received %q, want only what was typed after the replay", got)
 	}
 	if got := output.String(); got != replay {
 		t.Errorf("output = %q, want the replay", got)
 	}
-}
-
-// gateWatcher closes done once at bytes have been written, which is where
-// the gate opens.
-type gateWatcher struct {
-	w    io.Writer
-	at   int
-	done chan struct{}
-
-	written int
-	once    *sync.Once
-}
-
-func (g *gateWatcher) Write(p []byte) (int, error) {
-	n, err := g.w.Write(p)
-	g.written += n
-	if g.written >= g.at {
-		g.once.Do(func() { close(g.done) })
-	}
-	return n, err
 }

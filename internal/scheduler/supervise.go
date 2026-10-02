@@ -215,6 +215,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		s.retainAfterEvidenceFailure(entry)
 		return
 	}
+	if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: record development container exit", "run", entry.runID, "error", err)
+		s.retainAfterEvidenceFailure(entry)
+		return
+	}
+	if err := s.StopDevelopmentRun(ctx, entry.runID); err != nil {
+		slog.Warn("scheduler: stop development resources", "run", entry.runID, "error", err)
+		s.retainAfterEvidenceFailure(entry)
+		return
+	}
 
 	// Keep the recording available through the capture above. A process that
 	// exits has already stopped producing PTY bytes, so stopping the session
@@ -335,7 +345,7 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 		}
 		s.mu.Unlock()
 	}
-	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		return fmt.Errorf("destroy-pending container: %w", err)
 	}
 	if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
@@ -395,7 +405,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 		return err
 	}
 
-	if err := s.cfg.Runtime.Destroy(ctx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		// Keep every ownership reference and make this owner due now. The
 		// bounded sweep will retry without allowing cleanup to race a live
 		// container.
@@ -494,7 +504,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			released := e.status == domain.RunNeedsAttention && observed &&
 				idle <= s.cfg.StallThreshold && !heldForTheMember
 			if released && e.agentReport.State == agentstatus.Waiting {
-				released = e.unparks(activity)
+				released = e.unparks(activity, s.cfg.turnTail)
 			}
 			var err error
 			switch {
@@ -521,11 +531,11 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	}
 }
 
-// turnTail is how long after a waiting report the terminal is still taken
+// defaultTurnTail is how long after a waiting report the terminal is still taken
 // to be painting the turn that ended: the answer it wrote, the prompt
 // being restored, a spinner winding down. It is a bound on a TUI's own
 // trailing frames, not a measured vendor number, so it is generous.
-const turnTail = 3 * time.Second
+const defaultTurnTail = 3 * time.Second
 
 // unparks reports whether terminal activity on a run the agent parked
 // itself is the next turn rather than the tail of the one that ended.
@@ -542,8 +552,8 @@ const turnTail = 3 * time.Second
 // single late frame is not a turn either.
 //
 // Caller must hold s.mu.
-func (e *supervised) unparks(activity time.Time) bool {
-	if !activity.After(e.parkedAt.Add(turnTail)) {
+func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
+	if !activity.After(e.parkedAt.Add(tail)) {
 		return false
 	}
 	if e.postParkActivity.IsZero() {
@@ -650,6 +660,9 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 				identity = "none"
 			}
 			cleanup := func(cleanupCtx context.Context) error {
+				if err := s.deleteDevelopment(cleanupCtx, r.ID); err != nil {
+					return err
+				}
 				if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, r.ID); err != nil {
 					return fmt.Errorf("scheduler: checkout gc: remove run transcripts: %w", err)
 				}

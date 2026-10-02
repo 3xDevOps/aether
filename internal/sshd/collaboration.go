@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -41,6 +42,12 @@ type EvidenceService interface {
 // evidence seam. Read-only transports do not need to implement it.
 type EvidenceCaptureService interface {
 	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
+}
+
+// EvidenceArtifactService opens a selected retained capture through the same
+// binary transport as a transient capture, without requiring a live run.
+type EvidenceArtifactService interface {
+	OpenArtifact(context.Context, domain.WorkspaceID, string, string) (protocol.DevArtifact, io.ReadCloser, error)
 }
 
 func init() {

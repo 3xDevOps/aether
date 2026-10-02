@@ -3,19 +3,175 @@ package sshd
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 func init() {
+	registerGuarded(protocol.MethodTerminalHistory, permissions.View, terminalHistoryTarget, (*Server).terminalHistory)
 	registerMethod(protocol.MethodTerminalStatus, (*Server).terminalStatus)
 	registerMethod(protocol.MethodTerminalStop, (*Server).terminalStop)
 	registerMethod(protocol.MethodEnvSave, (*Server).environmentSave)
 	registerMethod(protocol.MethodEnvReset, (*Server).environmentReset)
+}
+
+func terminalHistoryTarget(s *Server, ctx context.Context, params json.RawMessage) (permissions.Target, *protocol.Error) {
+	if _, perr := decodeTerminalHistoryParams(params); perr != nil {
+		return permissions.Target{}, perr
+	}
+	return runTarget(s, ctx, params)
+}
+
+func decodeTerminalHistoryParams(params json.RawMessage) (protocol.TerminalHistoryParams, *protocol.Error) {
+	if len(params) > protocol.MaxTerminalHistoryParamsBytes {
+		return protocol.TerminalHistoryParams{}, invalidParams("terminal history params are too large")
+	}
+	if !utf8.Valid(params) {
+		return protocol.TerminalHistoryParams{}, invalidParams("terminal history query must be valid UTF-8")
+	}
+	p, perr := decodeParams[protocol.TerminalHistoryParams](params)
+	if perr != nil {
+		return protocol.TerminalHistoryParams{}, perr
+	}
+	if p.RunID == "" {
+		return protocol.TerminalHistoryParams{}, invalidParams("run_id is required")
+	}
+	if !validTerminalHistoryRunID(p.RunID) {
+		return protocol.TerminalHistoryParams{}, invalidParams("invalid run_id")
+	}
+	if p.Limit < 0 {
+		return protocol.TerminalHistoryParams{}, invalidParams("limit must not be negative")
+	}
+	if p.Limit == 0 {
+		p.Limit = protocol.DefaultTerminalHistoryLimit
+	} else if p.Limit > protocol.MaxTerminalHistoryLimit {
+		p.Limit = protocol.MaxTerminalHistoryLimit
+	}
+	if !utf8.ValidString(p.Query) {
+		return protocol.TerminalHistoryParams{}, invalidParams("terminal history query must be valid UTF-8")
+	}
+	if len(p.Query) > protocol.MaxTerminalHistoryQueryBytes {
+		return protocol.TerminalHistoryParams{}, invalidParams("terminal history query is too long")
+	}
+	if p.Before != "" && !validTerminalHistoryCursor(p.Before) {
+		return protocol.TerminalHistoryParams{}, invalidParams("invalid terminal history cursor")
+	}
+	return p, nil
+}
+
+func validTerminalHistoryCursor(encoded string) bool {
+	if encoded == "" || len(encoded) > protocol.MaxTerminalHistoryCursorBytes {
+		return false
+	}
+	decodedLen := base64.RawURLEncoding.DecodedLen(len(encoded))
+	if decodedLen <= sha256.Size || decodedLen > 1024 {
+		return false
+	}
+	var decoded [1024]byte
+	n, err := base64.RawURLEncoding.Strict().Decode(decoded[:], []byte(encoded))
+	return err == nil && n == decodedLen
+}
+
+func validTerminalHistoryRunID(id string) bool {
+	if id == "" || len(id) > 128 || id[0] == '.' || id[0] == '-' || strings.Contains(id, "..") {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+const terminalHistoryTimeout = 2 * time.Second
+
+func (s *Server) terminalHistory(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeTerminalHistoryParams(params)
+	if perr != nil {
+		return nil, perr
+	}
+	runID := domain.RunID(p.RunID)
+	history, ok := s.cfg.PTY.(PTYHistoryReader)
+	if !ok {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "terminal history is unavailable"}
+	}
+	type historyResult struct {
+		page ptyhost.HistoryPage
+		err  error
+	}
+	historyCtx, cancel := context.WithTimeout(ctx, terminalHistoryTimeout)
+	defer cancel()
+	result := make(chan historyResult, 1)
+	go func() {
+		page, err := history.History(historyCtx, runID, p.Before, p.Query, p.Limit)
+		result <- historyResult{page: page, err: err}
+	}()
+	var page ptyhost.HistoryPage
+	var err error
+	select {
+	case historyResult := <-result:
+		page, err = historyResult.page, historyResult.err
+	case <-historyCtx.Done():
+		err = historyCtx.Err()
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, ptyhost.ErrInvalidHistoryCursor):
+			return nil, invalidParams("invalid terminal history cursor")
+		case errors.Is(err, ptyhost.ErrHistoryQueryTooLong):
+			return nil, invalidParams("terminal history query is too long")
+		case errors.Is(err, ptyhost.ErrInvalidRunID):
+			return nil, invalidParams("invalid run_id")
+		case errors.Is(err, os.ErrNotExist):
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "terminal transcript not found"}
+		case errors.Is(err, context.Canceled):
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "terminal history request canceled"}
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded),
+			errors.Is(err, ptyhost.ErrNoSession), errors.Is(err, ptyhost.ErrSessionEnded):
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "terminal history is unavailable"}
+		default:
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "terminal history failed"}
+		}
+	}
+	if len(page.Lines) > p.Limit ||
+		page.HasMore != (page.NextCursor != "") ||
+		(page.NextCursor != "" && !validTerminalHistoryCursor(page.NextCursor)) {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "terminal history returned an invalid page"}
+	}
+	resultBytes := len(page.NextCursor)
+	lines := make([]protocol.TerminalHistoryLine, len(page.Lines))
+	for i := range page.Lines {
+		line := &page.Lines[i]
+		if !validTerminalHistoryCursor(line.Cursor) ||
+			len(line.Text) > protocol.MaxTerminalHistoryLineBytes ||
+			len(line.Cursor)+len(line.Text) > protocol.MaxTerminalHistoryResultBytes-resultBytes {
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "terminal history returned an invalid page"}
+		}
+		resultBytes += len(line.Cursor) + len(line.Text)
+		lines[i] = protocol.TerminalHistoryLine{
+			Cursor: line.Cursor,
+			Time:   line.Time,
+			Text:   line.Text,
+		}
+	}
+	return protocol.TerminalHistoryResult{
+		Lines: lines, NextCursor: page.NextCursor, HasMore: page.HasMore,
+	}, nil
 }
 
 // serveTerminal serves one member's persistent environment terminal. The

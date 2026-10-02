@@ -3,14 +3,9 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,10 +15,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -36,15 +30,11 @@ import (
 // from the test process. Everything else on the path is the real thing.
 // The container half is coordination_container_integration_test.go.
 
-// mcpConfigTarget is where a registered harness is told to read its MCP
-// config, inside the container.
-var mcpConfigTarget = path.Join(mcpbridge.MountDir, coord.ConfigName)
-
 // TestIntegrationCoordinationEndToEnd is the release gate: two overlapping
-// runs on a registered harness are told about each other, settle it
-// through the real MCP tools over their own coordination sockets, and
-// leave attributed timeline entries - while a run on a harness with no MCP
-// registration gets the notice and nothing else.
+// runs on a registered harness manually invoke the MCP bridge, settle the
+// overlap through their own coordination sockets, and leave attributed
+// timeline entries. A taskless fixture receives the same ordinary assets but
+// does not invoke MCP.
 func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -79,30 +69,23 @@ func TestIntegrationCoordinationEndToEnd(t *testing.T) {
 
 	e.assertRegistered(t, runA)
 	e.assertRegistered(t, runB)
-	e.assertNoticeOnly(t, runC)
+	e.assertUnregistered(t, runC)
 
-	// Every overlapping agent is told, in its own terminal.
-	for _, att := range []*attachConn{attA, attB, attC} {
-		att.waitOutput(t, "aether injects")
-		att.waitOutput(t, "notice:[aether] Overlap: run ")
-	}
-	attC.waitOutput(t, "assets:notice-only")
-
+	attA.waitOutput(t, "assets:manual-mcp")
+	attB.waitOutput(t, "assets:manual-mcp")
+	attC.waitOutput(t, "assets:manual-mcp")
 	// The two registered agents settle it between themselves, each message
 	// travelling agent -> MCP tool -> bridge -> its own socket -> mailbox.
 	attA.waitOutput(t, "inbox:"+bodyB)
 	attB.waitOutput(t, "inbox:"+bodyA)
 
-	// The whole exchange is on the workspace timeline under the run where
-	// each server-originated notice or message happened.
-	waitEvent(t, sub, &seen, "run A's notice entry", coordNoticeNote(runA.ID, runB.ID))
-	waitEvent(t, sub, &seen, "run B's notice entry", coordNoticeNote(runB.ID, runA.ID))
+	// The exchange stays attributed to the original sending runs.
 	waitEvent(t, sub, &seen, "run A's coordination note", coordNote(runA.ID, runB.ID))
 	waitEvent(t, sub, &seen, "run B's coordination note", coordNote(runB.ID, runA.ID))
 
-	// The unregistered harness never joined the conversation.
+	// The taskless fixture intentionally did not message peers.
 	if out := attC.output(); strings.Contains(out, "inbox:") || strings.Contains(out, "sent:") {
-		t.Errorf("the unregistered harness exchanged messages: %q", out)
+		t.Errorf("the taskless harness exchanged messages: %q", out)
 	}
 	for _, att := range []*attachConn{attA, attB, attC} {
 		assertNoAgentError(t, att)
@@ -135,72 +118,53 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 	attA := openAttach(t, adaClient, runA.ID)
 	attB := openAttach(t, boClient, runB.ID)
 
-	// Cold start with the switch off: a registered harness is launched
-	// exactly as it was before the feature existed. Nothing is staged,
-	// nothing is provisioned, no argument is added.
-	attA.waitOutput(t, "assets:none")
-	attB.waitOutput(t, "assets:none")
-	e.assertNoCoordination(t, runA)
-	e.assertNoCoordination(t, runB)
-	for _, dir := range []string{filepath.Join(e.dataDir, "coord"), filepath.Join(e.dataDir, "runtime", "bin")} {
-		if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("%s exists with coordination off (stat error %v)", dir, err)
-		}
-	}
-	// The radar is the one thing that still reacts, and it is the only one.
+	// The policy switch removes peer and mission authority, not authenticated
+	// run discovery or the independent development broker.
+	e.assertRunAuthority(ctx, t, runA, true, runB.ID)
+	e.assertRunAuthority(ctx, t, runB, true, runA.ID)
 	waitOverlap(t, adaCtrl, runA.ID, runB.ID)
-	assertNoNotice(t, attA, attB)
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID)
 	drain(sub, &seen)
 	assertNoCoordNote(t, seen)
+	// A swarm needs the disabled mailbox authority.
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(e.ada.id), Harness: "claude", Mode: string(domain.LaunchTUI)}
+	createErr := adaCtrl.Call(protocol.MethodMissionCreate, protocol.MissionCreateParams{
+		WorkspaceID: string(e.ws.ID), Objective: "swarm with coordination off", IdempotencyKey: "kill-switch-swarm",
+		Integrator:            protocol.MissionIntegrator(integrator),
+		ExecutionChoices:      []protocol.MissionExecutionChoice{integrator},
+		MaxConcurrentAttempts: 1, MaxTotalAttempts: 1,
+	}, nil)
+	if createErr == nil {
+		t.Error("mission.create succeeded with coordination off")
+	}
 
-	// Off -> on. Only a new run gains the bridge; the two containers that
-	// predate the switch keep exactly what they were given.
+	// Off -> on restores coordination authority for recovered runs as well
+	// as new runs; all retain their run-scoped development identity.
 	srv.stop()
 	srv = e.start(ctx, t, false)
 	sub, seen = srv.subscribe(ctx, t), nil
 	adaCtrl, adaClient = srv.control(t, e.ada.key)
-
-	// The surviving containers are re-attached asynchronously, and a notice
-	// is only ever injected into a live terminal - so wait for run A's
-	// before giving the radar something new to say.
-	attA2 := waitAttach(t, adaClient, runA.ID)
+	waitAttach(t, adaClient, runA.ID)
 
 	runC := e.launch(t, adaCtrl, taskC, "claude")
 	attC := openAttach(t, adaClient, runC.ID)
-	attC.waitOutput(t, "assets:mcp")
-	e.assertRegistered(t, runC)
-	e.assertNoCoordination(t, runA)
-	e.assertNoCoordination(t, runB)
+	e.assertRunAuthority(ctx, t, runC, false, runA.ID)
+	e.assertRunAuthority(ctx, t, runA, false, runB.ID)
+	e.assertRunAuthority(ctx, t, runB, false, runA.ID)
+	waitOverlap(t, adaCtrl, runC.ID, runA.ID)
 
-	// The unprovisioned run is notice-only: the banner reaches it, the
-	// tools never can.
-	attA2.waitOutput(t, "notice:[aether] Overlap: run ")
-	attC.waitOutput(t, "notice:[aether] Overlap: run ")
-
-	// On -> off. What run C's container already holds stays physically
-	// where it is - the mount, the config, the argument it launched with.
+	// On -> off recovers the same sockets, serving discovery and development
+	// while refusing mailbox and mission calls.
 	srv.stop()
-	dir := e.coordDir(runC.ID)
-	config, err := os.ReadFile(filepath.Join(dir, coord.ConfigName))
-	if err != nil {
-		t.Fatalf("read run C's MCP config: %v", err)
-	}
 	srv = e.start(ctx, t, true)
-	// A fresh subscription, so what is collected below is only what the
-	// server published while the switch was off.
 	sub, seen = srv.subscribe(ctx, t), nil
 	adaCtrl, _ = srv.control(t, e.ada.key)
-	e.assertRegistered(t, runC)
-	if after, rerr := os.ReadFile(filepath.Join(dir, coord.ConfigName)); rerr != nil || !bytes.Equal(after, config) {
-		t.Errorf("run C's MCP config changed when coordination was turned off: %s (err %v)", after, rerr)
+	for _, run := range []protocol.Run{runA, runB, runC} {
+		e.assertRunAuthority(ctx, t, run, true, runA.ID)
 	}
-	// What makes any of it work is gone: the socket is unlinked and every
-	// method behind it answers unavailable before touching anything.
-	if _, serr := os.Stat(filepath.Join(dir, coord.SocketName)); !errors.Is(serr, fs.ErrNotExist) {
-		t.Errorf("the coordination socket survived the switch being turned off (stat error %v)", serr)
+	for _, att := range []*attachConn{attA, attB, attC} {
+		assertNoAgentError(t, att)
 	}
-	assertToolsUnavailable(ctx, t, filepath.Join(dir, coord.SocketName), runA.ID)
 
 	// No side effect anywhere, and the radar is still exactly as it was.
 	e.assertNoMail(ctx, t, srv, runA.ID, runB.ID, runC.ID)
@@ -214,8 +178,9 @@ func TestIntegrationCoordinationKillSwitch(t *testing.T) {
 // switch in a different position while the containers it left behind stay
 // alive.
 type coordEnv struct {
-	rt    runtime.Runtime
-	image string
+	rt           runtime.Runtime
+	image        string
+	browserImage string
 	// serverBinary is what the scheduler stages as the in-container bridge;
 	// empty stages the running binary, which under `go test` is the test
 	// binary and has no mcp subcommand.
@@ -323,6 +288,7 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		Addr:                 "127.0.0.1:0",
 		Runtime:              e.rt,
 		StandardImage:        e.image,
+		BrowserImage:         e.browserImage,
 		CoordinationDisabled: disabled,
 		ServerBinary:         e.serverBinary,
 	})
@@ -403,79 +369,61 @@ func (e *coordEnv) container(t *testing.T, run string) *e2eContainer {
 	return c
 }
 
-// assertRegistered is the whole registration contract for one run: the
-// read-only bridge and coordination mounts, the config the server wrote
-// into the coordination directory naming the staged bridge, the argument
-// pointing the harness at it, and no trace of any of it in the worktree.
+// assertRegistered is the positive mount contract for a run that can
+// manually invoke MCP: the staged bridge, CLI, and socket directory are
+// read-only, while no harness-owned MCP config or launch flag is synthesized.
 func (e *coordEnv) assertRegistered(t *testing.T, run protocol.Run) {
 	t.Helper()
 	c := e.container(t, run.ID)
-	argv := c.spec.Command
-	if i := slices.Index(argv, "--mcp-config"); i < 0 || i+1 >= len(argv) || argv[i+1] != mcpConfigTarget {
-		t.Fatalf("run %s argv = %v, want --mcp-config %s in it", run.ID, argv, mcpConfigTarget)
+	if slices.Contains(c.spec.Command, "--mcp-config") {
+		t.Errorf("run %s received obsolete automatic MCP config: %v", run.ID, c.spec.Command)
 	}
-	for _, target := range []string{mcpbridge.MountDir, mcpbridge.BinaryPath} {
+	for _, target := range []string{coordtransport.MountDir, coordtransport.BinaryPath, coordtransport.CLIPath} {
 		m, ok := c.mount(target)
 		if !ok || !m.ReadOnly {
 			t.Fatalf("run %s has no read-only mount at %s: %+v", run.ID, target, c.spec.Mounts)
 		}
 	}
-	raw, err := os.ReadFile(filepath.Join(e.coordDir(run.ID), coord.ConfigName))
-	if err != nil {
-		t.Fatalf("read the MCP config written for run %s: %v", run.ID, err)
-	}
-	var doc struct {
-		Servers map[string]struct {
-			Type    string   `json:"type"`
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		} `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("decode the MCP config written for run %s: %v", run.ID, err)
-	}
-	bridge, ok := doc.Servers[mcpbridge.ServerName]
-	if !ok || bridge.Type != "stdio" || bridge.Command != mcpbridge.BinaryPath ||
-		len(bridge.Args) != 1 || bridge.Args[0] != "mcp" {
-		t.Fatalf("run %s MCP config = %s, want a stdio %s server running the staged bridge",
-			run.ID, raw, mcpbridge.ServerName)
-	}
-	if _, err := os.Stat(filepath.Join(c.spec.WorktreeHostPath, ".mcp.json")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("run %s has an .mcp.json in its worktree (stat error %v)", run.ID, err)
-	}
 }
 
-// assertNoticeOnly is the degradation a harness without MCP registration
-// gets: provisioned like any other run, but never pointed at the bridge.
-func (e *coordEnv) assertNoticeOnly(t *testing.T, run protocol.Run) {
+// assertUnregistered is a run whose fixture does not manually invoke MCP:
+// ordinary coordination assets are still available, but no launch profile
+// registration is injected.
+func (e *coordEnv) assertUnregistered(t *testing.T, run protocol.Run) {
 	t.Helper()
 	c := e.container(t, run.ID)
 	if slices.Contains(c.spec.Command, "--mcp-config") {
-		t.Errorf("unregistered harness argv = %v, want no MCP registration", c.spec.Command)
+		t.Errorf("run %s received obsolete automatic MCP config: %v", run.ID, c.spec.Command)
 	}
-	if _, ok := c.mount(mcpbridge.MountDir); !ok {
-		t.Errorf("run %s has no coordination mount: %+v", run.ID, c.spec.Mounts)
-	}
-	if _, err := os.Stat(filepath.Join(e.coordDir(run.ID), coord.ConfigName)); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("run %s got an MCP config it cannot read (stat error %v)", run.ID, err)
-	}
-}
-
-// assertNoCoordination is what a run launched with the kill switch off
-// carries: no mounts, no directory, no argument.
-func (e *coordEnv) assertNoCoordination(t *testing.T, run protocol.Run) {
-	t.Helper()
-	c := e.container(t, run.ID)
-	if slices.Contains(c.spec.Command, "--mcp-config") {
-		t.Errorf("run %s argv = %v, want no MCP registration", run.ID, c.spec.Command)
-	}
-	for _, target := range []string{mcpbridge.MountDir, mcpbridge.BinaryPath} {
-		if _, ok := c.mount(target); ok {
-			t.Errorf("run %s has a %s mount with coordination off: %+v", run.ID, target, c.spec.Mounts)
+	for _, target := range []string{coordtransport.MountDir, coordtransport.CLIPath} {
+		m, ok := c.mount(target)
+		if !ok || !m.ReadOnly {
+			t.Errorf("run %s has no read-only %s mount: %+v", run.ID, target, c.spec.Mounts)
 		}
 	}
-	if _, err := os.Stat(e.coordDir(run.ID)); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("run %s has a coordination directory with coordination off (stat error %v)", run.ID, err)
+}
+
+// assertDevelopmentDiscovery checks the authenticated identity and independent
+// development authority, including when conflict coordination is disabled.
+func assertDevelopmentDiscovery(t *testing.T, status protocol.CoordStatusResult, run protocol.Run, disabled bool, development ...string) {
+	t.Helper()
+	if status.RunID != run.ID || status.WorkspaceID != run.WorkspaceID || status.MemberID != run.MemberID {
+		t.Fatalf("discovery identity = %+v, want run %+v", status, run)
+	}
+	for _, method := range append([]string{protocol.MethodCoordStatus}, development...) {
+		if !slices.Contains(status.Capabilities, method) {
+			t.Errorf("run %s did not advertise %s: %v", run.ID, method, status.Capabilities)
+		}
+	}
+	if disabled {
+		if len(status.Peers) != 0 || status.Unread != 0 || status.Assignment != nil {
+			t.Errorf("disabled coordination exposed peer or mission state: %+v", status)
+		}
+		for _, method := range status.Capabilities {
+			if method != protocol.MethodCoordStatus && !strings.HasPrefix(method, "dev.") {
+				t.Errorf("disabled coordination advertised %s", method)
+			}
+		}
 	}
 }
 
@@ -496,31 +444,41 @@ func (e *coordEnv) assertNoMail(ctx context.Context, t *testing.T, srv *coordSer
 	}
 }
 
-// assertToolsUnavailable drives the real bridge at a socket the kill
-// switch unlinked: every tool must report Aether's unavailable code.
-func assertToolsUnavailable(ctx context.Context, t *testing.T, sock, peer string) {
+func (e *coordEnv) assertRunAuthority(ctx context.Context, t *testing.T, run protocol.Run, disabled bool, peer string) {
 	t.Helper()
-	cs, stop, err := bridgeSession(ctx, sock)
-	if err != nil {
-		t.Fatalf("start a bridge on the inert socket: %v", err)
+	sock := filepath.Join(e.coordDir(run.ID), coordtransport.SocketName)
+	var status protocol.CoordStatusResult
+	if err := coordtransport.Call(ctx, sock, protocol.MethodCoordStatus, nil, &status); err != nil {
+		t.Fatalf("run %s discovery: %v", run.ID, err)
 	}
-	defer stop()
-	calls := []struct {
-		tool string
-		args any
-	}{
-		{toolStatus, nil},
-		{toolSend, protocol.CoordSendParams{ToRunID: peer, Body: "anyone there?"}},
-		{toolInbox, nil},
-	}
-	for _, call := range calls {
-		res, cerr := callTool(ctx, cs, call.tool, call.args, nil)
-		if cerr == nil {
-			t.Errorf("%s answered with coordination off", call.tool)
-			continue
+	assertDevelopmentDiscovery(t, status, run, disabled)
+	if slices.Contains(status.Capabilities, protocol.MethodDevTerminalList) {
+		var terminals protocol.DevTerminalListResult
+		if err := coordtransport.Call(ctx, sock, protocol.MethodDevTerminalList, nil, &terminals); err != nil {
+			t.Fatalf("run %s development terminal list: %v", run.ID, err)
 		}
-		if code := toolErrorCode(res); code != protocol.CodeUnavailable {
-			t.Errorf("%s error code = %d, want %d (unavailable): %v", call.tool, code, protocol.CodeUnavailable, cerr)
+	}
+	if !disabled {
+		if !slices.Contains(status.Capabilities, protocol.MethodCoordSend) {
+			t.Errorf("run %s did not regain peer messaging: %v", run.ID, status.Capabilities)
+		}
+		if err := coordtransport.Call(ctx, sock, protocol.MethodCoordInbox, nil, nil); err != nil {
+			t.Errorf("run %s did not regain mailbox access: %v", run.ID, err)
+		}
+		return
+	}
+	for _, call := range []struct {
+		method string
+		params any
+	}{
+		{protocol.MethodCoordSend, protocol.CoordSendParams{ToRunID: peer, Body: "anyone there?"}},
+		{protocol.MethodCoordInbox, nil},
+		{protocol.MethodTaskList, nil},
+		{protocol.MethodRunReport, nil},
+	} {
+		err := coordtransport.Call(ctx, sock, call.method, call.params, nil)
+		if code := coordtransport.ErrorCode(err); code != protocol.CodeUnavailable {
+			t.Errorf("%s with coordination off = %v, want unavailable (%d)", call.method, err, protocol.CodeUnavailable)
 		}
 	}
 }
@@ -575,12 +533,6 @@ func coordNote(run, to string) func(events.Event) bool {
 	return timelineNote(run, "coordination message to run "+to+": ")
 }
 
-// coordNoticeNote matches the server-originated timeline entry the overlap
-// notice leaves on the run it was delivered to.
-func coordNoticeNote(run, peer string) func(events.Event) bool {
-	return timelineNote(run, "coordination notice: run "+peer+" is also editing ")
-}
-
 func timelineNote(run, prefix string) func(events.Event) bool {
 	return func(e events.Event) bool {
 		p, ok := e.Payload.(events.TimelinePayload)
@@ -604,26 +556,13 @@ func drain(sub events.Subscription, seen *[]events.Event) {
 	}
 }
 
-// assertNoCoordNote covers both entries coordination writes - the notice
-// and the message - so the kill switch stays honest about either one.
+// assertNoCoordNote verifies the kill switch suppresses message audit entries.
 func assertNoCoordNote(t *testing.T, seen []events.Event) {
 	t.Helper()
 	for _, e := range seen {
 		p, ok := e.Payload.(events.TimelinePayload)
 		if ok && strings.HasPrefix(p.Message, "coordination ") {
 			t.Errorf("coordination reached the timeline with the kill switch off: %+v", p)
-		}
-	}
-}
-
-// assertNoNotice gives the injector a beat past the overlap the radar has
-// already reported, then insists nothing was said.
-func assertNoNotice(t *testing.T, atts ...*attachConn) {
-	t.Helper()
-	time.Sleep(2 * time.Second)
-	for _, att := range atts {
-		if out := att.output(); strings.Contains(out, "Overlap:") || strings.Contains(out, "notice:") {
-			t.Errorf("a notice was injected with coordination off: %q", out)
 		}
 	}
 }

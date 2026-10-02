@@ -1,7 +1,9 @@
 // Hydration and live updates: one HTTP fetch fills the store, then the event
 // stream is the only thing that changes it.
 
+import { toast } from 'sonner'
 import { api, ApiError, takeRequestedRun, type Api } from '@/lib/api'
+import { edgeHost, message } from '@/lib/format'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import type {
   Event,
@@ -35,13 +37,37 @@ import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | null {
   if (err instanceof ApiError && err.status === 503) {
     if (err.message.includes('network unreachable')) return 'network'
-    if (err.message.includes('server unreachable')) return 'server'
+    if (err.message.includes('server unreachable')) return edgeHop(err.message, store) ?? 'server'
   }
   if (err instanceof TypeError) {
     // An unknown gateway is the desktop one: it is the only surface that can
     // fail before the descriptor is read, since the probe seeds it.
     return store.getState().capabilities?.gateway === 'server' ? 'tailnet' : 'gateway'
   }
+  return null
+}
+
+/**
+ * Which part of an edge link failed, from the "server unreachable" error
+ * the local gateway passes on. The client's error keeps the edge's refusal
+ * and the server's SSH banner in their own words, and a failure to reach the
+ * edge at all names the edge host followed by the transport error. Any
+ * other refusal the edge words itself is `edge-refused`. Null when the link
+ * is not through an edge or the error is none of these.
+ */
+function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
+  const edge = store.getState().linkStatus?.edge_url
+  if (!edge) return null
+  if (detail.includes('server is not connected to the edge')) return 'edge-server'
+  if (detail.includes('device token revoked') || detail.includes('not signed in')) {
+    return 'signed-out'
+  }
+  if (detail.includes('was revoked on this server')) return 'device-revoked'
+  if (detail.includes('is waiting for approval')) return 'device-pending'
+  // The edge's refusal and the server's SSH banner word it the same way.
+  if (detail.includes('not a member of this server')) return 'not-member'
+  if (detail.includes(`${edgeHost(edge)} refused: `)) return 'edge-refused'
+  if (detail.includes(`${edgeHost(edge)}: `)) return 'edge'
   return null
 }
 
@@ -53,8 +79,16 @@ function refusalKind(err: ApiError, store: RootStore): UnreachableKind | null {
   return classifyUnreachable(err, store)
 }
 
-/** Fills the store from the server. False means the server was unreachable. */
-export async function hydrate(store: RootStore, client: Api = api): Promise<boolean> {
+/**
+ * Fills the store from the server. False means the fetch failed or its owner
+ * was disposed. Direct callers may omit the signal; connect owns its lifetime.
+ */
+export async function hydrate(
+  store: RootStore,
+  client: Api = api,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) return false
   const s = store.getState()
   try {
     const [info, workspaces, members, runs, overlaps, capabilities] =
@@ -71,6 +105,7 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
         // client on its built-in assumptions.
         client.capabilities().catch(() => null),
       ])
+    if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
     const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
     const previousIdentity = store.getState().identityKey
@@ -78,21 +113,27 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
       // Reconnects retain drafts; a different authenticated owner must not.
       store.getState().resetFiles()
     }
+    if (!s.hydrated && capabilities?.local?.includes('workspace.selection')) {
+      try {
+        const saved = await client.localWorkspaceSelection()
+        if (signal?.aborted) return false
+        // A choice made while startup was fetching outranks the saved one.
+        if (store.getState().activeWorkspace === s.activeWorkspace && saved.workspace_id) {
+          s.setActiveWorkspace(saved.workspace_id)
+        }
+      } catch (err) {
+        if (signal?.aborted) return false
+        // Preferences are optional; report the gateway's error without
+        // turning a successful server snapshot into a connection failure.
+        toast.error(message(err))
+      }
+    }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
-    // Every scoped surface reads activeWorkspace, so it must name a
-    // workspace that exists: an unset one, or one deleted while we were
-    // away, falls back to the first by id rather than leaving the app
-    // pointed at nothing.
-    // Read after the fetches: `s` is the pre-await snapshot.
     const active = store.getState().activeWorkspace
-    if (!active || !workspaces.some((w) => w.id === active)) {
-      const first = [...workspaces].sort((a, b) => a.id.localeCompare(b.id))[0]
-      if (first) s.setActiveWorkspace(first.id)
-    }
     s.setMembers(members)
-    s.setRuns(runs)
+    s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
     s.seedPaused(
@@ -103,17 +144,19 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
       ),
     )
     s.setOverlaps(overlaps)
-    s.setCapabilities(capabilities)
-    // A deep link (`aether://run/<id>` from either shell) arrives as
-    // `?run=<id>` and can only be acted on now that the runs are here. A
-    // member is sent the runs they may see, so an id that is not among them
-    // is not theirs or no longer exists: the board stays, rather than
-    // mounting a run detail for something nothing can load. Before the
-    // onboarding redirect below, which outranks it.
-    const requested = takeRequestedRun()
-    if (requested && store.getState().runs[requested]) {
-      store.getState().navigate('terminal', { runId: requested })
+    if (
+      active &&
+      (capabilities === null || capabilities.methods.includes('mission.list'))
+    ) {
+      await client
+        .missionList({ workspace_id: active, limit: 50 })
+        .then((result) => {
+          if (!signal?.aborted) s.setMissions(active, result.missions, result.next_cursor)
+        })
+        .catch(ignore)
     }
+    if (signal?.aborted) return false
+    s.setCapabilities(capabilities)
     // The status bar's link chip reads linkStatus, and nothing else
     // fetches it until the settings or onboarding view opens - so without
     // this, a linked machine launches looking unlinked and the chip points
@@ -122,22 +165,33 @@ export async function hydrate(store: RootStore, client: Api = api): Promise<bool
     if (store.getState().capabilities?.local?.includes('link.status')) {
       try {
         const linkStatus = await client.localLinkStatus()
+        if (signal?.aborted) return false
         s.setLinkStatus(linkStatus)
         if (linkStatus.linked === true) s.setOnboarded(true)
       } catch {
         ignore()
       }
     }
+    if (signal?.aborted) return false
     s.setHydrated(true)
     if (
+      !s.hydrated &&
+      s.route.name === 'board' &&
+      store.getState().route === s.route &&
       !store.getState().onboarded &&
       capabilities?.local?.includes('link.status') === true
     ) {
       store.setState({ route: { name: 'onboarding', params: {} } })
     }
+    // An authorized run link outranks optional local-repository onboarding.
+    const requested = takeRequestedRun()
+    if (requested && store.getState().runs[requested]) {
+      store.getState().navigate('terminal', { runId: requested })
+    }
     s.setUnreachable(null)
     return true
   } catch (err) {
+    if (signal?.aborted) return false
     // A failed re-hydration keeps the data we already have; only the error
     // is new. Once the token is known dead, the recorded recovery hint is
     // more useful than this raw failure, so it stays.
@@ -253,11 +307,16 @@ export async function applyEvent(
     store.getState().resetSeq()
     return false
   }
+  if (ev.type === 'workspace.deleted') {
+    // Record deletion before any fetch: every list writer must reject older
+    // snapshots, even while this event's own reconciliation is pending.
+    store.getState().removeWorkspace(ev.workspace_id)
+  }
 
   // Workspaces arrive only by fetch, so an event for one we do not know means
   // a teammate created it after we hydrated. Without this its runs would be
   // stored but rendered nowhere.
-  if (ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  if (ev.type !== 'workspace.deleted' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -271,7 +330,72 @@ export async function applyEvent(
     await client.memberList().then(store.getState().setMembers).catch(ignore)
   }
 
+  // Mission events are scoped projection hints. Never let an event from a
+  // background workspace refresh the mission currently visible in this tab.
+  if (ev.type.startsWith('mission.') && ev.workspace_id) {
+    const state = store.getState()
+    if (state.activeWorkspace === ev.workspace_id) {
+      const current = state.route
+      const missionID =
+        current.name === 'missions' ? current.params.missionId : undefined
+      let changedMissionID: string | undefined
+      if (typeof ev.payload === 'object' && ev.payload !== null && 'mission_id' in ev.payload) {
+        const candidate = ev.payload.mission_id
+        if (typeof candidate === 'string') changedMissionID = candidate
+      }
+      const currentMission = missionID ? state.missions[missionID] : undefined
+      if (
+        missionID &&
+        changedMissionID === missionID &&
+        (!currentMission || currentMission.workspace_id === ev.workspace_id)
+      ) {
+        await client
+          .missionShow(missionID)
+          .then((result) => {
+            if (result.mission.workspace_id !== ev.workspace_id) return
+            store.getState().setMissionDetail({
+              mission: result.mission,
+              tasks: result.tasks,
+              attempts: result.attempts ?? [],
+              submissions: result.submissions ?? [],
+              diagnostics: result.diagnostics ?? [],
+              questions: result.questions ?? [],
+              plan_reviews: result.plan_reviews ?? [],
+            })
+          })
+          .catch(ignore)
+      } else {
+        await client
+          .missionList({ workspace_id: ev.workspace_id, limit: 50 })
+          .then((result) => {
+            const state = store.getState()
+            // Merged, not replaced, so older pages the reader loaded stay.
+            // Everything newer than the stored cursor is still held, so it
+            // still marks the next older page; a cursor read for another
+            // workspace, or none, gives way to the fetched one.
+            const loaded = state.missionListWorkspace === ev.workspace_id
+            state.setMissions(
+              ev.workspace_id,
+              result.missions,
+              loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
+              true,
+            )
+          })
+          .catch(ignore)
+      }
+    }
+  }
+
   switch (ev.type) {
+    case 'workspace.deleted': {
+      try {
+        store.getState().setWorkspaces(await client.workspaceListFull())
+      } catch (err) {
+        store.getState().setUnreachable(classifyUnreachable(err, store))
+        return false
+      }
+      break
+    }
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
       break
@@ -472,7 +596,11 @@ type Probe =
  * only an HTTP body carries, so it is recorded before the stream's own
  * failure can only say "unreachable".
  */
-async function probeGateway(store: RootStore, client: Api): Promise<Probe | null> {
+async function probeGateway(
+  store: RootStore,
+  client: Api,
+  signal: AbortSignal,
+): Promise<Probe | null> {
   let capabilities: GatewayCapabilities
   try {
     capabilities = await client.capabilities()
@@ -481,6 +609,7 @@ async function probeGateway(store: RootStore, client: Api): Promise<Probe | null
     if (err instanceof ApiError && (err.status === 403 || err.status === 503)) return { refused: err }
     return null
   }
+  if (signal.aborted) return null
   // Hydration writes the same descriptor, but a hydration that never
   // succeeds writes nothing - and classifying its failure needs to know
   // which gateway serves the page.
@@ -488,6 +617,10 @@ async function probeGateway(store: RootStore, client: Api): Promise<Probe | null
   try {
     if (!capabilities.local?.includes('link.status')) return null
     const status = await client.localLinkStatus()
+    if (signal.aborted) return null
+    // A failure before hydration succeeds is classified by whether the link
+    // runs through an edge, so the link has to be known first.
+    store.getState().setLinkStatus(status)
     return status.server_configured ? null : { unlinked: { capabilities, status } }
   } catch {
     return null
@@ -514,7 +647,8 @@ async function probeGateway(store: RootStore, client: Api): Promise<Probe | null
  * instead of subscribing live and missing the outage.
  */
 export function connect(store: RootStore, client: Api = api): () => void {
-  let disposed = false
+  const lifecycle = new AbortController()
+  const { signal } = lifecycle
   let hydrating = false
   let attempts = 0
   let retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -522,11 +656,83 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const queue: Event[] = []
   let chain: Promise<void> = Promise.resolve()
   let stopStream: () => void = () => {}
+  let selectionWrite = Promise.resolve()
+  const stopSelection = store.subscribe((state, previous) => {
+    // The gateway keys the selection by the server's answer, so an unlinked
+    // gateway, hydrated only for onboarding, has nowhere to save it.
+    if (!state.hydrated || !state.info || !state.capabilities?.local?.includes('workspace.selection')) return
+    if (state.activeWorkspace === previous.activeWorkspace && previous.hydrated) return
+    const workspace = state.activeWorkspace
+    selectionWrite = selectionWrite
+      .then(() => client.localWorkspaceSelection(workspace))
+      .then(() => {})
+      .catch((err: unknown) => {
+        if (!signal.aborted) {
+          store.getState().setHydrated(true, err instanceof Error ? err.message : String(err))
+        }
+      })
+  })
+
+  const missionRefreshes = new Set<string>()
+  let refreshingMissions = false
+  let missionGeneration = 0
+
+  const refreshMissionRuns = () => {
+    if (refreshingMissions || hydrating || signal.aborted || missionRefreshes.size === 0) return
+    refreshingMissions = true
+    const generation = missionGeneration
+    void (async () => {
+      while (missionRefreshes.size > 0 && !hydrating && !signal.aborted && generation === missionGeneration) {
+        const workspaceID = missionRefreshes.values().next().value as string
+        missionRefreshes.delete(workspaceID)
+        try {
+          const listed = await client.runList({ workspace_id: workspaceID })
+          if (signal.aborted || generation !== missionGeneration) return
+          store.setState((state) => {
+            let runs = state.runs
+            for (const run of listed) {
+              const current = runs[run.id]
+              if (!current || current.workspace_id !== workspaceID) continue
+              if (
+                current.mission_id === run.mission_id &&
+                current.mission_role === run.mission_role &&
+                current.integrator_run_id === run.integrator_run_id
+              ) continue
+              if (runs === state.runs) runs = { ...runs }
+              // Status/title/delete events may have landed during this fetch.
+              runs[run.id] = {
+                ...current,
+                mission_id: run.mission_id,
+                mission_role: run.mission_role,
+                integrator_run_id: run.integrator_run_id,
+              }
+            }
+            return { runs }
+          })
+        } catch (err) {
+          if (signal.aborted || generation !== missionGeneration) return
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          void load()
+          return
+        }
+      }
+    })().finally(() => {
+      if (generation !== missionGeneration) return
+      refreshingMissions = false
+      refreshMissionRuns()
+    })
+  }
 
   const drain = async () => {
-    while (!disposed && !hydrating && queue.length > 0) {
+    while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
-      if (await applyEvent(store, ev, client)) continue
+      if (await applyEvent(store, ev, client)) {
+        if (ev.type === 'mission.changed' && ev.workspace_id) {
+          missionRefreshes.add(ev.workspace_id)
+          refreshMissionRuns()
+        }
+        continue
+      }
       // The event named something we could not fetch. A fresh snapshot is the
       // repair; the rest of the queue waits for it.
       void load()
@@ -539,12 +745,16 @@ export function connect(store: RootStore, client: Api = api): () => void {
   }
 
   const load = async () => {
-    if (disposed || hydrating || store.getState().streamDead) return
+    if (signal.aborted || hydrating || store.getState().streamDead) return
     hydrating = true
+    // Full hydration supersedes pending relationship snapshots, not vice versa.
+    missionGeneration++
+    refreshingMissions = false
+    missionRefreshes.clear()
     await chain // let an event that is mid-flight finish first
-    const ok = await hydrate(store, client)
+    const ok = await hydrate(store, client, signal)
     hydrating = false
-    if (disposed) return
+    if (signal.aborted) return
     if (!ok) {
       retryTimer = setTimeout(() => {
         retryTimer = null
@@ -553,6 +763,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       return
     }
     attempts = 0
+    refreshMissionRuns()
     pump()
   }
 
@@ -594,7 +805,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // machine's own network, or the SSH tunnel to aether-server. Either
         // way the gateway itself is fine.
         const s = store.getState()
-        s.setUnreachable(kind)
+        s.setUnreachable(kind === 'server' ? edgeHop(detail, store) ?? kind : kind)
         // A refused subscribe never goes live, so hydration never runs and
         // nothing else will ever record what happened. Keep an error already
         // recorded: a dead token is more precise than a dead hop.
@@ -611,15 +822,15 @@ export function connect(store: RootStore, client: Api = api): () => void {
   // data for the rest of a wait that also caps at 30 seconds. A wake with no
   // retry pending re-fetches nothing.
   const stopWake = onWake(() => {
-    if (disposed || !retryTimer) return
+    if (signal.aborted || !retryTimer) return
     clearTimeout(retryTimer)
     retryTimer = null
     attempts = 0
     void load()
   })
 
-  void probeGateway(store, client).then((probe) => {
-    if (disposed) return
+  void probeGateway(store, client, signal).then((probe) => {
+    if (signal.aborted) return
     if (probe && 'rejected' in probe) {
       // Every reconnect would carry the same rejected credential, so the
       // stream is never opened. The flag is what makes the panes and the
@@ -654,8 +865,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
   })
 
   return () => {
-    disposed = true
+    lifecycle.abort()
     stopWake()
+    stopSelection()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
   }

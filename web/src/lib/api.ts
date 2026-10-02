@@ -13,8 +13,15 @@ import type {
   ConfigImportResult,
   ConfigRoot,
   DaemonInstallResult,
-  DiskUsage,
   DaemonStatusResult,
+  Device,
+  DeviceLookup,
+  DiskUsage,
+  EdgeHostKey,
+  EdgeLinkResult,
+  EdgeLogin,
+  EdgeServer,
+  EdgeStatus,
   EnvHarnessesResult,
   EnvSaveResult,
   EvidenceGetResult,
@@ -25,10 +32,20 @@ import type {
   GitHubConnectResult,
   GitHubProbeResult,
   GitIdentity,
+  Invitation,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
   Member,
+  MissionCancelResult,
+  MissionCreateResult,
+  MissionListResult,
+  MissionPlanDecideResult,
+  MissionPlanDecision,
+  MissionQuestionResult,
+  MissionReplaceIntegratorResult,
+  MissionShowResult,
+  MissionWorkerReleaseResult,
   Overlap,
   PresenceEntry,
   PullResult,
@@ -41,6 +58,7 @@ import type {
   RoomStatusResult,
   RoomMessageAnchor,
   RoomMessageKind,
+  UsageResult,
   WorkspaceMirrorAuth,
   WorkspaceMirrorResult,
   FileDiff,
@@ -55,6 +73,8 @@ import type {
   ServerUpdateWhen,
   SyncSessionState,
   SyncStatusResult,
+  TerminalHistoryParams,
+  TerminalHistoryResult,
   TerminalStatusResult,
   Template,
   TemplateLaunch,
@@ -65,6 +85,107 @@ import type {
   UpdateStatus,
   Workspace,
 } from '@/lib/types'
+import type {
+  IntegrationDecideParams,
+  IntegrationDecideResult,
+  IntegrationDeliverParams,
+  IntegrationDeliverResult,
+  IntegrationDeleteParams,
+  IntegrationDeleteResult,
+  IntegrationListParams,
+  IntegrationListResult,
+  IntegrationPatchResult,
+  IntegrationPrepareParams,
+  IntegrationPrepareResult,
+  IntegrationRequestDeliveryParams,
+  IntegrationRequestDeliveryResult,
+  IntegrationResolveParams,
+  IntegrationResolveResult,
+  IntegrationShowParams,
+  IntegrationShowResult,
+  IntegrationVerifyParams,
+  IntegrationVerifyResult,
+} from '@/lib/integration-types'
+import type {
+  DevArtifactDeleteParams,
+  DevArtifactDeleteResult,
+  DevArtifactDownloadRequest,
+  DevArtifactGetParams,
+  DevArtifactGetResult,
+  DevArtifactListParams,
+  DevArtifactListResult,
+  DevArtifactRetainParams,
+  DevArtifactRetainResult,
+  DevBrowserActionParams,
+  DevBrowserActionResult,
+  DevBrowserCloseParams,
+  DevBrowserCloseResult,
+  DevBrowserConsoleParams,
+  DevBrowserConsoleResult,
+  DevBrowserNavigateParams,
+  DevBrowserNavigateResult,
+  DevBrowserNetworkParams,
+  DevBrowserNetworkResult,
+  DevBrowserOpenParams,
+  DevBrowserOpenResult,
+  DevBrowserPagesParams,
+  DevBrowserPagesResult,
+  DevBrowserResetParams,
+  DevBrowserResetResult,
+  DevBrowserScreenshotParams,
+  DevBrowserScreenshotResult,
+  DevBrowserSnapshotParams,
+  DevBrowserSnapshotResult,
+  DevBrowserStatusParams,
+  DevBrowserStatusResult,
+  DevBrowserStreamRequest,
+  DevBrowserViewportParams,
+  DevBrowserViewportResult,
+  DevBrowserWaitParams,
+  DevBrowserWaitResult,
+  DevControlAcquireParams,
+  DevControlAcquireResult,
+  DevControlReleaseParams,
+  DevControlReleaseResult,
+  DevControlStatusParams,
+  DevControlStatusResult,
+  DevTerminalInputParams,
+  DevTerminalInputResult,
+  DevTerminalListParams,
+  DevTerminalListResult,
+  DevTerminalOutputParams,
+  DevTerminalOutputResult,
+  DevTerminalResizeParams,
+  DevTerminalResizeResult,
+  DevTerminalScreenParams,
+  DevTerminalScreenResult,
+  DevTerminalScreenshotParams,
+  DevTerminalScreenshotResult,
+  DevTerminalStartParams,
+  DevTerminalStartResult,
+  DevTerminalStopParams,
+  DevTerminalStopResult,
+  DevTerminalWaitParams,
+  DevTerminalWaitResult,
+} from '@/lib/development-types'
+import type {
+  RunGitCommitParams,
+  RunGitCommitResult,
+  RunGitDiffParams,
+  RunGitDiffResult,
+  RunGitPushParams,
+  RunGitPushResult,
+  RunGitStatusParams,
+  RunGitStatusResult,
+  RunPRCreateParams,
+  RunPRCreateResult,
+  RunPRFeedbackParams,
+  RunPRFeedbackResult,
+  RunPRStatusParams,
+  RunPRStatusResult,
+  WorkspaceImportParams,
+  WorkspaceImportResult,
+} from '@/lib/run-repository-types'
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
@@ -168,7 +289,7 @@ export function takeRequestedRun(): string | null {
   return id
 }
 
-async function call<T>(method: string, params: unknown = {}): Promise<T> {
+async function call<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
   const token = bearer()
   const res = await fetch(`${API_BASE}/${method}`, {
     method: 'POST',
@@ -177,6 +298,7 @@ async function call<T>(method: string, params: unknown = {}): Promise<T> {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(params),
+    signal,
   })
   if (!res.ok) {
     const err = await failure(res)
@@ -185,16 +307,29 @@ async function call<T>(method: string, params: unknown = {}): Promise<T> {
   return (await res.json()) as T
 }
 
-async function get<T>(path: string): Promise<T> {
+async function getResponse(path: string, signal?: AbortSignal): Promise<Response> {
   const token = bearer()
   const res = await fetch(`${API_BASE}${path}`, {
     headers: token ? { authorization: `Bearer ${token}` } : {},
+    signal,
   })
   if (!res.ok) {
     const err = await failure(res)
     throw new ApiError(res.status, `${path}: ${err.message}`, err.code, err.data)
   }
-  return (await res.json()) as T
+  return res
+}
+
+async function get<T>(path: string): Promise<T> {
+  return (await (await getResponse(path)).json()) as T
+}
+
+async function downloadArtifact(params: DevArtifactDownloadRequest, signal?: AbortSignal): Promise<Blob> {
+  const path = `/dev/${encodeURIComponent(params.run_id)}/artifacts/${encodeURIComponent(params.artifact_id)}`
+  const query = params.evidence_packet_id
+    ? `?${new URLSearchParams({ evidence_packet_id: params.evidence_packet_id }).toString()}`
+    : ''
+  return (await getResponse(path + query, signal)).blob()
 }
 
 
@@ -207,6 +342,7 @@ async function local<T>(
   verb: string,
   params: unknown = {},
   signal?: AbortSignal,
+  keepalive = false,
 ): Promise<T> {
   const token = bearer()
   const res = await fetch(`/local/v1/${verb}`, {
@@ -221,6 +357,7 @@ async function local<T>(
     // needs that: leaving the step must stop the work, not just stop
     // waiting for it.
     signal,
+    keepalive,
   })
   if (!res.ok) {
     const err = await failure(res)
@@ -282,6 +419,11 @@ export function socketURL(path: string): string {
   return url.toString()
 }
 
+/** Send params as the first JSON message; subsequent browser frames are binary. */
+export function browserStreamURL(params: DevBrowserStreamRequest): string {
+  return socketURL(`/ws/dev/browser/${encodeURIComponent(params.run_id)}`)
+}
+
 
 // Only what the SPA actually calls; the team-feature methods land with the
 // tickets that use them.
@@ -290,6 +432,8 @@ export const api = {
   memberList: () =>
     call<{ members: Member[] }>('member.list').then((r) => r.members),
   accountList: () => call<AccountAccess>('account.list'),
+  accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
+    call<UsageResult>('account.usage', params),
   accountShare: (memberID: string) =>
     call<unknown>('account.share', { member_id: memberID }),
   accountRevoke: (memberID: string) =>
@@ -306,6 +450,130 @@ export const api = {
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
+  runGitStatus: (params: RunGitStatusParams) =>
+    call<RunGitStatusResult>('run.git.status', params),
+  runGitDiff: (params: RunGitDiffParams) =>
+    call<RunGitDiffResult>('run.git.diff', params),
+  runGitCommit: (params: RunGitCommitParams) =>
+    call<RunGitCommitResult>('run.git.commit', params),
+  runGitPush: (params: RunGitPushParams) =>
+    call<RunGitPushResult>('run.git.push', params),
+  runPRStatus: (params: RunPRStatusParams) =>
+    call<RunPRStatusResult>('run.pr.status', params),
+  runPRCreate: (params: RunPRCreateParams) =>
+    call<RunPRCreateResult>('run.pr.create', params),
+  runPRFeedback: (params: RunPRFeedbackParams) =>
+    call<RunPRFeedbackResult>('run.pr.feedback', params),
+  workspaceImport: (params: WorkspaceImportParams) =>
+    call<WorkspaceImportResult>('workspace.import', params),
+  devTerminalList: (params: DevTerminalListParams) =>
+    call<DevTerminalListResult>('dev.terminal.list', params),
+  devTerminalStart: (params: DevTerminalStartParams) =>
+    call<DevTerminalStartResult>('dev.terminal.start', params),
+  devTerminalOutput: (params: DevTerminalOutputParams) =>
+    call<DevTerminalOutputResult>('dev.terminal.output', params),
+  devTerminalScreen: (params: DevTerminalScreenParams) =>
+    call<DevTerminalScreenResult>('dev.terminal.screen', params),
+  devTerminalScreenshot: (params: DevTerminalScreenshotParams) =>
+    call<DevTerminalScreenshotResult>('dev.terminal.screenshot', params),
+  devTerminalInput: (params: DevTerminalInputParams) =>
+    call<DevTerminalInputResult>('dev.terminal.input', params),
+  devTerminalResize: (params: DevTerminalResizeParams) =>
+    call<DevTerminalResizeResult>('dev.terminal.resize', params),
+  devTerminalWait: (params: DevTerminalWaitParams) =>
+    call<DevTerminalWaitResult>('dev.terminal.wait', params),
+  devTerminalStop: (params: DevTerminalStopParams) =>
+    call<DevTerminalStopResult>('dev.terminal.stop', params),
+  devBrowserStatus: (params: DevBrowserStatusParams) =>
+    call<DevBrowserStatusResult>('dev.browser.status', params),
+  devBrowserOpen: (params: DevBrowserOpenParams) =>
+    call<DevBrowserOpenResult>('dev.browser.open', params),
+  devBrowserPages: (params: DevBrowserPagesParams) =>
+    call<DevBrowserPagesResult>('dev.browser.pages', params),
+  devBrowserNavigate: (params: DevBrowserNavigateParams) =>
+    call<DevBrowserNavigateResult>('dev.browser.navigate', params),
+  devBrowserSnapshot: (params: DevBrowserSnapshotParams) =>
+    call<DevBrowserSnapshotResult>('dev.browser.snapshot', params),
+  devBrowserAction: (params: DevBrowserActionParams) =>
+    call<DevBrowserActionResult>('dev.browser.action', params),
+  devBrowserScreenshot: (params: DevBrowserScreenshotParams) =>
+    call<DevBrowserScreenshotResult>('dev.browser.screenshot', params),
+  devBrowserViewport: (params: DevBrowserViewportParams) =>
+    call<DevBrowserViewportResult>('dev.browser.viewport', params),
+  devBrowserWait: (params: DevBrowserWaitParams) =>
+    call<DevBrowserWaitResult>('dev.browser.wait', params),
+  devBrowserConsole: (params: DevBrowserConsoleParams) =>
+    call<DevBrowserConsoleResult>('dev.browser.console', params),
+  devBrowserNetwork: (params: DevBrowserNetworkParams) =>
+    call<DevBrowserNetworkResult>('dev.browser.network', params),
+  devBrowserReset: (params: DevBrowserResetParams) =>
+    call<DevBrowserResetResult>('dev.browser.reset', params),
+  devBrowserClose: (params: DevBrowserCloseParams) =>
+    call<DevBrowserCloseResult>('dev.browser.close', params),
+  devControlStatus: (params: DevControlStatusParams) =>
+    call<DevControlStatusResult>('dev.control.status', params),
+  devControlAcquire: (params: DevControlAcquireParams) =>
+    call<DevControlAcquireResult>('dev.control.acquire', params),
+  devControlRelease: (params: DevControlReleaseParams) =>
+    call<DevControlReleaseResult>('dev.control.release', params),
+  devArtifactList: (params: DevArtifactListParams) =>
+    call<DevArtifactListResult>('dev.artifact.list', params),
+  devArtifactGet: (params: DevArtifactGetParams) =>
+    call<DevArtifactGetResult>('dev.artifact.get', params),
+  devArtifactDelete: (params: DevArtifactDeleteParams) =>
+    call<DevArtifactDeleteResult>('dev.artifact.delete', params),
+  devArtifactRetain: (params: DevArtifactRetainParams) =>
+    call<DevArtifactRetainResult>('dev.artifact.retain', params),
+  devArtifactDownload: (params: DevArtifactDownloadRequest, signal?: AbortSignal) =>
+    downloadArtifact(params, signal),
+  missionCreate: (params: {
+    workspace_id: string
+    objective: string
+    accountable_human_id: string
+    integrator: {
+      account_member_id: string
+      harness: string
+      mode: string
+    }
+    execution_choices: Array<{
+      account_member_id: string
+      harness: string
+      mode: string
+    }>
+    max_concurrent_attempts: number
+    max_total_attempts: number
+    idempotency_key: string
+  }) => call<MissionCreateResult>('mission.create', params),
+  missionShow: (missionID: string) =>
+    call<MissionShowResult>('mission.show', { mission_id: missionID }),
+  missionList: (params: { workspace_id: string; limit?: number; before?: string }) =>
+    call<MissionListResult>('mission.list', params),
+  missionReplaceIntegrator: (params: {
+    mission_id: string
+    expected_generation: number
+    integrator: {
+      account_member_id: string
+      harness: string
+      mode: string
+    }
+    idempotency_key: string
+  }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
+  missionQuestionAnswer: (params: {
+    question_id: string
+    answer: string
+    idempotency_key: string
+  }) => call<MissionQuestionResult>('mission.question.answer', params),
+  missionPlanDecide: (params: {
+    mission_id: string
+    expected_plan_version: number
+    decision: MissionPlanDecision
+    feedback?: string
+    idempotency_key: string
+  }) => call<MissionPlanDecideResult>('mission.plan.decide', params),
+  missionCancel: (params: { mission_id: string; idempotency_key: string }) =>
+    call<MissionCancelResult>('mission.cancel', params),
+  missionWorkerRelease: (params: { run_id: string; expected_takeover_generation: number }) =>
+    call<MissionWorkerReleaseResult>('mission.worker.release', params),
   runDelete: (runID: string) => call<unknown>('run.delete', { run_id: runID }),
   runPause: (runID: string) => call<unknown>('run.pause', { run_id: runID }),
   runResume: (runID: string) => call<unknown>('run.resume', { run_id: runID }),
@@ -321,8 +589,8 @@ export const api = {
     before?: string
     limit?: number
   }) => call<RoomMessageListResult>('run.room.list', params),
-  runRoomStatus: (params: { workspace_id: string; run_id: string }) =>
-    call<RoomStatusResult>('run.room.status', params),
+  runRoomStatus: (params: { workspace_id: string; run_id: string }, signal?: AbortSignal) =>
+    call<RoomStatusResult>('run.room.status', params, signal),
   runRoomPost: (params: {
     workspace_id: string
     run_id: string
@@ -359,6 +627,26 @@ export const api = {
     packet_id: string
     max_bytes?: number
   }) => call<EvidenceTranscriptResult>('run.evidence.transcript', params),
+  integrationPrepare: (params: IntegrationPrepareParams) =>
+    call<IntegrationPrepareResult>('integration.prepare', params),
+  integrationShow: (params: IntegrationShowParams) =>
+    call<IntegrationShowResult>('integration.show', params),
+  integrationList: (params: IntegrationListParams) =>
+    call<IntegrationListResult>('integration.list', params),
+  integrationResolve: (params: IntegrationResolveParams) =>
+    call<IntegrationResolveResult>('integration.resolve', params),
+  integrationVerify: (params: IntegrationVerifyParams) =>
+    call<IntegrationVerifyResult>('integration.verify', params),
+  integrationRequestDelivery: (params: IntegrationRequestDeliveryParams) =>
+    call<IntegrationRequestDeliveryResult>('integration.request_delivery', params),
+  integrationDecide: (params: IntegrationDecideParams) =>
+    call<IntegrationDecideResult>('integration.decide', params),
+  integrationDeliver: (params: IntegrationDeliverParams) =>
+    call<IntegrationDeliverResult>('integration.deliver', params),
+  integrationPatch: (params: IntegrationShowParams) =>
+    call<IntegrationPatchResult>('integration.patch', params),
+  integrationDelete: (params: IntegrationDeleteParams) =>
+    call<IntegrationDeleteResult>('integration.delete', params),
   approvalList: (workspaceID: string, all = false) =>
     call<{ approvals: Approval[] }>('approval.list', {
       workspace_id: workspaceID,
@@ -418,6 +706,31 @@ export const api = {
     call<{ member: Member }>('member.role', { member_id: memberID, role }).then(
       (r) => r.member,
     ),
+  memberDeviceList: () =>
+    call<{ devices: Device[] }>('member.device.list').then((r) => r.devices),
+  memberDeviceLookup: (code: string) => call<DeviceLookup>('member.device.lookup', { code }),
+  /** Approves the device member.device.lookup named for code; the server
+   * refuses a code that now names another. */
+  memberDeviceApprove: (code: string, deviceID: string) =>
+    call<{ device: Device }>('member.device.approve', { code, device_id: deviceID }).then(
+      (r) => r.device,
+    ),
+  memberDeviceRevoke: (deviceID: string) =>
+    call<{ device: Device }>('member.device.revoke', { device_id: deviceID }).then(
+      (r) => r.device,
+    ),
+  memberInvitationList: () =>
+    call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
+  memberInvitationCreate: (params: {
+    login?: string
+    email?: string
+    role: Member['role']
+  }) =>
+    call<{ invitation: Invitation }>('member.invitation.create', params).then(
+      (r) => r.invitation,
+    ),
+  memberInvitationRevoke: (invitationID: string) =>
+    call<unknown>('member.invitation.revoke', { invitation_id: invitationID }),
   workspaceAdd: (params: {
     name: string
     base_branch?: string
@@ -434,6 +747,8 @@ export const api = {
     call<{ workspaces: Workspace[] }>('workspace.list').then(
       (r) => r.workspaces,
     ),
+  workspaceDelete: (workspaceID: string) =>
+    call<{ ok: true }>('workspace.delete', { workspace_id: workspaceID }),
   workspaceSettings: (params: { workspace_id: string; steer_others?: string }) =>
     call<{ workspace: Workspace }>('workspace.settings', {
       workspace_id: params.workspace_id,
@@ -547,6 +862,13 @@ export const api = {
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   // The local gateway's client-machine verbs; see the `local` helper.
   localLinkStatus: () => local<LinkStatus>('link.status'),
+  localWorkspaceSelection: (workspaceID?: string) =>
+    local<{ workspace_id: string }>(
+      'workspace.selection',
+      { workspace_id: workspaceID },
+      undefined,
+      workspaceID !== undefined,
+    ),
   localLinkApply: (params: { addr: string; invite?: string; name?: string }) =>
     local<LinkApplyResult>('link.apply', params),
   localLinkRepo: (repo: string, workspaceID?: string) =>
@@ -554,6 +876,17 @@ export const api = {
   // link.switch never succeeds: the gateway's SSH identity is fixed at
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
+  /** Starts a sign-in at the edge; edge.status reports how it ends. */
+  localEdgeLogin: () => local<EdgeLogin>('edge.login'),
+  localEdgeStatus: () => local<EdgeStatus>('edge.status'),
+  localEdgeServers: (edge: string) =>
+    local<{ edge: string; servers: EdgeServer[] }>('edge.servers', { edge }),
+  localEdgeHostKey: (serverID: string, edge: string) =>
+    local<EdgeHostKey>('edge.hostkey', { server_id: serverID, edge }),
+  localEdgeLink: (serverID: string, edge: string) =>
+    local<EdgeLinkResult>('edge.link', { server_id: serverID, edge }),
+  localEdgeClaim: (code: string, edge: string) =>
+    local<EdgeLinkResult>('edge.claim', { code, edge }),
   /** This machine's own git identity, for prefilling the one the server
    * stores. */
   localGitIdentity: () => local<GitIdentity>('git.identity'),
@@ -596,6 +929,8 @@ export const api = {
    * linked repository folder when the gateway knows exactly one. */
   envHarnesses: () => local<EnvHarnessesResult>('env.harnesses'),
   terminalStatus: () => call<TerminalStatusResult>('terminal.status', {}),
+  terminalHistory: (params: TerminalHistoryParams, signal?: AbortSignal) =>
+    call<TerminalHistoryResult>('terminal.history', params, signal),
   uploadTerminalImage: (file: File, runID?: string) => uploadTerminalImage(file, runID),
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),

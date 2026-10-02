@@ -5,7 +5,7 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { agentInfo, alice, bob, otherWorkspace, run, vera, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
 import { hintOn } from '@/test/tooltip'
 import { openSelect, pickOption } from '@/test/select'
 
@@ -306,13 +306,41 @@ describe('command palette', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
-      expect(api.runLaunch).toHaveBeenCalledWith({
+      expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
         workspace_id: workspace.id,
         harness: 'claude',
-      }),
+      })),
     )
     // A launch drops the user straight into the agent terminal.
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
+  })
+
+  it('opens the launch dialog on Swarm from Create swarm', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    open()
+
+    fireEvent.click(await screen.findByText('Create swarm...'))
+    expect(await screen.findByRole('dialog', { name: 'Launch a swarm' })).toBeDefined()
+    expect(screen.getByLabelText(/^Objective/)).toBeDefined()
+  })
+
+  it('offers Create swarm only where the gateway carries mission.create', async () => {
+    open()
+    await screen.findByText('Launch a run...')
+    expect(screen.queryByText('Create swarm...')).toBeNull()
+  })
+
+  it('hides Create swarm from a role that cannot launch', async () => {
+    useStore.setState({
+      capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+      info: { ...serverInfo, member: vera },
+    })
+    onTestFinished(() => {
+      useStore.setState({ info: null })
+    })
+    open()
+    await screen.findByText('Open the board')
+    expect(screen.queryByText('Create swarm...')).toBeNull()
   })
 
   it('offers member-registered agents in the launch harness dropdown', async () => {
@@ -424,6 +452,55 @@ describe('command palette', () => {
     expect(screen.queryByText('Manage workspaces')).toBeNull()
     expect(screen.queryByText('Onboarding')).toBeNull()
   })
+
+  it.each(['local', 'remote'] as const)(
+    'finds configuration and remote files with config-only capabilities on a %s gateway',
+    async (gateway) => {
+      useStore.setState({
+        capabilities: {
+          gateway,
+          methods: ['config.roots', 'config.import', 'config.tree', 'config.read'],
+          ws: [],
+        },
+        workspaces: {},
+        activeWorkspace: '',
+        runs: {},
+        onboarded: true,
+      })
+      open()
+
+      const search = await screen.findByRole('combobox')
+      await userEvent.type(search, 'config')
+      fireEvent.click(await screen.findByText('Configuration'))
+      expect(useStore.getState().route).toEqual({ name: 'configuration', params: {} })
+      expect(useStore.getState().paletteOpen).toBe(false)
+
+      act(() => useStore.setState({ paletteOpen: true }))
+      const reopenedSearch = await screen.findByRole('combobox')
+      await userEvent.clear(reopenedSearch)
+      await userEvent.type(reopenedSearch, 'files')
+      fireEvent.click(await screen.findByText('Files'))
+      expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
+    },
+  )
+
+  it.each(['config.roots', 'config.import'])(
+    'hides configuration when %s is not advertised',
+    async (missing) => {
+      useStore.setState({
+        capabilities: {
+          gateway: 'remote',
+          methods: ['config.roots', 'config.import'].filter(
+            (method) => method !== missing,
+          ),
+          ws: [],
+        },
+      })
+      open()
+      await screen.findByRole('combobox')
+      expect(screen.queryByText('Configuration')).toBeNull()
+    },
+  )
 
   it('hides the admin surfaces on a legacy monitor without capabilities', async () => {
     // capabilities stays null (the beforeEach default): the endpoint 404ed,

@@ -18,7 +18,7 @@ import {
 import { type Gateway, startGateway } from './harness/gateway'
 import { cloneRepo, seedRepo } from './harness/git'
 import { scratchDir } from './harness/paths'
-import { dockerReachable, type Server, startServer } from './harness/server'
+import { dockerReachable, type Server, type ServerOptions, startServer } from './harness/server'
 
 export interface Member {
   name: string
@@ -128,10 +128,11 @@ async function leftovers(
   return { containers: [], memberIDs: [] }
 }
 
-export const test = base.extend<{ aether: Aether }>({
-  aether: async ({}, use, testInfo) => {
+export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }>({
+  serverOptions: [{}, { option: true }],
+  aether: async ({ serverOptions }, use, testInfo) => {
     const dir = scratchDir()
-    const server = await startServer(dir)
+    const server = await startServer(dir, serverOptions)
     const gateways: Gateway[] = []
 
     const member = async (name: string): Promise<Member> => {

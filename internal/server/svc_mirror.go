@@ -19,6 +19,7 @@ func init() {
 			return nil, err
 		}
 		d.SSH.Services.Mirrors = svc
+		d.Workspaces.mirrors = svc
 		d.Runs.UseBaseCapture(svc)
 		return nil, nil
 	})

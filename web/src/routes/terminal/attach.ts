@@ -24,6 +24,12 @@ export const codeUnavailable = -32004
  */
 const unavailableRetries = 4
 
+/**
+ * The server's reconnect window (internal/control/lease.go): how long a
+ * disconnected session's lease is held for that same session to reclaim.
+ */
+const reclaimWindowMs = 15_000
+
 /** WebSocket policy violation: the gateway's authorization watch fired. */
 const policyClose = 1008
 
@@ -43,19 +49,58 @@ const inputChunk = 8 * 1024
  */
 export const standardGeometry = { cols: 80, rows: 24 }
 
+export type TerminalEpoch = string
+export type TerminalSequence = string
+
+/** One indivisible terminal incarnation and byte high-water mark. */
+export interface TerminalPosition {
+  readonly epoch: TerminalEpoch
+  readonly sequence: TerminalSequence
+}
+
+const maxTerminalSequence = 18_446_744_073_709_551_615n
+
+const decodeTerminalSequence = (cursor: number | string | undefined): TerminalSequence | null => {
+  if (cursor === undefined) return '0'
+  if (typeof cursor === 'number') {
+    if (!Number.isSafeInteger(cursor) || cursor < 0) return null
+    return String(cursor)
+  }
+  if (!/^[0-9]+$/.test(cursor)) return null
+  const sequence = BigInt(cursor)
+  if (sequence > maxTerminalSequence) return null
+  return sequence.toString()
+}
+
+const positionFromFrame = (frame: Pick<AttachFrame, 'resume_id' | 'cursor'>): TerminalPosition | null => {
+  if (typeof frame.resume_id !== 'string' || frame.resume_id.length === 0) return null
+  const sequence = decodeTerminalSequence(frame.cursor)
+  return sequence === null ? null : { epoch: frame.resume_id, sequence }
+}
+
+const advancePosition = (position: TerminalPosition | null, bytes: number): TerminalPosition | null => {
+  if (position === null) return null
+  const sequence = BigInt(position.sequence) + BigInt(bytes)
+  if (sequence > maxTerminalSequence) return null
+  return { epoch: position.epoch, sequence: sequence.toString() }
+}
+
 interface AttachHeader {
   write?: boolean
+  screen?: boolean
+  interactive?: boolean
   follow?: boolean
   resume?: boolean
   /** The PTY process incarnation whose parsed cursor is being resumed. */
   resume_id?: string
-  cursor?: number
+  cursor?: TerminalSequence
   cols: number
   rows: number
   control_session_id: string
   control_generation?: number
   takeover?: boolean
   release_control?: boolean
+  incarnation?: string
 }
 
 /**
@@ -66,24 +111,44 @@ interface AttachHeader {
 interface AttachFrame {
   type?: string
   ok: boolean
+  request_id?: number
   code?: number
   error?: string
   cols?: number
   rows?: number
-  cursor?: number
+  cursor?: number | string
   resumed?: boolean
   /** The PTY process incarnation that produced this screen/cursor. */
   resume_id?: string
   replay?: number
+  control_session_id?: string
   control_generation?: number
   has_control?: boolean
+  terminal_id?: string
+  incarnation?: string
+  server_owned_responder?: boolean
 }
+
 
 
 export interface ControlMetadata {
   control_session_id: string
   control_generation: number
   has_control: boolean
+  /** Server-issued terminal high-water carried atomically by this state. */
+  position?: TerminalPosition
+}
+export interface ControlResult extends ControlMetadata {
+  ok: boolean
+  request_id?: number
+  code?: number
+  error?: string
+}
+
+export interface AttachTerminalIdentity {
+  terminal_id: string
+  incarnation: string
+  server_owned_responder: boolean
 }
 
 export type AttachDataKind = 'replay' | 'replay-end' | 'live'
@@ -107,27 +172,26 @@ export interface AttachHandlers {
    * second copy of the scrollback. `size` is the geometry the ack reports -
    * the live session's, not what the header asked for - which is what a
    * client that renders the session at its own size adopts. `resumed` says
-   * this attach asked to keep the screen it already had: no replay follows,
-   * so clearing it would throw away the only copy.
+   * this attach asked to keep the screen it already had.
    */
   onAttached: (
     write: boolean,
     size: { cols: number; rows: number },
     resumed?: boolean,
+    identity?: AttachTerminalIdentity,
   ) => void
   /**
    * Runs immediately after onAttached, before the first replay frame can be
-   * handled. `bytes` is the ack-declared replay length; zero means this
-   * attach resumes the existing screen or has no transcript to send.
+   * handled. The second argument distinguishes a resumed delta from a reset
+   * bootstrap, allowing a caller to mute input without hiding a warm screen.
    */
-  onReplayStart?: (bytes: number) => void
-  /**
-   * Cancel an in-flight replay without revealing its partial terminal. The
-   * replacement attach will announce the next replay (or a final refusal).
-   */
-  onReplayAbort?: () => void
+  onReplayStart?: (bytes: number, full: boolean) => void
+  /** Cancel an in-flight replay without revealing its partial terminal. */
+  onReplayAbort?: (full: boolean) => void
   /** Lease metadata returned with every successful attach ack. */
   onControl?: (metadata: ControlMetadata) => void
+  /** A control request result, or an out-of-band lease revocation. */
+  onControlResult?: (result: ControlResult) => void
   onState: (state: ConnectionState) => void
   /**
    * The attach was refused for good; no further reconnect is attempted. The
@@ -136,44 +200,40 @@ export interface AttachHandlers {
    */
   onRefused: (message: string, code?: number) => void
   /** The member cannot steer this run. The attach continues as a mirror. */
-  onWriteDenied: () => void
+  onWriteDenied: (message?: string) => void
   /**
    * Another session took or released writable control. This is an ephemeral
-   * lease loss, not a permission denial: the caller clears its writable
-   * preference and reconnects as a mirror so the member can ask again.
+   * lease loss, not a permission denial.
    */
   onControlLost?: () => void
-  /**
-   * The session's PTY was resized by whoever does decide its size. Only a
-   * follower is sent this, and only after the ack that carried the first
-   * geometry; it is not an event and nothing replays it.
-   */
-  onGeometry?: (cols: number, rows: number) => void
-  /**
-   * Whether this client renders the session at the size it already is
-   * rather than imposing one, read at every connect. A follower is left out
-   * of the minimum the PTY is sized to, so a phone can steer a run without
-   * reflowing the agent's screen for everyone watching it.
-   */
+  /** A geometry update from the session; replay draining awaits its reflow. */
+  onGeometry?: (cols: number, rows: number) => AttachDataResult
+  /** Whether this client follows the session geometry. */
   follows?: () => boolean
-  /**
-   * Whether a missing session on this run is worth waiting out rather than
-   * reporting. True only while the run can still gain one; read at every
-   * refusal, so a run that ends mid-retry stops being retried.
-   */
+  /** Whether a missing session is worth waiting out. */
   sessionPending?: () => boolean
   /** A terminal process exited and the gateway closed the socket normally. */
   onExit?: () => void
   /** Geometry to ask for, read at every connect. */
   geometry: () => { cols: number; rows: number }
-  /** Whether the caller wants to steer, read at every connect. */
+  /** Whether this client wants initial writable control. */
   wantsWrite: () => boolean
+  /** Whether this browser attachment brings a compact screen snapshot. */
+  screen?: () => boolean
+  /** Whether this attachment accepts framed input/control records. */
+  interactive?: () => boolean
+  /** Development attaches must name a known process; never implicitly start. */
+  developmentTerminal?: () => { terminal_id: string; incarnation: string }
+  /** Observed surface generation for an explicitly confirmed takeover. */
+  takeoverGeneration?: () => number
 }
 
 export interface Attachment {
   /** Keystrokes for the agent's terminal; dropped while not attached. */
   send: (data: string) => void
   resize: (cols: number, rows: number) => void
+  /** Request a control lease on the existing stream. */
+  setControl: (write: boolean, takeover?: boolean) => void
   /**
    * Reattach now, picking up the current write preference. `resume` asks
    * the server for no replay and keeps the screen already on-screen; it is
@@ -210,22 +270,20 @@ export interface Attachment {
  * replay-end completion covers the final chunk and every reply the replay
  * provoked.
  */
+export type ReplayMode = 'full' | 'delta'
+
 export function replayGate(
   write: (chunk: Uint8Array, done?: () => void) => void,
-  onReplaying?: (replaying: boolean) => void,
+  onReplaying?: (replaying: boolean, full?: boolean) => void,
 ) {
   let muted = false
-  // A reopen mid-replay leaves callbacks pending in xterm's write queue; the
-  // generation lets them expire instead of unmuting the replay that replaced
-  // them. It also guards the two-frame reveal below.
   let generation = 0
   let pendingReveal: number | null = null
+  let mode: ReplayMode = 'full'
   const nextFrame = (callback: () => void) => {
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => callback())
     } else {
-      // jsdom and non-visual embeds have no RAF. Keep the same turn-based
-      // delay there rather than making a replay callback crash the attach.
       setTimeout(callback, 0)
     }
   }
@@ -236,27 +294,31 @@ export function replayGate(
       nextFrame(() => {
         if (generation !== current || pendingReveal !== current) return
         pendingReveal = null
-        onReplaying?.(false)
+        onReplaying?.(false, true)
       })
     })
   }
-  const start = () => {
+  const start = (nextMode: ReplayMode = 'full') => {
     muted = true
+    mode = nextMode
     generation++
     pendingReveal = null
-    onReplaying?.(true)
+    // A resumed delta mutes terminal replies and user input while preserving
+    // the already-valid screen.
+    onReplaying?.(true, nextMode === 'full')
   }
   const unmute = () => {
     muted = false
     generation++
     pendingReveal = null
-    onReplaying?.(false)
+    onReplaying?.(false, mode === 'full')
   }
-  const cancel = () => {
+  const cancel = (full = true) => {
     muted = true
+    mode = full ? 'full' : 'delta'
     generation++
     pendingReveal = null
-    onReplaying?.(true)
+    onReplaying?.(true, full)
   }
   return {
     muted: () => muted,
@@ -283,8 +345,12 @@ export function replayGate(
           completed = true
           if (kind === 'replay-end' && generation === current) {
             muted = false
-            pendingReveal = current
-            reveal(current)
+            if (mode === 'full') {
+              pendingReveal = current
+              reveal(current)
+            } else {
+              onReplaying?.(false, false)
+            }
           }
           resolve()
         }
@@ -300,7 +366,11 @@ export function replayGate(
 }
 
 /** Connect to a terminal socket, re-reading its URL before every reconnect. */
-export function connectAttach(socketURL: () => string, h: AttachHandlers): Attachment {
+export function connectAttach(
+  socketURL: () => string,
+  h: AttachHandlers,
+  seededSessionID?: string,
+): Attachment {
   // A socket can outlive the component that currently displays it (a dock
   // collapse or route change keeps the server-side shell alive). Rebinding
   // keeps callbacks pointed at the current terminal instead of a disposed
@@ -327,16 +397,20 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   // completely; no later resume may trust that partial screen.
   let replayInvalid = false
   let attached = false
+  let pendingControl: { write: boolean; takeover: boolean } | null = null
   // Sticky for the life of the attachment: once the server has said this
   // member cannot steer, every reconnect is a mirror.
   let writeDenied = false
   type ReplayOperation =
-    | { type: 'data'; chunk: Uint8Array; kind: AttachDataKind; cursor?: number }
+    | { type: 'data'; chunk: Uint8Array; kind: AttachDataKind; position?: TerminalPosition }
     | { type: 'geometry'; cols: number; rows: number }
   // Keep each replay operation backed by the WebSocket frame that carried it.
   // In particular, never allocate a transcript-sized buffer from ack.replay.
   let replayRemaining = 0
   let replayReady = true
+  const queuedOutputLimit = 4 * 1024 * 1024
+  let queuedOutputBytes = 0
+  let queueOverflowed = false
   let replayIsFull = false
   let replayQueue: ReplayOperation[] = []
   let replayQueueOffset = 0
@@ -349,25 +423,126 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         releaseControl?: boolean
       }
     | null = null
-  // A resume cursor is meaningful only for the PTY incarnation that produced
-  // the retained screen. The server's nonempty ack value becomes the fence
-  // for every subsequent resume request; it intentionally survives a full
-  // replay fallback so the next request can target the new incarnation.
-  let resumeID: string | null = null
-  // The ack cursor is the boundary at which the declared replay ends. Bytes
-  // received after it are accounted for independently until xterm confirms
-  // that it parsed them.
-  let receivedCursor = 0
-  let parsedCursor = 0
-  let replayCursorTarget: number | null = null
+  // Resume state is one object so an epoch can never be retained while its
+  // sequence is replaced by a different server observation.
+  let receivedPosition: TerminalPosition | null = null
+  let pendingLiveBytes = 0
+  let parsedPosition: TerminalPosition | null = null
+  let replayPositionTarget: TerminalPosition | null = null
+  let pendingServerPosition: TerminalPosition | null = null
   const pendingLiveWrites = new Set<Promise<void>>()
   let reopenGeneration = 0
   let deliveryGeneration = 0
-  // Stable for this logical browser tab and intentionally distinct from
-  // another tab by the same member. Reconnects reuse it to resume control.
-  const controlSessionID = crypto.randomUUID()
+  let liveOverflowed = false
+  // Stable for this attachment's reconnects, and for a later attachment in
+  // the same browser tab that seeds it, so either reclaims the disconnected
+  // lease this session held. Another tab by the same member never shares it.
+  // A seed carries no generation: generations restart with the server, so a
+  // remembered one could fence a takeover of someone else's lease.
+  const controlSessionID = seededSessionID ?? crypto.randomUUID()
   let controlGeneration = 0
   let hasControl = false
+  // A seeded attach can race the server's teardown of this session's
+  // previous transport, which reads as occupied until it lands. Until the
+  // first successful ack, keep asking for as long as the lease is held.
+  let reclaimUntil = seededSessionID === undefined ? 0 : Date.now() + reclaimWindowMs
+  let controlRequestID = 0
+  let controlRevision = 0
+  let controlPosition: TerminalPosition | null = null
+  const pendingControls = new Map<
+    number,
+    { generation: number; observedGeneration: number; revision: number; write: boolean; fresh: boolean }
+  >()
+  const applyPendingServerPosition = () => {
+    if (pendingServerPosition === null || replayPending() || pendingLiveWrites.size > 0) return
+    if (
+      parsedPosition === null ||
+      parsedPosition.epoch !== pendingServerPosition.epoch ||
+      BigInt(parsedPosition.sequence) < BigInt(pendingServerPosition.sequence)
+    ) {
+      parsedPosition = pendingServerPosition
+    }
+    pendingServerPosition = null
+  }
+  const adoptServerPosition = (position: TerminalPosition) => {
+    receivedPosition = position
+    pendingServerPosition = position
+    applyPendingServerPosition()
+  }
+  const publishControl = (
+    generation: number,
+    granted: boolean,
+    position: TerminalPosition | null | undefined = undefined,
+  ) => {
+    controlGeneration = generation
+    hasControl = granted
+    controlRevision++
+    if (position !== undefined) controlPosition = position
+    const metadata: ControlMetadata = {
+      control_session_id: controlSessionID,
+      control_generation: controlGeneration,
+      has_control: hasControl,
+    }
+    if (controlPosition !== null) metadata.position = controlPosition
+    handlers.onControl?.(metadata)
+  }
+  const receiveControl = (frame: AttachFrame) => {
+    if (frame.control_session_id && frame.control_session_id !== controlSessionID) return
+    const requestID = frame.request_id
+    const pending = requestID === undefined ? undefined : pendingControls.get(requestID)
+    const expectedGeneration = pending?.generation ?? (requestID === undefined ? controlGeneration : undefined)
+    if (requestID !== undefined && !pending) return
+    const freshZero =
+      pending?.fresh === true &&
+      frame.control_generation === 0 &&
+      pending.revision === controlRevision &&
+      pending.observedGeneration === controlGeneration
+    if (
+      frame.control_generation !== undefined &&
+      ((frame.control_generation < controlGeneration && !freshZero) ||
+        (expectedGeneration !== undefined && frame.control_generation < expectedGeneration && !freshZero))
+    ) {
+      if (requestID !== undefined) pendingControls.delete(requestID)
+      return
+    }
+    if (requestID !== undefined) pendingControls.delete(requestID)
+    const generation = frame.control_generation ?? controlGeneration
+    const currentFenceNegative =
+      requestID === undefined &&
+      frame.ok !== true &&
+      frame.control_generation !== undefined &&
+      frame.control_generation === controlGeneration
+    const foreignGenerationNegative =
+      frame.ok !== true &&
+      frame.control_generation !== undefined &&
+      frame.control_generation > controlGeneration
+    const granted =
+      frame.has_control ??
+      (currentFenceNegative || foreignGenerationNegative ||
+      (pending?.write === false && frame.ok === true) ? false : hasControl)
+    const result: ControlResult = {
+      request_id: requestID,
+      ok: frame.ok === true,
+      code: frame.code,
+      error: frame.error,
+      control_session_id: frame.control_session_id ?? controlSessionID,
+      control_generation: generation,
+      has_control: granted,
+    }
+    const framePosition = positionFromFrame(frame)
+    if (framePosition !== null) adoptServerPosition(framePosition)
+    const resultPosition = framePosition ?? controlPosition
+    if (resultPosition !== null) result.position = resultPosition
+    if (pending?.write === false && result.ok && !result.has_control) {
+      // A released lease no longer needs its old fence. The next acquisition
+      // starts from the server's unoccupied generation.
+      result.control_generation = 0
+      publishControl(0, false, framePosition ?? undefined)
+    } else if (frame.has_control !== undefined || frame.control_generation !== undefined) {
+      publishControl(result.control_generation, result.has_control, framePosition ?? undefined)
+    }
+    handlers.onControlResult?.(result)
+  }
   let drainGeneration = 0
   let drainAbort: AbortController | null = null
   const replayPending = () =>
@@ -380,14 +555,27 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   }
 
   const clearReplay = () => {
+    queuedOutputBytes = 0
+    queueOverflowed = false
     cancelDrain()
     drainGeneration++
     replayRemaining = 0
     replayReady = true
     replayIsFull = false
-    replayCursorTarget = null
+    replayPositionTarget = null
     replayQueue = []
     replayQueueOffset = 0
+  }
+  const enqueueReplay = (operation: ReplayOperation): boolean => {
+    if (operation.type === 'data') {
+      queuedOutputBytes += operation.chunk.length
+      if (handlers.screen?.() === true && queuedOutputBytes > queuedOutputLimit) {
+        queueOverflowed = true
+        return false
+      }
+    }
+    replayQueue.push(operation)
+    return true
   }
 
   const waitForDrain = (completion: Promise<void>, signal: AbortSignal): Promise<boolean> => {
@@ -426,7 +614,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     // Stop the socket before notifying the host. This is a terminal refusal,
     // not a dropped connection that may be retried behind the callback.
     drop()
-    handlers.onReplayStart?.(0)
+    handlers.onReplayStart?.(0, true)
     const detail = error instanceof Error ? error.message : String(error)
     handlers.onRefused(`terminal replay failed: ${detail}`)
     handlers.onState('offline')
@@ -442,21 +630,28 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     pendingReopen = null
     clearReplay()
     drop()
-    handlers.onReplayStart?.(0)
+    handlers.onReplayStart?.(0, true)
     const detail = error instanceof Error ? error.message : String(error)
     handlers.onRefused(`terminal live output failed: ${detail}`)
     handlers.onState('offline')
   }
-  const advanceParsed = (target: number, generation: number) => {
-    if (generation !== deliveryGeneration || disposed || refused) return
-    parsedCursor = Math.max(parsedCursor, target)
+  const advanceParsed = (target: TerminalPosition | null, generation: number) => {
+    if (generation !== deliveryGeneration || disposed || refused || target === null) return
+    if (parsedPosition?.epoch === target.epoch && BigInt(parsedPosition.sequence) > BigInt(target.sequence)) return
+    parsedPosition = target
   }
 
   const trackPendingLive = (
     chunk: Uint8Array,
-    target: number,
+    target: TerminalPosition | null,
     generation: number,
   ) => {
+    if (liveOverflowed) return
+    const screen = handlers.screen?.() === true
+    if (screen && (chunk.length > queuedOutputLimit || pendingLiveBytes + chunk.length > queuedOutputLimit)) {
+      overflowLive()
+      return
+    }
     const onData = handlers.onData
     if (!onData) {
       advanceParsed(target, generation)
@@ -502,8 +697,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       () => undefined,
       () => undefined,
     )
+    pendingLiveBytes += chunk.length
     pendingLiveWrites.add(tracked)
-    void tracked.then(() => pendingLiveWrites.delete(tracked))
+    void tracked.then(() => {
+      pendingLiveWrites.delete(tracked)
+      pendingLiveBytes = Math.max(0, pendingLiveBytes - chunk.length)
+      applyPendingServerPosition()
+    })
+    if (screen && pendingLiveBytes >= queuedOutputLimit) overflowLive()
   }
 
   // Feed each replay frame to xterm as soon as it arrives. The queue retains
@@ -529,10 +730,17 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       try {
         while (valid() && replayQueueOffset < replayQueue.length) {
           const operation = replayQueue[replayQueueOffset++]
+          if (operation.type === 'data') {
+            queuedOutputBytes = Math.max(0, queuedOutputBytes - operation.chunk.length)
+          }
           if (!valid()) return
           if (operation.type === 'geometry') {
             try {
-              handlers.onGeometry?.(operation.cols, operation.rows)
+              const completion = handlers.onGeometry?.(operation.cols, operation.rows)
+              if (completion && typeof completion.then === 'function') {
+                const settled = await waitForDrain(Promise.resolve(completion), signal)
+                if (!settled || !valid()) return
+              }
             } catch (error) {
               if (valid()) failReplay(error)
               return
@@ -544,7 +752,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           if (operation.kind === 'live') {
             const onData = handlers.onData
             if (!onData) {
-              advanceParsed(operation.cursor ?? receivedCursor, dataGeneration)
+              advanceParsed(operation.position ?? null, dataGeneration)
               continue
             }
             let settled!: () => void
@@ -580,7 +788,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
               // write. In the callback-only case the callback may be
               // asynchronous, so inspect callbackSettled after the await.
               if (promise || callbackSettled) {
-                advanceParsed(operation.cursor ?? receivedCursor, dataGeneration)
+                advanceParsed(operation.position ?? null, dataGeneration)
               }
             } catch (error) {
               if (valid()) failReplay(error)
@@ -607,8 +815,8 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
             }
             if (!valid()) return
           }
-          if (operation.kind === 'replay-end' && operation.cursor !== undefined) {
-            parsedCursor = operation.cursor
+          if (operation.kind === 'replay-end') {
+            if (operation.position !== undefined) parsedPosition = operation.position
             // A fresh replay is the only operation that can make a screen
             // abandoned by an earlier replay safe to resume again.
             if (replayIsFull) replayInvalid = false
@@ -620,6 +828,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         replayQueueOffset = 0
         replayDraining = false
         drainAbort = null
+        applyPendingServerPosition()
         maybeCutover()
       }
     })()
@@ -635,11 +844,12 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     // A replacement is not attached until its ack arrives. Controls sent
     // during CONNECTING must not leak onto the old or half-open transport.
     attached = false
+    liveOverflowed = false
     deliveryGeneration++
-    clearReplay()
-    // Never send a cursor without the server-issued PTY incarnation fence.
-    // An unknown fence deliberately becomes an ordinary full attach.
-    const resume = (options.resume ?? false) && resumeID !== null
+    // Never send a sequence without the server-issued epoch fence. An unknown
+    // position deliberately becomes an ordinary full attach.
+    const resumePosition = (options.resume ?? false) ? parsedPosition : null
+    const resume = resumePosition !== null
     handlers.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
@@ -650,14 +860,22 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     }
     ws.binaryType = 'arraybuffer'
     socket = ws
-    const askedWrite = handlers.wantsWrite() && !writeDenied
+    // Read again when the socket opens. A control click during CONNECTING
+    // changes the header; one after the header is queued until the ack.
+    let askedWrite = handlers.wantsWrite() && !writeDenied
     const follows = handlers.follows?.() ?? false
+    const screen = handlers.screen?.()
+    const interactive = handlers.interactive?.()
     // The server closes a refused attach with 1008 too, so the close handler
     // needs to know whether this socket already got its answer.
     let answered = false
 
     ws.onopen = () => {
       if (disposed || refused || socket !== ws) return
+      const queued = pendingControl
+      pendingControl = null
+      const queuedTakeover = queued?.takeover === true
+      askedWrite = (queued ? queued.write : handlers.wantsWrite()) && !writeDenied
       const { cols, rows } = handlers.geometry()
       // A mirror sends no "write" key at all; every attach still carries
       // its stable control-session identity alongside geometry.
@@ -666,17 +884,24 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         rows,
         control_session_id: controlSessionID,
       }
-      if ((askedWrite || options.releaseControl) && hasControl && controlGeneration > 0) {
+      const development = handlers.developmentTerminal?.()
+      if (development) header.incarnation = development.incarnation
+      if (screen !== undefined) header.screen = screen
+      if (interactive !== undefined) header.interactive = interactive
+      if ((askedWrite || options.releaseControl) && controlGeneration > 0 && (hasControl || options.takeover)) {
         header.control_generation = controlGeneration
       }
-      if (options.takeover || (askedWrite && hasControl)) header.takeover = true
+      if (development && (options.takeover || queuedTakeover)) {
+        header.control_generation = handlers.takeoverGeneration?.() ?? controlGeneration
+      }
+      if (options.takeover || queuedTakeover || (askedWrite && hasControl)) header.takeover = true
       if (options.releaseControl) header.release_control = true
       if (askedWrite) header.write = true
       if (follows) header.follow = true
-      if (resume) {
+      if (resumePosition !== null) {
         header.resume = true
-        header.resume_id = resumeID!
-        header.cursor = parsedCursor
+        header.resume_id = resumePosition.epoch
+        header.cursor = resumePosition.sequence
       }
       ws.send(JSON.stringify(header))
     }
@@ -692,12 +917,15 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
             if (replayRemaining === 0) replayReady = true
             // Tag the exact slice that consumes the declared replay before it
             // enters the queue. A straddling frame's suffix remains live.
-            replayQueue.push({
+            if (!enqueueReplay({
               type: 'data',
               chunk: chunk.subarray(0, replayLength),
               kind: reachesBoundary ? 'replay-end' : 'replay',
-              cursor: reachesBoundary ? replayCursorTarget ?? receivedCursor : undefined,
-            })
+              position: reachesBoundary ? replayPositionTarget ?? undefined : undefined,
+            })) {
+              overflowReplay()
+              return
+            }
           }
 
           // A frame can straddle the replay/live boundary. Queue its suffix
@@ -705,13 +933,16 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           // accounting.
           if (replayLength < chunk.length) {
             const live = chunk.subarray(replayLength)
-            receivedCursor += live.length
-            replayQueue.push({
+            receivedPosition = advancePosition(receivedPosition, live.length)
+            if (!enqueueReplay({
               type: 'data',
               chunk: live,
               kind: 'live',
-              cursor: receivedCursor,
-            })
+              position: receivedPosition ?? undefined,
+            })) {
+              overflowReplay()
+              return
+            }
           }
           // Parsing starts with this frame, even when more replay bytes are
           // still expected.
@@ -719,10 +950,13 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           return
         }
 
-        receivedCursor += chunk.length
-        const target = receivedCursor
+        receivedPosition = advancePosition(receivedPosition, chunk.length)
+        const target = receivedPosition
         if (replayPending()) {
-          replayQueue.push({ type: 'data', chunk, kind: 'live', cursor: target })
+          if (!enqueueReplay({ type: 'data', chunk, kind: 'live', position: target ?? undefined })) {
+            overflowReplay()
+            return
+          }
           drainReplay()
         } else {
           trackPendingLive(chunk, target, deliveryGeneration)
@@ -736,9 +970,15 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       } catch {
         return
       }
+      const framePosition = positionFromFrame(ack)
+      if (ack.type === 'control') {
+        receiveControl(ack)
+        return
+      }
       // Someone who does impose a size resized the session; a follower
       // redraws at it. Before the ack there is nothing to redraw.
       if (attached && ack.type === 'geometry') {
+        if (framePosition !== null) adoptServerPosition(framePosition)
         if (ack.cols && ack.rows) {
           const geometry: ReplayOperation = {
             type: 'geometry',
@@ -746,7 +986,10 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
             rows: ack.rows,
           }
           if (replayPending()) {
-            replayQueue.push(geometry)
+            if (!enqueueReplay(geometry)) {
+              overflowReplay()
+              return
+            }
             drainReplay()
           } else {
             handlers.onGeometry?.(ack.cols, ack.rows)
@@ -756,6 +999,21 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
 
       if (ack.ok) {
+        const development = handlers.developmentTerminal?.()
+        if (development && (
+          ack.terminal_id !== development.terminal_id ||
+          ack.incarnation !== development.incarnation ||
+          ack.server_owned_responder !== true
+        )) {
+          answered = true
+          refused = true
+          attached = false
+          clearReplay()
+          handlers.onRefused('Development terminal identity or protocol ownership changed')
+          handlers.onState('offline')
+          drop()
+          return
+        }
         const replayBytes = ack.replay === undefined ? 0 : ack.replay
         if (
           typeof replayBytes !== 'number' ||
@@ -767,52 +1025,51 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
           refused = true
           attached = false
           clearReplay()
-          handlers.onReplayStart?.(0)
+          handlers.onReplayStart?.(0, true)
           handlers.onRefused(`invalid replay length: ${String(ack.replay)}`)
           handlers.onState('offline')
           drop()
           return
         }
-        // Keep only a nonempty server-issued incarnation ID. A legacy or
-        // malformed ack leaves the last known fence untouched; when no fence
-        // is known, a later resume request is downgraded to a full attach.
-        if (typeof ack.resume_id === 'string' && ack.resume_id.length > 0) {
-          resumeID = ack.resume_id
-        }
+        const highWater = positionFromFrame(ack)
         replayRemaining = replayBytes
         replayReady = replayBytes === 0
         replayIsFull = !resume || ack.resumed !== true
         replayQueueOffset = 0
         replayQueue = []
-        receivedCursor = ack.cursor ?? 0
-        replayCursorTarget = replayBytes > 0 ? receivedCursor : null
-        if (replayBytes === 0) parsedCursor = receivedCursor
-        hasControl = ack.has_control === true
-        if (ack.control_generation !== undefined) {
-          controlGeneration = ack.control_generation
-        }
-        handlers.onControl?.({
-          control_session_id: controlSessionID,
-          control_generation: controlGeneration,
-          has_control: hasControl,
-        })
+        // Replace the whole position even when this old peer supplied no
+        // epoch; retaining either component from a prior ack would be unsafe.
+        receivedPosition = highWater
+        parsedPosition = null
+        pendingServerPosition = null
+        const ackGeneration = ack.control_generation ?? (ack.has_control === false ? 0 : controlGeneration)
+        publishControl(ackGeneration, ack.has_control === true, highWater)
+        replayPositionTarget = replayBytes > 0 ? highWater : null
+        if (replayBytes === 0) parsedPosition = highWater
         attached = true
+        reclaimUntil = 0
         attempt = 0
         unavailableTries = 0
         waitingForSession = false
         handlers.onState('live')
-        handlers.onAttached(
-          askedWrite,
-          {
-            cols: ack.cols ?? standardGeometry.cols,
-            rows: ack.rows ?? standardGeometry.rows,
-          },
-          resume && ack.resumed === true,
-        )
+        const size = { cols: ack.cols ?? standardGeometry.cols, rows: ack.rows ?? standardGeometry.rows }
+        const resumed = resume && ack.resumed === true
+        if (development) {
+          handlers.onAttached(hasControl, size, resumed, {
+            terminal_id: development.terminal_id,
+            incarnation: development.incarnation,
+            server_owned_responder: true,
+          })
+        } else {
+          handlers.onAttached(interactive === true ? hasControl : askedWrite, size, resumed)
+        }
         if (disposed || refused || socket !== ws) return
+        // A control change that arrived while this socket was still connecting
+        // has to correct the lease the header just established.
+        flushPendingControl()
         // Keep this immediately after the callback: WebSocket events are
         // serialized, so replayGate is muted before the first binary frame.
-        handlers.onReplayStart?.(replayBytes)
+        handlers.onReplayStart?.(replayBytes, replayIsFull)
         if (disposed || refused || socket !== ws) return
         if (replayReady) {
           if (replayIsFull) replayInvalid = false
@@ -823,14 +1080,11 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       answered = true
       // A refused write is not a dead attach: drop the request and mirror.
       if (ack.code === codeDenied && askedWrite) {
+        pendingControl = null
         writeDenied = true
-        hasControl = false
-        handlers.onControl?.({
-          control_session_id: controlSessionID,
-          control_generation: controlGeneration,
-          has_control: false,
-        })
-        handlers.onWriteDenied()
+        publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
+        if (handlers.developmentTerminal) handlers.onWriteDenied(ack.error)
+        else handlers.onWriteDenied()
         attempt = 0
         return
       }
@@ -840,12 +1094,22 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // write preference and reconnect as a mirror so it can still observe
       // the terminal.
       if (ack.code === codeConflict && askedWrite) {
-        hasControl = false
-        handlers.onControl?.({
-          control_session_id: controlSessionID,
-          control_generation: controlGeneration,
-          has_control: false,
-        })
+        pendingControl = null
+        if (handlers.developmentTerminal) {
+          handlers.onControlResult?.({
+            ok: false, error: ack.error, code: ack.code,
+            control_session_id: controlSessionID,
+            control_generation: ack.control_generation ?? controlGeneration,
+            has_control: false,
+          })
+        }
+        publishControl(ack.control_generation ?? controlGeneration, false, framePosition ?? undefined)
+        if (!handlers.developmentTerminal && Date.now() < reclaimUntil) {
+          // Retry unfenced on a growing backoff, starting one step up so
+          // the old transport's disconnect has time to land.
+          attempt = Math.max(attempt, 1)
+          return
+        }
         handlers.onControlLost?.()
         attempt = 0
         return
@@ -865,7 +1129,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       refused = true
       waitingForSession = false
       clearReplay()
-      handlers.onReplayStart?.(0)
+      handlers.onReplayStart?.(0, true)
       handlers.onRefused(ack.error ?? 'attach refused', ack.code)
       handlers.onState('offline')
     }
@@ -878,7 +1142,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       const replayAborted = !replayReady
       if (replayAborted) {
         replayInvalid = true
-        handlers.onReplayAbort?.()
+        handlers.onReplayAbort?.(replayIsFull)
         clearReplay()
       }
       const replayBusy = replayPending()
@@ -890,12 +1154,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       const steerWithdrawn =
         ev.code === policyClose && !answered && wasAttached && ev.reason === 'steer permission withdrawn'
       if (controlTakenOver || steerWithdrawn) {
-        hasControl = false
-        handlers.onControl?.({
-          control_session_id: controlSessionID,
-          control_generation: controlGeneration,
-          has_control: false,
-        })
+        publishControl(controlGeneration, false)
         if (controlTakenOver) {
           // This loss is ephemeral: clear the caller's write preference but
           // leave the permanent permission-denied latch untouched.
@@ -943,14 +1202,14 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       }
       if (wasAttached && ev.reason === 'session ended') {
         ended = true
-        if (replayAborted) handlers.onReplayStart?.(0)
+        if (replayAborted) handlers.onReplayStart?.(0, true)
         handlers.onState('offline')
         return
       }
       if (ev.code === policyClose && !answered) {
         refused = true
         clearReplay()
-        handlers.onReplayStart?.(0)
+        handlers.onReplayStart?.(0, true)
         handlers.onRefused(ev.reason || 'the gateway refused the attach')
         handlers.onState('offline')
         return
@@ -1012,12 +1271,22 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     drop()
     open(request)
   }
+  const overflowReplay = () => {
+    if (!queueOverflowed || disposed || suspended || ended || refused) return
+    replayInvalid = true
+    handlers.onReplayAbort?.(replayIsFull)
+    clearReplay()
+    retryAfterReplay = false
+    drop()
+    open()
+  }
 
   const reopenAfterLiveWrites = (options: {
     resume?: boolean
     takeover?: boolean
     releaseControl?: boolean
   }) => {
+    if (disposed || suspended || ended || refused) return
     const resumeAttached = attached
     // Freeze the old transport before waiting. Its handlers are detached by
     // drop(), so bytes arriving from it cannot race the parsed cursor.
@@ -1056,6 +1325,16 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
     })
   }
 
+  const overflowLive = () => {
+    if (liveOverflowed || disposed || suspended || ended || refused) return
+    liveOverflowed = true
+    // The current screen has a parsed prefix but is missing the frames that
+    // arrived after the cap. Keep it invalid until a deliberate full replay.
+    replayInvalid = true
+    handlers.onReplayAbort?.(true)
+    reopenAfterLiveWrites({ resume: false })
+  }
+
   const maybeCutover = () => {
     if (suspended || resumePending || replayPending()) return
     if (pendingReopen) {
@@ -1074,6 +1353,49 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
   const control = (frame: object) => {
     if (!attached || !socket) return
     socket.send(JSON.stringify(frame))
+  }
+  const sendControlFrame = (frame: Record<string, unknown>) => {
+    if (handlers.interactive?.() === true) frame.control_generation = controlGeneration
+    control(frame)
+  }
+  const dispatchControl = (write: boolean, takeover = false) => {
+    if (!attached || !socket) return
+    const requestID = ++controlRequestID
+    // An ordinary mirror acquisition must not fence itself to the owner it
+    // observed: that lease may have been released before this request
+    // arrives. An explicit, user-confirmed takeover keeps that generation as
+    // its precondition so a raced replacement is not silently displaced.
+    const fresh = write && !hasControl && !takeover
+    const generation = fresh ? 0 : controlGeneration
+    pendingControls.set(requestID, {
+      generation,
+      observedGeneration: controlGeneration,
+      revision: controlRevision,
+      write,
+      fresh,
+    })
+    const frame: Record<string, unknown> = {
+      type: 'control',
+      request_id: requestID,
+      write,
+    }
+    if (takeover) frame.takeover = true
+    if (generation > 0) frame.control_generation = generation
+    socket.send(JSON.stringify(frame))
+  }
+  const setControl = (write: boolean, takeover = false) => {
+    if (!attached || !socket) {
+      pendingControl = { write, takeover }
+      return
+    }
+    pendingControl = null
+    dispatchControl(write, takeover)
+  }
+  const flushPendingControl = () => {
+    if (!pendingControl) return
+    const request = pendingControl
+    pendingControl = null
+    dispatchControl(request.write, request.takeover)
   }
 
   // A phone that was in a pocket comes back to a dead socket and a frozen
@@ -1097,7 +1419,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // socket. Cancel its drain, keep the current host hidden, and let the
       // new ack announce one fresh full replay.
       replayInvalid = true
-      handlers.onReplayAbort?.()
+      handlers.onReplayAbort?.(replayIsFull)
       clearReplay()
       drop()
       retryAfterReplay = false
@@ -1125,7 +1447,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       // while canceling any old drain, then begin one fresh full replay.
       handlers = next
       replayInvalid = true
-      handlers.onReplayAbort?.()
+      handlers.onReplayAbort?.(replayIsFull)
       clearReplay()
       pendingReopen = null
       retryAfterReplay = false
@@ -1148,16 +1470,21 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
         // Never split a surrogate pair across frames.
         const last = data.charCodeAt(end - 1)
         if (end < data.length && last >= 0xd800 && last < 0xdc00) end--
-        control({ type: 'input', data: data.slice(at, end) })
+        sendControlFrame({ type: 'input', data: data.slice(at, end) })
         at = end
       }
     },
-    resize: (cols, rows) => control({ type: 'resize', cols, rows }),
-    controlMetadata: () => ({
-      control_session_id: controlSessionID,
-      control_generation: controlGeneration,
-      has_control: hasControl,
-    }),
+    resize: (cols, rows) => sendControlFrame({ type: 'resize', cols, rows }),
+    setControl,
+    controlMetadata: () => {
+      const metadata: ControlMetadata = {
+        control_session_id: controlSessionID,
+        control_generation: controlGeneration,
+        has_control: hasControl,
+      }
+      if (controlPosition !== null) metadata.position = controlPosition
+      return metadata
+    },
     resetWriteDenial: () => {
       writeDenied = false
     },
@@ -1192,7 +1519,7 @@ export function connectAttach(socketURL: () => string, h: AttachHandlers): Attac
       stopWake = () => {}
       if (incompleteReplay) {
         replayInvalid = true
-        handlers.onReplayAbort?.()
+        handlers.onReplayAbort?.(replayIsFull)
         clearReplay()
       }
       attached = false

@@ -31,7 +31,17 @@ export function emptyDetachedStyleSheets(): void {
   }
 }
 
-afterEach(emptyDetachedStyleSheets)
+// Captured before any test installs fake timers. Radix focus scope returns
+// focus with a real zero-delay timer; that has to run while this document
+// still owns Event. If it fires after the file environment is gone,
+// dispatchEvent rejects the unmount event and the suite fails with every
+// assertion already passed.
+const realSetTimeout = globalThis.setTimeout
+
+afterEach(async () => {
+  emptyDetachedStyleSheets()
+  await new Promise((resolve) => realSetTimeout(resolve, 0))
+})
 
 // Radix measures, scrolls and captures the pointer over whatever it pops out -
 // an open select, a dialog, a menu - and xterm's fit addon measures its host.

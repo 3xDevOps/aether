@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/palette/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { agentInfo, alice, run, workspace } from '@/test/fixtures'
+import { agentInfo, alice, run, serverInfo, workspace } from '@/test/fixtures'
 import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
@@ -77,9 +77,9 @@ describe('launch dialog', () => {
       expect(screen.getByLabelText('Agent').textContent).toBe('claude'),
     )
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
-    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
       workspace_id: workspace.id, harness: 'claude',
-    }))
+    })))
   })
   it('offers setup, and the pinned custom harness, when nothing is installed', async () => {
     vi.mocked(api.agentList).mockResolvedValue([agentInfo({ installed: false })])
@@ -142,11 +142,11 @@ describe('launch dialog', () => {
 
     // The default mode is the server's own, so it stays off the wire.
     await waitFor(() =>
-      expect(api.runLaunch).toHaveBeenCalledWith({
+      expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
         workspace_id: workspace.id,
         harness: 'claude',
         task: 'rewrite the checkout flow',
-      }),
+      })),
     )
     expect(useStore.getState().lastHarnessByAccount[alice.id]).toBe('claude')
   })
@@ -208,14 +208,194 @@ describe('launch dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
-      expect(api.runLaunch).toHaveBeenCalledWith({
+      expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({
         workspace_id: workspace.id,
         harness: 'claude',
         task: 'triage the flaky tests',
         mode: 'headless',
-      }),
+      })),
     )
     // A launch drops the member straight into the run's terminal.
     await waitFor(() => expect(useStore.getState().route.name).toBe('terminal'))
+  })
+
+  describe('swarm', () => {
+    beforeEach(() => {
+      useStore.setState({
+        info: serverInfo,
+        capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+        route: { name: 'missions', params: {} },
+      })
+    })
+
+    /** The worker grid fills in after every account's harness list lands. */
+    async function openSwarm() {
+      const view = render(<LaunchDialog />)
+      await waitFor(() =>
+        expect(screen.getByLabelText('Integrator harness').textContent).toBe('claude'),
+      )
+      const worker = await screen.findByRole('checkbox', { name: /Alice · claude/ })
+      await waitFor(() => expect((worker as HTMLInputElement).checked).toBe(true))
+      return view
+    }
+
+    function setObjective(objective: string) {
+      fireEvent.change(screen.getByLabelText(/^Objective/), { target: { value: objective } })
+    }
+
+    it('authorizes the integrator choice alongside the default worker choice', async () => {
+      await openSwarm()
+      const locked = screen.getByRole('checkbox', { name: 'Integrator execution choice' }) as HTMLInputElement
+      expect(locked.checked).toBe(true)
+      expect(locked.disabled).toBe(true)
+      expect(screen.getByText('Integrator · Alice · claude · tui')).toBeDefined()
+
+      setObjective('coordinate checkout work')
+      fireEvent.click(screen.getByRole('button', { name: 'Create swarm' }))
+
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+      const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+      expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'tui' })
+      expect(params.execution_choices).toEqual([
+        { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+      ])
+    })
+
+    it('keeps the integrator interactive and offers no integrator mode', async () => {
+      await openSwarm()
+      expect(screen.queryByLabelText('Integrator mode')).toBeNull()
+      expect(screen.queryByLabelText('Mode')).toBeNull()
+      // The worker row keeps its own mode.
+      const worker = screen.getByRole('checkbox', { name: /Alice · claude/ }).closest('label') as HTMLElement
+      expect(within(worker).getByRole('combobox').textContent).toBe('headless')
+
+      await pickOption(screen.getByLabelText('Launch type'), 'Single agent')
+      expect(screen.getByLabelText('Mode')).toBeDefined()
+    })
+
+    it('sends a worker choice equal to the integrator choice once', async () => {
+      await openSwarm()
+      const worker = screen.getByRole('checkbox', { name: /Alice · claude/ }).closest('label') as HTMLElement
+      await pickOption(within(worker).getByRole('combobox'), 'tui')
+      setObjective('coordinate checkout work')
+      fireEvent.click(screen.getByRole('button', { name: 'Create swarm' }))
+
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+      const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+      expect(params.integrator.mode).toBe('tui')
+      expect(params.execution_choices).toEqual([
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+      ])
+    })
+
+    it('sends the same choices in the same order, under the same key, after a re-tick', async () => {
+      vi.mocked(api.agentList).mockResolvedValue([agentInfo(), agentInfo({ name: 'codex' })])
+      vi.mocked(api.missionCreate).mockRejectedValueOnce(new Error('integrator launch failed'))
+      await openSwarm()
+      setObjective('coordinate the re-ticked work')
+      fireEvent.click(screen.getByRole('checkbox', { name: /Alice · codex/ }))
+      const create = screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement
+      fireEvent.click(create)
+      await screen.findByRole('alert')
+      await waitFor(() => expect(create.disabled).toBe(false))
+
+      // Unticking and re-ticking appends the worker at a new position.
+      const claude = screen.getByRole('checkbox', { name: /Alice · claude/ })
+      fireEvent.click(claude)
+      fireEvent.click(claude)
+      fireEvent.click(create)
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(2))
+
+      const [first, second] = vi.mocked(api.missionCreate).mock.calls.map(([params]) => params)
+      expect(second.idempotency_key).toBe(first.idempotency_key)
+      expect(second.execution_choices).toEqual(first.execution_choices)
+      expect(first.execution_choices).toEqual([
+        { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+        { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+        { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
+      ])
+    })
+
+    it('opens on Single agent when swarm launch is unavailable', async () => {
+      useStore.setState({ capabilities: null })
+      await open()
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeDefined()
+      expect(screen.queryByLabelText('Launch type')).toBeNull()
+    })
+
+    it('stays on Swarm and says why when the capabilities drop while open', async () => {
+      await openSwarm()
+      setObjective('coordinate checkout work')
+      act(() => useStore.setState({ capabilities: null }))
+
+      expect(screen.getByRole('status').textContent).toBe(
+        'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.',
+      )
+      const create = screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement
+      expect(create.disabled).toBe(true)
+      fireEvent.click(create)
+      expect(api.missionCreate).not.toHaveBeenCalled()
+
+      await pickOption(screen.getByLabelText('Launch type'), 'Single agent')
+      expect(screen.queryByRole('status')).toBeNull()
+      expect((screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('names missing capabilities before the role', async () => {
+      await openSwarm()
+      act(() => useStore.setState({
+        capabilities: null,
+        info: { ...serverInfo, member: { ...alice, role: 'viewer' } },
+      }))
+      expect(screen.getByRole('status').textContent).toBe(
+        'Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.',
+      )
+    })
+
+    it('says a role that cannot launch is why swarm launch is unavailable', async () => {
+      await openSwarm()
+      act(() => useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } } }))
+      expect(screen.getByRole('status').textContent).toBe('Swarm launch is unavailable: your role cannot launch.')
+      expect((screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('keeps one key per swarm contents until a create succeeds', async () => {
+      const failure = new Error('mission mission_1 exists but its integrator run run_1 did not launch')
+      vi.mocked(api.missionCreate)
+        .mockRejectedValueOnce(failure)
+        .mockRejectedValueOnce(failure)
+        .mockRejectedValueOnce(failure)
+        .mockRejectedValueOnce(failure)
+      const key = (call: number) => vi.mocked(api.missionCreate).mock.calls[call][0].idempotency_key
+      const submit = async (objective: string, calls: number) => {
+        setObjective(objective)
+        const create = screen.getByRole('button', { name: 'Create swarm' }) as HTMLButtonElement
+        await waitFor(() => expect(create.disabled).toBe(false))
+        fireEvent.click(create)
+        await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(calls))
+      }
+
+      const first = await openSwarm()
+      await submit('coordinate checkout work', 1)
+      expect((await screen.findByRole('alert')).textContent).toBe(failure.message)
+      // Closing the dialog unmounts it; the same contents still replay.
+      first.unmount()
+      await openSwarm()
+      await submit('coordinate checkout work', 2)
+      expect(key(1)).toBe(key(0))
+      await submit('coordinate the payment work', 3)
+      expect(key(2)).not.toBe(key(0))
+      await submit('coordinate checkout work', 4)
+      expect(key(3)).toBe(key(0))
+      // The fifth call succeeds and closes the dialog.
+      await submit('coordinate checkout work', 5)
+      expect(key(4)).toBe(key(0))
+
+      cleanup()
+      await openSwarm()
+      await submit('coordinate checkout work', 6)
+      expect(key(5)).not.toBe(key(0))
+    })
   })
 })

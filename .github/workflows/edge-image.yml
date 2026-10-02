@@ -1,0 +1,55 @@
+name: Edge image
+
+# Builds images/edge/Dockerfile on both architectures it ships for and runs
+# scripts/edge-image-smoke.sh on each, natively. ci.yml calls it when
+# scripts/ci-classify-edge.sh says a pull request can change the image;
+# `gh workflow run edge-image.yml --ref <branch>` forces it for any branch.
+# It pushes nothing and holds no credential beyond a read-only token.
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, commit or refs/pull/<n>/head to build; empty builds the ref this run was started from
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    name: build-and-smoke (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      # The Makefile's COMMIT, so the binary reports the form a release
+      # binary does.
+      - name: Read the short commit
+        id: commit
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the edge image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/edge/Dockerfile
+          load: true
+          tags: aether-edge:ci
+          build-args: |
+            VERSION=dev
+            COMMIT=${{ steps.commit.outputs.short }}
+      - name: Smoke-test the edge image
+        run: sh scripts/edge-image-smoke.sh aether-edge:ci

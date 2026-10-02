@@ -80,7 +80,7 @@ func (g *Gateway) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if s.WriteJSON(ack) != nil {
 		return
 	}
-	if err := s.pumpTerminal(term, true, true); err != nil {
+	if err := s.pumpTerminal(term, true, true, false); err != nil {
 		_ = s.Conn.Close(attachEndClose(err))
 		return
 	}

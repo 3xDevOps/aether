@@ -28,7 +28,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
   await page.addInitScript(() => {
     const seen: string[] = []
     ;(window as Window & { seenStates?: string[] }).seenStates = seen
-    const labels = ['Connecting', 'Reconnecting', 'Attached', 'Offline']
+    const labels = ['Connecting', 'Reconnecting', 'Offline']
     setInterval(() => {
       for (const span of document.querySelectorAll('span')) {
         const text = (span.textContent ?? '').trim()

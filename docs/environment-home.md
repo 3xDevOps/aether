@@ -13,7 +13,7 @@ The home is the member's durable environment:
 
 - Executables installed in `~/.local/bin`
 - Vendor login state and other files written by the agent
-- Configuration imported once from the browser or edited in **Files**
+- Configuration imported explicitly from the browser or edited in **Files**
 - The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
 - The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
 - `~/.gitconfig`, which carries the git identity, gh's credential helper, and
@@ -240,24 +240,24 @@ rm ~/.local/bin/gh
 
 ## Importing and editing configuration
 
-In the local dashboard (`aether gui`), choose one local directory with the
-browser's directory picker and explicitly import it once. The server-hosted
-dashboard cannot read a directory on your laptop; use `aether gui` for this
-step. The picker compares the selected directory basename with the roots in
-`config.roots`: a known unique basename is selected automatically, while an
-unknown or ambiguous basename requires an explicit destination. The browser
-waits for that metadata and destination before previewing or reading bytes.
-Changing the destination clears the old preview and re-reads the retained
-local file handles with that destination's policy; stale reads are discarded.
-There is no directory watcher and no AI-generated inventory.
+Open **Agents → Configuration** in either dashboard and choose a local directory
+with the browser picker. Import is explicit and repeatable. The picker compares
+the selected basename with `config.roots`: a known unique basename is selected
+automatically; an unknown or ambiguous basename requires an explicit destination.
+The browser waits for that metadata before previewing paths, and reads file
+bytes only when importing. Changing the destination recomputes the preview
+from retained handles. There is no directory watcher or AI-generated inventory.
 
 Known credential names in any path component and `*.pem` files are always
 skipped locally. Runtime/history paths come from the selected root's
 `runtime_ignores` metadata and are skipped with exact, case-sensitive
 root-relative component-prefix matching. Remaining bytes are uploaded and
 scanned by the server, so secret content is not guaranteed to stay on the
-browser machine. Empty files and arbitrary binary assets are preserved. The
-limits are **1 MiB per file**, **20 MiB decoded total**, and **2,000 files**.
+browser machine. Empty files and arbitrary binary assets are preserved.
+Directories have no file-count or aggregate-size ceiling; the browser transfers
+bounded batches and reports cumulative progress. Individual files support up to
+64 MiB. Failures stop further requests and report already committed work; a
+lost response leaves that request's outcome unknown rather than claiming success.
 New browser-imported files use mode `0644`; existing files retain their current
 modes, including restrictive server-side umask modes. Executable mode and
 symlinks cannot be represented by the browser. Server-side validation rejects

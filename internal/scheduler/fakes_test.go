@@ -761,11 +761,10 @@ func (g *fakeGit) publishedCount(run domain.RunID) int {
 // ownership of the attachment and pumps its Stdout, recording the time of
 // the last byte read.
 type fakePTY struct {
-	mu              sync.Mutex
-	sessions        map[ptyhost.SessionKey]*fakePTYSession
-	nextGeneration  uint64
-	injects         []fakeInject
-	stoppedPrefixes []string
+	mu             sync.Mutex
+	sessions       map[ptyhost.SessionKey]*fakePTYSession
+	nextGeneration uint64
+	injects        []fakeInject
 }
 
 type fakePTYSession struct {
@@ -862,7 +861,6 @@ func (p *fakePTY) ActiveSessions(prefix string) []ptyhost.SessionKey {
 
 func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
 	p.mu.Lock()
-	p.stoppedPrefixes = append(p.stoppedPrefixes, prefix)
 	sessions := make([]*fakePTYSession, 0)
 	for key, sess := range p.sessions {
 		if strings.HasPrefix(string(key), prefix) {
@@ -873,12 +871,6 @@ func (p *fakePTY) StopSessionsWithPrefix(_ context.Context, prefix string) {
 	for _, sess := range sessions {
 		_ = sess.att.Close()
 	}
-}
-
-func (p *fakePTY) stoppedPrefixesSnapshot() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.stoppedPrefixes)
 }
 
 func (p *fakePTY) LastOutput(key ptyhost.SessionKey) (time.Time, bool) {

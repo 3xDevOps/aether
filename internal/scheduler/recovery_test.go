@@ -121,6 +121,77 @@ func TestRebootRecoveryResumesSupervision(t *testing.T) {
 	}
 }
 
+type pendingRecoveryPTY struct {
+	*fakePTY
+	mu                sync.Mutex
+	pending           int
+	attempts          int
+	attachment        runtime.Attachment
+	changedAttachment bool
+}
+
+func (p *pendingRecoveryPTY) StartSession(ctx context.Context, key ptyhost.SessionKey, att runtime.Attachment) error {
+	p.mu.Lock()
+	p.attempts++
+	if p.attachment == nil {
+		p.attachment = att
+	} else if p.attachment != att {
+		p.changedAttachment = true
+	}
+	pending := p.attempts <= p.pending
+	p.mu.Unlock()
+	if pending {
+		return ptyhost.ErrSnapshotPending
+	}
+	return p.fakePTY.StartSession(ctx, key, att)
+}
+
+func (p *pendingRecoveryPTY) stats() (attempts int, reusedAttachment bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.attempts, !p.changedAttachment
+}
+
+func TestRecoveryRetriesPendingSnapshotWithSameAttachment(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "pending recovery snapshot")
+	beforeAttach := e.rt.attachCount()
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	pty := &pendingRecoveryPTY{fakePTY: newFakePTY(), pending: 2}
+	s2 := e.newScheduler(t, e.rt, pty.fakePTY)
+	s2.cfg.PTY = pty
+	startScheduler(t, s2)
+	waitFor(t, "PTY session after snapshot repair", func() bool {
+		return pty.session(run.ID) != nil
+	})
+
+	attempts, reusedAttachment := pty.stats()
+	if attempts != 3 {
+		t.Fatalf("PTY start attempts = %d, want 3", attempts)
+	}
+	if !reusedAttachment || e.rt.attachCount() != beforeAttach+1 {
+		t.Fatalf("recovery attachment changed across retries; reused = %v, attach count = %d -> %d", reusedAttachment, beforeAttach, e.rt.attachCount())
+	}
+	s2.mu.Lock()
+	owner := s2.runs[run.ID]
+	supervised := owner != nil && owner.waitStarted && !owner.destroyPending
+	s2.mu.Unlock()
+	if !supervised {
+		t.Fatalf("recovered owner = %+v, want active supervision", owner)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if row.Status != domain.RunRunning {
+		t.Fatalf("recovered run status = %s, want running", row.Status)
+	}
+}
+
 // TestRecoveryOfLegacySidecarKeepsWorkspaceScope pins the upgrade path:
 // a sidecar written before runs hung off workspaces carries session_id and
 // no workspace_id. It must still decode, and the resumed supervision must

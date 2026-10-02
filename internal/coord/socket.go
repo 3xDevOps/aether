@@ -17,23 +17,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 const (
-	// SocketName is the v3 coordination socket inside a run's directory.
-	// Every wire version has its own name so a stale bridge cannot parse a
-	// newer status or message shape.
-	SocketName = "coord3.sock"
 	// v1 and v2 sockets are retired at the v3 cutover. Recovery unlinks
 	// them instead of serving a shape their bridges cannot parse.
 	legacySocketName   = "coord.sock"
 	previousSocketName = "coord2.sock"
-	// ConfigName is the optional harness config a launch profile points
-	// the agent at. Its content belongs to the harness registry; this
-	// package owns only where it lives and that it is read-only.
-	ConfigName = "mcp.json"
 	// CoAuthorsName holds the Co-authored-by trailers the agent appends to
 	// its commits, one per member other than the owner who has steered the
 	// run. It is rewritten whenever that set grows, so an agent reads it
@@ -42,7 +35,7 @@ const (
 )
 
 // wireSocketNames is the current coordination wire only.
-var wireSocketNames = []string{SocketName}
+var wireSocketNames = []string{coordtransport.SocketName}
 
 // retiredSocketNames are wire versions this server no longer speaks.
 var retiredSocketNames = []string{legacySocketName, previousSocketName}
@@ -66,8 +59,8 @@ const (
 )
 
 // maxRequestBytes bounds one coordination request line. The largest legal
-// request is a 4 KiB body plus JSON escaping; the control channel's 32 MiB
-// budget belongs to profile pushes and has no business here.
+// request is a 4 KiB body plus JSON escaping; the control channel's 96 MiB
+// budget belongs to configuration imports and has no business here.
 const maxRequestBytes = 64 << 10
 
 // The agent behind the socket is only semi-trusted, so its connections are
@@ -91,9 +84,6 @@ const (
 // needs.
 func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[string][]byte) (string, error) {
 	_ = ctx
-	if s.cfg.Disabled {
-		return "", ErrDisabled
-	}
 	dir, err := s.runDir(run)
 	if err != nil {
 		return "", err
@@ -131,7 +121,7 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 			return "", fmt.Errorf("coord: set mode on %s: %w", path, err)
 		}
 	}
-	if err := s.listen(run, SocketName); err != nil {
+	if err := s.listen(run, coordtransport.SocketName); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -148,9 +138,6 @@ func (s *Service) Provision(ctx context.Context, run domain.RunID, files map[str
 // is a rename over the old name: a reader either gets the whole previous
 // list or the whole new one, never a missing path.
 func (s *Service) WriteCoAuthors(run domain.RunID, trailers []string) error {
-	if s.cfg.Disabled {
-		return ErrDisabled
-	}
 	dir, err := s.runDir(run)
 	if err != nil {
 		return err
@@ -211,7 +198,6 @@ func (s *Service) Release(run domain.RunID) error {
 		close(waiter.ch)
 		delete(s.inboxWaiters, run)
 	}
-	delete(s.noticed, run)
 	s.mu.Unlock()
 	s.radar.forget(run)
 	// Existing handlers keep using their scoped buckets and report lock until
@@ -222,6 +208,8 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.buckets, run)
 	delete(s.inboxBuckets, run)
 	delete(s.requestBuckets, run)
+	delete(s.hookBuckets, run)
+	delete(s.lifecycleBuckets, run)
 	delete(s.reportLocks, run)
 	delete(s.runs, run)
 	s.mu.Unlock()
@@ -234,17 +222,9 @@ func (s *Service) Release(run domain.RunID) error {
 	return nil
 }
 
-// recoverListeners rebuilds the host side after a restart. A run's
-// directory is the record that it was provisioned, and the socket names in
-// it are the wire versions its container references: while coordination is
-// enabled, every one of them is rebound for a run that is still active or
-// whose terminal container is still retained, and the directory of every
-// other run is garbage collected. The rebind creates a new inode, so a
-// bridge holding the old one redials.
-//
-// With the kill switch off, old sockets are unlinked and nothing is
-// recreated: the directory and config still mounted in a live container
-// become inert.
+// recoverListeners rebuilds the authenticated run transport after a restart,
+// independently of conflict policy. Active runs and retained terminal containers
+// keep their sockets; every other run's directory is garbage collected.
 func (s *Service) recoverListeners(ctx context.Context) error {
 	entries, err := os.ReadDir(s.cfg.Dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -255,26 +235,21 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 	}
 	active := make(map[domain.RunID]bool)
 	retained := make(map[domain.RunID]bool)
-	if !s.cfg.Disabled {
-		runs, lerr := s.cfg.Store.ListActiveRuns(ctx)
-		if lerr != nil {
-			return fmt.Errorf("coord: list active runs: %w", lerr)
-		}
-		for _, r := range runs {
-			active[r.ID] = true
-		}
-		if s.cfg.RetainsContainer != nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				run := domain.RunID(e.Name())
-				if active[run] {
-					continue
-				}
-				if s.cfg.RetainsContainer(ctx, run) {
-					retained[run] = true
-				}
+	runs, lerr := s.cfg.Store.ListActiveRuns(ctx)
+	if lerr != nil {
+		return fmt.Errorf("coord: list active runs: %w", lerr)
+	}
+	for _, r := range runs {
+		active[r.ID] = true
+	}
+	if s.cfg.RetainsContainer != nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			run := domain.RunID(e.Name())
+			if !active[run] && s.cfg.RetainsContainer(ctx, run) {
+				retained[run] = true
 			}
 		}
 	}
@@ -285,12 +260,6 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 		run := domain.RunID(e.Name())
 		dir := filepath.Join(s.cfg.Dir, e.Name())
 		switch {
-		case s.cfg.Disabled:
-			for _, name := range slices.Concat(wireSocketNames, retiredSocketNames) {
-				if err := removeFile(filepath.Join(dir, name)); err != nil {
-					return fmt.Errorf("coord: unlink %s: %w", filepath.Join(dir, name), err)
-				}
-			}
 		case active[run] || retained[run]:
 			// A retired version's socket goes first: leaving it bound
 			// would answer an old bridge in a shape it cannot read.
@@ -316,9 +285,8 @@ func (s *Service) recoverListeners(ctx context.Context) error {
 	return nil
 }
 
-// survivingSockets lists the wire-version sockets present in a run's
-// directory. A provisioned run whose sockets were unlinked - by a kill
-// switch cycle - is brought back on the current version.
+// survivingSockets lists the wire-version sockets present in a run's directory.
+// A provisioned directory without a socket recovers on the current version.
 func survivingSockets(dir string) []string {
 	var names []string
 	for _, name := range wireSocketNames {
@@ -327,7 +295,7 @@ func survivingSockets(dir string) []string {
 		}
 	}
 	if len(names) == 0 {
-		names = append(names, SocketName)
+		names = append(names, coordtransport.SocketName)
 	}
 	return names
 }
@@ -460,27 +428,28 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 		if s.isRunClosing(run) {
 			return
 		}
-		// Charge at the authenticated socket boundary, before parsing the
-		// envelope, method, or params. A malformed request still consumes
-		// transport budget and cannot be used to bypass the limiter.
-		if !s.transportAllowed(run) {
-			resp, ok := rateLimitedResponse(line)
+		// Only valid envelopes for the exact background methods get their
+		// own budgets. Malformed and unknown requests spend foreground allowance.
+		req, resp, valid := protocol.ParseRequest(line)
+		method := ""
+		if valid {
+			method = req.Method
+		}
+		if !s.transportAllowed(run, method) {
+			var ok bool
+			resp, ok = rateLimitedResponse(resp, method)
 			if !ok {
 				return
 			}
-			out, merr := json.Marshal(resp)
-			if merr != nil {
-				return
+		} else if valid {
+			if hookWaitRequest(req) {
+				if hookErr := s.serveHookWait(connCtx, conn, run, req, resp); hookErr != nil {
+					return
+				}
+				continue
 			}
-			if err = conn.SetWriteDeadline(time.Now().Add(s.cfg.idle)); err != nil {
-				return
-			}
-			if _, err = conn.Write(append(out, '\n')); err != nil {
-				return
-			}
-			continue
+			resp = s.handleParsed(connCtx, run, req, resp)
 		}
-		resp := s.handle(connCtx, run, line)
 		if connCtx.Err() != nil {
 			return
 		}
@@ -501,15 +470,17 @@ func (s *Service) serve(conn net.Conn, run domain.RunID) {
 	}
 }
 
-// handle decodes one request and dispatches it. The method set is closed:
-// anything outside the coordination methods and run.report is method-not-found,
-// so no control verb is reachable from inside a container.
+// handle dispatches only explicitly allowlisted run methods. Human control
+// methods and caller-selected run identities are never reachable here.
 func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) protocol.Response {
 	req, resp, valid := protocol.ParseRequest(line)
 	if !valid {
 		return resp
 	}
+	return s.handleParsed(ctx, run, req, resp)
+}
 
+func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protocol.Request, resp protocol.Response) protocol.Response {
 	var (
 		result any
 		rpcErr *protocol.Error
@@ -517,6 +488,17 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 	switch req.Method {
 	case protocol.MethodCoordStatus:
 		result, rpcErr = s.Status(ctx, run)
+	case protocol.MethodCoordHookStatus:
+		if !hookWaitRequest(req) {
+			result, rpcErr = s.Status(ctx, run)
+			break
+		}
+		p, perr := decodeParams[protocol.CoordHookStatusParams](req.Method, req.Params)
+		if perr != nil {
+			resp.Error = perr
+			return resp
+		}
+		result, rpcErr = s.hookStatus(ctx, run, p)
 	case protocol.MethodCoordSend:
 		p, perr := decodeParams[protocol.CoordSendParams](req.Method, req.Params)
 		if perr != nil {
@@ -561,14 +543,41 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 		}
 		result, rpcErr = s.Report(ctx, run, p)
 	default:
-		resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
-		return resp
+		if isDevelopmentMethod(req.Method) {
+			result, rpcErr = s.handleDevelopment(ctx, run, req.Method, req.Params)
+		} else if isMissionMethod(req.Method) {
+			if s.cfg.Disabled {
+				resp.Error = unavailable(req.Method)
+				return resp
+			}
+			if s.cfg.Mission == nil {
+				resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
+				return resp
+			}
+			var missionErr error
+			result, missionErr = s.cfg.Mission.HandleAgent(ctx, run, req.Method, req.Params)
+			if missionErr != nil {
+				rpcErr = missionRPCError(req.Method, missionErr)
+			}
+			if rpcErr == nil {
+				break
+			}
+		} else {
+			resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + req.Method}
+			return resp
+		}
 	}
 	if rpcErr != nil {
-		resp.Error = rpcErr
+		resp.Error = missionRPCError(req.Method, rpcErr)
 		return resp
 	}
-	raw, err := json.Marshal(result)
+	var raw json.RawMessage
+	var err error
+	if isDevelopmentMethod(req.Method) {
+		raw, err = protocol.MarshalDevResult(result)
+	} else {
+		raw, err = json.Marshal(result)
+	}
 	if err != nil {
 		resp.Error = &protocol.Error{Code: protocol.CodeInternal, Message: "marshal result: " + err.Error()}
 		return resp
@@ -576,13 +585,86 @@ func (s *Service) handle(ctx context.Context, run domain.RunID, line []byte) pro
 	resp.Result = raw
 	return resp
 }
-func rateLimitedResponse(line []byte) (protocol.Response, bool) {
-	_, resp, _ := protocol.ParseRequest(line)
+
+func (s *Service) handleDevelopment(ctx context.Context, run domain.RunID, method string, params json.RawMessage) (any, *protocol.Error) {
+	if s.cfg.Development == nil {
+		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + method}
+	}
+	if !s.enterRun(run) {
+		return nil, runClosing(method)
+	}
+	defer s.leaveRun(run)
+	if err := ctx.Err(); err != nil {
+		return nil, internalError(method, err)
+	}
+	self, rpcErr := s.resolveRun(ctx, method, run)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+	if self.Status.Terminal() {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": run has finished"}
+	}
+	if len(params) > protocol.MaxDevParamsBytes {
+		return nil, invalidParams(method, "development request is too large")
+	}
+	// The backend decodes typed parameters strictly. Guard identity here as well:
+	// no spelling accepted by encoding/json may override the socket-bound run.
+	var fields map[string]json.RawMessage
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &fields); err != nil || fields == nil {
+			return nil, invalidParams(method, "expected an object")
+		}
+	}
+	for field := range fields {
+		if strings.EqualFold(field, "run_id") {
+			return nil, invalidParams(method, "run identity comes from the socket")
+		}
+	}
+	result, err := s.cfg.Development.HandleAgent(ctx, run, method, params)
+	return result, missionRPCError(method, err)
+}
+
+func isDevelopmentMethod(method string) bool {
+	switch method {
+	case protocol.MethodDevTerminalList, protocol.MethodDevTerminalStart,
+		protocol.MethodDevTerminalOutput, protocol.MethodDevTerminalScreen,
+		protocol.MethodDevTerminalScreenshot, protocol.MethodDevTerminalInput,
+		protocol.MethodDevTerminalResize, protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop,
+		protocol.MethodDevBrowserStatus, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserPages,
+		protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserAction,
+		protocol.MethodDevBrowserScreenshot, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserWait,
+		protocol.MethodDevBrowserConsole, protocol.MethodDevBrowserNetwork, protocol.MethodDevBrowserReset,
+		protocol.MethodDevBrowserClose, protocol.MethodDevControlStatus, protocol.MethodDevControlAcquire,
+		protocol.MethodDevControlRelease, protocol.MethodDevArtifactList, protocol.MethodDevArtifactGet,
+		protocol.MethodDevArtifactDelete, protocol.MethodDevArtifactRetain:
+		return true
+	default:
+		return false
+	}
+}
+
+func isMissionMethod(method string) bool {
+	switch method {
+	case protocol.MethodTaskShow, protocol.MethodTaskList, protocol.MethodTaskPropose,
+		protocol.MethodTaskRevise, protocol.MethodTaskAccept, protocol.MethodTaskAcceptSubmission,
+		protocol.MethodTaskAbandon, protocol.MethodWorkerStart, protocol.MethodWorkerList,
+		protocol.MethodWorkerInspect, protocol.MethodWorkerCancel, protocol.MethodWorkerRetry,
+		protocol.MethodIntegrationPrepare, protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify, protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver,
+		protocol.MethodMissionQuestionAsk, protocol.MethodMissionClarificationComplete,
+		protocol.MethodMissionPlanShow, protocol.MethodMissionPlanSubmit:
+		return true
+	default:
+		return false
+	}
+}
+func rateLimitedResponse(resp protocol.Response, method string) (protocol.Response, bool) {
 	if len(resp.ID) == 0 || bytes.Equal(bytes.TrimSpace(resp.ID), []byte("null")) {
 		return protocol.Response{}, false
 	}
 	resp.Result = nil
-	resp.Error = transportRateError()
+	resp.Error = transportRateError(method)
 	return resp, true
 }
 

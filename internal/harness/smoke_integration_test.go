@@ -281,22 +281,6 @@ func smokeBothModes(t *testing.T, name string, env map[string]string) {
 		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), env)
 		assertArgvAccepted(t, name, "headless", out)
 	})
-	if p.MCPConfigFlag == "" {
-		return
-	}
-	// Conflict coordination appends the MCP registration after the task
-	// prompt, so the flag lands behind a positional argument - in both
-	// launch modes, whose templates differ structurally. Every CLI tested
-	// accepts that today; this is what turns a future parser change into
-	// one failing test instead of every run silently degrading to
-	// notice-only. The config path need not exist - a CLI that rejects the
-	// option says so before it ever opens the file.
-	for mode, template := range map[string][]string{"tui": p.TUIArgs, "headless": p.HeadlessArgs} {
-		t.Run("mcp-config-"+mode, func(t *testing.T) {
-			argv := append(Argv(template, smokeTask), p.MCPArgs("/run/aether/mcp.json")...)
-			assertArgvAccepted(t, name, "mcp-config-"+mode, runSmoke(t, image, argv, env))
-		})
-	}
 }
 
 // launchEnv is what the scheduler puts in every container regardless of

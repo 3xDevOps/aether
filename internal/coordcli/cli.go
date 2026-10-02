@@ -18,16 +18,13 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 const (
-	// BinaryPath is the argv0-selected path for the coordination CLI. The
-	// scheduler mounts the same digest-staged server binary here alongside
-	// mcpbridge.BinaryPath, whose historical path remains the MCP/status hook
-	// surface.
-	BinaryPath = "/usr/local/bin/aether-internal"
 	// SchemaVersion is the machine-readable CLI envelope version.
 	SchemaVersion = protocol.CoordWireVersion
 
@@ -37,6 +34,8 @@ const (
 	ExitDenied  = 3
 	ExitMissing = 4
 )
+
+var defaultSocketPath = coordtransport.SocketPath
 
 // Config makes Run testable without changing the command's wire contract.
 // Socket is intentionally not a command-line option: production always uses
@@ -48,8 +47,8 @@ type Config struct {
 	ErrOut io.Writer
 }
 
-// Envelope is the stable output wrapper for every command except skill,
-// whose output is concise human-readable instructions by design.
+// Envelope is the stable output wrapper for state commands. Skill and help
+// write text; hook writes the harness's native response.
 type Envelope struct {
 	SchemaVersion string    `json:"schema_version"`
 	OK            bool      `json:"ok"`
@@ -78,12 +77,12 @@ func Execute(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 	return Run(ctx, args, Config{In: in, Out: out, ErrOut: errOut})
 }
 
-// Run executes one command and writes exactly one JSON envelope for success or
-// failure, except skill which writes its text directly. It never changes the
-// calling process's cwd or environment and never writes a user repository.
+// Run executes one command without changing the calling process's cwd,
+// environment, or repository. State commands write one JSON envelope; skill,
+// help, and hook use their documented output formats.
 func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	if cfg.Socket == "" {
-		cfg.Socket = mcpbridge.SocketPath
+		cfg.Socket = defaultSocketPath
 	}
 	if cfg.In == nil {
 		cfg.In = os.Stdin
@@ -95,7 +94,13 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		cfg.ErrOut = os.Stderr
 	}
 	if len(args) == 0 {
-		return fail(cfg.Out, protocol.CodeInvalidRequest, "a command is required")
+		return fail(cfg.Out, protocol.CodeInvalidRequest, "a command is required; use --help for command usage")
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		return writeHelp(cfg.Out, "")
+	}
+	if len(args) >= 2 && (args[len(args)-1] == "-h" || args[len(args)-1] == "--help") {
+		return writeHelp(cfg.Out, strings.Join(args[:len(args)-1], " "))
 	}
 
 	var result any
@@ -105,6 +110,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = status(ctx, cfg.Socket, args[1:])
 	case "skill":
 		return skill(ctx, cfg.Socket, args[1:], cfg.Out)
+	case "hook":
+		return hook(ctx, cfg, args[1:])
 	case "send":
 		result, err = send(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "inbox":
@@ -115,6 +122,17 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = reply(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
 	case "report":
 		result, err = report(ctx, cfg.Socket, args[1:], cfg.In, cfg.ErrOut)
+	case "task", "worker":
+		result, err = missionCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In, cfg.ErrOut)
+	case "mission":
+		result, err = planCommand(ctx, cfg.Socket, args[1:], cfg.In)
+	case "integration":
+		if len(args) < 2 {
+			return fail(cfg.Out, protocol.CodeInvalidParams, "integration requires a subcommand")
+		}
+		result, err = integrationCommand(ctx, cfg.Socket, args[1], args[2:], cfg.In)
+	case "terminal", "browser", "control", "artifact":
+		result, err = developmentCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In)
 	default:
 		return fail(cfg.Out, protocol.CodeMethodNotFound, "unknown command: "+args[0])
 	}
@@ -127,17 +145,226 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	return ExitOK, nil
 }
 
+const topUsage = `usage: aether-internal <command> [options]
+
+Commands:
+  status    inspect this run and its authorized peers
+  skill     print live assignment or a terminal/browser/git workflow topic
+  hook      run a native inbox hook or print a copyable integration file
+  send      send a durable message to an authorized peer
+  inbox     read the at-least-once inbox
+  ask       ask an authorized peer a durable question
+  reply     answer a durable question
+  mission   ask the accountable human and submit the plan for review
+  task      inspect and mutate mission task revisions
+  worker    inspect and manage mission worker attempts
+  integration run the five integrator candidate operations
+  report    submit a durable outcome with evidence references
+  terminal  run, observe and interact with development PTYs
+  browser   operate the isolated headless browser companion
+  control   inspect, acquire and release development surface control
+  artifact  inspect, retain and delete private capture artifacts
+
+Run "aether-internal <command> --help" for command options.
+`
+
+var commandUsages = map[string]string{
+	"hook": hookUsage,
+	"status": `usage: aether-internal status [--json]
+
+Print this run's identity, assignment, authorized peers, unread count, and capabilities
+in the v3 JSON envelope. --json is optional; output is always JSON.
+`,
+	"skill": `usage: aether-internal skill [terminal|browser|git]
+
+Print the live assignment, conditional development topics, and read-only hook
+installation checks with copyable integrations. Without a socket, print only
+short capability-neutral discovery; no tools or authority are implied.
+`,
+	"send": `usage: aether-internal send --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
+
+Send one durable message. A body file of "-" reads standard input.
+`,
+	"inbox": `usage: aether-internal inbox [--wait <seconds>] [--ack <token>]
+
+Read one bounded inbox batch. It stays frozen until its ack_token is acknowledged;
+new arrivals wait behind it. After processing, use --ack with that token to read
+the next batch. --wait does not bypass an unacknowledged batch.
+`,
+	"ask": `usage: aether-internal ask --to <run-id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
+
+Ask one durable, correlated question. A body file of "-" reads standard input.
+`,
+	"reply": `usage: aether-internal reply --question-id <id> (--body <text> | --body-file <path>) [--idempotency-key <key>]
+
+Reply to the sender of one durable question. A body file of "-" reads standard input.
+`,
+	"mission": `usage: aether-internal mission <clarification|question|plan> <subcommand> [options]
+
+mission question ask asks the accountable human, who answers in the dashboard.
+ask --to <run-id> asks a peer agent run, which answers with reply. They are
+separate mailboxes. The mission is the run's own; no command takes a mission ID.
+`,
+	"mission clarification": `usage: aether-internal mission clarification complete --idempotency-key <key>
+
+Declare that clarification is done and the plan can be written. Only the
+integrator may complete it, and only while the mission is in the planning
+phase.
+`,
+	"mission clarification complete": `usage: aether-internal mission clarification complete --idempotency-key <key>
+
+Move the mission from planning to clarified. Questions are optional, but the
+call is refused while a question you asked is unanswered.
+`,
+	"mission question": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
+
+mission question ask asks the accountable human, who answers in the dashboard.
+ask --to <run-id> asks a peer agent run, which answers with reply. They are
+separate mailboxes.
+`,
+	"mission question ask": `usage: aether-internal mission question ask (--body <text> | --body-file <path>) --idempotency-key <key>
+
+Ask the accountable human one clarifying question. A body file of "-" reads
+standard input. Only the integrator may ask, in the planning and clarified
+phases; asking in clarified returns the mission to planning until the question
+is answered.
+`,
+	"mission plan": `usage: aether-internal mission plan <show|submit> [options]
+
+show reads the gate state, questions, and review rounds. submit sends the
+proposed tasks to the accountable human for a decision.
+`,
+	"mission plan show": `usage: aether-internal mission plan show [--wait <seconds>]
+
+Read the mission phase, plan version, open questions, and review rounds.
+--wait asks the server to wait up to 30 seconds for a change; it is not a
+client polling loop.
+`,
+	"mission plan submit": `usage: aether-internal mission plan submit (--summary <text> | --summary-file <path>) --idempotency-key <key>
+
+Submit the pending tasks and revisions as a plan for human review. For an
+initial plan, clarification must be complete first; from the active phase this
+submits an amendment to the approved plan. A summary file of "-" reads standard
+input.
+`,
+	"task": `usage: aether-internal task <show|list|propose|revise|accept|accept-submission|abandon> [options]
+
+Task commands use the live assignment. Workers may read and propose within
+their scope; accepting or abandoning tasks is integrator-only. Mutations
+require explicit idempotency keys.
+Use task propose --help or task revise --help for revision JSON and required flags.
+`,
+	"worker": `usage: aether-internal worker <start|list|inspect|cancel|retry> [options]
+
+Worker mutations use the mission authority on the run socket. Dispatch keys
+are explicit identities for retry-safe starts and retries.
+`,
+	"report": `usage: aether-internal report --outcome <success|failure|blocked> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+
+Submit one durable outcome. Success/failure are terminal worker outcomes;
+blocked is a nonterminal observation, not a way to wait for a peer or human.
+A summary file of "-" reads standard input.
+When live capabilities advertise artifact retain, deliberately retain reviewed
+captures before a terminal report can clean up the run; pass its packet_id as
+--evidence-ref. A transient capture handle is not a durable evidence reference.
+`,
+	"integration": `usage: aether-internal integration <prepare|show|verify|request-delivery|deliver> --params-file FILE|- [--json]
+
+Agent integration is limited to these five assignment-scoped operations.
+The mounted socket supplies caller identity. JSON input is limited to 32 KiB.
+`,
+	"integration prepare": `usage: aether-internal integration prepare --params-file FILE|- [--json]
+
+Required JSON: target_ref, expected_target_revision, idempotency_key.
+The server resolves omitted workspace_id, mission_id, and accepted submissions
+from the current integrator assignment. Explicit submissions select exact
+accepted inputs in the supplied order. Optional: required_sources.
+Retry uncertain outcomes with the same parameters and idempotency_key.
+`,
+	"integration show": `usage: aether-internal integration show --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id.
+Returns the exact candidate revision, verification results, and delivery state.
+`,
+	"integration verify": `usage: aether-internal integration verify --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id, candidate_revision, argv,
+idempotency_key. Optional: timeout_seconds.
+argv is a JSON string array. Poll show for the durable verification result.
+`,
+	"integration request-delivery": `usage: aether-internal integration request-delivery --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id, candidate_revision, verification_ids,
+action ("update_ref" or "proposal"), idempotency_key.
+This requests a human decision; it does not approve or deliver the candidate.
+`,
+	"integration deliver": `usage: aether-internal integration deliver --params-file FILE|- [--json]
+
+Required JSON: workspace_id, candidate_id, request_id, request_version.
+Use the human-approved request returned by show. Replay the same request after
+an uncertain outcome; do not invent another delivery request.
+`,
+	"task show":              "usage: aether-internal task show --task-id <id>\n",
+	"task list":              "usage: aether-internal task list --mission-id <id>\n",
+	"task propose":           "usage: aether-internal task propose --mission-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n" + taskRevisionHelp,
+	"task revise":            "usage: aether-internal task revise --task-id <id> --idempotency-key <key> (--revision <json> | --revision-file <path>)\n" + taskRevisionHelp,
+	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
+	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
+	"worker start":           "usage: aether-internal worker start --mission-id <id> --task-id <id> --task-revision <n> --dispatch-key <key> --harness <name> --mode <mode> --account-owner-id <id> --run-owner-id <id> --expected-integrator-generation <n>\n",
+	"worker list":            "usage: aether-internal worker list --mission-id <id> [--task-id <id>]\n",
+	"worker inspect":         "usage: aether-internal worker inspect --attempt-id <id>\n",
+	"worker cancel":          "usage: aether-internal worker cancel --attempt-id <id> --expected-integrator-generation <n> --idempotency-key <key>\n",
+	"worker retry":           "usage: aether-internal worker retry --attempt-id <id> --dispatch-key <key> --expected-integrator-generation <n>\n",
+}
+
+// The input fields below are the author-supplied subset of protocol.TaskRevision.
+const taskRevisionHelp = `
+Revision JSON (maximum 32 KiB); title and objective are required non-empty strings:
+  {"title":"Fix checkout","objective":"Reject expired sessions"}
+Declare the intended scope before human approval, for example:
+  {"title":"Fix checkout","objective":"Reject expired sessions","scope":{"expected_paths":["internal/checkout/"],"exclusions":["internal/checkout/generated/"]},"evidence_requirements":[{"kind":"transcript","detail":"Retain test output showing expired sessions are rejected"}]}
+scope.expected_paths and scope.exclusions are arrays of repository-relative paths.
+evidence_requirements is an array of {kind, detail} objects; detail is optional.
+Kinds name retained evidence sources, such as transcript or git, not test types.
+depends_on is an array of task IDs in this mission; the task stays blocked, and
+worker start is refused, until each one's current revision has an accepted
+submission. A cycle or an unknown, abandoned, or self ID is refused.
+Set "material":true for changed scope, constraints, or success criteria requiring
+a human-approved amendment. IDs, revision numbers, status, and timestamps are
+server-managed; do not copy them from task show. Revise supplies the whole spec,
+not a patch, so a revision without depends_on drops earlier dependencies.
+--revision-file - reads stdin. Store files outside /run/aether.
+`
+
+func writeHelp(out io.Writer, command string) (int, error) {
+	text, ok := commandUsages[command]
+	if !ok {
+		text, ok = developmentHelp(command)
+	}
+	if command == "" {
+		text, ok = topUsage, true
+	}
+	if !ok {
+		return fail(out, protocol.CodeMethodNotFound, "unknown command: "+command)
+	}
+	if _, err := io.WriteString(out, text); err != nil {
+		return ExitFailure, fmt.Errorf("write help: %w", err)
+	}
+	return ExitOK, nil
+}
+
 func status(ctx context.Context, socket string, args []string) (protocol.CoordStatusResult, error) {
 	fs := newFlags("status")
-	jsonOut := fs.Bool("json", false, "machine-readable output")
+	fs.Bool("json", false, "machine-readable output (always enabled)")
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordStatusResult{}, err
 	}
-	if !*jsonOut || fs.NArg() != 0 {
-		return protocol.CoordStatusResult{}, usageError("status requires --json")
+	if fs.NArg() != 0 {
+		return protocol.CoordStatusResult{}, usageError("status takes no positional arguments")
 	}
 	var out protocol.CoordStatusResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
 		return out, err
 	}
 	if out.Peers == nil {
@@ -154,28 +381,195 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 	if err := parseFlags(fs, args); err != nil {
 		return fail(out, protocol.CodeInvalidParams, err.Error())
 	}
-	if fs.NArg() != 0 {
-		return fail(out, protocol.CodeInvalidParams, "skill takes no arguments")
+	if fs.NArg() > 1 {
+		return fail(out, protocol.CodeInvalidParams, "skill accepts at most one topic: terminal, browser, git")
+	}
+	topic := ""
+	if fs.NArg() == 1 {
+		topic = fs.Arg(0)
+		if topic != "terminal" && topic != "browser" && topic != "git" {
+			return fail(out, protocol.CodeInvalidParams, "unknown skill topic: "+topic)
+		}
+	}
+	write := func(status *protocol.CoordStatusResult) (int, error) {
+		if topic != "" {
+			return writeDevelopmentSkill(out, status, topic)
+		}
+		return writeSkill(out, status)
+	}
+	if socket == "" {
+		return write(nil)
 	}
 	var status protocol.CoordStatusResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
+		if errorCode(err) == protocol.CodeUnavailable {
+			return write(nil)
+		}
 		return fail(out, errorCode(err), err.Error())
 	}
-	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\nRun: %s\n", SchemaVersion, status.RunID); err != nil {
+	return write(&status)
+}
+
+const skillBootstrap = `Inspect current state and messages:
+  aether-internal status
+  aether-internal inbox
+  aether-internal --help
+Status is a bounded summary, not the full task. Its capabilities describe
+current authority; help describes syntax, not permission.
+`
+
+const skillWorkflow = `Coordination and completion:
+Stay within your assignment. Peers listed by status are reachable with send,
+ask, and reply; ask when a decision is theirs:
+  aether-internal ask --help
+Hooks announce pending inbox items at harness lifecycle boundaries; loaded
+native omp/pi/OpenCode integrations can also wake a live idle session.
+Check the inbox before waiting or reporting. Wait without reporting an outcome:
+  aether-internal inbox --wait 30
+Process the batch before acknowledging it: on the next inbox call pass
+--ack with that batch's ack_token. Until then the same frozen batch repeats;
+new steering waits behind it. Acknowledge processed batches before waiting.
+Read the inbox once more before a terminal report:
+  aether-internal report --help
+Success and failure are terminal worker outcomes: success submits the attempt
+and stops the worker; failure ends it without a task result. Report success
+only after finishing with required evidence, failure only if irrecoverable.
+Verify the changed behavior and collect required screenshots/evidence BEFORE
+reporting: a terminal worker report can clean up its development resources.
+Blocked is a nonterminal durable observation, not a submission or a way to wait.
+Do not report while idle or waiting on a peer or human. After a terminal
+report, take no new work.
+For an uncertain mutation, retry identical inputs with the same idempotency
+key. Save the generated key printed to stderr if you omitted --idempotency-key.
+Use a new key only for a new operation; receipt means durable storage, not read.
+`
+
+const integratorWorkflow = `When accepted submissions are ready for combined verification:
+  aether-internal integration --help
+  aether-internal integration prepare --help
+Prepare, show, verify, request-delivery, then deliver only after human approval.
+Each subcommand's --help lists its JSON fields; use --params-file with a file
+outside /run/aether or "-" for stdin. The agent cannot approve delivery or
+take over an integrator. A human uses Replace integrator if this run stops.
+`
+
+func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
+	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\nCLI build: %s\n", SchemaVersion, version.String()); err != nil {
 		return ExitFailure, fmt.Errorf("write skill header: %w", err)
 	}
-	assignment := strings.TrimSpace(status.Task)
-	if assignment == "" {
-		assignment = "(assignment not supplied)"
+	if status == nil {
+		if _, err := io.WriteString(out, "Role: unassigned (no coordination socket)\nNo live run identity or assignment; no mission authority. State commands need the mounted socket.\n"); err != nil {
+			return ExitFailure, fmt.Errorf("write skill availability: %w", err)
+		}
+		if _, err := io.WriteString(out, generalDiscovery); err != nil {
+			return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
+		}
+		return ExitOK, nil
+	} else {
+		assignment := status.Assignment
+		role := "ordinary"
+		if assignment != nil {
+			role = assignment.Role
+		}
+		if _, err := fmt.Fprintf(out, "Role: %s\nRun: %s\n", boundedSkillField(role), boundedSkillField(status.RunID)); err != nil {
+			return ExitFailure, fmt.Errorf("write skill identity: %w", err)
+		}
+		if assignment == nil {
+			if _, err := io.WriteString(out, "No mission authority; coordinate only with peers authorized by status.\n"); err != nil {
+				return ExitFailure, fmt.Errorf("write skill ordinary scope: %w", err)
+			}
+		} else {
+			if _, err := fmt.Fprintf(out, "Mission: %s\nIntegrator run: %s\nIntegrator generation: %d\n",
+				boundedSkillField(assignment.MissionID), boundedSkillField(assignment.IntegratorRunID), assignment.IntegratorGeneration); err != nil {
+				return ExitFailure, fmt.Errorf("write skill mission assignment: %w", err)
+			}
+			switch role {
+			case "worker":
+				if _, err := fmt.Fprintf(out, "Task ID: %s\nTask revision: %d\nAttempt ID: %s\nPhase: %s\nRead your full assigned task before acting (use the assigned revision above):\n  aether-internal task show --task-id %s\nWorkers may read and propose only; do not spawn workers, accept tasks, or perform mission/integration operations.\nCheck the inbox after reading the task, before each commit, and before reporting; sibling workers are listed by status.\n",
+					boundedSkillField(assignment.TaskID), assignment.TaskRevision, boundedSkillField(assignment.AttemptID), boundedSkillField(assignment.Phase), shellquote.Quote(assignment.TaskID)); err != nil {
+					return ExitFailure, fmt.Errorf("write skill worker scope: %w", err)
+				}
+			case "integrator":
+				if _, err := io.WriteString(out, integratorRole); err != nil {
+					return ExitFailure, fmt.Errorf("write skill integrator role: %w", err)
+				}
+				if err := writeSkillPhase(out, assignment); err != nil {
+					return ExitFailure, err
+				}
+				if _, err := fmt.Fprintf(out, "Inspect this mission and discover command syntax:\n  aether-internal task list --mission-id %s\n  aether-internal worker list --mission-id %s\n  aether-internal task --help\n  aether-internal worker --help\n",
+					shellquote.Quote(assignment.MissionID), shellquote.Quote(assignment.MissionID)); err != nil {
+					return ExitFailure, fmt.Errorf("write skill mission commands: %w", err)
+				}
+				if len(assignment.ExecutionChoices) > 0 {
+					if _, err := fmt.Fprintf(out, "Approved execution choices: %s\n", boundedSkillExecutionChoices(assignment.ExecutionChoices)); err != nil {
+						return ExitFailure, fmt.Errorf("write skill execution choices: %w", err)
+					}
+				}
+				if _, err := fmt.Fprintf(out, "Attempt allowance: active=%d/%d total=%d/%d remaining_concurrent=%d remaining_total=%d\n",
+					assignment.ActiveAttempts, assignment.MaxConcurrentAttempts, assignment.TotalAttempts, assignment.MaxTotalAttempts,
+					assignment.MaxConcurrentAttempts-assignment.ActiveAttempts, assignment.MaxTotalAttempts-assignment.TotalAttempts); err != nil {
+					return ExitFailure, fmt.Errorf("write skill attempt allowance: %w", err)
+				}
+				if assignment.Phase == "active" || assignment.Phase == "amendment_review" {
+					if _, err := io.WriteString(out, integratorWorkflow); err != nil {
+						return ExitFailure, fmt.Errorf("write skill integration workflow: %w", err)
+					}
+				}
+			}
+		}
+		summary := strings.TrimSpace(status.Task)
+		if len(summary) > protocol.CoordMaxStatusTaskBytes {
+			summary = summary[:protocol.CoordMaxStatusTaskBytes] + "…"
+		}
+		if _, err := fmt.Fprintf(out, "Task summary (bounded): %s\n", summary); err != nil {
+			return ExitFailure, fmt.Errorf("write skill task summary: %w", err)
+		}
 	}
-	if _, err := fmt.Fprintf(out, "Assignment: %s\n", assignment); err != nil {
-		return ExitFailure, fmt.Errorf("write skill assignment: %w", err)
+	if err := writeDevelopmentEntrypoints(out, status); err != nil {
+		return ExitFailure, fmt.Errorf("write development entrypoints: %w", err)
 	}
-	_, err := io.WriteString(out, "Inspect this assignment before acting. Stay within scope, use aether-internal to communicate with authorized peers, read inbox at natural checkpoints, ask questions when blocked, and report success, failure, or blocked with real evidence. Do not take new work after reporting.\n")
-	if err != nil {
-		return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
+	if hasSkillCapability(status, protocol.MethodCoordInbox) || status.Assignment != nil {
+		if _, err := io.WriteString(out, skillBootstrap+skillWorkflow); err != nil {
+			return ExitFailure, fmt.Errorf("write skill workflow: %w", err)
+		}
+	} else if _, err := io.WriteString(out, "Use aether-internal status for current authority and --help for syntax.\nNo coordination mailbox or mission commands are implied by a run socket.\n"); err != nil {
+		return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
+	}
+	if err := writeHookInstallation(out); err != nil {
+		return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
 	}
 	return ExitOK, nil
+}
+
+func boundedSkillField(value string) string {
+	if len(value) <= 256 {
+		return value
+	}
+	return value[:256] + "…"
+}
+
+func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) string {
+	var b strings.Builder
+	for _, choice := range values {
+		value := "account=" + boundedSkillField(choice.AccountMemberID) +
+			" harness=" + boundedSkillField(choice.Harness) +
+			" mode=" + boundedSkillField(choice.Mode)
+		separator := 0
+		if b.Len() > 0 {
+			separator = 2
+		}
+		if b.Len()+separator+len(value) > 2048 {
+			break
+		}
+		if separator > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(value)
+	}
+	if b.Len() == 2048 {
+		return b.String() + "…"
+	}
+	return b.String()
 }
 
 func send(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordSendResult, error) {
@@ -203,7 +597,7 @@ func send(ctx context.Context, socket string, args []string, in io.Reader, errOu
 	}
 	p := protocol.CoordSendParams{ToRunID: *to, Body: text, IdempotencyKey: idempotencyKey}
 	var out protocol.CoordSendResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordSend, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordSend, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -220,7 +614,7 @@ func inbox(ctx context.Context, socket string, args []string) (protocol.CoordInb
 		return protocol.CoordInboxResult{}, usageError("inbox takes --wait and --ack flags")
 	}
 	var out protocol.CoordInboxResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: *ack, WaitSeconds: *wait}, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: *ack, WaitSeconds: *wait}, &out); err != nil {
 		return out, err
 	}
 	if out.Messages == nil {
@@ -254,7 +648,7 @@ func ask(ctx context.Context, socket string, args []string, in io.Reader, errOut
 	}
 	p := protocol.CoordAskParams{ToRunID: *to, Body: text, IdempotencyKey: idempotencyKey}
 	var out protocol.CoordAskResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordAsk, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordAsk, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -285,7 +679,7 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 	}
 	p := protocol.CoordReplyParams{QuestionID: *question, Body: text, IdempotencyKey: idempotencyKey}
 	var out protocol.CoordReplyResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordReply, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReply, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -315,7 +709,7 @@ func report(ctx context.Context, socket string, args []string, in io.Reader, err
 	}
 	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey}
 	var out protocol.CoordReportResult
-	if err := mcpbridge.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -360,6 +754,9 @@ func resolveBody(body, file string, in io.Reader) (result string, retErr error) 
 		return "", usageError("choose one of --body and --body-file")
 	}
 	if file == "" && body != "-" {
+		if len(body) > protocol.CoordMaxBodyBytes {
+			return "", usageError(fmt.Sprintf("body exceeds %d bytes", protocol.CoordMaxBodyBytes))
+		}
 		return body, nil
 	}
 	r := in
@@ -377,9 +774,12 @@ func resolveBody(body, file string, in io.Reader) (result string, retErr error) 
 		}()
 		r = f
 	}
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(io.LimitReader(r, protocol.CoordMaxBodyBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read body: %w", err)
+	}
+	if len(data) > protocol.CoordMaxBodyBytes {
+		return "", usageError(fmt.Sprintf("body exceeds %d bytes", protocol.CoordMaxBodyBytes))
 	}
 	return string(data), nil
 }
@@ -416,7 +816,7 @@ func errorCode(err error) int {
 	if _, ok := err.(*CLIUsageError); ok {
 		return protocol.CodeInvalidParams
 	}
-	if code := mcpbridge.ErrorCode(err); code != 0 {
+	if code := coordtransport.ErrorCode(err); code != 0 {
 		return code
 	}
 	return protocol.CodeInternal

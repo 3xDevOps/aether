@@ -1,5 +1,8 @@
+import { act, render, screen } from '@testing-library/react'
+import { createElement } from 'react'
+import { Toaster, toast } from 'sonner'
 import { ApiError } from '@/lib/api'
-import type { Event, Run } from '@/lib/types'
+import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { configKey } from '@/store/files'
@@ -10,6 +13,7 @@ import {
   bob,
   evidencePacket,
   fakeApi,
+  mission,
   otherWorkspace,
   roomMessage,
   run,
@@ -100,6 +104,90 @@ describe('hydrate', () => {
 
     expect(store.getState().runs.run_1.unanswered_questions).toBe(2)
   })
+  it('prunes write intents and control sessions absent from the run snapshot', async () => {
+    const store = createRootStore()
+    const surviving = {
+      write: true,
+      identityKey: 'member:alice',
+      terminalCacheEpoch: 1,
+      authorityKey: 'authority:run_1',
+      runCreatedAt: '2026-08-14T10:00:00Z',
+    }
+    store.getState().setTerminalWriteIntent('run_1', surviving)
+    store.getState().setTerminalWriteIntent('run_deleted', {
+      ...surviving,
+      authorityKey: 'authority:run_deleted',
+    })
+    const { write: _write, ...fence } = surviving
+    store.getState().setTerminalControlSession('run_1', { ...fence, controlSessionID: 'tab-1' })
+    store.getState().setTerminalControlSession('run_deleted', { ...fence, controlSessionID: 'tab-2' })
+
+    await hydrate(
+      store,
+      fakeApi({ runList: vi.fn(async () => [run({ id: 'run_1' })]) }),
+    )
+
+    expect(store.getState().terminalWriteIntents).toEqual({ run_1: surviving })
+    expect(store.getState().terminalWriteIntents.run_1).toBe(surviving)
+    expect(Object.keys(store.getState().terminalControlSessions)).toEqual(['run_1'])
+  })
+
+  it('does not publish missions or hydration success after disposal during the mission fetch', async () => {
+    const store = createRootStore()
+    store.getState().setActiveWorkspace(workspace.id)
+    const staleClient = fakeApi()
+    const missions = Promise.withResolvers<MissionListResult>()
+    staleClient.capabilities = vi.fn(async () => ({
+      gateway: 'server',
+      methods: ['mission.list'],
+      ws: ['events'],
+    }))
+    staleClient.missionList = vi.fn(() => missions.promise)
+    const lifecycle = new AbortController()
+    const pending = hydrate(store, staleClient, lifecycle.signal)
+    await vi.waitFor(() => expect(staleClient.missionList).toHaveBeenCalled())
+    lifecycle.abort()
+    await hydrate(store, fakeApi())
+    store.getState().setHydrated(true, 'current connection failure')
+    const current = store.getState()
+
+    missions.resolve({ missions: [mission({ id: 'mission_stale' })], next_cursor: 'stale-page' })
+    expect(await pending).toBe(false)
+
+    expect(store.getState().missions).toEqual(current.missions)
+    expect(store.getState().capabilities).toEqual(current.capabilities)
+    expect(store.getState().hydrationError).toBe('current connection failure')
+  })
+
+  it('does not publish link status or clear current errors after disposal during a local poll', async () => {
+    const store = createRootStore()
+    const staleClient = fakeApi()
+    const link = Promise.withResolvers<LinkStatus>()
+    staleClient.capabilities = vi.fn(async () => ({
+      gateway: 'local',
+      methods: ['*'],
+      ws: ['events'],
+      local: ['link.status'],
+    }))
+    staleClient.localLinkStatus = vi.fn(() => link.promise)
+    const lifecycle = new AbortController()
+    const pending = hydrate(store, staleClient, lifecycle.signal)
+    await vi.waitFor(() => expect(staleClient.localLinkStatus).toHaveBeenCalled())
+    lifecycle.abort()
+    await hydrate(store, fakeApi())
+    store.getState().setHydrated(true, 'current connection failure')
+    store.getState().setUnreachable('server')
+    const current = store.getState()
+
+    link.resolve({ server_configured: true, linked: true, addr: 'old', user: 'old', repo: 'old' })
+    expect(await pending).toBe(false)
+
+    expect(store.getState().linkStatus).toEqual(current.linkStatus)
+    expect(store.getState().onboarded).toBe(current.onboarded)
+    expect(store.getState().hydrationError).toBe('current connection failure')
+    expect(store.getState().unreachable).toBe('server')
+  })
+
 
 
   // Both shells turn `aether://run/<id>` into `<dashboard>?run=<id>`, so the
@@ -141,6 +229,37 @@ describe('hydrate', () => {
 
       expect(store.getState().route).toEqual({ name: 'board', params: {} })
     })
+
+    it.each(['run_1', 'run_someone_elses'])('resolves %s without requiring a local clone', async (requested) => {
+      window.history.replaceState({}, '', `/?run=${requested}`)
+      const store = createRootStore()
+      const client = fakeApi({
+        capabilities: vi.fn(async () => ({
+          gateway: 'local',
+          methods: ['*'],
+          ws: ['events', 'attach'],
+          local: ['link.status'],
+        })),
+        localLinkStatus: vi.fn(async () => ({
+          server_configured: true,
+          linked: false,
+          addr: 'host:2222',
+          user: 'alice',
+          repo: '',
+        })),
+      })
+      await hydrate(store, client)
+
+      expect(store.getState().route).toEqual(requested === 'run_1'
+        ? { name: 'terminal', params: { runId: requested } }
+        : { name: 'onboarding', params: {} })
+      expect(window.location.search).toBe('')
+      if (requested === 'run_1') {
+        store.getState().navigate('board')
+        await hydrate(store, client)
+        expect(store.getState().route.name).toBe('board')
+      }
+    })
   })
 
   it('points the app at a workspace, keeping one the member already chose', async () => {
@@ -155,6 +274,117 @@ describe('hydrate', () => {
     chosen.getState().setActiveWorkspace(otherWorkspace.id)
     await hydrate(chosen, fakeApi())
     expect(chosen.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('restores the local gateway selection on a fresh browser origin', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events'],
+        local: ['workspace.selection'],
+      })),
+      localWorkspaceSelection: vi.fn(async () => ({ workspace_id: otherWorkspace.id })),
+    }))
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('keeps a workspace selected while startup preferences are loading', async () => {
+    const store = createRootStore()
+    const saved = Promise.withResolvers<{ workspace_id: string }>()
+    const read = vi.fn(() => saved.promise)
+    const loading = hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local', methods: ['*'], ws: ['events'], local: ['workspace.selection'],
+      })),
+      localWorkspaceSelection: read,
+    }))
+    await vi.waitFor(() => expect(read).toHaveBeenCalled())
+    store.getState().setActiveWorkspace(otherWorkspace.id)
+    saved.resolve({ workspace_id: workspace.id })
+    await loading
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it.each([
+    { selected: '', expected: workspace.id, failure: new Error('decode workspace selection: invalid character') },
+    { selected: otherWorkspace.id, expected: otherWorkspace.id, failure: new ApiError(500, 'read workspace selection: permission denied') },
+  ])('hydrates with scope "$expected" and shows the raw preference failure', async ({ selected, expected, failure }) => {
+    const store = createRootStore()
+    store.getState().setActiveWorkspace(selected)
+    render(createElement(Toaster))
+    try {
+      let hydrated = false
+      await act(async () => {
+        hydrated = await hydrate(store, fakeApi({
+          capabilities: vi.fn(async () => ({
+            gateway: 'local', methods: ['*'], ws: ['events'], local: ['workspace.selection'],
+          })),
+          localWorkspaceSelection: vi.fn(async () => { throw failure }),
+        }))
+      })
+
+      expect(hydrated).toBe(true)
+      expect(store.getState().hydrated).toBe(true)
+      expect(store.getState().hydrationError).toBeNull()
+      expect(store.getState().unreachable).toBeNull()
+      expect(store.getState().activeWorkspace).toBe(expected)
+      expect(store.getState().workspaces).toEqual({
+        [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace,
+      })
+      expect(store.getState().runs.run_1.status).toBe('running')
+      expect(store.getState().info?.member).toEqual(alice)
+      expect((await screen.findByText(failure.message)).textContent).toBe(failure.message)
+    } finally {
+      act(() => { toast.dismiss() })
+    }
+  })
+
+  it('does not restore a deleted workspace from hydration already in flight', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('workspace', { workspaceId: workspace.id })
+    const snapshot = Promise.withResolvers<typeof workspace[]>()
+    const loading = hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(() => snapshot.promise),
+    }))
+    await applyEvent(store, statusEvent({
+      type: 'workspace.deleted', run_id: '', payload: {},
+    }), fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]) }))
+    snapshot.resolve([workspace, otherWorkspace])
+
+    expect(await loading).toBe(true)
+    expect(store.getState().workspaces).toEqual({ [otherWorkspace.id]: otherWorkspace })
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+    expect(store.getState().route).toEqual({
+      name: 'workspace', params: { workspaceId: otherWorkspace.id },
+    })
+    expect(store.getState().runs.run_1).toBeUndefined()
+  })
+
+  it('restores a browser selection across store recreation and list reordering', async () => {
+    const previous = createRootStore()
+    await hydrate(previous, fakeApi())
+    previous.getState().setActiveWorkspace(otherWorkspace.id)
+    const reopened = createRootStore()
+    await hydrate(reopened, fakeApi({
+      workspaceListFull: vi.fn(async () => [otherWorkspace, workspace]),
+    }))
+    expect(reopened.getState().activeWorkspace).toBe(otherWorkspace.id)
+  })
+
+  it('clears a deleted final workspace and leaves its detail route', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('workspace', { workspaceId: otherWorkspace.id })
+    await hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(async () => []),
+      runList: vi.fn(async () => []),
+    }))
+    expect(store.getState().activeWorkspace).toBe('')
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    expect(createRootStore().getState().activeWorkspace).toBe('')
   })
 
   it('re-points a scope whose workspace is gone, so no surface is left blank', async () => {
@@ -315,6 +545,39 @@ describe('hydrate', () => {
       expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
       if (tc.linked) expect(store.getState().onboarded).toBe(true)
     }
+  })
+
+  it.each(['before', 'during'])('preserves navigation %s initial hydration without a local clone', async (when) => {
+    const store = createRootStore()
+    let resolveInfo!: (value: typeof serverInfoFixture) => void
+    const info = new Promise<typeof serverInfoFixture>((resolve) => { resolveInfo = resolve })
+    const client = fakeApi({
+      serverInfo: vi.fn(() => info),
+      capabilities: vi.fn(async () => ({
+        gateway: 'local',
+        methods: ['*'],
+        ws: ['events', 'attach'],
+        local: ['link.status'],
+      })),
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: true,
+        linked: false,
+        addr: 'host:2222',
+        user: 'alice',
+        repo: '',
+      })),
+    })
+    if (when === 'before') store.getState().navigate('workspaces')
+    const pending = hydrate(store, client)
+    if (when === 'during') store.getState().navigate('workspaces')
+    resolveInfo(serverInfoFixture)
+    await pending
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    await hydrate(store, client)
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    store.getState().navigate('board')
+    await hydrate(store, client)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
   })
 
   it('treats a missing capabilities endpoint as the legacy remote monitor', async () => {
@@ -527,6 +790,20 @@ describe('applyEvent', () => {
   it('removes a run when the server publishes its deletion', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
+    store.getState().setTerminalWriteIntent('run_1', {
+      write: true,
+      identityKey: 'member:alice',
+      terminalCacheEpoch: 1,
+      authorityKey: 'authority:run_1',
+      runCreatedAt: store.getState().runs.run_1.created_at,
+    })
+    store.getState().setTerminalControlSession('run_1', {
+      identityKey: 'member:alice',
+      terminalCacheEpoch: 1,
+      authorityKey: 'authority:run_1',
+      runCreatedAt: store.getState().runs.run_1.created_at,
+      controlSessionID: 'tab-1',
+    })
 
     expect(await applyEvent(
       store,
@@ -534,6 +811,8 @@ describe('applyEvent', () => {
       fakeApi(),
     )).toBe(true)
 
+    expect(store.getState().terminalWriteIntents.run_1).toBeUndefined()
+    expect(store.getState().terminalControlSessions.run_1).toBeUndefined()
     expect(store.getState().runs.run_1).toBeUndefined()
     expect(store.getState().lastSeq).toBe(7)
   })
@@ -832,6 +1111,110 @@ describe('applyEvent', () => {
     expect(store.getState().workspaces[workspace.id]).toBeDefined()
   })
 
+  it('removes a remotely deleted workspace and leaves its open run', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('terminal', { runId: 'run_1' })
+    const applied = await applyEvent(store, statusEvent({
+      type: 'workspace.deleted', run_id: '', payload: {},
+    }), fakeApi({
+      workspaceListFull: vi.fn(async () => [otherWorkspace]),
+    }))
+    expect(applied).toBe(true)
+    expect(store.getState().workspaces[workspace.id]).toBeUndefined()
+    expect(store.getState().runs.run_1).toBeUndefined()
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it('does not restore a deleted workspace from an unknown-workspace refresh already in flight', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+    }))
+    const snapshot = Promise.withResolvers<typeof workspace[]>()
+    const pending = applyEvent(store, statusEvent({
+      type: 'run.deleted', workspace_id: otherWorkspace.id,
+      run_id: 'run_missing', seq: 4, payload: {},
+    }), fakeApi({
+      workspaceListFull: vi.fn(() => snapshot.promise),
+    }))
+    await applyEvent(store, statusEvent({
+      type: 'workspace.deleted', run_id: '', payload: {},
+    }), fakeApi({ workspaceListFull: vi.fn(async () => [otherWorkspace]) }))
+    snapshot.resolve([workspace, otherWorkspace])
+    expect(await pending).toBe(true)
+    expect(store.getState().workspaces).toEqual({ [otherWorkspace.id]: otherWorkspace })
+    expect(store.getState().activeWorkspace).toBe(otherWorkspace.id)
+    expect(store.getState().runs.run_1).toBeUndefined()
+  })
+
+  it('keeps a deletion authoritative when its reconciliation fails', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      workspaceListFull: vi.fn(async () => [workspace]),
+    }))
+    store.getState().navigate('workspace', { workspaceId: workspace.id })
+    const applied = await applyEvent(store, statusEvent({
+      type: 'workspace.deleted', run_id: '', payload: {},
+    }), fakeApi({
+      workspaceListFull: vi.fn(async () => { throw new ApiError(503, 'server unreachable') }),
+    }))
+    expect(applied).toBe(false)
+    expect(store.getState().unreachable).toBe('server')
+    expect(store.getState().workspaces).toEqual({})
+    expect(store.getState().activeWorkspace).toBe('')
+    expect(store.getState().route).toEqual({ name: 'workspaces', params: {} })
+    expect(store.getState().runs.run_1).toBeUndefined()
+    expect(store.getState().lastSeq).toBe(0)
+
+    store.getState().upsertWorkspace(workspace)
+    expect(store.getState().workspaces).toEqual({})
+  })
+
+  it('keeps the older mission pages the reader loaded on a mission change', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({
+      missionList: vi.fn(async () => ({ missions: [mission({ id: 'mission_new' })], next_cursor: 'page-2' })),
+    }))
+    store.getState().setMissions(workspace.id, [mission({ id: 'mission_old' })], 'page-3', true)
+
+    const client = fakeApi({
+      missionList: vi.fn(async () => ({
+        missions: [mission({ id: 'mission_newest' }), mission({ id: 'mission_new', phase: 'rejected' })],
+        next_cursor: 'page-2-shifted',
+      })),
+    })
+    await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_new' },
+    }), client)
+
+    const s = store.getState()
+    expect(client.missionList).toHaveBeenCalledWith({ workspace_id: workspace.id, limit: 50 })
+    expect(Object.keys(s.missions).sort()).toEqual(['mission_new', 'mission_newest', 'mission_old'])
+    expect(s.missions.mission_new.phase).toBe('rejected')
+    expect(s.missionNextCursor).toBe('page-3')
+  })
+
+  it('takes the fetched mission cursor over one read for another workspace', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().setMissions(otherWorkspace.id, [mission({ id: 'mission_other', workspace_id: otherWorkspace.id })], 'other-page')
+
+    await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_1' },
+    }), fakeApi({
+      missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: 'page-2' })),
+    }))
+
+    expect(store.getState().missionNextCursor).toBe('page-2')
+    expect(store.getState().missionListWorkspace).toBe(workspace.id)
+  })
+
   it('follows a server update and never moves it backwards', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
@@ -911,6 +1294,114 @@ describe('connect', () => {
     socket.onmessage?.({ data: JSON.stringify(ev) })
   }
 
+  it('coalesces mission hints without delaying run events or overwriting their state', async () => {
+    const store = createRootStore()
+    const retired = run({ id: 'old-integrator', mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'old-integrator' })
+    const worker = run({ id: 'worker', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: retired.id })
+    const deleted = run({ id: 'deleted' })
+    const unrelated = run({ id: 'unrelated', workspace_id: otherWorkspace.id })
+    const replacement = run({ id: 'new-integrator', mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'new-integrator' })
+    const refresh = Promise.withResolvers<Run[]>()
+    const listed = [run({ id: retired.id }), { ...worker, integrator_run_id: replacement.id }, deleted, replacement]
+    const runList = vi.fn()
+      .mockResolvedValueOnce([retired, worker, deleted, unrelated])
+      .mockImplementationOnce(() => refresh.promise)
+      .mockResolvedValue(listed)
+    const client = fakeApi({ runList, runGet: vi.fn(async () => replacement) })
+    const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.setState({ activeWorkspace: otherWorkspace.id, route: { name: 'overview', params: {} } })
+      const hint = (seq: number) => statusEvent({ seq, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1' } })
+      deliver(socket, hint(1))
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(2))
+      deliver(socket, hint(2))
+      deliver(socket, hint(3))
+      deliver(socket, statusEvent({ seq: 4, run_id: replacement.id }))
+      deliver(socket, statusEvent({ seq: 5, run_id: worker.id, payload: { to: 'failed' } }))
+      deliver(socket, statusEvent({ seq: 6, run_id: deleted.id, type: 'run.deleted' }))
+      deliver(socket, statusEvent({ seq: 7, workspace_id: otherWorkspace.id, run_id: unrelated.id, payload: { to: 'completed' } }))
+      await vi.waitFor(() => expect(store.getState().lastSeq).toBe(7))
+      expect(store.getState().runs[unrelated.id].status).toBe('completed')
+      expect(runList).toHaveBeenCalledTimes(2)
+
+      refresh.resolve(listed)
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(3))
+      await vi.waitFor(() => expect(store.getState().runs[worker.id].integrator_run_id).toBe(replacement.id))
+      const state = store.getState()
+      expect(state.runs[retired.id].mission_role).toBeUndefined()
+      expect(state.runs[replacement.id].mission_role).toBe('integrator')
+      expect(state.runs[worker.id].status).toBe('failed')
+      expect(state.runs[deleted.id]).toBeUndefined()
+      expect(state.runs[unrelated.id].workspace_id).toBe(otherWorkspace.id)
+    } finally {
+      stop()
+    }
+  })
+
+  it('repairs a failed mission projection with a fresh hydration', async () => {
+    const store = createRootStore()
+    const runList = vi.fn()
+      .mockResolvedValueOnce([run()])
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValue([run({ mission_id: 'mission_1', mission_role: 'integrator', integrator_run_id: 'run_1' })])
+    const stop = connect(store, fakeApi({ runList }))
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      deliver(socket, statusEvent({ type: 'mission.changed', run_id: '', payload: { mission_id: 'mission_1' } }))
+      await vi.waitFor(() => expect(store.getState().runs.run_1.mission_role).toBe('integrator'))
+      expect(store.getState().unreachable).toBeNull()
+    } finally {
+      stop()
+    }
+  })
+
+  it.each(['response', 'error'] as const)('hydrates on reconnect without waiting for an obsolete mission %s', async (outcome) => {
+    const store = createRootStore()
+    const worker = run({ mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'old-integrator' })
+    const activeRun = run({ id: 'active-run', workspace_id: otherWorkspace.id })
+    const refresh = Promise.withResolvers<Run[]>()
+    const refreshedWorker = { ...worker, integrator_run_id: 'new-integrator' }
+    const runList = vi.fn()
+      .mockResolvedValueOnce([worker, activeRun])
+      .mockImplementationOnce(() => refresh.promise)
+      .mockResolvedValueOnce([refreshedWorker, { ...activeRun, status: 'completed' }])
+      .mockResolvedValue([{ ...refreshedWorker, integrator_run_id: 'latest-integrator' }])
+    const client = fakeApi({
+      runList,
+      capabilities: vi.fn(async () => ({ gateway: 'server', methods: ['*'], ws: ['events'] })),
+    })
+    const stop = connect(store, client)
+    try {
+      const socket = await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.setState({ activeWorkspace: otherWorkspace.id })
+      deliver(socket, statusEvent({ seq: 1, run_id: '', type: 'mission.changed' }))
+      await vi.waitFor(() => expect(runList).toHaveBeenCalledTimes(2))
+      socket.onclose?.({ code: 1006 })
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2), { timeout: 2000 })
+      const reconnected = await subscribe()
+      await vi.waitFor(() => expect(store.getState().runs[activeRun.id].status).toBe('completed'))
+      expect(store.getState().runs[worker.id].integrator_run_id).toBe('new-integrator')
+
+      deliver(reconnected, statusEvent({ seq: 2, run_id: '', type: 'mission.changed' }))
+      await vi.waitFor(() => expect(store.getState().runs[worker.id].integrator_run_id).toBe('latest-integrator'))
+      if (outcome === 'response') refresh.resolve([worker])
+      else refresh.reject(new TypeError('obsolete request failed'))
+      await refresh.promise.catch(() => {})
+      await Promise.resolve()
+      expect(store.getState().runs[worker.id].integrator_run_id).toBe('latest-integrator')
+      expect(store.getState().runs[activeRun.id].status).toBe('completed')
+      expect(store.getState().unreachable).toBeNull()
+      expect(store.getState().hydrationError).toBeNull()
+    } finally {
+      refresh.resolve([])
+      stop()
+    }
+  })
+
   it('waits for the subscription acknowledgement before it hydrates', async () => {
     const client = fakeApi()
     const store = createRootStore()
@@ -926,6 +1417,130 @@ describe('connect', () => {
 
     await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
     stop()
+  })
+
+  it('saves the last selection even when an earlier save is still pending', async () => {
+    let persisted = ''
+    const firstSave = Promise.withResolvers<void>()
+    const client = fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local', methods: ['*'], ws: ['events'], local: ['workspace.selection'],
+      })),
+      localWorkspaceSelection: vi.fn(async (id?: string) => {
+        if (id === workspace.id) await firstSave.promise
+        if (id !== undefined) persisted = id
+        return { workspace_id: persisted }
+      }),
+    })
+    const store = createRootStore()
+    const stop = connect(store, client)
+    try {
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      store.getState().setActiveWorkspace(otherWorkspace.id)
+      firstSave.resolve()
+      await vi.waitFor(() => expect(persisted).toBe(otherWorkspace.id))
+      window.localStorage.clear()
+      const reopened = createRootStore()
+      await hydrate(reopened, client)
+      expect(reopened.getState().activeWorkspace).toBe(otherWorkspace.id)
+    } finally {
+      firstSave.resolve()
+      stop()
+    }
+  })
+
+  it.each([
+    { identity: 'a different member', member: bob },
+    { identity: 'the same member with a newer run list', member: alice },
+  ])('ignores a disposed snapshot after reconnecting as $identity', async ({ member }) => {
+    const store = createRootStore()
+    const oldRuns = Promise.withResolvers<Run[]>()
+    const oldClient = fakeApi({ runList: vi.fn(() => oldRuns.promise) })
+    const stopOld = connect(store, oldClient)
+    await subscribe()
+    await vi.waitFor(() => expect(oldClient.runList).toHaveBeenCalled())
+    stopOld()
+
+    const stopCurrent = connect(store, fakeApi({
+      serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })),
+      runList: vi.fn(async () => [run(), run({ id: 'run_new' })]),
+    }))
+    try {
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      const currentIdentity = store.getState().identityKey
+      const currentRuns = store.getState().runs
+
+      vi.useFakeTimers()
+      oldRuns.resolve([run()])
+      // Drain the settled response's entire promise chain before observing
+      // state; an immediate waitFor could pass before the stale write.
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.getState().identityKey).toBe(currentIdentity)
+      expect(store.getState().info?.member.id).toBe(member.id)
+      expect(store.getState().runs).toEqual(currentRuns)
+      expect(store.getState().runs.run_new?.id).toBe('run_new')
+    } finally {
+      stopCurrent()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not publish a disposed hydration failure over a recovered connection', async () => {
+    const store = createRootStore()
+    const oldRuns = Promise.withResolvers<Run[]>()
+    const oldClient = fakeApi({ runList: vi.fn(() => oldRuns.promise) })
+    const stopOld = connect(store, oldClient)
+    await subscribe()
+    await vi.waitFor(() => expect(oldClient.runList).toHaveBeenCalled())
+    stopOld()
+
+    const stopCurrent = connect(store, fakeApi())
+    try {
+      await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+
+      vi.useFakeTimers()
+      oldRuns.reject(new TypeError('old gateway disappeared'))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.getState().hydrated).toBe(true)
+      expect(store.getState().hydrationError).toBeNull()
+      expect(store.getState().unreachable).toBeNull()
+    } finally {
+      stopCurrent()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not publish a disposed capabilities probe over the current gateway', async () => {
+    const store = createRootStore()
+    const oldClient = fakeApi()
+    const probe = Promise.withResolvers<GatewayCapabilities>()
+    oldClient.capabilities = vi.fn(() => probe.promise)
+    const stopOld = connect(store, oldClient)
+    stopOld()
+
+    const stopCurrent = connect(store, fakeApi())
+    try {
+      await subscribe()
+      await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+      const currentCapabilities = store.getState().capabilities
+
+      vi.useFakeTimers()
+      probe.resolve({ gateway: 'server', methods: [], ws: [] })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(store.getState().capabilities).toEqual(currentCapabilities)
+      expect(store.getState().connection).toBe('live')
+    } finally {
+      stopCurrent()
+      vi.useRealTimers()
+    }
   })
   it('shows the gateway refusal instead of an unreachable server', async () => {
     const store = createRootStore()
@@ -977,7 +1592,7 @@ describe('connect', () => {
         gateway: 'local',
         methods: ['*'],
         ws: ['events', 'attach'],
-        local: ['link.status'],
+        local: ['link.status', 'workspace.selection'],
       })),
       localLinkStatus: vi.fn(async () => ({
         server_configured: false,
@@ -994,6 +1609,8 @@ describe('connect', () => {
     expect(store.getState().route.name).toBe('onboarding')
     expect(store.getState().linkStatus?.server_configured).toBe(false)
     expect(client.serverInfo).not.toHaveBeenCalled()
+    expect(client.localWorkspaceSelection).not.toHaveBeenCalled()
+    expect(store.getState().hydrationError).toBeNull()
     expect(StubSocket.opened).toHaveLength(0)
     stop()
   })

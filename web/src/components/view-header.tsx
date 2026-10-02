@@ -2,11 +2,13 @@ import type { ReactNode } from 'react'
 
 export function ViewHeader({
   title,
+  titleTooltip,
   titleAdornment,
   subtitle,
   actions,
 }: {
   title: string
+  titleTooltip?: string
   titleAdornment?: ReactNode
   subtitle?: string
   actions?: ReactNode
@@ -16,7 +18,7 @@ export function ViewHeader({
       <div className="flex min-w-0 flex-[1_1_20rem] flex-wrap items-center gap-x-2 gap-y-0.5">
         <h1
           className="min-w-0 break-words text-[15px] font-semibold leading-5"
-          title={title}
+          title={titleTooltip ?? title}
         >
           {title}
         </h1>

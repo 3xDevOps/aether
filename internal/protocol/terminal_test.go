@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"slices"
@@ -44,6 +45,47 @@ func TestTerminalRecordsPreserveOutputGeometryOrder(t *testing.T) {
 	events = append(events, output.String())
 	if !slices.Equal(events, []string{before, after}) {
 		t.Fatalf("output around geometry = %q", events)
+	}
+}
+func TestTerminalControlRecordRoundTrip(t *testing.T) {
+	var wire bytes.Buffer
+	want := DashAttachControl{
+		Type: DashAttachControlFrame, RequestID: 9, OK: true,
+		HasControl: true, ControlSessionID: "tab-1", ControlGeneration: 4,
+	}
+	if err := WriteTerminalControl(&wire, want); err != nil {
+		t.Fatal(err)
+	}
+	reader := TerminalReader{Reader: &wire}
+	n, geometry, err := reader.Read(make([]byte, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || geometry != [2]uint{} || reader.Control == nil || *reader.Control != want {
+		t.Fatalf("control record = n=%d geometry=%v control=%+v, want %+v", n, geometry, reader.Control, want)
+	}
+}
+
+func TestMarshalTerminalControlExplicitAuthority(t *testing.T) {
+	position := TerminalPosition{Epoch: "pty-max", Sequence: TerminalSequence(^uint64(0))}
+	payload, err := MarshalTerminalControl(DashAttachControl{
+		Type: DashAttachControlFrame, RequestID: 3, ControlGeneration: 7, Position: position,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"has_control":false`)) {
+		t.Fatalf("outbound control = %s, want explicit false authority", payload)
+	}
+	if !bytes.Contains(payload, []byte(`"cursor":"18446744073709551615"`)) {
+		t.Fatalf("outbound control = %s, want lossless quoted cursor", payload)
+	}
+	var decoded DashAttachControl
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.HasControl || decoded.HighWater() != position {
+		t.Fatalf("decoded control = %+v, want false authority and position %+v", decoded, position)
 	}
 }
 

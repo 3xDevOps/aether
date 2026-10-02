@@ -1,0 +1,20 @@
+{{define "devices"}}{{template "top" .}}
+{{if .Data}}<table>
+<thead><tr><th>Device</th><th>Key</th><th>Signed in</th><th>Last used</th><th></th></tr></thead>
+<tbody>
+{{range .Data}}<tr>
+<td>{{.Label}}</td>
+<td><code>{{fingerprint .Key}}</code></td>
+<td>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</td>
+<td>{{.LastUsedAt.Format "2006-01-02 15:04 MST"}}</td>
+<td><form method="post" action="/devices/revoke">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="device" value="{{.ID}}">
+<button>Revoke</button>
+</form></td>
+</tr>
+{{end}}</tbody>
+</table>
+<p>Revoke ends that device's token and closes its open connections.</p>
+{{else}}<p>No devices. Run <code>aether login</code> to sign one in.</p>{{end}}
+{{template "bottom" .}}{{end}}

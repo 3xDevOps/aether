@@ -20,10 +20,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/adapter"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -78,15 +81,28 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// IntegrationAdmission is the server-controlled policy seam for
+	// consequential candidate mutations. It is never populated from a
+	// request field.
+	IntegrationAdmission integration.AdmissionFunc
 	// StandardImage is the server-owned image used for all runs until member
 	// image selection is available. Empty uses DefaultStandardImage.
 	StandardImage string
+	// BrowserImage is the pinned, sandboxed headless companion image.
+	BrowserImage string
 	// TailnetAutoJoin registers unknown tailnet identities as approved
 	// members instead of pending ones.
 	TailnetAutoJoin bool
 	// TailnetRequireKey additionally requires pubkey verification on
 	// tailnet connections.
 	TailnetRequireKey bool
+	// EdgeURL is the edge the server enrolls with (docs/edge.md); empty
+	// keeps the server off every edge.
+	EdgeURL string
+	// EdgeAccess is the server's edge access policy; empty is
+	// PolicyApprovedDevices. The server enforces it and announces it to
+	// the edge for display only.
+	EdgeAccess edgeproto.AccessPolicy
 	// CoordinationDisabled turns the conflict coordination kill switch off.
 	// The zero value keeps coordination enabled, which is the shipped
 	// default.
@@ -145,6 +161,7 @@ type Server struct {
 	evidence *evidence.Service
 	adapters *adapter.Manager
 	ssh      *sshd.Server
+	edge     *edgeagent.Agent
 	web      *servergw.Gateway
 	tailnet  servergw.Tailnet
 	services []namedService
@@ -205,6 +222,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if cfg.StandardImage == "" {
 		cfg.StandardImage = DefaultStandardImage
 	}
+	if cfg.BrowserImage == "" {
+		cfg.BrowserImage = DefaultBrowserImage
+	}
 
 	s := &Server{}
 	defer func() {
@@ -216,10 +236,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if err = os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("server: create data dir: %w", err)
 	}
-	if s.db, err = store.Open(filepath.Join(cfg.DataDir, "aether.db")); err != nil {
+	if s.db, err = store.Open(StorePath(cfg.DataDir)); err != nil {
 		return nil, err
 	}
-	if s.log, err = events.OpenSQLiteLog(filepath.Join(cfg.DataDir, "aether.db")); err != nil {
+	if s.log, err = events.OpenSQLiteLog(StorePath(cfg.DataDir)); err != nil {
 		return nil, err
 	}
 	if s.bus, err = events.NewInProc(ctx, s.log); err != nil {
@@ -293,6 +313,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
+	s.control = control.New(control.Config{})
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
@@ -304,6 +325,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
 		Profiles:      prof,
 		StandardImage: cfg.StandardImage,
+		BrowserImage:  cfg.BrowserImage,
+		Control:       s.control,
 		// What this build ships with, so the scheduler can tell a member
 		// whether a server update would move their environment image.
 		DefaultStandardImage: DefaultStandardImage,
@@ -317,14 +340,16 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
-	s.control = control.New(control.Config{})
+	authMu := &sync.Mutex{}
 	if s.evidence, err = evidence.New(evidence.Config{
-		Store:       s.db,
-		Git:         s.git,
-		Runs:        s.db,
-		Transcript:  ptyTranscript{host: s.pty},
-		Events:      s.log,
-		EvidenceDir: filepath.Join(cfg.DataDir, "evidence"),
+		Store:           s.db,
+		Git:             s.git,
+		Runs:            s.db,
+		Transcript:      ptyTranscript{host: s.pty},
+		Events:          s.log,
+		Artifacts:       s.sched,
+		EvidenceDir:     filepath.Join(cfg.DataDir, "evidence"),
+		AuthorizationMu: authMu,
 	}); err != nil {
 		return nil, err
 	}
@@ -343,9 +368,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		node, nodeErr = tailscaled.Self(discoverCtx)
 		cancel()
 	}
+	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus}
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
-		HostKeyPath:       filepath.Join(cfg.DataDir, "ssh", "host_ed25519_key"),
+		HostKeyPath:       HostKeyPath(cfg.DataDir),
 		Store:             s.db,
 		Bus:               s.bus,
 		Git:               lazyGit{s.git},
@@ -360,24 +386,35 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
 		Profiles:          prof,
 		Config:            sshd.NewConfigBackend(homes, s.db),
+		AuthorizationMu:   authMu,
+		DeleteWorkspace:   workspaces.Delete,
 	}
+	sshCfg.EdgeAccess = cfg.EdgeAccess
 	if err = s.buildServices(Deps{
-		Config:   cfg,
-		DataDir:  cfg.DataDir,
-		Store:    s.db,
-		Bus:      s.bus,
-		Events:   s.log,
-		Runs:     s.sched,
-		Git:      s.git,
-		PTY:      s.pty,
-		SSH:      &sshCfg,
-		Control:  s.control,
-		Evidence: s.evidence,
+		Config:     cfg,
+		DataDir:    cfg.DataDir,
+		Store:      s.db,
+		Bus:        s.bus,
+		Events:     s.log,
+		Runs:       s.sched,
+		Runtime:    s.rt,
+		Git:        s.git,
+		PTY:        s.pty,
+		SSH:        &sshCfg,
+		Control:    s.control,
+		Evidence:   s.evidence,
+		Workspaces: workspaces,
 	}); err != nil {
 		return nil, err
 	}
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
 		return nil, err
+	}
+	if cfg.EdgeURL != "" {
+		if s.edge, err = newEdgeAgent(cfg, s.ssh); err != nil {
+			return nil, err
+		}
+		s.ssh.SetEdgeOwner(s.edge)
 	}
 	if cfg.WebPort != 0 {
 		if cfg.WebPort < 0 || cfg.WebPort > 65535 {
@@ -392,6 +429,24 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		s.tailnet = servergw.Tailnet{Node: node, Port: cfg.WebPort, Certs: tailscaled}
 	}
 	return s, nil
+}
+
+// StorePath is the server's database under dataDir.
+func StorePath(dataDir string) string { return filepath.Join(dataDir, "aether.db") }
+
+// HostKeyPath is where the server keeps its SSH host key under dataDir.
+// The key derives the server's id at an edge.
+func HostKeyPath(dataDir string) string {
+	return filepath.Join(dataDir, "ssh", "host_ed25519_key")
+}
+
+func newEdgeAgent(cfg Config, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
+	hostKey, err := sshd.LoadOrCreateHostKey(HostKeyPath(cfg.DataDir))
+	if err != nil {
+		return nil, err
+	}
+	return edgeagent.New(edgeagent.Config{EdgeURL: cfg.EdgeURL, DataDir: cfg.DataDir, HostKey: hostKey, SSH: sshSrv,
+		AccessPolicy: cfg.EdgeAccess})
 }
 
 // WebURL is the address the dashboard is served at, empty when the
@@ -447,6 +502,15 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 3)
 	var wg sync.WaitGroup
 	wg.Add(2)
+	if s.edge != nil {
+		// The agent never ends the server: it retries an unreachable
+		// edge until runCtx is done.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.edge.Run(runCtx)
+		}()
+	}
 	if s.web != nil {
 		wg.Add(1)
 		go func() {

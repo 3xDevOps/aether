@@ -9,6 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -32,6 +33,7 @@ type Deps struct {
 	Bus     events.Bus
 	Events  events.EventLog
 	Runs    *scheduler.Scheduler
+	Runtime runtime.Runtime
 	Git     *gitengine.Engine
 	PTY     *ptyhost.Host
 	SSH     *sshd.Config
@@ -41,7 +43,8 @@ type Deps struct {
 	Control *control.Service
 	// Evidence is the one durable evidence service shared by lifecycle hooks,
 	// room handoffs, and SSH/local evidence reads.
-	Evidence *evidence.Service
+	Evidence   *evidence.Service
+	Workspaces *workspaceDeletion
 }
 
 type serviceBuilder struct {

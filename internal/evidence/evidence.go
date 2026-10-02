@@ -77,6 +77,7 @@ type Store interface {
 type StagingStore interface {
 	CreateEvidenceStaging(context.Context, *store.EvidenceStaging) error
 	ListEvidenceStaging(context.Context, time.Time, int) ([]*store.EvidenceStaging, error)
+	ListRunEvidenceStaging(context.Context, domain.RunID, int) ([]*store.EvidenceStaging, error)
 	DeleteEvidenceStaging(context.Context, string) error
 }
 
@@ -100,6 +101,12 @@ type GitEvidencePruner interface {
 // count; evidence owns the bounded artifact copy below.
 type TranscriptExporter interface {
 	Replay(domain.RunID) (io.ReadCloser, error)
+}
+
+// ArtifactSource opens an immutable, run-scoped development capture. It is an
+// internal source seam; transports must authenticate before requesting capture.
+type ArtifactSource interface {
+	OpenEvidenceArtifact(context.Context, domain.RunID, string) (protocol.DevArtifact, io.ReadCloser, error)
 }
 
 // RunLookup resolves the immutable run identity needed by a packet.
@@ -137,6 +144,7 @@ type FileSystem interface {
 	Remove(string) error
 	Stat(string) (fs.FileInfo, error)
 	Open(string) (io.ReadCloser, error)
+	ReadDir(string) ([]fs.DirEntry, error)
 }
 
 type osFileSystem struct{}
@@ -153,9 +161,10 @@ func (osFileSystem) SyncDir(path string) error {
 	closeErr := dir.Close()
 	return errors.Join(syncErr, closeErr)
 }
-func (osFileSystem) Remove(path string) error                { return os.Remove(path) }
-func (osFileSystem) Stat(path string) (fs.FileInfo, error)   { return os.Stat(path) }
-func (osFileSystem) Open(path string) (io.ReadCloser, error) { return os.Open(path) }
+func (osFileSystem) Remove(path string) error                   { return os.Remove(path) }
+func (osFileSystem) Stat(path string) (fs.FileInfo, error)      { return os.Stat(path) }
+func (osFileSystem) Open(path string) (io.ReadCloser, error)    { return os.Open(path) }
+func (osFileSystem) ReadDir(path string) ([]fs.DirEntry, error) { return os.ReadDir(path) }
 
 // Config wires the service. Store, Git, Runs, and EvidenceDir are required.
 // Transcript and Events are optional sources: an unavailable optional source
@@ -165,17 +174,22 @@ type Config struct {
 	Store       Store
 	Git         GitEvidence
 	Transcript  TranscriptExporter
+	Artifacts   ArtifactSource
 	Runs        RunLookup
 	Events      EventLookup
 	EvidenceDir string
 	Retention   time.Duration
 	Now         func() time.Time
 	FS          FileSystem
+	// AuthorizationMu is the shared credential-bearing admission gate used
+	// by account, membership, role, and workspace policy mutations.
+	// Explicit captures require it; trusted lifecycle captures do not.
+	AuthorizationMu *sync.Mutex
 }
 
-// Request describes one automatic evidence capture. Objective and provenance
-// are bounded and treated as untrusted text. Legacy CreatorID requests are
-// interpreted as human-origin captures; new callers should set Origin.
+// Request describes one evidence capture. Objective and provenance are bounded
+// and treated as untrusted text. Legacy CreatorID requests are interpreted as
+// human-origin captures; new callers should set Origin.
 type Request struct {
 	RunID                 domain.RunID
 	Origin                store.EvidenceOrigin
@@ -188,22 +202,30 @@ type Request struct {
 	RelatedRoomMessageIDs []string
 	// SourceFacts are server-observed availability facts supplied by the
 	// scheduler for sources not owned by this service, such as Run Room pages.
-	SourceFacts     []store.EvidenceSourceFact
-	UnresolvedFacts []string
-	NextAction      string
-	Provenance      string
+	SourceFacts       []store.EvidenceSourceFact
+	UnresolvedFacts   []string
+	NextAction        string
+	Provenance        string
+	ArtifactIDs       []string
+	VerificationNotes string
+	// Authorize re-resolves the authenticated caller's current authority using
+	// bounded local reads. Nil is reserved for trusted lifecycle captures.
+	// Explicit selection must supply it, never a caller-controlled identity.
+	Authorize func() error
 }
 
 type Service struct {
-	store      Store
-	git        GitEvidence
-	transcript TranscriptExporter
-	runs       RunLookup
-	events     EventLookup
-	root       string
-	retention  time.Duration
-	now        func() time.Time
-	fs         FileSystem
+	store           Store
+	git             GitEvidence
+	transcript      TranscriptExporter
+	artifacts       ArtifactSource
+	runs            RunLookup
+	events          EventLookup
+	root            string
+	retention       time.Duration
+	now             func() time.Time
+	fs              FileSystem
+	authorizationMu *sync.Mutex
 
 	mu      sync.Mutex
 	locks   map[domain.RunID]*sync.Mutex
@@ -230,8 +252,10 @@ func New(cfg Config) (*Service, error) {
 	}
 	svc := &Service{
 		store: cfg.Store, git: cfg.Git, transcript: cfg.Transcript, runs: cfg.Runs,
-		events: cfg.Events, root: cfg.EvidenceDir, retention: cfg.Retention,
-		now: cfg.Now, fs: cfg.FS, locks: make(map[domain.RunID]*sync.Mutex),
+		artifacts: cfg.Artifacts,
+		events:    cfg.Events, root: cfg.EvidenceDir, retention: cfg.Retention,
+		now: cfg.Now, fs: cfg.FS, authorizationMu: cfg.AuthorizationMu,
+		locks:   make(map[domain.RunID]*sync.Mutex),
 		packets: make(map[string]protocol.EvidencePacket),
 		cleaned: make(map[string]struct{}),
 	}
@@ -306,12 +330,23 @@ func validateRequest(req Request) error {
 	if req.PublicationOwner != "" && !req.PublicationOwner.Valid() {
 		return fmt.Errorf("%w: invalid publication owner", ErrInvalidRequest)
 	}
+	if err := validateCaptureSelection(req.ArtifactIDs, req.VerificationNotes); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.EvidencePacket, error) {
 	if err := ctx.Err(); err != nil {
 		return protocol.EvidencePacket{}, err
+	}
+	if req.Authorize != nil {
+		if s.authorizationMu == nil {
+			return protocol.EvidencePacket{}, errors.New("evidence: authorization admission gate unavailable")
+		}
+		if err := req.Authorize(); err != nil {
+			return protocol.EvidencePacket{}, err
+		}
 	}
 	run, err := s.runs.GetRun(ctx, req.RunID)
 	if err != nil {
@@ -354,6 +389,18 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 			existing.IdempotencyKey != req.IdempotencyKey {
 			return protocol.EvidencePacket{}, errors.New("evidence: durable idempotency lookup returned a mismatched packet")
 		}
+		if existing.Availability == store.EvidenceExpired ||
+			(existing.ExpiresAt != nil && !s.now().Before(*existing.ExpiresAt)) {
+			return protocol.EvidencePacket{}, ErrExpired
+		}
+		sameSelection := len(existing.Captures) == len(req.ArtifactIDs) &&
+			existing.VerificationNotes == req.VerificationNotes
+		for i := 0; sameSelection && i < len(req.ArtifactIDs); i++ {
+			sameSelection = existing.Captures[i].ID == req.ArtifactIDs[i]
+		}
+		if !sameSelection {
+			return protocol.EvidencePacket{}, fmt.Errorf("%w: idempotency key already used with different capture selection or verification notes", ErrInvalidRequest)
+		}
 		packet := safePacket(protocol.EvidencePacketFromStore(existing))
 		s.mu.Lock()
 		s.packets[key] = clonePacket(packet)
@@ -362,6 +409,9 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 	}
 	if !errors.Is(lookupErr, store.ErrNotFound) {
 		return protocol.EvidencePacket{}, fmt.Errorf("evidence: lookup packet idempotency: %w", lookupErr)
+	}
+	if len(req.ArtifactIDs) > 0 && (s.artifacts == nil || s.stagingStore() == nil) {
+		return protocol.EvidencePacket{}, errors.New("evidence: development capture retention unavailable")
 	}
 	now := s.now().UTC()
 	journaled := s.stagingStore() != nil
@@ -404,6 +454,11 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 		}
 		return protocol.EvidencePacket{}, err
 	}
+	captures, err := s.retainCaptures(ctx, run, key, req.ArtifactIDs, req.Authorize)
+	if err != nil {
+		rollbackErr := s.rollbackCapture(ctx, run.WorkspaceID, key, gitCreated, transcriptStaged, journaled)
+		return protocol.EvidencePacket{}, errors.Join(err, rollbackErr)
+	}
 	boundaryFact, boundary, boundaryUnresolved := s.eventBoundary(ctx)
 
 	objective := req.Objective
@@ -439,6 +494,9 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 	sources = appendSourceFacts(sources, changedFilesSource)
 	sources = appendSourceFacts(sources, req.SourceFacts...)
 	sources = appendSourceFacts(sources, transcriptFact, boundaryFact)
+	if len(captures) > 0 {
+		sources = appendSourceFacts(sources, store.EvidenceSourceFact{Name: "development_captures", Available: true})
+	}
 	p := &store.EvidencePacket{
 		ID: key, WorkspaceID: run.WorkspaceID, RunID: req.RunID, Origin: origin, OwnerID: owner, CreatorID: creator,
 		PublicationOwner: publicationOwner,
@@ -446,11 +504,12 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 		ExpiresAt: new(now.Add(s.retention)), EventBoundary: boundary,
 		BaseRevision: cleanObjectID(revision.BaseCommit), RetainedRevision: cleanObjectID(revision.Commit),
 		ChangedFiles: changedFacts(revision.ChangedFiles), Sources: sources,
+		Captures: captures, VerificationNotes: req.VerificationNotes,
 		RelatedRoomMessageIDs: boundedIDs(req.RelatedRoomMessageIDs), UnresolvedFacts: unresolved,
 		NextAction: cleanText(nextAction, MaxNextActionBytes), Provenance: cleanText(provenance, MaxProvenanceBytes),
 		IdempotencyKey: req.IdempotencyKey, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.store.CreateEvidencePacket(ctx, p); err != nil {
+	if err := s.publishPacket(ctx, req, p); err != nil {
 		rollbackErr := s.rollbackCapture(ctx, run.WorkspaceID, key, gitCreated, transcriptStaged, journaled)
 		if rollbackErr != nil {
 			return protocol.EvidencePacket{}, fmt.Errorf("evidence: persist packet: %w (rollback: %v)", err, rollbackErr)
@@ -475,8 +534,31 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 	return packet, nil
 }
 
+// publishPacket is the explicit sharing linearization point: the durable
+// packet insert and its final authorization check share the revocation gate.
+// No Git, source reads, filesystem work, or rollback runs under that gate.
+func (s *Service) publishPacket(ctx context.Context, req Request, packet *store.EvidencePacket) error {
+	if req.Authorize != nil {
+		// Deletion takes authorizationMu before the evidence run lock. Never
+		// wait for that gate while holding the run lock: a busy admission is
+		// denied and the caller rolls staged bytes back before releasing it.
+		if !s.authorizationMu.TryLock() {
+			return fmt.Errorf("evidence: authorization admission in progress; retry retention: %w", store.ErrConflict)
+		}
+		defer s.authorizationMu.Unlock()
+		if err := req.Authorize(); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.store.CreateEvidencePacket(ctx, packet)
+}
+
 func (s *Service) rollbackCapture(ctx context.Context, workspace domain.WorkspaceID, key string, gitCreated, transcriptStaged, journaled bool) error {
 	err := s.rollbackArtifacts(ctx, workspace, key, gitCreated, transcriptStaged)
+	err = errors.Join(err, s.removeCaptures(key))
 	if err == nil && journaled {
 		cleanupCtx, cancel := s.cleanupContext(ctx)
 		err = s.clearStaging(cleanupCtx, key)
@@ -597,6 +679,9 @@ func (s *Service) reapStaging(ctx context.Context, before time.Time) error {
 }
 
 func (s *Service) removeStagedArtifacts(ctx context.Context, workspace domain.WorkspaceID, key string) error {
+	if err := s.removeCaptures(key); err != nil {
+		return err
+	}
 	path, err := s.artifactPath(key)
 	if err != nil {
 		return err

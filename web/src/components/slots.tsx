@@ -15,7 +15,9 @@ export interface CardSlotProps {
 export interface SlotPropsMap {
   /** Compact markers on the card's title row: paused, protected, approvals. */
   'card:badges': CardSlotProps
-  /** A wrapping row under the task line: conflict chips and the like. */
+  /** Compact warning controls kept outside the status metadata scroller. */
+  'card:warnings': CardSlotProps
+  /** Full conflict diagnostics in the card's Details disclosure. */
   'card:chips': CardSlotProps
   /** The card's bottom row, right of the owner: watcher avatars. */
   'card:footer': CardSlotProps
@@ -25,7 +27,7 @@ export interface SlotPropsMap {
 
 export type SlotName = keyof SlotPropsMap
 /** The slots that live inside a run card and take its run. */
-export type CardSlotName = 'card:badges' | 'card:chips' | 'card:footer'
+export type CardSlotName = 'card:badges' | 'card:warnings' | 'card:chips' | 'card:footer'
 
 type AnyProps = Record<string, unknown>
 type Entry = { id: string; view: ComponentType<AnyProps> }

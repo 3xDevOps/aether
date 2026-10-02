@@ -36,10 +36,14 @@ export interface SidebarRun {
   owner?: Member
 }
 
+export interface SidebarRunTree extends SidebarRun {
+  children: SidebarRun[]
+}
+
 export interface SidebarGroup {
   key: string
   label: string
-  runs: SidebarRun[]
+  runs: SidebarRunTree[]
 }
 
 function byAttention(
@@ -80,21 +84,43 @@ export function sidebarRuns(s: SidebarInput): SidebarRun[] {
   return sortRuns(entries)
 }
 
-/**
- * Group by run state, or by the owning member. Groups and runs both sort
- * worst-state-first, then most-recently-changed-first.
- */
+/** Swarms stay together, ordered by their most urgent run. */
 export function sidebarGroups(s: SidebarInput): SidebarGroup[] {
   const groups = new Map<string, SidebarGroup>()
+  const entries = sidebarRuns(s)
+  const byID = new Map(entries.map((entry) => [entry.run.id, entry]))
+  const parents = new Map<string, SidebarRun>()
+  const children = new Map<string, SidebarRun[]>()
+  for (const entry of entries) {
+    const run = entry.run
+    if (run.mission_role !== 'worker' || !run.integrator_run_id) continue
+    const parent = byID.get(run.integrator_run_id)
+    if (
+      !parent ||
+      parent.run.mission_role !== 'integrator' ||
+      !run.mission_id ||
+      parent.run.mission_id !== run.mission_id ||
+      parent.run.workspace_id !== run.workspace_id
+    ) continue
+    parents.set(run.id, parent)
+    const siblings = children.get(parent.run.id)
+    if (siblings) siblings.push(entry)
+    else children.set(parent.run.id, [entry])
+  }
+  const listed = new Set<string>()
 
-  for (const entry of sidebarRuns(s)) {
+  for (const entry of entries) {
+    const root = parents.get(entry.run.id) ?? entry
+    if (listed.has(root.run.id)) continue
+    listed.add(root.run.id)
+    const tree = { ...root, children: children.get(root.run.id) ?? [] }
     const [key, label] =
       s.groupBy === 'status'
         ? [entry.state, stateLabel[entry.state]]
-        : ownerOf(entry)
+        : ownerOf(root)
     const group = groups.get(key)
-    if (group) group.runs.push(entry)
-    else groups.set(key, { key, label, runs: [entry] })
+    if (group) group.runs.push(tree)
+    else groups.set(key, { key, label, runs: [tree] })
   }
 
   const order = [...groups.values()]

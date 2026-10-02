@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "aether-inbox",
+            "type": "command",
+            "command": "/usr/local/bin/aether-internal hook gemini BeforeAgent",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "aether-inbox",
+            "type": "command",
+            "command": "/usr/local/bin/aether-internal hook gemini AfterTool",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "aether-inbox",
+            "type": "command",
+            "command": "/usr/local/bin/aether-internal hook gemini AfterAgent",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

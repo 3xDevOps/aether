@@ -21,8 +21,18 @@ type PTYAttacher interface {
 	// Replay streams a run's recorded transcript as raw terminal bytes and
 	// reports their count; os.ErrNotExist when the run never recorded one.
 	Replay(run domain.RunID) (io.ReadCloser, int, error)
+	// RecentReplay returns a bounded suffix of a run's recorded transcript.
+	RecentReplay(run domain.RunID, maxBytes int) (ptyhost.ReplayWindow, error)
 	// Snapshot returns the compact current screen for a finished-run attach.
 	Snapshot(run domain.RunID) (ptyhost.ScreenSnapshot, error)
+}
+
+// PTYHistoryReader is the read-only transcript extension implemented by the
+// production PTY host. Inputs are validated and normalized before dispatch;
+// implementations return at most limit lines in chronological order. It stays
+// separate so attach-only adapters remain small.
+type PTYHistoryReader interface {
+	History(ctx context.Context, run domain.RunID, before, query string, limit int) (ptyhost.HistoryPage, error)
 }
 
 // RunLauncherWithOptions is the optional extension implemented by schedulers

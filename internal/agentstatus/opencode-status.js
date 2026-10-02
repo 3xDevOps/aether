@@ -3,7 +3,7 @@
 // that say whether the agent is working or waiting are handed to the staged
 // server binary, which reports them over the run's coordination socket.
 //
-// The command below is internal/mcpbridge.BinaryPath, the server binary the
+// The command below is internal/coordtransport.BinaryPath, the server binary the
 // scheduler mounts into every run container. The mapping itself lives in Go
 // (internal/agentstatus.FromOpenCodeEvent).
 import { spawn } from "node:child_process"

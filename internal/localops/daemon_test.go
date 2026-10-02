@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/syncd"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -24,7 +25,7 @@ func TestDaemonInstallAndStatus(t *testing.T) {
 	}
 
 	keyPath := filepath.Join(t.TempDir(), "aether_ed25519")
-	path, note, err := InstallDaemon("host:2222", t.TempDir(), keyPath)
+	path, note, err := InstallDaemon(syncd.Config{Server: "host:2222", RepoPath: t.TempDir(), KeyPath: keyPath})
 	if err != nil {
 		t.Fatalf("InstallDaemon: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestDaemonInstallAndStatus(t *testing.T) {
 }
 
 func TestInstallDaemonRequiresServer(t *testing.T) {
-	if _, _, err := InstallDaemon("", ".", ""); err == nil {
+	if _, _, err := InstallDaemon(syncd.Config{RepoPath: "."}); err == nil {
 		t.Fatal("InstallDaemon accepted an empty server")
 	}
 }

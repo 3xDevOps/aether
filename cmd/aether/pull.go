@@ -33,7 +33,7 @@ func runPull(args []string) error {
 	}); err != nil {
 		return err
 	}
-	result, err := localops.Pull(cfg.Repo, cfg.User, cfg.Addr, coords)
+	result, err := localops.Pull(cfg.Repo, cfg.User, cfg.GitHost(), coords)
 	if err != nil {
 		return err
 	}

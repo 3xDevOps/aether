@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -40,7 +41,7 @@ func (st *sessionState) geometry() (cols, rows uint, hasPTY bool) {
 // The context handed to handlers is canceled when the channel closes (the
 // request loop ends), so subsystem handlers observe channel teardown even
 // when they are not blocked on channel I/O.
-func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc ssh.NewChannel) {
+func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc ssh.NewChannel, abortConn func()) {
 	ch, reqs, err := nc.Accept()
 	if err != nil {
 		return
@@ -102,13 +103,17 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 			var handler func()
 			switch p.Name {
 			case protocol.SubsystemControl:
-				handler = func() { s.serveControl(ctx, member, ch) }
+				handler = func() { s.serveControl(ctx, member, ch, abortConn) }
 			case protocol.SubsystemEvents:
-				handler = func() { s.serveEvents(ctx, member, sshConn{ch}) }
+				handler = func() { s.serveEvents(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemAttach:
-				handler = func() { s.serveAttach(ctx, member, st, sshConn{ch}) }
+				handler = func() { s.serveAttach(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemTerminal:
-				handler = func() { s.serveTerminal(ctx, member, st, sshConn{ch}) }
+				handler = func() { s.serveTerminal(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
+			case protocol.SubsystemDevBrowser:
+				handler = func() { s.serveDevelopmentBrowser(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
+			case protocol.SubsystemDevArtifact:
+				handler = func() { s.serveDevelopmentArtifact(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemSync:
 				handler = func() { s.serveSync(ctx, member, ch) }
 			}
@@ -167,6 +172,14 @@ func (s *Server) runGitCommand(ctx context.Context, member domain.MemberID, ch s
 		return
 	}
 	ws, err := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(wsID))
+	if err == nil {
+		lock := s.workspaceLock(ws.ID)
+		lock.RLock()
+		defer lock.RUnlock()
+		// Resolve before allocating a gate, then revalidate under it so a
+		// completed deletion cannot be followed by lazy repo creation.
+		ws, err = s.cfg.Store.GetWorkspace(ctx, ws.ID)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(ch.Stderr(), "aether: workspace %q: %v\n", wsID, err)
 		sendExitStatus(ch, 128)
@@ -210,6 +223,24 @@ type subsystemConn interface {
 	exit(status int)
 }
 
-type sshConn struct{ ssh.Channel }
+const sshChannelCloseTimeout = time.Second
 
-func (c sshConn) exit(status int) { sendExitStatus(c.Channel, status) }
+type sshConn struct {
+	ssh.Channel
+	abort func()
+}
+
+// Status and close share the transport's packet writer with every channel.
+// Only abort that transport if the graceful operation itself stops progressing;
+// a responsive peer keeps its other sessions and receives the denial status.
+func (c sshConn) exit(status int) {
+	timer := time.AfterFunc(sshChannelCloseTimeout, c.abort)
+	defer timer.Stop()
+	sendExitStatus(c.Channel, status)
+}
+
+func (c sshConn) Close() error {
+	timer := time.AfterFunc(sshChannelCloseTimeout, c.abort)
+	defer timer.Stop()
+	return c.Channel.Close()
+}

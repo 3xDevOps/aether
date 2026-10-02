@@ -40,22 +40,25 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 	// server fences the writer before admitting this replacement, and the
 	// gateway must not forward input while that transition is in flight.
 	allowWrite := req.Write && !req.ReleaseControl
-	term, ack, err := s.Backend.Attach(s.Ctx, protocol.AttachRequest{
+	attachReq := protocol.AttachRequest{
 		RunID:             r.PathValue("run"),
 		ReadOnly:          !allowWrite,
+		Screen:            req.Screen,
+		Interactive:       req.Interactive,
 		Cols:              cols,
 		Rows:              rows,
 		Shell:             shell,
+		Incarnation:       req.Incarnation,
 		Follow:            req.Follow,
 		Resume:            req.Resume,
-		Cursor:            req.Cursor,
-		ResumeID:          req.ResumeID,
 		ControlSessionID:  req.ControlSessionID,
 		ControlGeneration: req.ControlGeneration,
 		Takeover:          req.Takeover,
 		ReleaseControl:    req.ReleaseControl,
 		Framed:            true,
-	})
+	}
+	attachReq.SetResumePosition(req.ResumePosition())
+	term, ack, err := s.Backend.Attach(s.Ctx, attachReq)
 	if err == nil && ack.OK && !ack.Framed {
 		err = errors.New("server does not support ordered terminal snapshots; update aether-server")
 		ack = protocol.AttachResponse{Code: protocol.CodeInternal, Error: err.Error()}
@@ -76,10 +79,11 @@ func (g *Gateway) handleAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A read-only attach's input is dropped rather than refused. Its
-	// resizes still travel: the session decides whether a mirror's size
-	// counts, and a lone one's does.
-	if err := s.pumpTerminal(term, allowWrite, true); err != nil {
+	// Read-only input is dropped. Primary mirrors retain their session's
+	// geometry policy, but development shell watchers must never impose a
+	// size. Interactive input/control is sent as NDJSON so the SSH and
+	// in-process gateways share one parser.
+	if err := s.pumpTerminal(term, allowWrite, shell == "" || allowWrite, req.Interactive); err != nil {
 		_ = s.Conn.Close(attachEndClose(err))
 		return
 	}
@@ -111,10 +115,10 @@ func attachEndClose(err error) (websocket.StatusCode, string) {
 }
 
 // pumpTerminal bridges the socket and a terminal: terminal output records are
-// decoded in order, binary records go out as binary frames, and geometry
-// records become JSON controls before the next record is read. Client input
-// and resize controls are handled concurrently.
-func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error {
+// decoded in order, binary records go out as binary frames, and geometry and
+// control records become JSON controls before the next record is read. Client
+// input and resize controls are handled concurrently.
+func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize, interactive bool) error {
 	go func() {
 		defer s.cancel()
 		defer func() { _ = term.Close() }()
@@ -132,10 +136,30 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 			}
 			switch ctl.Type {
 			case protocol.DashAttachInput:
-				if !allowInput || ctl.Data == "" {
+				if ctl.Data == "" || (!interactive && !allowInput) {
 					continue
 				}
-				if _, err := term.Write([]byte(ctl.Data)); err != nil {
+				payload := []byte(ctl.Data)
+				if interactive {
+					var marshalErr error
+					payload, marshalErr = json.Marshal(ctl)
+					if marshalErr != nil {
+						continue
+					}
+					payload = append(payload, '\n')
+				}
+				if _, err := term.Write(payload); err != nil {
+					return
+				}
+			case protocol.DashAttachControlFrame:
+				if !interactive {
+					continue
+				}
+				payload, err := json.Marshal(ctl)
+				if err != nil {
+					continue
+				}
+				if _, err := term.Write(append(payload, '\n')); err != nil {
 					return
 				}
 			case protocol.DashAttachResize:
@@ -157,6 +181,15 @@ func (s *Socket) pumpTerminal(term Terminal, allowInput, allowResize bool) error
 				Cols: size[0],
 				Rows: size[1],
 			}) != nil {
+				return nil
+			}
+		}
+		if reader.Control != nil {
+			payload, marshalErr := protocol.MarshalTerminalControl(*reader.Control)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if s.write(websocket.MessageText, payload) != nil {
 				return nil
 			}
 		}

@@ -343,6 +343,25 @@ func (s *Service) PurgeRun(ctx context.Context, workspace domain.WorkspaceID, ru
 			}
 		}
 	}
+	if staging := s.stagingStore(); staging != nil {
+		for {
+			rows, err := staging.ListRunEvidenceStaging(cleanupCtx, run, MaxPageSize)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				break
+			}
+			for _, row := range rows {
+				if err := s.removeStagedArtifacts(cleanupCtx, workspace, row.ID); err != nil {
+					return err
+				}
+				if err := staging.DeleteEvidenceStaging(cleanupCtx, row.ID); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	if cleanup != nil {
 		if err := cleanup(cleanupCtx); err != nil {
 			return fmt.Errorf("evidence: run cleanup: %w", err)
@@ -358,6 +377,9 @@ func (s *Service) purgePacket(ctx context.Context, p *store.EvidencePacket) erro
 	cleanupCtx, cancel := s.cleanupContext(ctx)
 	defer cancel()
 	key := packetCaptureKey(p)
+	if err := s.removeCaptures(key); err != nil {
+		return err
+	}
 	path, err := s.artifactPath(key)
 	if err != nil {
 		return err
@@ -527,6 +549,13 @@ func appendSourceFacts(dst []store.EvidenceSourceFact, facts ...store.EvidenceSo
 	return dst
 }
 func clonePacket(in protocol.EvidencePacket) protocol.EvidencePacket {
+	in.Captures = append([]protocol.DevArtifact(nil), in.Captures...)
+	for i := range in.Captures {
+		if in.Captures[i].Dirty != nil {
+			dirty := *in.Captures[i].Dirty
+			in.Captures[i].Dirty = &dirty
+		}
+	}
 	in.ChangedFiles = append([]protocol.ChangedFileFact(nil), in.ChangedFiles...)
 	in.Sources = append([]protocol.EvidenceSourceFact(nil), in.Sources...)
 	in.RelatedRoomMessageIDs = append([]string(nil), in.RelatedRoomMessageIDs...)

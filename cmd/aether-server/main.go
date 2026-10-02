@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordcli"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -23,6 +25,11 @@ import (
 )
 
 func main() {
+	// The lifecycle helper must precede the aether-internal basename dispatch:
+	// every run receives that read-only, version-matched staged binary.
+	if len(os.Args) > 1 && os.Args[1] == "dev-exec" {
+		os.Exit(devExec(os.Args[2:]))
+	}
 	if filepath.Base(os.Args[0]) == "aether-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))
 	}
@@ -46,6 +53,10 @@ func main() {
 		exitOn(setup(args))
 	case "config":
 		exitOn(configCmd(args))
+	case "edge":
+		exitOn(edgeCmd(args))
+	case "device":
+		exitOn(deviceCmd(args))
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", os.Args[1])
 		usage()
@@ -69,6 +80,8 @@ commands:
   install  write the systemd unit and the config file (same options as serve)
   setup    walk through the install interactively
   config   show | path | set <key> <value> | edit
+  edge     status | claim-code | trust | leave
+  device   approve <code> | review: approve or revoke members' edge devices
   version  print the version
 
 serve and install options, which are also the config file keys:
@@ -83,9 +96,12 @@ type serveOptions struct {
 	addr                 *string
 	webPort              *int
 	standardImage        *string
+	browserImage         *string
 	harnessDefinitions   *string
 	tailnetAutoJoin      *bool
 	tailnetRequireKey    *bool
+	edgeURL              *edgeURLValue
+	edgeAccess           *accessPolicyValue
 	conflictCoordination *bool
 	stallThreshold       *time.Duration
 	pollInterval         *time.Duration
@@ -107,10 +123,23 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"serve the dashboard over HTTPS on this host's tailnet addresses at this port (0 = off; 443 makes it https://<magicdns-name>/)")
 	o.standardImage = fs.String("standard-image", server.DefaultStandardImage,
 		"published standard environment image recommended at workspace creation")
+	browserImage := os.Getenv("AETHER_BROWSER_IMAGE")
+	if browserImage == "" {
+		browserImage = server.DefaultBrowserImage
+	}
+	o.browserImage = fs.String("browser-image", browserImage,
+		"versioned browser companion image or digest (AETHER_BROWSER_IMAGE; never untagged or latest)")
 	o.harnessDefinitions = fs.String("harness-definitions", os.Getenv("AETHER_HARNESS_DEFINITIONS"),
 		`JSON object of administrator-owned generic harness definitions`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	o.tailnetRequireKey = fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")
+	o.edgeURL = new(edgeURLValue)
+	fs.Var(o.edgeURL, "edge-url",
+		"edge that relays SSH for members without a direct or tailnet route (empty = off; aether-server setup offers "+edgeagent.DefaultURL+")")
+	o.edgeAccess = new(accessPolicyValue(edgeproto.PolicyApprovedDevices))
+	fs.Var(o.edgeAccess, "edge-access",
+		"who may reach this server through the edge: account (signing in with GitHub is enough) or approved-devices "+
+			"(each new device waits until a person approves it); changed only on this host")
 	o.conflictCoordination = fs.Bool("conflict-coordination", true, "let overlapping runs exchange coordination messages")
 	o.stallThreshold = fs.Duration("stall-threshold", 0,
 		"how long a run may go with no output and no file changes before it parks needs-attention (0 = 10m)")
@@ -118,7 +147,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished run's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long an explicitly closed TUI run's container is retained (0 = 1h, negative = no retention)")
+		"how long an explicitly closed TUI run's container is retained (0 = 168h / 7 days, negative = no retention)")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"refuse new runs below this many free bytes (0 = 1GiB, negative = no floor)")
 	return o
@@ -150,9 +179,13 @@ func serve(args []string) error {
 		Addr:              *o.addr,
 		WebPort:           *o.webPort,
 		StandardImage:     *o.standardImage,
+		BrowserImage:      *o.browserImage,
 		Harnesses:         harnesses,
 		TailnetAutoJoin:   *o.tailnetAutoJoin,
 		TailnetRequireKey: *o.tailnetRequireKey,
+
+		EdgeURL:    string(*o.edgeURL),
+		EdgeAccess: edgeproto.AccessPolicy(*o.edgeAccess),
 
 		CoordinationDisabled: !*o.conflictCoordination,
 		// The one place a process is granted the right to replace itself

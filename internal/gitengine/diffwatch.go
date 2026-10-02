@@ -720,6 +720,13 @@ func (w *diffWatch) snapshot() {
 		if treeErr == nil {
 			payload.Tree = tree
 			payload.ParentTree = w.lastTree
+			// Persist the tree before publishing its event. A subscriber can
+			// receive the event immediately, and a restart must resume from
+			// the tree named by that event.
+			if err := w.e.setLastSnapshotTree(w.run, tree); err != nil {
+				slog.Warn("gitengine: snapshot tree not recorded; a restart will diff from the fork point",
+					"run", string(w.run), "error", err)
+			}
 		}
 		if w.e.cfg.Bus != nil {
 			// The registry entry outlives the watch, so the workspace scope
@@ -735,10 +742,6 @@ func (w *diffWatch) snapshot() {
 		}
 		if treeErr == nil {
 			w.lastTree = tree
-			if err := w.e.setLastSnapshotTree(w.run, tree); err != nil {
-				slog.Warn("gitengine: snapshot tree not recorded; a restart will diff from the fork point",
-					"run", string(w.run), "error", err)
-			}
 		}
 	}
 	w.checkHead(ctx)

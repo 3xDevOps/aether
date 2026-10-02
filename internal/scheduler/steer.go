@@ -59,6 +59,9 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	// No container yet (still provisioning): the provisioning checkpoints
 	// see killRequested and abort. Not-found means the desired state is gone.
 	if cid != "" {
+		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
+			return err
+		}
 		if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			return err
 		}
@@ -237,6 +240,10 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return fmt.Errorf("scheduler: inspect destroy-pending sidecar: %w", serr)
 	}
+	if err = s.persistEvidencePendingErr(id, identity); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
 	s.mu.Unlock()
 	if err != nil {
@@ -246,6 +253,11 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		logEvidenceFailure(id, captureErr)
 		s.persistEvidencePending(id, identity)
 		return captureErr
+	}
+	if cid := s.developmentContainer(id); cid != "" {
+		if err := s.destroyDevelopmentContainer(ctx, id, cid); err != nil {
+			return err
+		}
 	}
 	s.removeSidecar(id)
 	s.publishTimeline(ctx, r.WorkspaceID, id, actor, events.TimelineKill, "")
@@ -334,11 +346,17 @@ func (s *Scheduler) DeleteRun(ctx context.Context, run domain.RunID, actor domai
 	}
 
 	removeSources := func(cleanupCtx context.Context) error {
+		if err := s.deleteDevelopment(cleanupCtx, run); err != nil {
+			return err
+		}
 		if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, run); err != nil {
 			return fmt.Errorf("scheduler: delete run checkout: %w", err)
 		}
 		if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, run); err != nil {
 			return fmt.Errorf("scheduler: delete run transcripts: %w", err)
+		}
+		if err := os.Remove(s.sidecarPath(run)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("scheduler: delete run sidecar: %w", err)
 		}
 		if err := s.cfg.Store.DeleteRun(cleanupCtx, run); err != nil {
 			return err
@@ -456,8 +474,20 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 	}
 	workspace, cid := entry.workspaceID, entry.containerID
 	s.mu.Unlock()
-	if err := s.cfg.Runtime.Pause(ctx, cid); err != nil {
+	if s.cfg.Control != nil {
+		if _, err := s.cfg.Control.RevokeRunSurfaces(string(run), func() error { s.setPaused(entry, true); return nil }); err != nil {
+			return err
+		}
+	} else {
+		s.setPaused(entry, true)
+	}
+	if err := s.pauseDevelopmentBrowser(ctx, run, cid); err != nil {
+		s.setPaused(entry, false)
 		return err
+	}
+	if err := s.cfg.Runtime.Pause(ctx, cid); err != nil {
+		s.setPaused(entry, false)
+		return errors.Join(err, s.resumeDevelopmentBrowser(context.WithoutCancel(ctx), run, cid))
 	}
 	s.setPaused(entry, true)
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelinePause, "")
@@ -489,6 +519,9 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	s.mu.Unlock()
 	if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
 		return err
+	}
+	if err := s.resumeDevelopmentBrowser(ctx, run, cid); err != nil {
+		return errors.Join(err, s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid))
 	}
 	s.setPaused(entry, false)
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineResume, "")
@@ -546,11 +579,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return err
 	}
-	submit := "\r"
-	if p, ok := harness.Lookup(r.Harness); ok {
-		submit = p.SteerSuffix()
-	}
-	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, submit); err != nil {
+	if err := s.cfg.PTY.Inject(ctx, ptyhost.RunSession(run), m.DisplayName, m.Color, message, harness.SubmitSequence(r.Harness)); err != nil {
 		return err
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, message)
@@ -659,16 +688,32 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
-	if s.runs[run] != entry {
-		s.mu.Unlock()
-		return retainedTransitionError()
+	status, workspace := entry.status, entry.workspaceID
+	live := s.runs[run] == entry
+	if !live {
+		// Exit cleanup can release the owner after CloseRun snapshots it.
+		// A finished row is still closable, but a replacement owner or an
+		// active row belongs to another lifecycle and must not be touched.
+		if s.runs[run] != nil || s.pending[run] != nil {
+			s.mu.Unlock()
+			return retainedTransitionError()
+		}
+		fresh, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		if !fresh.Status.Terminal() {
+			s.mu.Unlock()
+			return retainedTransitionError()
+		}
+		status, workspace = fresh.Status, fresh.WorkspaceID
 	}
-	if entry.destroyPending {
+	if live && entry.destroyPending {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run cleanup is pending", ErrInvalidTransition)
 	}
-	if entry.finalizing {
-		status, workspace := entry.status, entry.workspaceID
+	if !live || entry.finalizing {
 		identity := entry.evidenceIdentity
 		if !status.Terminal() {
 			s.mu.Unlock()
@@ -740,6 +785,9 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	}
 
 	if mode == domain.LaunchTUI && !status.Terminal() {
+		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
+			return err
+		}
 		// Detach before committing so no PTY client can continue typing while
 		// the close operation snapshots the worktree.
 		s.cfg.Git.StopDiffWatch(run)
@@ -845,6 +893,9 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 				s.mu.Unlock()
 				return captureErr
 			}
+			if err := s.StopDevelopmentRun(ctx, run); err != nil {
+				return err
+			}
 			if ttl < 0 {
 				s.stopCloseContainer(ctx, cid)
 				s.destroyClosedRetained(ctx, entry)
@@ -875,6 +926,9 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 			s.persistEvidencePending(run, "none")
 		}
 		return captureErr
+	}
+	if err := s.StopDevelopmentRun(ctx, run); err != nil {
+		return err
 	}
 	s.stopCloseContainer(ctx, cid)
 	return nil
@@ -917,6 +971,14 @@ func (s *Scheduler) restoreAfterCloseFailure(ctx context.Context, entry *supervi
 		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed,
 			fmt.Errorf("scheduler: restore closed run: diff watch: %w", err))
 	}
+	if err := s.reopenDevelopment(ctx, entry.runID); err != nil {
+		return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed, err)
+	}
+	if !alreadyPaused {
+		if err := s.resumeDevelopmentBrowser(ctx, entry.runID, entry.containerID); err != nil {
+			return s.closeRollbackFailure(ctx, entry, alreadyPaused, resumed, err)
+		}
+	}
 	// For an originally paused run, Attach/PTY/watch do not thaw the
 	// container, so the confirmed state remains paused. For an originally
 	// running run, Resume already established the running state.
@@ -957,7 +1019,7 @@ func (s *Scheduler) destroyClosedRetained(ctx context.Context, entry *supervised
 	if entry == nil {
 		return
 	}
-	if err := s.cfg.Runtime.Destroy(ctx, entry.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, entry.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		slog.Warn("scheduler: destroy container behind closed run", "run", entry.runID, "error", err)
 		return
 	}

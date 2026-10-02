@@ -301,6 +301,35 @@ func TestMirrorRequestRejectsHTTPSPortsAndSSHPasswords(t *testing.T) {
 	}
 }
 
+func TestMirrorFetchFailureClassificationAndRedaction(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		kind         MirrorErrorKind
+	}{
+		{"TLS", "fatal: unable to access 'https://secret@host/repo': SSL certificate problem: expired", MirrorErrorFailed},
+		{"local permissions", "fatal: cannot open 'secret': Permission denied", MirrorErrorFailed},
+		{"SSH authentication", "secret@host: Permission denied (publickey).", MirrorErrorAuthFailed},
+		{"DNS", "fatal: unable to access 'https://secret@host/repo': Could not resolve host: host", MirrorErrorOffline},
+		{"unknown transport", "fatal: unable to access 'https://secret@host/repo': unexpected transport error", MirrorErrorFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cause := errors.New("transport failure")
+			failure := &mirrorFetchFailure{err: cause, output: tc.output}
+			err := mirrorErr(classifyFetchError(failure), "w", MirrorRequest{Branch: "main"}, "", "", failure)
+			var typed *MirrorError
+			if !errors.As(err, &typed) || typed.Kind != tc.kind || !errors.Is(err, cause) {
+				t.Fatalf("failure = %v, want kind %s preserving cause", err, tc.kind)
+			}
+			if strings.Contains(err.Error(), "secret") {
+				t.Fatalf("operator error exposed transport credentials: %v", err)
+			}
+			if !strings.Contains(failure.Error(), tc.output) {
+				t.Fatal("trusted diagnostic lost original Git output")
+			}
+		})
+	}
+}
+
 func TestConfigureWorkspaceRepoHidesAetherRefsForBothPackServices(t *testing.T) {
 	e := newUnitEngine(t)
 	repo, err := e.InitWorkspaceRepo(t.Context(), "hidden")

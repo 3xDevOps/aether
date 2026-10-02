@@ -64,6 +64,7 @@ describe('run tab strip', () => {
     useStore.setState({ navigate })
     render(<RunTabs runID={active.id} active="terminal" />)
     const tabs = screen.getAllByRole('tab')
+    const last = tabs.at(-1)!
 
     fireEvent.keyDown(tabs[1], { key: 'ArrowRight' })
     expect(document.activeElement).toBe(tabs[2])
@@ -75,16 +76,16 @@ describe('run tab strip', () => {
     expect(document.activeElement).toBe(tabs[0])
 
     fireEvent.keyDown(tabs[0], { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(tabs[3])
+    expect(document.activeElement).toBe(last)
 
-    fireEvent.keyDown(tabs[3], { key: 'End' })
-    expect(document.activeElement).toBe(tabs[3])
+    fireEvent.keyDown(tabs[0], { key: 'End' })
+    expect(document.activeElement).toBe(last)
 
     // Arrowing past a tab must not open it: each one costs an attach socket
     // or a patch fetch to mount. A click on the same tab proves the strip was
     // wired up at all.
     expect(navigate).not.toHaveBeenCalled()
-    fireEvent.click(tabs[3])
+    fireEvent.click(screen.getByRole('tab', { name: 'Events' }))
     expect(navigate).toHaveBeenCalledWith('events', { runId: active.id })
   })
 
@@ -92,10 +93,7 @@ describe('run tab strip', () => {
     const navigate = vi.fn()
     useStore.setState({ navigate })
     render(<RunTabs runID={active.id} active="terminal" />)
-    const tabs = screen.getAllByRole('tab')
-    tabs[1].focus()
-
-    fireEvent.keyDown(tabs[1], { key: 'ArrowRight' })
+    screen.getByRole('tab', { name: 'Diff' }).focus()
     await userEvent.keyboard(key)
 
     expect(navigate).toHaveBeenCalledWith('diff', { runId: active.id })
@@ -174,7 +172,7 @@ describe('run tab strip', () => {
     expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs[1]])
 
     fireEvent.keyDown(tabs[1], { key: 'End' })
-    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs[3]])
+    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs.at(-1)])
 
     // A run-to-run switch reuses this strip, so the stop has to come back.
     rerender(<RunTabs runID="run_2" active="terminal" />)

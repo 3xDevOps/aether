@@ -31,6 +31,10 @@ var _ Store = (*DB)(nil)
 // created at 0600 before SQLite sees it, because SQLite copies the main
 // database file's mode onto the -wal and -shm sidecars it creates while
 // applying the journal_mode pragma.
+//
+// Write transactions begin IMMEDIATE: a deferred transaction that reads
+// and then writes fails its lock upgrade with SQLITE_BUSY without waiting
+// on busy_timeout whenever another connection writes in between.
 func Open(path string) (*DB, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -40,7 +44,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("store: create %s: %w", path, closeErr)
 	}
 	dsn := "file:" + url.PathEscape(path) +
-		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+		"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
@@ -516,17 +520,27 @@ func (d *DB) ListHarnessDefinitions(ctx context.Context, member domain.MemberID)
 	return collect(rows, scanHarnessDefinition)
 }
 
-func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
-	return d.execDelete(ctx, "delete workspace", `DELETE FROM workspaces WHERE id = ?`, id)
-}
-
 // Members
 
 func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
+	if m.PublicKey == "" && m.TailnetLogin == "" {
+		return errors.New("store: create member: a public key or a tailnet login is required")
+	}
+	return insertMember(ctx, d.db, m)
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// insertMember inserts m with whatever identity it has; a caller creating
+// a member with neither key nor tailnet login inserts its edge identity in
+// the same transaction.
+func insertMember(ctx context.Context, q execer, m *domain.Member) error {
 	if !m.Role.Valid() {
 		return fmt.Errorf("store: create member: invalid role %q", m.Role)
 	}
-	key, err := normalizeMemberKey(m.PublicKey, m.TailnetLogin, "create member")
+	key, err := normalizeMemberKey(m.PublicKey, "create member")
 	if err != nil {
 		return err
 	}
@@ -538,7 +552,7 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 	if err != nil {
 		return fmt.Errorf("store: create member: %w", err)
 	}
-	if _, err := d.db.ExecContext(ctx,
+	if _, err := q.ExecContext(ctx,
 		`INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at, image, git_name, git_email)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, m.DisplayName, key, m.TailnetLogin, m.Pending, m.Color, m.Role, createdAt, m.Image,
@@ -550,13 +564,9 @@ func (d *DB) CreateMember(ctx context.Context, m *domain.Member) error {
 	return nil
 }
 
-// normalizeMemberKey canonicalizes the public key when present and
-// enforces that at least one identity (key or tailnet login) exists.
-func normalizeMemberKey(publicKey, tailnetLogin, op string) (string, error) {
+// normalizeMemberKey canonicalizes the public key when present.
+func normalizeMemberKey(publicKey, op string) (string, error) {
 	if publicKey == "" {
-		if tailnetLogin == "" {
-			return "", fmt.Errorf("store: %s: a public key or a tailnet login is required", op)
-		}
 		return "", nil
 	}
 	key, err := normalizePublicKey(publicKey)
@@ -668,7 +678,7 @@ func (d *DB) UpdateMember(ctx context.Context, m *domain.Member) error {
 	if !m.Role.Valid() {
 		return fmt.Errorf("store: update member: invalid role %q", m.Role)
 	}
-	key, err := normalizeMemberKey(m.PublicKey, m.TailnetLogin, "update member")
+	key, err := normalizeMemberKey(m.PublicKey, "update member")
 	if err != nil {
 		return err
 	}

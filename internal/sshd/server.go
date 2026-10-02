@@ -1,8 +1,10 @@
 // Package sshd is the embedded SSH server: the single transport every
 // client rides. It authenticates members - by Tailscale WhoIs identity
 // when a resolver is configured, falling back to public key against the
-// store - and multiplexes git transport (exec), the JSON-RPC control
-// channel, the event stream, and PTY attach (subsystems) over one port.
+// store, or, on a connection an edge relays, by the edge's grant and the
+// device key it names - and multiplexes git transport (exec), the JSON-RPC
+// control channel, the event stream, and PTY attach (subsystems) over one
+// port.
 // It owns no run lifecycle, git, or PTY logic - everything mutating
 // state is delegated through the consumer-side seam interfaces or the
 // store.
@@ -23,6 +25,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -63,13 +66,14 @@ const (
 // Config wires the server to its collaborators. All collaborators are
 // required.
 type Config struct {
-	Addr        string // default ":2222"
-	HostKeyPath string // <data>/ssh/host_ed25519_key; generated on first start if absent
-	Store       store.Store
-	Bus         events.Bus
-	Git         GitTransport
-	PTY         PTYAttacher
-	Runs        RunController
+	Addr            string // default ":2222"
+	HostKeyPath     string // <data>/ssh/host_ed25519_key; generated on first start if absent
+	Store           store.Store
+	Bus             events.Bus
+	Git             GitTransport
+	PTY             PTYAttacher
+	Runs            RunController
+	DeleteWorkspace func(context.Context, domain.WorkspaceID, domain.MemberID) error
 	// Control owns the per-run controller lease shared by SSH and local
 	// gateway attaches. Nil preserves deployments without controller
 	// arbitration.
@@ -99,6 +103,12 @@ type Config struct {
 	// disables member.invite and invite-code joins.
 	InvitesDir string
 
+	// EdgeAccess is the access policy for connections an edge relays:
+	// under PolicyAccount a signed-in member's new device is registered
+	// and admitted; under PolicyApprovedDevices, which empty selects, it
+	// waits until a person approves it.
+	EdgeAccess edgeproto.AccessPolicy
+
 	// Profiles is the legacy agent-profile snapshot service. Nil disables
 	// profile.push / profile.status / profile.rollback.
 	Profiles ProfileService
@@ -106,6 +116,9 @@ type Config struct {
 	// Config provides authenticated access to the caller's persistent
 	// harness configuration roots. It never accepts a member selector.
 	Config ConfigBackend
+	// AuthorizationMu is shared with mission admission so account and role
+	// revocation cannot race a run launch. New allocates one when omitted.
+	AuthorizationMu *sync.Mutex
 	// Services carries the team-feature service seams; see services.go.
 	// Each nil field disables its methods with CodeUnavailable.
 	Services Services
@@ -119,6 +132,10 @@ type Config struct {
 	// syncHandshakeTimeout bounds the aether-sync setup handshake; zero
 	// means defaultSyncHandshakeTimeout. Unexported test knob.
 	syncHandshakeTimeout time.Duration
+	// Control frames get a progress deadline and an absolute lifetime.
+	// Unexported test knobs; zero selects the production defaults.
+	controlReadIdleTimeout time.Duration
+	controlFrameTimeout    time.Duration
 	// revalidateInterval is how often a live sync bridge or PTY attach
 	// re-checks its authorization; zero means defaultRevalidateInterval.
 	// Unexported test knob.
@@ -127,9 +144,18 @@ type Config struct {
 
 // Server is the embedded SSH server.
 type Server struct {
-	cfg        Config
-	sshCfg     *ssh.ServerConfig
-	handshakes chan struct{}
+	cfg     Config
+	sshCfg  *ssh.ServerConfig
+	hostKey ssh.Signer
+	// handshakes and edgeHandshakes are separate pre-auth budgets, so a
+	// flood relayed by an edge cannot shed direct and tailnet clients.
+	handshakes     chan struct{}
+	edgeHandshakes chan struct{}
+	// directoryChanged signals, coalesced, that EdgeDirectory may differ.
+	directoryChanged chan struct{}
+	// edgeOwner records ownership at the edge; nil while no edge agent
+	// runs. Guarded by mu.
+	edgeOwner EdgeOwner
 
 	// wg counts every handler goroutine (per-connection, per-channel, and
 	// per-subsystem); Close waits on it so no handler outlives shutdown.
@@ -149,18 +175,29 @@ type Server struct {
 	// makes either admission or revocation the linearization point. Handlers
 	// that also need registerMu acquire registerMu first; authorizationMu
 	// paths never acquire registerMu or mu, so the lock order cannot cycle.
-	authorizationMu sync.Mutex
+	authorizationMu *sync.Mutex
 	handoffSeq      atomic.Uint64
+
+	// Workspace gates fence repository access and live overlays against
+	// deletion. Keep each gate stable even after deletion so queued readers
+	// cannot acquire a replacement lock and recreate removed resources.
+	workspaceLocksMu sync.Mutex
+	workspaceLocks   map[domain.WorkspaceID]*sync.RWMutex
 
 	mu    sync.Mutex
 	ln    net.Listener
 	conns map[net.Conn]struct{}
+	// connIdentities names who each authenticated connection is, so a
+	// revocation closes that member's or device's connections at once.
+	connIdentities map[net.Conn]connIdentity
 	// syncChannels counts each member's live aether-sync channels, for
 	// the per-member concurrency cap (see claimSyncChannel).
 	syncChannels map[domain.MemberID]int
-	closed       bool
-	baseCtx      context.Context
-	baseCancel   context.CancelFunc
+	// Expanded control frames retain their slot through dispatch/response.
+	controlFrames map[domain.MemberID]struct{}
+	closed        bool
+	baseCtx       context.Context
+	baseCancel    context.CancelFunc
 
 	// controlMu lets takeover cancel the displaced transport immediately;
 	// the control service remains the fenced source of truth. Incarnations
@@ -182,6 +219,14 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Store == nil || cfg.Bus == nil || cfg.Git == nil || cfg.PTY == nil || cfg.Runs == nil {
 		return nil, errors.New("sshd: config requires Store, Bus, Git, PTY, and Runs")
 	}
+	if cfg.AuthorizationMu == nil {
+		cfg.AuthorizationMu = &sync.Mutex{}
+	}
+	policy, err := edgeproto.ParseAccessPolicy(string(cfg.EdgeAccess))
+	if err != nil {
+		return nil, fmt.Errorf("sshd: %w", err)
+	}
+	cfg.EdgeAccess = policy
 	if cfg.handshakeTimeout <= 0 {
 		cfg.handshakeTimeout = defaultHandshakeTimeout
 	}
@@ -191,6 +236,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.syncHandshakeTimeout <= 0 {
 		cfg.syncHandshakeTimeout = defaultSyncHandshakeTimeout
 	}
+	if cfg.controlReadIdleTimeout <= 0 {
+		cfg.controlReadIdleTimeout = 30 * time.Second
+	}
+	if cfg.controlFrameTimeout <= 0 {
+		cfg.controlFrameTimeout = 15 * time.Minute
+	}
 	if cfg.revalidateInterval <= 0 {
 		cfg.revalidateInterval = defaultRevalidateInterval
 	}
@@ -199,12 +250,18 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg:             cfg,
-		handshakes:      make(chan struct{}, cfg.maxHandshakes),
-		conns:           make(map[net.Conn]struct{}),
-		syncChannels:    make(map[domain.MemberID]int),
-		controlAttaches: make(map[string]map[string]controlAttach),
-		baseCtx:         context.Background(),
+		cfg:              cfg,
+		authorizationMu:  cfg.AuthorizationMu,
+		hostKey:          signer,
+		handshakes:       make(chan struct{}, cfg.maxHandshakes),
+		edgeHandshakes:   make(chan struct{}, cfg.maxHandshakes),
+		directoryChanged: make(chan struct{}, 1),
+		conns:            make(map[net.Conn]struct{}),
+		connIdentities:   make(map[net.Conn]connIdentity),
+		syncChannels:     make(map[domain.MemberID]int),
+		controlFrames:    make(map[domain.MemberID]struct{}),
+		controlAttaches:  make(map[string]map[string]controlAttach),
+		baseCtx:          context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
 	if cfg.WhoIs != nil {
@@ -224,6 +281,9 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("sshd: resolve public key: %w", err)
+		}
+		if perms, ok, derr := s.directDevice(ctx, key); derr != nil || ok {
+			return perms, derr
 		}
 		// Fresh server: accept the key for admin bootstrap, but create
 		// nothing yet. x/crypto/ssh also calls this callback for the
@@ -445,9 +505,18 @@ func (s *Server) untrackConn(c net.Conn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.conns, c)
+	delete(s.connIdentities, c)
 }
 
 func (s *Server) handleConn(ctx context.Context, c net.Conn) {
+	s.serveConn(ctx, c, s.sshCfg, s.handshakes, s.directIdentity)
+}
+
+// serveConn runs one SSH connection, direct or relayed by an edge: the
+// pre-auth handshake within budget, identity resolution once the key is
+// proven, then the member's channels. resolve logs its own refusals.
+func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfig, budget chan struct{},
+	resolve func(context.Context, *ssh.ServerConn) (connIdentity, error)) {
 	if !s.trackConn(c) {
 		_ = c.Close()
 		return
@@ -458,13 +527,13 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	// Shed connections over the concurrent-handshake cap and bound the
 	// pre-auth handshake so stalled clients cannot pin goroutines.
 	select {
-	case s.handshakes <- struct{}{}:
+	case budget <- struct{}{}:
 	default:
 		return
 	}
 	_ = c.SetDeadline(time.Now().Add(s.cfg.handshakeTimeout))
-	sconn, chans, reqs, err := ssh.NewServerConn(c, s.sshCfg)
-	<-s.handshakes
+	sconn, chans, reqs, err := ssh.NewServerConn(c, cfg)
+	<-budget
 	if err != nil {
 		return
 	}
@@ -473,6 +542,15 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 
 	connCtx, cancelConn := context.WithCancel(ctx)
 	defer cancelConn()
+	// Channel.Close and exit-status share the SSH packet writer and can stall
+	// behind a peer that stops reading. A peer can also withhold its close
+	// acknowledgement and leave channel.Read blocked. Close-deadline expiry
+	// uses this raw abort to unblock packet I/O and all channel readers.
+	// Do not change shared transport deadlines for a single healthy channel.
+	abortConn := func() {
+		cancelConn()
+		_ = c.Close()
+	}
 	// ssh.Conn has no context or Done channel. Wait observes transport
 	// teardown, including a client that drops the whole SSH connection while
 	// a channel handler is blocked outside SSH I/O.
@@ -481,36 +559,26 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 		cancelConn()
 	})
 
-	member := domain.MemberID(sconn.Permissions.Extensions[memberIDExtension])
-
-	// Signature is proven now: perform any deferred bootstrap or invite
-	// registration. Losing the freshness race mid-handshake is handled
-	// exactly like an unknown key - the connection is dropped.
-	if member == "" {
-		if code, ok := sconn.Permissions.Extensions[inviteCodeExtension]; ok {
-			keyLine := sconn.Permissions.Extensions[inviteKeyExtension]
-			_, display, _ := parseInviteUser(sconn.User())
-			m, jerr := s.joinInviteMember(connCtx, code, keyLine, display)
-			if jerr != nil {
-				slog.Warn("sshd: invite join failed; dropping connection", "error", jerr)
-				return
-			}
-			member = m.ID
-		} else if keyLine, ok := sconn.Permissions.Extensions[bootstrapKeyExtension]; ok {
-			m, berr := s.bootstrapKeyMember(connCtx, sconn.User(), keyLine)
-			if berr != nil {
-				slog.Warn("sshd: deferred key bootstrap failed; dropping connection", "error", berr)
-				return
-			}
-			member = m.ID
-		}
+	id, err := resolve(connCtx, sconn)
+	if err != nil {
+		return
 	}
+	// A revocation between authentication and this registration closed
+	// nothing, so re-check once the connection is findable.
+	s.bindConn(c, id)
+	if err := s.checkConnIdentity(connCtx, id); err != nil {
+		slog.Info("sshd: identity revoked during handshake; dropping connection", "member", id.member, "error", err)
+		return
+	}
+	connCtx = context.WithValue(connCtx, connIdentityKey{}, id)
+	if id.device != "" {
+		s.spawn(func() { s.watchDevice(connCtx, id, abortConn) })
+	}
+	member := id.member
 
-	if member != "" {
-		if svc := s.cfg.Services.Approvals; svc != nil {
-			svc.ConnectionOpened(member)
-			defer svc.ConnectionClosed(member)
-		}
+	if svc := s.cfg.Services.Approvals; svc != nil {
+		svc.ConnectionOpened(member)
+		defer svc.ConnectionClosed(member)
 	}
 
 	// Deny every global request, including tcpip-forward (no reverse
@@ -526,11 +594,41 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	for nc := range chans {
 		switch nc.ChannelType() {
 		case "session":
-			s.spawn(func() { s.handleSession(connCtx, member, nc) })
+			s.spawn(func() { s.handleSession(connCtx, member, nc, abortConn) })
 		case "direct-tcpip":
 			s.spawn(func() { s.handleDirectTCPIP(connCtx, member, nc) })
 		default:
 			_ = nc.Reject(ssh.UnknownChannelType, "unsupported channel type")
 		}
 	}
+}
+
+// directIdentity resolves a direct or tailnet connection. The signature is
+// proven now: perform any deferred bootstrap or invite registration.
+// Losing the freshness race mid-handshake is handled exactly like an
+// unknown key - the connection is dropped.
+func (s *Server) directIdentity(ctx context.Context, sconn *ssh.ServerConn) (connIdentity, error) {
+	ext := sconn.Permissions.Extensions
+	if member := domain.MemberID(ext[memberIDExtension]); member != "" {
+		return connIdentity{member: member, device: domain.DeviceID(ext[deviceIDExtension]), deviceKey: ext[deviceKeyExtension]}, nil
+	}
+	if code, ok := sconn.Permissions.Extensions[inviteCodeExtension]; ok {
+		keyLine := sconn.Permissions.Extensions[inviteKeyExtension]
+		_, display, _ := parseInviteUser(sconn.User())
+		m, err := s.joinInviteMember(ctx, code, keyLine, display)
+		if err != nil {
+			slog.Warn("sshd: invite join failed; dropping connection", "error", err)
+			return connIdentity{}, err
+		}
+		return connIdentity{member: m.ID}, nil
+	}
+	if keyLine, ok := sconn.Permissions.Extensions[bootstrapKeyExtension]; ok {
+		m, err := s.bootstrapKeyMember(ctx, sconn.User(), keyLine)
+		if err != nil {
+			slog.Warn("sshd: deferred key bootstrap failed; dropping connection", "error", err)
+			return connIdentity{}, err
+		}
+		return connIdentity{member: m.ID}, nil
+	}
+	return connIdentity{}, errors.New("sshd: connection authenticated without a member")
 }

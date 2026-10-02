@@ -19,6 +19,13 @@ type RunWorktreeStore interface {
 	ClearRunWorktree(context.Context, domain.RunID, string, domain.RunStatus) error
 }
 
+// ReservedRunStore creates a run with an ID reserved by durable orchestration
+// state. The reserved ID closes the reservation/CreateRun crash gap; ordinary
+// launches continue to use CreateRun's generated IDs.
+type ReservedRunStore interface {
+	CreateRunWithID(context.Context, *domain.Run) error
+}
+
 func validateRun(r *domain.Run, op string) error {
 	if !r.Status.Valid() {
 		return fmt.Errorf("store: %s run: invalid status %q", op, r.Status)
@@ -28,13 +35,37 @@ func validateRun(r *domain.Run, op string) error {
 	}
 	return nil
 }
-
 func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
+	return d.createRun(ctx, r, false)
+}
+
+// CreateRunWithID is the reserved-ID variant used by mission attempts. It
+// accepts only a caller-supplied ID and never silently substitutes another
+// identity.
+func (d *DB) CreateRunWithID(ctx context.Context, r *domain.Run) error {
+	if r == nil || r.ID == "" {
+		return errors.New("store: create reserved run: id is required")
+	}
+	return d.createRun(ctx, r, true)
+}
+
+func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error {
 	if err := validateRun(r, "create"); err != nil {
 		return err
 	}
 	r.AccountMemberID = r.AccountMember()
-	id, ts, err := prepareCreate(r.CreatedAt)
+	var id string
+	id = string(r.ID)
+	var ts time.Time
+	var err error
+	if reserved {
+		ts = r.CreatedAt
+		if ts.IsZero() {
+			ts = time.Now().UTC()
+		}
+	} else {
+		id, ts, err = prepareCreate(r.CreatedAt)
+	}
 	if err != nil {
 		return err
 	}
@@ -52,11 +83,11 @@ func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
 	}
 	lastCommitAt, err := encodeOptionalTime(r.LastCommitAt)
 	if err != nil {
-		return fmt.Errorf("store: create run: last commit at: %w", err)
+		return fmt.Errorf("store: create run: %w", err)
 	}
 	baseCheckedAt, err := encodeOptionalTime(r.BaseCheckedAt)
 	if err != nil {
-		return fmt.Errorf("store: create run: base checked at: %w", err)
+		return fmt.Errorf("store: create run: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, task, harness, mode, status,
@@ -88,7 +119,8 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.UnansweredQuestions); err != nil {
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.UnansweredQuestions,
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID); err != nil {
 		return nil, err
 	}
 	r.CreatedAt = decodeTime(createdAt)
@@ -115,8 +147,18 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 // list and single-run snapshots cannot disagree, without walking room history
 // once per run.
 func runSnapshotQuery(where string) string {
-	return `SELECT ` + runCols + `, COUNT(question.id)
+	return `SELECT ` + runCols + `, COUNT(question.id),
+		COALESCE(integrator.id, worker_mission.id, ''),
+		CASE WHEN integrator.id IS NOT NULL THEN 'integrator'
+		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
+		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, '')
 		FROM runs
+		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
+		LEFT JOIN missions worker_mission ON worker_mission.id = (
+			SELECT MIN(attempt.mission_id) FROM mission_attempts attempt
+			WHERE attempt.run_id = runs.id
+			HAVING COUNT(DISTINCT attempt.mission_id) = 1
+		)
 		LEFT JOIN room_messages question
 			ON question.run_id = runs.id
 			AND question.kind = 'question'

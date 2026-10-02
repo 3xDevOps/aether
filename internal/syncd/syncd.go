@@ -22,6 +22,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -41,8 +42,15 @@ const (
 // Config configures a Daemon. Server and RepoPath are required; everything
 // else has a working default.
 type Config struct {
-	// Server is the aether-server SSH address, host:port.
+	// Server is the aether-server SSH address, host:port. A link through
+	// an edge may leave it empty.
 	Server string
+	// EdgeURL and ServerID link the server through an edge, as cli.Config
+	// does: the host key is pinned to ServerID, Server (when set) is
+	// dialed before the edge, the device key authenticates, and git runs
+	// with GIT_SSH_COMMAND set to aether edge-ssh.
+	EdgeURL  string
+	ServerID string
 	// KeyPath is the member's SSH private key file. Empty means the same
 	// discovery the CLI uses: the SSH agent, then the default files under
 	// ~/.ssh.
@@ -81,12 +89,21 @@ type Daemon struct {
 
 	lastSeq    uint64 // event-stream resume cursor, touched only in runSession
 	lastPushed string // base tip last pushed, touched only in pushBase
+
+	// gitEnv is added to every git process's environment.
+	gitEnv []string
 }
 
 // New validates cfg, fills defaults, and returns a Daemon.
 func New(cfg Config) (*Daemon, error) {
-	if cfg.Server == "" {
+	if cfg.Server == "" && cfg.ServerID == "" {
 		return nil, errors.New("syncd: server address required")
+	}
+	if cfg.ServerID != "" && !edgeproto.ValidServerID(cfg.ServerID) {
+		return nil, fmt.Errorf("syncd: %q is not a server id", cfg.ServerID)
+	}
+	if cfg.Server == "" && cfg.EdgeURL == "" {
+		return nil, errors.New("syncd: a server id needs an address or an edge URL")
 	}
 	if cfg.RepoPath == "" {
 		return nil, errors.New("syncd: repo path required")
@@ -113,6 +130,13 @@ func New(cfg Config) (*Daemon, error) {
 		cfg.CatchupInterval = defaultCatchupInterval
 	}
 	d := &Daemon{cfg: cfg}
+	if cfg.ServerID != "" {
+		command, err := cli.EdgeSSHCommand()
+		if err != nil {
+			return nil, err
+		}
+		d.gitEnv = []string{"GIT_SSH_COMMAND=" + command}
+	}
 	d.fetch = d.fetchRuns
 	d.push = d.pushBase
 	return d, nil
@@ -196,31 +220,13 @@ func (s *sshStream) Close() error { return s.client.Close() }
 // come from the same resolver as the CLI and GUI, so `aether link --key`
 // and automatic discovery behave identically here; the daemon differs
 // only in host-key policy, where an unattended process pins nothing and
-// needs the host already in known_hosts.
+// needs the host already in known_hosts. An edge link is pinned to its
+// server id instead.
 func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, error) {
-	hostKeys, err := knownhosts.New(d.cfg.KnownHostsPath)
+	client, err := d.dial(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("known_hosts (run aether link once, or point --known-hosts at a file listing the server's host key): %w", err)
+		return nil, nil, err
 	}
-	auth := cli.ResolveAuth(cli.Config{Key: d.cfg.KeyPath})
-	defer auth.Close()
-	conf := &ssh.ClientConfig{
-		User:            d.cfg.User,
-		Auth:            auth.Methods(),
-		HostKeyCallback: hostKeys,
-		BannerCallback:  auth.Banner,
-		Timeout:         dialTimeout,
-	}
-	nc, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", d.cfg.Server)
-	if err != nil {
-		return nil, nil, fmt.Errorf("dial %s: %w", d.cfg.Server, err)
-	}
-	cc, chans, reqs, err := ssh.NewClientConn(nc, d.cfg.Server, conf)
-	if err != nil {
-		_ = nc.Close()
-		return nil, nil, auth.Explain(fmt.Errorf("ssh handshake with %s: %w", d.cfg.Server, err))
-	}
-	client := ssh.NewClient(cc, chans, reqs)
 	sess, err := client.NewSession()
 	if err != nil {
 		_ = client.Close()
@@ -241,6 +247,37 @@ func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, 
 		return nil, nil, fmt.Errorf("subsystem %s: %w", protocol.SubsystemEvents, err)
 	}
 	return client, &sshStream{Reader: stdout, Writer: stdin, client: client}, nil
+}
+
+// dial opens the SSH connection. A link through an edge uses the CLI's
+// linked dialer; any other link verifies the host against known_hosts.
+func (d *Daemon) dial(ctx context.Context) (*ssh.Client, error) {
+	if d.cfg.ServerID != "" {
+		return cli.DialLinked(ctx, cli.Config{Addr: d.cfg.Server, EdgeURL: d.cfg.EdgeURL, ServerID: d.cfg.ServerID}, d.cfg.User)
+	}
+	hostKeys, err := knownhosts.New(d.cfg.KnownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("known_hosts (run aether link once, or point --known-hosts at a file listing the server's host key): %w", err)
+	}
+	auth := cli.ResolveAuth(cli.Config{Key: d.cfg.KeyPath})
+	defer auth.Close()
+	conf := &ssh.ClientConfig{
+		User:            d.cfg.User,
+		Auth:            auth.Methods(),
+		HostKeyCallback: hostKeys,
+		BannerCallback:  auth.Banner,
+		Timeout:         dialTimeout,
+	}
+	nc, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", d.cfg.Server)
+	if err != nil {
+		return nil, fmt.Errorf("dial %s: %w", d.cfg.Server, err)
+	}
+	cc, chans, reqs, err := ssh.NewClientConn(nc, d.cfg.Server, conf)
+	if err != nil {
+		_ = nc.Close()
+		return nil, auth.Explain(fmt.Errorf("ssh handshake with %s: %w", d.cfg.Server, err))
+	}
+	return ssh.NewClient(cc, chans, reqs), nil
 }
 
 // keepalive probes the connection so a silently dead network surfaces as a

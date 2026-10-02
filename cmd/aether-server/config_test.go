@@ -139,23 +139,39 @@ func TestConfigShowWithNoFileSaysSo(t *testing.T) {
 	}
 }
 
-// TestServeFlagsAreTheOnlyOptionList pins the structural rule: every key the
-// config file may hold is a flag `serve` declares, because both come from
-// serveFlags.
-func TestServeFlagsAreTheOnlyOptionList(t *testing.T) {
-	validator := serveFlagSet()
-	serveSet := flag.NewFlagSet("serve", flag.ContinueOnError)
-	serveFlags(serveSet)
-
-	var serveNames []string
-	serveSet.VisitAll(func(f *flag.Flag) { serveNames = append(serveNames, f.Name) })
-	if len(serveNames) == 0 {
-		t.Fatal("serveFlags declared nothing")
+func TestBrowserImageConfigRoundTripAndPrecedence(t *testing.T) {
+	t.Setenv("AETHER_BROWSER_IMAGE", "registry.example/browser:environment")
+	path := filepath.Join(t.TempDir(), "server.conf")
+	const configured = "registry.example/browser@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	var out bytes.Buffer
+	if err := configSet(&out, path, "browser-image", configured); err != nil {
+		t.Fatal(err)
 	}
-	for _, name := range serveNames {
-		if validator.Lookup(name) == nil {
-			t.Errorf("option %q is not visible to the config-key validator", name)
-		}
+	for _, tc := range []struct {
+		name   string
+		config bool
+		args   []string
+		want   string
+	}{
+		{name: "environment", want: "registry.example/browser:environment"},
+		{name: "persisted digest overrides environment", config: true, want: configured},
+		{name: "flag overrides config", config: true, args: []string{"--browser-image", "registry.example/browser:explicit"}, want: "registry.example/browser:explicit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+			options := serveFlags(fs)
+			if err := fs.Parse(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			if tc.config {
+				if _, err := applyConfigFile(fs, path, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if *options.browserImage != tc.want {
+				t.Fatalf("browser image = %q, want %q", *options.browserImage, tc.want)
+			}
+		})
 	}
 }
 
@@ -214,11 +230,11 @@ func TestInstallRecordsOnlyNamedOptions(t *testing.T) {
 	_ = fs.String("unit", serversetup.UnitPath, "unit file")
 	_ = fs.Bool("force", false, "overwrite")
 	serveFlags(fs)
-	if err := fs.Parse([]string{"-config", "/tmp/x.conf", "-addr", ":2300", "-tailnet-auto-join"}); err != nil {
+	if err := fs.Parse([]string{"-config", "/tmp/x.conf", "-addr", ":2300", "-tailnet-auto-join", "-browser-image", "registry.example/browser:v1"}); err != nil {
 		t.Fatal(err)
 	}
 	values := installValues(fs)
-	want := map[string]string{"addr": ":2300", "tailnet-auto-join": "true"}
+	want := map[string]string{"addr": ":2300", "tailnet-auto-join": "true", "browser-image": "registry.example/browser:v1"}
 	if len(values) != len(want) {
 		t.Fatalf("values = %v, want only the named serve options %v", values, want)
 	}

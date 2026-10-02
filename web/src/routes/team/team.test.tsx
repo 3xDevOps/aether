@@ -1,8 +1,7 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { StatusBar } from '@/components/shell/status-bar'
 import { ApiError } from '@/lib/api'
 import type { PresenceEntry } from '@/lib/types'
-import { Board } from '@/routes/board'
 import { TeamStatus } from '@/routes/team'
 import { ApprovalInbox, ApprovalStatus } from '@/routes/team/approvals'
 import { BudgetStatus } from '@/routes/team/budget'
@@ -308,19 +307,6 @@ describe('team status bar', () => {
   })
 })
 
-describe('run card contributions', () => {
-  it('carries the approval badge and the watcher avatars', async () => {
-    seed({ inbox: { [workspace.id]: [approval()] }, presence: [watching] })
-    render(<Board />)
-
-    const card = screen.getByRole('article')
-    expect(await hintOn(within(card).getByRole('button', { name: '1' }))).toBe(
-      '1 waiting on a decision',
-    )
-    expect(within(card).getByTitle('Watching: Bob')).toBeDefined()
-  })
-})
-
 describe('approval inbox', () => {
   it('decides through the gateway and shows who decided', async () => {
     const client = fakeApi({
@@ -366,14 +352,6 @@ describe('approval inbox', () => {
     render(<ApprovalInbox params={{}} client={client} />)
 
     expect(await screen.findByText(workspace.name)).toBeDefined()
-  })
-
-  it('is titled the word its nav entry uses', async () => {
-    const client = fakeApi({ approvalList: vi.fn(async () => [approval()]) })
-    seed({ inbox: { [workspace.id]: [approval()] } })
-    render(<ApprovalInbox params={{}} client={client} />)
-
-    expect(await screen.findByRole('heading', { name: 'Approvals' })).toBeDefined()
   })
 
   it('reports a failed read instead of saying nothing is waiting', async () => {

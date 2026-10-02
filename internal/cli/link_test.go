@@ -72,6 +72,32 @@ func TestLinkConfig(t *testing.T) {
 	}
 }
 
+// A repo's edge remote names only its server id, so a link that replaces
+// an edge default must keep that server reachable by id.
+func TestLinkConfigKeepsReplacedEdgeDefault(t *testing.T) {
+	a := Config{Addr: "a:2222", User: "aether", Repo: "/src/a", EdgeURL: "https://edge.example", ServerID: "aaaa"}
+	for _, next := range []struct {
+		cfg  Config
+		name string
+	}{
+		{Config{User: "aether", EdgeURL: "https://edge.example", ServerID: "bbbb"}, "b"},
+		{Config{User: "aether", EdgeURL: "https://edge.example", ServerID: "bbbb"}, ""},
+		{Config{Addr: "host:2222", User: "aether"}, ""},
+	} {
+		got := linkConfig(next.cfg, a, next.name)
+		kept, ok := got.ByServerID("aaaa")
+		if !ok || kept.EdgeURL != a.EdgeURL || kept.Addr != a.Addr || kept.Repo != a.Repo {
+			t.Fatalf("after linking %+v as %q, server aaaa = %+v, %v", next.cfg, next.name, kept, ok)
+		}
+		if again := linkConfig(next.cfg, got, next.name); len(again.Links) != len(got.Links) {
+			t.Fatalf("linking %+v again grew links from %+v to %+v", next.cfg, got.Links, again.Links)
+		}
+	}
+	if got := linkConfig(Config{User: "aether", EdgeURL: "https://other.example", ServerID: "aaaa"}, a, ""); len(got.Links) != 0 {
+		t.Fatalf("relinking the same server kept its old link: %+v", got.Links)
+	}
+}
+
 func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	home := testhome.Isolate(t)
 	key := testhome.Ed25519Key(t)

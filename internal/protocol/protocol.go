@@ -40,39 +40,40 @@ const (
 )
 
 // MaxLineBytes is the maximum length of one NDJSON line, framing included.
-// 32 MiB covers the base64 form of the valid 20 MiB aggregate profile cap.
-const MaxLineBytes = 32 << 20
+// 96 MiB covers base64 encoding and framing for a 64 MiB config import request.
+const MaxLineBytes = 96 << 20
 
 // Control-channel method names.
 const (
-	MethodServerInfo     = "server.info"
-	MethodWorkspaceList  = "workspace.list"
-	MethodWorkspaceGet   = "workspace.get"
-	MethodMemberList     = "member.list"
-	MethodMemberApprove  = "member.approve"
-	MethodMemberInvite   = "member.invite"
-	MethodMemberRemove   = "member.remove"
-	MethodMemberColor    = "member.color"
-	MethodMemberGit      = "member.git"
-	MethodMemberRole     = "member.role"
-	MethodAccountList    = "account.list"
-	MethodAccountShare   = "account.share"
-	MethodAccountRevoke  = "account.revoke"
-	MethodWorkspaceAdd   = "workspace.add"
-	MethodRunLaunch      = "run.launch"
-	MethodRunList        = "run.list"
-	MethodRunGet         = "run.get"
-	MethodRunKill        = "run.kill"
-	MethodRunDelete      = "run.delete"
-	MethodRunPause       = "run.pause"
-	MethodRunResume      = "run.resume"
-	MethodRunInject      = "run.inject"
-	MethodRunClose       = "run.close"
-	MethodRunRelaunch    = "run.relaunch"
-	MethodRunHandoff     = "run.handoff"
-	MethodRunPull        = "run.pull"
-	MethodTerminalStatus = "terminal.status"
-	MethodTerminalStop   = "terminal.stop"
+	MethodServerInfo      = "server.info"
+	MethodWorkspaceList   = "workspace.list"
+	MethodWorkspaceGet    = "workspace.get"
+	MethodMemberList      = "member.list"
+	MethodMemberApprove   = "member.approve"
+	MethodMemberInvite    = "member.invite"
+	MethodMemberRemove    = "member.remove"
+	MethodMemberColor     = "member.color"
+	MethodMemberGit       = "member.git"
+	MethodMemberRole      = "member.role"
+	MethodAccountList     = "account.list"
+	MethodAccountShare    = "account.share"
+	MethodAccountRevoke   = "account.revoke"
+	MethodWorkspaceAdd    = "workspace.add"
+	MethodWorkspaceDelete = "workspace.delete"
+	MethodRunLaunch       = "run.launch"
+	MethodRunList         = "run.list"
+	MethodRunGet          = "run.get"
+	MethodRunKill         = "run.kill"
+	MethodRunDelete       = "run.delete"
+	MethodRunPause        = "run.pause"
+	MethodRunResume       = "run.resume"
+	MethodRunInject       = "run.inject"
+	MethodRunClose        = "run.close"
+	MethodRunRelaunch     = "run.relaunch"
+	MethodRunHandoff      = "run.handoff"
+	MethodRunPull         = "run.pull"
+	MethodTerminalStatus  = "terminal.status"
+	MethodTerminalStop    = "terminal.stop"
 	// MethodTerminalImage stores an image in the target member home and
 	// returns the absolute path visible inside its container. An empty run
 	// ID targets the caller's environment terminal.
@@ -88,6 +89,9 @@ const (
 	// terminal, before they are told to log in with it.
 	MethodGitHubProbe = "github.probe"
 )
+
+// MethodTerminalHistory reads a bounded page of normalized run output.
+const MethodTerminalHistory = "terminal.history"
 
 // Custom agent (harness) onboarding methods.
 const (

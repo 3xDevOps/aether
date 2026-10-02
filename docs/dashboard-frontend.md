@@ -217,11 +217,12 @@ one file each (`server`, `workspaces`, `runs`, `members`, `terminal`, `board`,
 `local`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
 may read another's data. Only view preferences (theme, sidebar width and
-collapse state, `activeWorkspace`, grouping, dismissed update versions,
-terminal zoom) are persisted; `persistedUi` in `store/index.ts` is the list
-that decides. Server data is always re-fetched.
+collapse state, `activeWorkspace`, grouping, board layout and per-workspace
+map camera, dismissed update versions, terminal zoom) are persisted;
+`persistedUi` in `store/index.ts` is the list that decides. Server data is
+always re-fetched.
 
-**`activeWorkspace` is the scope every surface reads.** It lives on the `ui`
+**`activeWorkspace` is the scope workspace surfaces read.** It lives on the `ui`
 slice and names the workspace the sidebar's run list, the board, launches,
 templates, budget dialogs and the activity feed all act on. Empty means "all",
 which is what the board falls back to before hydration has named one.
@@ -229,6 +230,16 @@ which is what the board falls back to before hydration has named one.
 switcher can never say one workspace while the view beside it acts on another,
 and `navigate('workspace', ...)` makes the workspace it opens the active scope
 for the same reason.
+Member configuration is account-scoped and does not require a workspace.
+
+The last selected workspace survives reopening. Browser and server-hosted
+dashboards use the `aether.ui` local-storage preference. The local gateway also
+stores it through `workspace.selection`, keyed by server address and member,
+because the desktop app's ephemeral port changes the browser origin on each
+launch. Startup restores this value before choosing a fallback; a selection
+made while startup is loading takes precedence. A failed preference read shows
+the gateway's original error in a toast without blocking workspace and run
+data: the current valid selection or normal fallback still applies.
 
 Derived data (the sidebar's grouped run list, the attention-ordered run list)
 lives in
@@ -251,9 +262,10 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:badges` | `{ run }` | the run card's title row, after the paused and unseen markers |
-| `card:chips` | `{ run }` | the wrapping metadata row after the harness, branch and last-commit readout |
-| `card:footer` | `{ run }` | the card's bottom row, right of the owner and timestamp |
+| `card:badges` | `{ run }` | the run card's status row, alongside the paused and unseen markers |
+| `card:warnings` | `{ run }` | reserved collapsed status-row controls, outside the scrolling metadata |
+| `card:chips` | `{ run }` | the card's Details disclosure, after the expanded run metadata |
+| `card:footer` | `{ run }` | the bottom of the card's Details disclosure |
 | `statusbar` | none | the status bar, for refresh, shortcuts and other live contributors |
 
 The `statusbar` Slot is mounted once, even when narrow layouts collapse its
@@ -275,10 +287,29 @@ overflow when all destinations do not fit. The adjacent sidebar defaults to
 are clamped when rendered. Runs, the attention count, New run, and Status /
 Member stay on one row; a phone drawer remains bounded by its viewport.
 
-The sidebar is a workspace switcher over a flat list of that workspace's runs.
-There is no run tree: one workspace is in view at a time, so the runs group
-instead by state or by owning member (`groupBy`, persisted). Rows and headers
-are compact rather than a lower navigation card.
+The sidebar scopes runs to the selected workspace and groups them by state or
+owning member (`groupBy`, persisted). A swarm is a mission whose integrator
+coordinates worker runs, shown as subsessions. Its current integrator carries
+an **Integrator** badge; subsessions sit directly below it with indented tree
+guides, including finished workers. Each row keeps its own state dot, owner
+color, harness, and navigation target.
+
+Swarm rows stay together in both grouping modes. **Member** uses the
+integrator's owner; **Status** uses the most urgent run in the swarm, so a
+worker needing attention keeps the tree out of the collapsed Done group.
+Trees and their subsessions sort by attention, then most recent change.
+Group counts include subsessions. If an integrator is missing or archived,
+its visible workers remain top-level rows marked **Subsession**.
+
+Relationships come from the run snapshot's `mission_id`, `mission_role`, and
+`integrator_run_id`, not task text or the currently opened mission page.
+`mission.changed` coalesces background refreshes of those relationship fields,
+including when another workspace is selected, without blocking run-status
+events or overwriting newer run state. Reconnect hydration supersedes pending
+relationship requests without waiting for them; their late responses and
+errors cannot change the fresh snapshot. Replacing an integrator moves its
+workers under the replacement and removes the old run's badge. Older servers
+that omit these fields retain the flat list.
 
 Every rendered group header is a disclosure button with its run count. When
 grouped by **Status**, every status header toggles its own member rows; `Done`
@@ -314,10 +345,10 @@ way.
   is a choice: a single workspace renders as a plain label with its base branch
   under it, because a picker with one option is a control that cannot be used.
 - **The runs come from `sidebarRuns`/`sidebarGroups`** in
-  `src/store/selectors.ts`, filtered to `activeWorkspace` and sorted
-  worst-state-first, then most-recently-changed-first, so what needs a human is
-  at the top of whichever group it is in. An empty scope shows every run, which
-  is what the list falls back to before hydration has named a workspace.
+  `src/store/selectors.ts`, filtered to `activeWorkspace`. `sidebarRuns`
+  keeps the flat attention-ordered list for other run surfaces;
+  `sidebarGroups` assembles the sidebar's swarm trees. An empty scope shows
+  every run until hydration names a workspace.
 - **The shared `RunList` keeps visible run labels to two lines**, while each row button retains the full label as its `aria-label`.
 - **The attention badge counts, it does not navigate.** The runs below are
   already sorted worst-first, so the number is for a scrolled sidebar or a
@@ -336,6 +367,40 @@ way.
   own copy for when the member is looking elsewhere.
 - **A nav entry is named what the view it opens is titled**, including
   `routes/workspaces/` as "Manage workspaces" rather than "Workspaces".
+
+## Configuration view
+
+The permanent `configuration` route renders the shared
+`src/components/profile-import.tsx` importer. It is available whenever
+`config.roots` and `config.import` are advertised, through both the local and
+server-hosted gateways, without a workspace or onboarding prerequisite.
+**Agents** provides a **Configuration** action, and `src/lib/surfaces.ts`
+exposes **Configuration** to both the navigation rail and command palette.
+The local onboarding Agents step is an optional consumer of the same component.
+
+The browser directory picker grants access to the directory the user selects
+even when the dashboard is server-hosted; it does not grant access to arbitrary
+local paths. The importer previews metadata and policy exclusions without
+reading file bytes. It transfers the entire eligible directory through
+sequential bounded requests, not a truncated selection. It retains at most the
+current batch's encoded payload and shows cumulative progress. Files above the
+64 MiB configuration-file ceiling and read failures are explicit errors.
+Server exclusions and exact committed paths accumulate across batches; a
+failure stops subsequent requests, distinguishing known commits from a request
+whose response was lost.
+
+After a result the user can select another directory or use **Open remote
+files**, which navigates to the existing `files` route. There is no automatic
+configuration sync, watcher, or import retry. Nonpersisted owner-scoped progress
+and results survive navigation; `configImportPending` serializes operations and
+protects against page unload. Each request rechecks identity after asynchronous
+reads, so a member/server switch prevents further writes and hides the old
+result. New browser-imported files use `0644`; existing
+remote modes are preserved on overwrite. The browser cannot preserve source
+executable bits or symlinks. See
+[Agent configuration](harnesses.md#agent-configuration-import-and-files) for
+the user workflow and [the protocol](local-gateway.md#files-and-member-configuration)
+for import result and failure semantics.
 
 ## Files view
 
@@ -372,9 +437,13 @@ The revision is the SHA-256 of the complete bytes read. A failed or stale save
 keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
-All of the member's run containers and environment terminal mount one shared
-read-write persistent HOME, so accepted configuration imports and saves are
-visible to already-running processes immediately; a tool may need to reload.
+All runs using the member's account and the environment terminal mount one
+shared read-write persistent HOME, so accepted configuration imports and saves
+are visible to active and future runs; a tool may need to reload. Browser
+imports and Files edits do not create CLI snapshot history. Optional run
+snapshot pins are provenance, not isolated writable copies. Manual profile
+push and rollback overlay snapshot files into that same HOME without removing
+paths absent from the snapshot; rollback is not an exact-tree restore.
 
 ## Title bar
 
@@ -480,8 +549,8 @@ it in a follow-up.
 finger has to hit carries its touch size beside its desktop one - for example
 `size-[22px] coarse:size-11`. It answers for the primary pointer, so a touch
 laptop with a trackpad keeps the desktop density. Under it the `Button`
-sizes, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`, the
-`Select` trigger and its options, the dialog close, the palette trigger and
+sizes, `Input`, `CommandItem`, `DropdownMenuItem`, the `CollapsibleTrigger`,
+the `Select` trigger and its options, the dialog close, the palette trigger and
 input, the status bar controls, the sidebar run rows and the sidebar's own
 buttons, the run-list title, the files tree rows and the approvals controls
 grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
@@ -528,8 +597,27 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   The popup also writes out the facts a pointer reads from a hover: the disk
   breakdown, the protocol version and what this machine is linked to. Tooltips
   and `title` stay hints for a pointer, never the only copy of a fact.
+  The bottom-left **Usage** entry is one mounted reader: it remains compact
+  and reachable at narrow widths and sits beside the version readout on wide
+  screens. It calls `account.usage` for the authenticated member, polls only
+  while the page is visible and live, and refreshes on reconnect, focus,
+  visibility and an explicit Refresh action. Opening the popover loads
+  `account.list` for the own/shared account selector; changing that selection
+  clears the previous values before reading the new account, and responses
+  from superseded selections are discarded. Claude and Codex are always
+  represented in the popover. The display uses only measured windows: an
+  expired reset window is omitted until a new measurement arrives, transport
+  failures mark saved values stale, and authorization failures clear them.
+  Older servers that report method-not-found are explained without a
+  retrying poll loop. Pi, OpenCode, OMP/custom harnesses, API-key usage and
+  billing history are explicitly outside this read-only surface; credentials
+  remain server-side.
 - **The run header** gives its first section two lines: the title and task
-  disclosure, then state, harness/mode and branch metadata. The second section
+  disclosure, then state, harness/mode and branch metadata. The title is the
+  agent's last terminal title; a run without one is named by the first line
+  of its prompt, cut at 120 characters. The heading clamps to two lines and
+  keeps the full label in its `title`; the whole prompt is behind
+  **View full task**. The second section
   holds only the run-detail tabs and actions. Desktop actions all appear from
   a 512px header width, with icon labels expanding from 1024px; narrower
   headers retain More. Metadata and tabs scroll inside their own regions
@@ -540,10 +628,10 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
   buttons do not fit across a phone, and the mouse answer to a narrow row -
   22px icons with the label in a hover tooltip - is six unnamed icons to a
   finger. Hand off is in the same menu.
-- **The board** uses one column on narrow screens and three columns from the
-  `lg`/1024px breakpoint, with compact flat run cards and vertical scrolling on
-  small screens. State labels remain visible; empty, loading and error panels
-  use the same bounded surface hierarchy.
+- **The board** offers Cards and Map layouts. Cards stacks its three status
+  columns on narrow screens and places them side by side from the
+  `lg`/1024px breakpoint; Map pans and zooms inside a bounded canvas. Both
+  keep state labels and run controls available (see [Board](#board)).
 - **The workspace/run sidebar** collapses at 1000px and narrower into the
   persistent 48px activity rail, which exposes **Expand sidebar** without
   changing the stored preference. At 640px and narrower its expanded pane is a
@@ -556,12 +644,19 @@ scrolls inside itself. `sm` is a width breakpoint, so a desktop window narrower 
 `connect()` in `src/store/sync.ts` owns the whole lifecycle. One round of HTTP
 fetches hydrates the store (`server.info`, `workspace.list`, `member.list`,
 `run.list`, `run.overlaps`, and `GET /api/v1/capabilities`), then `/ws/events`
-is the only thing that changes it. Hydration also repairs the scope: an unset
-`activeWorkspace`, or one naming a workspace that is gone, falls back to the
-first by ID rather than leaving every scoped surface pointed at nothing. The capabilities fetch may fail without
-failing hydration - a legacy gateway has no such endpoint - and the store
-then holds `null`. The snapshot also seeds the board's paused map from each
-run's wire `paused` field, skipping runs that do not carry it.
+is the only thing that changes it. `setWorkspaces` keeps a valid selection;
+an unset selection or a workspace that has been deleted falls back to the
+first by ID, or clears the selection when none remain. An open deleted
+workspace route moves to the replacement workspace or **Manage workspaces**;
+an open run in a deleted workspace returns to the board. The capabilities
+fetch may fail without failing hydration; a legacy gateway then holds `null`.
+The snapshot also seeds the board's paused map from each run's wire `paused`
+field, skipping runs that do not carry it.
+
+`removeWorkspace` records deleted IDs for the lifetime of the in-memory store.
+Every workspace snapshot and upsert excludes those IDs, so an older route or
+hydration response cannot resurrect a deletion received from another member.
+Removal also repairs the selection and open route before any refresh awaits.
 
 - **The subscription is established first.** Hydration starts only once the
   server acknowledges it (`{"ok":true}`), which is also when the client calls
@@ -599,7 +694,13 @@ run's wire `paused` field, skipping runs that do not carry it.
   reason. A fetch that got no answer at all is `gateway` only on the desktop
   origin, where that process can be restarted; on the server gateway it is
   `tailnet`, because the page came over the tailnet and there is no local
-  process to blame and no wifi advice to give. The capabilities probe records
+  process to blame and no wifi advice to give. A local gateway linked through
+  an edge classifies the client's own error text: `edge` (the edge did not
+  answer), `edge-server` (the server is not connected to it), `signed-out`
+  (no valid device token; gives the `aether login --edge` command),
+  `device-revoked` and `device-pending`. `src/store/edge-sync.test.ts` pins
+  the wording those classes match, so a change in `internal/edge/client` or
+  the sshd banners fails there. The capabilities probe records
   which gateway serves the page before hydration runs, so the first failure
   is classified too. The gateway's message appears in an initially open
   "Technical details" disclosure, and the page suppresses the toast that
@@ -692,10 +793,12 @@ or roles but can grant or revoke access to their own agent account.
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, gateway authentication and error decoding. It carries exactly the
 methods the views call; the team-feature methods arrive with the tickets that
-use them. Every call is a `POST /api/v1/<method>` bar three `GET`s - the diff
-tab's patch text, the status bar's disk number, and the capabilities probe -
-because those read a working tree, a filesystem, and the gateway descriptor
-rather than RPC methods. `aether gui` sends its per-process token as
+use them. Control calls use `POST /api/v1/<method>`. The diff patch, disk
+gauge and capabilities descriptor are read through `GET`; development and
+retained-evidence capture bytes also use an authenticated binary `GET`, not
+base64 in control JSON. The shared browser's observation-only WebSocket is
+`/ws/dev/browser/{run_id}`; actions stay on the typed HTTP control API.
+`aether gui` sends its per-process token as
 `Authorization: Bearer` on HTTP and as `?token=` on WebSockets. The
 server-hosted gateway sends no token; WhoIs authenticates each request.
 
@@ -710,29 +813,48 @@ itself, and the gauge is labelled as that: it is the number that says whether
 the box is running out of room, and claiming it as Aether's own usage would
 be an invention.
 
+`account.usage` is the quota RPC used by the status-bar popover. Its params
+are `{account_member_id?: string, refresh?: boolean}` and its result is
+`{account_member_id, providers}` with independently decoded Claude/Codex
+provider rows (`status`, `windows`, optional `plan`, `updated_at`, `retry_at`,
+`error`, and `checked_at`). The provider endpoints are subscription services
+whose response shapes can change; the server owns credentials, fixed provider
+hosts, bounded fetches and cache policy. The dashboard does not refresh
+tokens, run provider CLIs, or infer billing/history, and an older server that
+does not know this method is shown as needing an update rather than polled
+forever.
+
 ## Board
 
-`src/routes/board/` is the default center view: the active workspace's run
-cards in the three buckets the GUI spec copies from Orca. `needs-attention` is
-Needs You - the agent is waiting for you, or the run stalled, and the reason
-strip on the card says which - `queued`/`provisioning`/`running` is Working,
-and `completed` plus the final statuses are Done. An active run whose approval
-request is still pending also presents as needs-attention on the board and in
-the sidebar - the pause is invisible in the domain status, so `runState` takes
-a pending flag fed from the approval inbox. Cards sort by last state change,
-newest first.
+`src/routes/board/` is the default center view, reached through the activity
+rail's **Board** home icon. Its header shows the active workspace, run count,
+New run, Mark all seen and a **Cards / Map** segmented layout control.
 
-The board header wraps its title, run count Chip, descriptive copy and toolbar.
-Its grid is one column on narrow screens and three columns from the
-`lg`/1024px breakpoint, with flat bordered columns, readable state headers and
-bounded card content. The primary run-card button contains the state and
-title/task metadata as bounded previews, each capped at three lines; the button
-keeps the full `runLabel` as its accessible name, and the shared `RunHeader`
-exposes the full task through **View full task**. An empty workspace
-shows one "Ready for a task" panel and a primary New run action rather than
-three repeated empty columns. Loading uses delayed skeletons, and hydrated
-empty buckets say "Nothing here." without confusing an in-flight request with
-an empty result.
+**Cards** arranges runs in three status buckets. `needs-attention` is Needs
+You: the agent is waiting for you, or the run stalled, and the reason strip
+says which. `queued`/`provisioning`/`running` is Working; `completed` and final
+statuses are Done. An active run with a pending approval also presents as
+needs-attention on the board and in the sidebar: `runState` takes a pending
+flag from the approval inbox because the domain status alone does not show
+the pause. Cards sort by last state change, newest first. The flat bordered
+columns stack on narrow screens and sit side by side from the `lg`/1024px
+breakpoint.
+
+Both layouts use uniform-height collapsed run previews. The title has its
+own full-width row with a bounded preview and the full `runLabel` as the
+navigation button's accessible name. Status, owner, harness, timestamp and
+branch-copy controls remain available without expanding the card. Counted
+file-overlap and mission-conflict buttons stay visible beside the status
+metadata and open diagnostic controls in popovers. **Details** reveals the
+full title/task, reason and additional metadata inline in Cards and in a
+dialog in Map, so expansion does not disturb map geometry. The run page also
+exposes the full task through **View full task**.
+
+An empty workspace shows one "Ready for a task" panel and a primary New run
+action rather than three repeated empty columns. Loading uses delayed
+skeletons, and hydrated empty buckets say "Nothing here." without confusing
+an in-flight request with an empty result.
+
 The card's article remains a pointer surface for noninteractive metadata, while
 interactive descendants and any non-collapsed text selection are ignored by
 the article handler. Branch text is explicitly navigation-exempt so it can be
@@ -743,6 +865,40 @@ card is. Copying goes through `src/lib/clipboard.ts`, shared with
 `CopyableCommand`, because an origin without `navigator.clipboard` - plain
 http, an older engine - has to fall back to selecting the text for a manual
 copy rather than failing quietly.
+
+**Map** groups runs by their actual owning member, with a named boundary and
+light identity tint. Standalone runs remain individual cards; swarm groups
+label integrators and workers and draw directed hierarchy connectors. Workers
+stay inside their own owner's boundary even when coordinated by another
+member's integrator; those cross-owner connectors are dashed. A worker whose
+integrator is not in the current map, for example because it is archived,
+remains visible and is labeled as having an integrator not visible.
+Relationships use the snapshot fields described under [Sidebar](#sidebar),
+not task-text guesses. Deterministic
+rectangular shelf packing arranges the groups into a landscape-oriented map
+rather than a radial graph or a single vertical stack.
+
+Map navigation stays inside its canvas:
+
+- Drag blank canvas with the mouse or scroll the wheel to pan.
+- Hold Ctrl or Cmd while scrolling to zoom around the pointer.
+- On touch screens, drag to pan and pinch to zoom.
+- With the canvas focused, arrow keys pan; Shift increases the step.
+  `+` / `-` zoom and `Home` / `0` fit all runs.
+- Visible **Zoom out**, zoom percentage, **Zoom in** and **Fit** controls
+  provide the same operations without gestures. Tab reaches run controls.
+
+The selected layout and each workspace's map pan/zoom are stored in the
+existing `aether.ui` origin-local preferences. They survive layout switches,
+route changes and reloads; switching workspaces restores that workspace's
+camera. Unlike the separately stored workspace selection, these preferences
+do not cross origins, including a local gateway's changed ephemeral port.
+While Map stays open, a changed run set or card geometry refits only when
+every card would be offscreen. Routine metadata updates and return visits
+preserve the camera.
+Switching Cards to Map or back moves matching cards between their measured
+rectangles, including width and height, over 460ms. Reduced-motion preference
+skips this movement.
 
 Two things the buckets do not come from the run status alone:
 
@@ -770,19 +926,22 @@ carries `archived_at`/`deletes_at` once archived. Every hide guard -
 `board()`, `sidebarRuns()`, and the attention count - drops it once its
 status is also final (`isArchivable`: `merged`, `abandoned`, `failed`,
 `interrupted`); a route that opens a run by id is untouched, since it reads
-the run map directly. The Done `ColumnHeader` grows an "Archived N" toggle
-once N is over zero, swapping the column's content to those runs, and
-resets to Done the moment the last one leaves. Each archived card, and the
-run header for one, show `deletesInLabel(deletes_at)` (`src/lib/format.ts`):
+the run map directly. In Cards, the Done `ColumnHeader` grows an "Archived N"
+toggle once N is over zero, swapping the column's content to those runs. Map
+keeps the same toggle in its Runs header and replaces Done runs with archived
+runs while leaving active runs visible. Both return to Done when the last
+archived run leaves. Each archived card, and the run header for one, show
+`deletesInLabel(deletes_at)` (`src/lib/format.ts`):
 "deleted today" under 24h (past due included), "deleted in 1 day" under
 48h, then "deleted in N days".
 
 **Clear done archives every eligible Done card at once.** The Done
-`ColumnHeader` grows a "Clear done" button, and the palette carries the same
-action as "Clear done runs"; both open the one confirm dialog
-(`ClearDoneConfirm`, `src/routes/board/clear-done-dialog.tsx`) over a plan
-`clearDonePlan()` (`src/lib/commands.ts`) snapshots when it opens. Eligible:
-`isArchivable`, not already archived, and killable by the caller. The
+`ColumnHeader` in Cards and the Runs header in Map offer "Clear done"; the
+palette carries the same action as "Clear done runs". All open the one
+confirm dialog (`ClearDoneConfirm`, `src/routes/board/clear-done-dialog.tsx`)
+over a plan `clearDonePlan()` (`src/lib/commands.ts`) snapshots when it opens.
+Eligible runs are `isArchivable`, not already archived, and killable by the
+caller. The
 dialog states what it will archive and, by count, what stays and why -
 still `completed` and awaiting Close, or not this caller's to kill. On
 confirm, `runClearDone()` issues every archive at once with
@@ -1002,10 +1161,11 @@ trigger in the status bar. `⌘K` lives with the palette in
 `n` is offered, on both surfaces, only to a member who may launch. The
 single-key ones carry no modifier, so `keyboardBusy` in `src/lib/keys.ts`
 stands them down whenever something else has the keyboard: a text field or a
-select, a terminal, an open menu or list box, or an open dialog. A stray `n`
-typed at an agent has to reach the agent, `n` in a menu is that menu's own
-typeahead, and `n` on a select jumps to the option that starts with it - the
-guard finds a select by its `combobox` role, since the control is a button.
+select, a live terminal or its focused history surface, an open menu or list
+box, or an open dialog. A stray `n` typed at an agent has to reach the agent;
+in history it does nothing. In a menu it is that menu's typeahead, and on a
+select it jumps to the option that starts with it. The guard finds a select
+by its `combobox` role, since the control is a button.
 The `g` prefix waits 1.5s for the key that completes it, and any key that goes
 somewhere else ends the wait.
 
@@ -1071,7 +1231,7 @@ single tab stop that follows focus, and Left/Right/Home/End through
 unmodified Delete and Backspace through `aria-keyshortcuts`.
 
 Neither strip is a Radix `Tabs`, though the library is already a dependency.
-The run strip cannot be: its four tabs are separate registry routes with no
+The run strip cannot be: its five tabs are separate registry routes with no
 common parent to hold a `Tabs.Root`, and Radix would emit `aria-controls`
 pointing at panels that are not in the tree. The dock keeps each tab's close
 affordance inside its native tab button instead of nesting another button
@@ -1089,15 +1249,15 @@ focus to the next surviving tab, the previous one when closing the last tab, or
 the Add terminal tab when the dock becomes empty.
 Each run route names the body under the strip as its `tabpanel`, through
 `runTabPanel` in `tabs.tsx`, and in both strips the selected tab is the only
-one carrying `aria-controls`: on the run strip only one of the four routes is
-active at a time, so the other three would be naming a panel that is not active
+one carrying `aria-controls`: on the run strip only one of the five routes is
+active at a time, so the other four would be naming a panel that is not active
 in the tree. An open dock's body is the panel its selected tab names; a shut
 dock has no body, and a dock
 holding no tabs is no tab list at all, so neither names anything.
 
-Opening a run tab swaps the active center view. The previously active strip
-unmounts; a cached primary terminal retains only its terminal surface, hidden
-and inert, so the strip the next route draws takes the focus back. Otherwise
+Opening a run tab swaps the active center view. The previously active view
+unmounts, including its terminal, so the strip the next route draws takes the
+focus back. Otherwise
 every tab press would drop a keyboard reader on `body`. It is armed
 from the activation rather than the key press, and only from one the keyboard
 produced, which carries no click count: a press that is cancelled arms
@@ -1124,7 +1284,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 
 `src/routes/terminal/` is the run-detail Terminal tab: xterm.js over
 `/ws/attach/<run>` (`docs/local-gateway.md`). The run-detail routes share one
-tab strip (`tabs.tsx`), so Overview, Terminal, Diff and Events are registry
+tab strip (`tabs.tsx`), so Overview, Terminal, Browser, Diff and Events are registry
 routes on the same `runId`; the strip is a real tab list, arrow keys included
 (see [Keyboard and focus](#keyboard-and-focus)).
 
@@ -1147,9 +1307,9 @@ the task.
 ### Run Room and control lease
 
 `RunRoom` is the collaboration view for the current run. It is mounted beside
-`TerminalView` as a collapsed vertical tab; opening it loads the durable room
-timeline and the current room status. The tab count is derived from the
-collaboration slice's unanswered questions and queued steers.
+`TerminalView` as a collapsed vertical tab; opening loads the durable room
+timeline, while presence refreshes even when collapsed. The tab count is
+derived from the collaboration slice's unanswered questions and queued steers.
 
 The server-side lease, reconnect, takeover, steering, protection, attachment,
 and question contract is defined once in
@@ -1158,10 +1318,18 @@ Dashboard changes must preserve that contract rather than restating it here.
 
 The dashboard-specific state wiring is:
 
-- `RunRoom` reads `roomMessages`, pagination, loading and action errors, and
-  `roomStatus` from `src/store/collaboration.ts`; it hydrates history and
-  status through `run.room.list` and `run.room.status`, then merges live room
-  events through the normal store sync.
+- `RunRoom` reads history, pagination, loading, action errors and presence from
+  `src/store/collaboration.ts`. `run.room.list` loads on opening and reconciles
+  every ten seconds while open; live room events merge through normal store
+  sync. `run.room.status` runs on mount, every five seconds and when acknowledged
+  control metadata changes. Refreshes are serialized with an abortable 15-second
+  deadline; polling continues after timeout. Each snapshot retains the exact
+  acknowledged `ControlMetadata` reference: taking then releasing can restore
+  the same generation, so generation values alone cannot establish freshness.
+  A changed reference marks the cached controller **(last known)** until the
+  next response. Late responses from an old scope or timed-out request are
+  ignored. Presence errors stay separate from history errors: retained names
+  are marked stale, and unavailable/loading status is not shown as nobody.
 - The composer calls `run.room.post` for comments, questions, replies, and
   steer requests. Approval and denial call `run.room.decide` with the control
   metadata supplied by the terminal attach.
@@ -1169,6 +1337,21 @@ The dashboard-specific state wiring is:
   `ControlMetadata` to `RunRoom`. `RunDock` keeps shell control state beside
   the agent terminal and exposes its own control action without duplicating
   room state.
+- `TerminalRoute` excludes `run.mission_role === 'worker'` from desktop owner
+  automatic write requests. Opening a subsession therefore starts as a mirror,
+  not a human takeover. `useRunTerminalSession` still gives deliberate per-run
+  write intent precedence over that default, with its existing identity and
+  authority fences; Take control and Release use acknowledged control frames.
+  Ordinary/integrator owner defaults and phone mirrors are unchanged.
+- **Ctrl/Cmd+Shift+M** toggles the room from xterm or the composer; the opener
+  tooltip, room header and shortcut reference show the platform-specific key.
+  The capture handler prevents terminal bytes, focuses the composer on keyboard
+  opening and restores the invoker (or opener) on closing without clearing the
+  draft, mode or attachments. Dialogs, the palette, composition and already
+  handled events take precedence.
+- **Comment** starts selected with a neutral selected segment and a
+  collaborators-only hint. **Send to agent** uses teal and explains the queued
+  instruction and controller approval consequence; colour is not the sole cue.
 
 On desktop the open room is a right-side panel capped at 420px. On a phone it
 is a full-viewport sheet; the terminal and room remain separate surfaces while
@@ -1176,9 +1359,53 @@ sharing the same server state. Questions and queued steers therefore appear in
 the existing run-level count and **Needs you** grouping instead of creating a
 second dashboard inbox.
 
-A run id none of the four tabs can find renders one shared `MissingRun`
+### Candidate review in Run evidence
+
+The existing `EvidenceDrawer` is also the candidate review surface; candidate
+state is not a second run board. Its retained packet view keeps the heading
+**Recorded observations, not verification**, and the candidate panel labels raw
+packet snapshots as **Raw packet — observation, not verification**. **Review
+candidates** opens the candidate list for the current workspace, and
+**Prepare candidate** starts a review from ordered retained packets. **Add
+selected packet** adds another exact source; the preparation action remains
+**Prepare candidate**. **Refresh candidates** re-reads the list and
+**Show candidate** loads the selected aggregate.
+
+The evidence drawer uses viewport-fixed positioning on desktop and phone so
+its controls are not clipped by the room or terminal's scroll containers.
+Its body scrolls within the available viewport height.
+
+The review shows the exact ordered inputs, their observation snapshots, target
+and expected revision, candidate revision/state, conflicts and file
+resolutions. **Apply resolutions** submits explicit path edits or deletes and
+continues isolated assembly. Once frozen, the panel shows the exact argv,
+observed image, runtime identity and working directory, bounded resource and
+timeout details, setup/environment provenance, result, bounded output and
+provenance for each verification. **Run verification** starts the server-side
+check;
+**Request delivery** binds the selected verification IDs, target, expected
+revision, and action; **Approve delivery** or **Deny delivery** records the
+human decision; and **Deliver approved** executes the already-approved exact
+request.
+
+Candidate mutations are disabled while the connection is **Offline**,
+**Reconnecting**, or **Connecting**. A return to **Live** refetches candidates
+and the selected review before enabling controls, so stale revisions and
+requests are not reused. A refreshed candidate with a new identity or version
+invalidates resolution drafts; an own partial **Apply resolutions** response
+keeps only untouched drafts that still conflict at the same assembly step.
+The panel preserves the gateway's real error rather than manufacturing a
+client-side result. Candidate review has no separate attention board,
+mission-progress surface, or agent decision path; it remains an evidence-linked
+human review flow.
+
+The wire methods and bounded records are documented in
+[integration.md](integration.md); this guide records only the dashboard
+surface and its reconnect behavior.
+
+A run id none of the five tabs can find renders one shared `MissingRun`
 (`src/components/missing-run.tsx`) instead of that header, its tab strip and
-four copies of a sentence with nothing to press. What it says is what the
+five copies of a sentence with nothing to press. What it says is what the
 store actually knows. While the server is unreachable it reports that, in
 the same words `run-list.tsx` uses and with the same split - a dead token is
 not a server that is retrying, so that one says what the error recorded -
@@ -1189,52 +1416,83 @@ offer **Back to board**. The launch paths seed the run they just started -
 both template launches and the onboarding first-run form, the way
 `launch-dialog.tsx` does - so a launch never lands on the deleted claim.
 
-`CenterView` retains visited `TerminalView` subtrees in its bounded cache while
-the run route changes. A first visit creates the terminal only for a known run;
-if that run has ended with no recorded terminal, the attach is refused and the
-cached pane is never allowed to show the previous run's output under the new
-run's name.
+`CenterView` mounts only the active route. A terminal key includes the route,
+the authenticated identity, the terminal data-generation epoch, and the run id,
+so a change of identity or epoch remounts the surface instead of reusing it.
+Leaving the terminal closes its WebSocket and disposes xterm; no hidden live
+terminal stays warm. A pinned view retains only its static presentation and
+history state. Returning attaches again at the compact current screen behind
+the saved reading surface, without replacing its content or position. A run
+left following live output shows that fresh current screen. Neither path
+replays the retained archive into xterm.
 
-**Primary run terminals are cached, not destroyed by navigation.** `CenterView`
-keeps up to four recently visited primary run terminals mounted in browser
-memory. Cache keys include the authenticated identity and the terminal data
-generation epoch, so a key is never reused across either boundary. The cache
-contains only runs the member has visited: it does not prefetch runs and is not
-persisted across reloads or browser tabs.
+The normal run xterm requests up to 5,000 scrollback rows. Once the server
+acknowledges geometry, xterm adapts the combined normal and alternate buffers
+to stay near 1,000,000 cells; wider terminals therefore retain fewer rows.
+That bound is the live surface. `history.tsx` integrates older recorded output
+into upward scrolling in the same pane: normal-buffer wheel-up, `PageUp`,
+`Home`, scrollbar movement or a downward finger drag freezes the current
+presentation and enters reading mode. Ordinary alternate-screen gestures
+remain app-owned; `Shift+PageUp` explicitly enters recorded output there,
+using a prior captured normal screen if available rather than pretending the
+alternate screen is normal scrollback.
 
-When a cached primary becomes inactive because the route changes, its
-WebSocket is intentionally closed. That detach removes its Watching presence,
-active control transport, and geometry participation, while retaining the
-parsed xterm screen/scrollback and the logical control-session identity.
-Reactivation renders that parsed state immediately and reconnects with
-`resume` only after pending xterm writes settle. The attach ack's server-issued
-`resume_id` fences the settled cursor to one PTY incarnation; a missing ID means
-a full attach, and a mismatched ID is acknowledged with `resumed:false`,
-the current cursor, and the current ID before the complete retained transcript
-is applied through the hidden serial replay transaction. A write completion while
-parked immediately reports the latest combined normal-plus-alternate buffer
-weight. A completed entry whose session ended stays parked and does not
-reconnect unless that same run is relaunched; then it full-attaches once active.
+The reading surface virtualizes visible rows plus overscan and prefetches near
+the oldest loaded rows. Its bounded scroll coordinate window shifts around the
+reader for very large archives; it does not discard older pages or impose a
+fixed line-count cutoff. Archived rows have stable negative indices, with
+the newest at `-1`, and retain their opaque server cursors. Frozen normal-screen
+rows have nonnegative indices. An explicit inline boundary separates normalized
+recorded text above from frozen VT presentation below. There is no heuristic
+text deduplication across that boundary and no claim of exact historical VT
+reconstruction.
 
-Inactive entries are trimmed least-recently-used to an approximate 4,000,000
-xterm-cell budget, with at most four entries total and one most-recent
-overweight entry allowed. The active entry is protected while selected.
-Run deletion, an attach's final refusal, and an identity or data-generation
-change invalidate entries; LRU eviction disposes inactive entries. An
-invalidated active entry remains only long enough to show its refusal, then is
-disposed when it becomes inactive. Generation changes dispose the old
-generation immediately.
+`history-cache.ts` stores pages, continuation metadata and the frozen HTML view
+in IndexedDB, with an eight-page resident text LRU. The saved anchor is a stable
+row plus its relative pixel offset and horizontal offset, not a distance from
+the ever-changing live bottom. Prepending pages and switching A to B to A
+preserve that anchor and the same cursor-linked row while output continues.
+The frozen rows keep their captured layout through live geometry changes;
+shared font zoom scales their presentation without rewrapping them.
+Storage is scoped by authenticated identity, terminal-data epoch, run id and
+creation time. Identity/epoch changes, authoritative run deletion and stale
+async completions cannot restore another scope's data. Leaving cancels fetching,
+not the saved view. Browser-storage failures are visible; unavailable storage
+allows an in-memory session fallback, not a durable-restore guarantee. Missing
+persisted pages are errors, not silent truncation.
 
-The Terminal view is a vertical split. Only the active terminal renders its
-RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`; inactive cached
-entries retain only the primary TerminalPane/xterm. This keeps auxiliary fixed
-IDs and portals unique and restores focus handoff when the entry becomes active.
+Arrows, `PageUp`/`PageDown`, `Home`, wheel and touch browse the read surface.
+Scrolling downward to its bottom or pressing `End` returns live. Only a new
+reading episode after returning live resets paging to the newest archive
+head; remounting a pinned run keeps its continuation and loaded pages.
+Empty bounded scan windows continue automatically while yielding to input;
+genuine fetch/storage failures appear inline. Existing pane Find searches
+retained loaded pages and frozen rows, not unfetched server history; copy
+selects from the read surface. Typing, paste and image insertion stay muted
+while reading. The hidden native host is inert; input guards block user
+actions without suppressing authorized terminal-generated protocol replies.
+
+A same-incarnation resume, when the current surface is still mounted, supplies
+only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
+back to a compact current-screen bootstrap through the hidden serial
+transaction. A finished run stays read-only until that same run is relaunched.
+
+The Terminal view is a vertical split. The active terminal renders its
+RunHeader, terminal tabs/actions, and `RunDock`/`RunRoom`.
 The agent terminal keeps flexible space above a `RunDock` below it. The first
 header section contains the title and metadata on two lines; the next contains
-tabs and actions on one line. The terminal strip left-aligns connection and
-steering immediately after the search, font, clipboard and image tools, without
-a spacer between the groups. Real gateway errors wrap there rather than being
-truncated.
+tabs and actions on one line. The existing terminal toolbar contains connection,
+control and presence alongside its tools, with no extra viewer/controller row.
+It names the controller and all viewers; the viewer list scrolls horizontally,
+and **Terminal tools** takes utility actions at limited widths. **(this tab)** requires
+live acknowledged local control; **(another session)** distinguishes the same
+member's other controller session. Real gateway errors remain readable.
+At narrow widths key and eye icons identify the controller and viewers; full
+role labels stay accessible, with the session marker also in the controller's
+hover title.
+The viewer scroller is keyboard-focusable.
+Find opens in a temporary row below the strip so it never obscures a matched
+terminal line. Closing Find returns that space to the terminal.
 
 The dock header uses a `min-h-9` strip rather than a fixed 40px height. It can
 wrap actions below the tabs on narrow screens, while the tab list scrolls
@@ -1245,18 +1503,44 @@ is reachable too. The shell tab strip is a custom manual tab list with one
 keyboard stop and overflow scrolling; it does not use a component-level tab
 primitive.
 
-`TerminalPane` keeps xterm's host geometry intact while layering the shared
-toolbar and Find over it. During replay it receives `replaying={replaying}`:
-the xterm host is hidden with CSS visibility while each frame-sized replay
-operation is parsed through one serial xterm write chain, and the pane says
-**Restoring terminal history** until the final replay write callback. The run
-terminal, run-shell tabs, and environment dock all pass `setReplaying` to their
-shared replay gate, so all three surfaces reveal only a settled terminal. After
-that callback, two `requestAnimationFrame` turns let the xterm DOM paint the
-settled state before visibility is removed.
+`TerminalPane` lays out its shared toolbar and optional Find row above the
+terminal host. During a dashboard run's compact current-screen
+bootstrap it receives `replaying={replaying}`: the xterm host is hidden with
+CSS visibility while each frame-sized operation is parsed through one serial
+xterm write chain. When no saved reading surface covers it, the pane says
+**Restoring terminal history** throughout the parse, paint delay, and
+saved-viewport restoration; the status clears only when the surface is ready
+to reveal. It describes compact bootstrap restoration, not an archive scan.
+When a pinned view exists it remains visible instead. The run terminal,
+run-shell tabs, and environment dock all use this shared replay gate. User
+input and terminal-generated replies remain muted through the final replay
+write callback. That callback restores authorized protocol replies, including
+while reading; user input remains blocked until returning live. A full replay
+remains hidden for two paint turns, then its queued viewport restoration
+settles before visibility is restored.
+
+There is one vertical scroll owner at a time: xterm while live, the virtual
+read surface while pinned. The host and ancestors suppress competing vertical
+overflow. xterm's scrollbar inherits the host's CSS visibility: its
+`visible`/`invisible` classes control opacity and must not pick up Tailwind's
+visibility utilities. Otherwise an inert live scrollbar remains painted over
+the reading surface or compact-bootstrap overlay.
+
+Live xterm follows output at the bottom. Its controller still
+protects viewport intent across structural replay or column reflow: it restores
+only a current operation, with no intervening viewport interaction and no
+normal/alternate-buffer change. The run's saved static reading surface is
+independent of those live-buffer operations, so a fresh bootstrap cannot
+overwrite it or shift its anchor.
+
+The [scrollbar comparison](media/terminal-scrollbar-visibility.webp) shows,
+top to bottom, the leaked scrollbar, the corrected reading surface, and the
+return to the live prompt. It uses the real terminal components with synthetic
+output; the headless browser suppresses its own native scrollbar in captures.
+
 `TerminalTools` in the same module owns the search, zoom/reset, copy,
 copy-last-screen, paste, and `TerminalImageAction` controls; the run terminal
-supplies its connection and steering controls immediately after those tools.
+supplies connection, control and presence in that same toolbar.
 Terminal tools delegate key behavior to the xterm controller and clipboard
 helpers rather than putting those actions in each dock. `useTerminalImage`
 owns the hidden file input, preview dialog, validation, upload call, and
@@ -1304,8 +1588,16 @@ A following terminal therefore:
   local measurements and resize reports, while `setGeometry()` applies the
   server's grid just as on desktop. The header carries `standardGeometry`
   (80x24) only for a session being created, such as a new shell tab.
-  Every terminal pane has `overflow-auto` so an oversized grid remains
-  reachable. While steering, the flag still keeps this viewer out of the
+  On phones the live terminal host exposes both axes. `useTerminalPan`
+  reveals the cursor on entry, focus, input and viewport changes, without
+  resizing xterm; a manual pan pauses following until a tap, focus or input resumes it.
+  It rounds fractional viewport bounds inward so the whole cursor cell remains visible.
+  History capture keeps the absolute outer pan offset separate from
+  accumulated gesture deltas, including when disposal beats the next paint.
+  Layout cleanup records the latest pan before host detachment, even if its
+  scroll event has not fired.
+  The integrated run-history surface owns both axes while reading, with
+  live-grid panning disabled. Steering still keeps this viewer out of the
   shared size calculation.
 - does not steer on entry even on the member's own run. `Take control` is the
   only way in, and `disableStdin` holds until the ack grants write - that is
@@ -1319,12 +1611,18 @@ and Ctrl+C, each through `terminal.input` so the replay gate and
 modifier held in the host (`armCtrl`), because a soft keyboard sends
 characters and never a modifier: it rewrites the next character into its
 control code, and a key it has no code for keeps the modifier armed rather
-than spending it on the wrong byte. The two copy actions carry a visible
-word beside them under `coarse:`, because a tooltip is the only other thing
-telling them apart and hover is what opens one.
+than spending it on the wrong byte. On phones, and when the run toolbar is too
+narrow for inline tools alongside presence, **Terminal tools** opens a bounded,
+scrollable popover with named search, text-size, copy, paste and upload actions
+instead of a second permanent toolbar row. Wider layouts keep inline tools.
 
-The pane scrolls the cursor into view whenever it moves or the host takes
-focus on a phone, where the row being written on can be outside the pane.
+In a run's normal buffer, a downward finger drag pans the live grid to its
+top before handing off continuously to integrated history. Horizontal drags
+do not enter history. Subsequent history swipes browse older pages or return
+live at the bottom. Panning either surface does not resize the PTY or raise
+an input keyboard. Oversized alternate screens use live-grid panning too;
+when the grid fits vertically, application scrolling remains native. Shell
+and environment terminals retain native xterm scrollback.
 
 The dock has a persisted height
 (`UiSlice.runDockHeight`, default 240px), a collapse toggle, and, once
@@ -1351,16 +1649,17 @@ displayed it. When a new xterm host adopts one, the dock calls
 `Attachment.rebind()` with fresh callbacks. `rebind(next)` is a
 host-replacement boundary: it cancels any old replay parser or drain with an
 explicit cancellation signal, drops the old socket, updates the handlers, and
-starts one fresh full replay after cancellation. Docks must not separately
-call `reopen()` after `rebind()`. Run shell callbacks guard the current
+starts one fresh full replay for the shell or environment dock after
+cancellation. Docks must not separately call `reopen()` after `rebind()`. Run
+shell callbacks guard the current
 `{ runID, tab }`; the environment dock guards its current tab. Host
 subscriptions are removed on cleanup, while closing a tab or an exited shell
 unregisters its socket. Thus route changes and tab remounts cannot deliver late
 output, resizes, or image actions to a disposed host; only the selected shell
 tab mounts an xterm host and transcript replay restores its content.
-The primary agent attach follows the cache lifecycle above: route changes
-suspend it rather than dispose its parsed terminal; eviction, invalidation, or
-unmount closes it permanently.
+The primary agent attach closes when its route unmounts. A return visit
+opens a new compact current-screen attach rather than revealing a retained
+terminal.
 
 The board's `TerminalDock` exposes **Save environment** while the member's
 terminal is running. Stopping the container and discarding the saved image
@@ -1374,85 +1673,77 @@ names the container only while there is one to stop, because Reset outlives
 it. Stopping therefore carries the rest of the status forward rather than
 replacing it, so the image survives the container in what the dock knows as
 well as on the server, and Reset stays on offer with the environment stopped.
-A stop or reset that fails renders the server's error inside the dialog that
-caused it. When the terminal is running and `saved_image` is empty, it shows
-the hint **Installs here reach agents after you save.** From the moment a tab
-opens until its attach is acked, a spinner covers the terminal. Once an ack
-declares positive replay, the xterm host remains hidden with CSS visibility
-and the pane says **Restoring terminal history** while each frame-sized replay
-operation is parsed serially as it arrives; it is revealed only after the
-final replay write callback and two `requestAnimationFrame` turns have let
-the xterm DOM paint the settled state. A zero-length replay settles the gate
-immediately because there is no historical write to render. The status words
-follow what
+When the terminal is running and `saved_image` is empty, it shows the hint
+**Installs here reach agents after you save.** From the moment a tab opens until
+its attach is acked, a spinner covers the terminal. Once a dashboard run ack
+declares a compact bootstrap, the xterm host remains hidden with CSS visibility
+and the pane says **Restoring terminal history** while each frame-sized
+operation is parsed serially as it arrives. Input and terminal-generated
+replies open only after the final replay write settles; the host remains hidden
+through the paint delay and viewport restoration described above. Run-shell
+tabs and the environment dock use the same settled-surface gate for their own
+stream mode. A zero-length replay has no bootstrap bytes or paint delay; any
+saved-viewport restoration still settles before the host is revealed.
+The status words follow what
 the dock knows: a terminal it has not seen running is **Starting your
 environment container**, which is the wait Docker's container start accounts
 for; a second tab, a tab switch or an expanded dock is **Connecting to your
 environment**, with no container to start. A refused or failed start replaces
 the terminal with the gateway's own error instead.
 
-- **The socket is `attach.ts`**, framework-free and the only part with logic
-  worth testing. It reuses `backoff()` from `src/lib/stream.ts`, so the
-  terminal and event stream reconnect on the same jittered schedule, and it
-  splits large input (a paste) into several ordered frames under the gateway's
-  64 KiB frame cap, never splitting a surrogate pair. Its `Attachment`
-  interface also supports `rebind()` and `reopen()`; `rebind()` follows the
-  host-replacement lifecycle above, while `reopen()` is reserved for an
-  explicit attach transition such as resume, takeover, or release.
-- **Controller lease and complete replay on entry.** A desktop owner's first
-  attach requests write; the server grants it only when no controller exists.
-  Other members enter as mirrors, and a second tab cannot become a second
-  writer. The toggle reattaches rather than upgrading in place. Until a member
-  has taken control once, a live run opened as a mirror says **Read-only
-  mirror. Take control to type into the agent.** A run that is starting shows
-  its spinner instead; a run that is not steerable says **This run is not
-  running**. Whether a member may steer is the server's answer, never the
-  client's guess: a `-32001` refusal downgrades the attach to a mirror and
-  disables the toggle. An occupied write request is a conflict and needs the
-  Run Room's confirmed takeover.
+- **The socket is `attach.ts`**, framework-free. It reuses `backoff()` from
+  `src/lib/stream.ts`, splits paste input below the gateway's 64 KiB frame cap,
+  and keeps callbacks bound to the current terminal host. The primary run
+  header requests `screen:true` and `interactive:true`; shells and CLI
+  attachments keep their existing stream modes. `screen:true` bootstraps the
+  compact current screen and bounded scrollback. Upward scrolling fetches older
+  normalized output through `terminal.history`, independently of the attach.
+  The dashboard does not download the raw archive.
+- **Controller lease and compact bootstrap.** A desktop owner's first attach
+  asks for write for ordinary and integrator runs, not mission workers.
+  Mission-worker terminals and other members start as mirrors. The server
+  grants write only when no controller exists; a second tab cannot become a
+  second writer.
+  A mirror uses the toolbar's controller/viewer names and **Take control**, not
+  a repeated read-only instruction. Live, acknowledged local control is shown by
+  the toolbar's **(this tab)** controller marker and **Release** action, plus a
+  steady 2px teal inset outline around the terminal while input is writable.
+  The pointer-transparent outline uses `--accent-soft-foreground`, never changes
+  layout or animates, and stays identical under reduced motion. It is absent
+  during replay or history reading, and on release, mirroring, disconnect or
+  denied steering.
+  Starting runs keep their spinner; ended runs say **This run is not running**.
+  Whether a member may steer is the server's answer:
+  `-32001` downgrades the attach to a mirror and disables the toggle. An
+  occupied write request is a conflict and needs the Run Room's confirmed
+  takeover.
 
-  A fresh run attach receives the complete retained transcript in the ordinary
-  terminal, including segments from earlier server incarnations. The ack's
-  `replay` count is the exact replay/live byte boundary, even when a WebSocket
-  frame straddles it. `connectAttach` begins parsing each frame-sized replay
-  operation as it arrives, retaining only those frame-sized operations and
-  geometry records needed for its serial wire-order queue; it never allocates a
-  `Uint8Array` (or equivalent) whose size is the declared replay length. Each
-  replay operation passes through a public xterm write callback in sequence,
-  waiting for completion before the next operation so xterm backpressure is
-  preserved. Only the slice containing the exact final replay byte is tagged
-  `replay-end`; live output and geometry received during replay queue behind
-  that serial transaction. The hidden `TerminalPane` is revealed only after
-  the final replay callback and two `requestAnimationFrame` turns, so the
-  xterm DOM paints the settled current screen before live output is presented.
-  Every retained transcript byte is fed to xterm. xterm retains normal
-  scrollback and rows preserved by its configured full-screen erase behavior;
-  control bytes and cursor overwrites affect terminal state but are not
-  themselves scrollback rows. Input and terminal-generated replies remain
-  muted from the ack through the final replay-write callback, so historical
-  redraws never appear as playback. There is no separate History player.
+  The attach ack's `replay` count is the exact bootstrap/live byte boundary,
+  even when a WebSocket frame straddles it. For a fresh, live, or finished
+  dashboard run attach, those bytes are the compact current-screen snapshot,
+  not the complete retained transcript. A valid same-incarnation
+  `resume`/`cursor`/`resume_id` supplies only the bounded gap and keeps the
+  warm screen. If the cursor or ring cannot serve it, `resumed:false` selects
+  a compact snapshot fallback. `connectAttach` parses frame-sized operations
+  through one serial xterm write chain. Input and terminal-generated replies
+  remain muted through the final write callback; input can then open unless
+  the user is reading history. The host stays hidden through two animation
+  frames and structural viewport restoration, and remains behind a pinned
+  reading surface until return-live. The attach never allocates a
+  transcript-sized browser buffer.
 
-  `Release control` sends `release_control` with the current control session and
-  generation on that same replacement attach request. At the PTY-host commit
-  boundary, the server holds the run-scoped authority lock, validates that
-  session and generation, admits the replacement, then releases and fences the
-  old lease before any replay, output, or geometry. If admission fails, the
-  request is refused while the old writer and lease remain intact. A successful
-  commit cancels the displaced writer; the replacement continues as the
-  read-only PTY attach on the same request, honors `resume`/`resume_id`/`cursor`,
-  returns one normal attach ack, and then streams output. A successful live ack's
-  nonempty `resume_id` fences the cursor to that PTY incarnation; without a
-  stored ID the client sends a full attach, and a mismatch is acknowledged with
-  `resumed:false`, the current cursor, and current ID. Invalid, stale, or
-  cross-member release is refused. A successful resume supplies only bytes
-  after the xterm-settled `cursor`; if resume cannot be honored, the server may
-  replay the complete retained run transcript again and the dashboard applies
-  that fallback through the same hidden, serial ordered transaction. Taking
-  control and releasing it preserve the existing terminal when resume succeeds;
-  when fallback is needed, they still produce no visible historical playback. The
-  server streams retained segments lazily, opening and reading at most one
-  segment at a time, so complete history does not require every segment to be
-  loaded or left open.
+  **Control changes stay on this WebSocket.** The client sends
+  `{"type":"control","request_id":17,"write":true,"takeover":true,
+  "control_generation":8}` (omit `takeover` unless explicitly displacing a
+  controller). The ordered response has `type:"control"`, the same
+  `request_id`, `ok`, optional `code`/`error`, and authoritative
+  `has_control`, `control_session_id`, and `control_generation`. An
+  unsolicited lease or **Steer** revocation has no `request_id`; it carries
+  `ok:false`, `has_control:false`, and the exact revoked generation. An
+  interactive attach remains open as a read-only mirror, with no replay or
+  reconnect. Input carries the current `control_generation`; stale input is
+  fenced. Take and release do not reconnect or replay, and the UI changes its
+  writable state only from acknowledged metadata.
 - **A missing session is not a dead terminal.** `-32004` means the run has
   no PTY session, and `internal/sshd/attach.go` refuses rather than waits
   for one, so the client is what has to tell a container that is still
@@ -1496,30 +1787,35 @@ the terminal with the gateway's own error instead.
   a denial outlives the socket that produced it: leaving the tab and coming
   back would show a live terminal beside a stale error, with steering greyed
   out even after `run.handoff` granted it.
-- **A 1008 close is read, not guessed at.** The server re-checks a live
-  attach's authorization every few seconds, the gateway relays a loss as a
-  1008 close, and the close reason names which gate fell: `steer permission
-  withdrawn` just downgrades - the client reconnects immediately as a
-  read-only mirror - while a dead token or `membership withdrawn` would refuse
-  every reconnect, so those stop the loop and surface the reason. A refusal
-  frame arrives with its own 1008 close, which is why the client reacts to the
-  code only when no refusal preceded it.
-- **Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
+- **Interactive revocation stays on the mirror socket.** The server
+  re-checks a live attach's authorization every few seconds. Losing **Steer**
+  sends an unsolicited control notification on the existing interactive
+  WebSocket; the client applies its exact revoked generation, disables input,
+  and remains a read-only mirror without replaying or reconnecting. A raw
+  legacy (non-interactive) attach retains the named **1008** close, reason
+  `steer permission withdrawn`. Membership withdrawal also uses **1008**,
+  reason `membership withdrawn`, and stops reconnecting. A refusal frame's own
+  close is handled only when no prior control response explains it.
+- **Live Find, zoom, and clipboard share xterm's key handler.** `xterm-host.tsx`
   chains zoom, find, and `clipboardKeys` in that order; the first to claim a
   key stops it reaching the shell. `clipboardKeys` claims copy shortcuts but
   leaves native paste alive. `useTerminalImage` separately registers the
   capture-phase image listener described above, so an image event is claimed
   only when the current terminal has a live image handler and plain text never
   takes that path. `Ctrl+Shift+F` opens the find bar `TerminalPane`
-  (`src/components/terminal-pane.tsx`) draws over the terminal, backed by
-  `@xterm/addon-search`; it reports **No matches** from the addon's own answer
-  rather than tracking a count. `Ctrl+=`, `Ctrl+-` and `Ctrl+0` move
+  (`src/components/terminal-pane.tsx`) places above the terminal. Live search uses
+  `@xterm/addon-search`; while reading, the same bar delegates to loaded archive
+  pages and frozen rows. **No matches** comes from the active surface's answer
+  rather than a tracked count. The read surface handles the same find, copy
+  and zoom shortcuts without forwarding typing or paste to xterm.
+  `Ctrl+=`, `Ctrl+-` and `Ctrl+0` move
   `UiSlice.terminalFontSize`, clamped to 8-32px by `clampTerminalFontSize` -
   on the way in from a keystroke and again in the store's `merge`, because a
   same-version reload never reaches `migrate` and xterm does not validate
   `fontSize`. The size is one persisted preference behind every terminal,
   applied to the live instance and re-fitted rather than by rebuilding it,
-  which would throw the scrollback away.
+  which would throw the scrollback away. The static reading surface scales
+  with that same preference while preserving its row-relative anchor.
 - **DOM renderer, deliberately.** `@xterm/addon-webgl` 0.19.0 can reuse stale
   glyph-atlas positions under heavy glyph churn (xtermjs/xterm.js#6038), garbling
   scrolled rows until a forced refresh; the DOM renderer never desyncs. The
@@ -1538,6 +1834,95 @@ The terminal's colours are the one place the tokens cannot be used directly:
 xterm needs resolved theme values rather than the CSS variables, so the view
 reads the computed background and foreground off its own host element and
 re-reads them when the dark class on `<html>` changes.
+
+## Shared run Browser
+
+`src/routes/browser/` is the run-detail **Browser** tab in the same bundle
+used by the local SSH gateway and server-hosted tailnet gateway. It observes
+the run's actual isolated Chromium companion, not an iframe or a forwarded
+preview host. App JavaScript, cookies, redirects, popups and hot updates run
+there against the run's own network namespace: `http://localhost:3000` means
+the app in the run, not the phone or laptop. No debugging/CDP endpoint is
+exposed to the dashboard.
+
+Opening the tab reads status, pages and ownership; it does not create a
+session. Enter the app address and press **Open browser** to launch explicitly.
+**New page** opens another page in the existing context. **Go**, **Back**,
+**Forward** and **Reload page** operate on the selected shared page. The
+**Page** selector includes popups and changes the selected page for the agent
+and other viewers, so it requires control. **Viewport** offers desktop
+1280 × 800, phone 390 × 844 and landscape phone 844 × 390; these change the
+real remote viewport, not just the displayed image. They do not emulate a
+different user agent, operating system or hardware.
+
+The pane uses shared 13px inputs and buttons and native selectors styled with
+`field`: 26px high for mouse input and 44px for coarse pointers. Navigation,
+address/actions, page/viewport, capture and destructive controls wrap in
+responsive groups; long addresses, page titles and errors stay within the pane.
+
+The header identifies the browser incarnation, lifecycle state and current
+member or run-agent controller. **Acquire control** claims an unoccupied
+browser; **Take over browser** explicitly displaces the displayed lease.
+**Release control** gives up only that browser surface, not a durable mission
+hold. Watchers see the same selected page but cannot navigate, resize, select
+pages or send input. The server revalidates Steer, current membership and the
+surface generation; a visible old control button never authorizes a stale
+mutation.
+
+Click or touch the image to interact. Keyboard shortcuts carry their
+modifiers, pointer gestures include button/click count, wheel input scrolls
+the remote page, and up to ten touch contacts retain distinct IDs. **Keyboard**
+focuses the phone's text input bridge; committed composition/IME text is sent
+once rather than forwarding intermediate composition candidates. Native
+hardware-bound login flows and identity providers which reject automated
+Chromium remain limitations; use test accounts rather than importing a
+personal browser profile.
+
+**Expand** fills the run pane with the selected page, hiding the run header
+and navigation/capture controls. **Restore** brings those controls back.
+Neither action reconnects the stream, changes the remote viewport, or
+reacquires control. The current controller and errors remain visible, and
+**Keyboard** remains available for phone input.
+
+The stream accepts one bounded binary frame per WebSocket message (16 KiB
+metadata and 2 MiB image maximum). It keeps one pending compressed image and
+one decode, closes decoded bitmaps after painting, and never builds an image
+history. Input uses the metadata of the frame actually painted, including
+session/page revision and viewport ID. Coordinates exclude letterboxing and
+undo image/page scaling. The ordered input buffer is capped at 32 operations
+and one second; redundant moves for the same contact are coalesced. Changed
+frame identity, expired input or changed authority discards pending input with
+a visible error. Failed mutations are not automatically retried or replayed.
+
+**Hide browser**, changing tabs, or closing the dashboard detaches observation
+only. The app, pages and login continue according to the run's lifetime.
+**Reconnect** reads surviving state and reconnects observation; it never opens
+a fresh session. Reloading the dashboard creates a new tab-local control
+identity and initially watches the surviving owner; taking over is explicit.
+Stream failures, lifecycle unavailability and mutation refusals remain visible.
+**Close page** explicitly closes the selected page
+for everyone. **Reset session** requires confirmation and current control;
+it destroys the shared pages/cookies and requires acquiring the new session
+before opening pages. Closing the run owns stopping the companion itself.
+
+**Screenshot** calls the real capture API at its own recorded boundary, not
+a canvas copy or the last received frame. It creates a private transient
+capture and displays its ID. Open the existing **Evidence** drawer to inspect
+and explicitly select captures/verification notes for retention. Taking a
+screenshot does not publish or automatically retain anything.
+
+`web/e2e/development-browser/` adds real-server Playwright scenarios using the
+existing server/SSH-gateway harness, a Node 22.14.0 app process bound only to
+run-loopback, and the real browser companion. They cover invalid credentials,
+cookie-backed sign-in/logout, module hot replacement without logout,
+desktop/phone input, native Chromium composition, multiple touch contacts,
+same-page run-principal actions, popups, detach/reconnect, watch/takeover and
+stale control/viewport rejection. The app container publishes no host port.
+Use the normal E2E binary/build prerequisites and a built `aether/browser:test`
+image, or the harness's inherited `AETHER_BROWSER_IMAGE` override. The
+deterministic harness only holds the run alive: these are not proof of an
+authenticated vendor model/tool loop, nor an authenticated Tailscale-hosted
+device run.
 
 ## Run events tab
 
@@ -1752,11 +2137,54 @@ Room tab count, and neither creates a second action inbox.
 - The same refresh reads `GET /api/v1/disk` and writes it onto the stored
   `server.info`, which is what fills the status bar's disk gauge.
 
+## Devices and invitations
+
+`src/routes/devices/` lists the computers members reach the server with
+through an edge, with each device key's fingerprint: the member's own, or
+every member's for an admin, and each device's status: `approved`,
+`pending`, `registered` (admitted by signing in under `edge-access
+account`) or `revoked`. It approves a pending or registered device only by
+the code typed in from that device, which no row shows: **Review** looks the
+code up with `member.device.lookup`, and a dialog shows the device, the
+account it signed in as, and the member and role approving admits it as,
+before **Approve** sends `member.device.approve` with that device's id. It
+revokes a device too, and shows every server refusal verbatim. It is its own view, not part of Settings, because
+Settings is local-gateway only and the tailnet server gateway serves the
+same methods; the sidebar and palette show it whenever the gateway serves
+`member.device.list`.
+
+The Members view carries an admin-only **Invitations** section
+(`src/routes/members/invitations.tsx`) for edge accounts: a GitHub login or
+an email, a role, and revoke. Its button reads **Invite account**, so it is
+not confused with **Invite**, which mints one-time codes for SSH-key joins.
+The server records every new invitation for a GitHub account; an email
+invitation an earlier version stored for another provider shows that
+provider as stored, such as `dana@example.com on google`. The section says
+what an invitation admits under each policy, because `server.info` does not
+report the policy: under `account` the first connection makes the account a
+member; under `approved-devices` its device waits until an admin approves
+it with its code.
+
 ## Manage workspaces
 
 `src/routes/workspaces/` renders a flat, bordered list of workspaces. Each row
 shows its name, creation time, base branch, steering policy and an **Open**
 button.
+
+Admins also get **Delete**. The confirmation lists what is permanently
+removed; **Cancel** leaves the workspace untouched. The server refuses active
+work, pending cleanup and configured schedules rather than stopping them.
+Failures remain in the dialog verbatim, so the admin can resolve the blocker
+and retry. See [workspace deletion](teams.md#workspaces) for the CLI and
+cleanup rules.
+
+![Workspace deletion confirmation](media/workspace-delete-confirmation.webp)
+
+![Deletion refused while a schedule remains](media/workspace-delete-refusal.webp)
+
+After deletion, the list and workspace switcher update together.
+`workspace.deleted` events reconcile other connected dashboards, including
+their selection and any open deleted workspace or run.
 
 ## Settings
 
@@ -1917,7 +2345,22 @@ here when `onboarded` is false. The server-hosted gateway has no local link
 state and opens at the board. Completing the final step or navigating
 elsewhere marks the UI onboarded and clears that wizard state.
 
-The Link step distinguishes no configured server, a server with no repository,
+The Link step first offers signing in to an edge
+(`src/routes/onboarding/edge-link.tsx`): it runs the edge's device flow
+through the local gateway, which keeps the device token, shows the code
+while it polls `edge.status`, then links a server or claims a new one
+with the code `aether-server setup` printed. Signed in to more than one
+edge, it lists them and shows nothing to link until one is chosen; the
+server list, link by id and claim then pass that edge to the gateway, as
+`--edge` does on the command line. **Server id from your admin**
+links by an id typed in, which the edge cannot substitute. A server picked
+from the account's list opens a **Confirm server** panel with its id and
+the host key fingerprint `edge.hostkey` read, and links only on **Link and
+pin**, because that id comes from the edge. **Link by
+address** swaps the sign-in for the address form, for a tailnet or SSH
+server, and **Sign in instead** swaps it back; showing one at a time keeps
+the address field above a phone's soft keyboard. The Link step
+distinguishes no configured server, a server with no repository,
 and a fully linked server. It refreshes on Retry and when the window regains
 focus, so a separate `aether link` command appears without restarting the GUI.
 
@@ -2020,40 +2463,25 @@ terminal to log in through, the whole flow is the CLI's. The login command
 itself lives in `src/lib/github.ts`, so the screen and the Playwright spec
 assert one string.
 
-**Configuration import** is an explicit, one-time directory import in the
-local onboarding flow. `config.roots` supplies destinations such as
-`~/.claude`, together with the destination-specific runtime paths that can be
-left out locally. The browser waits for that response: a known unique basename
-selects its destination automatically, while an unknown or ambiguous basename
-requires a destination choice before previewing or reading any file bytes.
-The raw browser `File` handles stay local so changing the destination clears
-the old preview and re-reads with the new policy; a generation guard prevents
-a slower old read from replacing the current preview. This action is not
-available from the server-hosted dashboard, because that browser cannot read a
-machine-local directory; the server dashboard still exposes Files and
-configuration editing through `config.tree`, `config.read` and `config.write`.
-There is no local discovery scan or directory watcher; the picker is the only
-onboarding import action.
+**Configuration import** in this step renders the same
+`src/components/profile-import.tsx` component as the permanent
+[Configuration view](#configuration-view). It is optional here and remains
+available from Agents, shared navigation, and the palette on either gateway,
+independently of onboarding or workspaces. `config.roots` supplies destinations
+such as `~/.claude` and their runtime exclusions. A unique basename selects
+the destination automatically; an unknown or ambiguous basename requires a
+choice before file bytes are read. Retained browser `File` handles allow the
+metadata preview to be recomputed after a destination change.
 
-Credential names found in any path component and `*.pem` files are always
-left out in the browser. Runtime/history paths come from the selected
-destination's `runtime_ignores` metadata and use exact, root-relative
-case-sensitive component-prefix matching. Every other selected byte is
-uploaded and server-scanned; the result reports accepted file/byte counts and
-server exclusions. A response with `error` is an incomplete import: the UI
-reports the committed counts, exact canonical `imported_paths`, and the real
-error instead of showing success, and warns that copied files remain. If the
-RPC fails without a response, the outcome is unknown (some files may have been
-copied); inspect **Files** before retrying. There is no watcher or automatic
-retry - choosing a directory and importing again is always explicit. The
-import limits are 2,000 files, 1 MiB per file and 20 MiB decoded in aggregate,
-with a 30 MiB HTTP request cap. Empty and binary regular files are preserved,
-but browser imports send mode `0644` and cannot preserve executable mode or
-symlinks.
-
-Accepted files change the calling member's persistent home immediately,
-including for already-running agents that share that home; an agent may need
-to reload. Auth/vendor login is separate.
+Credential names in any path component and `*.pem` files are excluded before
+read; destination-specific `runtime_ignores` match exact root-relative paths or
+component prefixes case-sensitively. Metadata previews, bounded complete
+transfers, progress, repeat-import controls, and server scanning are identical
+to the permanent route. A response with `error`
+shows committed counts, exact canonical `imported_paths`, and the real error,
+and warns that copied files remain. A lost RPC response leaves the outcome
+unknown; inspect **Files** before explicitly importing again. Auth/vendor login
+is separate.
 
 The First run step is the last one, and launches a run in the workspace the
 Workspace step settled on. Its **Agent** select offers only the entries
@@ -2212,16 +2640,16 @@ about itself and appears wherever the member is an admin.
   the way back to a banner someone dismissed by reflex.
 - **The desktop shell has a banner of its own.** The SPA ships inside the CLI,
   but the Electron shell around it is whatever `aether gui build` last
-  produced. `aether gui build` stamps the CLI version into the shell's
-  `package.json`, `desktop/main.js` hands it to the renderer, and
-  `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`. When
-  it differs from the `version` the capabilities descriptor carries, a third
-  banner says the app is out of date and gives `aether gui build`. It is
-  deliberately not nested in the CLI banner and not keyed on
-  `update_available`: the way a shell goes stale is that the CLI *was* just
-  updated, which is the moment no update is available any more, so gating it
-  on one would hide it in the only flow it exists for. It renders on the shell
-  stamp alone, so a browser tab never sees it.
+  produced. That build records the complete CLI version and its executable
+  path alongside the shell's npm-valid `package.json` version. `desktop/main.js`
+  starts the recorded binary ahead of `PATH` (unless `AETHER_BIN` explicitly
+  overrides it) and hands the build version to the renderer; `desktop/preload.js`
+  exposes it as `window.aetherDesktop.shellVersion`. On a local gateway, a
+  different capabilities version raises the app-out-of-date banner with
+  `aether gui build`. A browser tab and a server-hosted dashboard do not
+  have a local shell to compare. The banner is independent of
+  `update_available`: the CLI is usually current *after* an update that
+  left the shell old.
 
 ## Styleguide
 
@@ -2250,8 +2678,9 @@ about itself and appears wherever the member is an admin.
   dots bouncing in `--state-working` on board cards, run headers and run lists.
   Sidebar rows keep one dot and pulse its opacity; palette rows stay static.
   The fixed dot box prevents a row shifting when a run starts or stops.
-- **Motion is optional.** The steering signal, working dots and sidebar pulse
-  answer `prefers-reduced-motion: reduce` by removing movement. The original
+- **Motion is optional.** The controlling terminal's 2px teal outline is always
+  static. Working dots and the sidebar pulse stop moving under
+  `prefers-reduced-motion: reduce`. The original
   shooting-star scene appears only at desktop startup and is skipped under
   reduced motion. There is no reveal-flash animation. Spinner and skeleton
   feedback remains available.
@@ -2265,6 +2694,8 @@ about itself and appears wherever the member is an admin.
   controls use bounded 2-4px radii. `Input`, `Textarea` and `SelectTrigger`
   compose the shared `field` style with contrast-tuned `--input` borders,
   readable placeholders and explicit disabled/read-only states.
+  Shared `Label` captions are block-level; stacked caption-to-field gaps must
+  measure 4px, including wrapped inputs, rather than relying on inline margins.
 - **The empty string belongs to the Select placeholder.** Use a named,
   non-empty sentinel for an empty API or filter value, then map it back at
   that boundary. The Select wrapper ignores the empty report Radix can send
@@ -2436,3 +2867,230 @@ connection, which is how to read the page's console and its computed
 shell falls back to padding for the system bars itself on a WebView older
 than Chromium 140, so check `chrome://version` on the phone before
 concluding the page is wrong.
+
+## Missions and swarm creation
+
+The launch dialog keeps **Single agent** as its default. When the gateway
+advertises `mission.create`, it also offers **Swarm**: one concise objective,
+an integrator account and harness, an explicit list of allowed
+account/harness/mode execution choices, and finite concurrent and
+total-attempt limits. The integrator always runs in `tui` mode, because
+`mission.create` and `mission.replace-integrator` refuse a headless
+integrator, so the swarm form has no integrator mode field; worker rows keep
+their own mode. `mission.create` refuses an integrator whose exact
+account/harness/mode is not one of `execution_choices`, so the list always
+starts with a checked, disabled **Integrator** row that follows the
+integrator fields and reads `tui`. A ticked worker row with the same tuple
+is not sent twice, and the list is sent sorted by account, harness, and
+mode, so the same set is always the same request. The worker rows default to the
+integrator's account and first installed harness in `headless` mode. Its
+submit button is **Create swarm**, matching the missions header action, and
+success toasts `Swarm created`; creating a swarm starts the integrator, not
+the workers. The form sends the exact selected values to `mission.create`,
+including a client idempotency key, then navigates to
+`missions/<server-issued-id>`.
+
+Swarm is offered only while `cap.hasMethod('mission.create')` and the
+member's role may launch. The dialog opens on Swarm from the Missions route
+or the palette's **Create swarm...** entry (`openPaletteDialog('swarm')`,
+listed under the same two conditions) when both hold, and on Single agent
+otherwise. If either stops holding while the dialog is open on Swarm - a
+re-hydration that could not read the capabilities, or a role change - the
+dialog stays on Swarm with **Create swarm** disabled and says why, naming
+missing capabilities before the role:
+
+- `Swarm launch is unavailable: the server did not report its capabilities. Switch to Single agent to launch a run.`
+- `Swarm launch is unavailable: your role cannot launch.`
+- `Swarm launch is unavailable: the gateway does not offer mission.create. Switch to Single agent to launch a run.`
+
+The **Launch type** select stays so the member can switch to Single agent.
+
+The key belongs to the submitted contents, not to the dialog: the tab keeps
+one key per distinct set of contents in memory until a create with them
+succeeds. A failed create may already have stored the mission, so resending
+the same contents - after edits and back, or after closing and reopening the
+dialog - sends the same key and the server replays that mission. Changed
+contents get their own key, because the server refuses changed contents
+under a used key as `store: mission idempotency conflict`. After a success
+the same contents start a new swarm. Client-generated IDs are never used as
+mission authority. The server bounds these finite limits at eight concurrent
+attempts and 128 total attempts; the form rejects values outside those
+bounds before sending.
+
+`routes/missions` is registered through `routes/index.ts`, and the
+`MissionsSlice` is composed into the root store. Hydration reads
+`mission.list` for the active workspace; mission events refetch either the
+open `mission.show` projection or the first list page, so reloads and event
+reconnects recover server state rather than retaining a demo snapshot. The
+refetched page is merged into the list, so older pages loaded with **Load
+older missions** stay, along with the cursor for the next one. The slice
+records which workspace the list and cursor were read for
+(`missionListWorkspace`): a cursor read for another workspace is replaced by
+the fetched one, and **Load older missions** only follows a cursor read for
+the active workspace. The
+progress view renders the authoritative task statuses Ready, Working, Review,
+Done, Proposed and Abandoned. It keeps blockers, exact task revision/scope,
+attempt IDs, evidence availability, and accepted submission
+revision/artifact references visible. A worker success or exit is not enough
+to render Done: the server must accept a submission for the current task
+revision, with the required evidence available and any scope disposition
+explicitly recorded.
+
+### The plan gate
+
+A mission is in one of six phases - `planning`, `clarified`, `plan_review`,
+`active`, `amendment_review`, `rejected`. `active` dispatches workers;
+`amendment_review` keeps dispatching the set a human already approved while
+the human decides an amendment, and no other phase dispatches at all. The
+phase chip replaces the generic `Mission` chip on every mission card:
+`Planning`, `Planning · N questions for you`, `Preparing plan`, `Plan ready
+for review`, `Active`, `Amendment ready for review`, `Rejected`. The detail
+view's status line answers the phase first and falls back to the
+task-derived string only in `active`.
+
+The detail header shows the objective's first line, cut to 80 characters
+with an ellipsis, and carries the full objective in its `title` attribute.
+The full objective opens the scrollable detail, clamped to three lines with
+a **Show more** toggle when it overflows; a long objective never pushes the
+plan review below the viewport. Mission cards clamp the objective the same
+way.
+
+A phase banner sits under the objective in every phase and says what the
+human must do next. When `current_integrator_run_id` names a run whose
+status in the store is terminal, the banner adds `The integrator run <id>
+has exited; replace the integrator to continue` with the **Replace
+integrator** control inline, in every phase but `rejected` - an integrator
+that exited while waiting for a decision is recovered, not hidden behind a
+friendlier message. A `rejected` mission's integrator is cancelled on
+purpose and `mission.replace-integrator` is refused in that phase, so the
+sentence and the control are not shown there.
+
+When `current_integrator_run_id` names a run the hydrated store does not
+hold, the detail view asks `run.get` once for that run ID; a create's
+response can reach the dashboard before the run's first `run.status` event.
+A returned run is added to the store. While the request is open, and before
+hydration, the banner keeps its phase copy. Only a not-found answer means
+the server holds no run for it: outside `rejected`, the banner then replaces
+the phase sentence with `The integrator run has not started.`, says the
+server retries the launch periodically and logs `mission: recover
+integrator`, and offers **Replace integrator**. When the mission's
+`integrator_run_launched` is true the run existed and is gone, so the
+banner says `The integrator run was deleted; replace the integrator.`
+instead, with ` or cancel the swarm` before the period in `planning`,
+`clarified` and `plan_review`, where **Cancel swarm** is offered. Any other `run.get` failure
+shows its error above the mission and keeps the phase copy; **Refresh** asks
+again, once. **Open integrator run** appears only once the store holds the
+run, beside the run's status chip - the same state vocabulary as the run
+list - and its last status reason.
+
+While the mission carries `integrator_launch_error`, the server's reason the
+integrator run last failed to launch, both the not-started and the exited
+banner add `Last launch failure <time ago>: <error>`, and the mission card
+in the list adds `Integrator did not launch: <error>` outside `rejected`,
+where the integrator is cancelled on purpose. The server clears the field
+once an integrator run launches.
+
+**Replace integrator** offers each distinct account and harness in the
+mission's `execution_choices`, of any mode, and always sends mode `tui`:
+the server accepts a replacement only from those choices and runs it
+interactive.
+
+In `planning`, **Questions from the integrator** lists every question the
+integrator asked. Questions are optional - the integrator declares
+clarification complete when it has what it needs - so the section can stay
+at `The integrator has not asked anything yet.` for a whole mission. Each
+unanswered question takes a textarea and an **Answer** button sending
+`mission.question.answer` with the deterministic key
+`question-answer-<question_id>`, so a retry replays rather than answering
+twice. Answered questions show the answer and who answered. If a question
+this member is typing into arrives answered - the `mission.changed` refetch
+replaces the whole projection - the textarea stays mounted with the draft
+intact under `Answered by <display name>`, rather than dropping what was
+typed. The feedback from the most recent **Request changes** decision is
+shown above the tasks, which render as a read-only **Draft plan**.
+
+In `clarified` the integrator has declared it has what it needs and the
+server refuses another answer, so **Questions from the integrator** is a
+record rather than a form: it opens with `Clarification complete.` and shows
+every question with its answer, above the same read-only **Draft plan**.
+Asking a follow-up question returns the mission to `planning`, where the
+answer form is offered again.
+
+In `plan_review`, **Plan review** shows the integrator's summary, the plan
+version, the same read-only task list, and **Approve**, **Request changes**
+(feedback required) and **Reject**. Each sends `mission.plan.decide` with the
+observed `expected_plan_version` and the key
+`plan-decide-<mission_id>-<plan_version>-<decision>`: retrying the same
+button replays, while a different button or a refreshed plan version is a
+fresh mutation. A member who is neither the mission's accountable human nor
+an admin still sees the whole plan, above the line `Only the accountable
+human or an admin may decide this plan.` Both gate controls need the
+capability, launch permission, and that identity:
+`cap.hasMethod(method) && allowed('launch', self) && (self.id === mission.accountable_human_id || self.role === 'admin')`.
+
+Until a plan is approved - in `planning`, `clarified` and `plan_review` -
+the header also offers **Cancel swarm** to the same identity, gated on
+`mission.cancel`. It opens a confirmation; confirming sends `mission.cancel`
+with a key minted when the confirmation opened, so a retry after a failure
+replays rather than cancelling twice. The mission moves to `rejected`. A
+refusal - the phase moved on while the dialog was open, for example - shows
+the server's error inside the dialog.
+
+In `amendment_review` the integrator has submitted a change to a plan that
+is already approved. **Amendment review** shows the summary, the plan
+version, and one card per item of the round - read from the undecided review
+at the mission's current plan version, never from the last review in the
+list. A `new_task` item is a **New work** card built from the task's current
+revision; any other item is a **Changed task** card showing the approved
+revision beside the proposed one, with the objective, expected paths and
+exclusions of each. A `material` item carries a `Material` chip. The paths
+and dropped exclusions highlighted as widening the approved scope are the
+item's server-computed `widening` list; the dashboard has no path rule of
+its own. Intended-overlap diagnostics for the item's task are listed under
+its card. An item whose task or pending revision is gone from the projection
+renders its title and revision number with `This revision is no longer
+pending.` The controls are **Approve** and **Request changes** only: the
+server refuses to reject an amendment, because the approved work it amends
+keeps running either way. Below the section, the Tasks and candidate
+sections stay visible, attempt chips included - those workers are still
+running.
+
+In `active` and `amendment_review`, a task carrying a `pending_revision`
+shows a `Revision pending` chip, `Material revision pending` when the
+revision is declared material, and names the pending revision number and
+title under the task. A pending revision is never the task's current
+revision, so it cannot be dispatched.
+
+Attempt chips render only where the mission can dispatch, so they are hidden
+outside `active` and `amendment_review`. The `proposal` blocker chip is
+hidden in every phase except `active`: everywhere else the proposal is
+waiting on the human, which the phase banner already says, and repeating it
+as a blocker reads as a fault. The candidate section renders in `active` and
+`amendment_review`. In every phase after `clarified`, the questions and the
+decided review rounds collapse into **Planning history**.
+
+Answer and decision failures live in component state and render through the
+same `ErrorNotice` as a failed release, verbatim. They never go through
+`setMissionError`, which the next `setMissionDetail` or `mission.changed`
+refetch would wipe, and a failed answer leaves the draft intact.
+
+Run links use the existing terminal route. Take control and Release control
+continue to enforce the normal run controller and durable worker hold.
+`mission.worker.release` is the human-only release action for a worker hold:
+the dashboard sends the run ID and observed
+`expected_takeover_generation` as a compare-and-swap, while the server
+rechecks current steering authority under the same admission boundary. A
+stale generation, revoked authority, or foreign control holder leaves the
+hold in place and surfaces the conflict; an integrator or worker cannot
+release it through the assignment-scoped socket. Integrator replacement is
+gated by capabilities and role, pins `expected_generation`, and reuses one
+idempotency key across retries while reloading the resulting mission. The
+mission marker joins ordinary run cards through the `card:badges` slot; the
+shell and board remain unchanged.
+
+`mission.show` also carries bounded server-derived scope diagnostics. The
+mission task view labels intended overlap, observed overlap and out-of-scope
+paths and links each diagnostic to the task or peer run. The same diagnostics
+are registered into the existing run-card conflict-chip slot, so overlap
+warnings stay in the conflict experience rather than creating a second board
+or lock surface.

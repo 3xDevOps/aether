@@ -294,15 +294,63 @@ func TestAttachShellQueryPreservesRequestedReadOnly(t *testing.T) {
 
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachInput, Data: "pwd\n"})
 	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
+	// Closing the ordered client stream waits until the gateway has consumed
+	// both controls. A timeout alone would not prove they were dropped.
+	if err := conn.Close(websocket.StatusNormalClosure, "watch complete"); err != nil {
+		t.Fatalf("close watch: %v", err)
+	}
+	select {
+	case <-term.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch terminal did not close")
+	}
 	select {
 	case in := <-term.inputCh:
 		t.Fatalf("read-only shell input reached terminal: %q", in)
+	case rs := <-term.resizeCh:
+		t.Fatalf("read-only shell resized terminal: %v", rs)
+	default:
+	}
+}
+
+func TestAttachShellControlAckAllowsExplicitResize(t *testing.T) {
+	term := newWSStubTerminal(io.EOF)
+	b := &wsStubBackend{
+		attachTerm: term,
+		attachAck: protocol.AttachResponse{
+			OK: true, Framed: true, Cols: 80, Rows: 24,
+			TerminalID: "tab-1", Incarnation: "inc-1",
+			HasControl: true, ControlGeneration: 7,
+		},
+	}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/attach/run-1?shell=tab-1", g.Token())
+
+	writeWSJSON(t, conn, protocol.DashAttachRequest{
+		Write: true, Cols: 132, Rows: 43, Incarnation: "inc-1",
+		ControlSessionID: "shell-controller", ControlGeneration: 7,
+	})
+	ack := readWSJSON[protocol.AttachResponse](t, conn)
+	if !ack.OK || !ack.HasControl || ack.ControlGeneration != 7 || ack.Incarnation != "inc-1" {
+		t.Fatalf("control ack = %+v", ack)
+	}
+	if req := b.recordedAttach(); req.ReadOnly || req.Shell != "tab-1" || req.ControlSessionID != "shell-controller" || req.ControlGeneration != 7 {
+		t.Fatalf("writable shell attach = %+v", req)
+	}
+	select {
+	case rs := <-term.resizeCh:
+		t.Fatalf("shell resized before explicit control: %v", rs)
+	default:
+	}
+
+	writeWSJSON(t, conn, protocol.DashAttachControl{Type: protocol.DashAttachResize, Cols: 132, Rows: 43})
+	select {
 	case rs := <-term.resizeCh:
 		if rs != [2]uint{132, 43} {
 			t.Fatalf("resize = %v, want [132 43]", rs)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("shell resize never reached terminal")
+		t.Fatal("controlled shell resize never reached terminal")
 	}
 	term.finish()
 	expectClose(t, conn, websocket.StatusNormalClosure)

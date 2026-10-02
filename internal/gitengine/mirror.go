@@ -74,10 +74,9 @@ const (
 	MirrorErrorFailed         MirrorErrorKind = "error"
 )
 
-// MirrorError is safe to show to an operator: it does not include git's raw
-// stderr, which can contain credential-helper or transport details. Cause is
-// retained for errors.Is/As by server code but is intentionally omitted from
-// Error().
+// MirrorError is safe to show to an operator: fetch failures expose only
+// allowlisted diagnostics, never raw transport output or credential details.
+// Cause retains the original error and output for trusted server diagnostics.
 type MirrorError struct {
 	Kind        MirrorErrorKind
 	WorkspaceID domain.WorkspaceID
@@ -96,10 +95,16 @@ func (e *MirrorError) Error() string {
 	if what == "" {
 		what = string(MirrorErrorFailed)
 	}
+	message := "gitengine: mirror " + what
 	if e.Branch != "" {
-		return fmt.Sprintf("gitengine: mirror %s for branch %q", what, e.Branch)
+		message += fmt.Sprintf(" for branch %q", e.Branch)
 	}
-	return "gitengine: mirror " + what
+	var failure *mirrorFetchFailure
+	if errors.As(e.Cause, &failure) {
+		_, diagnostic := mirrorFetchProblem(failure)
+		message += ": " + diagnostic
+	}
+	return message
 }
 
 func (e *MirrorError) Unwrap() error { return e.Cause }
@@ -118,17 +123,19 @@ var mirrorSharedCGNAT = &net.IPNet{
 	Mask: net.CIDRMask(10, 32),
 }
 
-// ConfigureWorkspaceMirror installs the protected-base policy and records the
-// exact mirrored ref and generation. It intentionally does not fetch refs;
-// persistence and key lifecycle belong to the service layer. The generation
-// high-water mark is never lowered, including when a prior configuration is
-// rolled back.
+// ConfigureWorkspaceMirror initializes the bare workspace repository when
+// needed, installs the protected-base policy, and records the exact mirrored
+// ref and generation. It intentionally does not fetch refs; persistence and
+// key lifecycle belong to the service layer. The generation high-water mark
+// is never lowered, including when a prior configuration is rolled back.
 func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, req MirrorRequest) (MirrorResult, error) {
+	e.fileWriteMu.Lock()
 	result := MirrorResult{WorkspaceID: ws, SourceURL: req.SourceURL, Branch: req.Branch, Generation: req.Generation, CheckedAt: time.Now().UTC()}
+	defer e.fileWriteMu.Unlock()
 	if err := validateMirrorRequest(req, e.cfg.MirrorFetch != nil); err != nil {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, req, "", "", err)
 	}
-	repo, err := e.existingRepoPath(ws)
+	repo, err := e.InitWorkspaceRepo(ctx, ws)
 	if err != nil {
 		return result, err
 	}
@@ -143,9 +150,6 @@ func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.Workspa
 	// The active generation may be restored after a persistence failure, but
 	// the durable high-water mark is never lowered. Service allocates the
 	// next value for every new configuration.
-	if err := e.configureWorkspaceRepo(ctx, repo); err != nil {
-		return result, err
-	}
 	base := mirrorBaseRef(req.Branch)
 	if req.Generation > durable {
 		if _, err := e.git(ctx, repo, "config", mirrorGenerationConfig, strconv.FormatInt(req.Generation, 10)); err != nil {
@@ -175,10 +179,14 @@ func (e *Engine) ConfigureWorkspaceMirror(ctx context.Context, ws domain.Workspa
 }
 
 // MirrorGeneration returns the durable generation high-water mark for the
-// workspace. It remains after Disable removes the active policy, so a later
-// configuration can allocate the next value.
+// workspace, or zero when the repository has not been initialized yet. It
+// remains after Disable removes the active policy, so a later configuration
+// can allocate the next value without a prior client push.
 func (e *Engine) MirrorGeneration(ctx context.Context, ws domain.WorkspaceID) (int64, error) {
 	repo, err := e.existingRepoPath(ws)
+	if errors.Is(err, ErrRepoNotFound) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -201,8 +209,9 @@ func (e *Engine) MirrorGeneration(ctx context.Context, ws domain.WorkspaceID) (i
 // DisableWorkspaceMirror removes the mirrored-base policy and its accepted /
 // candidate refs. The workspace branch itself is left intact and becomes a
 // normal client-writable branch again. The always-on refs/aether hiding policy
-// remains in place for server-owned bookkeeping refs.
 func (e *Engine) DisableWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID) error {
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
 		return err
@@ -247,9 +256,9 @@ func (e *Engine) DisableWorkspaceMirror(ctx context.Context, ws domain.Workspace
 
 // RefreshWorkspaceMirror fetches exactly req.Branch and advances the mirrored
 // base only when the accepted observation is unchanged locally and upstream is
-// equal to or ahead of it. Rewrites and local/server-ahead divergence retain
-// candidate while leaving accepted and base untouched.
 func (e *Engine) RefreshWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, req MirrorRequest) (MirrorResult, error) {
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	result := MirrorResult{WorkspaceID: ws, SourceURL: req.SourceURL, Branch: req.Branch, Generation: req.Generation, CheckedAt: time.Now().UTC()}
 	if err := validateMirrorRequest(req, e.cfg.MirrorFetch != nil); err != nil {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, req, "", "", err)
@@ -314,9 +323,9 @@ func (e *Engine) RefreshWorkspaceMirror(ctx context.Context, ws domain.Workspace
 	return result, mirrorErr(MirrorErrorCASConflict, ws, req, result.BaseCommit, result.ObservedCommit, nil)
 }
 
-// AdoptWorkspaceMirror explicitly accepts a retained candidate and moves it to
-// accepted and the mirrored base. This is the sole non-fast-forward operation.
 func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, generation int64) (MirrorResult, error) {
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	result := MirrorResult{WorkspaceID: ws, Generation: generation, CheckedAt: time.Now().UTC()}
 	if generation < 0 {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, MirrorRequest{Generation: generation}, "", "", errors.New("invalid mirror generation"))
@@ -583,24 +592,57 @@ type mirrorFetchFailure struct {
 	output string
 }
 
-func (e *mirrorFetchFailure) Error() string { return "mirror fetch failed" }
+func (e *mirrorFetchFailure) Error() string {
+	return fmt.Sprintf("mirror fetch failed: %v: %s", e.err, strings.TrimSpace(e.output))
+}
 func (e *mirrorFetchFailure) Unwrap() error { return e.err }
 
 func classifyFetchError(err error) MirrorErrorKind {
+	kind, _ := mirrorFetchProblem(err)
+	return kind
+}
+
+// Do not classify Git's generic "unable to access" or "permission denied"
+// wrappers: they also describe local filesystem and TLS configuration failures.
+// Only fixed diagnostics cross the operator boundary; remote output may contain
+// secrets even when the configured source URL itself is credential-free.
+func mirrorFetchProblem(err error) (MirrorErrorKind, string) {
 	var failure *mirrorFetchFailure
 	if !errors.As(err, &failure) {
-		return MirrorErrorFailed
+		return MirrorErrorFailed, ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return MirrorErrorOffline, "fetch deadline exceeded; check server connectivity and refresh the mirror"
+	}
+	if errors.Is(err, context.Canceled) {
+		return MirrorErrorFailed, "fetch canceled; refresh the mirror before retrying launch"
 	}
 	msg := strings.ToLower(failure.output)
 	switch {
-	case strings.Contains(msg, "authentication failed"), strings.Contains(msg, "permission denied"), strings.Contains(msg, "could not read username"), strings.Contains(msg, "host key verification failed"):
-		return MirrorErrorAuthFailed
+	case strings.Contains(msg, "host key verification failed"):
+		return MirrorErrorAuthFailed, "host key verification failed; verify the mirror's pinned host key"
+	case strings.Contains(msg, "authentication failed"), strings.Contains(msg, "permission denied (publickey"), strings.Contains(msg, "could not read username"), strings.Contains(msg, "returned error: 401"), strings.Contains(msg, "returned error: 403"):
+		return MirrorErrorAuthFailed, "upstream authentication failed; check source access and the mirror deploy key"
 	case strings.Contains(msg, "couldn't find remote ref"), strings.Contains(msg, "could not find remote ref"), strings.Contains(msg, "no such ref"):
-		return MirrorErrorSourceMissing
-	case strings.Contains(msg, "could not resolve host"), strings.Contains(msg, "no such host"), strings.Contains(msg, "dns lookup failed"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "network is unreachable"), strings.Contains(msg, "failed to connect"), strings.Contains(msg, "unable to access"):
-		return MirrorErrorOffline
+		return MirrorErrorSourceMissing, "upstream branch was not found; verify the configured branch"
+	case strings.Contains(msg, "ssl certificate problem"), strings.Contains(msg, "server certificate verification failed"), strings.Contains(msg, "error setting certificate"):
+		return MirrorErrorFailed, "TLS certificate verification or configuration failed; check server Git CA configuration"
+	case strings.Contains(msg, "url rejected"), strings.Contains(msg, "url using bad/illegal format"):
+		return MirrorErrorFailed, "invalid fetch URL; check server Git URL rewrites and the mirror source"
+	case strings.Contains(msg, "protocol 'file' is not supported"), strings.Contains(msg, "transport 'file' not allowed"):
+		return MirrorErrorFailed, "file transport is prohibited; check server Git URL rewrites and the mirror source"
+	case strings.Contains(msg, "could not resolve host"), strings.Contains(msg, "no such host"), strings.Contains(msg, "dns lookup failed"):
+		return MirrorErrorOffline, "DNS lookup failed; check server DNS and refresh the mirror"
+	case strings.Contains(msg, "connection refused"):
+		return MirrorErrorOffline, "connection refused; check server connectivity and refresh the mirror"
+	case strings.Contains(msg, "network is unreachable"), strings.Contains(msg, "failed to connect"), strings.Contains(msg, "connection timed out"), strings.Contains(msg, "operation timed out"):
+		return MirrorErrorOffline, "upstream connection failed or timed out; check server connectivity and refresh the mirror"
+	case strings.Contains(msg, "permission denied"):
+		return MirrorErrorFailed, "permission denied during fetch; check server repository and key-file permissions"
+	case strings.Contains(msg, "no space left on device"):
+		return MirrorErrorFailed, "no space left on device; free server repository disk space before refreshing"
 	default:
-		return MirrorErrorFailed
+		return MirrorErrorFailed, "fetch failed; check server Git configuration and mirror source before refreshing"
 	}
 }
 func (e *Engine) classifyMirror(ctx context.Context, repo, base, accepted, observed string) (domain.MirrorStatus, string, string) {

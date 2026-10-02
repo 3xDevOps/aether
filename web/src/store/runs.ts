@@ -22,6 +22,20 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
   }
 }
 
+/** `records` without the runs `keep` rejects; the same object when none is. */
+function pruneRuns<T>(
+  records: Record<string, T>,
+  keep: (runID: string) => boolean,
+): Record<string, T> {
+  let pruned = records
+  for (const runID in records) {
+    if (keep(runID)) continue
+    if (pruned === records) pruned = { ...records }
+    delete pruned[runID]
+  }
+  return pruned
+}
+
 export interface RunsSlice {
   runs: Record<string, RunRecord>
   setRuns: (runs: Run[]) => void
@@ -46,19 +60,27 @@ export interface RunsSlice {
 export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
   runs: {},
   setRuns: (runs) =>
-    set((s) => ({
-      runs: Object.fromEntries(
+    set((s) => {
+      const records = Object.fromEntries(
         runs.map((r) => [r.id, toRecord(r, s.runs[r.id])]),
-      ),
-    })),
+      )
+      const listed = (runID: string) => runID in records
+      return {
+        runs: records,
+        terminalWriteIntents: pruneRuns(s.terminalWriteIntents, listed),
+        terminalControlSessions: pruneRuns(s.terminalControlSessions, listed),
+      }
+    }),
   upsertRun: (run) =>
     set((s) => ({ runs: { ...s.runs, [run.id]: toRecord(run, s.runs[run.id]) } })),
   removeRun: (runID) =>
     set((s) => {
-      if (!s.runs[runID]) return {}
-      const runs = { ...s.runs }
-      delete runs[runID]
-      return { runs }
+      const other = (id: string) => id !== runID
+      return {
+        runs: pruneRuns(s.runs, other),
+        terminalWriteIntents: pruneRuns(s.terminalWriteIntents, other),
+        terminalControlSessions: pruneRuns(s.terminalControlSessions, other),
+      }
     }),
   applyRunStatus: (runID, to, reason, time) =>
     set((s) => {

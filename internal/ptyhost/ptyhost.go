@@ -10,6 +10,7 @@
 package ptyhost
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +31,7 @@ import (
 )
 
 const resumeIDBytes = 32
+const historyCursorKeyFile = ".history-cursor-key"
 
 func newResumeID() (string, error) {
 	var raw [resumeIDBytes]byte
@@ -71,13 +74,19 @@ const (
 )
 
 var (
-	ErrNoSession         = errors.New("ptyhost: no session for run")
-	ErrSessionEnded      = errors.New("ptyhost: session ended")
-	ErrWriteDenied       = errors.New("ptyhost: write access denied")
-	ErrInvalidRunID      = errors.New("ptyhost: invalid run id")
-	ErrSessionReplaced   = errors.New("ptyhost: session was replaced")
-	errAttachNoAdmission = errors.New("ptyhost: attach commit did not admit client")
-	errAttachRepeated    = errors.New("ptyhost: attach admission called more than once")
+	ErrNoSession       = errors.New("ptyhost: no session for run")
+	ErrSessionEnded    = errors.New("ptyhost: session ended")
+	ErrWriteDenied     = errors.New("ptyhost: write access denied")
+	ErrInvalidRunID    = errors.New("ptyhost: invalid run id")
+	ErrSessionReplaced = errors.New("ptyhost: session was replaced")
+	// ErrSnapshotPending means one bounded, deduplicated background repair is
+	// rebuilding a missing, stale, or invalid screen checkpoint.
+	ErrSnapshotPending = errors.New("ptyhost: terminal snapshot repair pending")
+	// ErrSnapshotUnavailable means repair finished without an authoritative
+	// snapshot. Callers may retry only after the recording changes.
+	ErrSnapshotUnavailable = errors.New("ptyhost: terminal snapshot unavailable")
+	errAttachNoAdmission   = errors.New("ptyhost: attach commit did not admit client")
+	errAttachRepeated      = errors.New("ptyhost: attach admission called more than once")
 )
 
 func validateRunID(run domain.RunID) error {
@@ -107,7 +116,8 @@ const drainTimeout = 5 * time.Second
 
 // Host manages one persistent PTY session per key.
 type Host struct {
-	cfg Config
+	historyCursorKey [32]byte
+	cfg              Config
 
 	mu             sync.Mutex
 	sessions       map[SessionKey]*session // stopped entries are lightweight idempotency sentinels
@@ -115,6 +125,87 @@ type Host struct {
 	snapshots      map[SessionKey]*snapshotResult
 	nextGeneration uint64
 	closed         bool
+}
+
+func syncHistoryCursorKeyDirectory(dir string) error {
+	// Windows cannot flush a read-only directory handle.
+	if goruntime.GOOS == "windows" {
+		return nil
+	}
+	dirFile, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	syncErr := dirFile.Sync()
+	closeErr := dirFile.Close()
+	return errors.Join(syncErr, closeErr)
+}
+
+func loadHistoryCursorKey(dir string) ([32]byte, error) {
+	path := filepath.Join(dir, historyCursorKeyFile)
+	read := func() ([32]byte, error) {
+		var key [32]byte
+		info, err := os.Lstat(path)
+		if err != nil {
+			return key, err
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+			return key, errors.New("ptyhost: history cursor key has insecure permissions")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return key, err
+		}
+		if len(data) != len(key) {
+			return key, errors.New("ptyhost: history cursor key has invalid length")
+		}
+		copy(key[:], data)
+		return key, nil
+	}
+	if key, err := read(); err == nil {
+		return key, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return [32]byte{}, err
+	}
+
+	var generated [32]byte
+	if _, err := rand.Read(generated[:]); err != nil {
+		return generated, fmt.Errorf("ptyhost: generate history cursor key: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+historyCursorKeyFile+"-*")
+	if err != nil {
+		return generated, fmt.Errorf("ptyhost: create history cursor key: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err = tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return generated, fmt.Errorf("ptyhost: secure history cursor key: %w", err)
+	}
+	if _, err = tmp.Write(generated[:]); err != nil {
+		_ = tmp.Close()
+		return generated, fmt.Errorf("ptyhost: write history cursor key: %w", err)
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return generated, fmt.Errorf("ptyhost: sync history cursor key: %w", err)
+	}
+	if err = tmp.Close(); err != nil {
+		return generated, fmt.Errorf("ptyhost: close history cursor key: %w", err)
+	}
+	if err = os.Link(tmpPath, path); err == nil {
+		if err = syncHistoryCursorKeyDirectory(dir); err != nil {
+			return generated, fmt.Errorf("ptyhost: sync history cursor key directory: %w", err)
+		}
+		return generated, nil
+	} else if !errors.Is(err, os.ErrExist) {
+		return generated, fmt.Errorf("ptyhost: publish history cursor key: %w", err)
+	}
+	key, err := read()
+	if err != nil {
+		return generated, fmt.Errorf("ptyhost: load history cursor key: %w", err)
+	}
+	return key, nil
 }
 
 type snapshotResult struct {
@@ -143,12 +234,18 @@ func New(cfg Config) (*Host, error) {
 	if err := os.MkdirAll(cfg.TranscriptDir, 0o755); err != nil {
 		return nil, fmt.Errorf("ptyhost: create transcript dir: %w", err)
 	}
-	return &Host{
+	h := &Host{
 		cfg:       cfg,
 		sessions:  make(map[SessionKey]*session),
 		starting:  make(map[SessionKey]struct{}),
 		snapshots: make(map[SessionKey]*snapshotResult),
-	}, nil
+	}
+	historyCursorKey, err := loadHistoryCursorKey(cfg.TranscriptDir)
+	if err != nil {
+		return nil, err
+	}
+	h.historyCursorKey = historyCursorKey
+	return h, nil
 }
 
 // Close stops all sessions and flushes their transcripts.
@@ -164,10 +261,11 @@ func (h *Host) Close() error {
 		all = append(all, s)
 	}
 	h.mu.Unlock()
+	var stopErr error
 	for _, s := range all {
-		s.stop()
+		stopErr = errors.Join(stopErr, s.stop())
 	}
-	return nil
+	return stopErr
 }
 
 // StartSession takes ownership of att and starts the persistent session for
@@ -176,41 +274,98 @@ func (h *Host) Close() error {
 // The session survives zero attachments; when the agent exits (stdout EOF)
 // it enters the ended state and stays queryable until StopSession.
 func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Attachment) error {
+	return h.startSession(ctx, key, att, false, h.cfg.DefaultCols, h.cfg.DefaultRows)
+}
+
+// StartDevelopmentSession adopts a run shell launched at cols by rows and opts
+// it into server-owned terminal query replies and retained post-exit observation.
+// The caller must use the same geometry in the runtime ExecSpec. Adoption never
+// resizes the process: a short-lived command may already have exited, and its
+// buffered output must be interpreted at its original geometry. Primary harnesses
+// keep their existing initial resize and client responder through StartSession.
+func (h *Host) StartDevelopmentSession(ctx context.Context, key SessionKey, att runtime.Attachment, cols, rows uint) error {
+	if !strings.HasPrefix(string(key), "run-shell:") {
+		return errors.New("ptyhost: development session must be a run shell")
+	}
+	if err := validateScreenDimensions(cols, rows); err != nil {
+		return err
+	}
+	return h.startSession(ctx, key, att, true, cols, rows)
+}
+
+func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Attachment, development bool, initialCols, initialRows uint) error {
 	// Reserve the key before touching the transcript file so a losing
 	// duplicate StartSession can never truncate the winner's transcript.
 	if err := h.reserve(key); err != nil {
 		return err
 	}
-	var err error
-	resumeID, err := newResumeID()
+	epoch, err := newTerminalEpoch()
 	if err != nil {
 		h.unreserve(key)
-		return fmt.Errorf("ptyhost: generate resume id: %w", err)
+		return fmt.Errorf("ptyhost: generate terminal epoch: %w", err)
 	}
+	resumeID := string(epoch)
 	if prev := h.lookup(key); prev != nil {
-		prev.stop()
+		if stopErr := prev.stop(); stopErr != nil {
+			h.unreserve(key)
+			return fmt.Errorf("ptyhost: stop previous session: %w", stopErr)
+		}
 	}
+
 	path := h.transcriptPath(key)
 	_, isRun := key.Run()
 	var seed []byte
 	var modes modeScanner
 	var screen *terminalScreen
+	var recoveredHistory []castSegment
+	position := TerminalPosition{Epoch: epoch}
 	recoveredTranscript := false
-	initialCols, initialRows := h.cfg.DefaultCols, h.cfg.DefaultRows
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
-		seed, err = readCastTail(path, h.cfg.ReplayBytes)
-		if err != nil {
-			slog.Warn("ptyhost: seed replay from transcript", "path", path, "error", err)
-			seed = nil
+		if isRun {
+			recovered, segments, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false)
+			if checkpointErr != nil {
+				h.unreserve(key)
+				repair := h.startSnapshotRepair(key, path)
+				select {
+				case <-repair.done:
+					if repair.err != nil {
+						return repair.err
+					}
+					// The repair can finish before this call waits. The error
+					// above describes the checkpoint that repair replaced.
+					if err = h.reserve(key); err != nil {
+						return err
+					}
+					recovered, segments, recoveredPosition, _, checkpointErr = loadCurrentCheckpoint(path, false)
+					if checkpointErr != nil {
+						h.unreserve(key)
+						return errors.Join(ErrSnapshotUnavailable, fmt.Errorf("ptyhost: repaired checkpoint remains invalid: %w", checkpointErr))
+					}
+				default:
+					return ErrSnapshotPending
+				}
+			}
+			screen, modes, recoveredHistory = recovered.screen, recovered.modes, segments
+			position = recoveredPosition
+			resumeID = string(position.Epoch)
+			recoveredTranscript = true
+		} else {
+			// Member terminals have no durable screen checkpoint. Recover only a
+			// fixed recent suffix under a new epoch, forcing a full replay for old
+			// clients rather than claiming continuity we cannot prove.
+			seed, err = readRecentCast(path, h.cfg.ReplayBytes)
+			if err != nil {
+				slog.Warn("ptyhost: seed recent terminal replay", "path", path, "error", err)
+				seed = nil
+			}
 		}
-		recovered, scanErr := readCastScreen(path)
-		if scanErr != nil {
-			h.unreserve(key)
-			return fmt.Errorf("ptyhost: restore terminal screen: %w", scanErr)
+		if isRun {
+			seed, err = readRecentCast(path, h.cfg.ReplayBytes)
+			if err != nil {
+				slog.Warn("ptyhost: seed recent run replay", "path", path, "error", err)
+				seed = nil
+			}
 		}
-		screen, modes = recovered.screen, recovered.modes
-		initialCols, initialRows = screen.cols, screen.rows
-		recoveredTranscript = true
 	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
 		slog.Warn("ptyhost: inspect transcript for replay", "path", path, "error", statErr)
 	}
@@ -220,7 +375,14 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 			h.unreserve(key)
 			return err
 		}
+		if len(seed) > 0 {
+			screen.write(seed)
+			modes.scan(seed)
+			recoveredTranscript = true
+		}
 	}
+	initialCols, initialRows = screen.cols, screen.rows
+
 	tr, err := newCastWriter(path, initialCols, initialRows)
 	if err != nil {
 		screen.dispose()
@@ -228,54 +390,72 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 		return err
 	}
 	var history []castSegment
-	if isRun {
-		history, err = priorCastSegments(path)
-		if err != nil {
-			_ = tr.close()
-			screen.dispose()
-			h.unreserve(key)
-			return err
-		}
+	if isRun && len(recoveredHistory) > 0 {
+		history = recoveredHistory
+		relocateCheckpointSegments(history, path)
 	}
 	if recoveredTranscript {
-		tr.seed(makeScreenSnapshot(screen, modes).Data)
+		tr.seed(makeScreenSnapshot(screen, modes, position).Data)
 	}
-	// Initial geometry goes out before the session is attachable, so a
-	// concurrent write-attach clamp can never be overwritten by it.
-	_ = att.Resize(ctx, initialCols, initialRows)
+	// Ordinary sessions retain the pre-attach initial resize. Development
+	// processes were launched at the explicit geometry and may already be done.
+	if !development {
+		_ = att.Resize(ctx, initialCols, initialRows)
+	}
 	s := &session{
-		run:          key,
-		resumeID:     resumeID,
-		att:          att,
-		tr:           tr,
-		history:      history,
-		stdin:        att.Stdin(),
-		clients:      make(map[*client]struct{}),
-		ring:         newRing(h.cfg.ReplayBytes),
-		cols:         initialCols,
-		rows:         initialRows,
-		acceptedCols: initialCols,
-		acceptedRows: initialRows,
-		geoTold:      [2]uint{initialCols, initialRows},
-		done:         make(chan struct{}),
-		modes:        modes,
-		screen:       screen,
+		run:              key,
+		resumeID:         resumeID,
+		att:              att,
+		tr:               tr,
+		history:          history,
+		checkpoint:       checkpointPath(path),
+		stdin:            att.Stdin(),
+		clients:          make(map[*client]struct{}),
+		ring:             newRingAt(h.cfg.ReplayBytes, position),
+		cols:             initialCols,
+		rows:             initialRows,
+		acceptedCols:     initialCols,
+		acceptedRows:     initialRows,
+		geoTold:          [2]uint{initialCols, initialRows},
+		done:             make(chan struct{}),
+		modes:            modes,
+		screen:           screen,
+		revision:         1,
+		geometryRevision: 1,
+		development:      development,
+	}
+	if development {
+		s.enableProtocolResponder()
 	}
 	if len(seed) > 0 {
-		s.ring.write(seed)
+		if isRun {
+			if TerminalSequence(len(seed)) <= position.Sequence {
+				s.ring.seed(seed, position)
+			}
+		} else {
+			s.ring.write(seed)
+		}
 	}
 	if h.cfg.OnTitle != nil {
 		s.onTitle = func(title string) {
 			h.cfg.OnTitle(key, title)
 		}
 	}
-
+	if isRun {
+		if err := s.checkpointNow(); err != nil {
+			_ = tr.close()
+			screen.dispose()
+			h.unreserve(key)
+			return err
+		}
+	}
 	h.mu.Lock()
 	delete(h.starting, key)
 	if h.closed {
 		h.mu.Unlock()
 		_ = tr.close()
 		screen.dispose()
+		_ = os.Remove(checkpointPath(path))
 		_ = att.Close()
 		return errHostClosed
 	}
@@ -288,7 +468,13 @@ func (h *Host) StartSession(ctx context.Context, key SessionKey, att runtime.Att
 	delete(h.snapshots, key)
 	h.mu.Unlock()
 
+	if development {
+		go s.respond()
+	}
 	go s.pump()
+	if isRun {
+		go s.checkpointLoop()
+	}
 	return nil
 }
 
@@ -301,8 +487,7 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	if s == nil {
 		return ErrNoSession
 	}
-	s.stop()
-	return nil
+	return s.stop()
 }
 
 // RemoveRunTranscripts removes the agent transcript and every run-shell
@@ -315,20 +500,29 @@ func (h *Host) RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
 		return fmt.Errorf("%w: %q", err, run)
 	}
 	name := string(run)
+	transcript := filepath.Join(h.cfg.TranscriptDir, name+".cast")
+	archives, err := removablePriorCastPaths(ctx, transcript)
+	if err != nil {
+		return fmt.Errorf("ptyhost: find run transcript history: %w", err)
+	}
+	paths := append(archives, transcript, checkpointPath(transcript))
 	patterns := []string{
-		filepath.Join(h.cfg.TranscriptDir, name+".cast"),
-		filepath.Join(h.cfg.TranscriptDir, name+".*.cast"),
 		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.cast"),
+		filepath.Join(h.cfg.TranscriptDir, "run-shell-"+name+"-*.screen"),
 	}
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			return fmt.Errorf("ptyhost: find run transcripts: %w", err)
 		}
-		for _, path := range matches {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("ptyhost: remove run transcript: %w", err)
-			}
+		paths = append(paths, matches...)
+	}
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ptyhost: remove run transcript: %w", err)
 		}
 	}
 	h.mu.Lock()
@@ -376,12 +570,74 @@ func (h *Host) Replay(run domain.RunID) (io.ReadCloser, int, error) {
 	return openFullCastReplay(h.transcriptPath(RunSession(run)))
 }
 
-// Snapshot returns the current compact terminal state for a run. Live
-// sessions serialize their incrementally maintained emulator under the
-// session lock; ended/stopped sessions retain only this compact final value.
-// If the session is no longer in memory, the complete cast is reconstructed
-// once and only the compact bytes are cached.
-func (h *Host) Snapshot(run domain.RunID) (ScreenSnapshot, error) {
+// ReplayWindow is a bounded recent terminal suffix and its proven boundary.
+// Position is zero and Complete is false without a valid v2 checkpoint.
+type ReplayWindow struct {
+	Reader   io.ReadCloser
+	Bytes    int
+	Cols     uint
+	Rows     uint
+	Position TerminalPosition
+	Complete bool
+}
+
+// RecentReplay reads only a fixed-size tail window from newest segments.
+func (h *Host) RecentReplay(run domain.RunID, maxBytes int) (ReplayWindow, error) {
+	if err := validateRunID(run); err != nil {
+		return ReplayWindow{}, fmt.Errorf("%w: %q", err, run)
+	}
+	if maxBytes <= 0 {
+		return ReplayWindow{}, errors.New("ptyhost: recent replay limit must be positive")
+	}
+	path := h.transcriptPath(RunSession(run))
+	data, err := readRecentCast(path, maxBytes)
+	if err != nil {
+		return ReplayWindow{}, err
+	}
+	window := ReplayWindow{Reader: io.NopCloser(bytes.NewReader(data)), Bytes: len(data)}
+	if checkpoint, checkpointErr := decodeCheckpoint(checkpointPath(path)); checkpointErr == nil && checkpoint.Version == screenCheckpointVersion {
+		if _, boundaryErr := validateCheckpointSegments(path, checkpoint, true); boundaryErr == nil {
+			window.Cols, window.Rows = checkpoint.Cols, checkpoint.Rows
+			window.Position = TerminalPosition{Epoch: checkpoint.Epoch, Sequence: checkpoint.Sequence}
+			window.Complete = true
+			return window, nil
+		}
+	}
+	if header, headerErr := newestCastHeader(path); headerErr == nil {
+		window.Cols, window.Rows = header.Width, header.Height
+	}
+	return window, nil
+}
+
+func (h *Host) startSnapshotRepair(key SessionKey, path string) *snapshotResult {
+	h.mu.Lock()
+	if existing := h.snapshots[key]; existing != nil {
+		h.mu.Unlock()
+		return existing
+	}
+	result := &snapshotResult{done: make(chan struct{})}
+	h.snapshots[key] = result
+	h.mu.Unlock()
+
+	go func() {
+		snapshot, err := repairColdSnapshot(path)
+		if err != nil {
+			err = errors.Join(ErrSnapshotUnavailable, fmt.Errorf("ptyhost: repair terminal snapshot: %w", err))
+		}
+		h.mu.Lock()
+		result.snapshot = snapshot
+		result.err = err
+		close(result.done)
+		h.mu.Unlock()
+	}()
+	return result
+}
+
+// Snapshot returns the authoritative compact terminal state when immediately
+// available. A missing, stale, or invalid cold checkpoint starts one
+// background repair and returns ErrSnapshotPending without scanning the cast
+// on the caller goroutine.
+func (h *Host) Snapshot(run domain.RunID) (snapshot ScreenSnapshot, err error) {
 	if err := validateRunID(run); err != nil {
 		return ScreenSnapshot{}, fmt.Errorf("%w: %q", err, run)
 	}
@@ -393,32 +649,53 @@ func (h *Host) Snapshot(run domain.RunID) (ScreenSnapshot, error) {
 	}
 	if cached := h.snapshots[key]; cached != nil {
 		h.mu.Unlock()
-		<-cached.done
-		return cloneScreenSnapshot(cached.snapshot), cached.err
+		select {
+		case <-cached.done:
+			return cloneScreenSnapshot(cached.snapshot), cached.err
+		default:
+			return ScreenSnapshot{}, ErrSnapshotPending
+		}
 	}
-	result := &snapshotResult{done: make(chan struct{})}
-	h.snapshots[key] = result
 	h.mu.Unlock()
 
-	recovered, err := readCastScreen(h.transcriptPath(key))
-	if err != nil {
-		result.err = fmt.Errorf("ptyhost: reconstruct snapshot: %w", err)
-	} else {
-		result.snapshot = makeScreenSnapshot(recovered.screen, recovered.modes)
+	path := h.transcriptPath(key)
+	recovered, _, position, _, loadErr := loadCurrentCheckpoint(path, false)
+	if loadErr == nil {
+		snapshot = makeScreenSnapshot(recovered.screen, recovered.modes, position)
 		recovered.screen.dispose()
+		result := &snapshotResult{done: make(chan struct{}), snapshot: cloneScreenSnapshot(snapshot)}
+		close(result.done)
+		h.mu.Lock()
+		if h.snapshots[key] == nil {
+			h.snapshots[key] = result
+		}
+		h.mu.Unlock()
+		return snapshot, nil
 	}
-	h.mu.Lock()
-	if result.err != nil && h.snapshots[key] == result {
-		delete(h.snapshots, key)
+	if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
+		return ScreenSnapshot{}, errors.Join(ErrSnapshotUnavailable, os.ErrNotExist)
+	} else if statErr != nil {
+		return ScreenSnapshot{}, errors.Join(ErrSnapshotUnavailable, statErr)
 	}
-	close(result.done)
-	h.mu.Unlock()
-	return cloneScreenSnapshot(result.snapshot), result.err
+	h.startSnapshotRepair(key, path)
+	return ScreenSnapshot{}, ErrSnapshotPending
 }
 
 func (h *Host) transcriptPath(key SessionKey) string {
 	name := strings.ReplaceAll(string(key), ":", "-")
 	return filepath.Join(h.cfg.TranscriptDir, name+".cast")
+}
+
+// flushLiveTranscript makes output already accepted by a live session visible
+// to history. Holding the session lock keeps end/stop from detaching and
+// closing the writer between the nil check and the flush.
+func (s *session) flushLiveTranscript() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tr == nil {
+		return nil
+	}
+	return s.tr.flush()
 }
 
 // Inject writes message plus submit (the harness's submit sequence, e.g. a
@@ -461,9 +738,10 @@ type AttachClient struct {
 	// it admitted. Zero accepts the current process for non-reserved attaches.
 	SessionGeneration uint64
 	ReadOnly          bool
-	// Snapshot asks for a compact current-screen replay rather than the raw
-	// retained output ring. The dashboard sets this; CLI and screenless taps
-	// leave it false.
+	// Screen asks for a compact current-screen replay for a run rather than
+	// the complete recorded transcript. Snapshot is the compatibility name
+	// retained for older in-process callers.
+	Screen   bool
 	Snapshot bool
 	// Follow renders at the session's geometry and imposes none, so a
 	// screen too small to hold the agent's can still steer it without
@@ -474,6 +752,10 @@ type AttachClient struct {
 	// holds the session's screen and its terminal state, so it is sent
 	// exactly the bytes that arrived while it was away.
 	Resume bool
+	// Position atomically identifies the terminal incarnation and byte
+	// boundary this client already holds. Cursor and ResumeID remain as
+	// compatibility fields for older in-process callers.
+	Position TerminalPosition
 	// Cursor is how much of the session's output this client has already
 	// seen, as reported to it by the ack it is resuming from. It is what
 	// makes the reattach lossless: the session hands back exactly what it
@@ -491,10 +773,14 @@ type AttachClient struct {
 	// client. Commit must be bounded, must not otherwise re-enter this session,
 	// and must not return an error after admit succeeds.
 	Commit func(admit func() error) error
-	// OnAttached runs after the client has joined successfully, but before
+	// OnAttached runs after the client has joined successfully, but before the
 	// replay, output, or geometry is written. It commits resources reserved
 	// while authorization was in flight.
 	OnAttached func()
+	// OnControlReady runs after admission and before OnAttached or any stream
+	// bytes. setReadOnly updates this client's live input eligibility and
+	// geometry contribution without detaching its output stream.
+	OnControlReady func(setReadOnly func(bool) error)
 	// InputGuard is checked immediately before and after every client read.
 	// It fences stale buffered input after a lease is taken over.
 	InputGuard func() error
@@ -537,11 +823,6 @@ type GeometryWriter interface {
 // or the host closes. Reads from conn are keystrokes (discarded when
 // read-only); writes to conn are raw PTY output, starting with the complete
 // run transcript or the recent scrollback for other session types. resize
-// carries [cols, rows] updates (nil = fixed geometry). Write authorization
-// runs synchronously before the client is registered, so a refused writer
-// can never contribute geometry or trigger a resize. A Commit hook receives
-// an admit callback and must invoke it exactly once before returning success;
-// the callback runs before attachment callbacks or stream data.
 func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn io.ReadWriter, resize <-chan [2]uint) error {
 	s := h.lookup(key)
 	if s == nil {
@@ -549,6 +830,10 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	}
 	if a.SessionGeneration != 0 && s.generation != a.SessionGeneration {
 		return ErrSessionReplaced
+	}
+	_, responderAware := conn.(TerminalResponderWriter)
+	if s.development && !a.ReadOnly && (!responderAware || a.InputAdmission == nil) {
+		return fmt.Errorf("%w: development viewers require fenced input and disabled protocol replies", ErrWriteDenied)
 	}
 	if a.Cols == 0 {
 		a.Cols = h.cfg.DefaultCols
@@ -626,8 +911,35 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 	if _, succeeded, _, _ := admissionState(); !succeeded {
 		return errAttachNoAdmission
 	}
+	if a.OnControlReady != nil {
+		a.OnControlReady(func(readOnly bool) error {
+			if !readOnly {
+				if s.development && (!responderAware || a.InputAdmission == nil) {
+					return fmt.Errorf("%w: development viewers require fenced input and disabled protocol replies", ErrWriteDenied)
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if !s.clientAttached(c) {
+					return ErrNoSession
+				}
+				if h.cfg.Gate != nil {
+					if err := h.cfg.Gate(ctx, a.Member, key); err != nil {
+						return fmt.Errorf("%w: %v", ErrWriteDenied, err)
+					}
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+			}
+			return s.setClientReadOnly(c, readOnly)
+		})
+	}
 	if a.OnAttached != nil {
 		a.OnAttached()
+	}
+	if writer, ok := conn.(TerminalResponderWriter); ok {
+		writer.SetTerminalResponder(s.development)
 	}
 	defer s.removeClient(c)
 	// The size the session is, not the size this client asked for: the ack
@@ -668,9 +980,9 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 			if c.isClosed() {
 				return
 			}
-			if n > 0 && !a.ReadOnly {
+			if n > 0 && s.clientWritable(c) {
 				accept := func() error {
-					return s.writeStdinContext(ctx, buf[:n])
+					return s.writeClientStdinContext(ctx, c, buf[:n])
 				}
 				if a.InputAdmission != nil {
 					if admissionErr := a.InputAdmission(accept); admissionErr != nil {
@@ -737,11 +1049,26 @@ func (h *Host) Attach(ctx context.Context, key SessionKey, a AttachClient, conn 
 				resize = nil
 				continue
 			}
-			s.resizeClient(c, sz[0], sz[1])
+			if s.development {
+				if !s.clientWritable(c) || c.follow {
+					continue
+				}
+				admission := SessionAdmission{Generation: s.generation, Member: a.Member, Admit: a.InputAdmission}
+				if err := h.ResizeSession(ctx, key, admission, sz[0], sz[1]); err != nil {
+					return err
+				}
+			} else {
+				s.resizeClient(c, sz[0], sz[1])
+			}
 		}
 	}
 }
 
+func (s *session) clientWritable(c *client) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.stopped && !s.ended && !c.readOnly
+}
 func (h *Host) lookup(key SessionKey) *session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -794,6 +1121,23 @@ func (h *Host) SessionGeneration(key SessionKey) uint64 {
 	return s.generation
 }
 
+// SessionGeometry returns the runtime-accepted dimensions and process generation
+// at one session boundary without capturing cells or serializing a snapshot.
+// An in-flight or failed resize does not publish its requested dimensions.
+// Ended sessions retain their final geometry; stopped sessions are unavailable.
+func (h *Host) SessionGeometry(key SessionKey) (cols, rows uint, generation uint64, err error) {
+	s := h.lookup(key)
+	if s == nil {
+		return 0, 0, 0, ErrNoSession
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return 0, 0, 0, ErrNoSession
+	}
+	return s.acceptedCols, s.acceptedRows, s.generation, nil
+}
+
 // ActiveSessions returns the keys of live sessions with the given prefix.
 func (h *Host) ActiveSessions(prefix string) []SessionKey {
 	h.mu.Lock()
@@ -834,6 +1178,6 @@ func (h *Host) StopSessionsWithPrefix(ctx context.Context, prefix string) {
 	}
 	h.mu.Unlock()
 	for _, s := range sessions {
-		s.stop()
+		_ = s.stop()
 	}
 }

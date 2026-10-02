@@ -63,12 +63,16 @@ export interface Server {
   stop: () => Promise<void>
 }
 
+export interface ServerOptions {
+  standardImage?: string
+}
+
 /**
  * Starts the server in `dir` and waits for its SSH listener. The first
  * identity to authenticate becomes the admin, so nothing is seeded here:
  * the wizard's own Link step bootstraps the account.
  */
-export async function startServer(dir: string): Promise<Server> {
+export async function startServer(dir: string, options: ServerOptions = {}): Promise<Server> {
   const dataDir = path.join(dir, 'data')
   mkdirSync(dataDir, { recursive: true })
   // An explicit empty options file: without --config the server reads the
@@ -90,7 +94,7 @@ export async function startServer(dir: string): Promise<Server> {
       '--config',
       configPath,
       '--standard-image',
-      standardImage,
+      options.standardImage ?? standardImage,
     ],
     { ...process.env, AETHER_FAKE_AGENT: fakeAgent },
   )

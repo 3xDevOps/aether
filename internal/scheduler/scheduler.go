@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -76,18 +77,21 @@ func (e *BaseCaptureError) Unwrap() error {
 
 // Config wires the scheduler's dependencies and tuning knobs.
 type Config struct {
-	Store         store.Store
-	Runtime       runtime.Runtime
-	Bus           events.Bus
-	Git           GitEngine
-	PTY           PTYHost
-	Bases         BaseCapture
-	StateDir      string
-	Homes         *memberhome.Manager
-	Profiles      profileService
-	ReposDir      string
-	WorktreeMount string
-	StandardImage string
+	Store                       store.Store
+	Runtime                     runtime.Runtime
+	Bus                         events.Bus
+	Git                         GitEngine
+	PTY                         PTYHost
+	Bases                       BaseCapture
+	StateDir                    string
+	Homes                       *memberhome.Manager
+	Profiles                    profileService
+	ReposDir                    string
+	WorktreeMount               string
+	StandardImage               string
+	BrowserImage                string
+	Control                     *control.Service
+	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
 	// DefaultStandardImage is the image this build ships with, before any
 	// --standard-image the operator set. A server update only moves the
 	// standard image when the two are the same.
@@ -96,7 +100,7 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
-	RunContainerTTL      time.Duration // default 1h; negative destroys on close
+	RunContainerTTL      time.Duration // default 168h; negative destroys on close
 	// ExitProbeTimeout bounds the short non-destructive Wait recovery uses
 	// on startup to learn whether a container already exited before
 	// attach. Defaults to defaultExitProbeTimeout.
@@ -120,17 +124,15 @@ type Config struct {
 	// checked. Member definitions shape argv inside that member's own
 	// container and do not leak across members.
 	Harnesses map[string]HarnessSpec
-	// ServerBinary is the server binary staged into run containers to
-	// serve the MCP bridge (docs/mcp-bridge.md). Empty means
-	// DefaultServerBinary: the running binary, which survives a PATH
-	// change, a relative launch, and an upgrade that replaced the file
-	// underneath the process. The E2E suite points it at a binary it
-	// built, because under `go test` /proc/self/exe is the test binary and
-	// has no mcp subcommand.
+	// ServerBinary is the server binary staged into every new run and
+	// terminal container for the coordination CLI. Coordinated runs also use
+	// it for lifecycle callbacks; empty means DefaultServerBinary.
 	ServerBinary string
+	// turnTail overrides defaultTurnTail; only tests set it.
+	turnTail time.Duration
 }
 
-const DefaultRunContainerTTL = time.Hour
+const DefaultRunContainerTTL = 7 * 24 * time.Hour
 
 // DefaultServerBinary is the running server binary, /proc/self/exe rather
 // than os.Args[0].
@@ -184,6 +186,8 @@ type Scheduler struct {
 	// an archived run, so the two can never leave a run stuck between
 	// archived and running.
 	archiveMu sync.Mutex
+	// workspaceLocks fence launch and retained relaunch during deletion.
+	workspaceLocks map[domain.WorkspaceID]*sync.RWMutex
 	// pending marks runs whose row exists but whose checkout/provisioning
 	// handoff has not reached runs yet. Delete waits for this short window so
 	// it cannot remove a row while its checkout is still being created; Kill
@@ -195,6 +199,9 @@ type Scheduler struct {
 	// cannot be written under independent per-run locks.
 	runShellReservationMu sync.Mutex
 	runShellReservations  map[string]*shellTabState
+	runShellTerminals     map[domain.RunID]*runTerminalSet
+	developmentMu         sync.Mutex
+	development           *developmentState
 	terminalLocks         map[domain.MemberID]*sync.Mutex
 	terminals             map[domain.MemberID]*terminalSupervision
 	credentialUsers       map[*credentialUserReservation]struct{}
@@ -451,6 +458,9 @@ func New(cfg Config) (*Scheduler, error) {
 	if cfg.ExitProbeTimeout <= 0 {
 		cfg.ExitProbeTimeout = defaultExitProbeTimeout
 	}
+	if cfg.turnTail <= 0 {
+		cfg.turnTail = defaultTurnTail
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -509,6 +519,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return recoveryError(err)
 	}
 	if err := s.recoverTerminals(ctx); err != nil {
+		return recoveryError(err)
+	}
+	if err := s.recoverDevelopment(ctx); err != nil {
 		return recoveryError(err)
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
@@ -573,7 +586,7 @@ func (s *Scheduler) Close() error {
 	s.superCancel()
 	s.wg.Wait()
 	s.flushPendingRunTitles()
-	return nil
+	return s.DetachDevelopmentTerminals(context.Background())
 }
 
 // UseBaseCapture attaches the immutable base-capture service. The server
@@ -672,14 +685,16 @@ func (s *Scheduler) command(ctx context.Context, member domain.MemberID, harness
 				DenyNames:       spec.DenyNames,
 			}).Profile()
 		}
-		// An explicit argv override is respected verbatim. The registry MCP
-		// flag belongs to the shipped CLI, not an override: nothing checks
-		// the override is still that CLI.
-		profile.MCPConfigFlag = ""
+		// An explicit argv override is respected verbatim. Registry discovery
+		// and status assets belong to the shipped CLI, not an override.
 		profile.Reporter = harness.ReporterNone
 		profile.StatusArgs = nil
 		profile.StatusEnv = nil
 		profile.StatusFiles = nil
+		profile.DiscoveryArgs = nil
+		profile.DiscoveryEnv = nil
+		profile.DiscoveryFiles = nil
+		profile.NativeCoordination = false
 	case inRegistry:
 		tui, headless = profile.TUIArgs, profile.HeadlessArgs
 	default:
@@ -817,7 +832,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 
 // containerSpec converts one fully assembled environment plan into a runtime
 // spec. Callers must not assemble workspace mounts or environment fields here.
-func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan) runtime.Spec {
+func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, persistSupervisor bool) runtime.Spec {
 	env := make(map[string]string, len(plan.Env)+7)
 	maps.Copy(env, plan.Env)
 	env["AETHER_RUN_ID"] = string(run.ID)
@@ -828,7 +843,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env["GIT_COMMITTER_NAME"] = identity.Name
 	env["GIT_AUTHOR_EMAIL"] = identity.Email
 	env["GIT_COMMITTER_EMAIL"] = identity.Email
-	if run.Mode == domain.LaunchTUI {
+	if run.Mode == domain.LaunchTUI || persistSupervisor {
 		argv = wrapTUICommand(argv)
 	}
 	return runtime.Spec{

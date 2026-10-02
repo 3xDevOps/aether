@@ -440,3 +440,55 @@ func TestAdmissionOnOneRunDoesNotBlockAnotherRun(t *testing.T) {
 		t.Fatalf("run-a admission = %v", err)
 	}
 }
+
+func TestTryAdmitDefersWithoutWaitingOrChangingController(t *testing.T) {
+	service := New(Config{})
+	controller, _, err := service.Acquire("run", "member", "session", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
+	defer resume()
+	held := make(chan error, 1)
+	go func() {
+		held <- service.Admit("run", func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	called := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- service.TryAdmit("run", func() error {
+			called <- struct{}{}
+			return nil
+		})
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrAdmissionBusy) {
+			t.Fatalf("contended optional action = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("optional admission waited for an in-flight action")
+	}
+	select {
+	case <-called:
+		t.Fatal("contended callback ran")
+	default:
+	}
+	resume()
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.TryAdmit("run", func() error { called <- struct{}{}; return nil }); err != nil {
+		t.Fatalf("optional action after release: %v", err)
+	}
+	<-called
+	if err := service.Validate("run", "session", controller.Generation); err != nil {
+		t.Fatalf("optional admission changed existing controller: %v", err)
+	}
+}

@@ -1,11 +1,12 @@
 import type { ConnectionState } from '@/lib/stream'
+import type { DevTerminal } from '@/lib/types'
 import type { AttachDataKind, AttachDataResult, Attachment } from '@/routes/terminal/attach'
 import type { SliceCreator } from '@/store/slice'
 
 /**
- * What the terminal view knows about one run's attach. `write` is what the
- * user asked for; `steerDenied` is the server's answer, which is the only
- * thing that gates steering - the client never decides it.
+ * What the terminal view knows about one run's attach. `write` is the
+ * server-granted control state; it never becomes true until an attach ack or
+ * an acknowledged control request grants the lease.
  */
 export interface TerminalState {
   connection: ConnectionState
@@ -25,7 +26,36 @@ export const initialTerminal: TerminalState = {
   refused: false,
 }
 
+/** Proves remembered attach state still belongs to the same authenticated run. */
+export interface TerminalRunFence {
+  identityKey: string
+  terminalCacheEpoch: number
+  authorityKey: string
+  runCreatedAt: string
+}
+
+/**
+ * A user's explicit preference for the next attach. This is deliberately
+ * limited to one boolean plus the fences; transport, replay, and xterm state
+ * stay owned by the mounted route.
+ */
+export interface TerminalWriteIntent extends TerminalRunFence {
+  write: boolean
+}
+
+/**
+ * The tab's control-session identity for a run, so a remount can reclaim the
+ * disconnected lease its previous mount held. Never persisted: a reload is a
+ * new session.
+ */
+export interface TerminalControlSession extends TerminalRunFence {
+  controlSessionID: string
+}
+
 export interface RunShellDockState {
+  terminals: DevTerminal[]
+  /** Hidden incarnations stay discoverable without reappearing on each poll. */
+  hidden: string[]
   tabs: string[]
   activeTab: string | null
   collapsed: boolean
@@ -33,6 +63,8 @@ export interface RunShellDockState {
 }
 
 export const initialRunShellDock: RunShellDockState = {
+  terminals: [],
+  hidden: [],
   tabs: [],
   activeTab: null,
   // Collapsed on arrival: the run's own terminal owns the Terminal tab, and
@@ -129,14 +161,19 @@ export { emitShellSocketData }
 
 export interface TerminalSlice {
   terminals: Record<string, TerminalState>
+  terminalWriteIntents: Record<string, TerminalWriteIntent>
+  terminalControlSessions: Record<string, TerminalControlSession>
   shellDocks: Record<string, RunShellDockState>
   setTerminal: (runID: string, patch: Partial<TerminalState>) => void
-  openShellTab: (runID: string) => string | null
+  setTerminalWriteIntent: (runID: string, intent: TerminalWriteIntent) => void
+  clearTerminalWriteIntent: (runID: string) => void
+  setTerminalControlSession: (runID: string, session: TerminalControlSession) => void
+  clearTerminalControlSession: (runID: string) => void
+  syncShellTerminals: (runID: string, terminals: DevTerminal[]) => void
   closeShellTab: (runID: string, tab: string) => void
   selectShellTab: (runID: string, tab: string) => void
   setDockCollapsed: (runID: string, collapsed: boolean) => void
   setShellRefused: (runID: string, message: string | null) => void
-  removeShellTab: (runID: string, tab: string) => void
 }
 
 const dock = (docks: Record<string, RunShellDockState>, runID: string) =>
@@ -144,6 +181,8 @@ const dock = (docks: Record<string, RunShellDockState>, runID: string) =>
 
 export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
   terminals: {},
+  terminalWriteIntents: {},
+  terminalControlSessions: {},
   shellDocks: {},
   setTerminal: (runID, patch) =>
     set((s) => ({
@@ -152,32 +191,52 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
         [runID]: { ...(s.terminals[runID] ?? initialTerminal), ...patch },
       },
     })),
-  openShellTab: (runID) => {
-    let opened: string | null = null
+  setTerminalWriteIntent: (runID, intent) =>
+    set((s) => ({
+      terminalWriteIntents: { ...s.terminalWriteIntents, [runID]: intent },
+    })),
+  clearTerminalWriteIntent: (runID) =>
+    set((s) => {
+      if (!s.terminalWriteIntents[runID]) return s
+      const terminalWriteIntents = { ...s.terminalWriteIntents }
+      delete terminalWriteIntents[runID]
+      return { terminalWriteIntents }
+    }),
+  setTerminalControlSession: (runID, session) =>
+    set((s) => ({
+      terminalControlSessions: { ...s.terminalControlSessions, [runID]: session },
+    })),
+  clearTerminalControlSession: (runID) =>
+    set((s) => {
+      if (!s.terminalControlSessions[runID]) return s
+      const terminalControlSessions = { ...s.terminalControlSessions }
+      delete terminalControlSessions[runID]
+      return { terminalControlSessions }
+    }),
+  syncShellTerminals: (runID, terminals) => {
     set((s) => {
       const current = dock(s.shellDocks, runID)
-      if (current.tabs.length >= 4) return s
-      for (let n = 1; n <= 4; n++) {
-        const tab = `t${n}`
-        if (!current.tabs.includes(tab)) {
-          opened = tab
-          break
+      for (const previous of current.terminals) {
+        const next = terminals.find((item) => item.terminal_id === previous.terminal_id)
+        if (!next || next.incarnation !== previous.incarnation || next.process.state !== 'running') {
+          unregisterShellSocket(runID, previous.terminal_id)
         }
       }
-      if (!opened) return s
+      const hidden = current.hidden.filter((key) =>
+        terminals.some((item) => `${item.terminal_id}:${item.incarnation}` === key))
+      const tabs = terminals.filter((item) =>
+        !hidden.includes(`${item.terminal_id}:${item.incarnation}`)).map((item) => item.terminal_id)
       return {
         shellDocks: {
           ...s.shellDocks,
           [runID]: {
-            ...current,
-            tabs: [...current.tabs, opened],
-            activeTab: opened,
-            refusedMessage: null,
+            ...current, terminals, hidden, tabs,
+            activeTab: current.activeTab && tabs.includes(current.activeTab)
+              ? current.activeTab : tabs[0] ?? null,
           },
         },
       }
     })
-    return opened
   },
   closeShellTab: (runID, tab) => {
     unregisterShellSocket(runID, tab)
@@ -185,12 +244,16 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
       const current = s.shellDocks[runID]
       if (!current || !current.tabs.includes(tab)) return s
       const tabs = current.tabs.filter((entry) => entry !== tab)
+      const terminal = current.terminals.find((item) => item.terminal_id === tab)
       return {
         shellDocks: {
           ...s.shellDocks,
           [runID]: {
             ...current,
             tabs,
+            hidden: terminal
+              ? [...current.hidden, `${terminal.terminal_id}:${terminal.incarnation}`]
+              : current.hidden,
             activeTab:
               current.activeTab === tab ? (tabs[tabs.length - 1] ?? null) : current.activeTab,
             refusedMessage: tabs.length === 0 ? null : current.refusedMessage,
@@ -202,8 +265,13 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
   selectShellTab: (runID, tab) =>
     set((s) => {
       const current = s.shellDocks[runID]
-      if (!current?.tabs.includes(tab)) return s
-      return { shellDocks: { ...s.shellDocks, [runID]: { ...current, activeTab: tab } } }
+      const terminal = current?.terminals.find((item) => item.terminal_id === tab)
+      if (!current || !terminal) return s
+      return { shellDocks: { ...s.shellDocks, [runID]: {
+        ...current, activeTab: tab, refusedMessage: null,
+        tabs: current.tabs.includes(tab) ? current.tabs : [...current.tabs, tab],
+        hidden: current.hidden.filter((key) => key !== `${tab}:${terminal.incarnation}`),
+      } } }
     }),
   setDockCollapsed: (runID, collapsed) =>
     set((s) => ({
@@ -219,24 +287,4 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
         [runID]: { ...dock(s.shellDocks, runID), refusedMessage: message },
       },
     })),
-  removeShellTab: (runID, tab) => {
-    // Shell exit and a user close have identical state semantics.
-    unregisterShellSocket(runID, tab)
-    set((s) => {
-      const current = s.shellDocks[runID]
-      if (!current?.tabs.includes(tab)) return s
-      const tabs = current.tabs.filter((entry) => entry !== tab)
-      return {
-        shellDocks: {
-          ...s.shellDocks,
-          [runID]: {
-            ...current,
-            tabs,
-            activeTab:
-              current.activeTab === tab ? (tabs[tabs.length - 1] ?? null) : current.activeTab,
-          },
-        },
-      }
-    })
-  },
 })

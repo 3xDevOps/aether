@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // coAuthorsPath is where the run's co-author list appears inside its
 // container, under the read-only coordination mount.
-var coAuthorsPath = path.Join(mcpbridge.MountDir, coord.CoAuthorsName)
+var coAuthorsPath = path.Join(coordtransport.MountDir, coord.CoAuthorsName)
 
 // coAuthorInstruction tells the agent to credit the people steering it.
 // The list changes while the agent works, so re-reading it is part of the
@@ -25,19 +26,23 @@ var coAuthorsPath = path.Join(mcpbridge.MountDir, coord.CoAuthorsName)
 var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
 	". It holds one Co-authored-by trailer per person other than the run owner who has steered this run," +
 	" and it changes while you work. End every commit message you write, and the description of any pull" +
-	" request you open, with exactly those lines. If the file is missing or empty, add nothing."
+	" request you open, with exactly those lines. If the file is missing or empty, add nothing." +
+	" After those lines, end every pull request description with \"Opened from Aether run <run id>\", using the run_id" +
+	" aether-internal status reports."
 
 // coordinationInstruction is deliberately one short, assignment-agnostic
 // launch hint. The CLI fetches the actual assignment and role from live
 // server state, so this prompt never embeds authority or stale task text.
-const coordinationInstruction = "Use `aether-internal skill` to read this run's live assignment; use `aether-internal` to coordinate and report your outcome."
+const coordinationInstruction = harness.DiscoveryInstruction
 
 // withCoAuthorInstruction appends the coordination discovery hint and the
-// co-author rule to a task prompt. A taskless launch stays taskless - its
-// placeholder is dropped whole, so there is nowhere to say this - and a run
-// without coordination has no mounted directory to read the files from.
+// co-author rule to a task prompt. A taskless launch remains taskless: its
+// profile receives the discovery hint through the coordination directory's
+// ephemeral launch mechanism instead of gaining a seeded user prompt. A run
+// without a run transport has no mounted directory to read the files from.
 func (s *Scheduler) withCoAuthorInstruction(task string) string {
-	if task == "" || s.coordinationSeam() == nil {
+	c := s.coordinationSeam()
+	if task == "" || c == nil || c.svc == nil {
 		return task
 	}
 	return task + "\n\n" + coordinationInstruction + "\n\n" + coAuthorInstruction

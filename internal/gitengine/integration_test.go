@@ -1729,6 +1729,53 @@ func TestCommitAllRefusesAForgedDisplayName(t *testing.T) {
 	}
 }
 
+func TestMirrorRefreshRejectsInvalidURLRewriteWithoutLosingDiagnostic(t *testing.T) {
+	e := newTestEngine(t, nil)
+	ctx := t.Context()
+	const workspace domain.WorkspaceID = "mirror-invalid-url"
+	repo, err := e.InitWorkspaceRepo(ctx, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	gitc(t, work, "init")
+	gitc(t, work, "commit", "--allow-empty", "-m", "accepted base")
+	gitc(t, work, "push", repo, "HEAD:refs/heads/main")
+	// Git applies repository URL rewrites after mirror source validation.
+	// An invalid IPv6 URL fails locally, with no reachable network dependency.
+	gitc(t, repo, "config", "url.https://[invalid/.insteadOf", "https://mirror.example/")
+	e.cfg.MirrorResolve = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("203.0.113.9")}, nil
+	}
+	req := MirrorRequest{SourceURL: "https://mirror.example/repo.git", Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(ctx, workspace, req); err != nil {
+		t.Fatal(err)
+	}
+	base := bareRevParse(t, e, workspace, "refs/heads/main")
+	result, err := e.RefreshWorkspaceMirror(ctx, workspace, req)
+	var typed *MirrorError
+	if !errors.As(err, &typed) || typed.Kind != MirrorErrorFailed || result.Status != domain.MirrorStatusError {
+		t.Fatalf("local fetch configuration failure = %+v, %v; must not report offline", result, err)
+	}
+	var failure *mirrorFetchFailure
+	var exit *exec.ExitError
+	if !errors.As(err, &failure) || !errors.As(err, &exit) {
+		t.Fatalf("fetch failure lost original error chain: %v", err)
+	}
+	// Git's combined output includes a trailing newline; Error formats it
+	// without surrounding whitespace, while output retains the raw diagnostic.
+	if !strings.Contains(failure.output, "https://[invalid/") ||
+		!strings.Contains(failure.Error(), strings.TrimSpace(failure.output)) {
+		t.Fatalf("fetch failure lost rejected URL or Git diagnostic: output=%q, error=%v", failure.output, failure)
+	}
+	if strings.Contains(err.Error(), "[invalid") {
+		t.Fatalf("public diagnostic exposed raw transport URL: %v", err)
+	}
+	if got := bareRevParse(t, e, workspace, "refs/heads/main"); got != base {
+		t.Fatalf("failed refresh changed base from %s to %s", base, got)
+	}
+}
+
 func TestMirrorLifecycleWithExplicitLocalTransportSeam(t *testing.T) {
 	e := newTestEngine(t, nil)
 	ctx := t.Context()

@@ -19,10 +19,24 @@ func install(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	values := installValues(fs)
+	if err := requireEdgeAccess(values); err != nil {
+		return err
+	}
 	if err := requireRoot(); err != nil {
 		return err
 	}
-	return writeAndReport(os.Stdout, *unitPath, *configPath, installValues(fs), *force)
+	return writeAndReport(os.Stdout, *unitPath, *configPath, values, *force)
+}
+
+// requireEdgeAccess refuses to turn the edge on without a policy: who
+// may reach the server through it is the owner's choice, not a default.
+func requireEdgeAccess(values map[string]string) error {
+	if values["edge-url"] != "" && values["edge-access"] == "" {
+		return errors.New("--edge-url turns the edge on and needs --edge-access: " +
+			"account (signing in with GitHub is enough) or approved-devices (each new device waits until a person approves it)")
+	}
+	return nil
 }
 
 // installValues collects the serve options the operator actually named.

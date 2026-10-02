@@ -13,11 +13,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// Conflict coordination (): the run-to-run mailbox and the per-run
-// coordination socket under <data>/coord. The service is built even when
-// the kill switch is off, because turning coordination off still has host
-// work to do - the sockets a previous process left behind are unlinked so
-// the mounts already inside live containers go inert.
+// The per-run authenticated transport remains available independently of the
+// conflict-coordination policy. Disabled coordination still blocks peer/radar,
+// mission, and lifecycle-report actions without removing run identity.
 func init() {
 	registerService("coord", func(d Deps) (Service, error) {
 		mail, ok := d.Store.(store.MessageStore)
@@ -32,27 +30,29 @@ func init() {
 			Mail:             mail,
 			Bus:              d.Bus,
 			Peers:            lazyRadar{ssh: d.SSH},
-			PTY:              d.PTY,
 			// The scheduler is the single writer of run statuses, so the
 			// agent's own status reports land on it.
-			Reports: d.Runs,
+			Reports:     d.Runs,
+			Development: d.Runs,
 			// coord.report captures evidence before accepting the durable
 			// outcome; the coordination service publishes its evidence event
 			// only after finalization.
 			Evidence:        coordEvidenceCapture{service: d.Evidence},
 			EvidencePackets: d.Store,
+			Mission:         lazyMission{ssh: d.SSH, runs: d.Runs},
+			WakeAdmission:   newCoordWakeAdmission(d),
 		})
 		if err != nil {
 			return nil, err
 		}
-		// The in-container half (): the scheduler stages the MCP
-		// bridge binary and mounts it beside this service's per-run
-		// directory. Leaving the seam unset with the kill switch off is
-		// what keeps new containers free of coordination assets, while the
-		// service above still runs to make the old ones inert.
-		if !d.Config.CoordinationDisabled {
-			d.Runs.UseCoordination(svc, filepath.Join(d.DataDir, "runtime", "bin"))
-		}
+		// Every new container receives the verified CLI; runs receive identity
+		// transport even when conflict coordination is disabled. The policy flag
+		// still gates mission admission and harness lifecycle reporting.
+		d.Runs.UseCoordination(
+			svc,
+			filepath.Join(d.DataDir, "runtime", "bin"),
+			!d.Config.CoordinationDisabled,
+		)
 		return svc, nil
 	})
 }

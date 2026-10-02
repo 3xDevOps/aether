@@ -11,13 +11,14 @@ const CoordWireVersion = "v3"
 // The coordination method set. The run.report method remains the harness
 // lifecycle hook; coord.report is the durable worker outcome report.
 const (
-	MethodCoordStatus = "coord.status"
-	MethodCoordSend   = "coord.send"
-	MethodCoordInbox  = "coord.inbox"
-	MethodCoordAsk    = "coord.ask"
-	MethodCoordReply  = "coord.reply"
-	MethodCoordReport = "coord.report"
-	MethodRunReport   = "run.report"
+	MethodCoordStatus     = "coord.status"
+	MethodCoordHookStatus = "coord.hook.status"
+	MethodCoordSend       = "coord.send"
+	MethodCoordInbox      = "coord.inbox"
+	MethodCoordAsk        = "coord.ask"
+	MethodCoordReply      = "coord.reply"
+	MethodCoordReport     = "coord.report"
+	MethodRunReport       = "run.report"
 )
 
 // Coordination caps, enforced by the server and published here so a bridge
@@ -31,6 +32,8 @@ const (
 	CoordMaxUnread = 100
 	// CoordMaxInboxWaitSeconds bounds one server-side long poll.
 	CoordMaxInboxWaitSeconds = 30
+	// CoordMaxMessageIDBytes bounds opaque observer message identities.
+	CoordMaxMessageIDBytes = 256
 	// CoordMaxSummaryBytes bounds a durable outcome summary.
 	CoordMaxSummaryBytes = 4 << 10
 	// CoordMaxEvidenceRefs bounds the number of evidence references in one
@@ -63,7 +66,33 @@ const (
 	// CoordPeerGrace is a peer whose overlap cleared but whose grace window
 	// has not expired yet, so in-flight replies still land.
 	CoordPeerGrace = "grace"
+	// CoordPeerMission is a peer authorized by the current mission
+	// membership/assignment even when no file overlap exists.
+	CoordPeerMission = "mission"
 )
+
+// CoordMissionAssignment is the live mission authority for the run behind a
+// coordination socket. Role is descriptive authority, never a client-provided
+// role flag; an omitted assignment means this is an ordinary run.
+type CoordMissionAssignment struct {
+	MissionID             string                   `json:"mission_id,omitempty"`
+	Role                  string                   `json:"role,omitempty"`
+	TaskID                string                   `json:"task_id,omitempty"`
+	TaskRevision          int                      `json:"task_revision,omitempty"`
+	AttemptID             string                   `json:"attempt_id,omitempty"`
+	IntegratorRunID       string                   `json:"integrator_run_id,omitempty"`
+	IntegratorGeneration  uint64                   `json:"integrator_generation,omitempty"`
+	ExecutionChoices      []MissionExecutionChoice `json:"execution_choices,omitempty"`
+	MaxConcurrentAttempts int                      `json:"max_concurrent_attempts,omitempty"`
+	MaxTotalAttempts      int                      `json:"max_total_attempts,omitempty"`
+	ActiveAttempts        int                      `json:"active_attempts,omitempty"`
+	TotalAttempts         int                      `json:"total_attempts,omitempty"`
+	Phase                 string                   `json:"phase,omitempty"`
+	PlanVersion           uint64                   `json:"plan_version,omitempty"`
+	OpenQuestions         int                      `json:"open_questions,omitempty"`
+	LatestFeedback        string                   `json:"latest_feedback,omitempty"`
+	Capabilities          []string                 `json:"capabilities,omitempty"`
+}
 
 // Status output limits are intentionally smaller than the request budget:
 // status is safe to call at natural checkpoints and must not turn a large
@@ -94,18 +123,46 @@ type CoordPeer struct {
 // CoordStatusResult is the result of coord.status: who the caller is,
 // exactly the peers it may message, and how many messages are waiting.
 type CoordStatusResult struct {
-	WireVersion    string      `json:"wire_version"`
-	RunID          string      `json:"run_id"`
-	WorkspaceID    string      `json:"workspace_id"`
-	MemberID       string      `json:"member_id"`
-	Task           string      `json:"task,omitempty"`
-	TaskBytes      int         `json:"task_bytes,omitempty"`
-	TaskTruncated  bool        `json:"task_truncated,omitempty"`
-	Peers          []CoordPeer `json:"peers"`
-	PeerTotal      int         `json:"peer_total,omitempty"`
-	PeersTruncated bool        `json:"peers_truncated,omitempty"`
-	Unread         int         `json:"unread"`
-	Capabilities   []string    `json:"capabilities"`
+	WireVersion      string                  `json:"wire_version"`
+	RunID            string                  `json:"run_id"`
+	WorkspaceID      string                  `json:"workspace_id"`
+	MemberID         string                  `json:"member_id"`
+	Task             string                  `json:"task,omitempty"`
+	TaskBytes        int                     `json:"task_bytes,omitempty"`
+	TaskTruncated    bool                    `json:"task_truncated,omitempty"`
+	Assignment       *CoordMissionAssignment `json:"assignment,omitempty"`
+	Peers            []CoordPeer             `json:"peers"`
+	PeerTotal        int                     `json:"peer_total,omitempty"`
+	PeersTruncated   bool                    `json:"peers_truncated,omitempty"`
+	Unread           int                     `json:"unread"`
+	Capabilities     []string                `json:"capabilities"`
+	WaitSupported    bool                    `json:"wait_supported,omitempty"`
+	UnreadMessageIDs []string                `json:"unread_message_ids,omitempty"`
+	WakeAdmitted     bool                    `json:"wake_admitted,omitempty"`
+}
+
+// CoordHookStatusParams opts a native hook into one bounded, non-consuming
+// mailbox observation. SeenMessageIDs is the observed set, not notified mail.
+type CoordHookStatusParams struct {
+	WaitSeconds    int      `json:"wait_seconds"`
+	SeenMessageIDs []string `json:"seen_message_ids"`
+}
+
+// ValidCoordMessageID accepts bounded opaque identities without interpreting
+// their ordering or coupling callers to the store's ID generator.
+func ValidCoordMessageID(id string) bool {
+	if len(id) == 0 || len(id) > CoordMaxMessageIDBytes {
+		return false
+	}
+	for i := range len(id) {
+		c := id[i]
+		valid := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !valid {
+			return false
+		}
+	}
+	return true
 }
 
 // CoordSendParams are the params of coord.send. The sender is the socket,

@@ -1,4 +1,12 @@
-import { type Attachment, type ControlMetadata, codeConflict, codeDenied, connectAttach, replayGate } from '@/routes/terminal/attach'
+import {
+  type Attachment,
+  type ControlMetadata,
+  type ControlResult,
+  codeConflict,
+  codeDenied,
+  connectAttach,
+  replayGate,
+} from '@/routes/terminal/attach'
 import type { ConnectionState } from '@/lib/stream'
 import { StubSocket } from '@/test/stub-socket'
 import { fire } from '@/test/wake'
@@ -20,7 +28,10 @@ let receivedControl: ControlMetadata | null = null
 let attachments: Attachment[] = []
 let refusal: string | null = null
 
-function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
+function attach(
+  url: string | (() => string) = '/ws/attach/run_1',
+  seededSessionID?: string,
+): Attachment {
   output = []
   outputKinds = []
   states = []
@@ -60,7 +71,7 @@ function attach(url: string | (() => string) = '/ws/attach/run_1'): Attachment {
     sessionPending: () => sessionPending,
     geometry: () => ({ cols: 120, rows: 40 }),
     wantsWrite: () => write,
-  })
+  }, seededSessionID)
   attachments.push(attachment)
   return attachment
 }
@@ -165,7 +176,7 @@ describe('connectAttach', () => {
       takeover: true,
       resume: true,
       resume_id: 'pty-incarnation-1',
-      cursor: 0,
+      cursor: '0',
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 4,
     })
@@ -179,7 +190,7 @@ describe('connectAttach', () => {
       takeover: true,
       resume: true,
       resume_id: 'pty-incarnation-2',
-      cursor: 0,
+      cursor: '0',
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 5,
     })
@@ -192,7 +203,7 @@ describe('connectAttach', () => {
       release_control: true,
       resume: true,
       resume_id: 'pty-incarnation-3',
-      cursor: 0,
+      cursor: '0',
       control_session_id: a.controlMetadata!().control_session_id,
       control_generation: 6,
     })
@@ -289,7 +300,166 @@ describe('connectAttach', () => {
     expect(StubSocket.last().frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-1',
-      cursor: 105,
+      cursor: '105',
+    })
+    a.close()
+  })
+
+  it('keeps a newer parsed position over deferred same-epoch geometry', async () => {
+    let finishGeometry!: () => void
+    const events: string[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (chunk, kind, settled) => {
+        events.push(`${kind}:${new TextDecoder().decode(chunk)}`)
+        settled?.()
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      onGeometry: () => new Promise<void>((resolve) => {
+        finishGeometry = resolve
+      }),
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({
+      data: JSON.stringify({ ok: true, cursor: 102, replay: 2, resume_id: 'pty-a' }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'geometry',
+        ok: true,
+        cols: 100,
+        rows: 30,
+        cursor: 102,
+        resume_id: 'pty-a',
+      }),
+    })
+    socket.onmessage?.({ data: new TextEncoder().encode('abXYZ').buffer })
+
+    finishGeometry()
+    await vi.waitFor(() => expect(events).toEqual(['replay-end:ab', 'live:XYZ']))
+    a.reopen({ resume: true })
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '105',
+    })
+    a.close()
+  })
+
+  it('uses the acknowledged high-water instead of adding replay length', async () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ resume_id: 'pty-a', cursor: 100, replay: 5 })
+    socket.onmessage?.({ data: new TextEncoder().encode('abcde').buffer })
+    await vi.waitFor(() => expect(output.join('')).toBe('abcde'))
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '100',
+    })
+    a.close()
+  })
+
+  it('does not combine an epoch with a sequence-only control update', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ resume_id: 'pty-a', cursor: 100 })
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'control', ok: true, has_control: false, cursor: 999 }),
+    })
+    expect(receivedControl).toMatchObject({ position: { epoch: 'pty-a', sequence: '100' } })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '100',
+    })
+    a.close()
+  })
+
+  it('atomically adopts a different epoch even with a lower sequence', () => {
+    const a = attach()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    ack({ resume_id: 'pty-a', cursor: 100 })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        ok: true,
+        has_control: false,
+        resume_id: 'pty-b',
+        cursor: 20,
+      }),
+    })
+    expect(receivedControl).toMatchObject({ position: { epoch: 'pty-b', sequence: '20' } })
+    expect(a.controlMetadata!()).toMatchObject({ position: { epoch: 'pty-b', sequence: '20' } })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-b',
+      cursor: '20',
+    })
+    a.close()
+  })
+
+  it('falls back to full replay for a sequence outside JSON safe integers', () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({
+      data: JSON.stringify({ ok: true, resume_id: 'pty-a', cursor: Number.MAX_SAFE_INTEGER + 1 }),
+    })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    expect(replacement.frames()[0]).not.toHaveProperty('resume_id')
+    expect(replacement.frames()[0]).not.toHaveProperty('cursor')
+    a.close()
+  })
+
+  it('round-trips a uint64 sequence as a decimal string', () => {
+    const a = attach()
+    const first = StubSocket.last()
+    first.onopen?.()
+    first.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        resume_id: 'pty-a',
+        cursor: '18446744073709551615',
+      }),
+    })
+
+    a.reopen({ resume: true })
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({
+      resume: true,
+      resume_id: 'pty-a',
+      cursor: '18446744073709551615',
     })
     a.close()
   })
@@ -323,7 +493,7 @@ describe('connectAttach', () => {
     expect(attempted.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 100,
+      cursor: '100',
     })
     ack({ cursor: 200, resumed: false, resume_id: 'pty-incarnation-b' })
 
@@ -333,7 +503,7 @@ describe('connectAttach', () => {
     expect(next.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-b',
-      cursor: 200,
+      cursor: '200',
     })
     a.close()
   })
@@ -368,7 +538,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 105,
+      cursor: '105',
     })
     a.close()
   })
@@ -405,7 +575,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 105,
+      cursor: '105',
       control_session_id: sessionID,
     })
     a.close()
@@ -595,7 +765,9 @@ describe('connectAttach', () => {
       onState: () => {},
       onRefused: () => {},
       onWriteDenied: () => {},
-      onGeometry: (cols, rows) => events.push(`geometry:${cols}x${rows}`),
+      onGeometry: (cols, rows) => {
+        events.push(`geometry:${cols}x${rows}`)
+      },
       geometry: () => ({ cols: 80, rows: 24 }),
       wantsWrite: () => false,
     })
@@ -625,10 +797,41 @@ describe('connectAttach', () => {
     expect(StubSocket.last().frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 18,
+      cursor: '18',
     })
     a.close()
   })
+  it('drains geometry queued before the first replay frame', () => {
+    const geometries: Array<[number, number]> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      onGeometry: (cols, rows) => {
+        geometries.push([cols, rows])
+      },
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({
+      data: JSON.stringify({ ok: true, replay: 1, resume_id: 'pty-incarnation-a' }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'geometry',
+        cols: 100,
+        rows: 30,
+      }),
+    })
+
+    expect(geometries).toEqual([[100, 30]])
+    a.close()
+  })
+
   it('stops old replay operations when closed during the first callback', async () => {
     const events: string[] = []
     let finish!: () => void
@@ -702,7 +905,7 @@ describe('connectAttach', () => {
     expect(replacement.frames()[0]).toMatchObject({
       resume: true,
       resume_id: 'pty-incarnation-a',
-      cursor: 6,
+      cursor: '6',
     })
     a.close()
 
@@ -1149,7 +1352,7 @@ describe('connectAttach', () => {
       release_control: true,
       resume: true,
       resume_id: 'pty-incarnation-1',
-      cursor: 10,
+      cursor: '10',
     })
     a.close()
   })
@@ -1447,6 +1650,106 @@ describe('connectAttach', () => {
     StubSocket.last().onopen?.()
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     a.close()
+  })
+
+  it('seeds only the control session ID, never a fence or takeover', () => {
+    write = true
+    attach('/ws/attach/run_1', 'tab-session')
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).toEqual({
+      cols: 120,
+      rows: 40,
+      control_session_id: 'tab-session',
+      write: true,
+    })
+
+    attach()
+    StubSocket.last().onopen?.()
+    const minted = StubSocket.last().frames()[0] as { control_session_id: string }
+    expect(minted).toEqual({ cols: 120, rows: 40, control_session_id: expect.any(String), write: true })
+    expect(minted.control_session_id).not.toBe('tab-session')
+  })
+
+  describe('a seeded attach meeting its own occupied lease', () => {
+    const plainWrite = { cols: 120, rows: 40, control_session_id: 'tab-session', write: true }
+    const occupied = () => {
+      StubSocket.last().onmessage?.({
+        data: JSON.stringify({
+          ok: false,
+          code: codeConflict,
+          error: 'run control is held by another session',
+          control_generation: 3,
+        }),
+      })
+      StubSocket.last().onclose?.({ code: 1008 })
+    }
+    /** Wait out the scheduled reconnect and open it; returns the wait. */
+    const nextAttach = (): number => {
+      const before = StubSocket.opened.length
+      let waited = 0
+      while (StubSocket.opened.length === before && waited < 60_000) {
+        vi.advanceTimersByTime(100)
+        waited += 100
+      }
+      StubSocket.last().onopen?.()
+      return waited
+    }
+
+    it('keeps asking on a growing backoff through the reconnect window, then mirrors', () => {
+      write = true
+      const seeded = Date.now()
+      attach('/ws/attach/run_1', 'tab-session')
+      StubSocket.last().onopen?.()
+      const waits: number[] = []
+      for (let tries = 0; tries < 20; tries++) {
+        occupied()
+        if (controlLost) break
+        waits.push(nextAttach())
+        expect(StubSocket.last().frames()[0]).toEqual(plainWrite)
+      }
+
+      expect(controlLost).toBe(true)
+      expect(Date.now() - seeded).toBeGreaterThanOrEqual(15_000)
+      // Backoff, not one attach per tick: 0.5-1 s, then 1-2 s, 2-4 s, ...
+      expect(StubSocket.opened.length).toBeGreaterThanOrEqual(4)
+      expect(StubSocket.opened.length).toBeLessThanOrEqual(7)
+      expect(waits[2]).toBeGreaterThan(waits[0])
+
+      controlLost = false
+      nextAttach()
+      expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+      ack({ has_control: false })
+      vi.advanceTimersByTime(60_000)
+      expect(controlLost).toBe(false)
+      expect(refusal).toBeNull()
+    })
+
+    it('steers when a retry inside the window is granted', () => {
+      write = true
+      attach('/ws/attach/run_1', 'tab-session')
+      StubSocket.last().onopen?.()
+      occupied()
+      nextAttach()
+      occupied()
+      nextAttach()
+      expect(StubSocket.opened).toHaveLength(3)
+      expect(StubSocket.last().frames()[0]).toEqual(plainWrite)
+      ack({ has_control: true, control_generation: 3, control_session_id: 'tab-session' })
+
+      expect(controlLost).toBe(false)
+      expect(receivedControl).toMatchObject({ has_control: true, control_generation: 3 })
+    })
+
+    it('mirrors at once when a conflict follows a successful attach', () => {
+      write = true
+      attach('/ws/attach/run_1', 'tab-session')
+      StubSocket.last().onopen?.()
+      ack({ has_control: true, control_generation: 3, control_session_id: 'tab-session' })
+      StubSocket.last().onclose?.({ code: 1006 })
+      nextAttach()
+      occupied()
+      expect(controlLost).toBe(true)
+    })
   })
 
   it('backs off after a dropped socket and resends the geometry', () => {
@@ -1976,6 +2279,400 @@ describe('connectAttach', () => {
     expect(refusal).toBeNull()
     a.close()
   })
+  it('bounds a screen live backlog at 4 MiB and recovers with a full compact replay', async () => {
+    const settled: Array<() => void> = []
+    const replayStarts: Array<[number, boolean]> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, kind, done) => {
+        if (kind === 'live' && done) settled.push(done)
+      },
+      onAttached: () => {},
+      onReplayStart: (bytes, full) => replayStarts.push([bytes, full]),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, resume_id: 'pty-incarnation-a' }) })
+    const oldMessage = oldSocket.onmessage!
+    const frame = new Uint8Array(1024 * 1024).buffer
+    for (let n = 0; n < 4; n++) oldMessage({ data: frame })
+
+    expect(settled).toHaveLength(4)
+    expect(oldSocket.closed).toBe(true)
+    // The detached old transport cannot add a fifth write after overflow.
+    oldMessage({ data: new Uint8Array([1]).buffer })
+    expect(settled).toHaveLength(4)
+
+    settled.forEach((done) => done())
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    replacement.onopen?.()
+    expect(replacement.frames()[0]).toMatchObject({ screen: true })
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+    replacement.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, resume_id: 'pty-incarnation-b' }) })
+    expect(replayStarts.at(-1)).toEqual([0, true])
+    a.close()
+  })
+
+  it('parks overflow recovery across suspend and resumes the invalid screen intentionally', async () => {
+    const finish: Array<() => void> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: () => new Promise<void>((resolve) => finish.push(resolve)),
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+    const frame = new Uint8Array(1024 * 1024).buffer
+    for (let n = 0; n < 4; n++) oldSocket.onmessage?.({ data: frame })
+    expect(finish).toHaveLength(4)
+
+    a.suspend()
+    finish.forEach((done) => done())
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(StubSocket.opened).toHaveLength(1)
+
+    a.resume()
+    await vi.waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames()[0]).not.toHaveProperty('resume')
+    a.close()
+  })
+
+  it('does not reopen an overflowed transport after close', async () => {
+    const finish: Array<() => void> = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onData: (_chunk, _kind, done) => {
+        if (done) finish.push(done)
+      },
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+    })
+    attachments.push(a)
+    const oldSocket = StubSocket.last()
+    oldSocket.onopen?.()
+    oldSocket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0 }) })
+    const frame = new Uint8Array(1024 * 1024).buffer
+    for (let n = 0; n < 4; n++) oldSocket.onmessage?.({ data: frame })
+    expect(oldSocket.closed).toBe(true)
+
+    a.close()
+    finish.forEach((done) => done())
+    await Promise.resolve()
+    await Promise.resolve()
+    vi.advanceTimersByTime(60_000)
+    expect(StubSocket.opened).toHaveLength(1)
+  })
+
+  it('sends screen and interactive options and updates control in place', () => {
+    const metadata: ControlMetadata[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      screen: () => true,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    expect(socket.frames()[0]).toMatchObject({ screen: true, interactive: true })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        replay: 0,
+        control_session_id: a.controlMetadata!().control_session_id,
+        control_generation: 3,
+        has_control: false,
+      }),
+    })
+
+    a.setControl(true)
+    expect(socket.frames()[1]).toMatchObject({
+      type: 'control',
+      request_id: 1,
+      write: true,
+    })
+    expect(socket.frames()[1]).not.toHaveProperty('control_generation')
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        request_id: 1,
+        ok: true,
+        has_control: true,
+        control_session_id: a.controlMetadata!().control_session_id,
+        control_generation: 4,
+      }),
+    })
+    expect(metadata[metadata.length - 1]).toMatchObject({ has_control: true, control_generation: 4 })
+    a.send('x')
+    expect(socket.frames()[2]).toMatchObject({ type: 'input', control_generation: 4 })
+    a.close()
+  })
+  it('clears authority on an unsolicited negative current-fence record', () => {
+    const metadata: ControlMetadata[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    const sessionID = a.controlMetadata!().control_session_id
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        replay: 0,
+        control_session_id: sessionID,
+        control_generation: 5,
+        has_control: true,
+      }),
+    })
+
+    // A Go omitempty response can omit both false-valued fields. A stale
+    // fence must still be ignored before deriving the current revocation.
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        control_session_id: sessionID,
+        control_generation: 4,
+      }),
+    })
+    expect(a.controlMetadata!().has_control).toBe(true)
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        control_session_id: sessionID,
+        control_generation: 5,
+      }),
+    })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 5, has_control: false })
+    expect(a.controlMetadata!().has_control).toBe(false)
+    a.close()
+  })
+
+
+  it('keeps a mirror owner fence for an explicit takeover', () => {
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 7, has_control: false }) })
+    a.setControl(true, true)
+    expect(socket.frames()[1]).toMatchObject({
+      type: 'control',
+      write: true,
+      takeover: true,
+      control_generation: 7,
+    })
+    a.close()
+  })
+
+  it('accepts a fresh zero-generation denial and permits the next mirror acquisition', () => {
+    const metadata: ControlMetadata[] = []
+    const results: ControlResult[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onControlResult: (value) => results.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 3, has_control: false }) })
+
+    a.setControl(true)
+    expect(socket.frames()[1]).not.toHaveProperty('control_generation')
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        request_id: 1,
+        ok: false,
+        code: codeConflict,
+        control_generation: 0,
+        has_control: false,
+      }),
+    })
+    expect(results[0]).toMatchObject({ ok: false, control_generation: 0, has_control: false })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 0, has_control: false })
+
+    a.setControl(true)
+    expect(socket.frames()[2]).not.toHaveProperty('control_generation')
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control',
+        request_id: 2,
+        ok: true,
+        control_generation: 4,
+        has_control: true,
+      }),
+    })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 4, has_control: true })
+    a.close()
+  })
+
+  it('retains authority across back-to-back duplicate acquisition refusals', () => {
+    const metadata: ControlMetadata[] = []
+    const results: ControlResult[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControl: (value) => metadata.push(value),
+      onControlResult: (value) => results.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 3, has_control: false }) })
+
+    // Both requests are sent before either result is delivered. The second
+    // refusal is for the lease granted by the first request.
+    a.setControl(true)
+    a.setControl(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 1, ok: true,
+        control_generation: 4, has_control: true,
+      }),
+    })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 2, ok: false, code: codeConflict,
+        control_generation: 4,
+      }),
+    })
+
+    expect(results).toHaveLength(2)
+    expect(results[1]).toMatchObject({ ok: false, control_generation: 4, has_control: true })
+    expect(metadata.at(-1)).toMatchObject({ control_generation: 4, has_control: true })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 4, has_control: true })
+    a.send('still-owner')
+    expect(socket.frames().at(-1)).toMatchObject({
+      type: 'input', data: 'still-owner', control_generation: 4,
+    })
+    a.close()
+  })
+
+  it('uses explicit retained authority before an earlier grant arrives', () => {
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+      interactive: () => true,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 3, has_control: false }) })
+    a.setControl(true)
+    a.setControl(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 2, ok: false, code: codeConflict,
+        control_generation: 4, has_control: true,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 4, has_control: true })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', ok: false, control_generation: 4, has_control: true,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 4, has_control: true })
+
+    a.setControl(true)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 3, ok: false, code: codeConflict,
+        control_generation: 5,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 5, has_control: false })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'control', request_id: 1, ok: true,
+        control_generation: 4, has_control: true,
+      }),
+    })
+    expect(a.controlMetadata!()).toMatchObject({ control_generation: 5, has_control: false })
+    a.close()
+  })
+
+  it('ignores stale control acknowledgements and revocations', () => {
+    const results: ControlResult[] = []
+    const a = connectAttach(() => '/ws/attach/run_1', {
+      onAttached: () => {},
+      onControlResult: (value) => results.push(value),
+      onState: () => {},
+      onRefused: () => {},
+      onWriteDenied: () => {},
+      geometry: () => ({ cols: 80, rows: 24 }),
+      wantsWrite: () => false,
+    })
+    attachments.push(a)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, control_generation: 5, has_control: true }) })
+    a.setControl(false)
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'control', request_id: 99, ok: false, has_control: false, control_generation: 4 }),
+    })
+    expect(a.controlMetadata!().has_control).toBe(true)
+    expect(results).toHaveLength(0)
+    a.close()
+  })
 })
 
 describe('replayGate', () => {
@@ -2038,6 +2735,23 @@ describe('replayGate', () => {
     expect(visibility).toEqual([true, true, false])
   })
 
+  it('mutes resumed deltas without hiding the warm screen', () => {
+    const visibility: boolean[] = []
+    const done: Array<() => void> = []
+    const gate = replayGate(
+      (_chunk, callback) => {
+        if (callback) done.push(callback)
+      },
+      (visible) => visibility.push(visible),
+    )
+    gate.start('delta')
+    expect(gate.muted()).toBe(true)
+    expect(visibility).toEqual([true])
+    gate.write(new Uint8Array([1]), 'replay-end')
+    done[0]()
+    expect(gate.muted()).toBe(false)
+    expect(visibility).toEqual([true, false])
+  })
   it('unmutes on demand so a dropped socket mid-replay never leaves input dead', () => {
     const gate = replayGate(() => {})
     gate.write(new Uint8Array([1]), 'replay')

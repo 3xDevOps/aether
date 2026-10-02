@@ -1,14 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Terminal } from '@xterm/xterm'
+import * as presentation from '@/components/terminal-presentation'
 import type * as apiModule from '@/lib/api'
+import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
-import type { RouteProps } from '@/routes/registry'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/terminal'
 import { codeDenied } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { initialTerminal, type TerminalState } from '@/store/terminal'
-import { bob, run, serverInfo } from '@/test/fixtures'
+import { alice, bob, run, serverInfo } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 import { fire } from '@/test/wake'
 import { StubSocket } from '@/test/stub-socket'
@@ -28,30 +29,66 @@ function terminalRoute() {
 function mount(
   seed: Partial<TerminalState> = {},
   over: Partial<Run> = {},
-  route: Partial<RouteProps> = {},
 ) {
   const View = terminalRoute()
   useStore.getState().upsertRun(run(over))
   useStore.setState({
     info: serverInfo,
     terminals: { run_1: { ...initialTerminal, ...seed } },
-    terminalControlTaken: false,
   })
-  return render(<View {...route} params={{ runId: 'run_1' }} />)
+  return render(<View params={{ runId: 'run_1' }} />)
 }
 
-function attached(size = { cols: 80, rows: 24 }, resume_id = 'pty-incarnation-run') {
+function attached(
+  size = { cols: 80, rows: 24 },
+  resume_id = 'pty-incarnation-run',
+  over: Record<string, unknown> = {},
+) {
   act(() => {
-    StubSocket.last().onopen?.()
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    const header = socket.frames()[0]
+    const hasControl =
+      typeof header === 'object' &&
+      header !== null &&
+      'write' in header &&
+      header.write === true
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: true,
+        ...size,
+        resume_id,
+        has_control: hasControl,
+        control_generation: hasControl ? 1 : 0,
+        ...over,
+      }),
+    })
+  })
+}
+
+function controlAck(
+  has_control: boolean,
+  request_id: number,
+  control_generation: number,
+  over: Record<string, unknown> = {},
+) {
+  act(() => {
     StubSocket.last().onmessage?.({
-      data: JSON.stringify({ ok: true, ...size, resume_id }),
+      data: JSON.stringify({
+        type: 'control',
+        request_id,
+        ok: true,
+        has_control,
+        control_generation,
+        ...over,
+      }),
     })
   })
 }
 
 beforeEach(() => {
   StubSocket.install()
-  useStore.setState({ runs: {} })
+  useStore.setState({ runs: {}, roomStatusControl: {} })
 })
 
 afterEach(() => {
@@ -60,109 +97,192 @@ afterEach(() => {
 })
 
 describe('terminal view', () => {
+  it('shows every named viewer and distinguishes another session owned by this member', async () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    const status = {
+      workspace_id: run().workspace_id,
+      run_id: 'run_1',
+      protected: false,
+      controller: { member_id: alice.id, connected: true, acquired_at: run().created_at },
+      watchers: [alice.id, bob.id, 'mem_unknown', 'mem_four', 'mem_five'],
+      queued_steers: 0,
+    }
+    // Let the initial status fetch finish before supplying a newer room snapshot.
+    await act(async () => {})
+    act(() => useStore.setState({
+      members: { [alice.id]: alice, [bob.id]: bob },
+      roomStatus: { run_1: status },
+      roomStatusError: {},
+    }))
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    expect(presence.getByText('(another session)')).toBeDefined()
+    expect(presence.queryByText('(this tab)')).toBeNull()
+    for (const name of ['Alice', 'Bob', 'mem_unknown', 'mem_four', 'mem_five']) {
+      expect(presence.getAllByText(name)).toHaveLength(name === 'Alice' ? 2 : 1)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
+    expect(presence.queryByText('(this tab)')).toBeNull()
+    controlAck(true, 1, 1)
+    expect(presence.getByText('(this tab)')).toBeDefined()
+    expect(presence.queryByText('(another session)')).toBeNull()
+    act(() => StubSocket.last().onclose?.({ code: 1006, reason: '' }))
+    expect(presence.queryByText('(this tab)')).toBeNull()
+    view.unmount()
+  })
+
+  it('does not invent another controller session from pre-release presence', async () => {
+    const occupied = {
+      workspace_id: run().workspace_id,
+      run_id: 'run_1',
+      protected: false,
+      controller: { member_id: alice.id, connected: true, acquired_at: run().created_at },
+      watchers: [alice.id, bob.id],
+      queued_steers: 0,
+    }
+    const status = vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupied)
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    await act(async () => {})
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    const refresh = Promise.withResolvers<typeof occupied>()
+    status.mockReturnValue(refresh.promise)
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }))
+    controlAck(true, 1, 1)
+    expect(presence.getByText('(this tab)')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    controlAck(false, 2, 1)
+    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('(last known)')).toBeDefined()
+    await act(async () => {
+      refresh.reject(new Error('presence service unavailable'))
+      await Promise.resolve()
+    })
+    expect(presence.queryByText('(another session)')).toBeNull()
+    expect(presence.getByText('(last known)')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
+    view.unmount()
+  })
+
+  it('keeps unloaded and unavailable presence distinct from an empty room', async () => {
+    const view = mount({}, { member_id: bob.id })
+    await act(async () => {})
+    act(() => useStore.setState({ roomStatus: {}, roomStatusError: {} }))
+    const presence = within(screen.getByRole('group', { name: 'Run presence' }))
+    expect(presence.getAllByText('Loading…')).toHaveLength(2)
+    expect(presence.queryByText('Nobody')).toBeNull()
+    act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
+    expect(presence.getAllByText('Unavailable')).toHaveLength(2)
+    expect(presence.queryByText('Nobody')).toBeNull()
+    act(() => useStore.setState({
+      roomStatus: { run_1: {
+        workspace_id: run().workspace_id,
+        run_id: 'run_1',
+        protected: false,
+        watchers: [],
+        queued_steers: 0,
+      } },
+      roomStatusError: {},
+    }))
+    expect(presence.getByText('Nobody')).toBeDefined()
+    expect(presence.getByText('None')).toBeDefined()
+    expect(presence.queryByText('Unavailable')).toBeNull()
+    act(() => useStore.setState({ roomStatusError: { run_1: 'status unavailable' } }))
+    expect(presence.getByText('Last known presence')).toBeDefined()
+    view.unmount()
+  })
+
   it('steers by default and lets the user return to a mirror', () => {
     const view = mount()
     attached()
 
     expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
-    expect(screen.getByText('Attached')).toBeDefined()
-    expect(screen.getByText('Steering')).toBeDefined()
 
-    fireEvent.click(screen.getByText('Steering'))
-    attached()
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(useStore.getState().terminals.run_1.write).toBe(true)
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 2)
 
-    expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
+    expect(useStore.getState().terminals.run_1.write).toBe(false)
     expect(screen.getByText('Take control')).toBeDefined()
     view.unmount()
   })
+
+  it('waits for a control acknowledgement without replacing the output socket', () => {
+    const view = mount({}, { member_id: bob.id })
+    attached()
+    const socket = StubSocket.last()
+    const opened = StubSocket.opened.length
+
+    fireEvent.click(screen.getByText('Take control'))
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(useStore.getState().terminals.run_1.write).toBe(false)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
+
+    expect(useStore.getState().terminals.run_1.write).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    expect(StubSocket.opened).toHaveLength(opened)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 2, write: false })
+    controlAck(false, 2, 1)
+    fireEvent.click(screen.getByText('Take control'))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 3, write: true })
+    expect(socket.frames().at(-1)).not.toHaveProperty('control_generation')
+    view.unmount()
+  })
+
 
   it('opens another member run as a mirror until they take control', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+    const view = mount({}, { member_id: bob.id })
     attached()
 
     expect(StubSocket.last().frames()[0]).not.toHaveProperty('write')
     expect(screen.getByText('Take control')).toBeDefined()
-    expect(screen.queryByText('Steering')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
     view.unmount()
   })
 
-  it('says what a mirror is until the member has taken control once', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
-    attached()
-
-    const hint = 'Read-only mirror. Take control to type into the agent.'
-    expect(screen.getByText(hint)).toBeDefined()
-
-    // Asking is not being granted: the flag waits for the reattach's ack, so
-    // a member the server refuses keeps the hint.
-    fireEvent.click(screen.getByText('Take control'))
-    expect(useStore.getState().terminalControlTaken).toBe(false)
-    attached()
-
-    expect(useStore.getState().terminalControlTaken).toBe(true)
-    expect(screen.queryByText(hint)).toBeNull()
-    view.unmount()
-  })
   it('downgrades a displaced writer to a mirror without permanent denial', () => {
     const view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
-    act(() => {
-      StubSocket.last().onopen?.()
-      StubSocket.last().onmessage?.({
-        data: JSON.stringify({
-          ok: true,
-          cols: 80,
-          rows: 24,
-          has_control: true,
-          control_generation: 7,
-          resume_id: 'pty-incarnation-run',
-        }),
-      })
-    })
-    expect(screen.getByText('Steering')).toBeDefined()
+    controlAck(true, 1, 1)
 
     act(() => StubSocket.last().onclose?.({ code: 1008, reason: 'control taken over' }))
     expect(screen.getByText('Take control')).toBeDefined()
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
 
-    // The mirror can explicitly ask for control again; reopen clears the
-    // bounded reconnect timer and starts this request immediately.
-    fireEvent.click(screen.getByText('Take control'))
-    act(() => StubSocket.last().onopen?.())
-    expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
+    // The mirror remains eligible for a later explicit request; no
+    // permission-denial latch is set by lease displacement.
     view.unmount()
   })
 
-  it('does not count an owner run automatic steer as taking control', () => {
-    const view = mount()
-    attached()
 
-    // The owner's attach asks for write on its own and the server grants it.
-    // Nobody pressed anything, so the hint is still owed to them on the first
-    // run they only watch.
-    expect(screen.getByText('Steering')).toBeDefined()
-    expect(useStore.getState().terminalControlTaken).toBe(false)
-    view.unmount()
-  })
-
-  it('keeps the mirror hint when the server refuses the request', () => {
-    const view = mount()
-    act(() => useStore.getState().upsertRun(run({ member_id: bob.id })))
+  it('reports when the server refuses the control request', () => {
+    const view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
-    act(() => {
-      StubSocket.last().onopen?.()
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    act(() =>
       StubSocket.last().onmessage?.({
-        data: JSON.stringify({ ok: false, code: codeDenied, error: 'permission denied' }),
-      })
-    })
+        data: JSON.stringify({
+          type: 'control',
+          request_id: 1,
+          ok: false,
+          code: codeDenied,
+          error: 'permission denied',
+          has_control: false,
+          control_generation: 1,
+        }),
+      }),
+    )
 
-    expect(useStore.getState().terminalControlTaken).toBe(false)
+    expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
 
@@ -171,11 +291,9 @@ describe('terminal view', () => {
     act(() => useStore.getState().upsertRun(run({ status: 'needs-attention' })))
     attached()
 
-    expect(screen.getByText('Steering')).toBeDefined()
     expect(StubSocket.last().frames()[0]).toMatchObject({ write: true })
     view.unmount()
   })
-
   it('keeps one control session across live status transitions', () => {
     const view = mount()
     attached()
@@ -195,7 +313,6 @@ describe('terminal view', () => {
   it('disables the toggle and says why when the server denies steering', () => {
     const view = mount()
     act(() => StubSocket.last().onopen?.())
-
     act(() =>
       StubSocket.last().onmessage?.({
         data: JSON.stringify({
@@ -211,49 +328,66 @@ describe('terminal view', () => {
     expect(screen.getByText('You cannot steer this run.')).toBeDefined()
     view.unmount()
   })
-  it('retries control when cached run authority changes', async () => {
-    const view = mount({}, { member_id: bob.id })
+
+  it('retries control after unmounting and revisiting with new authority', async () => {
+    let view = mount({}, { member_id: bob.id })
     attached()
 
     fireEvent.click(screen.getByText('Take control'))
     const denied = StubSocket.last()
-    act(() => {
-      denied.onopen?.()
+    act(() =>
       denied.onmessage?.({
         data: JSON.stringify({
+          type: 'control',
+          request_id: 1,
           ok: false,
           code: codeDenied,
           error: 'run.attach: permission denied',
+          has_control: false,
+          control_generation: 1,
         }),
-      })
-    })
+      }),
+    )
     expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.unmount()
     act(() => useStore.getState().upsertRun(run()))
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
 
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const authorized = StubSocket.last()
     act(() => authorized.onopen?.())
-    expect(authorized.frames()[0]).toMatchObject({ write: true, resume: true })
+    expect(authorized.frames()[0]).toMatchObject({ write: true, screen: true })
+    expect(authorized.frames()[0]).not.toHaveProperty('resume')
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
     view.unmount()
   })
-  it('reattaches when changed authority revives an unchanged automatic write', async () => {
+  it('retries control on an authority change without replacing the stream', () => {
     const view = mount()
-    const denied = StubSocket.last()
-    act(() => {
-      denied.onopen?.()
-      denied.onmessage?.({
+    const socket = StubSocket.last()
+    attached()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 1)
+
+    fireEvent.click(screen.getByText('Take control'))
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 2, write: true })
+    act(() =>
+      socket.onmessage?.({
         data: JSON.stringify({
+          type: 'control',
+          request_id: 2,
           ok: false,
           code: codeDenied,
           error: 'run.attach: permission denied',
+          has_control: false,
+          control_generation: 0,
         }),
-      })
-    })
+      }),
+    )
+    expect((screen.getByText('Take control') as HTMLButtonElement).disabled).toBe(true)
 
     act(() =>
       useStore.setState({
@@ -264,10 +398,9 @@ describe('terminal view', () => {
       }),
     )
 
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
-    const authorized = StubSocket.last()
-    act(() => authorized.onopen?.())
-    expect(authorized.frames()[0]).toMatchObject({ write: true })
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 3, write: true })
+    controlAck(true, 3, 2)
     expect(screen.queryByText('You cannot steer this run.')).toBeNull()
     view.unmount()
   })
@@ -282,14 +415,14 @@ describe('terminal view', () => {
     })
     attached()
 
-    const toggle = screen.getByText('Steering') as HTMLButtonElement
+    const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(false)
     expect(screen.queryByText('no live terminal')).toBeNull()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()
   })
 
-  it('writes PTY output frames into the terminal', () => {
+  it('writes PTY output frames into the terminal', async () => {
     // The blank-terminal regression: the attach delivered frames but the
     // view never handed them to xterm, so the pane stayed empty forever.
     const write = vi.spyOn(Terminal.prototype, 'write')
@@ -299,23 +432,25 @@ describe('terminal view', () => {
     const chunk = new TextEncoder().encode('agent says hi').buffer
     act(() => StubSocket.last().onmessage?.({ data: chunk }))
 
-    const written = write.mock.calls.map(([data]) =>
-      typeof data === 'string' ? data : new TextDecoder().decode(data),
-    )
-    expect(written).toContain('agent says hi')
+    await waitFor(() => {
+      const written = write.mock.calls.map(([data]) =>
+        typeof data === 'string' ? data : new TextDecoder().decode(data),
+      )
+      expect(written).toContain('agent says hi')
+    })
     write.mockRestore()
     view.unmount()
   })
-  it('does not initialize a cached run until its first active visit', () => {
-    const view = mount({}, {}, { active: false })
-    expect(StubSocket.opened).toHaveLength(0)
+  it('initializes the terminal for a known mounted run', () => {
+    const view = mount()
+    const socket = StubSocket.last()
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
     expect(StubSocket.opened).toHaveLength(1)
+
     view.unmount()
+    expect(socket.closed).toBe(true)
   })
-  it('unmounts parked Run Dock, Run Room, and run header while retaining the primary pane', async () => {
+  it('renders the complete route UI only while mounted', async () => {
     const view = mount()
     attached()
     await waitFor(() => expect(document.querySelector('.xterm')).toBeDefined())
@@ -325,156 +460,126 @@ describe('terminal view', () => {
     expect(screen.getByRole('tabpanel')).toBeDefined()
     const pane = document.querySelector('.xterm')
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.unmount()
 
     expect(screen.queryByRole('button', { name: 'Open Run Room' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Terminal dock' })).toBeNull()
     expect(screen.queryByRole('tablist', { name: 'Run tabs' })).toBeNull()
     expect(screen.queryByRole('tabpanel')).toBeNull()
-    expect(pane?.isConnected).toBe(true)
-
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
-    expect(screen.getByRole('button', { name: 'Open Run Room' })).toBeDefined()
-    expect(screen.getByRole('region', { name: 'Terminal dock' })).toBeDefined()
-    expect(screen.getByRole('tablist', { name: 'Run tabs' })).toBeDefined()
-    expect(screen.getByRole('tabpanel')).toBeDefined()
-    view.unmount()
+    expect(pane?.isConnected).toBe(false)
   })
 
-  it('parks a live run without a hidden socket and resumes its parsed output', async () => {
+  it('blocks historical DOM input while answering live terminal queries and refocuses at the live end', async () => {
+    vi.spyOn(presentation, 'captureTerminalPresentation').mockReturnValue({
+      rows: ['<span>pinned output</span>', '<span>second row</span>'],
+      cols: 80, viewportY: 0, baseY: 0, cellWidth: 8, cellHeight: 16,
+      fontFamily: 'monospace', fontSize: 12, letterSpacing: 0,
+    })
+    const opened = vi.spyOn(Terminal.prototype, 'open')
     const view = mount()
+    const terminal = opened.mock.contexts[0] as Terminal
+    attached()
+    const socket = StubSocket.last()
+    const host = terminal.element!.parentElement!
+    const input = terminal.textarea!
+    // Saved-view hydration can finish before the attach's ordered geometry,
+    // empty replay write and reveal frames have enabled DOM input.
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull()
+      expect(host.hasAttribute('inert')).toBe(false)
+      expect(input.readOnly).toBe(false)
+    })
+    fireEvent.paste(input, { clipboardData: { getData: () => 'live input' } })
+    expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: 'live input' }))
+
+    fireEvent.wheel(host, { deltaY: -80 })
+    const history = await screen.findByRole('region', { name: 'Terminal scrollback' })
+    expect(screen.getByText('pinned output')).toBeDefined()
+    expect(host.hasAttribute('inert')).toBe(true)
+    expect(host.style.visibility).toBe('hidden')
+    const sent = socket.sent.length
+    fireEvent.keyDown(history, { key: 'x', code: 'KeyX', keyCode: 88 })
+    fireEvent.paste(history, { clipboardData: { getData: () => 'historical input' } })
+    fireEvent.keyDown(input, { key: 'x', code: 'KeyX', keyCode: 88 })
+    fireEvent.paste(input, { clipboardData: { getData: () => 'hidden input' } })
+    fireEvent.keyDown(history, { key: 'PageUp', code: 'PageUp' })
+    expect(socket.sent).toHaveLength(sent)
+    // These replies originate in the parser, not terminal.input()/paste().
+    act(() => socket.onmessage?.({ data: new TextEncoder().encode('new live output\x1b[6n\x1b[c').buffer }))
+    await waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString()).toContain('new live output'))
+    await waitFor(() => {
+      expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: expect.stringMatching(/^\x1b\[\d+;\d+R$/) }))
+      expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: expect.stringMatching(/^\x1b\[\?[\d;]+c$/) }))
+    })
+    expect(screen.getByText('pinned output')).toBeDefined()
+    expect(socket.closed).toBe(false)
+
+    fireEvent.keyDown(history, { key: 'End', code: 'End' })
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    expect(host.hasAttribute('inert')).toBe(false)
+    expect(host.style.visibility).toBe('')
+    fireEvent.paste(input, { clipboardData: { getData: () => 'resumed input' } })
+    expect(socket.frames()).toContainEqual(expect.objectContaining({ type: 'input', data: 'resumed input' }))
+    view.unmount()
+    expect(socket.closed).toBe(true)
+  })
+
+  it('unmounts a live run and remounts a fresh screen snapshot', async () => {
+    let view = mount()
     attached({ cols: 20, rows: 4 })
     const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
     act(() =>
       StubSocket.last().onmessage?.({
-        data: new TextEncoder().encode('retained output').buffer,
+        data: new TextEncoder().encode('old output').buffer,
       }),
     )
-    await vi.waitFor(() => expect(pane()).toContain('retained output'))
-
+    await vi.waitFor(() => expect(pane()).toContain('old output'))
+    const oldPane = document.querySelector('.xterm')
     const socket = StubSocket.last()
-    const weight = vi.fn()
-    const View = terminalRoute()
-    view.rerender(
-      <View
-        params={{ runId: 'run_1' }}
-        active={false}
-        onTerminalWeight={weight}
-      />,
-    )
 
+    view.unmount()
     expect(socket.closed).toBe(true)
-    expect(StubSocket.opened).toHaveLength(1)
-    expect(weight).toHaveBeenCalledWith(expect.any(Number))
-    expect(weight.mock.calls[0][0]).toBeGreaterThan(0)
+    expect(oldPane?.isConnected).toBe(false)
 
-    view.rerender(
-      <View
-        params={{ runId: 'run_1' }}
-        active
-        onTerminalWeight={weight}
-      />,
-    )
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
-    const resumed = StubSocket.last()
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).toMatchObject({ screen: true })
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
+
     act(() => {
-      resumed.onopen?.()
-      resumed.onmessage?.({
+      replacement.onmessage?.({
         data: JSON.stringify({
           ok: true,
-          replay: 0,
+          replay: 14,
           cols: 20,
           rows: 4,
-          resumed: true,
           resume_id: 'pty-incarnation-run',
         }),
       })
+      replacement.onmessage?.({ data: new TextEncoder().encode('current output').buffer })
     })
-    expect(resumed.frames()[0]).toMatchObject({
-      resume: true,
-      resume_id: 'pty-incarnation-run',
-    })
-    expect(pane()).toContain('retained output')
+    await vi.waitFor(() => expect(pane()).toContain('current output'))
+    expect(pane()).not.toContain('old output')
     view.unmount()
   })
-  it('reports retained normal and alternate buffer weight', async () => {
-    const open = vi.spyOn(Terminal.prototype, 'open')
-    const view = mount()
-    const terminal = open.mock.contexts[0] as Terminal
-    attached({ cols: 20, rows: 4 })
-    await new Promise<void>((done) => terminal.write('normal output', done))
-    await new Promise<void>((done) => terminal.write('\x1b[?1049halt output', done))
-
-    const weight = vi.fn()
-    const View = terminalRoute()
-    view.rerender(
-      <View
-        params={{ runId: 'run_1' }}
-        active={false}
-        onTerminalWeight={weight}
-      />,
-    )
-
-    const expected = (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
-    expect(terminal.buffer.normal.length).toBeGreaterThan(0)
-    expect(terminal.buffer.alternate.length).toBeGreaterThan(0)
-    expect(weight).toHaveBeenCalledWith(expected)
-    open.mockRestore()
-    view.unmount()
-  })
-  it('reports the larger weight when a deferred live multiline write settles while parked', async () => {
-    const originalWrite = Terminal.prototype.write
-    const write = vi.spyOn(Terminal.prototype, 'write')
-    write.mockImplementation(function (this: Terminal, chunk, done) {
-      if (chunk instanceof Uint8Array && done) {
-        // Let xterm parse the bytes, but defer the completion observed by the
-        // attach until the next turn so parking can happen first.
-        return originalWrite.call(this, chunk, () => setTimeout(done, 0))
-      }
-      return originalWrite.call(this, chunk, done)
-    })
-
-    const view = mount()
-    attached({ cols: 20, rows: 4 })
-    const weight = vi.fn()
-    const View = terminalRoute()
-    const socket = StubSocket.last()
-    act(() => {
-      socket.onmessage?.({
-        data: new TextEncoder().encode('line one\nline two\nline three').buffer,
-      })
-      view.rerender(
-        <View
-          params={{ runId: 'run_1' }}
-          active={false}
-          onTerminalWeight={weight}
-        />,
-      )
-    })
-
-    const terminal = write.mock.instances.find(
-      (instance): instance is Terminal => instance instanceof Terminal,
-    )
-    if (!terminal) throw new Error('xterm terminal did not receive the live write')
-    const parkedCalls = weight.mock.calls.length
-    await waitFor(() => expect(weight.mock.calls.length).toBeGreaterThan(parkedCalls))
-    const expected = (terminal.buffer.normal.length + terminal.buffer.alternate.length) * terminal.cols
-    expect(weight.mock.calls.at(-1)?.[0]).toBe(expected)
-    write.mockRestore()
-    view.unmount()
-  })
-  it('does not reopen an ended completed run when its cached view is revisited', () => {
-    const view = mount({}, { status: 'completed' })
+  it('fresh-attaches an ended completed run when revisited', async () => {
+    let view = mount({}, { status: 'completed' })
     attached()
     const socket = StubSocket.last()
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
 
+    view.unmount()
     const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    view = render(<View params={{ runId: 'run_1' }} />)
 
-    expect(StubSocket.opened).toHaveLength(1)
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).toMatchObject({ screen: true })
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
     view.unmount()
   })
   it('does not reopen an ended completed run when follow mode changes', () => {
@@ -504,21 +609,20 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('records a parked same-run relaunch and full-attaches only on activation', async () => {
-    const view = mount({}, { status: 'completed', member_id: bob.id })
+  it('full-attaches a same-run relaunch after an unmounted visit', async () => {
+    let view = mount({}, { status: 'completed', member_id: bob.id })
     attached(undefined, 'pty-incarnation-ended')
     const endedSocket = StubSocket.last()
     act(() => endedSocket.onclose?.({ code: 1000, reason: 'session ended' }))
 
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
+    view.unmount()
     act(() => useStore.getState().upsertRun(run({ status: 'running', member_id: bob.id })))
-    expect(StubSocket.opened).toHaveLength(1)
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
 
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const replacement = StubSocket.last()
-    replacement.onopen?.()
+    act(() => replacement.onopen?.())
     expect(replacement.frames()[0]).not.toHaveProperty('resume')
     expect(replacement.frames()[0]).not.toHaveProperty('cursor')
     view.unmount()
@@ -543,13 +647,14 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('keeps an in-flight replay hidden and requests a full replay after parking', async () => {
+  it('cancels an in-flight replay on unmount and requests a fresh replay on revisit', async () => {
     const write = vi.spyOn(Terminal.prototype, 'write')
     const callbacks: Array<() => void> = []
     write.mockImplementation((chunk, done) => {
       if (chunk instanceof Uint8Array && done) callbacks.push(done)
+      else done?.()
     })
-    const view = mount({}, { status: 'completed' })
+    let view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -565,12 +670,15 @@ describe('terminal view', () => {
       socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
     })
     const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
-    expect(callbacks).toHaveLength(1)
+    await waitFor(() => expect(callbacks).toHaveLength(1))
     expect(host.style.visibility).toBe('hidden')
+
+    view.unmount()
+    expect(socket.closed).toBe(true)
+    act(() => callbacks[0]?.())
+
     const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
-    expect(host.style.visibility).toBe('hidden')
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
+    view = render(<View params={{ runId: 'run_1' }} />)
     await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const replacement = StubSocket.last()
     act(() => replacement.onopen?.())
@@ -579,7 +687,7 @@ describe('terminal view', () => {
     view.unmount()
   })
 
-  it('disposes the attachment and xterm when the route is evicted', () => {
+  it('disposes the attachment and xterm when the route unmounts', () => {
     const dispose = vi.spyOn(Terminal.prototype, 'dispose')
     const view = mount()
     attached()
@@ -591,10 +699,9 @@ describe('terminal view', () => {
     dispose.mockRestore()
   })
 
-  it('resets cached output and invalidates it on a final refusal', async () => {
+  it('resets mounted output on a final refusal', async () => {
     const reset = vi.spyOn(Terminal.prototype, 'reset')
-    const invalidate = vi.fn()
-    const view = mount({}, {}, { onTerminalInvalidate: invalidate })
+    const view = mount()
     attached()
     const pane = () => document.querySelector('.xterm-rows')?.textContent ?? ''
     act(() =>
@@ -610,10 +717,10 @@ describe('terminal view', () => {
         data: JSON.stringify({ ok: false, code: -32000, error: 'final refusal' }),
       })
     })
-
-    expect(reset).toHaveBeenCalled()
-    expect(invalidate).toHaveBeenCalledTimes(1)
-    expect(pane()).not.toContain('stale output')
+    await waitFor(() => {
+      expect(reset).toHaveBeenCalled()
+      expect(pane()).not.toContain('stale output')
+    })
     reset.mockRestore()
     view.unmount()
   })
@@ -655,6 +762,7 @@ describe('terminal view', () => {
       return originalWrite.call(this, chunk, done)
     })
     const view = mount({}, { status: 'completed' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -672,14 +780,14 @@ describe('terminal view', () => {
     })
 
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.xterm')!.parentElement!
     expect(host.style.visibility).toBe('hidden')
 
     act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    expect(callbacks).toHaveLength(1)
+    await waitFor(() => expect(callbacks).toHaveLength(1))
 
-    // A completed session parks offline after the exact replay boundary, but
+    // A completed session stays offline after the exact replay boundary, but
     // the pane stays hidden while xterm parses the final replay frame.
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
@@ -693,7 +801,7 @@ describe('terminal view', () => {
     write.mockRestore()
     view.unmount()
   })
-  it('finishes an ended replay after the route is parked and reveals it on revisit', async () => {
+  it('cancels an ended replay on unmount and replays afresh on revisit', async () => {
     const originalWrite = Terminal.prototype.write
     const write = vi.spyOn(Terminal.prototype, 'write')
     const callbacks: Array<() => void> = []
@@ -704,7 +812,7 @@ describe('terminal view', () => {
       }
       return originalWrite.call(this, chunk, done)
     })
-    const view = mount({}, { status: 'completed' })
+    let view = mount({}, { status: 'completed' })
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -717,29 +825,26 @@ describe('terminal view', () => {
           resume_id: 'pty-incarnation-run',
         }),
       })
+      socket.onmessage?.({ data: new TextEncoder().encode('old').buffer })
     })
-    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    act(() => socket.onmessage?.({ data: new TextEncoder().encode('old').buffer }))
+    await waitFor(() => expect(callbacks).toHaveLength(1))
     act(() => socket.onclose?.({ code: 1000, reason: 'session ended' }))
 
-    expect(callbacks).toHaveLength(1)
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
-    expect(host.style.visibility).toBe('hidden')
-    const View = terminalRoute()
-    view.rerender(<View params={{ runId: 'run_1' }} active={false} />)
-    expect(host.style.visibility).toBe('hidden')
-
+    view.unmount()
     act(() => callbacks[0]?.())
-    await waitFor(() =>
-      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
-    )
-    view.rerender(<View params={{ runId: 'run_1' }} active />)
-    expect(host.style.visibility).toBe('')
+    const View = terminalRoute()
+    view = render(<View params={{ runId: 'run_1' }} />)
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    const replacement = StubSocket.last()
+    act(() => replacement.onopen?.())
+    expect(replacement.frames()[0]).not.toHaveProperty('resume')
     write.mockRestore()
     view.unmount()
   })
-  it('reveals a completed session when an offline close aborts before replay ends', () => {
+  it('reveals a completed session when an offline close aborts before replay ends', async () => {
     const view = mount({}, { status: 'completed' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -756,23 +861,26 @@ describe('terminal view', () => {
       })
     })
 
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.xterm')!.parentElement!
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
     expect(host.style.visibility).toBe('hidden')
 
-    // No replay-end frame arrived: the close's explicit replay abort settles
-    // the gate instead of leaving an incomplete transcript latched.
+    // No replay-end frame arrived: ending the session synthesizes the boundary
+    // so reveal still waits for paint and structural completion.
     act(() => {
       socket.onmessage?.({ data: new TextEncoder().encode('ol').buffer })
       socket.onclose?.({ code: 1000, reason: 'session ended' })
     })
 
-    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
-    expect(host.style.visibility).toBe('')
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+      expect(host.style.visibility).toBe('')
+    })
     view.unmount()
   })
-  it('settles the hidden replay overlay when wake replacement is refused', () => {
+  it('settles the hidden replay overlay when wake replacement is refused', async () => {
     const view = mount({}, { status: 'completed' })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring saved terminal view' })).toBeNull())
     const socket = StubSocket.last()
     act(() => {
       socket.onopen?.()
@@ -794,7 +902,7 @@ describe('terminal view', () => {
     const replacement = StubSocket.last()
     expect(replacement).not.toBe(socket)
     expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    const host = document.querySelector('.min-h-0.flex-1.bg-background') as HTMLElement
+    const host = document.querySelector('.xterm')!.parentElement!
     expect(host.style.visibility).toBe('hidden')
     act(() => {
       replacement.onopen?.()
@@ -803,13 +911,15 @@ describe('terminal view', () => {
       })
     })
 
-    expect(host.style.visibility).toBe('')
-    expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    await waitFor(() => {
+      expect(host.style.visibility).toBe('')
+      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+    })
     expect(screen.getByText('replacement refused')).toBeDefined()
     view.unmount()
   })
 
-  it('preserves existing terminal output when Steering is released with resume', async () => {
+  it('preserves existing terminal output when control is released', async () => {
     const reset = vi.spyOn(Terminal.prototype, 'reset')
     const write = vi.spyOn(Terminal.prototype, 'write')
     const view = mount()
@@ -825,15 +935,11 @@ describe('terminal view', () => {
     const resetCount = reset.mock.calls.length
     const writeCount = write.mock.calls.length
 
-    fireEvent.click(screen.getByText('Steering'))
-    expect(StubSocket.opened).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    expect(StubSocket.opened).toHaveLength(1)
     const release = StubSocket.last()
-    act(() => {
-      release.onopen?.()
-      release.onmessage?.({
-        data: JSON.stringify({ ok: true, cols: 20, rows: 4, resumed: true, resume_id: 'pty-incarnation-run' }),
-      })
-    })
+    expect(release.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 2)
 
     expect(reset.mock.calls).toHaveLength(resetCount)
     const writesAfterAck = write.mock.calls.slice(writeCount)
@@ -957,7 +1063,6 @@ describe('terminal view', () => {
 
     expect(StubSocket.opened).toHaveLength(1)
     expect(screen.queryByText("Starting the run's container")).toBeNull()
-    expect(screen.getByText('Attached')).toBeDefined()
     view.unmount()
   })
 
@@ -1065,7 +1170,7 @@ describe('terminal view', () => {
     const view = mount({}, { status: 'needs-attention' })
     attached()
 
-    const toggle = screen.getByText('Steering') as HTMLButtonElement
+    const toggle = screen.getByRole('button', { name: 'Release' }) as HTMLButtonElement
     expect(toggle.disabled).toBe(false)
     expect(screen.queryByText('This run is not running')).toBeNull()
     view.unmount()
@@ -1109,6 +1214,8 @@ describe('the terminal on a phone', () => {
     // of its own - a finished run's replay - is laid out at.
     expect(StubSocket.last().frames()[0]).toEqual({
       follow: true,
+      screen: true,
+      interactive: true,
       cols: 80,
       rows: 24,
       control_session_id: expect.any(String),
@@ -1135,19 +1242,12 @@ describe('the terminal on a phone', () => {
     const view = mount()
     attached({ cols: 132, rows: 43 })
 
+    const socket = StubSocket.last()
     fireEvent.click(screen.getByText('Take control'))
-    attached({ cols: 132, rows: 43 })
-
-    expect(StubSocket.last().frames()[0]).toEqual({
-      write: true,
-      follow: true,
-      resume: true,
-      resume_id: 'pty-incarnation-run',
-      cursor: 0,
-      cols: 80,
-      rows: 24,
-      control_session_id: expect.any(String),
-    })
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(socket.frames()[0]).toMatchObject({ follow: true, cols: 80, rows: 24 })
+    expect(socket.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
     view.unmount()
   })
 
@@ -1166,8 +1266,8 @@ describe('the terminal on a phone', () => {
     expect(screen.queryByRole('toolbar', { name: 'Terminal keys' })).toBeNull()
 
     fireEvent.click(screen.getByText('Take control'))
-    attached()
-
+    expect(StubSocket.last().frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: true })
+    controlAck(true, 1, 1)
     await vi.waitFor(() => expect(input()?.readOnly).toBe(false))
     // The keys a soft keyboard has not got arrive with the ability to type.
     expect(screen.getByRole('toolbar', { name: 'Terminal keys' })).toBeDefined()
@@ -1206,25 +1306,14 @@ describe('the terminal on a phone', () => {
     const view = mount()
     attached()
 
-    fireEvent.click(screen.getByText('Steering'))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
+    expect(StubSocket.opened).toHaveLength(1)
     const released = StubSocket.last()
-    act(() => {
-      released.onopen?.()
-      released.onmessage?.({
-        data: JSON.stringify({
-          ok: true,
-          replay: 0,
-          cols: 80,
-          rows: 24,
-          resumed: true,
-          resume_id: 'pty-incarnation-run',
-        }),
-      })
-    })
-    expect(StubSocket.opened).toHaveLength(2)
+    expect(released.frames().at(-1)).toMatchObject({ type: 'control', request_id: 1, write: false })
+    controlAck(false, 1, 2)
 
     resize(390)
-    await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
     const reopened = StubSocket.last()
     act(() => reopened.onopen?.())
     expect(reopened.frames()).toHaveLength(1)

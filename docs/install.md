@@ -15,7 +15,7 @@ build and development server.
 
 ```sh
 make dashboard         # build the static dashboard export in web/dist
-make build             # dashboard, then the Go server and CLI into dist/
+make build             # dashboard, then the Go server, CLI and edge into dist/
 cd web && bun run dev  # development server
 ```
 
@@ -24,6 +24,19 @@ the Go server and CLI through `web/embed.go`. The CLI serves it from
 `aether gui`; the server serves it when `--web-port` is set, so upgrading the
 server binary is what refreshes the dashboard a phone loads. Running an
 installed server or CLI needs no Node.js and no Next server.
+
+The remote browser has its own Docker image. For an untagged, dirty, or
+git-describe source build, build it locally before opening a browser session:
+
+```sh
+make browser-image
+make browser-smoke
+```
+
+Both commands default to `aether/browser:test`; `BROWSER_IMAGE=<reference>`
+selects another image. The smoke command runs the image's native Chromium
+sandbox and companion checks, not a host-installed browser. See
+[testing.md](testing.md#headless-browser-and-remote-development-acceptance).
 
 ## The install script
 
@@ -63,9 +76,10 @@ machine never runs and make the dashboard ask for a
 
 If the install directory is not on your `PATH`, the script prints the one line
 that adds it for your shell - bash, zsh, or fish, and a plain `export` when it
-cannot tell - and never edits a profile for you. The desktop app looks in
-`~/.local/bin` itself, so it starts either way; a terminal needs the line. If
-an older `aether` is still in `/usr/local/bin`, the script names it and prints
+cannot tell - and never edits a profile for you. The desktop build records
+the installed CLI's path, so the app starts without that directory on the
+desktop session's `PATH`; a terminal still needs the line. An older
+`aether` in `/usr/local/bin` is named by the script, which prints
 the `sudo rm -f` that removes it, because that copy comes first on most
 `PATH`s and would shadow the new one.
 
@@ -152,8 +166,8 @@ directory; existing applications keep their old environment. Sign out and
 back in if another terminal still cannot find the CLI. An older CLI,
 alias, or function can still shadow `aether`: `Get-Command aether -All`
 shows which command runs. The installer never deletes a shadowing copy.
-The desktop also checks the default CLI directory, so a Start Menu process
-with an older `PATH` can find a default installation.
+The desktop built by the installer records the CLI it just installed, so an
+older Start Menu `PATH` does not change which CLI the app starts.
 
 Close Aether before rerunning the installer to upgrade. Downloads and
 checksum failures leave the installed binary alone; a locked binary reports
@@ -171,10 +185,10 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 ## Upgrading
 
-`aether update` replaces the running CLI with the latest release (or
-`--version <tag>`), verifying it against the release's `checksums.txt`. On a
-Linux host with `aether-server` installed next to the CLI it updates both and
-reminds you to `sudo systemctl restart aether-server`. The command never asks
+`aether update` replaces the running CLI with the latest release only if it
+is newer (or installs `--version <tag>`), verifying it against the release's
+`checksums.txt`. On Linux, an `aether-server` beside the CLI is updated too;
+restart it with `sudo systemctl restart aether-server`. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -247,6 +261,12 @@ output streams to your terminal. Skip it with `--no-app`:
 aether update --no-app
 ```
 
+The rebuilt app starts that CLI path rather than whichever older copy happens
+to come first on the desktop session's `PATH`. `AETHER_BIN` still overrides it
+when you deliberately choose another binary. If the recorded CLI is moved or
+deleted, set `AETHER_BIN` or rebuild the app with the installed CLI instead of
+silently falling back to a different copy.
+
 A machine with no app installed builds nothing and downloads nothing, so a
 server box never sees this step. If the app is running when the rebuild
 finishes, the command says to restart it. A rebuild that fails prints the
@@ -276,9 +296,11 @@ dashboard banner all answer `disabled` without touching the network.
 A binary built from a checkout reports what `git describe` produced
 (`v1.2.3-4-gabc123`, plus `-dirty` for uncommitted changes). The comparison
 reads that as the tag it descends from *plus* commits on top, so such a build
-is never told to downgrade to that tag, and is still told about a genuinely
-newer release. A checkout with no tags in reach reports a bare commit, which
-cannot be ordered against anything and never reports an update.
+is never told to downgrade to that tag, and `aether update` without
+`--version` does not replace it with that older release. It is still told
+about a genuinely newer release. A checkout with no tags in reach reports a
+bare commit, which cannot be ordered against anything and never updates
+automatically; `--version <tag>` explicitly selects a release instead.
 
 **In the dashboard.** `aether gui` runs the same check in the background and
 prints one line to stderr when a newer release exists. The dashboard shows a
@@ -373,11 +395,12 @@ sudo systemctl restart aether-server
 **The desktop app is separate.** The dashboard ships inside the CLI, so
 updating the CLI updates the dashboard. The Electron shell around it - window
 chrome, notifications, `aether://` deep links - is whatever `aether gui build`
-last produced, and records which CLI built it. Both `aether update` and the
-dashboard's **Update now** rebuild it for you; the banner below is what is
-left when that rebuild was skipped (`--no-app`) or failed. It is not tied to a
-release being available, because the usual way to get there is to have just
-updated.
+last produced, and records the full version and executable path of the CLI
+that built it. Both `aether update` and the dashboard's **Update now** rebuild
+it for you; the banner below is what is left when that rebuild was skipped
+(`--no-app`) or failed, or the shell deliberately uses another CLI through
+`AETHER_BIN`. It is not tied to a release being available, because the usual
+way to get there is to have just updated.
 
 ## Manual install
 
@@ -385,12 +408,17 @@ Every release publishes bare binaries plus `checksums.txt`:
 
 ```
 aether-server-linux-amd64   aether-server-linux-arm64
+aether-edge-linux-amd64     aether-edge-linux-arm64
 aether-linux-amd64          aether-linux-arm64
 aether-darwin-amd64         aether-darwin-arm64
 aether-windows-amd64.exe    aether-windows-arm64.exe
 ```
 
-`aether-server` is Linux-only. The Windows and macOS assets are the client.
+`aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
+are the client. `aether-edge` is only for running your own edge
+([edge.md](edge.md)); servers and clients do not need it. It also ships as
+the image `ghcr.io/3xdevops/aether-edge:<release-tag>`
+([edge.md](edge.md#in-a-container)).
 
 **Linux and macOS.** Download the one you want, check it against
 `checksums.txt`, `chmod +x`, and drop it on your `PATH` under the name
@@ -642,15 +670,16 @@ A failure ends with `{"phase":"error","error":"..."}` carrying the build's own
 message, and the command still exits non-zero.
 
 The app requires the `aether` CLI installed first; it does not bundle the
-binary and `aether gui build` refuses to run if the shell would not find it.
-It looks for `aether` in `AETHER_BIN`, then `PATH`, then the installer
-defaults: `%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
-`~/.local/bin` on Linux and macOS. The application menu can have an older or
-different `PATH` than your terminal, so a CLI outside those defaults may work
-in the terminal and still fail from the menu; `aether gui build` warns when
-it finds `aether` that way. If launch fails with "aether CLI not found",
-install the CLI into the default directory or set `AETHER_BIN` to its full
-path. That lookup is
+binary. As a build-time check, `aether gui build` requires an installed CLI
+discoverable through `AETHER_BIN`, then `PATH`, then the installer defaults:
+`%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
+`~/.local/bin` on Linux and macOS. The new shell records the path of the CLI
+that built it. At launch, `AETHER_BIN` overrides that path; otherwise the
+shell starts the recorded executable, not another copy on the desktop
+session's `PATH`. If that executable is gone or cannot run, the error names
+its exact path: restore it, set `AETHER_BIN` to a working CLI, or rerun that
+installed CLI's `gui build` command. Older shells without a recorded path
+still search `PATH` and the installer defaults. This CLI selection is
 the launcher's job alone: once the app is running, the dashboard's harness
 detection and scans widen `PATH` from your login shell each time they look,
 so coding agents installed through a shell profile are found from the
@@ -675,8 +704,10 @@ reinstalled - not when the desktop app is rebuilt:
 make build && sudo install -m 0755 dist/aether /usr/local/bin/aether
 ```
 
-If the window renders an older dashboard than your checkout, an older `aether`
-is on your `PATH`; `aether version` prints the commit it was built from.
+If the window renders an older dashboard than your checkout, check the
+version of the CLI recorded by the shell (or the `AETHER_BIN` override):
+`<path-to-aether> version` prints the commit it was built from. A newer
+`aether` on your terminal's `PATH` does not change the shell's CLI.
 Building installers (`.dmg`, `.exe`, AppImage) from a checkout and code signing
 are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
@@ -695,7 +726,9 @@ The app holds no logic and no credential. It is a WebView locked to one HTTPS
 origin, so identity stays the phone's own tailnet login, resolved by the server
 on every request ([networking.md](networking.md#the-dashboard)). Two things
 have to be true first: the server has `web-port` set, and the phone is signed
-in to the same tailnet.
+in to the same tailnet. The app does not use the edge in this release: it
+works over a tailnet exactly as before, whatever the server's `edge-url`
+and `edge-access` say ([edge.md](edge.md#the-dashboard)).
 
 1. Open the release page in the phone's browser and download
    `aether-android.apk`. Check it against its line in `checksums.txt` if you
@@ -751,8 +784,15 @@ Building the APK from a checkout is in
   [environment-home.md](environment-home.md#connect-github). `aether github
   connect` refuses rather than generating a key it could not sign with.
 - Optionally **Tailscale**, which is the recommended way to make the SSH port
-  reachable and the recommended identity layer. See
+  reachable and the recommended identity layer. Without it, outbound HTTPS to
+  the edge is enough: nothing needs to reach the server. See
   [networking.md](networking.md).
+
+A standard headless Ubuntu server is sufficient. No desktop login, display
+server, `DISPLAY`, X11, Wayland, Xvfb, host Node.js, host Chromium, or host
+browser libraries are required. The companion image contains Chromium,
+Playwright, their matching OS libraries, and fonts. The optional desktop app
+is a client, not a server prerequisite.
 
 ## Images and containers
 
@@ -782,6 +822,116 @@ aether workspace init <name> --base <branch>
 Workspace variables and the setup script remain workspace settings and still
 apply to runs.
 
+### Headless browser companion
+
+The remote browser is a separate, lazy container, not part of the member's
+saved environment. A release binary defaults to
+`ghcr.io/3xdevops/aether-browser:<exact-release-version>`; development, dirty,
+and git-describe builds default to the local `aether/browser:test` image.
+There is no `latest` fallback. A versioned tag, registry digest
+(`registry/image@sha256:...`), or locally loaded immutable image ID selects
+the image; the runtime resolves a tag or digest to an immutable Docker image
+ID before creating a companion. A missing registry image is pulled; a missing
+local immutable ID is an error, not a request to substitute another image.
+
+Set the image with `--browser-image`, the persisted `browser-image` config
+key, or `AETHER_BROWSER_IMAGE`, in that order of precedence, followed by the
+build default. For example:
+
+```sh
+sudo aether-server config set browser-image aether/browser:test
+sudo systemctl restart aether-server
+```
+
+That local image must first exist in the server's Docker daemon. For an
+environment-variable override in the installed service, put
+`AETHER_BROWSER_IMAGE=<reference>` in `/etc/aether/aether-server.env` and
+restart; a persisted config value still takes precedence. Explicit
+`setup`/`install --browser-image` values are persisted, while an omitted
+option follows the default. An existing config remains operator-owned across
+upgrades; use `config show` to inspect the effective value.
+
+Merely starting a run does not allocate Chromium. Opening its browser or
+rendering a terminal PNG lazily reserves an additional 1 CPU and 1 GiB of
+memory **plus** a private 256 MiB `/dev/shm`; leave that capacity alongside
+the run. Insufficient capacity refuses the browser operation rather than
+weakening its limits.
+The browser uses the run's network namespace to reach local app ports, but
+has no checkout or member-home mount. See
+[security.md](security.md#remote-development-and-browser-isolation).
+
+Chromium runs headless as a non-root user with its namespace and seccomp
+sandboxes enabled. Docker's stock AppArmor policy is retained. A sandbox
+startup failure is fatal and its diagnostic is returned; inspect the Docker,
+kernel, and custom AppArmor policy on that host and rerun `make browser-smoke`
+after correcting it. Do not disable the sandbox, use a privileged/unconfined
+container, relax host-wide user-namespace controls, or install Xvfb as a
+workaround. A lost companion reports
+`browser companion unavailable; explicit restart required`; reopening must
+be explicit because its old authenticated browser session may be gone.
+
+For broker clients, `dev.browser.status` returns the lifecycle state
+(`not_started`, `running`, `paused`, `creating`, `session_lost`, or `unavailable`)
+and the actual failure reason. An unavailable Chromium session reports
+`available: false` and `running: false`, even when its companion container is
+still running. Recovery is explicit: acquire the browser surface
+using that status's `session_id`, then call `dev.browser.reset` with the
+current control lease. If initial creation failed before establishing a
+session, the returned `pending:<creation-key>` is an opaque recovery
+incarnation, not a page or frame identity. After reset, obtain the new
+session and page references; do not replay old input.
+
+Browser status and input operations still verify the recorded companion's
+ownership and health. Only lifecycle changes rewrite its journal.
+
+**Release prerequisite:** a new GHCR package starts private. Before the first
+server release can complete, a repository administrator must make the
+`aether-browser` package public. The release workflow smoke-checks each
+architecture natively, publishes their versioned manifest, then pulls both
+`linux/amd64` and `linux/arm64` anonymously before releasing the server.
+Missing or private images block that gate. This describes the publication
+requirement, not a claim that the new package already exists or that a smoke
+run has passed. Pull-request CI builds local images without registry writes.
+
+### Git inside run environments
+
+Managed selected-path commits use native prepared `git update-ref --stdin`
+transactions inside the selected run environment. The standard image uses
+Ubuntu 24.04's distribution Git; stock Git 2.43 supports the required
+primitive. No custom source build or new Ubuntu host upgrade is required,
+and no minimum version is asserted for other environments.
+
+One dereferencing `update HEAD NEW OLD` gives Git the expected old object ID
+for its native compare-and-swap. After the `prepare` acknowledgement, Aether
+checks symbolic `HEAD` while Git holds both the `HEAD` and branch locks,
+then commits or aborts within that transaction. A custom environment without
+the required native support fails closed; unrelated repository reads do not
+depend on this transaction.
+
+Failures preserve native Git stderr. A missing protocol acknowledgement adds
+`runrepo: native reference transaction did not acknowledge <phase>`, where
+the phase is `start`, `prepare`, `commit`, or `abort`. A branch mismatch reports
+`runrepo: symbolic HEAD changed: expected <branch>, found <branch>`; a detached
+or unreadable `HEAD` reports
+`runrepo: symbolic HEAD changed to a detached or unreadable reference while preparing commit`.
+Inspect the actual diagnostic: lock contention, a changed branch, a native
+hook veto, and unavailable transaction support are not interchangeable errors.
+Do not treat every failure as a request to upgrade Git.
+
+If a custom image lacks transaction support, install an appropriate native
+Git package in the selected member environment and save it for future runs,
+or use `aether env reset` to return to the standard image. Reset discards saved
+image customizations. Open a new environment terminal and start a new run;
+saving or resetting does not change an already-running container. See
+[environments.md](environments.md#git-in-run-environments).
+
+Managed commits honor native signing, identity, and coauthor trailers but
+report `hooks_run=false` for commit hooks; use native `git commit` in the run
+terminal when those hooks are required. Native `reference-transaction` hooks
+remain active, including their preparation veto. The selected-path and
+post-commit index boundary are explained in
+[security.md](security.md#managed-selected-path-git-commits).
+
 ## First boot
 
 `aether-server setup` walks you through the install: it asks for the listen
@@ -791,8 +941,20 @@ starts the service. On a host that already runs tailscaled, and where tailnet
 connections are not required to carry a key, it asks one more question -
 `Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
 fresh config - which is how a phone on the tailnet reaches the dashboard
-([networking.md](networking.md#the-dashboard)). Answering `server` to the
-install script's question runs it for you; this is the same command by hand.
+([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
+on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
+that lets clients reach the server over SSH with a GitHub sign-in
+([edge.md](edge.md)), and prints what the edge can see and the command that
+turns it off; with tailscaled it asks, defaulting to no. With the edge on
+it asks who may reach the server through it, `1` (account access) or `2`
+(approved devices), and repeats the question until answered
+([edge.md](edge.md#access-policies)). Setup is the only thing that turns
+the edge on: `edge-url` is empty unless the config file or a flag names an
+edge, so an upgrade never enrolls an existing server. With the edge on,
+setup ends by printing the server id and a claim code for `aether link
+--claim <code>`.
+Answering `server` to the install script's question runs it for you; this
+is the same command by hand.
 
 ```sh
 sudo aether-server setup
@@ -800,7 +962,9 @@ sudo aether-server setup
 
 For an unattended install, `aether-server install` writes the same files from
 flags instead of questions - any serve option below is accepted, and options
-you leave off keep tracking the binary's defaults across upgrades:
+you leave off keep tracking the binary's defaults across upgrades. The edge
+stays off unless you pass `--edge-url`, which is refused without
+`--edge-access account` or `--edge-access approved-devices`:
 
 ```sh
 sudo aether-server install --addr :2222 --tailnet-auto-join
@@ -821,6 +985,11 @@ root-equivalent on the host, and member images with a non-root user make the
 server chown run checkouts to that UID, which needs `CAP_CHOWN`. The header
 comment in the unit spells out how to run unprivileged instead, and what you
 give up.
+
+Browser support also needs permission to assign its private control directory
+to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch
+the companion or render terminal PNGs. Keep the private directory permissions;
+do not make the control socket world-accessible to work around ownership errors.
 
 To run the server in the foreground instead - handy the first time - skip
 setup and serve directly:
@@ -845,25 +1014,38 @@ uses the default; negative values have the semantics in the table.
 | `--addr` | `:2222` | The SSH listener. This is the port clients must be able to reach. |
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
+| `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
+| `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled. See [edge.md](edge.md). |
+| `--edge-access` | `approved-devices` | Who may reach the server through the edge: `account` (signing in is enough) or `approved-devices` (each new device waits until a person approves it). `install` refuses `--edge-url` without it. See [edge.md](edge.md#access-policies). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |
 | `--conflict-coordination` | on | Let overlapping runs message each other; see [coordination.md](coordination.md). |
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
-| `--run-container-ttl` | `1h` | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `1h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` | Free bytes below which new runs are refused. Negative disables the floor. |
-| `--harness-definitions` | none | Path to a custom harness registry file; see [harnesses.md](harnesses.md). |
+| `--harness-definitions` | none | Inline JSON custom harness definitions via this flag or `AETHER_HARNESS_DEFINITIONS`; see [harnesses.md](harnesses.md). |
+
+Swarms run over conflict coordination, so `--conflict-coordination=false` also
+turns them off. The dashboard still offers **Swarm**, but `mission.create`
+fails with:
+
+```
+swarms need conflict coordination; the server was started with --conflict-coordination=false: scheduler: coordination is unavailable
+```
 
 Three things happen on the first start and never need attention again:
 
-1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`.
-   Clients record its fingerprint on first link and print it. Do not delete it:
-   clients that already trust it refuse to connect until you clear the entry
-   from their `known_hosts`.
+1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`
+   (by setup already, when the edge is on). Clients record its fingerprint on
+   first link and print it, and the edge derives the server id from it. Do
+   not delete it: clients that already trust it refuse to connect until you
+   clear the entry from their `known_hosts`, and at the edge a new key is a
+   new server that must be claimed and linked again.
 2. **The first identity to link becomes the admin** - the SSH key, or the
-   tailnet login, of whoever runs `aether link` first. There is no other
-   account creation step.
+   tailnet login, of whoever runs `aether link` first, or the edge account
+   that uses the claim code. There is no other account creation step.
 3. **The SQLite store and the git repo root** are created under the data
    directory.
 
@@ -911,8 +1093,8 @@ Task XML (`%USERPROFILE%\aether-daemon.xml`, registered with
 `schtasks /Create`) on Windows. `aether daemon run --server ... --repo ...`
 does the same work in the foreground on any of them. The daemon syncs git
 branches only; it does not watch agent configuration directories. Configuration
-is imported explicitly in the local dashboard (`aether gui`) and edited in
-**Files**; the server-hosted dashboard has no laptop directory picker.
+is imported explicitly through **Agents → Configuration** in either the local
+dashboard (`aether gui`) or the server-hosted dashboard, and edited in **Files**.
 
 If a service unit was generated by an older release, it may still contain the
 removed `--no-profile-sync` argument. Reinstall the unit with the current
@@ -988,7 +1170,8 @@ automatic.
 | Path | Contents |
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
-| `ssh/` | The server's SSH host key. |
+| `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
+| `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `checkouts/` | Per-run worktrees. A retained, explicitly closed TUI run keeps its exact checkout for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk gauge reports. |
@@ -996,8 +1179,8 @@ automatic.
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
-| `coord/` | Per-run conflict-coordination sockets, recreated each run. |
-| `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. |
+| `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained TUI runs retain this mount until expiry/deletion. |
+| `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes and mirror credentials are server-owned state. Back up the
 database, `homes/`, `profiles/`, and `mirrors/` when recovery matters. Those
@@ -1026,7 +1209,8 @@ Three consequences worth knowing:
 - **Keep the path short.** Per-run coordination sockets live under
   `coord/<run-id>/coord3.sock`, and unix socket paths have a hard length limit
   (about 100 characters). A very deep data directory makes the server log
-  `coordination unavailable for this run` and fall back to the overlap notice.
+  `coordination unavailable for this run`; inbox commands and native hook
+  delivery then have no socket. There is no terminal-notice fallback.
   `/var/lib/aether` is nowhere near the limit.
 
 If you run agents you do not trust, put the data directory on a filesystem
@@ -1043,6 +1227,9 @@ install end to end.
 ### Server
 
 ```sh
+# 0. With the edge on: unenroll, so the edge stops listing the server.
+sudo aether-server edge leave
+
 # 1. Stop the service.
 sudo systemctl disable --now aether-server
 sudo rm -f /etc/systemd/system/aether-server.service
@@ -1061,10 +1248,12 @@ sudo rm -rf /tmp/aether-patch-*
 
 Step 2 is the one people miss. The scheduler deliberately leaves run containers
 alive across a server restart so it can reattach to them, so they outlive the
-unit. Every container the server creates carries `aether.managed=true` and is
-named `aether-run-<id>`, so either the label filter or
-`--filter name=^/aether-run-` finds them. Use `docker ps -a`, not `docker ps`:
-a crashed run leaves an exited container behind.
+unit. Every container the server creates carries `aether.managed=true`; the
+label filter includes the browser companions as well as run containers.
+Filtering only `--filter name=^/aether-run-` misses companions. Use
+`docker ps -a`, not `docker ps`: a crashed run can leave an exited container
+behind. Remove companion images according to the same Docker image retention
+policy as standard and saved member images.
 
 The server writes no log files. Its output goes to the journal, so
 `sudo journalctl --rotate && sudo journalctl --vacuum-time=1s` is what clears
@@ -1173,8 +1362,37 @@ the unit tests, cross-compiles the full matrix with `make release`, writes
 steps run before any toolchain is installed, so a missing secret or a tag such
 as `v0.5` ends the release in seconds instead of after the whole matrix is
 built - which used to leave the published release with no assets and
-`/releases/latest` pointing at it. Only an admin publisher runs this release
-job on the self-hosted runner labeled `moss`; other publishers are skipped.
+`/releases/latest` pointing at it. Only an admin publisher runs the release
+job on a GitHub-hosted runner; other publishers are skipped.
+
+The workflow also publishes the [edge](edge.md#in-a-container) image
+`ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
+[`images/edge/Dockerfile`](../images/edge/Dockerfile) without a build cache
+and stamped with the release tag and the same short commit as the release
+binaries. Nothing reaches a tag before it is tested:
+
+1. `edge-image` builds each architecture on a native runner, runs
+   `scripts/edge-image-smoke.sh` on it, and only then pushes it as
+   `<tag>-amd64` or `<tag>-arm64`.
+2. `edge-manifest` joins those two under the immutable tags: the release
+   tag, the full commit SHA and `sha-<short-sha>`. It checks that every tag
+   names one index digest and that the index carries the two tested images,
+   pulls each architecture by tag and by digest, and lists the digests in
+   the job summary. The release job waits for it, so a failed edge image
+   uploads no assets.
+3. `edge-latest` moves `latest` to that digest only after the release job
+   has uploaded the assets. A release that fails earlier leaves `latest` on
+   the previous release.
+
+A new GHCR package starts private. The workflow does not fail on that, by
+design: the image is published and pullable with credentials, and only an
+administrator can change the visibility. After the first release that
+publishes `aether-edge`, a repository administrator opens
+<https://github.com/orgs/3xDevOps/packages/container/package/aether-edge>,
+chooses Package settings, and sets Danger Zone > Change visibility to
+Public; if the package page does not show the repository, **Connect
+repository** links it. Until then `edge-manifest` ends with the warning
+`aether-edge is not public` and the release still completes.
 
 `make release` also builds and signs the [Android app](#android-app), the
 APK and the app bundle, in a pinned SDK container, so the release needs

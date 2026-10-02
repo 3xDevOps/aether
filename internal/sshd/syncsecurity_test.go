@@ -517,8 +517,8 @@ func TestSyncRejectsOversizedInitFrame(t *testing.T) {
 	assertSyncChannelClosed(t, h, 15*time.Second, "oversized init frame")
 }
 
-// The JSON header is bounded too: protocol.MaxLineBytes is 32 MiB for
-// profile pushes, which would let one sync channel buffer that much
+// The JSON header is bounded too: protocol.MaxLineBytes is 96 MiB for
+// configuration imports, which would let one sync channel buffer that much
 // before the run ID is even parsed.
 func TestSyncRejectsOversizedHeader(t *testing.T) {
 	t.Parallel()

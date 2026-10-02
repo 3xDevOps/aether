@@ -5,7 +5,7 @@ const resizeStep = 16
 
 /** Anything that owns the keys pressed inside it. */
 const overlays =
-  '.xterm, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
+  '.xterm, [data-terminal-history], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
 /**
  * The subset that owns the keyboard outright while it is open. A terminal does

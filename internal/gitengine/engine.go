@@ -82,6 +82,10 @@ type Engine struct {
 	watches       map[domain.RunID]*diffWatch
 	registry      map[domain.RunID]runInfo
 	closed        bool
+	// repoInitMu serializes first-touch creation and configuration, including
+	// duplicate mirror imports and client transports. It does not cover fetches,
+	// pushes, checkouts, or other normal repository operations.
+	repoInitMu sync.Mutex
 	// fileWriteMu serializes read/compare/replace and bare ref CAS so two
 	// browser saves cannot overwrite one another within this engine.
 	fileWriteMu sync.Mutex
@@ -155,13 +159,15 @@ func (e *Engine) Close() error {
 // InitWorkspaceRepo creates the workspace's bare repo (git init --bare) and
 // applies the repo settings every workspace repo must have (reflogs, the
 // run-branch update hook); idempotent, so pre-existing repos converge on
-// first touch. Importing content is a normal client git push through
-// ReceivePack - there is no separate import API.
+// first touch. Content arrives through client ReceivePack or an explicitly
+// configured source mirror; neither path requires a server restart.
 func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (string, error) {
 	path, err := e.repoPath(ws)
 	if err != nil {
 		return "", err
 	}
+	e.repoInitMu.Lock()
+	defer e.repoInitMu.Unlock()
 	if !isBareRepo(path) {
 		if _, err := e.git(ctx, "", "init", "--bare", "--initial-branch=main", path); err != nil {
 			return "", err
@@ -171,6 +177,33 @@ func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (
 		return "", err
 	}
 	return path, nil
+}
+
+// RemoveWorkspaceRepo removes all branches and private refs after the server
+// has fenced workspace admission and purged its run/candidate artifacts.
+func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) error {
+	repo, err := e.repoPath(ws)
+	if err != nil {
+		return err
+	}
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
+	e.repoMaintenanceMu.Lock()
+	defer e.repoMaintenanceMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(repo); err != nil {
+		return fmt.Errorf("gitengine: remove workspace repository: %w", err)
+	}
+	e.mu.Lock()
+	for run, info := range e.registry {
+		if info.workspace == ws {
+			delete(e.registry, run)
+		}
+	}
+	e.mu.Unlock()
+	return nil
 }
 
 // updateHook is installed as hooks/update in every workspace bare repo. Run

@@ -2,17 +2,17 @@
 
 Zero to a finished agent run in about ten minutes, solo.
 
-Two machines are involved, though they can be the same one:
+The standard deployment is a **headless Ubuntu server** with Docker and git.
+Agents, repository fetches, builds, and run tools execute there; the server
+does not need a desktop session.
 
-- **the server box** - a Linux machine with Docker and git. Agents run here.
-- **your machine** - Linux, macOS, or Windows. Where you type.
-
-Your machine needs git and, unless both machines are on a tailnet
-(see [step 3](#3-link-from-your-machine)), an SSH key. Aether uses
-`~/.ssh/id_ed25519` and your ssh-agent. For a key somewhere else, pass
-`aether link --key <path>`; for a passphrase-protected one, `ssh-add` it
-first. Windows paths and the OpenSSH agent service are in
-[install.md](install.md#the-windows-client).
+You can use its authenticated hosted dashboard/API from another machine with
+no local project clone or toolchain. Administrators can seed a repository with
+[remote import](#remote-only-import-no-local-clone) instead of a local push.
+The local-client path below is also available on Linux, macOS, or Windows.
+That path needs git for local linking/pushing. How your machine reaches the
+server is [step 3](#3-link-from-your-machine): through an edge with a GitHub
+sign-in, over a tailnet, or by SSH address with a key.
 
 ---
 
@@ -66,16 +66,40 @@ sudo aether-server setup
 
 It asks for the listen address, data directory, and tailnet policy - plus, on
 a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
-(Enter accepts each default) - then prints:
+and whether to use the edge (Enter accepts each default) - and, with the edge
+on, who may reach the server through it, a question with no default. Then it
+prints:
 
 ```sh
 systemctl daemon-reload && systemctl enable --now aether-server
 ```
 
-Run that and the server is live on `:2222`. The SSH host key is generated on
-first start, and the SSH port is the only thing exposed unless you answered the
-dashboard question. Change any option later with
-`aether-server config set <key> <value>`, then restart.
+On a host without tailscaled, setup turns on the **edge**: a relay the Aether
+project runs at `https://edge.onaether.dev` that the server and your machine
+both dial out to, so neither needs an open port ([edge.md](edge.md)). Setup
+prints what the edge can see and `aether-server config set edge-url ""`,
+which turns it off. It then asks for the **access policy**: `1` (account
+access) lets people you invite in by signing in with GitHub; `2`
+(approved devices) makes each new device wait until a person approves it.
+[edge.md](edge.md#access-policies) compares them. Setup then prints the
+server's id and a **claim code**, which makes whoever uses it first the
+server's admin:
+
+```
+edge: https://edge.onaether.dev
+edge access: approved-devices
+server id: <server id>
+edge key: pinned when the server first connects; `aether-server edge status` shows it
+claim code: <code> (valid until 3:04PM, 5 attempts)
+claim this server with:
+  aether link --claim <code>
+```
+
+Run the activation line and the server is live on `:2222`. The SSH port is
+the only thing it listens on unless you answered the dashboard question; the
+edge connection is outbound. The claim code lasts 30 minutes;
+`sudo aether-server edge claim-code` prints a new one. Change any option
+later with `aether-server config set <key> <value>`, then restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
 Ctrl-C. [install.md](install.md) covers unattended installs, running
@@ -83,38 +107,69 @@ unprivileged, and every serve option.
 
 ## 3. Link from your machine
 
+**Through the edge**, with the claim code from step 2:
+
+```sh
+aether login
+aether link --claim <code>
+```
+
+`aether login` prints an address and a short code; open it, sign in with
+GitHub, and confirm the code:
+
+```
+auth.onaether.dev signs you in for the edge edge.onaether.dev
+open https://auth.onaether.dev/device and enter the code <user code>
+waiting for you to confirm the code...
+signed in to edge.onaether.dev as <login> (github); this device is "<host name>"
+the device token in <config dir>/edge-tokens.json does not expire and is not refreshed. aether logout revokes it at
+the edge and deletes it here; the edge's Devices page and deleting the account revoke it too. Your links stay:
+the edge path refuses with the edge's reason, and a link's --addr still reaches the server with this device's
+key until the account is deleted, which removes the account's devices on every server. SSH keys and tailnet
+identities are not affected.
+claimed server <server id>
+linked to server <server id> through edge.onaether.dev as <your name> (admin)
+```
+
+This machine now holds its own device key; no SSH key is involved. The
+claim code travels inside SSH, only to a server whose host key derives the
+id in the code. The server's host key is checked against the server id on
+every connection, so nothing is written to `known_hosts`.
+
+**By address**, over a tailnet or to a reachable SSH port:
+
 ```sh
 aether link <server-host>:2222
 ```
-
-Output:
 
 ```
 linked to <server-host>:2222 as admin (admin)
 ```
 
-**The first identity to link a fresh server becomes the admin.** That is the
-whole account setup - there is no signup, no password, no config file to edit.
-The link is saved to `~/.config/aether/config.json`, or
-`%AppData%\aether\config.json` on Windows. (Joining over a tailnet,
-the display name comes from your tailnet login instead of the literal
-`admin`; the role is the same. Change any display color with
-`aether member color <#rrggbb>`.)
+**The first identity to link a fresh server becomes the admin**, and
+through the edge the claim code decides who that is. That is the whole
+account setup - there is no password and no config file to edit. The link is
+saved to `~/.config/aether/config.json`, or `%AppData%\aether\config.json`
+on Windows. (Joining over a tailnet, the display name comes from your
+tailnet login instead of the literal `admin`; the role is the same. Change
+any display color with `aether member color <#rrggbb>`.)
 
-How you were identified depends on the network:
+How you were identified by address depends on the network:
 
 - **On a tailnet:** Tailscale already knows who you are and the server asks it.
   No SSH key, no invite code, nothing to copy. See
   [networking.md](networking.md).
 - **Anywhere else:** your SSH public key (`~/.ssh/id_ed25519`, or any key in
-  your ssh-agent) is registered as the admin's key. Generate one first with
-  `ssh-keygen -t ed25519` if you do not have one. On Windows that is
-  `%USERPROFILE%\.ssh\id_ed25519` and the OpenSSH agent service; `ssh-keygen`
-  ships with Windows OpenSSH.
+  your ssh-agent) is registered as the admin's key. With no key to offer,
+  `aether link` creates `~/.ssh/id_ed25519` itself. For a key somewhere else,
+  pass `--key <path>`; for a passphrase-protected one, `ssh-add` it first. On
+  Windows the path is `%USERPROFILE%\.ssh\id_ed25519` with the OpenSSH agent
+  service ([install.md](install.md#the-windows-client)).
 
-On first contact `aether` records the server's host key in `~/.ssh/known_hosts`
-(`%USERPROFILE%\.ssh\known_hosts` on Windows) and prints its fingerprint.
-Compare that against what the server printed if you care to.
+On first contact by address `aether` records the server's host key in
+`~/.ssh/known_hosts` (`%USERPROFILE%\.ssh\known_hosts` on Windows) and
+prints its fingerprint. Compare that against what the server printed if you
+care to.
 
 Then tell Aether who to put on your commits:
 
@@ -130,7 +185,7 @@ wizard asks for the same two fields in its **Git identity** step, right after
 Link, prefilled from this machine's `git config user.name` and `user.email`.
 `aether member git` with no flags shows what is set.
 
-## 4. Create a workspace and push your repo
+## 4. Create a workspace
 
 A **workspace** is the repo plus a server-owned scope for runs and shells.
 Creating one is an admin operation. Every container for a member starts from
@@ -148,7 +203,7 @@ them too; see [environments.md](environments.md).
 Now point your local clone at it and seed the repo:
 
 ```sh
-aether link <server-host>:2222 --repo ~/code/myproject
+aether link <server-host>:2222 --repo ~/code/myproject   # or: aether link <server id> --repo ...
 cd ~/code/myproject
 git push -u aether main
 ```
@@ -200,11 +255,109 @@ commits, and nothing here force-pushes. See
 
 For optional source-mirror setup, see [the detailed instructions](#optional-configure-source-control).
 
+### Remote-only import (no local clone)
+
+In the authenticated dashboard, open the command palette (**Ctrl/Cmd+K**),
+choose **Manage workspaces**, then **Import repository** as an administrator.
+Enter **Workspace name**, **Source URL** and **Source / base branch**.
+Set **Checkout Origin (optional)** to your writable repository
+or leave it blank; it is never inferred from the source. Choose **Public HTTPS**
+or **Read-only deploy key** under **Source authentication**. Generic SSH sources
+also need verified **Pinned known_hosts** contents.
+
+Click **Import repository**, then inspect **Import outcome**: the retained
+workspace ID, source state, observed candidate, generation and accepted base.
+Click **Continue to Source control** to use the existing **Workspace Source**
+dialog. For deploy-key sources, copy the generated key, install it read-only
+at the source, then **Verify** / **Refresh**; do not reconfigure after installing
+the key. Review the observed SHA and generation, click **Adopt candidate**,
+and confirm the adoption. A fetched initial candidate is not automatically
+accepted. The same flow remains available under **Workspace → Source control**.
+
+If import creates the workspace but configuration or fetch fails, the dialog
+keeps **Created: yes**, the workspace ID and the real error. Repair or refresh
+that retained workspace in Source control rather than importing a duplicate.
+If the response is lost, close the dialog and inspect the refreshed workspace
+list before considering another import.
+
+The administrator endpoint is also `workspace.import`, available through the
+SSH control channel or `POST /api/v1/workspace.import` on either authenticated
+gateway. Collaborators cannot import workspaces. The commands below use the
+server-hosted HTTPS gateway from the administrator's tailnet device; set
+`AETHER_URL` to the dashboard URL printed by server setup. Authentication is
+the existing Tailscale identity, not a GitHub token.
+
+```sh
+export AETHER_URL='https://your-server.your-tailnet.ts.net:8443'
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.import" \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"myproject","environment":{},"source_url":"https://github.com/acme/myproject.git","base_branch":"main","origin":"https://github.com/my-account/myproject.git","auth":"public"}'
+```
+
+The server creates the workspace and its bare repository, configures the
+existing read-only mirror, and fetches immediately. No client clone, hidden
+push, or server restart is needed. In the response, retain `workspace.id`
+and inspect `mirror.observed_commit`, `mirror.generation`, and `mirror.status`.
+The first candidate remains **pending** with no `accepted_commit`: fetching
+is not approval. After reviewing the candidate, explicitly adopt the returned
+generation on that same workspace:
+
+```sh
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.adopt" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>","generation":1}'
+```
+
+Replace `1` with the actual returned generation. Adoption supplies the base
+for new runs. Later upstream rewrites never silently replace an accepted base;
+they require another explicit adoption through the existing mirror flow.
+
+For a private repository, send `"auth":"deploy-key"` instead. Import returns
+**pending** and `mirror.public_key` without attempting a fetch before you have
+installed that key. Add it to the source repository as a **read-only deploy
+key** (on GitHub: **Settings > Deploy keys > Add deploy key**, leave **Allow
+write access** off). Generic SSH sources also require pinned `known_hosts`
+contents in the request, as described below. Then verify and inspect the
+candidate before adopting:
+
+```sh
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.refresh" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>"}'
+curl --fail-with-body "$AETHER_URL/api/v1/workspace.mirror.status" \
+  -H 'Content-Type: application/json' \
+  --data '{"workspace_id":"<returned-workspace-id>"}'
+```
+
+Use refresh, not configure, after installing the key; reconfiguration rotates
+the key and generation. Public authentication only accepts credential-free
+HTTPS; deploy-key authentication follows the same source and host-trust rules
+as ordinary mirror configuration.
+
+**Partial success matters:** after workspace creation the import response
+keeps `created:true`, `workspace.id`, the available mirror/key state, and an
+`error` string if configuration or fetch failed. An HTTP success alone does
+not mean the source fetched. Missing branches and empty upstream repositories
+return fetch failures, not an invented initial commit. Keep the workspace and
+repair its mirror with `workspace.mirror.configure` or
+`workspace.mirror.refresh`; do not submit another import. If the connection
+drops before the response arrives, inspect `workspace.list` before deciding
+whether creation is needed.
+
+The explicit `origin` is the checkout's push destination; it is **not** derived
+from `source_url`. Set it to `""` to leave the workspace without an external
+push destination. GitHub SSH origins are normalized to HTTPS just as with
+`workspace.origin`. Mirror deploy keys only read source: they neither grant
+push permission nor configure run-account GitHub authentication. Publishing
+uses the selected run account's native Git/`gh` credentials, independently of
+the mirror and of local repository linking.
+
 ### Optional: configure source control
 
 An administrator can make the workspace's base a read-only mirror of an
-upstream branch. Configure it from the CLI or local dashboard only after the
-initial workspace push or after reconciling the two repositories:
+upstream branch. Configure it from the CLI or local dashboard after a local
+push, or on a fresh workspace without one. A fresh repository's first fetched
+candidate needs explicit adoption as in [remote import](#remote-only-import-no-local-clone):
 
 ```sh
 # Public GitHub or any public HTTPS repository:
@@ -304,25 +457,25 @@ the vendor's instructions, then complete its login in the environment terminal.
 Return to the dashboard when finished.
 
 The member home persists the executable and vendor login state across
-containers. Configuration can be imported once from the browser and then
-edited in **Files**. See [the environment terminal guide](terminal.md) for tab
-and stop behavior.
+containers. Import configuration from the browser and edit it in **Files**.
+See [the environment terminal guide](terminal.md) for tab and stop behavior.
 
-Your own configuration is separate from vendor login and image setup. In the
-local dashboard's Agents step, choose one directory such as `~/.claude`,
-`~/.codex`, or `~/.pi` with **Choose directory**. Review the preview, select a
+Your own configuration is separate from vendor login and image setup. Open
+**Agents → Configuration** in either dashboard and choose one directory such
+as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`. Review the preview, select a
 destination when the basename is unknown or ambiguous, and click **Import
-configuration**. This is explicit and one-time; there is no local directory
-watcher or AI inventory. The server-hosted dashboard has no local directory
-picker; use `aether gui` for this step.
+configuration**. You can return to import updated files. There is no local
+directory watcher or automatic configuration synchronization.
 
 Known credential names in any path component and runtime/history defaults are
 skipped in the browser before upload. Remaining bytes are uploaded and
 server-scanned, so never assume all secret content stays on your machine.
-Empty files and arbitrary binary regular files are preserved. Imports are
-limited to 1 MiB per file, 20 MiB decoded total, and 2,000 files. Browser
-imports create files with mode `0644`; executable mode and symlinks cannot be
-preserved, so a script may need `chmod` in the remote terminal.
+Empty files and arbitrary binary regular files are preserved. The directory
+has no file-count or total-size ceiling: Aether transfers it in bounded batches
+and reports progress or the real failure. Individual files support up to
+64 MiB. New files use mode `0644`; overwrites retain remote permissions.
+The browser cannot preserve local executable mode or symlinks, so a new script
+may need `chmod` in the remote terminal.
 
 The imported files go into your authenticated member's persistent home, which
 is mounted read-write in the environment terminal and in runs using that
@@ -348,6 +501,28 @@ home; there is no admin/member selector. For
 workspace files, **Commit to <branch>** creates one commit on the base branch
 but does not push upstream; live-run writes modify the uncommitted checkout.
 Base saves require **Push** and run saves require **Steer**.
+
+### Agent coordination hooks
+
+Coordination mail is durable: a successful send means stored, not read. An
+agent actively awaiting a reply should use `aether-internal inbox --wait 30`
+and explicitly acknowledge the batch only after handling it.
+
+Loaded native pi, OMP, and version-matched OpenCode integrations can wake an
+eligible live idle session without terminal keystrokes. Native wake respects
+human protection, takeover, and Stop. Claude Code, Codex, Copilot CLI,
+Gemini CLI, and Cursor CLI command hooks instead announce mail at their next
+supported lifecycle boundary. Neither path restarts an exited run.
+
+Inside a run, `aether-internal skill` checks configuration and prints setup
+instructions. **Configured is not loaded, trusted, or executed**: restart or
+reload as the harness requires and inspect its real hook/plugin errors.
+See [per-harness setup](harnesses.md#incoming-coordination-hooks) for managed
+loading, copyable files, versions, and disable controls; see
+[delivery and acknowledgement](coordination.md#delivery-acknowledgement-and-retries)
+for the runtime contract. An unlisted CLI can use the
+[unsupported-harness authoring guide](harness-integration.md) without adding
+a new daemon or terminal fallback.
 
 ### Connect GitHub
 
@@ -391,6 +566,8 @@ run 01m04mhf114eap4k85n2mgcped running
 A **run** is one agent execution with its own container, git worktree, and
 branch; `aether runs` lists them. Scoped commands default to the only
 workspace when there is exactly one, which is why nothing above named it.
+To hand one objective to a team of agents instead, see
+[Launching a swarm](teams.md#launching-a-swarm).
 
 ## 7. Watch it
 
@@ -459,7 +636,59 @@ aether inject <run-id> "also update the README"
 The message appears in the transcript as a banner in your member color, and
 everyone watching sees who said it.
 
-## 8. Pull the result
+## 8. Review and publish the result
+
+### Remote-only: commit, push and open a PR
+
+Open the run's **Diff** tab and expand **Native changes & publish**. The
+existing **Land**, candidate review and interval timeline remain separate:
+a GitHub PR is not an internal candidate proposal.
+
+1. Inspect **Run checkout**: the native branch and HEAD, **Selected run
+   account**, **GitHub identity** (or its real authentication error), and
+   changed, staged and untracked paths. Connect GitHub in that account's
+   environment first; mirror deploy keys do not provide push credentials.
+2. Check exact paths, then click **Review selected paths**. The view shows
+   worktree and staged diffs separately, with content previews for selected
+   untracked files. Enter a **Commit message** and click **Commit selected
+   paths**. This commits those paths' current worktree contents, not only
+   their staged hunks; unselected staged paths are preserved. Native identity
+   and signing apply, but commit hooks do not run.
+3. Inspect **Commit outcome** and native diagnostics. **Committed: yes** with
+   **Index updated: no** means the commit exists but index reconciliation
+   failed: inspect the checkout instead of repeating the commit. A branch/HEAD
+   mismatch requires **Refresh native status** and a fresh review.
+4. Under **Push branch**, choose **Push remote**, its exact **Writable push
+   URL**, and **Push head branch**. Check the account/branch/HEAD/destination
+   review box, then **Push reviewed branch**. Add any missing fork remote using
+   native Git in the run terminal first. Push is non-force and does not switch
+   branches or change workspace Origin, source mirror or accepted base.
+5. Under **GitHub pull request**, explicitly enter **PR repository
+   (owner/name)** and **PR base branch**, separately from **PR head repository
+   (owner/name)** and **PR head branch**. For a fork, the PR repository is the
+   upstream and the head repository is your fork; neither choice reconfigures
+   the mirror or Origin. Click **Discover existing PR** to find that exact
+   head/base, including PRs created using native `gh`.
+6. If no PR exists, review the returned GitHub identity and exact target, enter
+   **PR title** / **PR description**, optionally check **Draft PR**, check the
+   identity/target review box, and click **Create reviewed PR**. If creation is
+   uncertain, use **Reconcile PR read-only** rather than repeating creation.
+   A PR failure never erases a successful **Pushed: yes** outcome.
+7. Click **Refresh PR feedback** for typed checks, comments, reviews and inline
+   feedback (including file/line and commit context). Check only the feedback
+   you want to send, then **Send selected feedback to Run Room**. This creates
+   a normal moderated steering request; its receipt is not proof of delivery
+   unless it says sent. Open the run terminal and **Run Room** to inspect the
+   durable message and delivery state.
+
+Native status is read when this view opens and after explicit actions; GitHub
+discovery and feedback refresh are explicit. No background PR watcher, automatic
+merge, force push, branch switch or automatic mutation retry is performed.
+GitHub discovery, creation and feedback need a working native `gh`, network
+access, and the selected account's permissions on the explicit upstream/fork.
+Review and merge on GitHub according to your repository's policy.
+
+### Optional: pull into a local clone
 
 When the TUI agent exits, the run stays alive in a login shell. Start another
 installed agent in the same checkout if needed; exiting that shell opens another
@@ -520,7 +749,7 @@ aether close <run-id> --outcome merged      # or --outcome abandoned
 ```
 
 Closing retains the exact TUI container, checkout, run row, member account and
-coordination surfaces for `--run-container-ttl` (default `1h`). Before that
+coordination surfaces for `--run-container-ttl` (default `7 days`). Before that
 retention expires, reopen the same run with:
 
 ```sh
@@ -538,7 +767,7 @@ does not fetch a mirror source or forward a checkout's `origin` into the
 workspace. In a mirrored workspace, a base push attempt is rejected because
 the mirror owns that branch; use `aether workspace mirror refresh` and, when
 needed, explicit `aether workspace mirror adopt` instead. `aether pull` remains
-the review path in every mode.
+available when you prefer reviewing in a local clone.
 
 ```sh
 aether daemon install --server <server-host>:2222 --repo ~/code/myproject
@@ -620,6 +849,14 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `parse ssh key <path>` | The file at that path is not an SSH private key (a public key, or a truncated file). Pass the private key with `aether link <addr> --key <path>`. |
 | `link --key: stat <path>` / `ssh key <path>: open <path>: no such file` | The key path you chose is not there. A chosen key is never skipped in favor of the agent, so re-link with the right `--key`. Re-linking without `--key` keeps the saved one; to go back to `~/.ssh/id_ed25519`, delete the `key` line from `~/.config/aether/config.json`. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
+| `not signed in` from `aether link --claim` or `aether servers` | This machine has no edge sign-in. Run `aether login`. |
+| `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new code, valid 30 minutes. |
+| `server is not connected to the edge` | The server is stopped or cannot reach the edge. On the server, `sudo aether-server edge status` shows the last connection error. |
+| `not a member of this server` | Your edge account has no membership or open invitation there. An admin runs `aether invite --github <your-login>` ([teams.md](teams.md#through-an-edge)). |
+| `device "<label>", signed in as <account>, is waiting for approval` | The server admits approved devices only (`edge-access approved-devices`), and this one is new. Run the `aether device approve <code>` the message prints from a device, SSH key or tailnet connection you already use, or give the code to an admin or to the machine's administrator (`sudo aether-server device approve <code>`). Either shows the member and role the code admits the device as and asks before approving. |
+| `10 devices of <account> are waiting for approval on this server already, so no new one is recorded` | An admin approves or revokes the waiting devices with `aether device list` and `aether device revoke <device-id>`, or `sudo aether-server device review` on the server. |
+| `this device connects as "github:<user id>", but the edge signed the connection in as <account> ...; nothing was recorded` | The edge vouched for another account than the one this device signed in as. Nothing changed on the server; tell the edge's operator. |
+| `... was admitted by signing in alone and is waiting for approval: this server now admits approved devices only` | The server switched from `account` to `approved-devices`. Approve it the same way. |
 | `tailnet identity unavailable; key authentication required` | Informational, not an error. The server has Tailscale but this connection did not arrive over the tailnet, so it fell back to your SSH key. |
 | `membership pending admin approval` | You joined over a tailnet on a server that requires approval. An admin runs `aether member approve <your-member-id>`. |
 | `no workspace yet; skip git remote` | Run `aether workspace init` first, then re-run `aether link --repo`. |

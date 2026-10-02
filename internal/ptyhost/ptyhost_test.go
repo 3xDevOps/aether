@@ -472,6 +472,64 @@ func TestRunAttachReplaysWholeTranscriptBeyondRing(t *testing.T) {
 		t.Fatalf("detach returned %v, want nil", err)
 	}
 }
+func TestRunAttachFramedHistoryAndCompactScreen(t *testing.T) {
+	h, _ := newTestHost(t, func(cfg *Config) { cfg.ReplayBytes = 8 })
+	att := newFakeAtt()
+	run := domain.RunID("run-framed-history")
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	var early strings.Builder
+	for i := range snapshotScrollback + 40 {
+		fmt.Fprintf(&early, "early-%03d\r\n", i)
+	}
+	output := early.String() + "late-marker\r\n"
+	att.writeOutput(t, output)
+	s := h.lookup(RunSession(run))
+	waitFor(t, "complete framed transcript", func() bool {
+		s.tr.mu.Lock()
+		defer s.tr.mu.Unlock()
+		return s.tr.outputBytes == len(output)
+	})
+
+	readReplay := func(a AttachClient) []byte {
+		kr, kw := io.Pipe()
+		t.Cleanup(func() {
+			_ = kw.Close()
+			_ = kr.Close()
+		})
+		conn := &replayConn{r: kr}
+		errCh := make(chan error, 1)
+		go func() { errCh <- h.Attach(context.Background(), RunSession(run), a, conn, nil) }()
+		waitFor(t, "framed replay", func() bool { return len(conn.replayBytes()) == 1 })
+		_ = kw.Close()
+		if err := <-errCh; err != nil {
+			t.Fatalf("Attach: %v", err)
+		}
+		var replay []byte
+		for _, part := range conn.replayBytes() {
+			replay = append(replay, part...)
+		}
+		return replay
+	}
+
+	framed := readReplay(AttachClient{
+		Member: "framed", Cols: 80, Rows: 24, ReadOnly: true, Screen: false, Snapshot: true,
+	})
+	if string(framed) != output {
+		t.Fatalf("framed replay = %q, want complete raw history", framed)
+	}
+	compact := readReplay(AttachClient{
+		Member: "screen", Cols: 80, Rows: 24, ReadOnly: true, Screen: true,
+	})
+	if !bytes.Contains(compact, []byte("late-marker")) {
+		t.Fatalf("compact replay lacks current output: %q", compact)
+	}
+	if bytes.Contains(compact, []byte("early-000")) {
+		t.Fatalf("compact replay retained evicted early history: %q", compact)
+	}
+}
 
 func TestAttachReplayWriterReceivesTranscriptBeforeLiveOutput(t *testing.T) {
 	h, _ := newTestHost(t)
@@ -1796,7 +1854,7 @@ func TestStopSessionsWithPrefix(t *testing.T) {
 	}
 }
 func TestRingBytesReturnsAllWhenUnwrapped(t *testing.T) {
-	r := newRing(8)
+	r := newRingAt(8, TerminalPosition{})
 	r.write([]byte("abc\n"))
 	if got := string(r.bytes()); got != "abc\n" {
 		t.Fatalf("unwrapped ring bytes = %q, want %q", got, "abc\n")
@@ -1804,7 +1862,7 @@ func TestRingBytesReturnsAllWhenUnwrapped(t *testing.T) {
 }
 
 func TestRingBytesStartsAtLineBoundaryAfterWrap(t *testing.T) {
-	r := newRing(10)
+	r := newRingAt(10, TerminalPosition{})
 	r.write([]byte("12345\n6789x"))
 	if got := string(r.bytes()); got != "6789x" {
 		t.Fatalf("wrapped ring bytes = %q, want %q", got, "6789x")
@@ -1812,7 +1870,7 @@ func TestRingBytesStartsAtLineBoundaryAfterWrap(t *testing.T) {
 }
 
 func TestRingBytesReturnsAllWrappedBytesWithoutNewline(t *testing.T) {
-	r := newRing(5)
+	r := newRingAt(5, TerminalPosition{})
 	r.write([]byte("abcdef"))
 	if got := string(r.bytes()); got != "bcdef" {
 		t.Fatalf("wrapped ring without newline = %q, want %q", got, "bcdef")
@@ -1864,41 +1922,124 @@ func TestTranscriptPathReplacesSessionKeySeparators(t *testing.T) {
 func TestRemoveRunTranscripts(t *testing.T) {
 	h, dir := newTestHost(t)
 	for _, name := range []string{
-		"run-1.cast",
-		"run-1.123.cast",
 		"run-shell-run-1-main.cast",
+		"run-shell-run-1-main.screen",
 		"run-2.cast",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("transcript"), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	w, err := newCastWriter(filepath.Join(dir, "run-1.cast"), 80, 24)
+	current := filepath.Join(dir, "run-1.cast")
+	old, err := newCastWriter(current, 80, 24)
 	if err != nil {
-		t.Fatalf("create run transcript: %v", err)
+		t.Fatal(err)
 	}
-	w.output([]byte("purge-me"))
-	if err := w.close(); err != nil {
-		t.Fatalf("close run transcript: %v", err)
+	old.output([]byte("purge-old"))
+	if err = old.close(); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := h.Snapshot("run-1"); err != nil {
-		t.Fatalf("cache cold snapshot: %v", err)
+	oldHeader, err := inspectCastHeader(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(dir, fmt.Sprintf("run-1.%d.cast", oldHeader.incarnation))
+	if err = os.Rename(current, legacy); err != nil {
+		t.Fatal(err)
+	}
+	canonicalWriter, err := newCastWriter(current, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWriter.output([]byte("purge-canonical"))
+	if err = canonicalWriter.close(); err != nil {
+		t.Fatal(err)
+	}
+	canonicalHeader, err := inspectCastHeader(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(dir, stableCastSegmentName(current, canonicalHeader.incarnation))
+	if err = os.Rename(current, canonical); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := newCastWriter(current, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.output([]byte("purge-current"))
+	if err = latest.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// This is the current transcript of a different, dotted run. Its header
+	// identity does not match the decimal filename suffix, so removing run-1
+	// must not mistake it for run-1's legacy archive.
+	dotted := filepath.Join(dir, "run-1.123.cast")
+	sibling, err := newCastWriter(dotted, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling.output([]byte("keep-sibling"))
+	if err = sibling.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
+		t.Fatalf("start cold snapshot repair: %v", err)
+	}
+	waitFor(t, "cold snapshot repair", func() bool {
+		_, err := h.Snapshot("run-1")
+		return err == nil
+	})
+	if _, err := os.Stat(checkpointPath(current)); err != nil {
+		t.Fatalf("repaired checkpoint missing before removal: %v", err)
 	}
 
 	if err := h.RemoveRunTranscripts(t.Context(), "run-1"); err != nil {
 		t.Fatalf("RemoveRunTranscripts: %v", err)
 	}
-	for _, name := range []string{"run-1.cast", "run-1.123.cast", "run-shell-run-1-main.cast"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("%s still exists (err %v)", name, err)
+	for _, path := range []string{
+		current,
+		legacy,
+		canonical,
+		checkpointPath(current),
+		filepath.Join(dir, "run-shell-run-1-main.cast"),
+		filepath.Join(dir, "run-shell-run-1-main.screen"),
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s still exists (err %v)", filepath.Base(path), err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "run-2.cast")); err != nil {
-		t.Errorf("unrelated transcript missing: %v", err)
+	for _, path := range []string{dotted, filepath.Join(dir, "run-2.cast")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unrelated transcript %s missing: %v", filepath.Base(path), err)
+		}
 	}
 	if _, err := h.Snapshot("run-1"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("snapshot after transcript removal = %v, want missing recording", err)
 	}
+}
+
+func TestSnapshotSurfacesCorruptArchivedTranscript(t *testing.T) {
+	h, dir := newTestHost(t)
+	if err := os.WriteFile(filepath.Join(dir, "run-1.123.cast"), []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := newCastWriter(filepath.Join(dir, "run-1.cast"), 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.output([]byte("current"))
+	if err = w.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = h.Snapshot("run-1"); !errors.Is(err, ErrSnapshotPending) {
+		t.Fatalf("corrupt archive initial snapshot error = %v, want pending", err)
+	}
+	waitFor(t, "corrupt archive repair failure", func() bool {
+		_, snapErr := h.Snapshot("run-1")
+		return errors.Is(snapErr, ErrSnapshotUnavailable) && strings.Contains(snapErr.Error(), "decode transcript header")
+	})
 }
 
 // TestStartSessionReplacesEndedSession: a run-shell tab whose shell exited
@@ -2315,7 +2456,7 @@ func TestResizeQueuesGeometryBeforeRepaint(t *testing.T) {
 	s = &session{
 		att:     att,
 		tr:      tr,
-		ring:    newRing(1024),
+		ring:    newRingAt(1024, TerminalPosition{}),
 		clients: map[*client]struct{}{c: {}},
 		cols:    120,
 		rows:    30,

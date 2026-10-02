@@ -107,10 +107,11 @@ const (
 )
 
 // BuildDesktop packages the Electron shell in src for this machine: it
-// writes the sources into buildDir, stamps cliVersion into the shell's
-// package.json, installs the npm dependencies, and runs electron-builder's
-// unpacked (--dir) target. npm and electron-builder output stream to stdout
-// and stderr. phase, when non-nil, is called with each Phase* constant as
+// writes the sources into buildDir, stamps the full CLI build identity and
+// its executable path independently of the npm package version, installs the
+// npm dependencies, and runs electron-builder's unpacked (--dir) target.
+// npm and electron-builder output stream to stdout and stderr. phase, when
+// non-nil, is called with each Phase* constant as
 // that step starts. It returns the unpacked app: a directory on linux and
 // windows, the .app bundle on darwin.
 func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, stdout, stderr io.Writer, phase func(string)) (string, error) {
@@ -130,7 +131,15 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	if err = writeTree(buildDir, src); err != nil {
 		return "", fmt.Errorf("localops: write shell sources: %w", err)
 	}
-	if err = stampShellVersion(buildDir, cliVersion); err != nil {
+	cliPath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("localops: locate CLI for shell: %w", err)
+	}
+	cliPath, err = filepath.EvalSymlinks(cliPath)
+	if err != nil {
+		return "", fmt.Errorf("localops: resolve CLI for shell: %w", err)
+	}
+	if err = stampShellVersion(buildDir, cliVersion, cliPath); err != nil {
 		return "", err
 	}
 	// Stale output from an earlier build must not be mistaken for this one.
@@ -236,17 +245,14 @@ func writeTree(dir string, src fs.FS) error {
 // package.json. A release tag is "v1.2.3"; a local build reports "dev".
 var shellSemver = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
 
-// stampShellVersion records which CLI built this shell in the unpacked
-// package.json, which main.js hands to the renderer. The dashboard compares
-// it with the CLI serving the gateway and asks for `aether gui build` once
-// the two have drifted apart. A version electron-builder would reject - a
-// dev build's "dev" - leaves the manifest's own 0.1.0 in place, so a shell
-// built by a dev CLI reads as stale against any release, which it is.
-func stampShellVersion(buildDir, cliVersion string) error {
+// stampShellVersion records the exact CLI build identity and executable path
+// alongside package.json's npm-valid version. The shell uses the path to
+// launch the same CLI that built it, even when a different aether comes first
+// on the desktop session's PATH. The dashboard compares the full identity
+// with the CLI serving the gateway. A git-describe or dev version is not
+// npm-valid, so it leaves the manifest's own package version intact.
+func stampShellVersion(buildDir, cliVersion, cliPath string) error {
 	semver := strings.TrimPrefix(cliVersion, "v")
-	if !shellSemver.MatchString(semver) {
-		return nil
-	}
 	path := filepath.Join(buildDir, "package.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -258,11 +264,23 @@ func stampShellVersion(buildDir, cliVersion string) error {
 	if err = json.Unmarshal(raw, &manifest); err != nil {
 		return fmt.Errorf("localops: parse %s: %w", path, err)
 	}
-	stamped, err := json.Marshal(semver)
+	stamped, err := json.Marshal(cliVersion)
 	if err != nil {
 		return err
 	}
-	manifest["version"] = stamped
+	manifest["aetherCliVersion"] = stamped
+	stamped, err = json.Marshal(cliPath)
+	if err != nil {
+		return err
+	}
+	manifest["aetherCliPath"] = stamped
+	if shellSemver.MatchString(semver) {
+		stamped, err = json.Marshal(semver)
+		if err != nil {
+			return err
+		}
+		manifest["version"] = stamped
+	}
 	out, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err

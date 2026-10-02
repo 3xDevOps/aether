@@ -9,11 +9,15 @@ routes, run-state colours and capabilities. Adjoining panes are flat and
 quiet: do not add saturated accent colours, arbitrary gradients, blurred cards or
 elevated nested panels.
 
-The UI uses the native system stack: `system-ui, Ubuntu, Droid Sans, sans-serif`
-at 13px with a 1.4 line height; supporting copy is 12px. JetBrainsMono NFM is
-retained for terminal output, commands and code. VT323 remains only for the
-Aether wordmark and the original startup splash. Do not use the brand face for
-body copy.
+The UI uses Saira at 13px with a 1.4 line height; supporting copy is 12px.
+The font stack is `'Saira', system-ui, sans-serif`. Normal-width variable
+WOFF2 files cover weights 100–900 and Latin, Latin extended and Vietnamese
+characters. They ship in `web/public/fonts/` with their SIL Open Font License;
+`web/src/index.css` declares Unicode ranges and `font-display: swap`, so the
+browser fetches only the subsets it needs, without contacting Google.
+JetBrainsMono NFM is retained for terminal output, commands and code. VT323
+remains only for the Aether wordmark and the original startup splash. Do not
+use the brand face for body copy.
 
 ## Semantic palette
 
@@ -51,8 +55,9 @@ where needed to keep the boundary discernible against its field surface.
 Pane seams retain the quieter Modern values and do not need input-border
 contrast. The subdued brand teal is separate from run status and member attribution.
 HeroUI aliases consume these semantics; they do not define a second palette.
-Member colours are the only arbitrary server data applied inline, on avatars
-and attribution rails while text remains token-based.
+Member colours are the only arbitrary server data applied inline, on avatars,
+attribution rails and the Map's owner boundaries with light identity tints.
+Text remains token-based; identity colour never replaces run-state colour.
 
 ## Geometry and responsive behavior
 
@@ -66,6 +71,9 @@ Use compact workbench geometry rather than landing-page ornament:
   according to real content.
 - 26px fields and buttons, 22px compact tools, 12px form gaps, 4px label
   gaps, 16px content gutters and 12px compact gutters.
+  Shared `Label` captions are block-level: stacked caption-to-field spacing
+  must measure 4px, including wrapped fields, rather than relying on margins
+  on inline text.
 - Adjoining panes, sections, rows, run cards and tab strips have zero radius.
   Compact controls and chips use 2px; fields, buttons, popups and dialogs use at
   most 4px. Full circles are reserved for actual avatars, status dots, radio
@@ -74,11 +82,30 @@ Use compact workbench geometry rather than landing-page ornament:
   Restrained shadows are limited to actual floating menus, quick input and
   dialogs. Headers stay 13-16px, with no promotional 20-24px titles or
   oversized cards.
+- Board cards share a uniform collapsed preview height, with a full-width
+  title row and visible status and branch-copy controls. The Cards / Map
+  layouts and their disclosure, packing and motion contracts are described in
+  [Dashboard SPA: Board](dashboard-frontend.md#board).
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main
 page never gains horizontal overflow; text and code may scroll inside their
-own surfaces. Coarse pointer controls may grow to 32px where required.
+own surfaces. Shared buttons, inputs and selectors use 40-44px touch targets
+under `coarse:` while retaining desktop density. Floating menus stay inside
+the available viewport and scroll to their last action.
+
+The run Browser uses shared 13px controls at 26px for mouse input and 44px
+for coarse pointers, including native selects. Navigation, address, selectors,
+capture and destructive actions wrap as groups rather than stretching the page.
+Run-terminal controller and viewer names stay in the existing toolbar, never
+in an extra presence row. Keep all viewers in a horizontally scrollable list;
+use the existing **Terminal tools** popover when inline tools crowd the names.
+
+Route roots own the shell's bounded height; their content regions use
+`min-h-0` and vertical overflow. On phones Diff scrolls its local controls
+and patch together, so long fetch output cannot strand the patch. Files
+keeps its header actions on a two-column grid, and its touch-sized search
+panel scrolls independently without consuming the entire editor.
 
 ## Shell, palette and focus
 
@@ -98,7 +125,8 @@ under the titlebar, max 600px, with compact rows and no giant scrim-heavy card.
 The status Slot remains mounted once for team refresh and other live
 contributors, including shortcuts. At narrow widths secondary status details
 use a bounded, keyboard-reachable popup while connection and theme controls stay
-available.
+available. Wrapped readouts in that popup use a 1.5 line height so Saira's
+glyphs fit inside each row; the wide status bar keeps its 22px rows.
 
 `focusRing` and `field` remain signature-compatible shared utilities. Preserve
 their keyboard outline, inset behavior for full-bleed rows, readable
@@ -124,9 +152,16 @@ presentation state. Domain status enums remain unchanged.
 lists. The labeled run-status chip reserves the full width of all three dots
 before its text; compact unlabeled surfaces keep the fixed dot box so state
 changes do not shift their columns. Sidebar rows pulse one dot and palette rows
-remain static. The steering signal, working dots and sidebar pulse stop moving
-under `prefers-reduced-motion: reduce`; state meaning remains available as text
-and labels. Loading spinners and delayed skeletons remain functional feedback.
+remain static. Live local control has a steady 2px teal inset outline around
+the terminal, alongside the toolbar's **(this tab)** controller marker and
+**Release** action. The pointer-transparent outline uses
+`--accent-soft-foreground` without changing layout; it appears only while this
+tab has live, acknowledged writable control, outside replay and history reading.
+It disappears on release, mirroring, disconnect or denied steering. It never
+orbits or animates and is identical under normal and reduced motion.
+Under `prefers-reduced-motion: reduce`,
+working dots and sidebar pulses stop moving; labels retain the state meaning.
+Loading spinners and delayed skeletons remain functional feedback.
 
 The desktop first-launch splash is a finite branded handoff, not a loading
 screen. Its dark sky, grain, clouds, twinkling field and shooting stars stay

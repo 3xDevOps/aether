@@ -1,9 +1,10 @@
-import { Archive, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
-import { useRef, type MouseEvent, type ReactNode } from 'react'
+import { Archive, ChevronDown, Copy, GitBranch, GitCommit, PauseCircle, Shield } from 'lucide-react'
+import { useId, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Slot, type CardSlotName } from '@/components/slots'
 import { StateIndicator } from '@/components/state-dot'
 import { Chip } from '@/components/ui/heroui'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { copyText } from '@/lib/clipboard'
 import { deletesInLabel, timeAgo } from '@/lib/format'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
@@ -29,7 +30,7 @@ const lifecycleLabel: Record<RunRecord['status'], string> = {
 
 /**
  * One run, as it appears on the board. Another feature contributes to the
- * card through the slots (`card:badges`, `card:chips`, `card:footer`); the
+ * card through the slots (`card:badges`, `card:warnings`, `card:chips`, `card:footer`); the
  * card's own content is written here.
  *
  * The article is a forgiving pointer surface for its noninteractive metadata,
@@ -37,10 +38,18 @@ const lifecycleLabel: Record<RunRecord['status'], string> = {
  * slot controls opt out of the article surface so selecting or copying a
  * branch never reveals the run.
  */
-export function RunCard({ card }: { card: BoardCard }) {
+export function RunCard({
+  card,
+  variant = 'cards',
+}: {
+  card: BoardCard
+  variant?: 'cards' | 'map'
+}) {
   const { run, state, owner, unseen, paused } = card
   const navigate = useStore((s) => s.navigate)
   const branchRef = useRef<HTMLSpanElement>(null)
+  const [expanded, setExpanded] = useState(false)
+  const detailsId = useId()
   const unansweredCount =
     state === 'needs-attention' ? Math.max(0, run.unanswered_questions ?? 0) : 0
   const questionAction =
@@ -81,148 +90,184 @@ export function RunCard({ card }: { card: BoardCard }) {
     navigate('terminal', { runId: run.id })
   }
 
-  return (
-    <article
-      onClick={handleCardClick}
-      style={{ borderLeftColor: owner?.color }}
-      className={cn(
-        'group min-w-0 cursor-pointer border-b border-l-2 border-border bg-background px-3 py-2.5 transition-colors duration-100 hover:bg-toolbar-hover',
-        unseen && 'border-foreground/25',
-      )}
+  const disclosure = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label={`${expanded ? 'Hide' : 'Show'} details for ${runLabel(run)}`}
+      aria-expanded={expanded}
+      aria-controls={expanded ? detailsId : undefined}
+      onClick={variant === 'cards' ? () => setExpanded((open) => !open) : undefined}
+      className="ml-auto shrink-0"
     >
-      <div className="flex min-w-0 items-start gap-2">
-        {/* This is the first actionable element in each card for keyboard users. */}
-        <button
-          type="button"
-          aria-label={runLabel(run)}
-          onClick={(event) => {
-            event.stopPropagation()
-            navigate('terminal', { runId: run.id })
-          }}
-          className={cn(
-            focusRing,
-            'flex min-w-0 flex-1 items-start gap-2 rounded-[2px] text-left',
-          )}
-        >
-          <StateIndicator state={state} decorative className="mt-1.5" />
-          <span className="min-w-0 flex-1">
-            <span className="flex flex-wrap items-center gap-1.5">
+      Details
+      <ChevronDown className={cn('size-3', expanded && 'rotate-180')} aria-hidden />
+    </Button>
+  )
+  const details = expanded && (
+    <div className="space-y-3 text-xs" data-run-navigation-exempt>
+      {variant === 'cards' && (
+        <h3 className="break-words text-sm font-medium">{runLabel(run)}</h3>
+      )}
+      {run.task.trim() && run.task.trim() !== runLabel(run) && (
+        <p className="whitespace-pre-wrap break-words text-muted-foreground">{run.task.trim()}</p>
+      )}
+      {summary && (
+        <p className="whitespace-pre-wrap break-words">{summary}</p>
+      )}
+      {finishedQuestion && (
+        <p className="break-words text-muted-foreground">
+          Lifecycle: {lifecycleLabel[run.status]}{run.reason ? ` - ${run.reason}` : ''}
+        </p>
+      )}
+      {questionAction && !finishedQuestion && run.reason && (
+        <p className="whitespace-pre-wrap break-words text-muted-foreground">{run.reason}</p>
+      )}
+      {run.branch && (
+        <p className="break-all select-text font-mono text-muted-foreground">
+          <span className="font-sans">Branch: </span>{run.branch}
+        </p>
+      )}
+      {run.last_commit && (
+        <p className="flex items-start gap-1 text-muted-foreground">
+          <GitCommit className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 break-all select-text">
+            {run.last_commit} · committed {timeAgo(run.last_commit_at ?? run.created_at)}
+          </span>
+        </p>
+      )}
+      <p className="text-muted-foreground">{timestamps(card)}</p>
+      <CardSlot name="card:chips" run={run} />
+      <CardSlot name="card:footer" run={run} />
+    </div>
+  )
+
+  return (
+    <Dialog open={variant === 'map' && expanded} onOpenChange={setExpanded}>
+      <article
+        data-run-id={run.id}
+        onClick={handleCardClick}
+        style={{ borderLeftColor: owner?.color }}
+        className={cn(
+          'group min-w-0 cursor-pointer border border-l-2 border-border bg-background transition-colors duration-100 hover:bg-toolbar-hover motion-reduce:transition-none',
+          unseen && 'border-foreground/25',
+        )}
+      >
+        <div className="grid h-[190px] min-w-0 grid-rows-[22px_40px_32px_20px_1fr] gap-1 px-3 py-2 coarse:grid-rows-[44px_40px_16px_20px_1fr] coarse:gap-0.5">
+          <div className="flex min-w-0 items-center gap-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_button]:focus-visible:-outline-offset-2">
+              <StateIndicator state={state} decorative className="shrink-0" />
               <StateChip state={state} />
+              {finishedQuestion && (
+                <span className="shrink-0 text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}</span>
+              )}
               {unseen && (
-                <Chip
-                  color="accent"
-                  variant="soft"
-                  size="sm"
-                  aria-label="Unseen"
-                >
+                <Chip color="accent" variant="soft" size="sm" aria-label="Unseen">
                   <Chip.Label>New</Chip.Label>
                 </Chip>
               )}
               {paused && (
-                <span title="Paused">
+                <span title="Paused" className="shrink-0">
                   <Chip color="warning" variant="soft" size="sm">
                     <PauseCircle className="size-3" aria-hidden />
                     <Chip.Label>Paused</Chip.Label>
                   </Chip>
                 </span>
               )}
-            </span>
-            <span
-              className={cn(
-                'mt-1 block line-clamp-3 break-words text-[14px] font-medium leading-5',
-                unseen && 'font-semibold',
+              {run.protected && (
+                <span
+                  role="img"
+                  aria-label="Protected: only the owner or an admin can steer or kill this run"
+                  title="Protected: only the owner or an admin can steer or kill this run"
+                  className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground"
+                >
+                  <Shield className="size-3.5" aria-hidden />
+                </span>
               )}
-            >
+              {deletesLabel && (
+                <span title="Archived" className="shrink-0">
+                  <Chip color="default" variant="soft" size="sm">
+                    <Archive className="size-3" aria-hidden />
+                    <Chip.Label>{deletesLabel}</Chip.Label>
+                  </Chip>
+                </span>
+              )}
+              <CardSlot name="card:badges" run={run} />
+            </div>
+            <CardSlot name="card:warnings" run={run} />
+          </div>
+          <button
+            type="button"
+            aria-label={runLabel(run)}
+            onClick={() => navigate('terminal', { runId: run.id })}
+            className={cn(focusRing, 'min-w-0 self-start text-left text-sm leading-5')}
+          >
+            <span className={cn('line-clamp-2 break-words font-medium', unseen && 'font-semibold')}>
               {runLabel(run)}
             </span>
-            {run.title?.trim() && run.task.trim() && (
-              <span className="mt-0.5 line-clamp-3 break-words text-xs leading-4 text-muted-foreground">
-                {run.task.trim()}
+          </button>
+          <div className="min-w-0 overflow-hidden">
+            {state === 'needs-attention' && summary && (
+              <p className="line-clamp-2 break-words border-l-2 border-state-needs-attention/60 pl-2 text-xs leading-4 text-foreground/85 coarse:line-clamp-1">
+                {summary}
+              </p>
+            )}
+          </div>
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="min-w-0 max-w-[45%]"><HarnessGlyph harness={run.harness} mode={run.mode} /></span>
+            <MemberAvatar member={owner} fallback={run.member_id} className="size-4 shrink-0 text-[9px]" />
+            <span className="min-w-0 truncate" title={owner?.display_name ?? run.member_id}>{owner?.display_name ?? run.member_id}</span>
+            <time className="ml-auto shrink-0 tabular-nums" title={timestamps(card)}>
+              {timeAgo(run.stateChangedAt)}
+            </time>
+          </div>
+          <div className="flex min-w-0 items-center gap-1 border-t border-border text-xs text-muted-foreground">
+            {run.branch && (
+              <span
+                data-run-navigation-exempt
+                className="flex min-w-0 flex-1 items-center gap-1"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <GitBranch className="size-3.5 shrink-0" aria-hidden />
+                <span
+                  ref={branchRef}
+                  className="min-w-0 truncate select-text font-mono text-xs"
+                  title={run.branch}
+                >
+                  {run.branch}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Copy branch ${run.branch}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void copyText(run.branch, branchRef.current)
+                  }}
+                >
+                  <Copy className="size-3" aria-hidden />
+                </Button>
               </span>
             )}
-          </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-1">
-          {run.protected && (
-            <span
-              role="img"
-              aria-label="Protected: only the owner or an admin can steer or kill this run"
-              title="Protected: only the owner or an admin can steer or kill this run"
-              className="flex size-[22px] items-center justify-center rounded-[2px] text-muted-foreground"
-            >
-              <Shield className="size-3.5" aria-hidden />
-            </span>
-          )}
-          {deletesLabel && (
-            <span title="Archived">
-              <Chip color="default" variant="soft" size="sm">
-                <Archive className="size-3" aria-hidden />
-                <Chip.Label>{deletesLabel}</Chip.Label>
-              </Chip>
-            </span>
-          )}
-          <CardSlot name="card:badges" run={run} />
+            {variant === 'map' ? <DialogTrigger asChild>{disclosure}</DialogTrigger> : disclosure}
+          </div>
         </div>
-      </div>
-
-      {state === 'needs-attention' && (summary || finishedQuestion) && (
-        <div className="mt-2 border-l-2 border-state-needs-attention/60 bg-state-needs-attention/10 px-2.5 py-1.5">
-          {summary && <p className="break-words text-xs leading-4 text-foreground/85">{summary}</p>}
-          {finishedQuestion && <p className="mt-1 break-words text-[11px] text-muted-foreground">Lifecycle: {lifecycleLabel[run.status]}{run.reason ? ` - ${run.reason}` : ''}</p>}
-        </div>
+        {variant === 'cards' && expanded && (
+          <div id={detailsId} className="cursor-auto border-t border-border px-3 py-3" data-run-navigation-exempt>
+            {details}
+          </div>
+        )}
+      </article>
+      {variant === 'map' && (
+        <DialogContent id={detailsId} aria-describedby={undefined}>
+          <DialogTitle className="break-words pr-8">{runLabel(run)}</DialogTitle>
+          {details}
+        </DialogContent>
       )}
-
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/80 pt-2 text-xs text-muted-foreground">
-        <HarnessGlyph harness={run.harness} mode={run.mode} />
-        {/* Branch content is selectable and intentionally outside navigation. */}
-        {run.branch && (
-          <span
-            data-run-navigation-exempt
-            className="flex min-w-0 max-w-full items-center gap-1"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <GitBranch className="size-3.5 shrink-0" aria-hidden />
-            <span
-              ref={branchRef}
-              className="min-w-0 break-all select-text font-mono text-xs"
-              title={run.branch}
-            >
-              {run.branch}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={`Copy branch ${run.branch}`}
-              className="size-[22px] shrink-0"
-              onClick={(event) => {
-                event.stopPropagation()
-                void copyText(run.branch, branchRef.current)
-              }}
-            >
-              <Copy className="size-3" aria-hidden />
-            </Button>
-          </span>
-        )}
-        {run.last_commit && (
-          <span className="flex items-center gap-1" title={run.last_commit}>
-            <GitCommit className="size-3.5 shrink-0" aria-hidden />
-            committed {timeAgo(run.last_commit_at ?? run.created_at)}
-          </span>
-        )}
-        <CardSlot name="card:chips" run={run} />
-      </div>
-
-      <div className="mt-2 flex min-w-0 items-center gap-2 border-t border-border/80 pt-2 text-xs text-muted-foreground">
-        <MemberAvatar member={owner} fallback={run.member_id} className="size-5 text-[9px]" />
-        <span className="min-w-0 truncate">{owner?.display_name ?? run.member_id}</span>
-        <time className="ml-auto shrink-0 tabular-nums" title={timestamps(card)}>
-          {timeAgo(run.stateChangedAt)}
-        </time>
-        <CardSlot name="card:footer" run={run} />
-      </div>
-    </article>
+    </Dialog>
   )
 }
 
@@ -254,7 +299,7 @@ function StateChip({ state }: { state: PresentationState }) {
 /** Slot content may contain its own links or buttons. */
 function CardSlot({ name, run }: { name: CardSlotName; run: RunRecord }): ReactNode {
   return (
-    <span className="flex flex-wrap items-center gap-1 empty:hidden">
+    <span data-run-navigation-exempt className={cn('flex items-center gap-1 empty:hidden', name === 'card:badges' || name === 'card:warnings' ? 'shrink-0' : 'flex-wrap')}>
       <Slot name={name} run={run} />
     </span>
   )

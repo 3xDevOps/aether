@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -44,10 +44,10 @@ import (
 const statusAgentScript = `#!/bin/sh
 sleep 1
 echo "argv:$*"
-printf '{"hook_event_name":"Stop"}' | ` + mcpbridge.BinaryPath + ` report claude
+printf '{"hook_event_name":"Stop"}' | ` + coordtransport.BinaryPath + ` report claude
 echo "reported:stop"
 while read line; do
-  printf '{"hook_event_name":"UserPromptSubmit"}' | ` + mcpbridge.BinaryPath + ` report claude
+  printf '{"hook_event_name":"UserPromptSubmit"}' | ` + coordtransport.BinaryPath + ` report claude
   echo "reported:prompt"
 done
 `
@@ -59,10 +59,10 @@ done
 const piStatusAgentScript = `#!/bin/sh
 sleep 1
 echo "argv:$*"
-` + mcpbridge.BinaryPath + ` report pi --event agent_end
+` + coordtransport.BinaryPath + ` report pi --event agent_end
 echo "reported:end"
 while read line; do
-  ` + mcpbridge.BinaryPath + ` report pi --event agent_start
+  ` + coordtransport.BinaryPath + ` report pi --event agent_start
   echo "reported:start"
 done
 `
@@ -106,7 +106,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o444 {
 		t.Errorf("%s mode = %o, want 0444", agentstatus.ClaudeSettingsName, got)
 	}
-	att.waitOutput(t, "--settings "+path.Join(mcpbridge.MountDir, agentstatus.ClaudeSettingsName))
+	att.waitOutput(t, "--settings "+path.Join(coordtransport.MountDir, agentstatus.ClaudeSettingsName))
 	att.waitOutput(t, "reported:stop")
 
 	// The report itself: the run parks the moment the agent says its turn
@@ -161,7 +161,7 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 	if got := piInfo.Mode().Perm(); got != 0o444 {
 		t.Errorf("%s mode = %o, want 0444", agentstatus.PiExtensionName, got)
 	}
-	piAtt.waitOutput(t, "-e "+path.Join(mcpbridge.MountDir, agentstatus.PiExtensionName))
+	piAtt.waitOutput(t, "-e "+path.Join(coordtransport.MountDir, agentstatus.PiExtensionName))
 	piAtt.waitOutput(t, "reported:end")
 
 	piParked := waitEvent(t, sub, &seen, "pi run.status needs-attention", func(ev events.Event) bool {
@@ -228,25 +228,22 @@ func buildStatusAgentImage(t *testing.T, agents map[string]string) string {
 	return image
 }
 
-// openCodeAgentScript stands in for opencode. Its reporter calls are the
-// ones the embedded plugin makes - the event on the command line, nothing
-// on stdin - and it prints the launch environment the plugin would have
-// been loaded from, which is the whole registration for a harness with no
-// flag to point at a file.
+// The scripted CLI reports through the same run-scoped socket as the plugin.
 const openCodeAgentScript = `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "1.18.32"
+  exit 0
+fi
 sleep 1
-echo "config:$OPENCODE_CONFIG_CONTENT"
-` + mcpbridge.BinaryPath + ` report opencode --event session.idle
+` + coordtransport.BinaryPath + ` report opencode --event session.idle
 echo "reported:idle"
 while read line; do
-  ` + mcpbridge.BinaryPath + ` report opencode --event session.status --status busy
+  ` + coordtransport.BinaryPath + ` report opencode --event session.status --status busy
   echo "reported:busy"
 done
 `
 
-// The same path for the harness whose reporter rides in the environment:
-// the plugin the server wrote into the run's coordination directory, the
-// variable naming it, and the run moving as the agent says so.
+// Exercise the native launch wrapper and status transitions in a real container.
 func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -283,7 +280,6 @@ func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o444 {
 		t.Errorf("%s mode = %o, want 0444", agentstatus.OpenCodePluginName, got)
 	}
-	att.waitOutput(t, `config:{"plugin":["file://`+path.Join(mcpbridge.MountDir, agentstatus.OpenCodePluginName)+`"]}`)
 	att.waitOutput(t, "reported:idle")
 
 	parked := waitEvent(t, sub, &seen, "run.status needs-attention", func(ev events.Event) bool {

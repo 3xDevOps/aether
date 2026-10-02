@@ -3,9 +3,9 @@
 // for a human.
 //
 // The radar (internal/overlap) says runs A and B are both editing the
-// same file. This package injects one advisory notice into both agents'
-// terminals, gives each run a private unix socket under the server data
-// directory, and serves the versioned coordination methods.
+// same file. This package exposes that advisory state and a durable mailbox
+// through each run's private unix socket under the server data directory.
+// Native harness hooks discover pending context without writing to terminals.
 //
 // The same socket carries run.report, a harness lifecycle hook. Durable
 // worker outcomes use coord.report and remain available after the request
@@ -18,6 +18,7 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -30,7 +31,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -39,9 +39,6 @@ import (
 const DefaultGrace = 10 * time.Minute
 
 var (
-	// ErrDisabled is returned by the host-side lifecycle calls when the
-	// conflict-coordination kill switch is off.
-	ErrDisabled = errors.New("coord: conflict coordination is disabled")
 	// ErrClosed is returned once the service has been closed.
 	ErrClosed = errors.New("coord: service closed")
 	// ErrNoReportSink is returned when run.report arrives with no sink
@@ -73,23 +70,39 @@ type Runs interface {
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
 }
 
-// Peers is the conflict radar's read side and the sole authorization
-// source for sends; satisfied by *overlap.Index.
+// MissionService is the optional mission authority behind the coordination
+// socket. It is deliberately expressed only in protocol/domain/store types:
+// the mission package can implement it without importing coord, while this
+// package remains the one run-authenticated transport boundary.
+//
+// A nil service means an ordinary run. Mission errors are authoritative:
+// callers must not silently fall back to radar authorization or ordinary
+// reporting when a current mission assignment is stale.
+type MissionService interface {
+	Assignment(context.Context, domain.RunID) (protocol.CoordMissionAssignment, error)
+	Peers(context.Context, domain.RunID) ([]protocol.CoordPeer, error)
+	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
+	ValidateReport(context.Context, domain.RunID) error
+	ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error
+}
+
+// DevelopmentService supplies only implemented run-scoped development methods.
+// The transport binds identity, applies its explicit allowlist, and owns request
+// cancellation. Capabilities must describe current availability for this run.
+type DevelopmentService interface {
+	Capabilities(context.Context, domain.RunID) ([]string, error)
+	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
+}
+
+// Peers is the conflict radar's read side. Mission authorization, when
+// configured, is evaluated by MissionService before radar fallback.
 type Peers interface {
 	Overlaps(ctx context.Context) ([]overlap.Entry, error)
 }
 
-// Injector writes an attributed banner into a run's terminal and its
-// transcript, ending the write with the run harness's submit sequence;
-// satisfied by *ptyhost.Host.
-type Injector interface {
-	Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error
-}
-
-// Config wires the service. Dir, Store, Mail, Bus, and Peers are
-// required; PTY may be nil, which degrades to no notices. RetainsContainer
-// may be nil; when set, it identifies terminal TUI runs whose retained
-// container still owns this coordination directory during recovery.
+// Config wires the service. Dir, Store, Mail, Bus, and Peers are required.
+// RetainsContainer may be nil; when set, it identifies terminal TUI runs whose
+// retained container still owns this coordination directory during recovery.
 type Config struct {
 	// Dir is the coordination state root, <data>/coord.
 	Dir string
@@ -104,8 +117,16 @@ type Config struct {
 	Bus events.Bus
 	// Peers is the radar index sends are authorized against.
 	Peers Peers
-	// PTY injects the overlap notice into a run's terminal.
-	PTY Injector
+	// Mission is the optional current mission authority. It extends peer
+	// authorization and owns mission task/worker methods and report
+	// validation/reconciliation; nil preserves ordinary coordination.
+	Mission MissionService
+	// Development is independent of conflict and mission policy. Nil advertises
+	// no development methods and leaves their dispatch unavailable.
+	Development DevelopmentService
+	// WakeAdmission orders the final native wake frame with human control.
+	// An absent seam disables native dispatch without affecting legacy hooks.
+	WakeAdmission WakeAdmission
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
@@ -115,9 +136,8 @@ type Config struct {
 	Evidence EvidenceCapture
 	// EvidencePackets loads retained packets for pending publication replay.
 	EvidencePackets EvidencePacketLookup
-	// Disabled is the conflict-coordination kill switch. When set, no
-	// notice, listener, directory, mailbox write, or timeline entry
-	// happens, and every coord.* call fails CodeUnavailable.
+	// Disabled blocks conflict coordination, peer/mailbox operations, mission
+	// actions and lifecycle reporting, but not identity or development transport.
 	Disabled bool
 	// Grace overrides DefaultGrace.
 	Grace time.Duration
@@ -139,20 +159,23 @@ type Service struct {
 	stop     context.CancelFunc
 	sub      events.Subscription
 
-	mu             sync.Mutex
-	listeners      map[socketKey]*net.UnixListener
-	buckets        map[domain.RunID]*bucket
-	inboxBuckets   map[domain.RunID]*bucket
-	requestBuckets map[domain.RunID]*bucket
-	inboxWaiters   map[domain.RunID]*inboxWaiter
-	reportLocks    map[domain.RunID]*sync.Mutex
-	reportPackets  map[string]protocol.EvidencePacket
-	noticed        map[domain.RunID]map[domain.RunID]bool
-	runs           map[domain.RunID]*runLifecycle
-	reportCursor   store.CoordOutboxCursor
-	auditCursor    store.CoordOutboxCursor
-	closed         bool
-	wg             sync.WaitGroup
+	mu               sync.Mutex
+	listeners        map[socketKey]*net.UnixListener
+	buckets          map[domain.RunID]*bucket
+	inboxBuckets     map[domain.RunID]*bucket
+	requestBuckets   map[domain.RunID]*bucket
+	hookBuckets      map[domain.RunID]*bucket
+	lifecycleBuckets map[domain.RunID]*bucket
+	inboxWaiters     map[domain.RunID]*inboxWaiter
+	hookWaiters      map[domain.RunID]map[*hookWaiter]struct{}
+	inboxConsumers   map[domain.RunID]int
+	reportLocks      map[domain.RunID]*sync.Mutex
+	reportPackets    map[string]protocol.EvidencePacket
+	runs             map[domain.RunID]*runLifecycle
+	reportCursor     store.CoordOutboxCursor
+	auditCursor      store.CoordOutboxCursor
+	closed           bool
+	wg               sync.WaitGroup
 }
 
 // socketKey identifies one listener: a run and the wire-version socket
@@ -166,6 +189,9 @@ type runLifecycle struct {
 	closing    bool
 	done       chan struct{}
 	doneClosed bool
+	// Serializes Inbox registration with the final native wake frame, never
+	// the mailbox query or long poll. Callers retain a run reference.
+	inboxAdmission sync.Mutex
 }
 
 // New builds the service; call Start to recover listeners and begin
@@ -185,20 +211,23 @@ func New(cfg Config) (*Service, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
-		cfg:            cfg,
-		radar:          newRadar(cfg.Peers, cfg.Grace, cfg.now),
-		now:            cfg.now,
-		serveCtx:       ctx,
-		stop:           cancel,
-		listeners:      make(map[socketKey]*net.UnixListener),
-		buckets:        make(map[domain.RunID]*bucket),
-		inboxBuckets:   make(map[domain.RunID]*bucket),
-		requestBuckets: make(map[domain.RunID]*bucket),
-		inboxWaiters:   make(map[domain.RunID]*inboxWaiter),
-		reportLocks:    make(map[domain.RunID]*sync.Mutex),
-		reportPackets:  make(map[string]protocol.EvidencePacket),
-		runs:           make(map[domain.RunID]*runLifecycle),
-		noticed:        make(map[domain.RunID]map[domain.RunID]bool),
+		cfg:              cfg,
+		radar:            newRadar(cfg.Peers, cfg.Grace, cfg.now),
+		now:              cfg.now,
+		serveCtx:         ctx,
+		stop:             cancel,
+		listeners:        make(map[socketKey]*net.UnixListener),
+		buckets:          make(map[domain.RunID]*bucket),
+		inboxBuckets:     make(map[domain.RunID]*bucket),
+		requestBuckets:   make(map[domain.RunID]*bucket),
+		hookBuckets:      make(map[domain.RunID]*bucket),
+		lifecycleBuckets: make(map[domain.RunID]*bucket),
+		inboxWaiters:     make(map[domain.RunID]*inboxWaiter),
+		hookWaiters:      make(map[domain.RunID]map[*hookWaiter]struct{}),
+		inboxConsumers:   make(map[domain.RunID]int),
+		reportLocks:      make(map[domain.RunID]*sync.Mutex),
+		reportPackets:    make(map[string]protocol.EvidencePacket),
+		runs:             make(map[domain.RunID]*runLifecycle),
 	}, nil
 }
 
@@ -272,15 +301,9 @@ func (s *Service) Close() error {
 	return errors.Join(errs...)
 }
 
-// consume folds the radar's overlap changes into the grace bookkeeping and
-// the notice injector.
-//
-// There is no replay machinery here because nothing depends on seeing
-// every event: the next change re-announces the whole set, authorization
-// always re-reads the live index, and a grace window runs from the last
-// instant the peers were seen overlapping, so discovering a clearing late
-// cannot hand out a window longer than the grace period. A dropped event
-// therefore costs at most one notice.
+// consume folds the radar's overlap changes into grace bookkeeping.
+// Authorization also re-reads the live index, so a dropped event cannot
+// extend a grace window beyond the last observed overlap.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	for e := range sub.Events() {
 		p, ok := e.Payload.(events.OverlapPayload)
@@ -292,7 +315,6 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 			current[peer.RunID] = peer.Files
 		}
 		s.radar.observe(e.RunID, current)
-		s.notify(ctx, e.RunID, p.With)
 		if ctx.Err() != nil {
 			return
 		}
@@ -346,6 +368,7 @@ func (s *Service) closeRun(run domain.RunID) <-chan struct{} {
 		s.runs[run] = state
 	}
 	state.closing = true
+	s.cancelHookWaitersLocked(run)
 	if state.refs == 0 && !state.doneClosed {
 		close(state.done)
 		state.doneClosed = true
@@ -363,6 +386,12 @@ func (s *Service) isRunClosing(run domain.RunID) bool {
 	return s.closed || (state != nil && state.closing)
 }
 
+func (s *Service) inboxAdmissionLock(run domain.RunID) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &s.runs[run].inboxAdmission
+}
+
 func (s *Service) reportLock(run domain.RunID) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -374,8 +403,8 @@ func (s *Service) reportLock(run domain.RunID) *sync.Mutex {
 	return lock
 }
 
-// unavailable is the kill switch's answer: every coord.* method fails
-// before it touches the mailbox, the radar, or the timeline.
+// unavailable denies conflict/mission/report actions before they touch the
+// mailbox, radar, or timeline. coord.status remains the identity bootstrap.
 func unavailable(method string) *protocol.Error {
 	return &protocol.Error{
 		Code:    protocol.CodeUnavailable,

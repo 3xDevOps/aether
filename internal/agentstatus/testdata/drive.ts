@@ -10,6 +10,10 @@ const pi = {
   },
 }
 
+// This driver represents a new top-level agent, not a descendant of the
+// developer's live harness running the Go suite.
+delete process.env.AETHER_STATUS_OWNER
+
 // A child agent spawned by the run's agent inherits the run's environment,
 // including the marker naming the process that reports. Set it to someone
 // else and the extension must register nothing at all.

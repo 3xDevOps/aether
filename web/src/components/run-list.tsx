@@ -154,7 +154,7 @@ export function RunList({ runs, empty }: { runs: SidebarRun[]; empty: string }) 
   )
 }
 
-function StatusChip({ state }: { state: PresentationState }) {
+export function StatusChip({ state }: { state: PresentationState }) {
   return (
     <span className="inline-flex min-h-5 items-center gap-1.5 rounded-[2px] border border-border/80 px-1.5 py-px text-xs leading-4 text-foreground">
       <StateIndicator state={state} decorative />

@@ -2,22 +2,29 @@ package coord
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func (h *coordHarness) dial(t *testing.T, run domain.RunID) *protocol.Client {
 	t.Helper()
-	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), SocketName))
+	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName))
 	if err != nil {
 		t.Fatalf("dial %s: %v", run, err)
 	}
@@ -55,7 +62,7 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	}
 	defer timeline.Close() //nolint:errcheck // test cleanup
 
-	dirA, err := h.svc.Provision(ctx, a, map[string][]byte{ConfigName: []byte(`{"mcpServers":{}}`)})
+	dirA, err := h.svc.Provision(ctx, a, map[string][]byte{"fixture.json": []byte(`{"mcpServers":{}}`)})
 	if err != nil {
 		t.Fatalf("Provision(a): %v", err)
 	}
@@ -68,10 +75,10 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	if got := mode(t, dirA); got != runDirMode {
 		t.Errorf("run directory mode = %o, want %o", got, runDirMode)
 	}
-	if got := mode(t, filepath.Join(dirA, ConfigName)); got != configMode {
+	if got := mode(t, filepath.Join(dirA, "fixture.json")); got != configMode {
 		t.Errorf("config mode = %o, want %o", got, configMode)
 	}
-	if got := mode(t, filepath.Join(dirA, SocketName)); got != socketMode {
+	if got := mode(t, filepath.Join(dirA, coordtransport.SocketName)); got != socketMode {
 		t.Errorf("socket mode = %o, want %o", got, socketMode)
 	}
 
@@ -128,6 +135,30 @@ func TestCoordinationSocketRoundTrip(t *testing.T) {
 	}
 	if n, err := h.db.CountUnackedRunMessages(ctx, b); err != nil || n != 0 {
 		t.Fatalf("unacked after release = %d (err %v), want 0", n, err)
+	}
+}
+func TestMissionMethodWhitelistIntegrationSurface(t *testing.T) {
+	for _, method := range []string{
+		protocol.MethodIntegrationPrepare,
+		protocol.MethodIntegrationShow,
+		protocol.MethodIntegrationVerify,
+		protocol.MethodIntegrationRequestDelivery,
+		protocol.MethodIntegrationDeliver,
+	} {
+		if !isMissionMethod(method) {
+			t.Errorf("integration method %q is not admitted to mission dispatch", method)
+		}
+	}
+	for _, method := range []string{
+		protocol.MethodIntegrationList,
+		protocol.MethodIntegrationResolve,
+		protocol.MethodIntegrationPatch,
+		protocol.MethodIntegrationDecide,
+		protocol.MethodIntegrationDelete,
+	} {
+		if isMissionMethod(method) {
+			t.Errorf("forbidden integration method %q is admitted to mission dispatch", method)
+		}
 	}
 }
 
@@ -217,7 +248,7 @@ func TestRestartRecovery(t *testing.T) {
 		if err := h.db.UpdateRunStatus(ctx, finished, domain.RunAbandoned, "", nil, nil); err != nil {
 			t.Fatalf("finish run: %v", err)
 		}
-		socket := filepath.Join(h.dir, "coord", string(alive), SocketName)
+		socket := filepath.Join(h.dir, "coord", string(alive), coordtransport.SocketName)
 		if cerr := h.svc.Close(); cerr != nil {
 			t.Fatalf("Close: %v", cerr)
 		}
@@ -270,7 +301,7 @@ func TestRestartRecovery(t *testing.T) {
 				t.Fatalf("finish run %s: %v", r, err)
 			}
 		}
-		socket := filepath.Join(h.dir, "coord", string(retained), SocketName)
+		socket := filepath.Join(h.dir, "coord", string(retained), coordtransport.SocketName)
 		if err := h.svc.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
@@ -311,7 +342,7 @@ func TestRestartRecovery(t *testing.T) {
 		h := newHarness(t, 1)
 		h.start()
 		run := h.run(0)
-		if _, err := h.svc.Provision(ctx, run, map[string][]byte{ConfigName: []byte(`{}`)}); err != nil {
+		if _, err := h.svc.Provision(ctx, run, map[string][]byte{"fixture.json": []byte(`{}`)}); err != nil {
 			t.Fatalf("Provision: %v", err)
 		}
 		if err := h.svc.Close(); err != nil {
@@ -319,13 +350,20 @@ func TestRestartRecovery(t *testing.T) {
 		}
 
 		h.restart(t, true)
-		socket := filepath.Join(h.dir, "coord", string(run), SocketName)
-		if _, err := os.Lstat(socket); !errors.Is(err, fs.ErrNotExist) {
-			t.Fatalf("socket after an off recovery = %v, want it unlinked", err)
+		var status protocol.CoordStatusResult
+		client := h.dial(t, run)
+		if err := client.Call(protocol.MethodCoordStatus, nil, &status); err != nil || status.RunID != string(run) {
+			t.Fatalf("identity after disabled recovery = %+v, %v", status, err)
 		}
-		// The mount itself stays: the container holds it open, and its
-		// read-only assets are simply inert.
-		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), ConfigName)); err != nil {
+		for _, method := range []string{protocol.MethodCoordInbox, protocol.MethodTaskList, protocol.MethodRunReport} {
+			err := client.Call(method, nil, nil)
+			var rpcErr *protocol.Error
+			if !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeUnavailable {
+				t.Fatalf("%s after disabled recovery = %v, want unavailable", method, err)
+			}
+		}
+		// The mounted assets and socket remain owned by this run.
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), "fixture.json")); err != nil {
 			t.Fatalf("the mounted config must stay in place: %v", err)
 		}
 	})
@@ -356,7 +394,7 @@ func TestRestartRecovery(t *testing.T) {
 		}
 		// The current version is still bound, so a re-provisioned bridge
 		// keeps working.
-		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), SocketName)); err != nil {
+		if _, err := os.Lstat(filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName)); err != nil {
 			t.Errorf("the current socket must stay bound: %v", err)
 		}
 	})
@@ -372,7 +410,6 @@ func (h *coordHarness) restart(t *testing.T, disabled bool, opts ...func(*Config
 		Mail:     h.db,
 		Bus:      h.bus,
 		Peers:    h.peers,
-		PTY:      h.pty,
 		Disabled: disabled,
 		now:      h.now,
 	}
@@ -479,7 +516,7 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 
-	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), SocketName))
+	conn, err := net.Dial("unix", filepath.Join(h.dir, "coord", string(run), coordtransport.SocketName))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -501,5 +538,154 @@ func TestWedgedWriterIsDropped(t *testing.T) {
 		}
 		return // the server dropped the wedged connection
 	}
+
 	t.Fatal("the server never dropped a connection that stopped reading responses")
+}
+
+// missionTransportStub is the mission authority: every run in mission is
+// assigned to one mission and is a peer of the others; every other run is
+// ordinary. HandleAgent fails with err.
+type missionTransportStub struct {
+	err     error
+	mission []domain.RunID
+}
+
+func (m missionTransportStub) Assignment(_ context.Context, run domain.RunID) (protocol.CoordMissionAssignment, error) {
+	if !slices.Contains(m.mission, run) {
+		return protocol.CoordMissionAssignment{}, nil
+	}
+	return protocol.CoordMissionAssignment{MissionID: "mission-1", Capabilities: coordinationCapabilities}, nil
+}
+
+func (m missionTransportStub) Peers(_ context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
+	peers := make([]protocol.CoordPeer, 0, len(m.mission))
+	for _, id := range m.mission {
+		if id != run {
+			peers = append(peers, protocol.CoordPeer{RunID: string(id)})
+		}
+	}
+	return peers, nil
+}
+
+func (m missionTransportStub) HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error) {
+	return nil, m.err
+}
+
+func (m missionTransportStub) ValidateReport(context.Context, domain.RunID) error {
+	return nil
+}
+
+func (m missionTransportStub) ReconcileReport(context.Context, domain.RunID, *store.CoordReport, protocol.EvidencePacket) error {
+	return nil
+}
+
+func TestMissionTransportMapsMissionErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cause    error
+		wantCode int
+	}{
+		"mission": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionIdempotencyConflict),
+			wantCode: protocol.CodeConflict,
+		},
+		"coordination": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrIdempotencyConflict),
+			wantCode: protocol.CodeConflict,
+		},
+		"accepted-revision": {
+			cause:    fmt.Errorf("task revision: %w", store.ErrConflict),
+			wantCode: protocol.CodeConflict,
+		},
+		"unauthorized-integrator": {
+			cause:    fmt.Errorf("%w: integrator lookup: %w", permissions.ErrDenied, store.ErrNotFound),
+			wantCode: protocol.CodeDenied,
+		},
+		"stale-integrator": {
+			cause:    fmt.Errorf("assignment: %w", store.ErrMissionStale),
+			wantCode: protocol.CodeDenied,
+		},
+		"missing-attempt": {
+			cause:    fmt.Errorf("attempt lookup: %w", store.ErrNotFound),
+			wantCode: protocol.CodeNotFound,
+		},
+		"active-retry": {
+			cause:    &protocol.Error{Code: protocol.CodeInvalidState, Message: "worker.retry: attempt remains active"},
+			wantCode: protocol.CodeInvalidState,
+		},
+		"phase": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionPhase),
+			wantCode: protocol.CodeInvalidState,
+		},
+		// A revision the integrator may not accept alone is the same class of
+		// answer as a phase refusal: the call is well-formed, the state says
+		// no until a human decides.
+		"amendment-required": {
+			cause:    fmt.Errorf("wrapped: %w", store.ErrMissionAmendmentRequired),
+			wantCode: protocol.CodeInvalidState,
+		},
+		"real-error": {
+			cause:    errors.New("database unavailable"),
+			wantCode: protocol.CodeInternal,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cause, wantCode := tc.cause, tc.wantCode
+			h := newHarness(t, 1, func(c *Config) {
+				c.Mission = missionTransportStub{err: cause}
+			})
+			ctx := context.Background()
+			h.start()
+			run := h.run(0)
+			if _, err := h.svc.Provision(ctx, run, nil); err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+
+			err := h.dial(t, run).Call(protocol.MethodTaskPropose, protocol.TaskProposeParams{}, nil)
+			var rpcErr *protocol.Error
+			if !errors.As(err, &rpcErr) {
+				t.Fatalf("task.propose error = %v, want protocol error", err)
+			}
+			if rpcErr.Code != wantCode {
+				t.Fatalf("task.propose code = %d, want %d", rpcErr.Code, wantCode)
+			}
+			wantCause := cause.Error()
+			var causeRPC *protocol.Error
+			if errors.As(cause, &causeRPC) {
+				wantCause = causeRPC.Message
+			}
+			if !strings.Contains(rpcErr.Message, wantCause) {
+				t.Fatalf("mission error lost its cause: message %q, want cause %q", rpcErr.Message, wantCause)
+			}
+		})
+	}
+}
+
+// TestMissionMethodWhitelistPlanGate: the allow-list, not the capability
+// advertisement, is what makes a method reachable from a run. The two human
+// decisions are control-channel-only and must stay unreachable from any agent.
+func TestMissionMethodWhitelistPlanGate(t *testing.T) {
+	for _, method := range []string{
+		protocol.MethodMissionQuestionAsk,
+		protocol.MethodMissionClarificationComplete,
+		protocol.MethodMissionPlanShow,
+		protocol.MethodMissionPlanSubmit,
+	} {
+		if !isMissionMethod(method) {
+			t.Errorf("plan gate method %q is not admitted to mission dispatch", method)
+		}
+	}
+	h := newHarness(t, 1)
+	for _, method := range []string{
+		protocol.MethodMissionQuestionAnswer,
+		protocol.MethodMissionPlanDecide,
+	} {
+		if isMissionMethod(method) {
+			t.Errorf("human decision method %q is admitted to mission dispatch", method)
+		}
+		line := []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`)
+		resp := h.svc.handle(context.Background(), h.runs[0].ID, line)
+		if resp.Error == nil || resp.Error.Code != protocol.CodeMethodNotFound {
+			t.Errorf("%s over the agent socket = %+v, want CodeMethodNotFound", method, resp.Error)
+		}
+	}
 }

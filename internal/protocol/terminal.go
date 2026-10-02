@@ -2,8 +2,22 @@ package protocol
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
+)
+
+const (
+	DefaultTerminalHistoryLimit   = 100
+	MaxTerminalHistoryLimit       = 200
+	MaxTerminalHistoryQueryBytes  = 256
+	MaxTerminalHistoryCursorBytes = 1366
+	MaxTerminalHistoryLineBytes   = 64 << 10
+	MaxTerminalHistoryParamsBytes = 4 << 10
+	// MaxTerminalHistoryResultBytes bounds the raw text and cursors in one
+	// result. JSON may escape one input byte as six output bytes; 5 MiB keeps
+	// that worst case below MaxLineBytes with room for the response envelope.
+	MaxTerminalHistoryResultBytes = 5 << 20
 )
 
 // TerminalRequest carries tab selection and terminal dimensions. Follow
@@ -29,6 +43,30 @@ type TerminalImageParams struct {
 // target container.
 type TerminalImageResult struct {
 	Path string `json:"path"`
+}
+
+// TerminalHistoryParams selects one bounded page of a run transcript.
+// Before is an opaque cursor returned by an earlier response.
+type TerminalHistoryParams struct {
+	RunID  string `json:"run_id"`
+	Before string `json:"before,omitempty"`
+	Query  string `json:"query,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// TerminalHistoryLine is one normalized, searchable terminal line.
+type TerminalHistoryLine struct {
+	Cursor string `json:"cursor"`
+	Time   int64  `json:"time"`
+	Text   string `json:"text"`
+}
+
+// TerminalHistoryResult is a newest-first page whose lines are ordered
+// chronologically for direct rendering.
+type TerminalHistoryResult struct {
+	Lines      []TerminalHistoryLine `json:"lines"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+	HasMore    bool                  `json:"has_more"`
 }
 
 // TerminalResponse is the result of a terminal control operation.
@@ -59,14 +97,20 @@ type EnvSaveResult struct {
 }
 
 // TerminalReader decodes the ordered records requested by Framed. Output is
-// streamed into p without allocating a frame-sized buffer; geometry is returned
-// on its own, before the next output record.
+// streamed into p without allocating a frame-sized buffer; geometry and
+// control records are returned before the next output record.
 type TerminalReader struct {
 	Reader    io.Reader
 	remaining uint32
+	// Control is set when Read consumes an ordered control record. The next
+	// Read clears it. Control records do not carry terminal output bytes.
+	Control *DashAttachControl
 }
 
+const maxTerminalControlBytes = 1 << 20
+
 func (r *TerminalReader) Read(p []byte) (n int, geometry [2]uint, err error) {
+	r.Control = nil
 	if len(p) == 0 {
 		return 0, geometry, nil
 	}
@@ -98,6 +142,31 @@ func (r *TerminalReader) Read(p []byte) (n int, geometry [2]uint, err error) {
 				return 0, [2]uint{}, fmt.Errorf("terminal geometry is zero: %v", geometry)
 			}
 			return 0, geometry, nil
+		case 'c':
+			var length [4]byte
+			if _, err = io.ReadFull(r.Reader, length[:]); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return 0, geometry, fmt.Errorf("terminal control length: %w", err)
+			}
+			size := binary.BigEndian.Uint32(length[:])
+			if size > maxTerminalControlBytes {
+				return 0, geometry, fmt.Errorf("terminal control exceeds %d bytes", maxTerminalControlBytes)
+			}
+			payload := make([]byte, size)
+			if _, err = io.ReadFull(r.Reader, payload); err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return 0, geometry, fmt.Errorf("terminal control body: %w", err)
+			}
+			var control DashAttachControl
+			if err = json.Unmarshal(payload, &control); err != nil {
+				return 0, geometry, fmt.Errorf("terminal control JSON: %w", err)
+			}
+			r.Control = &control
+			return 0, geometry, nil
 		default:
 			return 0, geometry, fmt.Errorf("unknown terminal record %q", tag[0])
 		}
@@ -111,6 +180,50 @@ func (r *TerminalReader) Read(p []byte) (n int, geometry [2]uint, err error) {
 		err = io.ErrUnexpectedEOF
 	}
 	return n, geometry, err
+}
+
+// MarshalTerminalControl encodes a server-to-client terminal control record.
+// Outbound results carry has_control explicitly, including false; inbound
+// commands continue to use DashAttachControl's compact omitempty encoding.
+func MarshalTerminalControl(control DashAttachControl) ([]byte, error) {
+	type wire DashAttachControl
+	out := wire(control)
+	out.ResumeID, out.Cursor = legacyTerminalPosition(control.Position, control.ResumeID, control.Cursor)
+	return json.Marshal(struct {
+		wire
+		HasControl bool `json:"has_control"`
+		Cursor     any  `json:"cursor,omitempty"`
+	}{
+		wire:       out,
+		HasControl: control.HasControl,
+		Cursor:     marshalTerminalCursor(out.Cursor),
+	})
+}
+
+// WriteTerminalControl writes an ordered JSON control record.
+func WriteTerminalControl(w io.Writer, control DashAttachControl) error {
+	payload, err := MarshalTerminalControl(control)
+	if err != nil {
+		return err
+	}
+	if uint64(len(payload)) > uint64(maxTerminalControlBytes) {
+		return fmt.Errorf("terminal control exceeds %d bytes", maxTerminalControlBytes)
+	}
+	var header [5]byte
+	header[0] = 'c'
+	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
+	n, err := w.Write(header[:])
+	if err != nil {
+		return err
+	}
+	if n != len(header) {
+		return io.ErrShortWrite
+	}
+	n, err = w.Write(payload)
+	if err == nil && n != len(payload) {
+		err = io.ErrShortWrite
+	}
+	return err
 }
 
 // WriteTerminalOutput writes an output record, reporting only payload bytes.

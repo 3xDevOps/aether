@@ -8,12 +8,14 @@ import (
 	"maps"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // imageUserResolver is the optional runtime capability used to learn the
@@ -202,6 +204,9 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 // base is captured after launch inputs are validated and before the run row is
 // created, so a failed capture leaves no durable or in-memory run state.
 func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	lock := s.workspaceLock(workspace)
+	lock.RLock()
+	defer lock.RUnlock()
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
@@ -223,6 +228,26 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 	if err != nil {
 		return nil, err
+	}
+	// A reserved identity that already has a run is a replay, not a fresh
+	// launch. Its immutable base was captured on the original handoff; a new
+	// fetch could fail (or observe a different base) without changing that run.
+	if opts.AssignedRunID != "" {
+		existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
+		if getErr == nil {
+			requested := &domain.Run{
+				ID: opts.AssignedRunID, WorkspaceID: workspace,
+				MemberID: member, AccountMemberID: account, Task: task,
+				Harness: harness, Mode: mode,
+			}
+			if !sameReservedRun(existing, requested) || (opts.CachedBase != "" && opts.CachedBase != existing.BaseCommit) {
+				return nil, errors.New("scheduler: reserved run does not match launch request")
+			}
+			return s.freshen(ctx, existing), nil
+		}
+		if !errors.Is(getErr, store.ErrNotFound) {
+			return nil, getErr
+		}
 	}
 	s.mu.Lock()
 	bases := s.cfg.Bases
@@ -267,12 +292,19 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		BaseSource:      source,
 		BaseCheckedAt:   base.CheckedAt,
 	}
-	if err := s.cfg.Store.CreateRun(ctx, run); err != nil {
+	if err := createAssignedRun(ctx, s.cfg.Store, run, opts.AssignedRunID); err != nil {
+		if opts.AssignedRunID != "" {
+			existing, getErr := s.cfg.Store.GetRun(ctx, opts.AssignedRunID)
+			if getErr == nil && sameReservedRun(existing, run) && (opts.CachedBase == "" || opts.CachedBase == existing.BaseCommit) {
+				return s.freshen(ctx, existing), nil
+			}
+		}
 		return nil, err
 	}
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
-	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile); err != nil {
+	persistSupervisor := opts.AssignedRunID != ""
+	if err := s.provision(ctx, run, ws, actor, accountMember, argv, profile, persistSupervisor); err != nil {
 		return nil, err
 	}
 	return s.freshen(ctx, run), nil
@@ -284,7 +316,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // the row underneath the in-flight launch. Any error after the row exists
 // marks the run failed ("provisioning: <err>"), or abandoned ("killed")
 // when a kill was accepted meanwhile.
-func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile) error {
+func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	entry := &supervised{
 		runID:       run.ID,
 		workspaceID: run.WorkspaceID,
@@ -309,14 +341,14 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		return err
 	}
 	run.Status = domain.RunProvisioning
-	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile); err != nil {
+	if err := s.provisionSteps(ctx, entry, run, ws, actor, account, argv, profile, persistSupervisor); err != nil {
 		s.failProvisioning(run, actor.ID, err)
 		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
 	}
 	return nil
 }
 
-func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile) error {
+func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor, account *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
 	if err != nil {
 		return fmt.Errorf("create checkout: %w", err)
@@ -341,6 +373,14 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if ownErr := s.applyRunOwnership(ws, run, plan.Mounts, plan.User); ownErr != nil {
 		return fmt.Errorf("apply run ownership: %w", ownErr)
 	}
+	var native harness.NativeLaunch
+	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
+		run.Mode == domain.LaunchTUI && run.Task != "" {
+		native, err = profile.PrepareNativeLaunch(coordtransport.MountDir, argv, plan.Env)
+		if err != nil {
+			return fmt.Errorf("prepare native coordination: %w", err)
+		}
+	}
 	// Recorded before coordination is provisioned, because the co-author
 	// list written there already leaves this address out: the agent's own
 	// commits carry it, so telling the agent to credit it would make it
@@ -349,15 +389,24 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	entry.gitAuthorEmail = actor.GitIdentity().Email
 	s.mu.Unlock()
 	// Coordination assets are Aether-owned container surfaces and are appended
-	// after the environment plan's validated workspace mounts.
-	coordMounts, coordArgs, coordEnv := s.coordinationMounts(ctx, entry, run, profile)
+	// after the environment plan's validated workspace mounts. Staging errors
+	// are provisioning errors: never create a container that lacks the CLI.
+	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile, native)
+	if coordErr != nil {
+		return coordErr
+	}
 	plan.Mounts = append(plan.Mounts, coordMounts...)
+	if len(coordMounts) > 0 {
+		ensureCoordinationCLIPath(plan.Env)
+	}
 	argv = append(argv, coordArgs...)
+	argv = native.Command(argv)
 	// Last, so the server's value wins over the workspace's for the same
 	// reason Profile.Env's does: what the server needs the container to
 	// have is not a preference.
 	maps.Copy(plan.Env, coordEnv)
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan))
+	maps.Copy(plan.Env, native.Env)
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}

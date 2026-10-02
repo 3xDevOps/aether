@@ -1,6 +1,8 @@
 import { clampDockHeight } from '@/components/dock'
 import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import type {
+  ConfigExclusion,
+  ConfigImportResult,
   LinkRepoResult,
   RepoFastForwardResult,
   RepoPushResult,
@@ -9,6 +11,43 @@ import type { SliceCreator } from '@/store/slice'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type GroupBy = 'status' | 'member'
+export type BoardView = 'cards' | 'map'
+
+export interface BoardMapViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export const minBoardMapZoom = 0.02
+export const maxBoardMapZoom = 2
+
+export function normalizeBoardMapViewport(value: unknown): BoardMapViewport | null {
+  if (!value || typeof value !== 'object') return null
+  const { x, y, zoom } = value as BoardMapViewport
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(zoom) ||
+    zoom <= 0
+  ) return null
+  return {
+    x: Math.max(-10_000_000, Math.min(10_000_000, x)),
+    y: Math.max(-10_000_000, Math.min(10_000_000, y)),
+    zoom: Math.max(minBoardMapZoom, Math.min(maxBoardMapZoom, zoom)),
+  }
+}
+
+export function normalizeBoardMapViewports(value: unknown): Record<string, BoardMapViewport> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const viewports: [string, BoardMapViewport][] = []
+  for (const [scope, candidate] of Object.entries(value)) {
+    const viewport = normalizeBoardMapViewport(candidate)
+    if (viewport) viewports.push([scope, viewport])
+  }
+  return Object.fromEntries(viewports)
+}
+
 /** The three things an update banner can be about. */
 export type UpdateKind = 'cli' | 'server' | 'shell'
 
@@ -84,6 +123,16 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 export const minSidebarWidth = 320
 export const maxSidebarWidth = 520
 
+export interface ConfigImportStatus {
+  owner: string | null
+  basename: string
+  totalFiles: number
+  excluded: ConfigExclusion[]
+  phase: 'reading' | 'uploading' | 'complete'
+  result: ConfigImportResult
+  unknownPaths: string[]
+}
+
 export interface UiSlice {
   theme: Theme
   sidebarWidth: number
@@ -99,12 +148,6 @@ export interface UiSlice {
    * back - several times a minute on a phone.
    */
   diffWrap: boolean | null
-  /**
-   * Whether the member has ever taken control of a run. Until they have, the
-   * Terminal tab says what the default attach is, because nothing else on
-   * screen distinguishes a read-only mirror from a steered session.
-   */
-  terminalControlTaken: boolean
   onboarded: boolean
   onboardingStep: OnboardingStep
   /**
@@ -116,7 +159,8 @@ export interface UiSlice {
   onboardingFurthest: OnboardingStep
   onboardingWorkspace: string
   onboardingRepo: OnboardingRepo | null
-  onboardingImportPending: boolean
+  configImportPending: boolean
+  configImportStatus: ConfigImportStatus | null
   /** What the First run step has typed but not launched. It lives here so a
    * jump to another step and back does not throw the draft away. */
   onboardingFirstRun: OnboardingFirstRun
@@ -127,6 +171,8 @@ export interface UiSlice {
    */
   activeWorkspace: string
   groupBy: GroupBy
+  boardView: BoardView
+  boardMapViewports: Record<string, BoardMapViewport>
   /**
    * The last harness successfully used for each agent account. This is a
    * preference, not run state: it survives run cleanup and gives a launch
@@ -146,7 +192,6 @@ export interface UiSlice {
   setRunDockHeight: (height: number) => void
   setTerminalFontSize: (size: number) => void
   setDiffWrap: (wrap: boolean) => void
-  markTerminalControlTaken: () => void
   toggleSidebar: () => void
   setOnboarded: (onboarded: boolean) => void
   setOnboardingStep: (step: OnboardingStep) => void
@@ -155,6 +200,8 @@ export interface UiSlice {
   setOnboardingFirstRun: (draft: OnboardingFirstRun) => void
   setActiveWorkspace: (workspaceID: string) => void
   setGroupBy: (groupBy: GroupBy) => void
+  setBoardView: (view: BoardView) => void
+  setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
   rememberHarness: (accountID: string, harness: string) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
@@ -170,16 +217,18 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   runDockHeight: 240,
   terminalFontSize: defaultTerminalFontSize,
   diffWrap: null,
-  terminalControlTaken: false,
   onboarded: false,
   onboardingStep: 'Link',
   onboardingFurthest: 'Link',
   onboardingWorkspace: '',
   onboardingRepo: null,
-  onboardingImportPending: false,
+  configImportPending: false,
+  configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
   activeWorkspace: '',
   groupBy: 'status',
+  boardView: 'cards',
+  boardMapViewports: {},
   lastHarnessByAccount: {},
   route: { name: 'board', params: {} },
   dismissedUpdates: { cli: '', server: '', shell: '' },
@@ -192,7 +241,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
   setRunDockHeight: (height) => set({ runDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size) }),
   setDiffWrap: (diffWrap) => set({ diffWrap }),
-  markTerminalControlTaken: () => set({ terminalControlTaken: true }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setOnboarded: (onboarded) =>
     set(
@@ -221,6 +269,14 @@ export const createUiSlice: SliceCreator<UiSlice> = (set, get) => ({
           : s.route,
     })),
   setGroupBy: (groupBy) => set({ groupBy }),
+  setBoardView: (boardView) => set({ boardView }),
+  setBoardMapViewport: (scope, value) => {
+    const viewport = normalizeBoardMapViewport(value)
+    if (!viewport) return
+    set((s) => ({
+      boardMapViewports: { ...s.boardMapViewports, [scope]: viewport },
+    }))
+  },
   rememberHarness: (accountID, harness) => {
     if (!accountID || !harness) return
     set((s) => ({

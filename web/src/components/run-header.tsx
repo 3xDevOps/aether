@@ -65,7 +65,7 @@ export function RunHeader({
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-3 py-1 sm:px-4">
           <div className="col-start-1 row-start-1 flex min-w-0 items-start gap-2">
             <h1
-              className="min-w-0 flex-1 break-words text-[15px] font-semibold leading-5 text-foreground"
+              className="line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-semibold leading-5 text-foreground"
               title={label}
             >
               {label}

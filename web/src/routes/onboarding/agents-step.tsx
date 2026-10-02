@@ -26,7 +26,7 @@ import {
   GitHubSection,
   githubSubStep,
 } from '@/routes/onboarding/github-connect'
-import { ProfileImport } from '@/routes/onboarding/profile-import'
+import { ProfileImport } from '@/components/profile-import'
 import type { Capability } from '@/store/hooks'
 
 

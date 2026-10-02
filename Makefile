@@ -23,6 +23,22 @@ DIST := dist
 BUN  := bun
 NODE := node
 
+# The companion carries Chromium, its OS libraries and fonts. No host browser
+# or display service participates. Keep these limits aligned with server
+# admission and internal/runtime/docker_browser.go.
+BROWSER_IMAGE ?= aether/browser:test
+BROWSER_RUN = docker run --rm --init --user 1000:1000 \
+	--network none --ipc private --shm-size 256m --read-only \
+	--cap-drop ALL --security-opt no-new-privileges=true \
+	--security-opt 'seccomp=$(CURDIR)/internal/runtime/browser_seccomp.json' \
+	--cpus 1 --memory 1g --memory-swap 1g --pids-limit 256 \
+	--tmpfs /tmp:rw,nosuid,nodev,size=536870912,mode=1777 \
+	--entrypoint node '$(BROWSER_IMAGE)'
+
+# The aether-edge image, built for this machine's architecture with the
+# build arguments the release passes. docs/edge.md, "In a container".
+EDGE_IMAGE ?= aether/edge:test
+
 # The Go version go.mod pins: the `toolchain` line when it names one, else the
 # `go` directive. `toolchain default` is legal and names no version, so only a
 # goX.Y value counts. Assigned lazily - only `lint` reads it.
@@ -39,9 +55,14 @@ INTEGRATION_PKGS = $(filter-out $(INTEGRATION_SKIP),$(shell \
   grep -rl --include='*_test.go' -E '^//go:build .*integration' . \
   | xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u))
 
-# Release matrix. The server is Linux-only by design (see the v1 cut-line);
-# the CLI additionally ships for macOS and Windows clients.
+# Every package, minus TEST_SKIP. Assigned lazily - only `test` reads it. CI
+# shards the unit tests by setting TEST_PKGS or TEST_SKIP.
+TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|.|'))
+
+# Release matrix. The server and the edge are Linux-only by design (see the
+# v1 cut-line); the CLI additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
+EDGE_PLATFORMS   := linux/amd64 linux/arm64
 CLI_PLATFORMS    := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 # Windows release inputs. The client's PE carries a VERSIONINFO resource, an
@@ -118,21 +139,39 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build test test-integration test-e2e test-scripts vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
+.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint vulncheck fmt-check public-audit dashboard android android-debug release deploy clean
 
 all: build
 
 build: dashboard
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(DIST)/ ./cmd/aether-server ./cmd/aether
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(DIST)/ ./cmd/aether-server ./cmd/aether ./cmd/aether-edge
+
+browser-image:
+	docker build --tag '$(BROWSER_IMAGE)' --file images/browser/Dockerfile .
+
+edge-image:
+	docker build --tag '$(EDGE_IMAGE)' --file images/edge/Dockerfile \
+		--build-arg VERSION='$(VERSION)' --build-arg COMMIT='$(COMMIT)' .
+
+# A working Ubuntu kernel/user-namespace AppArmor policy is a prerequisite;
+# sandbox failures fail this gate, never trigger an unconfined fallback.
+# Run the exact image intended for publication, without source/home mounts.
+browser-smoke:
+	$(BROWSER_RUN) /opt/aether-browser/smoke.mjs
+	$(BROWSER_RUN) --test /opt/aether-browser/companion.test.mjs
 
 test:
-	go test -race ./...
+	go test -race $(TEST_PKGS)
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
-# carry them - the unit tests are `make test`'s job. CI shards it: set
-# INTEGRATION_PKGS to run one package, INTEGRATION_SKIP to run all but some.
+# carry them - the unit tests are `make test`'s job. CI shards it with
+# INTEGRATION_PKGS, INTEGRATION_SKIP, INTEGRATION_RUN, and
+# INTEGRATION_SKIP_PATTERN. The run and skip patterns are optional; they are
+# quoted so the shell does not interpret their metacharacters.
 test-integration:
-	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS)
+	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS) \
+		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
+		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on
@@ -144,13 +183,22 @@ test-e2e: build
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
-# a real host, or a real release.
+# a real host, or a real release. edge-nginx-test.sh runs a real nginx on
+# loopback when one is installed, and skips otherwise.
 test-scripts:
 	sh scripts/install-test.sh
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
+	sh scripts/ci-classify-changes-test.sh
+	sh scripts/ci-classify-edge-test.sh
+	sh scripts/edge-go-version-test.sh
+	sh scripts/edge-nginx-test.sh
+
+# Native adapter lifecycle regressions use Node 22.13+ built-ins only.
+test-native-hooks:
+	$(NODE) --experimental-vm-modules --test internal/coordhooks/native_pi_omp_lifecycle_test.mjs internal/coordhooks/native_opencode_lifecycle_test.mjs internal/agentstatus/native_opencode_v2_status_test.mjs
 
 vet:
 	go vet ./...
@@ -259,6 +307,14 @@ release: dashboard
 		name=aether-server-$$os-$$arch; out=$(DIST)/$$name; \
 		echo "building $$out"; \
 		( CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-server \
+			>"$$job_dir/$$name.log" 2>&1 ) & \
+		pids="$$pids $$!"; jobs="$$jobs $$name"; \
+	done; \
+	for platform in $(EDGE_PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		name=aether-edge-$$os-$$arch; out=$(DIST)/$$name; \
+		echo "building $$out"; \
+		( CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/aether-edge \
 			>"$$job_dir/$$name.log" 2>&1 ) & \
 		pids="$$pids $$!"; jobs="$$jobs $$name"; \
 	done; \

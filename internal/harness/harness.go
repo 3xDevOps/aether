@@ -7,15 +7,15 @@
 // login state (persisted per member under <data>/homes/<member-id>/ and
 // bind-mounted read-write into every run), an explicit numeric uid:gid
 // mapping for images whose configured user is named rather than numeric,
-// whether the harness can be pointed at an MCP server config at launch (how
-// conflict coordination reaches the agent; see docs/mcp-bridge.md).
+// and the short runtime-scoped discovery mechanism that points the agent at
+// the staged coordination CLI. Lifecycle status reporting remains a
+// separate per-launch profile capability.
 //
 // The registry is a map and a few functions, not a plugin system.
 
 package harness
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
 	"path"
@@ -29,10 +29,20 @@ import (
 // TaskPlaceholder is replaced by the run's task prompt in argv templates.
 const TaskPlaceholder = "{task}"
 
+// DiscoveryInstruction points to live run identity, available capabilities, and
+// any assignment. It carries no authority, identity, or task details.
+const (
+	DiscoveryInstruction = "Use `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. Use only available capabilities and report only what you verified."
+	DiscoveryFileName    = "discovery.md"
+	// developer_instructions is the Codex config key for additional
+	// instructions; model_instructions_file would replace built-ins.
+	codexDiscoverySetting = "developer_instructions=\"" + DiscoveryInstruction + "\""
+)
+
 // CoordPlaceholder is replaced by the container path of the run's
-// coordination directory in StatusArgs. The directory is where the server
-// writes the harness's status-reporter asset, and a profile must not have
-// to know the mount point.
+// coordination directory in per-launch profile arguments and environment.
+// The directory is where the server writes the harness's runtime assets, and
+// a profile must not have to know the mount point.
 const CoordPlaceholder = "{aether}"
 
 // Reporter says how much the harness's status reporter can tell the
@@ -270,12 +280,22 @@ type Profile struct {
 	// text into the editor" and need a second one to send. Empty means
 	// the default single Enter; see SteerSuffix.
 	SteerSubmit string
-	// MCPConfigFlag is the harness's flag for a server-supplied MCP server
-	// config file (Claude Code's "--mcp-config"). Set means the harness can
-	// be pointed at the in-container coordination bridge at launch; empty
-	// means it has no MCP registration and conflict coordination degrades
-	// to the overlap notice alone.
-	MCPConfigFlag string
+	// DiscoveryArgs are appended to a supported taskless interactive
+	// launch so the harness loads the short runtime-scoped discovery hint.
+	// CoordPlaceholder stands for the coordination directory inside the
+	// container.
+	DiscoveryArgs []string
+	// DiscoveryEnv is the environment form of DiscoveryArgs for a harness
+	// such as opencode that has no startup flag for instruction files.
+	DiscoveryEnv map[string]string
+	// DiscoveryFiles are read-only assets written into the coordination
+	// directory before a taskless interactive container exists, keyed by
+	// the file name they take there.
+	DiscoveryFiles map[string][]byte
+	// NativeCoordination enables the shipped run-scoped mailbox integration.
+	// The scheduler applies it only to coordinated interactive runs with a task.
+	// Overrides never inherit this capability from a registry name.
+	NativeCoordination bool
 	// Reporter is how much this harness's status reporter can say.
 	Reporter Reporter
 	// StatusArgs are appended to an interactive launch so the harness runs
@@ -336,10 +356,10 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".claude"},
 		LocalRoot:       ".claude",
 		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
-		MCPConfigFlag:   "--mcp-config",
+		DiscoveryArgs:   []string{"--append-system-prompt", DiscoveryInstruction},
 		// Claude Code runs a command on every lifecycle event a settings
-		// file registers a hook for, and --settings merges one more
-		// settings document over the member's own for this launch alone.
+		// file registers, and --settings merges one more settings document
+		// over the member's own for this launch alone.
 		Reporter:      ReporterFull,
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
@@ -353,6 +373,10 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".codex"},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
+		// Codex's developer_instructions config key is a one-launch
+		// additional developer instruction, unlike model_instructions_file
+		// which replaces the vendor's built-in instructions.
+		DiscoveryArgs: []string{"-c", codexDiscoverySetting},
 		// Codex runs an external program when a turn completes, and a -c
 		// override points it at the reporter for this launch alone. It
 		// says nothing when the next turn starts, so the run comes back
@@ -373,12 +397,14 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".pi"},
 		LocalRoot:       ".pi",
 		// pi stores provider keys and OAuth tokens under ~/.pi/agent/.
-		DenyNames: []string{"auth.json", "oauth.json"},
+		DenyNames:     []string{"auth.json", "oauth.json"},
+		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
 		// pi loads an extension with -e, and the one Aether ships reports
 		// every start and stop of a turn.
-		Reporter:    ReporterFull,
-		StatusArgs:  []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
-		StatusFiles: map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		Reporter:           ReporterFull,
+		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "command -v npm >/dev/null 2>&1 && npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent",
 	},
@@ -393,11 +419,13 @@ var profiles = map[string]Profile{
 		LocalRoot:       ".omp",
 		// omp keeps provider keys and OAuth tokens in the SQLite database
 		// under ~/.omp/agent/, so the write-ahead log holds them too.
-		DenyNames:     []string{"agent.db", "agent.db-wal", "agent.db-shm"},
-		Reporter:      ReporterFull,
-		StatusArgs:    []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
-		StatusFiles:   map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
-		InstallScript: "curl -fsSL https://omp.sh/install | sh",
+		DenyNames:          []string{"agent.db", "agent.db-wal", "agent.db-shm"},
+		DiscoveryArgs:      []string{"--append-system-prompt", DiscoveryInstruction},
+		Reporter:           ReporterFull,
+		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		NativeCoordination: true,
+		InstallScript:      "curl -fsSL https://omp.sh/install | sh",
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -413,14 +441,22 @@ var profiles = map[string]Profile{
 		// opencode has no flag for a plugin, but it merges the inline JSON
 		// config in OPENCODE_CONFIG_CONTENT over the member's own and
 		// concatenates the plugin lists, so naming the reporter there adds
-		// it to whatever the member already loads. It reports both ends of
-		// a turn: session.status busy and session.idle.
+		// it to whatever the member already loads. It reports both ends
+		// of a turn: session.status busy and session.idle.
 		Reporter: ReporterFull,
 		StatusEnv: map[string]string{
 			"OPENCODE_CONFIG_CONTENT": `{"plugin":["file://` + CoordPlaceholder + "/" + agentstatus.OpenCodePluginName + `"]}`,
 		},
-		StatusFiles:   map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
-		InstallScript: "curl -fsSL https://opencode.ai/install | bash",
+		StatusFiles:        map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
+		NativeCoordination: true,
+		// OpenCode discovers instruction files from its merged config.
+		// Discovery must also work without the lifecycle reporter. The
+		// scheduler combines these independent config overlays when both apply.
+		DiscoveryEnv: map[string]string{
+			"OPENCODE_CONFIG_CONTENT": `{"instructions":["` + CoordPlaceholder + "/" + DiscoveryFileName + `"]}`,
+		},
+		DiscoveryFiles: map[string][]byte{DiscoveryFileName: []byte(DiscoveryInstruction + "\n")},
+		InstallScript:  "curl -fsSL https://opencode.ai/install | bash",
 	},
 	"custom": {Name: "custom"},
 }
@@ -429,6 +465,16 @@ var profiles = map[string]Profile{
 func Lookup(name string) (Profile, bool) {
 	p, ok := profiles[name]
 	return p, ok
+}
+
+// SubmitSequence returns the bytes that end terminal input for the named
+// harness: its profile's SteerSuffix, or a single Enter for a harness with
+// no shipped profile.
+func SubmitSequence(name string) string {
+	if p, ok := Lookup(name); ok {
+		return p.SteerSuffix()
+	}
+	return "\r"
 }
 
 // Profiles lists the shipped profiles sorted by name.
@@ -476,15 +522,32 @@ func Argv(template []string, task string) []string {
 	return out
 }
 
-// MCPArgs are the arguments appended to a run's launch command so the
-// harness loads the MCP server config at configPath, a container-side
-// path. Nil for a harness with no MCP registration: it is launched exactly
-// as before and sees only the overlap notice.
-func (p Profile) MCPArgs(configPath string) []string {
-	if p.MCPConfigFlag == "" || configPath == "" {
+// DiscoveryLaunchArgs renders DiscoveryArgs, the startup arguments appended
+// to a supported taskless interactive launch, with CoordPlaceholder replaced
+// by dir, the container path of the coordination directory. Nil for a
+// harness whose discovery mechanism is environment- or file-based instead.
+func (p Profile) DiscoveryLaunchArgs(dir string) []string {
+	if len(p.DiscoveryArgs) == 0 || dir == "" {
 		return nil
 	}
-	return []string{p.MCPConfigFlag, configPath}
+	out := make([]string, 0, len(p.DiscoveryArgs))
+	for _, a := range p.DiscoveryArgs {
+		out = append(out, strings.ReplaceAll(a, CoordPlaceholder, dir))
+	}
+	return out
+}
+
+// DiscoveryLaunchEnv renders DiscoveryEnv, the environment variables a
+// supported taskless interactive launch needs to load its runtime guidance.
+func (p Profile) DiscoveryLaunchEnv(dir string) map[string]string {
+	if len(p.DiscoveryEnv) == 0 || dir == "" {
+		return nil
+	}
+	out := make(map[string]string, len(p.DiscoveryEnv))
+	for name, value := range p.DiscoveryEnv {
+		out[name] = strings.ReplaceAll(value, CoordPlaceholder, dir)
+	}
+	return out
 }
 
 // StatusLaunchArgs renders StatusArgs, the arguments appended to an
@@ -506,8 +569,9 @@ func (p Profile) StatusLaunchArgs(dir string) []string {
 
 // StatusLaunchEnv renders StatusEnv, the environment variables an
 // interactive run needs for the harness to load its reporter, with
-// CoordPlaceholder replaced by dir, the container path of the coordination
-// directory. Nil for a harness whose reporter needs no environment.
+// CoordPlaceholder replaced by dir, the container path of the
+// coordination directory. Nil for a harness whose reporter needs no
+// environment.
 func (p Profile) StatusLaunchEnv(dir string) map[string]string {
 	if len(p.StatusEnv) == 0 || dir == "" {
 		return nil
@@ -517,26 +581,6 @@ func (p Profile) StatusLaunchEnv(dir string) map[string]string {
 		out[name] = strings.ReplaceAll(value, CoordPlaceholder, dir)
 	}
 	return out
-}
-
-// MCPConfig renders the config file MCPArgs points a harness at: the
-// standard mcpServers document naming one stdio server. It is written into
-// the run's coordination directory by the server, never into the worktree
-// or the member's synced profile.
-func MCPConfig(name, command string, args ...string) ([]byte, error) {
-	type stdioServer struct {
-		Type    string   `json:"type"`
-		Command string   `json:"command"`
-		Args    []string `json:"args,omitempty"`
-	}
-	doc := struct {
-		Servers map[string]stdioServer `json:"mcpServers"`
-	}{Servers: map[string]stdioServer{name: {Type: "stdio", Command: command, Args: args}}}
-	out, err := json.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("harness: render MCP config for %q: %w", name, err)
-	}
-	return out, nil
 }
 
 // HomeDir is the container-side home directory for a resolved run user:

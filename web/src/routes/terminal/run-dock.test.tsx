@@ -1,356 +1,144 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { lookupRoute } from '@/routes/registry'
-import '@/routes/terminal'
-import type { RunStatus } from '@/lib/types'
-import type * as apiModule from '@/lib/api'
-import type * as attachModule from '@/routes/terminal/attach'
+import { api } from '@/lib/api'
+import type { DevTerminal } from '@/lib/types'
+import { RunDock } from '@/routes/terminal/run-dock'
 import { useStore } from '@/store'
-import {
-  initialRunShellDock,
-  type RunShellDockState,
-  unregisterShellSocket,
-} from '@/store/terminal'
+import { initialRunShellDock, unregisterShellSocket } from '@/store/terminal'
 import { run } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
-const replayGateCalls = vi.hoisted(() => ({ starts: 0, unmutes: 0 }))
-
-vi.mock('@/routes/terminal/attach', async (importOriginal) => {
-  const actual = await importOriginal<typeof attachModule>()
-  return {
-    ...actual,
-    replayGate: (
-      write: (chunk: Uint8Array, done?: () => void) => void,
-      onReplaying?: (replaying: boolean) => void,
-    ) => {
-      const gate = actual.replayGate(write, onReplaying)
-      return {
-        ...gate,
-        start: () => {
-          replayGateCalls.starts++
-          gate.start()
-        },
-        unmute: () => {
-          replayGateCalls.unmutes++
-          gate.unmute()
-        },
-      }
-    },
-  }
-})
-
-vi.mock('@/lib/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof apiModule>()
-  const { fakeApi } = await import('@/test/fixtures')
-  return {
-    ...actual,
-    api: {
-      ...fakeApi(),
-      attachShellSocket: (runID: string, tab: string) =>
-        `ws://localhost/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,
-    },
-  }
-})
-
-function mount({
-  runID = 'run_1',
-  dock = {},
-  status = 'running',
-}: { runID?: string; dock?: Partial<RunShellDockState>; status?: RunStatus } = {}) {
-  const View = lookupRoute('terminal')
-  if (!View) throw new Error('terminal route not registered')
-  useStore.getState().upsertRun(run({ id: runID, status }))
-  useStore.setState({
-    terminals: {},
-    pausedRuns: { [runID]: false },
-    // The dock ships collapsed; these cases are about what it shows open.
-    shellDocks: { [runID]: { ...initialRunShellDock, collapsed: false, ...dock } },
-  })
-  return render(<View params={{ runId: runID }} />)
+const process: DevTerminal = {
+  terminal_id: 'command-1', incarnation: 'process-1', name: 'Agent command',
+  cols: 73, rows: 19, process: { state: 'running' },
 }
-beforeEach(() => {
-  replayGateCalls.starts = 0
-  replayGateCalls.unmutes = 0
-  for (const runID of ['run_1', 'run_2']) {
-    for (const tab of ['t1', 't2', 't3', 't4']) unregisterShellSocket(runID, tab)
-  }
-  StubSocket.install()
-})
 
+beforeEach(() => {
+  StubSocket.install()
+  useStore.getState().upsertRun(run())
+  useStore.setState({ pausedRuns: { run_1: false }, shellDocks: {
+    run_1: { ...initialRunShellDock, collapsed: false },
+  } })
+  vi.spyOn(api, 'devTerminalList').mockResolvedValue({ terminals: [process] })
+  vi.spyOn(api, 'devTerminalStart').mockResolvedValue({ terminal: process })
+  vi.spyOn(api, 'devControlStatus').mockResolvedValue({
+    surface: { kind: 'terminal', id: process.terminal_id, incarnation: process.incarnation },
+    controller: null,
+  })
+  vi.spyOn(api, 'devTerminalResize').mockResolvedValue({ terminal: process, screen_revision: 1, geometry_revision: 1 })
+  vi.spyOn(api, 'devTerminalInput').mockResolvedValue({ accepted: true })
+  vi.spyOn(api, 'devTerminalStop').mockResolvedValue({ terminal: { ...process, process: { state: 'stopped' } }, stopped: true, timed_out: false })
+})
 afterEach(() => {
+  unregisterShellSocket('run_1', process.terminal_id)
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
-describe('run-shell dock', () => {
-  it('opens a forced writable shell tab for a stalled live run', async () => {
-    const view = mount({ status: 'needs-attention' })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-
-    const socket = StubSocket.opened[1]
-    expect(socket.url).toBe('ws://localhost/ws/attach/run_1?shell=t1')
-    act(() => socket.onopen?.())
-    expect(socket.frames()[0]).toMatchObject({ write: true })
-    view.unmount()
+async function attach(write = false, replay = '') {
+  await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(0))
+  const socket = StubSocket.last()
+  act(() => {
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({
+      ok: true, cols: 73, rows: 19, replay: new TextEncoder().encode(replay).length,
+      terminal_id: process.terminal_id, incarnation: process.incarnation,
+      server_owned_responder: true, has_control: write, control_generation: 7,
+    }) })
+    if (replay) socket.onmessage?.({ data: new TextEncoder().encode(replay).buffer })
   })
+  return socket
+}
 
-  it('shows the fixed refusal sentence and does not reconnect on denied shells', async () => {
-    const view = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
+it('discovers an agent command without creating a process or resizing a watcher', async () => {
+  const view = render(<RunDock runID="run_1" />)
+  const socket = await attach(false, '\x1b[?1049h\x1b[H共有 λ界')
+  expect(socket.frames()[0]).toMatchObject({ incarnation: 'process-1', follow: true })
+  expect(socket.frames()[0]).not.toHaveProperty('write')
+  await waitFor(() => expect(view.container.querySelector('.xterm-rows')?.textContent).toContain('共有 λ界'))
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  expect(api.devTerminalResize).not.toHaveBeenCalled()
+  view.unmount()
+})
 
-    const socket = StubSocket.opened[1]
-    act(() => {
-      socket.onopen?.()
-      socket.onmessage?.({
-        data: JSON.stringify({ ok: false, code: -32001, error: 'permission denied' }),
-      })
-    })
+it('hides and rejoins the same incarnation without stopping or restarting it', async () => {
+  const view = render(<RunDock runID="run_1" />)
+  const first = await attach()
+  fireEvent.click(screen.getByRole('button', { name: 'Hide terminal' }))
+  expect(first.closed).toBe(true)
+  expect(api.devTerminalStop).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: /Show Agent command/ }))
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+  const second = await attach()
+  expect(second.frames()[0]).toMatchObject({ incarnation: 'process-1' })
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  view.unmount()
+})
 
-    const refusal = screen.getByText('You can view this run but not open a shell in it')
-    expect(refusal).toBeDefined()
-    // The refusal disposes the terminal that had the keyboard. Left on
-    // <body>, the reader's next keystroke would reach the shell's shortcuts
-    // and leave the run.
-    expect(document.activeElement).toBe(refusal)
-    await waitFor(
-      () => expect(StubSocket.opened).toHaveLength(2),
-      { timeout: 100 },
-    )
-    view.unmount()
+it('requires confirmed authority before resizing or stopping a process', async () => {
+  const view = render(<RunDock runID="run_1" />)
+  await attach()
+  expect((screen.getByRole('button', { name: 'Stop terminal' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Take shell control' }))
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+  expect(api.devTerminalResize).not.toHaveBeenCalled()
+  await attach(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Stop terminal' }))
+  expect(api.devTerminalStop).not.toHaveBeenCalled()
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm stop' }))
+  await waitFor(() => expect(api.devTerminalStop).toHaveBeenCalledWith(expect.objectContaining({
+    terminal_id: process.terminal_id, incarnation: process.incarnation, control_generation: 7,
+  })))
+  view.unmount()
+})
+
+it('keeps ended command terminals discoverable without attaching or rerunning them', async () => {
+  vi.mocked(api.devTerminalList).mockResolvedValue({ terminals: [{ ...process, process: { state: 'exited', exit_code: 23 } }] })
+  const view = render(<RunDock runID="run_1" />)
+  await screen.findByRole('tab', { name: /Agent command.*exited/ })
+  expect((screen.getByRole('button', { name: 'Stop terminal' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(StubSocket.opened).toHaveLength(0)
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  view.unmount()
+})
+
+it('refuses an ACK for a replacement incarnation rather than parsing its output', async () => {
+  const view = render(<RunDock runID="run_1" />)
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(1))
+  const socket = StubSocket.last()
+  act(() => {
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({
+      ok: true, terminal_id: process.terminal_id, incarnation: 'replacement', server_owned_responder: true,
+    }) })
   })
+  expect(socket.closed).toBe(true)
+  expect(api.devTerminalResize).not.toHaveBeenCalled()
+  expect(api.devTerminalStart).not.toHaveBeenCalled()
+  view.unmount()
+})
 
-  it('removes a tab when the shell socket closes normally', async () => {
-    const view = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
-    act(() => StubSocket.opened[1].onclose?.({ code: 1000 }))
-
-    expect(useStore.getState().shellDocks.run_1.tabs).toEqual([])
-    // The last shell exiting disposes the terminal that had the keyboard, so
-    // the body it leaves behind takes it rather than <body>.
-    expect(document.activeElement).toBe(
-      screen.getByRole('button', { name: 'Open shell' }).parentElement,
-    )
-    view.unmount()
-  })
-
-  it('rebinds a persistent shell after the terminal route remounts', async () => {
-    const first = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(StubSocket.last().url).toContain('?shell=t1'))
-    const shell = StubSocket.last()
-    act(() => {
-      shell.onopen?.()
-      shell.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
-    })
-    first.unmount()
-
-    const second = mount({
-      dock: { tabs: ['t1'], activeTab: 't1', collapsed: false },
-    })
-    const shellsBeforeReopen = () =>
-      StubSocket.opened.filter((socket) => socket.url.includes('?shell=t1'))
-    await waitFor(() => expect(shellsBeforeReopen()).toHaveLength(2))
-    const reopened = shellsBeforeReopen()[1]
-    act(() => {
-      reopened.onopen?.()
-      reopened.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 2, resume_id: 'pty-incarnation-shell' }) })
-      reopened.onmessage?.({ data: new TextEncoder().encode('remounted shell').buffer })
-    })
-
-    await vi.waitFor(() =>
-      expect(
-        [...document.querySelectorAll('.xterm-rows')].some((rows) =>
-          rows.textContent?.includes('remounted shell'),
-        ),
-      ).toBe(true),
-    )
-    second.unmount()
-  })
-  it('starts shell replay muting and hiding before the first replay frame', async () => {
-    const view = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
-    const shell = StubSocket.opened[1]
-
-    act(() => {
-      shell.onopen?.()
-      shell.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 3, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }),
-      })
-    })
-    expect(replayGateCalls.starts).toBe(1)
-    expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeDefined()
-    const terminalDockElement = screen.getByRole('region', { name: 'Terminal dock' })
-    const host = terminalDockElement.querySelector(
-      '.min-h-0.flex-1.bg-background',
-    ) as HTMLElement
-    expect(host.style.visibility).toBe('hidden')
-
-    act(() => {
-      shell.onmessage?.({ data: new TextEncoder().encode('out').buffer })
-    })
-    expect(replayGateCalls.starts).toBe(1)
-
-    await waitFor(() =>
-      expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull(),
-    )
-    expect(host.style.visibility).toBe('')
-    view.unmount()
-  })
-  it('ignores late callbacks from a prior run sharing the active shell tab', async () => {
-    const View = lookupRoute('terminal')
-    if (!View) throw new Error('terminal route not registered')
-    const first = mount({
-      runID: 'run_1',
-      dock: { tabs: ['t1'], activeTab: 't1', collapsed: false },
-    })
-    const shellFor = (runID: string) =>
-      StubSocket.opened.find((socket) => socket.url.includes(`/attach/${runID}?shell=t1`))
-    await waitFor(() => expect(shellFor('run_1')).toBeDefined())
-    const oldShell = shellFor('run_1')
-    act(() => {
-      oldShell?.onopen?.()
-      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
-    })
-
-    useStore.getState().upsertRun(run({ id: 'run_2' }))
-    useStore.setState({
-      terminals: {},
-      pausedRuns: { run_1: false, run_2: false },
-      shellDocks: {
-        run_1: { ...initialRunShellDock, tabs: ['t1'], activeTab: 't1', collapsed: false },
-        run_2: { ...initialRunShellDock, tabs: ['t1'], activeTab: 't1', collapsed: false },
-      },
-    })
-    first.rerender(<View params={{ runId: 'run_2' }} />)
-
-    await waitFor(() => expect(shellFor('run_2')).toBeDefined())
-    const currentShell = shellFor('run_2')
-    act(() => {
-      currentShell?.onopen?.()
-      currentShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
-      currentShell?.onmessage?.({ data: new TextEncoder().encode('B output').buffer })
-      // These events belong to run_1, but arrive after run_2 accepted t1.
-      oldShell?.onmessage?.({ data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' }) })
-      oldShell?.onmessage?.({ data: new TextEncoder().encode('A output').buffer })
-      oldShell?.onclose?.({ code: 1000 })
-    })
-
-    await vi.waitFor(() =>
-      expect(
-        [...document.querySelectorAll('.xterm-rows')].some((rows) =>
-          rows.textContent?.includes('B output'),
-        ),
-      ).toBe(true),
-    )
-    expect(screen.queryByRole('status')).toBeNull()
-    expect(useStore.getState().shellDocks.run_2.tabs).toEqual(['t1'])
-    expect(currentShell?.closed).toBe(false)
-    first.unmount()
-  })
-
-  it('keeps late background callbacks away from the active shell and refusal', async () => {
-    const view = mount({
-      dock: { tabs: ['t1', 't2'], activeTab: 't1', collapsed: false },
-    })
-    const terminalDock = within(screen.getByRole('region', { name: 'Terminal dock' }))
-    const shellsFor = (tab: string) =>
-      StubSocket.opened.filter((socket) => socket.url.includes(`?shell=${tab}`))
-    const accepted = JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 1, resume_id: 'pty-incarnation-shell' })
-    const denied = JSON.stringify({ ok: false, code: -32001, error: 'write denied' })
-
-    await waitFor(() => expect(shellsFor('t1')).toHaveLength(1))
-    const firstActive = shellsFor('t1')[0]
-    act(() => {
-      firstActive?.onopen?.()
-      firstActive?.onmessage?.({ data: accepted })
-    })
-
-    fireEvent.click(screen.getByRole('tab', { name: 't2' }))
-    await waitFor(() => expect(shellsFor('t2')).toHaveLength(1))
-    const background = shellsFor('t2')[0]
-    act(() => {
-      background?.onopen?.()
-      background?.onmessage?.({ data: accepted })
-    })
-
-    fireEvent.click(screen.getByRole('tab', { name: 't1' }))
-    await waitFor(() => expect(shellsFor('t1')).toHaveLength(2))
-    const active = shellsFor('t1')[1]
-    act(() => {
-      active?.onopen?.()
-      active?.onmessage?.({ data: accepted })
-    })
-    expect(terminalDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeDefined()
-
-    const lateBackgroundMessage = background?.onmessage
-    act(() => lateBackgroundMessage?.({ data: denied }))
-    expect(background?.closed).toBe(true)
-    act(() => lateBackgroundMessage?.({ data: accepted }))
-    expect(terminalDock.getByRole('toolbar', { name: 'Terminal controls' })).toBeDefined()
-
-    const activeMessage = active?.onmessage
-    act(() =>
-      activeMessage?.({
-        data: JSON.stringify({ ok: false, code: -32002, error: 'active backend refusal' }),
-      }),
-    )
-    expect(terminalDock.getByText('active backend refusal')).toBeDefined()
-    expect(active?.closed).toBe(true)
-    act(() => lateBackgroundMessage?.({ data: accepted }))
-    expect(terminalDock.getByText('active backend refusal')).toBeDefined()
-    expect(terminalDock.queryByRole('toolbar', { name: 'Terminal controls' })).toBeNull()
-    view.unmount()
-  })
-
-
-  it('reconnects as a mirror after control loss until the user takes over', async () => {
-    const view = mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Open shell' }))
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(2))
-
-    const shell = StubSocket.opened[1]
-    act(() => {
-      shell.onopen?.()
-      shell.onmessage?.({
-        data: JSON.stringify({ ok: true, replay: 0, has_control: true, control_generation: 3, resume_id: 'pty-incarnation-shell' }),
-      })
-      shell.onclose?.({ code: 1008, reason: 'control taken over' })
-    })
-
-    expect(screen.getByText('Read-only shell. Another session controls this run.')).toBeDefined()
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(3))
-    const mirror = StubSocket.opened[2]
-    act(() => {
-      mirror.onopen?.()
-    })
-    expect(mirror.frames()[0]).not.toHaveProperty('write')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Take shell control' }))
-    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThanOrEqual(4))
-    const takeover = StubSocket.opened[3]
-    act(() => {
-      takeover.onopen?.()
-    })
-    expect(takeover.frames()[0]).toMatchObject({ write: true, takeover: true })
-    view.unmount()
-  })
-  it('waits for pause state instead of offering a rejected shell', () => {
-    const view = mount({ status: 'needs-attention' })
-    act(() => useStore.setState({ pausedRuns: {} }))
-
-    expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
-    expect(screen.getByText('Run shell unavailable: waiting for the run pause state.')).toBeDefined()
-    view.unmount()
-  })
-
-  it('does not offer shell tabs after a completed run loses its container', () => {
-    const view = mount({ status: 'completed' })
-
-    expect(screen.queryByRole('button', { name: 'Open shell' })).toBeNull()
-    expect(screen.getByText(/Run shell unavailable/)).toBeDefined()
-    view.unmount()
-  })
+it.each(['detach', 'rejection'])('drops the unsent remainder of a paste after %s', async (boundary) => {
+  let finish!: (value: { accepted: boolean }) => void
+  let reject!: (reason: Error) => void
+  const pending = new Promise<{ accepted: boolean }>((resolve, fail) => { finish = resolve; reject = fail })
+  vi.mocked(api.devTerminalInput).mockReturnValueOnce(pending)
+  const view = render(<RunDock runID="run_1" />)
+  await attach()
+  fireEvent.click(screen.getByRole('button', { name: 'Take shell control' }))
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+  await attach(true)
+  await waitFor(() => expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull())
+  const input = view.container.querySelector('.xterm-helper-textarea')!
+  fireEvent.paste(input, { clipboardData: { getData: () => 'x'.repeat(5000) } })
+  await waitFor(() => expect(api.devTerminalInput).toHaveBeenCalledTimes(1))
+  if (boundary === 'detach') {
+    fireEvent.click(screen.getByRole('button', { name: 'Hide terminal' }))
+    await act(async () => { finish({ accepted: true }); await pending })
+  } else {
+    await act(async () => { reject(new Error('Control was fenced')); await pending.catch(() => {}) })
+    expect((await screen.findByRole('alert')).textContent).toContain('Control was fenced')
+  }
+  expect(api.devTerminalInput).toHaveBeenCalledTimes(1)
+  expect(api.devTerminalStop).not.toHaveBeenCalled()
+  view.unmount()
 })

@@ -18,7 +18,7 @@ immediate cleanup.
 | `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept before the GC reclaims it. Negative disables the GC. |
-| `--run-container-ttl` | `1h` | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `1h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `168h` (7 days) | How long an explicitly closed TUI run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
 | `--min-free-disk` | `1GiB` (`1073741824`) | Free bytes below which new runs are refused. Negative disables the floor. |
 
 They are also `server.Config` fields (`StallThreshold`, `PollInterval`,
@@ -148,6 +148,100 @@ Prefer these read-only probes and preserve the original state for diagnosis.
 
 ## What happens, per failure
 
+### Worker launch timeouts and mirror failures
+
+A `worker.start` response timing out (`-32004`) does **not** prove that launch
+stopped. Mission launch uses a service-owned context; its durable attempt and
+reserved run ID survive the request. Replay the same start command with the
+**same dispatch key** to retrieve that attempt, then use `worker list` or
+`worker inspect` to observe it. Do not switch keys to work around an unknown
+result: the original attempt can still launch and hold concurrency.
+
+Before creating a run, strict base capture refreshes a configured mirror.
+A failed fetch never silently substitutes the previously accepted commit.
+An `unknown` attempt with a mirror `last_error` is recoverable, not proof of a
+dead worker: mission reconciliation can retry its original reserved run after
+the cause is fixed. Replaying an already-created reserved run returns its
+original pinned base without requiring another upstream fetch.
+
+Inspect and repair the mirror from an administrator's CLI:
+
+```sh
+aether workspace mirror status --workspace <workspace>
+# Fix the reported cause on the server or at the upstream, then:
+aether workspace mirror refresh --workspace <workspace>
+aether workspace mirror status --workspace <workspace>
+```
+
+The diagnostic distinguishes DNS/connectivity failures from authentication,
+TLS/CA configuration, invalid Git URL rewrites, local permissions, and disk
+space failures. In older versions, Git's generic `unable to access` wrapper
+was classified as `offline` even for local or TLS failures; that old label
+alone cannot establish a network outage. Operator-facing errors expose only
+allowlisted diagnostics; raw Git output can contain secrets and remains in the
+internal error cause, not in the public attempt or mirror status.
+
+Check DNS and outbound access **from the server**, not just the worker or your
+laptop. For TLS failures, repair the server Git trust configuration rather than
+disabling certificate verification. For deploy-key failures, verify source
+access, key-file permissions, and the pinned host key. Review repository-local
+Git URL rewrites if the configured source looks correct but fetching fails.
+Refresh again only after addressing the cause. A rewritten or diverged upstream
+requires review and explicit candidate adoption; do not disable mirror
+protection merely to force a launch.
+
+After repair, inspect the original attempt before any retry. If it is still
+launching, running, or unknown and holds concurrency, either let reconciliation
+settle it or use the normal authorized cancel operation and observe the settled
+state before retrying. Cancellation and takeover authority are unchanged.
+Only a launch path that explicitly supports `--cached-base <sha>` may use a
+human-approved, unchanged accepted commit; mission worker recovery does not
+automatically consent to a stale base.
+
+### Integrator launch failures
+
+`mission.create` stores the mission in `planning` and reserves its integrator
+run ID before it launches that run. When the launch fails, the mission is
+kept and the create error names it. Which error you get depends on whether
+the scheduler wrote the run row before failing:
+
+```
+mission <mission-id> exists but its integrator run <run-id> did not launch; the server retries the launch periodically, follow it with aether swarm show <mission-id>: <cause>
+mission <mission-id> exists but its integrator run <run-id> failed to start; replace it with aether swarm replace-integrator <mission-id> --agent <harness> or from the Missions page, or read it with aether swarm show <mission-id>: <cause>
+```
+
+With no run row, mission reconciliation retries the launch of the reserved
+run on its periodic pass and logs each failure as `mission: recover
+integrator` with the mission ID and the cause. Repeating `mission.create`
+with the same contents and idempotency key also retries the launch, and
+returns the same mission. The Missions page shows `The integrator run has not
+started.` for that mission, and `aether swarm show <mission-id>` prints the
+error as `launch error:`.
+`mission.show` and `mission.list` carry the last launch error in
+`integrator_launch_error` and the time it was first seen in
+`integrator_launch_error_at`; both clear once the run is live (a row that
+failed while provisioning keeps them) or the integrator is replaced.
+`mission.replace-integrator` reports a failed launch of the new run with the
+same two errors and records it the same way.
+
+A run row that failed while provisioning is not retried, and a same-key
+`mission.create` returns the mission without launching again. The Missions
+page shows that the integrator run has exited. Fix the cause, then use
+**Replace integrator** to launch a new integrator run.
+
+Reconciliation only relaunches an integrator run whose row never existed.
+Once the row exists, `mission.show` reports `integrator_run_launched: true`,
+and deleting that run does not bring it back, not even through a same-key
+`mission.create`, which then returns the mission unchanged, as it does for
+a cancelled swarm. Use **Replace integrator** to start a new one, or, before
+the plan is approved, cancel the swarm.
+
+Upgrading to the server version that added `integrator_run_launched` marks
+every existing swarm's integrator as launched, so the upgrade relaunches
+nothing, including an integrator run deleted before the upgrade. An older
+swarm whose integrator never launched therefore stays unlaunched; use
+**Replace integrator** to start it.
+
 ### Container wait errors
 
 An error from Docker while waiting is inconclusive: it does not prove that
@@ -223,6 +317,18 @@ commits and publishes the branch, records `completed` for a clean exit or
 run remains available for review and an authorized member may close it as
 merged or abandoned, but neither headless status is relaunchable.
 
+Mission-assigned integrator and worker runs keep that same persistent supervisor
+even in headless mode, so a one-shot harness exit does not destroy the container
+or mark the run completed. They stay until Close, Kill, a successful worker
+report, or worker cancel.
+
+Mission recovery also loads durable objectives and their bounded worker
+attempts. If the initial mission inventory scan fails, `aether-server serve`
+reports `server: start service mission: mission: recover durable state: <cause>`
+and exits instead of deferring the failed scan to periodic recovery. The
+underlying store error is preserved; fix that cause before restarting.
+Saved missions and attempt reservations are not deleted.
+
 ### TUI lifecycle and relaunch
 
 For `--mode tui`, container PID 1 supervises the harness. After any normal
@@ -242,8 +348,9 @@ aether close <run> --outcome abandoned
 Closing a live TUI run pauses its container, commits and publishes the current
 checkout, records the selected outcome, and retains the exact container,
 checkout, run row, member account, and coordination surfaces for
-`--run-container-ttl`. Zero uses the default `1h`; a negative TTL disables
-retention and cleans up immediately. Kill stops and destroys a run immediately.
+`--run-container-ttl`. Zero uses the default `168h` (7 days); negative TTL
+disables retention and cleans up immediately. Kill stops and destroys a run
+immediately.
 Delete stops any live container and removes the checkout, transcript, and
 durable run records; its timeline remains audit history. Its recorded cost
 survives inside its workspace's and its member's spend totals - the numbers
@@ -325,7 +432,62 @@ working, which is what you need to actually clear space.
 If the filesystem cannot be read at all, the floor allows the run: the guard
 exists to stop a disk from filling, not to stop the server.
 
-### Launch freshness and mirror failures
+### Candidate assembly, verification, and delivery
+
+Candidate work has its own durable lifecycle and is independent of the source
+run's checkout and evidence row. Preparation creates the candidate aggregate
+before allocating resources, then records each completed input copy as it
+retains the exact evidence Git revision and, when available, a bounded
+transcript artifact. Packet snapshots are bounded to 1 MiB total per
+candidate. A source packet may expire or be deleted after that ownership
+transfer; the candidate validates its own refs, transcript checksums, and
+metadata instead of trusting the original packet or run row.
+
+Candidate inputs are applied in order in a server-owned isolated checkout.
+When a cherry-pick conflicts, the journal and checkout remain in the
+`conflicted` state for explicit file resolutions. The candidate does not
+freeze until every retained input has applied; after freezing, the candidate
+revision and inputs are immutable. A required source that is unavailable or
+truncated refuses preparation. If an owned ref, transcript, or checksum is
+missing later, the candidate becomes `unavailable` and verification and
+delivery are blocked; Aether does not silently rebuild it from an expired
+source.
+
+Verification is asynchronous and finite. The server persists the runtime
+creation key before creating a container, runs the exact requested argv
+against a disposable copy of the frozen revision, bounds retained output to
+64 KiB per verification (at most 2 MiB across 32 verification records) while
+continuing to drain it, and checks the tree after all child processes stop. A
+timeout, cancellation, runtime failure, or source change is never a pass.
+A restart reconciles persisted creation keys, destroys any
+discovered verification container, removes its disposable checkout, and marks
+an interrupted attempt as an error; it never reruns the command or invents an
+exit code. Cleanup failures leave the verification record and recoverable
+resources for a later retry.
+
+Delivery claims its request durably before touching Git. A local workspace
+target uses an atomic expected-old compare-and-swap. A mirrored target cannot
+be updated directly: a proposal transaction creates the public
+`refs/heads/aether/proposal-<request-id>` ref and a private receipt while
+leaving the upstream-owned mirror base unchanged. A database failure after a
+successful Git transaction is reconciled from that exact private receipt, not
+by guessing from the target's current value; retrying therefore does not
+duplicate a delivery. The public proposal remains available for the human's
+normal fetch/push review route.
+
+Candidate lifetime is 30 days. Verification validity is 24 hours, and a
+delivery request cannot outlive its candidate or its selected verifications.
+Expiry and deletion first fence new actions and persist the transition, then
+destroy runtime/checkouts and remove candidate-private refs and transcript
+copies. Public proposal refs are transport artifacts and are not removed by
+candidate-private cleanup. Tombstone metadata is retained for at most 30 days
+so retries and cleanup can be reconciled without keeping source artifacts.
+If the transition or preservation step fails, Aether keeps recoverable
+resources and retries cleanup rather than deleting evidence silently. See
+[teams.md](teams.md#candidate-integration) for the operator-facing flow and
+[integration.md](integration.md) for the method-level contract.
+
+## Launch freshness and mirror failures
 
 Launch freshness is server-owned. Before a run row, checkout or container
 exists, the scheduler captures the workspace base. A configured workspace

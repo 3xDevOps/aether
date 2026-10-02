@@ -52,9 +52,9 @@ export const RECHECK_MS = 30 * 60 * 1000
 
 /**
  * Whether the desktop app was built by a different CLI than the one serving
- * this gateway. Both sides have to be known: a browser tab has no shell at
- * all, and a gateway that predates the capabilities field reports no
- * version, and neither of those is a mismatch.
+ * this local gateway. Both sides have to be known: a browser tab has no
+ * shell at all, and a gateway that predates the capabilities field reports
+ * no version. Release tags alone carry an optional leading "v".
  */
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
@@ -174,7 +174,7 @@ export function UpdateBanners({ client = api }: { client?: Api } = {}) {
           the CLI it was built by is replaced, which is the flow this
           notice exists for and the one where no update is available any
           more. */}
-      <ShellBanner />
+      {serves && <ShellBanner />}
       {serves && update && (
         <CliBanner update={update} client={client} recheck={recheck} />
       )}

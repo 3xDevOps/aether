@@ -60,6 +60,10 @@ func (d *DB) CreateEvidencePacket(ctx context.Context, p *EvidencePacket) error 
 	if err != nil {
 		return fmt.Errorf("store: create evidence packet unresolved facts: %w", err)
 	}
+	captures, err := marshalCollaborationJSON(p.Captures, "[]")
+	if err != nil {
+		return fmt.Errorf("store: create evidence packet captures: %w", err)
+	}
 	id, created, err := prepareCreate(p.CreatedAt)
 	if err != nil {
 		return err
@@ -98,12 +102,12 @@ func (d *DB) CreateEvidencePacket(ctx context.Context, p *EvidencePacket) error 
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 	res, err := tx.ExecContext(ctx, `INSERT INTO evidence_packets (`+evidencePacketCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (origin_kind, origin_id, run_id, idempotency_key) DO NOTHING`,
 		id, p.WorkspaceID, p.RunID, origin.Kind, origin.ID, p.OwnerID, p.CreatorID, p.PublicationOwner,
 		p.Trigger, p.Objective, capturedAt, expiresAt, p.Availability, expiredAt,
 		p.EventBoundary, p.BaseRevision, p.RetainedRevision, changed, sources, related,
-		unresolved, p.NextAction, p.Provenance, p.IdempotencyKey, createdAt, updatedAt)
+		unresolved, p.NextAction, p.Provenance, p.IdempotencyKey, createdAt, updatedAt, captures, p.VerificationNotes)
 	if err != nil {
 		return fmt.Errorf("store: create evidence packet: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -440,6 +444,15 @@ func (d *DB) ListEvidenceStaging(ctx context.Context, before time.Time, limit in
 	return items, nil
 }
 
+func (d *DB) ListRunEvidenceStaging(ctx context.Context, run domain.RunID, limit int) ([]*EvidenceStaging, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT id, workspace_id, run_id, origin_kind, origin_id, creator_id, idempotency_key, expires_at, created_at
+		FROM evidence_staging WHERE run_id = ? ORDER BY id LIMIT ?`, run, normalizeCollaborationLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, scanEvidenceStaging)
+}
+
 func (d *DB) DeleteEvidenceStaging(ctx context.Context, id string) error {
 	if _, err := d.db.ExecContext(ctx, `DELETE FROM evidence_staging WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("store: delete evidence staging: %w", err)
@@ -482,12 +495,12 @@ func scanEvidencePacket(row interface{ Scan(...any) error }) (*EvidencePacket, e
 		originID, ownerID                               string
 		eventBoundary, capturedAt, createdAt, updatedAt int64
 		expiresAt, expiredAt                            *int64
-		changed, sources, related, unresolved           sql.NullString
+		changed, sources, related, unresolved, captures sql.NullString
 	)
 	if err := row.Scan(&p.ID, &p.WorkspaceID, &p.RunID, &originKind, &originID, &ownerID, &p.CreatorID,
 		&p.PublicationOwner, &p.Trigger, &p.Objective, &capturedAt, &expiresAt, &p.Availability, &expiredAt, &eventBoundary,
 		&p.BaseRevision, &p.RetainedRevision, &changed, &sources, &related, &unresolved, &p.NextAction,
-		&p.Provenance, &p.IdempotencyKey, &createdAt, &updatedAt); err != nil {
+		&p.Provenance, &p.IdempotencyKey, &createdAt, &updatedAt, &captures, &p.VerificationNotes); err != nil {
 		return nil, err
 	}
 	p.Origin = EvidenceOrigin{Kind: originKind, ID: originID}
@@ -507,6 +520,7 @@ func scanEvidencePacket(row interface{ Scan(...any) error }) (*EvidencePacket, e
 		{sources, &p.Sources},
 		{related, &p.RelatedRoomMessageIDs},
 		{unresolved, &p.UnresolvedFacts},
+		{captures, &p.Captures},
 	} {
 		if !item.raw.Valid || item.raw.String == "" {
 			continue

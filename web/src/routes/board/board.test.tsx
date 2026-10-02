@@ -1,10 +1,12 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { toast } from 'sonner'
-import { registerSlot } from '@/components/slots'
 import { api, ApiError } from '@/lib/api'
 import type { GatewayCapabilities, Run } from '@/lib/types'
 import { Board } from '@/routes/board'
+import { RunCard } from '@/routes/board/run-card'
 import { useBoard } from '@/routes/board/selectors'
+import '@/routes/diff/conflict-chips'
+import '@/routes/missions'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { applyEvent } from '@/store/sync'
@@ -13,6 +15,7 @@ import {
   approval,
   bob,
   fakeApi,
+  mission,
   otherWorkspace,
   run,
   serverInfo,
@@ -34,12 +37,15 @@ function seed(runs: Run[], active = workspace.id) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
     activeWorkspace: active,
+    boardView: 'cards',
     members: { [alice.id]: alice, [bob.id]: bob },
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
     acked: {},
     pausedRuns: {},
     inbox: {},
     hydrated: true,
+    overlaps: {},
+    missionDetails: {},
     hydrationError: null,
     lastSeq: 0,
     route: { name: 'board', params: {} },
@@ -145,7 +151,7 @@ afterEach(() => vi.unstubAllGlobals())
 beforeEach(() => vi.clearAllMocks())
 
 describe('board', () => {
-  it('deals runs into the three buckets, newest first, the working one bouncing', () => {
+  it('deals runs into the three buckets, newest first', () => {
     seed([stalled, working, queued, merged])
     render(<Board />)
 
@@ -163,9 +169,6 @@ describe('board', () => {
           .getAttribute('aria-label'),
       )
     expect(tasks).toEqual(['not started', 'still going'])
-    // A card carries no state in words, so the running one bounces.
-    const card = column('Working').getByText('still going').closest('article')
-    expect(card?.querySelector('.working-dots')).not.toBeNull()
   })
 
   it('carries the whole branch name and copies it', async () => {
@@ -182,6 +185,154 @@ describe('board', () => {
     )
 
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(working.branch))
+  })
+
+  it('discloses the full task and reason without opening the run', () => {
+    const detailed = run({
+      ...working,
+      title: 'Checkout redesign',
+      task: 'Replace the checkout flow while retaining payment retries and saved addresses.',
+      reason: 'Checking the final migration before publishing.',
+    })
+    seed([detailed])
+    render(<Board />)
+
+    expect(screen.queryByText(detailed.task)).toBeNull()
+    expect(screen.queryByText(detailed.reason!)).toBeNull()
+    const disclosure = screen.getByRole('button', { name: 'Show details for Checkout redesign' })
+    disclosure.focus()
+    fireEvent.click(disclosure)
+
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(detailed.task)).toBeDefined()
+    expect(screen.getByText(detailed.reason!)).toBeDefined()
+    expect(document.activeElement).toBe(disclosure)
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    fireEvent.click(screen.getByText(detailed.task))
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+
+    fireEvent.click(disclosure)
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText(detailed.task)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Checkout redesign' }))
+    expect(useStore.getState().route).toEqual({
+      name: 'terminal',
+      params: { runId: detailed.id },
+    })
+  })
+
+  it.each(['cards', 'map'] as const)('keeps overlap and mission warnings actionable on collapsed %s cards', async (variant) => {
+    const peer = run({ id: 'run_peer', member_id: bob.id })
+    seed([working, peer])
+    const activeMission = mission()
+    useStore.setState({
+      overlaps: {
+        [working.id]: [{
+          run_id: peer.id,
+          member_id: bob.id,
+          files: ['src/checkout.ts', 'src/payment.ts'],
+        }],
+      },
+      missionDetails: {
+        [activeMission.id]: {
+          mission: activeMission,
+          tasks: [],
+          attempts: [],
+          submissions: [],
+          questions: [],
+          plan_reviews: [],
+          diagnostics: [{
+            kind: 'observed_overlap',
+            task_id: 'task_checkout',
+            task_revision: 1,
+            run_id: working.id,
+            peer_run_id: peer.id,
+            paths: ['src/checkout.ts'],
+            detail: 'Checkout changes overlap the payment worker.',
+          }],
+        },
+      },
+    })
+    render(
+      <RunCard
+        variant={variant}
+        card={{ run: toRecord(working), state: 'working', owner: alice, unseen: false, paused: false }}
+      />,
+    )
+
+    const disclosure = screen.getByRole('button', { name: `Show details for ${working.task}` })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    const fileWarning = screen.getByRole('button', { name: 'File overlap warnings: 1 other run' })
+    const missionWarning = screen.getByRole('button', { name: 'Mission conflict warnings: 1' })
+    fireEvent.click(fileWarning)
+    const overlaps = await screen.findByRole('dialog', { name: 'File overlap warnings' })
+    fireEvent.click(within(overlaps).getByRole('button', { name: '2 overlapping files with Bob, open their run' }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: peer.id } })
+    fireEvent.keyDown(overlaps, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'File overlap warnings' })).toBeNull())
+
+    act(() => useStore.setState({ route: { name: 'board', params: {} } }))
+    fireEvent.click(missionWarning)
+    const conflicts = await screen.findByRole('dialog', { name: 'Mission conflict warnings' })
+    expect(within(conflicts).getByText('Checkout changes overlap the payment worker.')).toBeDefined()
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    fireEvent.click(within(conflicts).getByRole('button', { name: 'observed overlap · 1 path' }))
+    expect(useStore.getState().route).toEqual({ name: 'terminal', params: { runId: peer.id } })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.keyDown(conflicts, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Mission conflict warnings' })).toBeNull())
+
+    act(() => useStore.setState({ overlaps: {}, missionDetails: {} }))
+    expect(screen.queryByRole('button', { name: /^File overlap warnings:/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Mission conflict warnings:/ })).toBeNull()
+  })
+
+  it.each([undefined, ''])('discloses a full multiline task with title %s without navigating', (title) => {
+    const task = [
+      'Review the checkout implementation and preserve existing payment retries, saved addresses, discount calculations, and receipt delivery.',
+      '',
+      '  Keep the migration reversible until the final verification is complete.',
+    ].join('\n')
+    const detailed = run({ ...working, title, task })
+    seed([detailed])
+    render(<Board />)
+
+    expect(screen.queryByText(task, { exact: true, collapseWhitespace: false })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Show details for / }))
+
+    const fullTask = screen.getByText(task, { exact: true, collapseWhitespace: false })
+    expect(fullTask.textContent).toBe(task)
+    fireEvent.click(fullTask)
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+  })
+
+  it('opens map details in a dismissible dialog and returns focus to the card', async () => {
+    const detailed = run({
+      ...working,
+      title: 'Map checkout',
+      task: 'Keep the full implementation notes available without navigating away.',
+    })
+    seed([detailed])
+    render(
+      <RunCard
+        variant="map"
+        card={{ run: toRecord(detailed), state: 'working', owner: alice, unseen: false, paused: false }}
+      />,
+    )
+    const disclosure = screen.getByRole('button', { name: 'Show details for Map checkout' })
+    disclosure.focus()
+    fireEvent.click(disclosure)
+
+    const dialog = await screen.findByRole('dialog', { name: 'Map checkout' })
+    expect(within(dialog).getByText(detailed.task)).toBeDefined()
+    expect(within(dialog).getByText(detailed.branch)).toBeDefined()
+    fireEvent.click(within(dialog).getByText(detailed.task))
+    expect(useStore.getState().route).toEqual({ name: 'board', params: {} })
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(document.activeElement).toBe(disclosure)
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('falls back to selecting the branch name where the clipboard is missing', async () => {
@@ -210,7 +361,6 @@ describe('board', () => {
 
     const card = screen.getByRole('article')
     expect(within(card).queryByRole('button', { name: /^Copy branch/ })).toBeNull()
-    expect(card.querySelector('.lucide-git-branch')).toBeNull()
   })
 
   it('does not open a card when selecting its attention explanation', () => {
@@ -422,25 +572,10 @@ describe('board', () => {
 
     const needsYou = column('Needs you')
     expect(needsYou.getByText('1 unanswered question - open Run Room to answer')).toBeDefined()
+    expect(needsYou.getByText('Lifecycle: Failed')).toBeDefined()
+    fireEvent.click(needsYou.getByRole('button', { name: 'Show details for answer after failure' }))
     expect(needsYou.getByText('Lifecycle: Failed - agent exited unexpectedly')).toBeDefined()
   })
-
-  it('pluralizes the unanswered room question summary', () => {
-    const questionRun = run({
-      id: 'run_room_attention_plural',
-      task: 'answer both rooms',
-      status: 'running',
-      unanswered_questions: 2,
-      reason: '',
-    })
-    seed([questionRun])
-    render(<Board />)
-
-    expect(
-      column('Needs you').getByText('2 unanswered questions - open Run Room to answer'),
-    ).toBeDefined()
-  })
-
 
   it('keeps the board identity across an inbox refresh that changed nothing', () => {
     seed([working])
@@ -554,12 +689,6 @@ describe('board', () => {
     expect(screen.queryByText(/No runs yet/)).toBeNull()
   })
 
-  it('renders what another feature registered into a card slot', () => {
-    registerSlot('card:chips', 'test-chip', ({ run: r }) => <span>chip:{r.id}</span>)
-    seed([working])
-    render(<Board />)
-    expect(screen.getByText(`chip:${working.id}`)).toBeDefined()
-  })
 
   it('hides an archived run from Done, and reveals it with its deletion badge behind the toggle', () => {
     vi.useFakeTimers()

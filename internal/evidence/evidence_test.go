@@ -186,6 +186,22 @@ func (s *evidenceTestStore) ListEvidenceStaging(_ context.Context, before time.T
 	return out, nil
 }
 
+func (s *evidenceTestStore) ListRunEvidenceStaging(_ context.Context, run domain.RunID, limit int) ([]*store.EvidenceStaging, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*store.EvidenceStaging
+	for _, staged := range s.staging {
+		if staged.RunID == run {
+			copy := *staged
+			out = append(out, &copy)
+			if len(out) == limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *evidenceTestStore) DeleteEvidenceStaging(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -16,11 +16,13 @@ import { cn, focusRing } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { Land } from '@/routes/diff/land'
 import { parsePatch } from '@/routes/diff/parse'
+import { NativeChanges } from '@/routes/diff/native-changes'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { ReviewCommands } from '@/routes/diff/review-commands'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { runTabPanel } from '@/routes/terminal/tabs'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import {
   initialDiff,
   intervalKey,
@@ -38,6 +40,7 @@ import {
  * shown that way, and is not selectable.
  */
 function DiffView({ params }: RouteProps) {
+  const caps = useCapability()
   const runID = params.runId
   const run = useStore((s) => s.runs[runID])
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
@@ -83,8 +86,9 @@ function DiffView({ params }: RouteProps) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <RunHeader run={run} subtitle={run.branch} active="diff" />
-      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col')}>
+      <div {...runTabPanel('diff', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden')}>
         <Land run={run} />
+        {caps.hasMethod('run.git.status') && <NativeChanges key={runID} run={run} wrap={wrap} />}
 
         <div className="shrink-0 bg-sidebar">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2 text-[12px] text-muted-foreground">
@@ -168,7 +172,7 @@ function DiffView({ params }: RouteProps) {
         )}
         <div
           className={cn(
-            'grid min-h-0 min-w-0 flex-1 grid-cols-1 overflow-hidden',
+            'grid min-h-0 min-w-0 flex-none grid-cols-1 md:flex-1 md:overflow-hidden',
             !hidden && 'md:grid-cols-[14rem_minmax(0,1fr)]',
           )}
         >

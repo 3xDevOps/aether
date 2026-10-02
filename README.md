@@ -101,7 +101,7 @@ handoff all call the same methods the CLI does, with the same permission checks
 and timeline attribution. The server-hosted dashboard also exposes the shared
 member-home **Files** editor through the same authenticated RPCs.
 A live TUI run closed as merged or abandoned keeps its exact run row, container
-and checkout for `--run-container-ttl` (default `1h`); relaunch reopens that
+and checkout for `--run-container-ttl` (default `7 days`); relaunch reopens that
 retained Done run before expiry rather than creating a new run or container.
 Expired or unavailable runs cannot relaunch.
 Launch freshness is server-owned: before a run row exists, the server captures
@@ -114,8 +114,13 @@ pre-launch operation.
 ## Supported agents
 
 Aether does not install agents - install the agent CLI in your member
-environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
-[docs/environments.md](docs/environments.md).
+environment terminal. Built-in launch profiles cover Claude Code, Codex, pi,
+OMP, and OpenCode; other CLIs can use a custom launch definition. Native
+idle wake is available through loaded pi, OMP, and version-matched OpenCode
+integrations; command-hook integrations deliver at the next supported
+boundary instead. Neither a send receipt nor a wake acknowledges mail.
+See [per-harness setup and limits](docs/harnesses.md) and
+[member environments](docs/environments.md).
 
 ## Documentation
 
@@ -124,9 +129,11 @@ environment terminal. See [docs/harnesses.md](docs/harnesses.md) and
 | [Quickstart](docs/quickstart.md) | Zero to a finished run in ten minutes. |
 | [Install](docs/install.md) | The install script, systemd, upgrades, data layout. |
 | [Environments](docs/environments.md) | Member images, saving, resetting, and persistence. |
-| [Networking](docs/networking.md) | Tailscale-first keyless setup, plus LAN and VPN. |
+| [Networking](docs/networking.md) | Tailscale, the edge relay, and plain LAN or VPN. |
+| [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub sign-in, and running your own edge as a binary or a container. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
 | [Harnesses](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
+| [Harness integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |
 | [Adapters](docs/adapters.md) | Adding a harness profile or an output adapter. |
 | [Security](docs/security.md) | What the container boundary does and does not do. |
 | [Privacy](docs/privacy.md) | What the Android app and the dashboard store and send. |
@@ -149,6 +156,7 @@ development server.
 make build            # static dashboard export, then both binaries into dist/
 make test             # unit tests, race detector on
 make test-integration # integration tests; needs real Docker and git
+make test-native-hooks # native adapter lifecycle regressions; Node.js 22.13+
 make release          # cross-compile the full release matrix
 ```
 

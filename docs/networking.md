@@ -5,11 +5,14 @@ reach the server's SSH port.** Git transport, the control channel, event
 streams, PTY attach and the dashboard forward all multiplex over that one
 connection. The server opens no HTTP port unless you set `web-port`, and that
 one listens on the host's tailnet addresses only - see
-[The dashboard](#the-dashboard).
+[The dashboard](#the-dashboard). Through an edge the server opens no port at
+all: it dials out.
 
 How you make that port reachable is up to you. Tailscale is the recommended
 answer, and it is also the recommended identity layer, because it removes SSH
-key management entirely.
+key management entirely. When neither side can reach the other, an **edge**
+relays the SSH connection instead: server and client both dial out to it, and
+you sign in with GitHub - see [Through an edge](#through-an-edge).
 
 ---
 
@@ -127,6 +130,38 @@ server user, `sudo tailscale set --operator=<user>`.
 
 ---
 
+## Through an edge
+
+An edge is a relay both the server and your client dial out to, so neither
+needs an open port, a tailnet or a copied SSH key. The project runs one at
+`https://edge.onaether.dev`, and `aether-server setup` turns it on when the
+host has no tailscaled. SSH still runs end to end: the edge splices bytes and
+cannot read them. You sign in once with GitHub and link the server
+by its id:
+
+```sh
+aether login
+aether link --claim <code>     # the owner, with the code aether-server setup printed
+aether link <server id>        # anyone the owner invited, with the id the owner sent them
+```
+
+A bare name such as `my-server` is always an SSH address, as on a tailnet;
+only a server id goes through the edge.
+
+The server's host key is checked against its id on every connection, and
+each device holds its own key. The server's owner chooses, on the machine,
+whether signing in is enough to admit a new device (`edge-access account`)
+or whether each new device waits for a person to approve it
+(`approved-devices`, the default when the setting is missing). Tailnet
+identities and SSH keys work the same under both. The edge serves no
+dashboard in this release: a phone reaches it over the tailnet
+([The dashboard](#the-dashboard)), and a computer through `aether gui`.
+[edge.md](edge.md) covers the two policies, claiming, what the edge can
+see, and running your own; invitations and device approval are in
+[teams.md](teams.md#through-an-edge).
+
+---
+
 ## Plain LAN, VPN, or a cloud box
 
 No tailnet? Everything still works; you manage identity with SSH keys and
@@ -135,12 +170,14 @@ invite codes instead.
 ### The admin
 
 ```sh
-ssh-keygen -t ed25519          # if you do not already have a key
 aether link 192.168.1.50:2222
 ```
 
 The first key to link a fresh server is registered as the admin. The CLI uses
 `~/.ssh/id_ed25519` by default and also offers any key loaded in your ssh-agent.
+With no key to offer (no `id_ed25519`, `id_ecdsa` or `id_rsa` in `~/.ssh` and
+none in the agent), `aether link` creates `~/.ssh/id_ed25519` and its `.pub`
+itself.
 For a key at another path:
 
 ```sh
@@ -311,8 +348,9 @@ refused here too. `--tailnet-require-key` and `web-port` are mutually
 exclusive: HTTP cannot present a key, so a server set to require one refuses
 to start with the dashboard on.
 
-Key-only and invite-code servers - anything with no tailscaled - have no
-phone dashboard in this release. `aether gui` is the whole story there.
+Key-only and invite-code servers - anything with no tailscaled, including
+one reached through an edge - have no phone dashboard in this release.
+`aether gui` is the whole story there.
 
 ### Where it refuses
 
@@ -352,8 +390,7 @@ tailnet that is not ready says exactly what to enable on the first start.
 ## Other tunnels
 
 The reachability seam inside the server covers announcement and address
-discovery - Tailscale first-class, plain host/port always available - and
-leaves room for a tunnel adapter later. **Aether ships no relay infrastructure
-of its own** and does not plan to. Anything that gets a TCP port from your
-laptop to the server box works today; only Tailscale gets the keyless identity
-integration.
+discovery - Tailscale first-class, plain host/port always available, and the
+edge for servers nothing can dial. Anything else that gets a TCP port from
+your laptop to the server box works too; Tailscale and the edge are the paths
+with identity built in.

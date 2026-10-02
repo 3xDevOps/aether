@@ -17,8 +17,8 @@ import (
 // It returns the written file path and the shell command that activates the
 // service.
 func InstallDaemonUnit(cfg syncd.Config) (path, activate string, err error) {
-	if cfg.Server == "" {
-		return "", "", errors.New("localops: daemon install requires a server address")
+	if cfg.Server == "" && cfg.ServerID == "" {
+		return "", "", errors.New("localops: daemon install requires a server address or a server id")
 	}
 	repo, err := filepath.Abs(cfg.RepoPath)
 	if err != nil {
@@ -29,7 +29,14 @@ func InstallDaemonUnit(cfg syncd.Config) (path, activate string, err error) {
 		return "", "", fmt.Errorf("resolve aether binary path: %w", err)
 	}
 
-	runArgs := []string{"daemon", "run", "--server", cfg.Server, "--repo", repo}
+	runArgs := []string{"daemon", "run"}
+	if cfg.Server != "" {
+		runArgs = append(runArgs, "--server", cfg.Server)
+	}
+	runArgs = append(runArgs, "--repo", repo)
+	if cfg.ServerID != "" {
+		runArgs = append(runArgs, "--server-id", cfg.ServerID, "--edge-url", cfg.EdgeURL)
+	}
 	if cfg.KeyPath != "" {
 		runArgs = append(runArgs, "--key", cfg.KeyPath)
 	}
@@ -68,21 +75,16 @@ func InstallDaemonUnit(cfg syncd.Config) (path, activate string, err error) {
 }
 
 // InstallDaemon is the /local/v1 daemon.install core: it installs the
-// sync-daemon service unit for server and repo with every other option at
-// its default and returns the unit path plus the activation note. keyPath
-// is the linked SSH key; empty leaves the daemon on ~/.ssh/id_ed25519.
-func InstallDaemon(server, repo, keyPath string) (unitPath, note string, err error) {
-	if repo == "" {
-		repo = "."
+// sync-daemon service unit for link's server and repository, with the
+// user, remote and base branch at their defaults, and returns the unit
+// path plus the activation note. An empty link.KeyPath leaves the daemon
+// on ~/.ssh/id_ed25519.
+func InstallDaemon(link syncd.Config) (unitPath, note string, err error) {
+	if link.RepoPath == "" {
+		link.RepoPath = "."
 	}
-	path, activate, err := InstallDaemonUnit(syncd.Config{
-		Server:     server,
-		RepoPath:   repo,
-		KeyPath:    keyPath,
-		User:       "aether",
-		Remote:     "aether",
-		BaseBranch: "main",
-	})
+	link.User, link.Remote, link.BaseBranch = "aether", "aether", "main"
+	path, activate, err := InstallDaemonUnit(link)
 	if err != nil {
 		return "", "", err
 	}

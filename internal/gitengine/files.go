@@ -282,7 +282,7 @@ func (e *Engine) openCheckoutRoot(checkout string) (*os.Root, error) {
 		return nil, ErrInvalidPath
 	}
 	rel, err := filepath.Rel(filepath.Clean(e.cfg.CheckoutsDir), filepath.Clean(checkout))
-	if err != nil || rel == "." || rel == ".." || strings.ContainsRune(rel, filepath.Separator) {
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, ErrInvalidPath
 	}
 	return rootfs.OpenRoot(e.checkoutsRoot, filepath.ToSlash(rel))

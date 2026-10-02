@@ -1,6 +1,10 @@
 // Wire types. These mirror internal/protocol/wire.go and internal/events;
 // field names are the JSON names the server sends.
 
+import type { DevArtifact } from '@/lib/development-types'
+export * from '@/lib/development-types'
+export * from '@/lib/run-repository-types'
+
 export type RunStatus =
   | 'queued'
   | 'provisioning'
@@ -18,6 +22,9 @@ export interface Run {
   member_id: string
   /** Account backing the run; absent on servers predating account sharing. */
   account_member_id?: string
+  mission_id?: string
+  mission_role?: 'integrator' | 'worker'
+  integrator_run_id?: string
   task: string
   /** Latest terminal title, omitted by older servers and for empty titles. */
   title?: string
@@ -46,6 +53,304 @@ export interface Run {
   base_branch?: string
   base_source?: string
   base_checked_at?: string | null
+}
+/** Release B mission orchestration wire objects. IDs and revisions are server authority. */
+/** Where a mission sits in the human plan gate. Only `active` and
+ * `amendment_review` dispatch workers, and `amendment_review` dispatches only
+ * the set a human already approved. */
+export type MissionPhase =
+  | 'planning'
+  | 'clarified'
+  | 'plan_review'
+  | 'active'
+  | 'amendment_review'
+  | 'rejected'
+export type MissionPlanDecision = 'approve' | 'revise' | 'reject'
+export type MissionTaskStatus = 'ready' | 'working' | 'review' | 'done' | 'proposed' | 'abandoned' | 'blocked'
+export type MissionTaskRevisionStatus = 'proposed' | 'accepted' | 'superseded' | 'abandoned'
+export type MissionAttemptState =
+  | 'reserved'
+  | 'launching'
+  | 'running'
+  | 'unknown'
+  | 'submitted'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'superseded'
+  | 'abandoned'
+export type MissionSubmissionState =
+  | 'proposed'
+  | 'accepted'
+  | 'rejected'
+  | 'superseded'
+  | 'abandoned'
+
+export interface MissionExecutionChoice {
+  account_member_id: string
+  harness: string
+  mode: string
+}
+
+export type MissionIntegrator = MissionExecutionChoice
+
+export interface Mission {
+  id: string
+  workspace_id: string
+  objective: string
+  accountable_human_id: string
+  integrator: MissionIntegrator
+  execution_choices: MissionExecutionChoice[]
+  max_concurrent_attempts: number
+  max_total_attempts: number
+  current_integrator_run_id: string
+  integrator_generation: number
+  accepted_set_version: number
+  phase: MissionPhase
+  plan_version: number
+  /** Unanswered questions; only mission.show and mission.list compute it. */
+  open_questions: number
+  /** Why the integrator run last failed to launch; cleared once it launched. */
+  integrator_launch_error?: string
+  integrator_launch_error_at?: string
+  /** True once the current integrator's run row has existed. */
+  integrator_run_launched?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface MissionQuestion {
+  id: string
+  mission_id: string
+  seq: number
+  body: string
+  asked_by_run_id: string
+  asked_at: string
+  answer?: string
+  answered_by_member_id?: string
+  answered_at?: string | null
+}
+
+export interface MissionPlanReview {
+  mission_id: string
+  plan_version: number
+  summary: string
+  submitted_by_run_id: string
+  submitted_at: string
+  /** `clarified` for an initial plan, `active` for an amendment. */
+  submitted_phase: 'clarified' | 'active'
+  decision?: MissionPlanDecision
+  feedback?: string
+  decided_by_member_id?: string
+  decided_at?: string | null
+  items?: MissionPlanItem[]
+}
+
+/** One task revision a plan round put in front of a human. `widening` is the
+ * server's own list of paths and dropped exclusions that reach outside the
+ * approved plan; the dashboard never recomputes it. */
+export interface MissionPlanItem {
+  task_id: string
+  revision: number
+  new_task: boolean
+  material: boolean
+  widening?: string[]
+  title: string
+  supersedes_revision?: number
+}
+
+export interface MissionTaskScope {
+  expected_paths?: string[]
+  semantic_responsibility?: string
+  interfaces?: MissionInterfaceRevision[]
+  migrations?: string[]
+  shared_tests?: string[]
+  base?: string
+  target?: string
+  exclusions?: string[]
+}
+
+export interface MissionInterfaceRevision {
+  name: string
+  revision: string
+}
+
+export interface MissionEvidenceRequirement {
+  kind: string
+  detail?: string
+}
+
+export interface MissionTaskRevision {
+  task_id: string
+  revision: number
+  title: string
+  objective: string
+  scope: MissionTaskScope
+  evidence_requirements: MissionEvidenceRequirement[]
+  status: MissionTaskRevisionStatus
+  /** The proposer's declaration that the change needs a human plan round. */
+  material?: boolean
+  proposed_by_run_id?: string
+  supersedes_revision?: number
+  accepted_by_member_id?: string
+  accepted_by_run_id?: string
+  created_at: string
+  accepted_at?: string | null
+}
+
+export interface MissionTaskDependency {
+  task_id: string
+  revision: number
+  depends_on_task_id: string
+  depends_on_revision: number
+  output_ref?: string
+}
+
+export interface MissionTaskBlocker {
+  kind: string
+  task_id?: string
+  owner_run_id?: string
+  action: string
+}
+
+export interface MissionTask {
+  id: string
+  mission_id: string
+  current_revision: number
+  revision?: MissionTaskRevision | null
+  /** A proposed revision above `current_revision`; it cannot be dispatched. */
+  pending_revision?: MissionTaskRevision | null
+  dependencies?: MissionTaskDependency[]
+  status: MissionTaskStatus
+  blockers?: MissionTaskBlocker[]
+  abandoned_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MissionAttempt {
+  id: string
+  mission_id: string
+  task_id: string
+  task_revision: number
+  number: number
+  dispatch_key: string
+  harness: string
+  mode: string
+  state: MissionAttemptState
+  run_id: string
+  actor_run_id?: string
+  authorizing_human_id?: string
+  run_owner_id?: string
+  account_owner_id?: string
+  authority_generation: number
+  integrator_generation: number
+  created_at: string
+  reserved_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  /** Durable hold/takeover state, not inferred from a live lease. */
+  takeover_active?: boolean
+  takeover_member_id?: string
+  takeover_generation?: number
+  /** Optional future-compatible field when the backend includes its hold. */
+  orchestration_hold?: boolean
+  cancel_requested_at?: string | null
+  cancellation_actor_run_id?: string
+  cancellation_generation?: number
+  last_error?: string
+}
+
+export interface MissionSubmissionEvidence {
+  kind: string
+  ref: string
+  available: boolean
+  detail?: string
+}
+
+export interface MissionSubmissionRef {
+  workspace_id: string
+  run_id: string
+  evidence_ref: string
+  retained_revision: string
+}
+
+export interface MissionSubmissionAcceptance {
+  scope_disposition?: string
+  /** Monotonic position in the mission's accepted set. */
+  accepted_set_version?: number
+}
+
+export interface MissionSubmission {
+  id: string
+  mission_id: string
+  task_id: string
+  task_revision: number
+  attempt_id: string
+  ref: MissionSubmissionRef
+  evidence: MissionSubmissionEvidence[]
+  scope_violations?: string[]
+  acceptance?: MissionSubmissionAcceptance
+  state: MissionSubmissionState
+  proposed_by_run_id: string
+  integrator_generation: number
+  created_at: string
+  decided_at?: string | null
+  decision_by_run_id?: string
+}
+
+export interface MissionScopeDiagnostic {
+  task_id: string
+  task_revision: number
+  run_id: string
+  kind: 'intended_overlap' | 'observed_overlap' | 'out_of_scope'
+  paths: string[]
+  peer_task_id?: string
+  peer_run_id?: string
+  unavailable?: boolean
+  unavailable_why?: string
+  detail?: string
+}
+
+export interface MissionShowResult {
+  mission: Mission
+  tasks: MissionTask[]
+  attempts?: MissionAttempt[]
+  submissions?: MissionSubmission[]
+  diagnostics?: MissionScopeDiagnostic[]
+  questions?: MissionQuestion[]
+  plan_reviews?: MissionPlanReview[]
+}
+
+export interface MissionQuestionResult {
+  question: MissionQuestion
+}
+
+export interface MissionPlanDecideResult {
+  mission: Mission
+}
+
+export interface MissionCancelResult {
+  mission: Mission
+}
+
+export interface MissionListResult {
+  missions: Mission[]
+  next_cursor?: string
+}
+
+export interface MissionCreateResult {
+  mission: Mission
+}
+
+export interface MissionReplaceIntegratorResult {
+  mission: Mission
+  run_id?: string
+}
+export interface MissionWorkerReleaseResult {
+  run_id: string
+  takeover_active: boolean
+  takeover_generation: number
 }
 export interface Workspace {
   id: string
@@ -77,6 +382,40 @@ export interface AccountAccess {
   /** Members the caller has allowed to use their account. */
   shared_with: Member[]
 }
+export type UsageProviderName = 'claude' | 'codex'
+
+export type UsageProviderStatus =
+  | 'ok'
+  | 'stale'
+  | 'unauthenticated'
+  | 'unsupported'
+  | 'unavailable'
+  | 'error'
+
+export interface UsageWindow {
+  id: string
+  label: string
+  used_percent: number
+  resets_at?: string
+}
+
+export interface UsageProvider {
+  provider: UsageProviderName
+  status: UsageProviderStatus
+  windows: UsageWindow[]
+  plan?: string
+  updated_at?: string
+  checked_at: string
+  retry_at?: string
+  error?: string
+}
+
+/** account.usage: read-only subscription quota measurements. */
+export interface UsageResult {
+  account_member_id: string
+  providers: UsageProvider[]
+}
+
 
 export interface ServerInfo {
   server_version: string
@@ -124,6 +463,25 @@ export interface TerminalStatusResult {
   saved_image?: string
   started_at?: string
   tabs?: string[]
+}
+
+export interface TerminalHistoryParams {
+  run_id: string
+  before?: string
+  query?: string
+  limit?: number
+}
+
+export interface TerminalHistoryLine {
+  cursor: string
+  time: number
+  text: string
+}
+
+export interface TerminalHistoryResult {
+  lines: TerminalHistoryLine[]
+  next_cursor?: string
+  has_more: boolean
 }
 
 export interface EnvSaveResult {
@@ -225,6 +583,7 @@ export interface RoomDecideResult {
 export type RoomDeliveryReceipt = 'sent' | 'not_sent' | 'uncertain'
 
 export type EvidenceTrigger = 'finish' | 'handoff' | 'report'
+export type EvidencePacketAvailability = 'available' | 'expired'
 
 export interface ChangedFileFact {
   path: string
@@ -249,9 +608,13 @@ export interface EvidencePacket {
   objective: string
   captured_at: string
   expires_at?: string
+  availability: EvidencePacketAvailability
+  expired_at?: string
   event_boundary: number
   base_revision?: string
   retained_revision?: string
+  captures?: DevArtifact[]
+  verification_notes?: string
   changed_files?: ChangedFileFact[]
   sources?: EvidenceSourceFact[]
   related_room_message_ids?: string[]
@@ -580,6 +943,112 @@ export interface LinkStatus {
   links?: { name: string; addr: string; repo?: string }[]
   /** The profile this gateway runs on; absent on the top-level link. */
   active?: string
+  /** The edge and server id of a link through an edge; absent otherwise. */
+  edge_url?: string
+  server_id?: string
+}
+
+/** An account signed in at an edge, as the edge reported it: `id` is the
+ * edge's own id for it, the rest the provider identity. */
+export interface EdgeAccount {
+  id: string
+  provider: string
+  subject: string
+  login?: string
+  email?: string
+  name?: string
+}
+
+/** edge.login, and edge.status's `login`: the sign-in this gateway runs.
+ * `edge` is the relay origin and `signin_origin` the origin whose page
+ * confirms the code. */
+export interface EdgeLogin {
+  state: 'pending' | 'signed_in' | 'failed'
+  edge: string
+  signin_origin: string
+  user_code: string
+  verification_uri: string
+  account?: EdgeAccount
+  error?: string
+}
+
+/** edge.status: every edge this machine is signed in to. */
+export interface EdgeStatus {
+  edges: { edge: string; signin_origin?: string; account?: EdgeAccount; error?: string }[]
+  login?: EdgeLogin
+}
+
+/** A server the signed-in account reaches through the edge. The server
+ * enforces `access_policy`; the edge only reports it. */
+export interface EdgeServer {
+  id: string
+  name: string
+  online: boolean
+  role: string
+  access_policy: 'account' | 'approved-devices'
+  kind: 'self-hosted' | 'hosted'
+}
+
+/** edge.hostkey: the host key a server presents through the edge, checked
+ * against its id, read without authenticating. */
+export interface EdgeHostKey {
+  edge: string
+  server_id: string
+  fingerprint: string
+}
+
+/** edge.link and edge.claim: the link just saved. */
+export interface EdgeLinkResult {
+  server_id: string
+  /** Set by the Link step for a server it linked from the edge's list. */
+  server_name?: string
+  edge: string
+  addr?: string
+  user: string
+  member: { id: string; display_name: string; role: string }
+}
+
+/** member.device.list: a client install a member reaches the server through
+ * an edge with. `account` is the login, else email, of the edge account it
+ * signed in as. A device waiting on an invitation has `invitation_id` and
+ * an empty `member_id`. */
+export interface Device {
+  id: string
+  member_id: string
+  invitation_id?: string
+  provider: string
+  account: string
+  label: string
+  status: 'registered' | 'pending' | 'approved' | 'revoked'
+  fingerprint: string
+  created_at: string
+  last_seen_at?: string
+  approved_by?: string
+}
+
+/** member.device.lookup: the device an approval code names and whom
+ * approving admits it as: its member, or the member a link invitation
+ * names, with that member's role. A device waiting on an invitation that
+ * adds a new member has no `member_id` and the invited `role`. */
+export interface DeviceLookup {
+  device: Device
+  member_id?: string
+  display_name?: string
+  role: Member['role']
+}
+
+/** member.invitation.list: an edge account that may join. `member_id` is
+ * set on an identity link, which binds an existing member and has no role. */
+export interface Invitation {
+  id: string
+  provider?: string
+  login?: string
+  email?: string
+  role?: Member['role']
+  member_id?: string
+  created_by: string
+  created_at: string
+  expires_at: string
 }
 
 /** link.apply: the server identity linked to this local gateway. */

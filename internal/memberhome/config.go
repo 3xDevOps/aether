@@ -25,12 +25,11 @@ import (
 )
 
 const (
-	// ConfigMaxFileBytes is the maximum UTF-8 file an editor can read or save.
+	// ConfigMaxFileBytes bounds individual files read, saved, or imported.
 	ConfigMaxFileBytes = 64 << 20
-	// ConfigImportMaxFileBytes is the per-file import limit.
-	ConfigImportMaxFileBytes = 1 << 20
-	// ConfigImportMaxBytes is the decoded aggregate import limit.
-	ConfigImportMaxBytes = 20 << 20
+	// ConfigImportMaxBytes and ConfigImportMaxFiles bound one import request,
+	// not the directory, which clients may transfer in sequential batches.
+	ConfigImportMaxBytes = ConfigMaxFileBytes
 	ConfigImportMaxFiles = 2000
 )
 
@@ -409,7 +408,6 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 	}
 	defer func() { _ = profileRoot.Close() }()
 	info, err := configTargetInfo(profileRoot, rel)
-	exists := err == nil
 	var mode os.FileMode = 0o644
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -436,7 +434,7 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 	if err := ensureDirPathOwned(home, profileRoot, path.Dir(rel), true); err != nil {
 		return ConfigRead{}, err
 	}
-	if err := atomicConfigWrite(home, profileRoot, rel, content, mode, expected, !exists); err != nil {
+	if err := atomicConfigWrite(home, profileRoot, rel, content, mode, expected, info); err != nil {
 		return ConfigRead{}, err
 	}
 	return ConfigRead{Content: append([]byte(nil), content...), Size: int64(len(content)), Revision: revision(content), Writable: true}, nil
@@ -445,7 +443,7 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 // ConfigImport validates every browser file and every existing destination
 // before the first mutation. Credentials, runtime/history defaults, and
 // scanner findings are reported as exclusions; arbitrary regular bytes are
-// preserved under the import size caps.
+// preserved under the per-request import bounds.
 func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harnessName, localRoot string, files []ConfigFile, deny []string) (ConfigImportResult, error) {
 	if len(files) > ConfigImportMaxFiles {
 		return ConfigImportResult{}, fmt.Errorf("%w: import contains too many files", ErrConfigTooLarge)
@@ -478,7 +476,7 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 		if err = validateConfigMode(file.Mode); err != nil {
 			return ConfigImportResult{}, err
 		}
-		if len(file.Content) > ConfigImportMaxFileBytes {
+		if len(file.Content) > ConfigMaxFileBytes {
 			return ConfigImportResult{}, ErrConfigTooLarge
 		}
 		total += int64(len(file.Content))
@@ -532,10 +530,21 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 			if err = ctx.Err(); err != nil {
 				return importFailure(i, err)
 			}
+			mode := os.FileMode(file.Mode & 0o777)
+			info, statErr := configTargetInfo(profileRoot, file.Path)
+			switch {
+			case errors.Is(statErr, fs.ErrNotExist):
+			case statErr != nil:
+				return importFailure(i, statErr)
+			case !info.Mode().IsRegular():
+				return importFailure(i, ErrConfigDenied)
+			default:
+				mode = info.Mode().Perm()
+			}
 			if err := ensureDirPathOwned(home, profileRoot, path.Dir(file.Path), true); err != nil {
 				return importFailure(i, err)
 			}
-			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, os.FileMode(file.Mode&0o777), "", false); err != nil {
+			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, mode, "", info); err != nil {
 				return importFailure(i, err)
 			}
 			result.Files++
@@ -760,6 +769,14 @@ func configTargetInfo(root *os.Root, name string) (fs.FileInfo, error) {
 	return info, nil
 }
 
+func configTargetMatches(root *os.Root, name string, expected fs.FileInfo) bool {
+	info, err := configTargetInfo(root, name)
+	if expected == nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return err == nil && os.SameFile(expected, info) && expected.Mode().Perm() == info.Mode().Perm()
+}
+
 func openConfigFile(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
 	f, err := rootfs.Open(root, name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -795,7 +812,7 @@ func readConfigBytes(root *os.Root, name string, limit int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode os.FileMode, expected string, requireAbsent bool) error {
+func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode os.FileMode, expected string, expectedTarget fs.FileInfo) error {
 	parentName := path.Dir(name)
 	parent := root
 	var owned *os.Root
@@ -815,7 +832,7 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 	target := path.Base(name)
 	for range 10 {
 		tmp := ".aether-config-" + rand.Text()
-		f, err := parent.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode.Perm())
+		f, err := parent.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if errors.Is(err, fs.ErrExist) {
 			continue
 		}
@@ -824,6 +841,10 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 		}
 		if _, err = f.Write(content); err == nil {
 			err = chownFileLikeHome(owner, f)
+		}
+		// Keep staged bytes private until the inherited permissions are validated.
+		if err == nil && !configTargetMatches(parent, target, expectedTarget) {
+			err = ErrConfigConflict
 		}
 		if err == nil {
 			err = f.Chmod(mode.Perm())
@@ -838,18 +859,17 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 			_ = parent.Remove(tmp)
 			return err
 		}
-		switch {
-		case expected != "":
+		if expected != "" {
 			current, checkErr := readConfigBytes(parent, target, ConfigMaxFileBytes)
 			if checkErr != nil || revision(current) != expected {
 				_ = parent.Remove(tmp)
 				return ErrConfigConflict
 			}
-		case requireAbsent:
-			if _, checkErr := configTargetInfo(parent, target); checkErr == nil || !errors.Is(checkErr, fs.ErrNotExist) {
-				_ = parent.Remove(tmp)
-				return ErrConfigConflict
-			}
+		}
+		// This is optimistic: an external writer can still race the stat/rename gap.
+		if !configTargetMatches(parent, target, expectedTarget) {
+			_ = parent.Remove(tmp)
+			return ErrConfigConflict
 		}
 		if err := parent.Rename(tmp, target); err != nil {
 			_ = parent.Remove(tmp)

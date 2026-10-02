@@ -1,7 +1,9 @@
 package store
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
@@ -952,7 +954,422 @@ CREATE TABLE run_cost_deletions (
 	`
 ALTER TABLE runs ADD COLUMN archived_at INTEGER;
 `,
+	// v32: durable integration candidate aggregates. Candidate rows are
+	// deliberately independent of runs (and therefore source-run deletion);
+	// payload carries the aggregate's protocol JSON while the immutable
+	// envelope columns support idempotency and CAS updates.
+	`
+CREATE TABLE integration_candidates (
+	id              TEXT PRIMARY KEY,
+	workspace_id    TEXT NOT NULL,
+	actor_key       TEXT NOT NULL,
+	idempotency_key TEXT NOT NULL,
+	digest          TEXT NOT NULL,
+	state           TEXT NOT NULL,
+	version         INTEGER NOT NULL CHECK (version > 0),
+	payload         TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	expires_at      INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_integration_candidates_key
+	ON integration_candidates(workspace_id, actor_key, idempotency_key);
+CREATE INDEX idx_integration_candidates_workspace
+	ON integration_candidates(workspace_id, created_at DESC, id DESC);
+CREATE INDEX idx_integration_candidates_cleanup
+	ON integration_candidates(state, expires_at, created_at, id);
+`,
+	// v33: durable missions, immutable task specifications, fenced attempts,
+	// exact-version submissions, and acceptance records. Mission state is
+	// deliberately separate from Store so compatibility stores can opt in.
+	`
+CREATE TABLE missions (
+	id                        TEXT PRIMARY KEY,
+	workspace_id              TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	objective                 TEXT NOT NULL,
+	accountable_human_id      TEXT NOT NULL REFERENCES members(id),
+	integrator_account_member_id TEXT NOT NULL DEFAULT '',
+	integrator_harness        TEXT NOT NULL DEFAULT '',
+	integrator_mode           TEXT NOT NULL DEFAULT 'headless',
+	execution_choices         TEXT NOT NULL DEFAULT '[]',
+	max_concurrent_attempts   INTEGER NOT NULL CHECK (max_concurrent_attempts > 0),
+	max_total_attempts        INTEGER NOT NULL CHECK (max_total_attempts > 0),
+	current_integrator_run_id TEXT,
+	integrator_generation     INTEGER NOT NULL DEFAULT 1,
+	accepted_set_version      INTEGER NOT NULL DEFAULT 0,
+	idempotency_key           TEXT NOT NULL,
+	created_at                INTEGER NOT NULL,
+	updated_at                INTEGER NOT NULL,
+	CHECK (json_valid(execution_choices)),
+	UNIQUE (workspace_id, idempotency_key)
+);
+CREATE INDEX idx_missions_workspace ON missions(workspace_id, created_at, id);
+
+CREATE TABLE mission_tasks (
+	id               TEXT PRIMARY KEY,
+	mission_id       TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	current_revision INTEGER NOT NULL DEFAULT 1 CHECK (current_revision > 0),
+	abandoned_at     INTEGER,
+	created_at       INTEGER NOT NULL,
+	updated_at       INTEGER NOT NULL
+);
+CREATE INDEX idx_mission_tasks_mission ON mission_tasks(mission_id, created_at, id);
+
+CREATE TABLE mission_task_revisions (
+	task_id               TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	revision              INTEGER NOT NULL CHECK (revision > 0),
+	title                 TEXT NOT NULL,
+	objective             TEXT NOT NULL,
+	scope                 TEXT NOT NULL DEFAULT '{}',
+	evidence_requirements TEXT NOT NULL DEFAULT '[]',
+	status                TEXT NOT NULL CHECK (status IN ('proposed', 'accepted', 'superseded', 'abandoned')),
+	proposed_by_run_id    TEXT NOT NULL DEFAULT '',
+	supersedes_revision   INTEGER NOT NULL DEFAULT 0,
+	created_at            INTEGER NOT NULL,
+	accepted_at           INTEGER,
+	PRIMARY KEY (task_id, revision),
+	CHECK (json_valid(scope)),
+	CHECK (json_valid(evidence_requirements))
+);
+CREATE INDEX idx_mission_task_revisions_status
+	ON mission_task_revisions(task_id, status, revision DESC);
+
+CREATE TABLE mission_task_dependencies (
+	task_id             TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision       INTEGER NOT NULL,
+	depends_on_task_id  TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	depends_on_revision INTEGER NOT NULL CHECK (depends_on_revision > 0),
+	output_ref          TEXT NOT NULL DEFAULT '',
+	created_at          INTEGER NOT NULL,
+	PRIMARY KEY (task_id, task_revision, depends_on_task_id, depends_on_revision),
+	CHECK (task_id <> depends_on_task_id),
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision) ON DELETE CASCADE
+);
+CREATE INDEX idx_mission_task_dependencies_source
+	ON mission_task_dependencies(depends_on_task_id, depends_on_revision);
+
+CREATE TABLE mission_attempts (
+	id                    TEXT PRIMARY KEY,
+	mission_id            TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id               TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision         INTEGER NOT NULL,
+	number                INTEGER NOT NULL CHECK (number > 0),
+	dispatch_key          TEXT NOT NULL,
+	harness               TEXT NOT NULL DEFAULT '',
+	mode                  TEXT NOT NULL DEFAULT 'headless',
+	state                 TEXT NOT NULL CHECK (state IN ('reserved', 'launching', 'running', 'unknown', 'submitted', 'completed', 'failed', 'cancelled', 'superseded', 'abandoned')),
+	run_id                TEXT,
+	actor_run_id          TEXT NOT NULL DEFAULT '',
+	authorizing_human_id  TEXT NOT NULL DEFAULT '',
+	run_owner_id          TEXT NOT NULL DEFAULT '',
+	account_owner_id      TEXT NOT NULL DEFAULT '',
+	authority_generation  INTEGER NOT NULL DEFAULT 0,
+	integrator_generation INTEGER NOT NULL DEFAULT 0,
+	created_at            INTEGER NOT NULL,
+	reserved_at           INTEGER NOT NULL,
+	started_at            INTEGER,
+	finished_at           INTEGER,
+	UNIQUE (mission_id, dispatch_key),
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision)
+);
+CREATE INDEX idx_mission_attempts_active
+	ON mission_attempts(mission_id, state, created_at, id);
+CREATE INDEX idx_mission_attempts_task
+	ON mission_attempts(task_id, number DESC, created_at DESC);
+
+CREATE TABLE mission_submissions (
+	id                    TEXT PRIMARY KEY,
+	mission_id            TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id               TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision         INTEGER NOT NULL,
+	attempt_id            TEXT NOT NULL REFERENCES mission_attempts(id) ON DELETE CASCADE,
+	workspace_id          TEXT NOT NULL REFERENCES workspaces(id),
+	run_id                TEXT NOT NULL REFERENCES runs(id),
+	evidence_ref          TEXT NOT NULL,
+	retained_revision     TEXT NOT NULL,
+	evidence               TEXT NOT NULL DEFAULT '[]',
+	state                 TEXT NOT NULL CHECK (state IN ('proposed', 'accepted', 'rejected', 'superseded', 'abandoned')),
+	proposed_by_run_id    TEXT NOT NULL,
+	integrator_generation INTEGER NOT NULL,
+	created_at            INTEGER NOT NULL,
+	decided_at            INTEGER,
+	decision_by_run_id    TEXT NOT NULL DEFAULT '',
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision),
+	UNIQUE (attempt_id)
+);
+CREATE INDEX idx_mission_submissions_task
+	ON mission_submissions(task_id, task_revision, state, created_at DESC);
+
+CREATE TABLE mission_acceptances (
+	submission_id          TEXT PRIMARY KEY REFERENCES mission_submissions(id),
+	mission_id             TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id                TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	task_revision          INTEGER NOT NULL,
+	accepted_set_version   INTEGER NOT NULL,
+	integrator_generation  INTEGER NOT NULL,
+	accepted_by_run_id     TEXT NOT NULL,
+	accepted_at            INTEGER NOT NULL,
+	FOREIGN KEY (task_id, task_revision)
+		REFERENCES mission_task_revisions(task_id, revision),
+	UNIQUE (mission_id, accepted_set_version),
+	UNIQUE (task_id, task_revision)
+);
+CREATE INDEX idx_mission_acceptances_mission
+	ON mission_acceptances(mission_id, accepted_set_version);
+
+CREATE TABLE mission_worker_takeovers (
+	worker_run_id TEXT PRIMARY KEY,
+	mission_id    TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	task_id       TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	attempt_id    TEXT NOT NULL REFERENCES mission_attempts(id) ON DELETE CASCADE,
+	member_id     TEXT NOT NULL,
+	active        INTEGER NOT NULL CHECK (active IN (0, 1)),
+	generation    INTEGER NOT NULL DEFAULT 1,
+	updated_at    INTEGER NOT NULL
+);
+CREATE INDEX idx_mission_worker_takeovers_mission
+	ON mission_worker_takeovers(mission_id, active, updated_at);
+CREATE TABLE mission_control_changes (
+	mission_id          TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+	generation          INTEGER NOT NULL DEFAULT 0,
+	published_generation INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE mission_integrator_replacements (
+	mission_id       TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	idempotency_key  TEXT NOT NULL,
+	account_member_id TEXT NOT NULL,
+	harness           TEXT NOT NULL,
+	mode              TEXT NOT NULL,
+	generation       INTEGER NOT NULL,
+	run_id           TEXT NOT NULL DEFAULT '',
+	created_at       INTEGER NOT NULL,
+	PRIMARY KEY (mission_id, idempotency_key)
+);
+CREATE TABLE mission_create_receipts (
+	workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	idempotency_key     TEXT NOT NULL,
+	mission_id          TEXT NOT NULL UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
+	objective           TEXT NOT NULL,
+	accountable_human_id TEXT NOT NULL,
+	integrator_account_member_id TEXT NOT NULL,
+	integrator_harness  TEXT NOT NULL,
+	integrator_mode     TEXT NOT NULL,
+	execution_choices   TEXT NOT NULL,
+	max_concurrent_attempts INTEGER NOT NULL,
+	max_total_attempts  INTEGER NOT NULL,
+	created_at          INTEGER NOT NULL,
+	PRIMARY KEY (workspace_id, idempotency_key)
+);
+CREATE INDEX idx_mission_integrator_replacements_mission
+	ON mission_integrator_replacements(mission_id, generation);
+`,
+	`
+CREATE TABLE mission_mutation_receipts (
+	mission_id       TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	operation        TEXT NOT NULL,
+	idempotency_key  TEXT NOT NULL,
+	payload          TEXT NOT NULL,
+	result_id        TEXT NOT NULL DEFAULT '',
+	result_revision  INTEGER NOT NULL DEFAULT 0,
+	created_at       INTEGER NOT NULL,
+	PRIMARY KEY (mission_id, operation, idempotency_key)
+);
+CREATE INDEX idx_mission_mutation_receipts_result
+	ON mission_mutation_receipts(result_id);
+`,
+	`
+ALTER TABLE mission_submissions ADD COLUMN scope_violations TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE mission_acceptances ADD COLUMN scope_disposition TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE missions ADD COLUMN integrator_authorizing_human_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_run_owner_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN authorizing_human_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN run_owner_id TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE mission_attempts ADD COLUMN cancel_requested_at INTEGER;
+ALTER TABLE mission_attempts ADD COLUMN cancellation_actor_run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_attempts ADD COLUMN cancellation_generation INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mission_attempts ADD COLUMN last_error TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE mission_create_receipts ADD COLUMN initial_run_id TEXT NOT NULL DEFAULT '';
+`,
+	`
+ALTER TABLE missions ADD COLUMN phase TEXT NOT NULL DEFAULT 'active'
+	CHECK (phase IN ('planning', 'clarified', 'plan_review', 'active', 'amendment_review', 'rejected'));
+ALTER TABLE missions ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE mission_task_revisions ADD COLUMN material INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mission_task_revisions ADD COLUMN accepted_by_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_task_revisions ADD COLUMN accepted_by_run_id TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE mission_questions (
+	id                    TEXT PRIMARY KEY,
+	mission_id            TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	seq                   INTEGER NOT NULL CHECK (seq > 0),
+	body                  TEXT NOT NULL,
+	asked_by_run_id       TEXT NOT NULL,
+	asked_at              INTEGER NOT NULL,
+	answer                TEXT NOT NULL DEFAULT '',
+	answered_by_member_id TEXT NOT NULL DEFAULT '',
+	answered_at           INTEGER,
+	UNIQUE (mission_id, seq)
+);
+CREATE INDEX idx_mission_questions_open ON mission_questions(mission_id, answered_at);
+
+CREATE TABLE mission_plan_reviews (
+	mission_id           TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	plan_version         INTEGER NOT NULL CHECK (plan_version > 0),
+	summary              TEXT NOT NULL,
+	submitted_by_run_id  TEXT NOT NULL,
+	submitted_at         INTEGER NOT NULL,
+	submitted_phase      TEXT NOT NULL CHECK (submitted_phase IN ('clarified', 'active')),
+	decision             TEXT NOT NULL DEFAULT '' CHECK (decision IN ('', 'approve', 'revise', 'reject')),
+	feedback             TEXT NOT NULL DEFAULT '',
+	decided_by_member_id TEXT NOT NULL DEFAULT '',
+	decided_at           INTEGER,
+	PRIMARY KEY (mission_id, plan_version)
+);
+
+CREATE TABLE mission_plan_items (
+	mission_id   TEXT NOT NULL,
+	plan_version INTEGER NOT NULL,
+	task_id      TEXT NOT NULL REFERENCES mission_tasks(id) ON DELETE CASCADE,
+	revision     INTEGER NOT NULL,
+	new_task     INTEGER NOT NULL DEFAULT 0,
+	material     INTEGER NOT NULL DEFAULT 0,
+	widening     TEXT NOT NULL DEFAULT '[]',
+	PRIMARY KEY (mission_id, plan_version, task_id),
+	FOREIGN KEY (mission_id, plan_version) REFERENCES mission_plan_reviews(mission_id, plan_version) ON DELETE CASCADE,
+	CHECK (json_valid(widening))
+);
+`,
+	// mission.cancel refuses a key already used on another mission, which
+	// looks a receipt up without its mission_id.
+	`
+CREATE INDEX idx_mission_mutation_receipts_key
+	ON mission_mutation_receipts(operation, idempotency_key);
+`,
+	`
+ALTER TABLE missions ADD COLUMN integrator_launch_error TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_launch_error_at INTEGER;
+`,
+	// Every existing integrator counts as launched, so an upgrade relaunches
+	// nothing: a missing row cannot tell a run a human deleted before the
+	// upgrade from one that never launched. The rare pre-upgrade integrator
+	// that truly never launched needs Replace integrator.
+	`
+ALTER TABLE missions ADD COLUMN integrator_run_launched INTEGER NOT NULL DEFAULT 0;
+UPDATE missions SET integrator_run_launched = 1 WHERE current_integrator_run_id <> '';
+`,
+	`
+CREATE INDEX idx_missions_integrator_run ON missions(current_integrator_run_id);
+CREATE INDEX idx_mission_attempts_run ON mission_attempts(run_id, mission_id);
+`,
+	`
+ALTER TABLE evidence_packets ADD COLUMN captures TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE evidence_packets ADD COLUMN verification_notes TEXT NOT NULL DEFAULT '';
+`,
+	// v45: edge identities. A member may now have neither a public key nor
+	// a tailnet login when an edge identity names it, which the members
+	// CHECK cannot express, so the table is rebuilt the v2 way. Several
+	// tables now reference members ON DELETE CASCADE, and DROP TABLE fires
+	// those cascades, so this version runs with foreign keys off (see
+	// foreignKeysOffMigrations). Invitations and devices go with the member
+	// who created or owns them. A device waiting on an invitation has no
+	// member yet: it goes with its invitation. A device outlives its edge
+	// identity only when revoked, so its account has no foreign key and
+	// the store deletes an identity's devices itself. Approval codes are
+	// derived from device keys, so two devices may share one; the code
+	// index is not unique.
+	`
+CREATE TABLE members_migrate AS
+	SELECT id, display_name, public_key, tailnet_login, pending, color, role, created_at,
+	       image, git_name, git_email
+	FROM members;
+DROP TABLE members;
+CREATE TABLE members (
+	id            TEXT PRIMARY KEY,
+	display_name  TEXT NOT NULL,
+	public_key    TEXT NOT NULL DEFAULT '',
+	tailnet_login TEXT NOT NULL DEFAULT '',
+	pending       INTEGER NOT NULL DEFAULT 0,
+	color         TEXT NOT NULL,
+	role          TEXT NOT NULL,
+	created_at    INTEGER NOT NULL,
+	image         TEXT NOT NULL DEFAULT '',
+	git_name      TEXT NOT NULL DEFAULT '',
+	git_email     TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at,
+                     image, git_name, git_email)
+	SELECT id, display_name, public_key, tailnet_login, pending, color, role, created_at,
+	       image, git_name, git_email
+	FROM members_migrate;
+DROP TABLE members_migrate;
+CREATE UNIQUE INDEX idx_members_public_key ON members(public_key) WHERE public_key <> '';
+CREATE UNIQUE INDEX idx_members_tailnet_login ON members(tailnet_login) WHERE tailnet_login <> '';
+
+CREATE TABLE member_identities (
+	provider   TEXT NOT NULL,
+	subject    TEXT NOT NULL,
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	email      TEXT NOT NULL DEFAULT '',
+	login      TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (provider, subject)
+);
+CREATE INDEX idx_member_identities_member ON member_identities(member_id);
+
+CREATE TABLE identity_invitations (
+	id          TEXT PRIMARY KEY,
+	provider    TEXT NOT NULL,
+	login       TEXT NOT NULL,
+	email       TEXT NOT NULL,
+	role        TEXT NOT NULL,
+	member_id   TEXT REFERENCES members(id) ON DELETE CASCADE,
+	created_by  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	consumed_at INTEGER,
+	CHECK ((login = '') <> (email = ''))
+);
+
+CREATE TABLE member_devices (
+	id            TEXT PRIMARY KEY,
+	member_id     TEXT REFERENCES members(id) ON DELETE CASCADE,
+	invitation_id TEXT REFERENCES identity_invitations(id) ON DELETE CASCADE,
+	provider      TEXT NOT NULL,
+	subject       TEXT NOT NULL,
+	email         TEXT NOT NULL DEFAULT '',
+	login         TEXT NOT NULL DEFAULT '',
+	name          TEXT NOT NULL DEFAULT '',
+	credential    TEXT NOT NULL UNIQUE,
+	label         TEXT NOT NULL,
+	status        TEXT NOT NULL CHECK (status IN ('registered', 'pending', 'approved', 'revoked')),
+	approval_code TEXT NOT NULL DEFAULT '',
+	created_at    INTEGER NOT NULL,
+	last_seen_at  INTEGER,
+	approved_by   TEXT NOT NULL DEFAULT '',
+	CHECK ((member_id IS NULL) <> (invitation_id IS NULL)),
+	CHECK (invitation_id IS NULL OR status IN ('pending', 'revoked')),
+	CHECK ((status IN ('registered', 'pending')) = (approval_code <> ''))
+);
+CREATE INDEX idx_member_devices_member ON member_devices(member_id);
+CREATE INDEX idx_member_devices_invitation ON member_devices(invitation_id);
+CREATE INDEX idx_member_devices_identity ON member_devices(provider, subject);
+CREATE INDEX idx_member_devices_approval_code
+	ON member_devices(approval_code) WHERE approval_code <> '';
+`,
 }
+
+// foreignKeysOffMigrations are the versions that drop a table other tables
+// reference with ON DELETE CASCADE. See applyMigration.
+var foreignKeysOffMigrations = map[int]bool{45: true}
 
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so
@@ -1010,8 +1427,32 @@ func migrateOnce(db *sql.DB) error {
 // claims the version row (acquiring the write lock before any DDL). When a
 // concurrent opener already applied this version, the claim inserts zero
 // rows and the DDL is skipped, so racing Opens on one file all succeed.
+//
+// A version in foreignKeysOffMigrations runs on one pinned connection with
+// foreign keys off, because SQLite ignores that pragma inside a
+// transaction and DROP TABLE would otherwise fire ON DELETE CASCADE into
+// every referencing table. PRAGMA foreign_key_check must come back empty
+// before it commits.
 func applyMigration(db *sql.DB, version int) error {
-	tx, err := db.Begin()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("store: begin migration %d: %w", version, err)
+	}
+	defer conn.Close() //nolint:errcheck // returns the connection to the pool
+	fkOff := foreignKeysOffMigrations[version]
+	if fkOff {
+		if _, err = conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("store: migration %d: disable foreign keys: %w", version, err)
+		}
+		defer func() {
+			if _, restoreErr := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); restoreErr != nil {
+				// Never hand a connection without foreign keys back to the pool.
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin migration %d: %w", version, err)
 	}
@@ -1035,8 +1476,33 @@ func applyMigration(db *sql.DB, version int) error {
 	if _, err := tx.Exec(migrations[version-1]); err != nil {
 		return fmt.Errorf("store: apply migration %d: %w", version, err)
 	}
+	if fkOff {
+		if err := checkForeignKeys(tx); err != nil {
+			return fmt.Errorf("store: migration %d: %w", version, err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: commit migration %d: %w", version, err)
 	}
 	return nil
+}
+
+func checkForeignKeys(tx *sql.Tx) error {
+	rows, err := tx.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("foreign key check: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	if rows.Next() {
+		var (
+			table, parent string
+			rowid         sql.NullInt64
+			fk            int
+		)
+		if err := rows.Scan(&table, &rowid, &parent, &fk); err != nil {
+			return fmt.Errorf("foreign key check: %w", err)
+		}
+		return fmt.Errorf("foreign key check: %s row %d references a missing %s row", table, rowid.Int64, parent)
+	}
+	return rows.Err()
 }

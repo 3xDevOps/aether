@@ -3,7 +3,11 @@
 Layers, per the design spec's testing strategy:
 
 - **Unit tests** live beside their packages and run with `make test`
-  (race detector on). Permission matrices, budget math, configuration import
+  (race detector on). `TEST_PKGS` narrows it to some packages and
+  `TEST_SKIP` leaves some out. CI's `unit` matrix gives `internal/sshd`,
+  `internal/scheduler`, and `internal/coord` with `internal/mission` a runner
+  each, the packages listed in `UNIT_SHARDED` in
+  `.github/workflows/ci.yml`; `build-and-test` runs the rest. Permission matrices, budget math, configuration import
   and file revision rules, tailnet auth edge cases, scheduler transitions, and
   the local gateway's own behaviors are proven there, once, and the E2E suite
   does not restate them.
@@ -15,12 +19,43 @@ Layers, per the design spec's testing strategy:
 - **Integration/E2E tests** are behind the `integration` build tag and run with
   `make test-integration` (real Docker, real git), which covers only the
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
-  to one package and `INTEGRATION_SKIP` leaves some out, as in
-  `make test-integration INTEGRATION_PKGS=./internal/server`. CI runs them on
-  every PR from `.github/workflows/ci.yml`: the `integration` matrix shards
-  them by package, one job each for `internal/server` and `internal/scheduler`
-  and one for the rest, and the `smoke` job runs `internal/harness` on the
-  images it builds. Those jobs are the merge gate the E2E suite owns.
+  to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
+  `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
+  GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
+  job log. The `integration` matrix in `.github/workflows/ci.yml`
+  gives `internal/server` five shards: `server-chaos`
+  (`INTEGRATION_RUN=^TestIntegrationChaos`), `server-coordination`
+  (`INTEGRATION_RUN=^TestIntegrationCoordination`), `server-mission`
+  (`INTEGRATION_RUN=^TestIntegrationMission`), `server-heavy`
+  (`INTEGRATION_RUN=^TestIntegration(EndToEnd|MultiMember|ServerUpdate)`),
+  and `server-rest` (`INTEGRATION_SKIP_PATTERN` of the other four shards' tests).
+  `scheduler` is `INTEGRATION_PKGS=./internal/scheduler`. `rest` is
+  `INTEGRATION_SKIP` of `./internal/harness`, `./internal/scheduler`, and
+  `./internal/server`. The `smoke` job runs `internal/harness` on the images
+  it builds. A docs-only pull request (only `docs/**` and root `*.md`) runs
+  `audit` and skips every other job, including these, the dashboard jobs, and
+  the release matrix. A markdown file anywhere else, including a dashboard
+  end-to-end fixture, does not. The `changes` job runs
+  `scripts/ci-classify-changes.sh` from the pull request's base revision, so
+  a change to that script cannot make the decision itself, and a rename is
+  classified by both its old path and its new one. The `edge-image` job
+  calls `.github/workflows/edge-image.yml`, which builds
+  [`images/edge/Dockerfile`](../images/edge/Dockerfile) on an amd64 and an
+  arm64 runner and runs `scripts/edge-image-smoke.sh` on each
+  ([The edge image](#the-edge-image)); it pushes nothing and uses no build
+  cache. A pull request runs it only when `scripts/ci-classify-edge.sh`,
+  also from the base revision, says a changed path can affect the image; a
+  push to `main`, the merge queue and a failed classification always run
+  it. A rerun classifies the same files, so to force it on a branch the
+  classifier skips, start the workflow by hand, which needs write access to
+  the repository:
+
+  ```sh
+  gh workflow run edge-image.yml --ref <branch>
+  gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
+  ```
+
+  These jobs are the merge gate the E2E suite owns.
 - **Dashboard component tests** live beside their components in `web/src/`
   and run with `bun run test` from `web/` (vitest in jsdom). CI runs them in
   the `dashboard` job. jsdom has no layout, so `web/src/test/setup.ts`
@@ -43,8 +78,15 @@ Layers, per the design spec's testing strategy:
   `make test-e2e`: a real browser driving the static Next export embedded by
   the shipped binary, through a real `aether gui` gateway and a real
   `aether-server`. They own the paths a person walks in the dashboard, which
-  no Go test and no jsdom test reaches. CI runs them in the `dashboard-e2e`
+  no Go test and no jsdom test reaches. CI runs them in one `dashboard-e2e`
   job.
+  Remote-development scenarios live in `web/e2e/development-browser/`
+  (shared real companion, login, live app update, popups, takeover and phone
+  viewport input), `web/e2e/development-terminal/` (agent-created shared TUI,
+  protocol replies, control, geometry and process lifetime), and
+  `web/e2e/remote-development-git/` (remote import, native selected-path commit
+  and push, plus opt-in actual GitHub PR publication). These use deterministic
+  harness fixtures, not authenticated vendor-agent loops.
 
 Windows CI runs `TestInstallDesktopWindowsPreservesCLI` in `internal/localops`:
 install and reinstall must preserve the CLI and unrelated files in the
@@ -75,6 +117,170 @@ gate rejects new detections even when Defender has already remediated them,
 and checks that installation changed neither protection settings nor exclusions.
 This is a detection gate, not a guarantee that an unsigned release will
 never receive a false positive on another machine.
+
+## Headless browser and remote-development acceptance
+
+These are commands and acceptance requirements, not a record of a completed
+smoke run. Use a stock headless Ubuntu Docker host with the source-build
+toolchain from [install.md](install.md#building-from-source). No display
+session, X11/Wayland, Xvfb, host Chromium, or host browser libraries are
+needed by the companion. Build and exercise the exact native image:
+
+```sh
+docker info
+docker build -f images/standard/Dockerfile -t aether-standard:ci .
+make browser-image
+make browser-smoke
+
+# Match the installed server's authority over its private UID-1000 bind.
+sudo env "PATH=$PATH" "HOME=$HOME" \
+  AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+  go test -race -timeout=10m -tags=integration ./internal/runtime \
+    -run '^TestDockerBrowser' -v
+
+# Load/build that image in this daemon before the complete integration gate.
+AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+AETHER_BROWSER_IMAGE=aether/browser:test make test-integration
+
+# Install the dashboard driver's Chromium once; it is separate from the companion.
+(cd web && bunx playwright install chromium)
+
+# Real dashboard interaction through the built gateway/server.
+AETHER_E2E_STANDARD_IMAGE=aether-standard:ci \
+AETHER_BROWSER_TEST_IMAGE=aether/browser:test \
+AETHER_BROWSER_IMAGE=aether/browser:test make test-e2e
+```
+
+`make browser-smoke BROWSER_IMAGE=<reference>` exercises another exact image.
+The image contains the scripts, Playwright, Chromium, OS dependencies and
+fonts; no source or member-home bind participates. The smoke reads Linux
+`/proc/<pid>/status` to verify nested renderer PID namespaces, no-new-privileges
+and Chromium seccomp filters beyond Docker's filters. It interacts with a
+loopback app, captures a browser PNG and a
+bounded JPEG frame, exercises a popup and console report, renders a terminal
+PNG with screen metadata, and resets the browser context. The companion's
+additional behavior checks run in the same image. A Docker spec or requested
+launch flag alone is not proof of a working Chromium sandbox.
+
+The runtime integration command separately exercises real namespace sharing,
+the private control mount, immutable image identity, lifecycle recovery and
+the absence of a CDP TCP listener. Run it with the installed server's root
+authority; do not make its control directory world-writable to get a pass.
+Sandbox failures must fail the gate. Inspect the host's kernel/Docker/custom
+AppArmor diagnostic; do not retry unconfined, with `--no-sandbox`, or after a
+global security-policy relaxation.
+
+CI's browser jobs use native Ubuntu amd64 and arm64 runners, building locally
+on pull requests without registry writes. Releases smoke the exact
+architecture images before publishing and require anonymous pulls of the
+versioned multiarchitecture manifest. An administrator must make the new
+GHCR package public before that gate can succeed; neither this guide nor a
+workflow definition proves publication or a successful run.
+
+The E2E native Git scenarios require the real `aether-standard:ci` image built
+from `images/standard/Dockerfile` (or the exact image selected by
+`AETHER_E2E_STANDARD_IMAGE`), with native Git and `gh`; a fake executable is not
+a substitute. Browser scenarios require the real companion image in the same
+Docker daemon and the loopback app image `node:22.14.0-alpine3.21` available to
+pull or already loaded. The Playwright dashboard driver has its own Chromium
+and host dependencies; the companion's lack of host-browser prerequisites
+does not waive the driver's setup. Build/load prerequisites and run commands
+are not evidence that these suites have passed.
+
+`web/e2e/remote-development-git/github.spec.ts` is a separately gated, externally
+visible smoke. It runs only with `AETHER_E2E_GITHUB_PUBLISH=1`,
+`AETHER_E2E_GITHUB_TOKEN`, `AETHER_E2E_GITHUB_BASE_REPOSITORY` (a public
+`owner/name`) and `AETHER_E2E_GITHUB_HEAD_REPOSITORY` (a writable fork
+`owner/name`); `AETHER_E2E_GITHUB_BASE_BRANCH` defaults to `main`. Supply the
+token through the test environment, never documentation or logs. Its authority
+must allow pushing the fork and creating, commenting on and closing upstream
+PRs. The scenario creates and closes a real PR and removes its temporary head
+branch. An absent credential, disabled opt-in or skipped smoke is an explicit
+GitHub coverage gap; native/local publication tests do not replace it.
+
+**Native Git boundary for commit coverage.** Managed selected-path commits use
+native prepared `git update-ref --stdin` transactions inside the run. The
+standard image uses Ubuntu 24.04's distribution Git, not a special source
+build. Stock Git 2.43 supports the required native transaction. No custom Git
+build or new Ubuntu host Git upgrade is required.
+
+```sh
+go test ./internal/runrepo
+```
+
+This suite exercises native Git and native `gh` against an isolated TLS API
+fixture. It does not replace Docker, authenticated GitHub, or real-harness
+acceptance.
+
+Verify rejection of a changed symbolic HEAD and expected branch OID, including
+a branch switch to another branch at the same OID. Exercise native lock
+contention and abort behavior, selected-path exactness, unrelated staging
+preservation, native identity/signing/coauthors, and the distinct
+`committed=true, index_updated=false` outcome. Custom environments lacking
+transaction support must fail closed and retain native diagnostics; see
+[install.md](install.md#git-inside-run-environments). Do not label selected-path
+commits commit-hook-aware: their result is `hooks_run=false`; use native
+`git commit` in the run terminal when commit hooks are required. Native
+`reference-transaction` hooks must remain active, including a preparation
+veto, and hook output must not be mistaken for protocol acknowledgements.
+
+### End-to-end acceptance matrix
+
+Exercise the following against **both** a local `aether gui` gateway and the
+server-hosted HTTPS dashboard at desktop and phone viewport widths. Record
+separately whether real tailnet identity, mobile operating-system keyboard,
+and WebView behavior were exercised; viewport emulation does not prove those.
+
+- Start a real app in a named development terminal in the live run. Observe
+  initial output, reconnect/replay, screen and geometry changes, normal and
+  alternate-screen rendering, terminal capture, exit and explicit restart.
+  Confirm a phone follows the shared terminal without silently resizing it.
+- Open the app's run-local URL in the companion, use a real DOM snapshot and
+  action, navigate and switch pages, inspect console/request failures, view
+  streamed frames, change viewport, and capture evidence. Join a static page
+  after another observer and confirm the latest complete frame appears.
+  After navigation, reset, closure, or restart, old page/node/viewport
+  references must fail rather than act on another target.
+- Let a run agent own an app surface, explicitly take it over as a human,
+  confirm stale agent input is rejected, then release/reacquire it. A second
+  terminal and the browser must remain independently controlled; the primary
+  harness's mission hold must remain intact.
+  Hold browser input across release, revocation and controller disconnect;
+  confirm server-side cleanup and refusal of replacement control if cleanup
+  fails. Observer disconnect must not clear a live controller's input.
+- Confirm read/capture/stream and write authorization on both gateways,
+  including a member without Steer, backing-account revocation, lifecycle
+  stop/pause, stale control generations, and reconnect after server restart.
+  Browser loss must not silently replace an authenticated session.
+- Exercise real Git status/diff and an explicit selected-path commit in the
+  run environment; verify signing and branch identity, concurrent branch
+  rejection, commit-hook disclosure, native reference-transaction hook
+  behavior, and fail-closed transaction diagnostics. Confirm no browser
+  profile or capture enters the source tree or commit.
+- Inspect deliberately selected evidence, its attribution and retention.
+  Retain reviewed captures and bounded notes before headless report/cleanup,
+  read back the packet and download its exact bytes using `evidence_packet_id`.
+  Confirm workspace View can read retained evidence while private transient
+  access still requires Steer/account-use. Exercise queued revocation and busy
+  publication admission with explicit retry, retained-plus-staged quotas,
+  transient deletion, and the separate capture-time and later packet Git
+  boundaries. Keep credential entry out of recordings and confirm nothing
+  uploads images to a public PR by itself.
+- Cancel or revoke idle browser streams and capture downloads through both
+  transports, including a stalled SSH peer. Source cleanup must not wait for
+  blocked status/close writes; responsive connections must preserve sibling
+  channels. Interrupted downloads must not look like complete captures.
+- Complete two genuine authenticated vendor-agent loops through the shared
+  development tools, with observed terminal/app changes and reviewed evidence.
+  Record which vendors, image identities, gateways and phone were exercised,
+  and any missing prerequisites or unexercised rows.
+
+Public CI has no authenticated real-harness credentials. Its deterministic
+fake agents and scripted `claude`, `pi`, or `omp` fixtures prove their stated
+broker/transport paths, **not two genuine vendor loops**. No-login vendor
+smokes prove argument acceptance and login failure, not authenticated work.
+A skipped test, unavailable Docker daemon, fake runtime, or absent phone is
+an explicit coverage gap, never a passing real-harness or phone acceptance.
 
 ## Local configuration in tests
 
@@ -109,7 +315,7 @@ Scenarios:
 | `TestIntegrationProfileSyncAndLogins` (`profile_integration_test.go`) | Explicit profile operations and harness logins: a login in the environment terminal persists into two runs, a manual profile push updates the shared persistent member home for a later run and an already-running run, and denylisted credential names are refused (Docker only - it needs a real terminal). CLI profile `push`, `status`, and `rollback` remain separate manual operations |
 | `TestIntegrationMemberEnvironmentImage` (`environment_image_integration_test.go`) | The saved environment image: what the container layer keeps, and that a container started from it **without** the member home mounted has no signing key, no `.gitconfig` and no gh token - Docker's commit never captures a bind mount |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
-| `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: both binds realized and read-only, `mcp.json` and `co-authors` found at `0444` inside the container, the staged binary executed as `/opt/aether/aether-server mcp` by a non-root agent, and a status/send/inbox round trip between two overlapping runs |
+| `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: the run socket and both verified read-only executable binds are realized, no Aether-managed `mcp.json` is installed, `co-authors` is found at `0444`, the staged binary executes as `/opt/aether/aether-server mcp` by a non-root agent when manually configured, and a status/send/inbox round trip works between two overlapping runs |
 | `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --event ...` against the run's own socket, and each run parking at needs-attention with `waiting for your input` seconds after the agent's turn ends - not after the stall threshold - then returning to running with `agent resumed` on the agent's next turn |
 | `TestIntegrationOpenCodeStatusReporterInContainer` (`agentstatus_integration_test.go`) | The same path for a harness that has no flag to point at its reporter: the plugin written at `0444` into the run's coordination directory, `OPENCODE_CONFIG_CONTENT` naming it from inside the container with the launch command left exactly as it was, the staged binary running `aether-server report opencode --event session.idle` against the run's own socket, the run parking at needs-attention with `waiting for your input` seconds after the turn ends, and returning to running with `agent resumed` when the agent takes the steer |
 | `TestIntegrationChaosRebootSurvivingContainer`, `TestIntegrationChaosRebootRetainedTUI`, `TestIntegrationChaosRebootLostContainer` (`chaos_reboot_integration_test.go`) | The server SIGKILLed mid-run: supervision reattaches to an active surviving container; an explicitly closed TUI run survives with the same row, paused container, and checkout and can relaunch that exact retained identity; a lost active container becomes `interrupted` after its `wip:` commit and published branch, with no replacement relaunch |
@@ -152,7 +358,7 @@ tailnet identity resolution so join and fallback scenarios need no real
 tailnet, `Harnesses` overrides registry argv templates so a registered
 harness (with its real profile root and credential mounts) can run a
 scripted agent - the first two double as deployment wiring - and
-`ServerBinary` names the binary staged as the in-container MCP bridge.
+`ServerBinary` names the executable staged for the CLI and optional MCP bridge.
 
 ### The container coordination scenario
 
@@ -166,17 +372,21 @@ under `go test` `/proc/self/exe` is not. So the scenario points
 `ServerBinary` at an `aether-server` it builds - the same one the chaos
 scenarios run as a child process.
 
-The agent has to be launched by the shipped `claude` profile, because a
-`Harnesses` argv override is respected verbatim and takes the MCP
-registration with it. So the scenario builds a run image whose `claude`
-executable is the fixture agent in `internal/server/testdata/coordagent`,
-running as a non-root user. The fixture knows no Aether paths: it takes the
-coordination directory from the `--mcp-config` it was handed and the bridge
-command from that config, the way a real harness would. What it found goes
-on its terminal, where the test reads it over a real attach: the modes,
-both binds read-only in the kernel's own mount table, a write the
-coordination directory refuses with EROFS, and every tool result. The
-daemon's own view of the two binds is checked beside it.
+The scenario uses the shipped `claude` profile with a non-root fixture agent
+from `internal/server/testdata/coordagent`. It explicitly invokes the optional
+bridge from the canonical executable mount; no automatic MCP registration is
+required. The fixture reports directory modes, read-only mounts from the
+kernel's mount table, EROFS on attempted writes, and tool results over a real
+attach. The daemon's mount view is checked alongside those observations.
+
+`TestIntegrationMissionCompositionInDocker` composes mission dispatch,
+proactive coordination, accepted retained submissions, combined verification,
+human approval, and exact delivery. It also checks failed verification,
+stale-target rejection, and integrator replacement. Its `claude`, `pi`, and
+`omp` executables are scripted fixtures, not genuine vendor-agent runs.
+`web/e2e/mission-candidate-review.spec.ts` drives launch, progress, worker
+control, and mission candidate preparation in a real browser and attaches a
+successful screenshot for visual inspection.
 
 The container user is the test process's own uid:gid unless that is root:
 the scheduler chowns the run checkout and the member home to the container
@@ -219,15 +429,228 @@ such credentials, so those stay a manual check. Every one of them skips when
 its variable is unset, and the no-login test skips as a whole rather than
 reporting a pass with nothing run.
 
-`pi` and `omp` have no smoke test: neither is in the smoke image, so
-nothing pins their templates. Adding one is an install line and a map
-entry each.
+`pi` and `omp` have no template smoke in that image. The native mailbox
+lifecycle checks below are separate from template acceptance and authenticated
+TUI smoke.
 
 The status extension those two load, `internal/agentstatus/status.ts`, is
 the one shipped file the Go build never executes. `internal/agentstatus`
 runs it under `bun` against a recording stand-in for the server binary, so
 a turn's reports are proven to come out in order and to end exactly once.
 Those tests skip where `bun` is not installed.
+
+### Native mailbox lifecycle and idle-wake smoke
+
+Run the shipped adapters against deterministic SDK-shaped lifecycle fixtures
+with Node 22.13 or newer:
+
+```sh
+make test-native-hooks
+node --experimental-vm-modules --test --test-name-pattern='omp:' \
+  internal/coordhooks/native_pi_omp_lifecycle_test.mjs
+```
+
+The OMP fixture separates extension `agent_end`, public terminal `agent_end`,
+and the session's asynchronous `waitForIdle()` drain. OMP 18.3.1 does not emit
+pi's `agent_before_settle` or `agent_settled`. Regressions exercise repeated
+busy consumption/ack followed by fresh idle mail, unread busy mail deferred
+through cleanup and fresh admission, native automatic continuations,
+approval resolution during work, Stop during cleanup, replacement, and
+admission crossing a busy transition. The shared suite retains rejected-send,
+reentrant acceptance, duplicate-loading and owning-root cases. These are
+adapter checks, not evidence of an authenticated model turn.
+
+For real native proof, use an isolated coordinated TUI run with an authorized
+peer and the exact CLI/server/extension versions under investigation. Do not
+edit a live production hook, credentials, trust state or disable settings to
+obtain evidence. Record the managed launch arguments separately from manual
+file inspection; see [activation](harnesses.md#installation-and-activation).
+
+1. Finish or block outstanding harness todos and confirm no native retry,
+   approval prompt or pending input remains. End the normal model turn without
+   a terminal worker report, active `inbox --wait`, polling loop or scheduled
+   prompt. Observe at least two 30-second receiver waits with no new model turn.
+2. Send one uniquely identified peer message using
+   `aether-internal send --to <receiver-run> --body <nonce> --idempotency-key <key>`.
+   Record the durable message ID, fresh admitted helper response, native API
+   acceptance, model turn start, exact inbox body, and explicit
+   `aether-internal inbox --ack <ack_token>`. After settlement, two more quiet
+   observer waits must produce no extra model turn.
+3. During ordinary foreground work, send another message. Let the agent read
+   and acknowledge it before its final response. Repeat this sequence; each
+   fresh idle snapshot must find no remaining mail and schedule no follow-up.
+   In a separate round, leave mail unread through completion and require one
+   deferred native wake after successful cleanup and fresh admission.
+4. Test frozen batches separately: read a batch without acknowledging it, send
+   steering, and read again. The old batch must repeat. Acknowledge its token
+   only after handling it; the next batch must expose the steering. This is
+   expected inbox behavior, not evidence of a missed native wake.
+5. Exercise approval waits, Stop, protection/takeover and release, replacement,
+   duplicate manual/managed loading, rejected native input and process exit.
+   No busy or stale root may receive an automatic turn. Stop requires accepted
+   human input to resume; releasing server control alone does not undo it.
+
+Capture session/root identity, generation, message IDs, acknowledgement,
+helper admission, native turn boundaries and visible output. A final-looking
+assistant message, hidden inbox pointer, status reporter event, or empty inbox
+alone cannot identify the initiator. OMP's own todo/retry continuation may
+encounter legitimate integrator mission-refresh context; that context does
+not start the turn. Name missing instrumentation and unexercised cases.
+
+In the actual dashboard, open an owned mission-worker terminal without touching
+control: it must remain a read-only mirror and request no write lease. Explicit
+**Take control** must acquire through its acknowledged control response;
+**Release control** must return to viewing, including after navigation. Check
+ordinary and integrator owner defaults, phone mirrors, foreign/protected runs
+and stale generations separately. The authoritative control/hold contract is
+in [Run control](terminal.md#run-control-and-the-run-room), not duplicated by a
+test-only permission model.
+
+## The edge suite
+
+`internal/edge/edgetest` runs edge remote access end to end in one process,
+under plain `make test`: a real edge (sign-in service and relay, serving its
+sign-in origin on `localhost` and its relay origin on `127.0.0.1`) against a
+fake GitHub, real servers (sshd over a real store, with the edge agent)
+under each access policy, the real client dialer and the local gateway, and
+a browser played by an HTTP client with a cookie jar for the edge's own
+pages. A proxy in front of the edge records the control channels and, with
+the edge's own signing key, plays a compromised edge: it forges, replays,
+alters, drops and injects control messages and grants, answers the data
+socket of an open it forged, and routes a client's connection to another
+server. Tests read each server's store to check what an attack changed.
+[edge.md](edge.md) describes the edge. It needs no Docker and no network:
+
+```sh
+go test -race ./internal/edge/edgetest/
+```
+
+| Test | Proves |
+| --- | --- |
+| `TestAccountAccess` | Under `account` an invited person works with no approval, the device is recorded `registered`, and a registered device approves nothing |
+| `TestApprovedDevices` | Under `approved-devices` every new device, a member's first included, waits: approved from the member's approved device, an admin's, or the console; a waiting device, an admin's included, opens no control channel |
+| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance, a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential; after the forged acceptance no member or administrator exists and the invitation is open |
+| `TestMaliciousEdgeSubstitutesTheClaimingAccount` | Under both policies a claim whose grant names another account is refused before the code is tried; no member, owner or spent attempt |
+| `TestMaliciousEdgeAccountAccess` | Against `account` the same forged admin grant is admitted with the admin's role: what that policy trusts the edge with. A key registered to one account still serves no other |
+| `TestTakenOverProviderAccount` | A taken-over GitHub account signs in on its own machine: access under `account`, a waiting device under `approved-devices` |
+| `TestClaim` | Under both policies: an edge that routes a claim to another server never delivers the code; expired, wrong and exhausted codes; the claiming device approved; another account's claim refused |
+| `TestTransferStandsOnlyOnceTheEdgeRecordsIt` | `server.owner.transfer` whose answer is lost, which the edge refuses, or with the edge unreachable fails with the reason and keeps the server's owner; after the lost answer the edge records the server's owner again when it reconnects |
+| `TestFailedClaimRecordRecovers` | The edge's database refuses to record the owner; the edge closes the server's control channel, the server drops its owner, and a fresh code claims again for the same account only |
+| `TestClaimKeepsTheDirectoryPushedWithIt` | A server with an admin and an open invitation is claimed through the admin's link, and the invitee joins |
+| `TestInvitations` | By login and email; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
+| `TestRoleChange` | A new role reaches the edge's list and the member's live connection |
+| `TestCrossServerIsolation` | A member of one server is refused on another, by the edge and, for forged grants, by the server |
+| `TestRevocationClosesLiveConnections` | Under both policies: member removal, device revocation, console revocation, `aether logout` and account deletion each close a live connection; the test logs how long each took |
+| `TestRevocationWhileTheEdgeIsDown` | Revocations made on the server while the edge is down hold once it is back |
+| `TestDeleteAccountAfterTransfer` | `server.owner.transfer`, then deletion: the server keeps its new owner and every member and role |
+| `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; the console recovers it |
+| `TestAccountDeletionReachesAnOfflineServer` | A deletion reaches a server that was offline when it next enrolls |
+| `TestLostAccountDeletionIsSentAgain` | A deletion dropped on its way to the server stays owed at the edge, is sent again when the server reconnects and is forgotten only on the server's answer; the identity and edge devices are then gone, the device key no longer connects directly, and a repeated notice changes nothing |
+| `TestConsoleRecoveryOfAnAdminWithoutAnAccount` | Under both policies: the only admin, reachable only through the edge, deletes their account; a claim code from `claim-code --admin` binds the account they sign in with again to the same member and approves the device; a code naming a collaborator claims nothing; no member or admin is added |
+| `TestRelayHostNameChangeKeepsPinAndOwner` | The edge moves to other host names with the same key; the server, its `edge-url` changed, keeps its pin and owner, the edge keeps it claimed, and an admin transfers ownership |
+| `TestPolicySwitchToApprovedDevices` | Switching `account` to `approved-devices` refuses registered devices until reviewed; approved devices, member SSH keys and the tailnet dashboard keep working |
+| `TestExistingPathsWithoutTheEdge` | With the edge down, an invite code with an SSH key and the tailnet dashboard's in-process client work |
+| `TestServerVerifiesGrants` | The server refuses forged, expired, replayed, misdirected, other-issuer, other-kind and wrong-connection grants, and a grant for a Google account with the reason; `aether-server edge trust` fetches the signing key |
+| `TestEnrollmentSignatureIsNotAHostSignature` | A server posing with a captured enrollment signature fails the client's handshake |
+| `TestNoBootstrapOverTheRelay` | An unclaimed server takes no member from the relay, and an invite code over the relay joins nobody |
+| `TestRelayedFloodDoesNotBlockDirect` | Relayed connections that never finish their handshake fill the relayed budget only; a direct connection still works |
+| `TestEdgeRestartAndDirectFallback` | A clean edge stop drops relayed connections, the server re-enrolls, and a link with an address uses it while the edge is down |
+| `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again |
+| `TestBlockedServerStatusSaysWhy` | A blocked server's status for `aether-server edge status` carries the edge's reason |
+| `TestBehindTrustedProxies` | Under both policies, with the edge behind `--trusted-proxies` and its proxy reaching it from a non-loopback address of this machine (skipped on a machine with none): GitHub sign-in, a claim, an invitation and relayed `server.info` calls work; the edge records the forwarded client address, not the proxy's; `/signin/google` answers 404; a request from loopback past the proxy is refused with `403` and counted |
+| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone |
+
+Beside the suite, `internal/sshd` checks each server rule on its own,
+among them `TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
+an invitation until one is approved, which creates the member and removes
+the others), `TestRevokedInvitationDropsItsWaitingDevices`,
+`TestMemberIdentityListAndRemove`,
+`TestClaimCodeForAnAdminRecoversThatAdmin`,
+`TestApprovalShowsWhomTheCodeAdmits` (a lookup names the member and role
+before approving, and an approval naming another device commits nothing),
+`TestRelayedConnectionThroughAnEdgeThatSubstitutesTheAccount` and
+`TestWaitingDevicesAreBounded`; `internal/edge/agent` has
+`TestPinAndOwnerFollowTheEdgeKey`, `TestEarlierLayoutPinIsNotSilentlyReplaced`,
+`TestTransferOwner` and `TestOwnerIsReportedAgainAtEnrollment`. The integration suite's
+`TestIntegrationUpgradeFromMainWithoutTheEdge` starts this build on a
+database at main's schema version and a configuration without edge keys:
+any outbound HTTP request fails it, and its SSH key and tailnet members
+sign in as before.
+
+Every request reaches the edge from 127.0.0.1, so each test moves its
+edge's clock forward to refill the per-address rate limits. Tests run in
+parallel, each with its own edge; the client calls that read the config
+directory from `AETHER_CONFIG_DIR` take turns.
+
+### Behind nginx
+
+`scripts/edge-nginx-test.sh`, part of `make test-scripts`, runs
+`TestBehindNginx` (build tag `nginx`) when `nginx` is on `PATH` and skips
+otherwise. It renders
+[`packaging/nginx/aether-edge.conf.example`](../packaging/nginx/aether-edge.conf.example)
+for the host names `localhost` and `127.0.0.1` on a free port with a
+self-signed certificate, checks it with `nginx -t`, and runs a real nginx
+in front of the edge wired as `aether-edge serve --proxy-listen` wires it. A
+real server enrolls through nginx; a client signs in, claims, runs
+`server.info`, holds the relayed connection silent for 75 seconds (past
+nginx's default 60-second read timeout) and runs it again; and requests
+carrying a forged `X-Forwarded-For` are recorded under the address nginx
+saw. It takes about 80 seconds.
+
+```sh
+sh scripts/edge-nginx-test.sh
+```
+
+### The edge image
+
+`scripts/edge-image-smoke.sh` runs a built
+[`images/edge/Dockerfile`](../images/edge/Dockerfile) image with fake
+GitHub credentials behind `curl` as its proxy, on a port published on
+127.0.0.1. It checks that the image runs as a non-root numeric uid, has no
+shell and declares its `HEALTHCHECK`; that a start without configuration
+fails naming `--signin-origin`; that a GitHub-only configuration passes
+`aether-edge healthcheck` and exits 0 on `SIGTERM` within 30 seconds
+without logging the secret; and, through `/v1/edge`, that a replacement
+container on the same volume presents the same edge key fingerprint and one
+on a new volume a different one. It needs a container runtime, so it is not
+part of `make test-scripts`; the second argument names the runtime, docker
+by default:
+
+```sh
+make edge-image
+sh scripts/edge-image-smoke.sh aether/edge:test
+```
+
+With podman, build with `podman build --format docker -f
+images/edge/Dockerfile .`: the default OCI format drops `HEALTHCHECK`, and
+the smoke test fails on it.
+
+`TestServeAsAContainerRunsIt` in `cmd/aether-edge` covers the same start,
+healthcheck, stop and key checks on the binary without a runtime, with a
+read-only working directory, `HOME` and `TMPDIR`.
+
+`scripts/ci-classify-edge.sh` decides from a pull request's changed paths
+whether the image can change. Its first `case` pattern lists every
+repository package `aether-edge` imports. `scripts/ci-classify-edge-test.sh`,
+part of `make test-scripts`, runs `go list -deps ./cmd/aether-edge` for
+linux/amd64 and linux/arm64 and fails when a package it imports is
+classified false. When the edge starts importing a new package, the test
+prints the line to add:
+
+```
+ci-classify-edge-test: aether-edge imports internal/<package> on linux/amd64, which ci-classify-edge.sh classifies false; add internal/<package>/* to its first case pattern
+```
+
+Add that pattern, then run `sh scripts/ci-classify-edge-test.sh` again.
+
+The golang base image in `images/edge/Dockerfile` sets `GOTOOLCHAIN=local`,
+so the image builds with that image's Go whatever go.mod's `toolchain` line
+says. `scripts/edge-go-version-test.sh`, part of `make test-scripts`, fails
+when the two differ and names both versions:
+
+```
+edge-go-version-test: images/edge/Dockerfile builds with golang:1.26.8, but go.mod pins go1.26.9; change the golang tag and its @sha256 digest in images/edge/Dockerfile to 1.26.9 (or go.mod's toolchain line to go1.26.8)
+```
 
 ## The dashboard end-to-end suite
 
@@ -304,7 +727,7 @@ attaches the server's output to the report.
 | `onboarding-second-member` | A second member joining on an invite code, onto a workspace someone else seeded: the workspace is picked rather than created, and the push offer is replaced by "already has main at ..." with nothing pushed |
 | `onboarding-agents` | The Agents step's setup screen: the install command, the environment container starting, Back closing the sub-screen without leaving the step, and "I've installed and logged in" saving the environment to a member image |
 | `onboarding-github` | The Agents step's Connect GitHub screen against the member's own environment container, in two acts. First with no gh in it: the screen names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: the screen reporting the login command ready - the state, because the command block alone is also what a failed check shows - the stub's own log proving the dock typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
-| `onboarding-configuration` | An explicit one-time browser directory import: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
+| `onboarding-configuration` | An explicit browser directory import: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
 | `onboarding-first-run` | Launching the first run on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the harness exits, and explicitly closing the run; and, with nothing installed, the step offering "Set up an agent" instead of a picker and sending the reader back to Agents |
 | `onboarding-navigation` | Back from every step, with the workspace and the connected clone still settled on the way through, and the Git identity step reached in both directions between Link and Workspace |
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
@@ -312,7 +735,8 @@ attaches the server's output to the report.
 | `run-switch` | Opening a second run from the sidebar while the first run's terminal is on screen, with the second attach left unanswered: the pane holds no output from the run before it |
 | `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration, the query is gone from the address bar afterwards, and a reload lands back on the board |
 | `terminal-tools` | The board's terminal dock: closed until the header strip is used, a real environment container behind it, `Ctrl+=` resizing the live terminal and surviving a reload, native `Ctrl+Shift+V` paste through the terminal's input path, `Ctrl+Shift+F` searching shell output, and new shell output after collapsing and reopening the dock |
-| `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: correct shared-grid growth, zoom, observe/steer, and reattach; a long redraw log opens with its complete output searchable in the ordinary terminal scrollback and remains responsive to input |
+| `terminal-geometry` | A newly launched cursor-addressed agent with differently sized writers: shared-grid growth, the same pinned row and relative pixel offset through shared font zoom, return-live in mirror mode and reattach; a large redraw archive opens at a bounded current screen rather than replaying older output |
+| `terminal-streaming` | Taking and releasing control without replacing the output socket; scrolling alone through more than 12,000 retained lines across more than 60 pages, with bounded rendered rows, stable cursor/text/pixel anchors during delayed prepend, keyboard browsing and the explicit archive/screen boundary; run A/B switches restore the same rows and horizontal/partial-row offsets under continuing output, close inactive sockets, and refresh the newest archive only after return-live and a new upward-reading episode |
 | `terminal-images` | Choosing a PNG in the terminal dock's file chooser, previewing it, checking the generated `terminal.image` path, and verifying the exact uploaded bytes by SHA-256 in both the member environment shell and a live run shell; the path is safely quoted and not submitted until the test presses Enter |
 | `window-sizing` | The update notices at the smallest window `desktop/main.js` allows, and at one smaller browser viewport: controls remain on their own first row, bounded technical output does not push the shell away, and the status actions stay reachable |
 | `status-bar-sizing.spec.ts` | A real linked member followed by a stopped server: primary actions stay visible at compact desktop widths, full secondary readouts open by keyboard, and the mobile details menu keeps every control inside the viewport; the phone behavior is covered by `status-bar.mobile.spec.ts` below |
@@ -368,7 +792,8 @@ covered - WebKit is not installed.
 | `dialog-anchor.mobile.spec.ts` | On a phone, a confirm short enough to tell centred from top-anchored sitting at the top of the screen, and the launch form keeping its Launch button on screen on a viewport as short as a soft keyboard leaves |
 | `toast-clearance.mobile.spec.ts` | On a phone, a toast settling above the 44px status bar rather than over it, which is what `sonner` needs `mobileOffset` for |
 | `run-views.mobile.spec.ts` | On a phone, steering a real run from the one Actions menu the run header keeps, and then reading its diff: the menu items are finger-sized, protecting the run shows on the header, and the file section that holds a line wider than the screen scrolls sideways only once the wrap toggle is off |
-| `terminal-phone.mobile.spec.ts` | A real run's Terminal tab on a phone, against the real gateway: a desktop-sized writer attached straight to the gateway's WebSocket sets the session to 132x43, the phone opens as a mirror rather than steering, renders every one of those rows at that width and pans over them, and the session is still 132x43 after the phone takes control, taps Esc from the key bar and loses half its screen to a keyboard - read back from the server through a fresh attach ack, not inferred from what the phone sent. Then the writer's window changes, and the phone follows it there |
+| `run-evidence.mobile.spec.ts` | Retained evidence at 390x600 with coarse-pointer touch input: tap through Patch and Summary, keep retained file content readable, and close both Evidence and Run Room; the report includes the open evidence sheet |
+| `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
 | `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome |
 
 The installed window itself is not in the suite. Chromium exposes no
@@ -399,18 +824,25 @@ way, so content stranded behind a real iOS keyboard stays a manual check on a
 phone (`docs/dashboard-frontend.md` has that path).
 
 The phone specs need git; `shell-drawer.mobile.spec.ts`,
-`run-views.mobile.spec.ts` and `terminal-phone.mobile.spec.ts` also need
-Docker, because they open a real run, and skip without it. Run them alone
+`run-views.mobile.spec.ts`, `run-evidence.mobile.spec.ts` and
+`terminal-phone.mobile.spec.ts` also need Docker, because they open a real run,
+and skip without it. Run them alone
 against the binaries `make build` produced:
 
 ```sh
 cd web && bunx playwright test --project=mobile
 ```
 
-They add about 15 seconds to `make test-e2e` and to the `dashboard-e2e` job,
-which stays inside the suite's 30-minute `globalTimeout` unchanged. That job
-uploads its `playwright-report` artifact on a pass as well as a failure, so
-the phone screenshots are on every run.
+These specs run in `make test-e2e` and the `dashboard-e2e` job. The job uploads
+its `playwright-report` artifact on a pass as well as a failure, so the phone
+screenshots are on every run.
+
+Reference screenshots from a Chromium touch audit use synthetic API data
+and a 132x43 terminal: [terminal before/after and keyboard-height input](media/mobile-terminal-scroll.webp),
+and [short-screen page and dialog layouts](media/mobile-layout-audit.webp).
+The audit exercised 390x844, 360x740 and 390x524 viewports, including the
+bottom actions of long pages and dialogs. These images show browser layout,
+not a physical keyboard or a live vendor session.
 
 ### Adding a step to the wizard
 

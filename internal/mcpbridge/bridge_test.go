@@ -79,7 +79,12 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 	success, errorResponses := golden(t, "success.ndjson"), golden(t, "errors.ndjson")
 	requests := goldenRequests(t)
 
+	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
+	later := protocol.Response{Result: json.RawMessage(`{"messages":[{"id":"msg_04","kind":"question",` +
+		`"correlation_id":"q_02","from_run_id":"run_02","body":"Is the auth helper merged?",` +
+		`"created_at":"2026-08-10T12:00:09Z"}],"ack_token":"01k1h7m4z9q0r8s5t2v6w3x7y2"}`)}
 	var mu sync.Mutex
+	var queued bool
 	coord := newFakeCoord(t, func(req protocol.Request) protocol.Response {
 		mu.Lock()
 		defer mu.Unlock()
@@ -104,7 +109,14 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 			if err := json.Unmarshal(req.Params, &p); err != nil {
 				t.Errorf("decode inbox params: %v", err)
 			}
-			if p.AckToken != "" {
+			// The later question is answered whichever token its read
+			// carries: the bridge promotes a token only after the client
+			// has read the response, so the read after the acknowledgement
+			// may still replay the old one.
+			switch {
+			case queued:
+				return later
+			case p.AckToken == ack:
 				return protocol.Response{Result: json.RawMessage(`{"messages":[]}`)}
 			}
 			return success[4]
@@ -183,7 +195,6 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 		t.Fatalf("send to a non-peer: code = %d, want %d", code, protocol.CodeDenied)
 	}
 
-	const ack = "01k1h7m4z9q0r8s5t2v6w3x7y1"
 	var inbox inboxOutput
 	callTool(t, cs, toolInbox, nil, &inbox)
 	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" || inbox.AckToken != ack {
@@ -200,9 +211,22 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 	if acking.AckToken != ack {
 		t.Fatalf("acknowledging inbox params = %+v, want token %q", acking, ack)
 	}
-	callTool(t, cs, toolInbox, nil, &inbox)
-	if len(inbox.Messages) != 1 || inbox.Messages[0].ID != "msg_02" {
-		t.Fatalf("inbox after acknowledging the first batch = %+v, want the later queued question to remain", inbox)
+	mu.Lock()
+	queued = true
+	mu.Unlock()
+	var after inboxOutput
+	callTool(t, cs, toolInbox, nil, &after)
+	if len(after.Messages) != 1 || after.Messages[0].ID != "msg_04" {
+		t.Fatalf("inbox after acknowledging the first batch = %+v, want the later queued question", after)
+	}
+	seenInbox := coord.seen()
+	last := seenInbox[len(seenInbox)-1]
+	var carried protocol.CoordInboxParams
+	if err := json.Unmarshal(last.Params, &carried); err != nil {
+		t.Fatalf("decode inbox params after acknowledgement: %v", err)
+	}
+	if carried.AckToken != "" && carried.AckToken != ack {
+		t.Fatalf("read after acknowledgement carried token %q, want none or the replayed %q", carried.AckToken, ack)
 	}
 
 	var report protocol.CoordReportResult

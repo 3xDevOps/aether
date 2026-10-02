@@ -135,9 +135,11 @@ func (m LaunchMode) Valid() bool {
 
 // LaunchOptions carries one-shot launch controls that are not part of the
 // strict Launch seam. CachedBase pins a retry to the exact accepted mirror
-// commit returned by a prior base-capture failure.
+// commit returned by a prior base-capture failure. AssignedRunID is reserved
+// by durable mission state and is never exposed through generic run.launch.
 type LaunchOptions struct {
-	CachedBase string
+	CachedBase    string
+	AssignedRunID RunID
 }
 
 // Role is a member's role within the deployment.
@@ -629,6 +631,12 @@ type Run struct {
 	// questions without a correlated reply. It is populated by run snapshot
 	// reads and is zero for newly-created runs.
 	UnansweredQuestions int
+	// Mission fields are read-only snapshot metadata from durable mission and
+	// attempt relationships, not authorization. MissionRole is "integrator"
+	// only for the current integrator, or "worker" even for finished attempts.
+	MissionID       MissionID
+	MissionRole     string
+	IntegratorRunID RunID
 	// ProfileSnapshotID is the immutable agent-profile snapshot pinned at
 	// provisioning. Zero (empty) means unpinned / no snapshot.
 	ProfileSnapshotID ProfileSnapshotID

@@ -56,4 +56,33 @@ func TestConfigWritePreservesModeWithRestrictiveUmask(t *testing.T) {
 	if err != nil || string(got) != content {
 		t.Fatalf("saved content = %q, err=%v", got, err)
 	}
+
+	content = "#!/bin/sh\necho imported\n"
+	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{
+		{Path: "check.sh", Content: []byte(content), Mode: 0o644},
+		{Path: "new.json", Content: []byte("{}"), Mode: 0o644},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []struct {
+		name    string
+		mode    os.FileMode
+		content string
+	}{
+		{"check.sh", 0o755, content},
+		{"new.json", 0o644, "{}"},
+	} {
+		target := filepath.Join(filepath.Dir(name), file.name)
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != file.mode {
+			t.Errorf("imported %s mode = %04o, want %04o", file.name, info.Mode().Perm(), file.mode)
+		}
+		got, err := os.ReadFile(target)
+		if err != nil || string(got) != file.content {
+			t.Errorf("imported %s content = %q, err=%v, want %q", file.name, got, err, file.content)
+		}
+	}
 }

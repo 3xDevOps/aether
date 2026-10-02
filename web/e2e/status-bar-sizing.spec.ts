@@ -17,8 +17,8 @@
 import { expect, test } from './fixtures'
 import { OnboardingWizard } from './pages/wizard'
 
-/** The right-hand group, which never gives way and so must always fit. */
-const controls = ['Commands', 'Keyboard shortcuts', 'Theme: system']
+/** Controls that must stay reachable even when the left status readouts wrap. */
+const controls = ['Commands', 'Keyboard shortcuts', 'Theme: system', 'Usage']
 
 const sizes = [
   // The floor desktop/main.js enforces.

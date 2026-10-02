@@ -143,7 +143,7 @@ func New(cfg Config) (*Gateway, error) {
 		Authorize: g.authorize,
 		Capabilities: protocol.GatewayCapabilities{
 			Gateway: "local",
-			WS:      []string{"events", "attach", "terminal"},
+			WS:      []string{"events", "attach", "terminal", "dev/browser"},
 			Local:   localVerbs,
 		},
 		Static: cfg.Static,
@@ -280,6 +280,7 @@ func (g *Gateway) Close() error {
 	built := make(chan struct{})
 	go func() {
 		g.builds.Wait()
+		g.local.edge.waits.Wait()
 		close(built)
 	}()
 	drain, stop := context.WithTimeout(context.Background(), closeTimeout)

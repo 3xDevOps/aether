@@ -24,6 +24,9 @@ func (d *Daemon) git(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, d.cfg.GitPath, append([]string{"-C", d.cfg.RepoPath}, args...)...)
+	if d.gitEnv != nil {
+		cmd.Env = append(cmd.Environ(), d.gitEnv...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

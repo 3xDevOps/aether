@@ -75,7 +75,7 @@ func TestTerminalScreenSnapshotKeepsCurrentViewportBounded(t *testing.T) {
 	}
 	screen.write([]byte("CURRENT-SNAPSHOT-PROMPT"))
 
-	snapshot := makeScreenSnapshot(screen, modeScanner{})
+	snapshot := makeScreenSnapshot(screen, modeScanner{}, TerminalPosition{})
 	assertEquivalentScreen(t, screen.term, restoreScreenSnapshot(t, snapshot))
 	if len(snapshot.Data) > 256<<10 {
 		t.Fatalf("snapshot grew with redraw history: %d bytes", len(snapshot.Data))
@@ -91,7 +91,7 @@ func TestTerminalScreenSnapshotContinuationMatchesUninterruptedScreen(t *testing
 	prefix := []byte("\x1b[?2004h\x1b[?1049h\x1b[2J\x1b[H\x1b[38;2;20;180;40m日本語\x1b[0m\r\n\x1b[1;34mSURVIVES\x1b[0m")
 	screen.write(prefix)
 	var modes modeScanner
-	snapshot := makeScreenSnapshot(screen, modes)
+	snapshot := makeScreenSnapshot(screen, modes, TerminalPosition{})
 	continuation := []byte("\r\x1b[Ktyped continuation")
 	screen.write(continuation)
 	restored := restoreScreenSnapshot(t, snapshot)
@@ -143,7 +143,7 @@ func TestTerminalScreenSnapshotPreservesSplitSequences(t *testing.T) {
 			defer screen.dispose()
 
 			screen.write(tc.prefix)
-			snapshot := makeScreenSnapshot(screen, modeScanner{})
+			snapshot := makeScreenSnapshot(screen, modeScanner{}, TerminalPosition{})
 			screen.write(tc.continuation)
 			restored := restoreScreenSnapshot(t, snapshot)
 			if _, err := restored.Write(tc.continuation); err != nil {
@@ -165,7 +165,7 @@ func TestTerminalScreenSnapshotModesPrecedePendingSequence(t *testing.T) {
 	screen.write([]byte("\x1b[?2004h"))
 	modes.scan([]byte("\x1b[?2004h"))
 	screen.write([]byte("\x1b["))
-	snapshot := makeScreenSnapshot(screen, modes)
+	snapshot := makeScreenSnapshot(screen, modes, TerminalPosition{})
 
 	continuation := []byte("2J\x1b[Hvisible")
 	screen.write(continuation)
@@ -184,7 +184,7 @@ func TestTerminalScreenSnapshotPreservesScrollRegionAndModes(t *testing.T) {
 	defer screen.dispose()
 
 	screen.write([]byte("\x1b[3;6r\x1b[?6h\x1b[?7l\x1b[4;3H\x1b[1;31mMARGIN\x1b[0m"))
-	snapshot := makeScreenSnapshot(screen, modeScanner{})
+	snapshot := makeScreenSnapshot(screen, modeScanner{}, TerminalPosition{})
 	restored := restoreScreenSnapshot(t, snapshot)
 	assertEquivalentScreen(t, screen.term, restored)
 
@@ -206,7 +206,7 @@ func TestTerminalScreenSnapshotPreservesPendingWrap(t *testing.T) {
 			t.Fatal(err)
 		}
 		screen.write([]byte(prefix + "\x1b[1;31mabcdefghijklmnopqrstuv日\x1b[32m"))
-		restored := restoreScreenSnapshot(t, makeScreenSnapshot(screen, modeScanner{}))
+		restored := restoreScreenSnapshot(t, makeScreenSnapshot(screen, modeScanner{}, TerminalPosition{}))
 		assertEquivalentScreen(t, screen.term, restored)
 		screen.write([]byte("X"))
 		if _, err := restored.Write([]byte("X")); err != nil {
@@ -226,7 +226,7 @@ func TestTerminalScreenSnapshotCanonicalizesLongCSIHeader(t *testing.T) {
 
 	prefix := append([]byte("\x1b["), bytes.Repeat([]byte("9"), maxCSIContinuation+32)...)
 	screen.write(prefix)
-	snapshot := makeScreenSnapshot(screen, modeScanner{})
+	snapshot := makeScreenSnapshot(screen, modeScanner{}, TerminalPosition{})
 	if len(snapshot.Data) >= len(prefix) {
 		t.Fatalf("long CSI header was not compacted: %d bytes", len(snapshot.Data))
 	}

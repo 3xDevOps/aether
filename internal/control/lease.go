@@ -22,6 +22,8 @@ var (
 	// ErrOccupied means another session currently controls the run. Taking
 	// over an occupied run requires force=true.
 	ErrOccupied = errors.New("control: run is already controlled")
+	// ErrAdmissionBusy means another action owns the run's admission boundary.
+	ErrAdmissionBusy = errors.New("control: run admission is busy")
 	// ErrStale means that the lease no longer names the current authority.
 	ErrStale = errors.New("control: stale lease")
 	// ErrInvalid is returned for an empty run or member identifier.
@@ -65,9 +67,11 @@ type lease struct {
 }
 
 type runState struct {
-	mu         sync.Mutex
-	generation uint64
-	current    *lease
+	mu sync.Mutex
+	// surfaceGate linearizes run-wide revocation against surface admission.
+	surfaceGate sync.RWMutex
+	generation  uint64
+	current     *lease
 }
 
 // Service is a concurrency-safe in-memory controller lease table. Runtime
@@ -80,6 +84,7 @@ type Service struct {
 	reconnectWindow time.Duration
 	maxSessionBytes int
 	runs            map[domain.RunID]*runState
+	surfaces        map[surfaceKey]*surfaceState
 }
 
 // New creates an in-memory controller lease service.
@@ -98,6 +103,7 @@ func New(cfg Config) *Service {
 		reconnectWindow: cfg.ReconnectWindow,
 		maxSessionBytes: cfg.MaxSessionIDBytes,
 		runs:            make(map[domain.RunID]*runState),
+		surfaces:        make(map[surfaceKey]*surfaceState),
 	}
 }
 
@@ -213,6 +219,24 @@ func (s *Service) Admit(run string, fn func() error) error {
 	})
 }
 
+// TryAdmit is Admit without waiting for an in-flight action. Optional actions
+// that retain cleanup resources must defer rather than block their own cleanup.
+func (s *Service) TryAdmit(run string, fn func() error) error {
+	if err := s.validateRun(run); err != nil {
+		return err
+	}
+	if fn == nil {
+		return ErrInvalid
+	}
+	state := s.stateFor(domain.RunID(run), true)
+	if !state.mu.TryLock() {
+		return ErrAdmissionBusy
+	}
+	defer state.mu.Unlock()
+	s.expireLocked(state, s.now())
+	return fn()
+}
+
 // AdmitSnapshot is Admit with the current controller snapshot supplied while
 // the run admission lock is held. The boolean is false when no controller is
 // present. The callback must not call back into this Service.
@@ -273,11 +297,14 @@ func (s *Service) AdmitRevoke(run string, fn func() error) (*Snapshot, error) {
 		return nil, ErrInvalid
 	}
 	state := s.stateFor(domain.RunID(run), true)
+	state.surfaceGate.Lock()
+	defer state.surfaceGate.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if err := fn(); err != nil {
 		return nil, err
 	}
+	s.fenceSurfacesLocked(domain.RunID(run))
 	return s.fenceLocked(domain.RunID(run), state), nil
 }
 
@@ -424,8 +451,11 @@ func (s *Service) Fence(run string) *Snapshot {
 	if state == nil {
 		return nil
 	}
+	state.surfaceGate.Lock()
+	defer state.surfaceGate.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	s.fenceSurfacesLocked(domain.RunID(run))
 	return s.fenceLocked(domain.RunID(run), state)
 }
 

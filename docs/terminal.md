@@ -23,67 +23,112 @@ page. The first open starts the environment; the dock says **Starting your
 environment container** until the shell attaches, and shows the server's own
 error if the start fails. Later tabs and tab switches reach a container that is
 already up, so those say **Connecting to your environment**. The dock reconnects
-and replays terminal output when the page or network reconnects. The stream ack
-names the exact replay byte count, including a boundary that falls inside one
-WebSocket frame. As each frame-sized replay operation arrives, the dashboard
-splits only the boundary-crossing frame and starts one serial xterm write chain
-behind the CSS-hidden surface; it does not retain the replay until the full
-boundary arrives or allocate a browser-sized buffer from the declared length.
-Only the slice containing the exact final replay byte is tagged `replay-end`;
-live output and geometry stay in wire order behind xterm's write backpressure.
-Terminal-generated replies and user input stay muted from the ack through the
-final replay write callback. After that callback, two `requestAnimationFrame`
-turns let the xterm DOM paint the settled state before the surface is revealed.
+and restores terminal output when the page or network reconnects. The stream
+ack names the exact bootstrap byte count in its `replay` field, including a
+boundary that falls inside one WebSocket frame. As each frame-sized bootstrap
+operation arrives, the dashboard splits only the boundary-crossing frame and
+starts one serial xterm write chain behind the CSS-hidden surface; it does not
+retain the bootstrap until the full boundary arrives or allocate a
+browser-sized buffer from the declared length. Only the slice containing the
+exact final bootstrap byte is tagged `replay-end`; live output and geometry
+stay in wire order behind xterm's write backpressure. Terminal-generated
+replies and user input stay muted from the ack through the final bootstrap
+write callback. Input may resume after that callback, but the surface stays
+hidden until two paint turns and any saved viewport restoration have settled;
+only then is the terminal revealed.
 Closing a tab only detaches it; opening that tab again reattaches to its shell.
-When a persistent dock host is replaced, `rebind` cancels the old replay drain
-with its cancellation signal, drops the old socket, installs the new handlers,
-and starts one fresh full replay after cancellation; the dock does not issue a
-second reopen. If an `online` wake interrupts an incomplete replay, the client
-cancels its parser and drain with the same cancellation signal, drops that
-socket while keeping the terminal hidden, and reconnects for a fresh hidden
-replay rather than revealing a partial history prefix. A final replacement
-refusal settles the replay gate before its server error is shown.
+When a persistent dock host is replaced, `rebind` cancels the old bootstrap
+drain with its cancellation signal, drops the old socket, installs the new
+handlers, and starts one fresh bounded bootstrap after cancellation; the dock
+does not issue a second reopen. If an `online` wake interrupts an incomplete
+bootstrap, the client cancels its parser and drain with the same cancellation
+signal, drops that socket while keeping the terminal hidden, and reconnects
+for a fresh hidden bootstrap rather than revealing a partial prefix. A final
+replacement refusal settles the bootstrap gate before its server error is
+shown. For a run terminal, this bootstrap is compact current-screen state
+captured without scanning the retained archive; the live view never fetches
+that archive.
 
 ## Run control and the Run Room
 
-A run has one controller session at a time. A member needs the run's **Steer**
-permission to acquire it. Viewing, presence, and run ownership by themselves do
-not grant input access. A writable dashboard terminal, `aether attach`, or run
-shell must acquire the controller lease; read-only attaches may coexist. A
+The **primary harness terminal** has one controller session at a time. A member
+needs the run's **Steer** permission to acquire it. Viewing, presence, and run
+ownership by themselves do not grant input access. A writable primary terminal
+or `aether attach` must acquire that lease; read-only attaches may coexist. A
 second tab or connection from the same member is a different session, not a
-second writer.
+second writer. Development terminals have separate, surface-scoped leases.
 
 On a desktop, the owner's first run-terminal attach asks for control
-automatically. The server grants it only when the run is unoccupied. Other
-members start as read-only mirrors. A write request that cannot acquire the
-lease is refused rather than silently becoming a second writer. `aether attach`
-asks for control by default; use `aether attach --read-only <run>` to watch
-deliberately. An occupied attach does not silently displace the current
-controller. Open the Run Room and confirm **Take control** to perform an
-occupied takeover. The confirmation names the current controller; takeover ends
-that writable session and notifies it.
+automatically **except for mission workers**. A mission worker is a subsession
+assigned work by an integrator; its terminal starts as a read-only mirror even
+for its owner. Merely viewing that worker must not create an orchestration
+hold. Use **Take control** to type, and release control to return to viewing.
+A deliberate per-run control choice survives same-tab navigation under the
+identity and authority fences below. Ordinary and integrator owner terminals
+keep automatic acquisition; other members and phones start as mirrors.
 
-A run shell that cannot acquire the occupied lease remains connected as a
-read-only mirror. Its terminal input and mobile key bar stay disabled; use the
-dock's **Take shell control** action for an explicit takeover.
+The server grants an unoccupied lease only with Steer permission. A write
+request that cannot acquire the lease is refused rather than silently becoming
+a second writer. `aether attach` asks for control by default; use
+`aether attach --read-only <run>` to watch deliberately. An occupied attach
+does not silently displace the current controller. Open the Run Room and
+confirm **Take control** to perform an occupied takeover. The confirmation
+names the current controller; takeover ends that writable session and notifies
+it.
+
+The development shell dock does not compete for the primary harness lease.
+Each shell has its own controller, named in the dock, and starts as a watcher.
+Use **Take shell control** for an explicit acquisition or confirmed takeover.
 
 Control is tied to the logical terminal session. When a controller disconnects,
 the server holds its lease for a **15-second reconnect window**. The same tab or
 connection session can reclaim the lease during that window. The disconnected
 session cannot write while it is away. A different tab cannot inherit it without
 an explicit takeover, and after the window expires a normal acquisition can win.
-**Release control** is a continuous handoff, not an acknowledgement-only call:
-it sends `release_control` with the current session and generation on the
-replacement attach request. At the PTY-host commit boundary, the server holds
-the run-scoped authority lock, admits the replacement, then releases and fences
-the old lease before any replay, output, or geometry is sent. If admission
-fails, the request is refused while the old writer and lease remain intact. On
-a successful commit, the server cancels the old writer; the replacement
-continues as a read-only PTY attach on the same request, honors `resume`/`cursor`,
-returns one normal attach ack, and then streams output. Invalid, stale, or
-cross-member release is refused. A committed release, takeover, protection,
-permission revocation, and reconnect expiry all fence the old authority, so
-input from an old session is rejected instead of reaching the PTY.
+A dashboard tab keeps one control session per run until the tab reloads, or
+until the signed-in identity, the server's event log (a fresh data directory
+restarts it), your authority over the run (role, run owner, protection, or
+steering policy), or the run's `created_at` changes. Returning to a run
+terminal in the same tab therefore attaches as the session that held the lease,
+and the server hands a disconnected lease back to it without a takeover. Until
+the old connection's disconnect reaches the server, that lease still reads as
+occupied, so the tab keeps asking for it through the reconnect window before it
+becomes a mirror. After the window, the return acquires control only if the run
+is still unoccupied.
+**Control changes are acknowledged on the existing attach WebSocket.** A
+dashboard terminal sends a text frame such as
+`{"type":"control","request_id":17,"write":true}`. It may include
+`"takeover":true` for an explicit Run Room takeover and the current
+`"control_generation"` fence. The server answers on that same stream with
+`{"type":"control","request_id":17,"ok":true,"has_control":true,
+"control_session_id":"...","control_generation":8}`. Every result includes
+`has_control`, even when false; refusals also carry `code` and `error`.
+A refused duplicate acquisition does not revoke a lease the session still owns.
+An unsolicited lease revocation is also a
+`type:"control"` frame, but has no `request_id`; it reports the exact revoked
+generation, and the displaced interactive session remains a read-only mirror.
+The same-socket notification is used when an interactive attach loses **Steer**:
+the terminal stays open and input is disabled. Raw legacy attaches retain the
+named close (`1008`, `steer permission withdrawn`) instead. Input frames carry
+the current `control_generation`, and stale input is rejected. Taking or
+releasing control therefore does not reconnect or replay the terminal.
+The terminal remains at its current screen while the lease changes. A
+successful takeover fences the old writer; its input is rejected and its
+session becomes a read-only mirror. Invalid, stale, or cross-member requests
+are refused without changing the current writer.
+
+When this run is a mission worker, taking writable agent or shell control also
+sets a durable orchestration hold for that worker. The hold survives reconnect
+expiry, disconnect cleanup, protection fencing, and a server restart; integrator
+messages remain visible and durable but cannot inject input while the hold is
+active. An explicitly authorized **Release control** action may clear the hold
+even after the lease, PTY, or worker attempt has disappeared; it must name the
+current durable takeover generation, and a stale generation is refused. The
+server rechecks current Steer authority for that human and never evicts a
+different member's live writer while releasing. A failed release admission
+leaves both the human lease and the hold in place. This hold changes
+orchestration eligibility only; taking control never grants account-use
+authority or affects unrelated workers.
 
 Only the run owner or an administrator can enable protection. Enabling
 protection immediately fences the current controller and cancels every queued
@@ -92,14 +137,41 @@ owner or an administrator must acquire control again before typing. Disabling
 protection does not restore a controller or a cancelled request.
 
 The **Run Room** is the collaboration surface for this run. It starts as a
-collapsed vertical tab on the right of the terminal. The tab count includes
-unanswered questions and queued steer requests. Opening it loads the durable,
-per-run attributed message timeline and the current watcher and controller
-status. Presence is a live view of attached members and does not decide who
-may type.
+collapsed vertical tab on the right of the terminal; its count includes
+unanswered questions and queued steer requests. The existing terminal toolbar
+names the controller and every viewer even while the room is collapsed. Viewer
+names scroll horizontally instead of adding a row; at limited widths, terminal
+tools move into **Terminal tools**. **(this tab)** means this live attach has
+acknowledged control; the same member controlling elsewhere is **(another session)**.
+Narrow toolbars use key and eye icons for controller and viewers, retaining
+accessible role labels. Session markers stay in the controller's hover title
+and screen-reader text instead of wrapping onto another row.
+Live local ownership is shown by the toolbar's **(this tab)** controller marker
+and **Release** action. A clear, static 2px teal outline surrounds the terminal
+only while this tab has live input. It disappears during replay, while reading
+history, after disconnecting or releasing control, and whenever input access is
+lost; a read-only mirror never shows it. The outline does not move or animate,
+including when reduced motion is enabled. The toolbar's controller markers and
+**Take control** / **Release** actions remain unchanged.
 
-**Comment** writes to that timeline for people watching the run and never sends
-anything to the agent. **Send to agent** creates a steer request. A request
+Presence refreshes on mount, every five seconds and after acknowledged control
+changes, independently of room history. A stalled refresh times out after 15
+seconds; later polls retry automatically. A controller name from before a
+control change, or after a failed refresh, is marked **(last known)** until a
+fresh response arrives. Loading or unavailable presence is not an empty room.
+Presence never decides who may type. Opening the room loads its durable
+attributed timeline; history refreshes only while it is open.
+
+**Ctrl+Shift+M** (**Cmd+Shift+M** on macOS) toggles the room from the terminal or
+composer. The opener tooltip, room header and shortcut reference show the key.
+Keyboard opening focuses the composer; closing restores the invoking control
+or the room opener. Toggling preserves the draft, mode and attachments and never
+sends terminal input. Dialogs and the command palette take precedence.
+
+**Comment** is the default selected composer segment; its hint says it is shared
+with collaborators, not sent to the agent. **Send to agent** is teal and explains
+that it queues an instruction the controller can approve or deny. **Comment**
+writes only to the timeline; **Send to agent** creates a steer request. A request
 made by the current controller session, with its current lease, is eligible for
 immediate PTY delivery. A request from another session, or from a run with no
 current controller, is queued with a **45-second countdown**. The current
@@ -144,6 +216,56 @@ parsing replay, but the replay gate mutes those terminal-generated replies along
 with user input until the final replay callback; they do not reach the server.
 The CLI is raw and has no xterm parser, so the announced replay and input
 discard rules above remain in force.
+
+## Shared development terminals
+
+The run's existing dock lists the server's authoritative development terminals,
+including command terminals started by an agent. `+` / **Open shell** calls
+`dev.terminal.start`; displaying, selecting, reconnecting or showing a hidden
+terminal never starts a process. There can be at most four running development
+terminals. The server assigns each a stable `terminal_id` and an `incarnation`;
+every attachment and mutation names that exact incarnation. An ended or replaced
+process is never implicitly rerun.
+
+Tabs show the process state, and the active panel shows its exit status/reason
+when available. **Hide terminal**, closing a dock tab, collapsing the dock,
+switching views, and disconnecting only detach the viewer. The process keeps
+running in the run container. **Show** reopens a hidden terminal; the same compact
+replay, focus handling and phone panning are used as in the existing dock.
+**Stop terminal** is different: the current controller must explicitly confirm
+stopping the named process. Ended terminals remain discoverable until the server
+replaces them; starting a new one is always a separate action.
+
+The dock shows the current terminal controller (member or run agent).
+**Take shell control** acquires only that terminal's lease; occupied takeover
+requires confirmation and fences the previously observed generation.
+**Release shell control** releases only that surface lease. It does **not**
+release primary harness control or clear any durable mission hold. Use the
+mission/Run Room's authorized hold-release action for that separate decision.
+Input, paste, mouse sequences, resizing and stop all use the acknowledged
+surface control session and generation. Failed mutations are shown and are not
+automatically retried.
+
+All development attaches follow the shared grid, including desktop watchers.
+Only a confirmed writer sends an explicit fenced resize after acquisition;
+phones continue following the acknowledged grid even while controlling input.
+The attach header carries `incarnation`; its ACK must name the same
+`terminal_id`/`incarnation` and advertise `server_owned_responder`.
+The server answers PTY protocol queries exactly once. The dashboard suppresses
+xterm's query responders through parser handlers (including mixed OSC color
+queries/setters), not by guessing which outgoing bytes are replies. Rendering,
+alternate-screen state, Unicode, keyboard, paste and mouse input remain active;
+output parsing is not a reason to discard user input. This policy applies only
+to development terminals; primary harness replay gating is unchanged.
+
+**Screenshot** calls the terminal screenshot API and captures the server's
+actual emulator state, without needing a connected viewer. Its total budget is
+90 seconds, including first companion startup; rendering itself is bounded to
+30 seconds. Cancelling the request closes only its isolated renderer, not the
+app's browser session. Open the existing **Evidence** drawer to inspect and
+select transient captures and explicitly retain them with verification notes.
+Taking a screenshot alone does not retain it as durable evidence.
+
 
 The Agents setup step uses the same dock and types the install command for you.
 Complete the vendor login there, then return to the wizard. Its **I've
@@ -206,7 +328,14 @@ the terminal itself claims them before the shell sees them.
 
 `Cmd`, or the `Super`/`Windows` key, works as well as `Ctrl` for the zoom
 keys. The font size is one preference across every terminal and survives a
-reload; find searches the scrollback of the terminal it was opened in.
+reload. Find searches the focused terminal's bounded live scrollback; while
+reading a run's history, it searches the already loaded recorded pages and
+frozen screen rows instead. It does not fetch the entire archive to search it.
+Scroll upward in a run terminal to read older output in the same pane.
+`PageUp` and `Home` also enter reading mode; `Shift+PageUp` explicitly opens
+recorded output even when an alternate-screen application owns ordinary
+scrolling. While reading, arrows, `PageUp`/`PageDown` and `Home` navigate;
+scrolling down to the bottom or pressing `End` returns to live output.
 `Ctrl+Shift+=` is accepted for zoom, but `Ctrl+Shift+-` remains the shell's
 `Ctrl+_` (readline undo or a vim keymap switch), as does a shifted `Ctrl+0`.
 The zoom shortcuts normally cancel the browser's own page zoom; if a browser
@@ -258,17 +387,31 @@ only one attached, where there is no other screen to protect and the
 terminal follows your window the way `ssh` does. A second attach ends
 that, and the size is recomputed without you.
 
-On a phone every terminal here - a run's, its shells, and this one - shows
-the session at the size it already is rather than at the phone's own width,
-and pans across it. It follows that size: when someone with a bigger screen
-resizes the terminal, the phone redraws at the new one. Nothing a phone does
-changes that size, watching or steering, so an agent's screen is never
-reflowed by a phone.
+On a phone every terminal here - a run's, its shells, and this one - keeps
+the session's existing size. Swipe vertically or horizontally to reach parts
+of a desktop-sized grid that do not fit on the phone, including an agent's
+input prompt near the bottom. The viewport initially reveals the cursor and
+keeps it visible while you type or the keyboard reduces the available height.
+Panning pauses that following until you tap or focus the terminal or type again.
 
-On a phone every run - including one you own - opens as a read-only mirror,
-where on a desktop an unoccupied owner's first attach may already have
-acquired control. **Take control** is a tap. While it is a mirror the terminal
-takes no input, so tapping it does not raise the keyboard.
+In a run's normal buffer, dragging downward first reveals the top of the
+live grid, then continues into recorded history. Swipe toward newer output
+to return live at the bottom. An oversized alternate screen can be panned
+the same way, without entering history. When the grid fits vertically,
+alternate-screen scrolling remains with the running application.
+Horizontal drags remain native when the grid cannot pan in that direction.
+The phone follows a desktop viewer's resizes; watching, steering, panning
+and opening the keyboard never change the shared PTY size.
+
+**Tools** opens the named search, text-size, copy, paste and image controls.
+The menu scrolls when the keyboard leaves too little room for every action.
+Closing it restores that space to the terminal.
+
+On a phone every run - including one you own - opens as a read-only mirror.
+On desktop, an owner's unoccupied ordinary or integrator terminal may already
+have acquired control; mission-worker terminals start as mirrors on both.
+**Take control** is a tap. While it is a mirror the terminal takes no input,
+so tapping it does not raise the keyboard.
 
 ### Paste or upload an image
 
@@ -296,88 +439,132 @@ instead. The server stores the selected bytes and returns a remote absolute
 path; Aether inserts that path with shell quoting and does **not** press
 Enter. Review or edit it, then press Enter yourself when it is ready.
 
-Changing away from a run terminal no longer destroys its primary terminal
-immediately. A recently visited terminal remains in browser memory, so returning
-shows its parsed screen and scrollback at once. While it is inactive, its socket
-closes intentionally: you are no longer **Watching**, and it has no active
-control transport or geometry participation. The retained surface is only the
-TerminalPane/xterm; the RunHeader, run tabs, actions, Run Dock, and Run Room
-unmount while inactive, so their fixed IDs and auxiliary resources are unique to
-the active route. This cache is not persistent across a reload or browser tab.
+Changing away from a run terminal closes its socket and unmounts its live
+xterm. You are no longer **Watching**, and the inactive run has no control
+transport or geometry participation. A controller's lease waits out the
+reconnect window: returning in the same tab within 15 seconds is still
+**Steering**, while another tab still needs **Take control**. A pinned reading
+position keeps its static screen presentation, loaded pages, and row-relative
+pixel and horizontal offsets. Switching from run A to B and back restores A's
+same recorded row and position, even if A kept producing output. The new live
+attachment bootstraps a compact current screen behind that saved presentation;
+it does not replace pinned content or jump the reader to the bottom. A run left
+following live output returns to the fresh current screen.
 
-On return, the dashboard reconnects with `resume` only when it retained the
-server's nonempty `resume_id` for that PTY incarnation, and sends that ID with
-the settled cursor. Without the ID it performs a full attach. A successful
-resume supplies only the gap. If resume cannot be honored, the dashboard
-replays the complete retained transcript through the same hidden, ordered
-transaction, so there is no visible historical timelapse. Writes that settle
-while parked immediately refresh the cache's total normal-plus-alternate buffer
-weight. A completed entry whose session ended does not reconnect unless the
-same run is relaunched; that transition records a refresh while parked and
-full-attaches once active.
+When an already-mounted dashboard surface deliberately reopens while its
+parsed screen remains valid, it may send the server's nonempty `resume_id` for
+that PTY incarnation with its
+xterm-settled cursor. A valid same-incarnation resume supplies only the bytes
+still available in the bounded in-memory resume ring and keeps the current
+screen; it never scans the transcript for a gap. If the ring, geometry, cursor,
+or incarnation fence cannot serve that gap, the server sends a compact current
+screen instead. Neither path replays the archive. A completed session opens
+from its compact final checkpoint, with a bounded recent-output fallback while
+a missing or invalid checkpoint is repaired, and remains read-only unless that
+run is relaunched.
 
-### Earlier output and full TUI history
+### Current screen and retained terminal archive
 
-Opening a run replays its complete retained transcript into the ordinary
-terminal before live output begins. This includes output from earlier server
-incarnations of the same run. There is no separate history player.
+A dashboard run attach requests `screen:true` and `interactive:true`. Its
+bootstrap is a compact VT snapshot of the current viewport, cursor, modes,
+colours, and alternate buffer, not every recorded byte from the run. The live
+session serializes that state in memory at the same output boundary named by
+the attach acknowledgement, so opening the terminal does not wait for a
+durable-history scan. The server snapshot keeps at most 200 scrollback rows and
+bounds the screen store to 1,048,576 cells. The browser requests up to 5,000
+live-scrollback rows and reduces that count as needed to keep its normal and
+alternate buffers within a 1,000,000-cell cap. The live side of a live,
+fallback, or finished run therefore opens at the current screen rather than
+showing a historical timelapse or scanning the archive. A saved pinned
+presentation stays in front of it. User input and terminal-generated replies
+stay muted through the final hidden snapshot write. After that write,
+authorized protocol replies resume even while reading; user input resumes
+only after returning live. Paint and viewport restoration settle before the
+live surface can be revealed.
 
-The ack's replay count is the exact byte boundary between replay and live
-output, including when that boundary falls inside a WebSocket frame. The
-dashboard does not hold replay bytes until that boundary: it retains only the
-current frame-sized output and geometry operations, in wire order, and starts
-parsing each replay operation as it arrives through one serial public xterm
-write chain. It waits for each xterm completion before parsing the next
-operation, preserving xterm backpressure while the terminal surface stays
-hidden. Only the slice containing the exact final replay byte is tagged
-`replay-end`; live output and geometry received during replay remain ordered
-behind the replay writes. The browser never allocates a `Uint8Array` (or
-equivalent) whose size is the declared replay length. After the final replay
-write callback, the reveal waits for two `requestAnimationFrame` turns so the
-xterm DOM paints the settled current screen.
+Live xterm and its bootstrap remain bounded; older retained output is reached
+by continuing upward in the same terminal pane. Reading freezes the current
+VT presentation while new output continues behind it. Older archive pages
+are **normalized recorded text**, not a reconstruction of historical VT
+screens. An inline boundary separates that text from the frozen current
+screen. Some content can appear on both sides: the dashboard does not
+heuristically deduplicate text against VT rows or replay the raw recording
+into xterm.
 
-Every retained transcript byte is fed to xterm. xterm retains normal scrollback
-and rows preserved by its configured full-screen erase behavior; control bytes
-and cursor overwrites affect terminal state but are not themselves scrollback
-rows. Input and terminal-generated replies stay muted from the ack through the
-final replay-write callback. A resume failure may repeat the complete retained
-run transcript, but the dashboard applies that fallback through the same
-hidden, serial transaction with no visible historical playback.
+As you approach the oldest loaded rows, the dashboard prefetches older pages
+and prepends them without moving the row or partial-row pixel offset you are
+reading. Only the visible rows and a small overscan window are rendered.
+Pages are stored in IndexedDB with a small resident text cache, so continuing
+upward can reach all retained pages without a fixed line-count cutoff.
+The saved view and cursor-linked rows belong to the authenticated identity,
+terminal-data epoch, and run creation identity; identity changes, invalidation
+and run deletion fence off stale results. If browser storage is unavailable,
+newly loaded content can remain in memory for this session, but durable restore
+is not guaranteed. Storage and paging failures are reported rather than
+silently treated as the end of the archive.
 
-The server streams a complete transcript lazily, opening and reading at most
-one retained segment at a time. Preserving complete history therefore does not
-load every segment into memory or keep every segment file open. Output not
-flushed before a crash, or removed with the run's retained artifacts, is
-unavailable.
+The frozen presentation keeps its line layout when the live grid changes.
+The shared font zoom also scales the reading surface while preserving its
+row-relative position. Find searches retained loaded pages and frozen rows,
+including pages outside the rendered window; copy targets the read surface.
+Typing, native paste and toolbar paste remain disabled while reading.
+Unmodified dashboard shortcuts also stay inactive while the reading surface
+has focus: `n` cannot launch a run and `Esc` cannot leave this one.
+Terminal-generated replies continue under the live connection's write
+authority, so reading history does not stall applications awaiting a reply.
+Scroll down to the bottom or press `End` to resume following live output.
+Only starting a new reading episode after returning live refreshes the
+archive from its newest page; remounting a pinned run preserves its existing
+pages and continuation instead.
+
+The [run-switch example](media/terminal-history-restore.webp) shows the same
+deep archive viewport before and after visiting another run while the archive
+grows. Continuing upward reaches the
+[earliest retained output](media/terminal-history-earliest.webp).
+
+The server returns at most 200 lines per request and also bounds disk reads,
+decoded events, segment discovery, concurrent readers, and elapsed scan time.
+A page can therefore be short or empty while `has_more` still says older
+output remains. Paging automatically continues with the authenticated opaque
+cursor returned by the server; it is tied to this run and query and must not
+be constructed or edited by the client. The dashboard's Find does not use
+the protocol's separate server-search option.
+
+The retained raw archive remains separately available to non-dashboard
+compatibility clients through
+`GET /api/runs/<run_id>/terminal-history` and the legacy form `POST` route at
+the same path. They use the gateway's normal authentication and member
+authorization, stream raw ANSI bytes from all retained cast incarnations only
+to the finite archive boundary captured for the request, and do not control or
+alter the PTY. The dashboard calls neither route and exposes no full-history
+download action. `aether attach` likewise remains a raw CLI stream: it requests
+`screen:false`, consumes the ack-declared replay byte count, and then treats
+following bytes as live. CLI output is retained raw history, not the
+dashboard's compact snapshot, and its pre-replay input-discard rule remains
+unchanged.
 
 ### Reattaching after an update
 
 Desktop terminals draw at the shared PTY's size, not independently at each
 window's width. A smaller writer can reduce that grid; other viewers adopt that
-size without reporting it back as their own window size.
-Fresh viewers request a redraw nudge even when they cannot resize the session;
-the dashboard's hidden, incremental replay transaction keeps that nudge from
-exposing historical redraws as playback.
+size without reporting it back as their own window size. Fresh viewers can
+request a redraw nudge, but the compact bootstrap keeps that redraw hidden
+until the settled current screen is ready.
 
-The server tracks the current screen as output arrives, including its cursor,
-colours, alternate buffer, and terminal modes. It uses that state to preserve
-geometry across attaches and restarts. A fresh run attach receives the complete
-raw transcript instead, including segments from earlier server incarnations.
-Successful resume, including the resumed read-only attach used by Release
-control, preserves the existing screen and receives only bytes after `cursor`.
-If resume cannot be honored, a run attach may receive the complete transcript
-again; the dashboard still applies it through the same hidden, incremental
-ordered transaction and keeps input and terminal replies muted through the
-final replay-write callback. After that callback, two
-`requestAnimationFrame` turns let the xterm DOM paint the settled state before
-reveal. Reusable shell terminals may receive a current-screen replay when
-their session requires it; those records use the same serial transaction.
+The current-screen checkpoint lives beside the transcript in the runtime
+transcript directory as a versioned `<transcript>.screen` record. A checkpoint
+stores the compact VT snapshot, its columns and rows, the cast incarnation ID
+and byte offset, and segment byte/output counts. It is replaced atomically, so
+a restart can resume from a complete record. A missing, invalid, or corrupt
+checkpoint is not trusted: Aether reconstructs the screen safely from the
+recorded cast output and resize events. If output was never persisted, it is
+unavailable.
 
-After a server restart, Aether reconstructs the screen from recorded output
-and resize events, then carries that state into the next transcript. This
-applies to surviving runs, not only agents started after the update. Output
-that was not persisted in the transcript before a crash cannot be
-reconstructed.
+Starting a new PTY incarnation preserves the previous non-empty cast as an
+old, timestamped artifact instead of truncating it. The current-screen
+checkpoint is only a fast bootstrap; it is not the archive. The raw
+compatibility exports and CLI replay can still read all retained cast
+incarnations, subject to the run's retained-artifact lifecycle.
 
 ### Control availability
 

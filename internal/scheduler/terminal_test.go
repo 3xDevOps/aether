@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -57,6 +59,58 @@ func TestEnsureTerminalCreatesPersistentContainer(t *testing.T) {
 	}
 	if _, err := e.db.GetTerminal(context.Background(), e.member.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("terminal row after stop: %v", err)
+	}
+}
+func TestTerminalGetsVerifiedCLIWithoutRunSocketWhenCoordinationDisabled(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "terminal cli")))
+	coord, binDir := withCoordination(t, e)
+	e.sched.UseCoordination(coord, binDir, false)
+
+	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	container, err := e.rt.get(runtime.ID(terminal.ContainerID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli, ok := mountFor(container.spec, coordtransport.CLIPath)
+	if !ok || !cli.ReadOnly {
+		t.Fatalf("terminal CLI mount = %+v, want read-only %s", container.spec.Mounts, coordtransport.CLIPath)
+	}
+	if _, ok := mountFor(container.spec, coordtransport.MountDir); ok {
+		t.Fatalf("disabled terminal received fabricated run socket mount: %+v", container.spec.Mounts)
+	}
+	if !strings.Contains(":"+container.spec.Env["PATH"]+":", ":"+filepath.Dir(coordtransport.CLIPath)+":") {
+		t.Fatalf("terminal PATH = %q, missing %s", container.spec.Env["PATH"], filepath.Dir(coordtransport.CLIPath))
+	}
+	ref, err := e.sched.readTerminalSidecar(e.member.ID)
+	if err != nil || ref.BridgeDigest == "" || ref.ContainerID == "" {
+		t.Fatalf("terminal coordination reference = %+v (%v)", ref, err)
+	}
+	if err := e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("StopTerminal: %v", err)
+	}
+	if _, err := e.sched.readTerminalSidecar(e.member.ID); !os.IsNotExist(err) {
+		t.Fatalf("terminal coordination reference after stop: %v", err)
+	}
+}
+
+func TestTerminalCoordinationStageFailureRefusesCreation(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(filepath.Join(t.TempDir(), "missing-server")))
+	coord, binDir := withCoordination(t, e)
+	e.sched.UseCoordination(coord, binDir, false)
+
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err == nil {
+		t.Fatal("EnsureTerminal unexpectedly succeeded without a stageable server binary")
+	}
+	if _, err := e.db.GetTerminal(t.Context(), e.member.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("terminal row after staging failure: %v", err)
+	}
+	if _, err := e.sched.readTerminalSidecar(e.member.ID); !os.IsNotExist(err) {
+		t.Fatalf("terminal reference after staging failure: %v", err)
 	}
 }
 

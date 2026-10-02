@@ -146,6 +146,109 @@ git config --global --unset gpg.format
 `aether env reset` does none of this - it forgets the saved image and never
 touches the home.
 
+## Remote development and browser isolation
+
+Development terminals, the shared app browser and transient captures require
+**Steer**, including reads and captures: an app session can already be
+authenticated. Ordinary permission to view a run is not permission to inspect
+that app session. The server also rechecks access to the run's backing account.
+Local SSH gateways and the server-hosted dashboard use the same checks.
+
+Explicitly retaining selected captures crosses a sharing boundary: retained
+bytes and verification notes become ordinary workspace evidence, readable with
+**View** under the packet's existing scope and expiry, without live Steer or
+backing-account access. Retain only reviewed content before headless completion
+or other cleanup. Capture bytes and observation metadata are immutable; the
+packet's later retained Git revision does not establish capture-time Git state.
+Notes are at most 4096 UTF-8 bytes; retained plus staged captures are bounded to
+64 files and 128 MiB per run, with at most 8 MiB per capture.
+
+Retention re-resolves current authority after taking the per-run evidence lock
+and before opening each selected source. Immediately before publishing the
+packet it rechecks under the shared `authorizationMu` admission gate, which
+also serializes account, membership, role and workspace-policy changes. A busy
+gate refuses publication with a visible retry-retention conflict and rolls
+back staged work; it never silently retries. After an uncertain result, inspect
+evidence and retry explicitly with the same key and exact request if needed.
+
+A human member and a run agent are distinct principals. The agent's identity
+comes from its run socket, not a member ID in a request. Each app terminal
+and browser session has its own writer lease and resource incarnation;
+commands carry that lease's generation. A human can explicitly take over,
+which fences stale writes. An agent cannot force a takeover. Taking an app
+surface does not take the primary harness terminal or release its mission
+hold; primary-terminal control and mission dispatch retain their own rules.
+Held browser keys, buttons and touches are cleared server-side when the
+controller releases, loses authority or disconnects, and before replacement
+control is admitted. A cleanup failure fences new control rather than handing
+the next controller potentially held input. A disconnected observer is not a
+controller release.
+
+This is shared-input ownership, **not a restricted execution sandbox**.
+An app terminal executes in the live run container, under the selected
+account's ordinary home, credentials, filesystem, and network authority.
+An agent or human can still execute native tools outside the managed surface.
+Taking a writer lease does not suspend every process already running there.
+
+The Chromium companion has a different policy from the agent container above:
+
+- It runs as UID/GID `1000:1000`, with a read-only root filesystem, all
+  capabilities dropped, `no-new-privileges`, private IPC and 256 MiB shared
+  memory, bounded memory/CPU, and a private temporary filesystem.
+- Chromium runs genuinely headless with its namespace and seccomp sandboxes
+  enabled. A scoped seccomp profile permits the required user-namespace
+  operations; Docker's stock AppArmor policy remains in place. There is no
+  privileged, unconfined, `--no-sandbox`, Xvfb, or host-display fallback.
+- Its only bind mount is a private control directory. It cannot mount the
+  checkout, member home, signing keys, harness credentials, or Docker socket.
+  It joins the run's network namespace, never host networking; this lets it
+  reach the app's loopback ports without exposing a browser port on the host.
+- Playwright controls Chromium through a debugging **pipe**, not a CDP TCP
+  listener. The server brokers typed commands and bounded frames over a Unix
+  socket; clients do not receive unrestricted CDP access.
+
+This separation protects member files from browser code; it does not make
+pages safe to publish. An app test login may contain cookies, tokens,
+customer data, or other secrets. The browser shares the run's network reach.
+Use dedicated test accounts, never paste production credentials for recording,
+and inspect every selected capture before sharing it. Console warnings/errors,
+failed requests, page URLs, and visible page or terminal content can also
+contain secrets. There is no automatic public pull-request image upload.
+See [privacy.md](privacy.md#remote-development-data) for retention and
+[install.md](install.md#headless-browser-companion) for deployment failures.
+
+### Managed selected-path Git commits
+
+These commits execute Git inside the live run environment, using its native
+identity and signing configuration and the run's coauthor trailers. Publication
+uses one native `git update-ref --stdin` prepared transaction, with a single
+dereferencing `update HEAD NEW OLD`. Git compares the branch's object ID with
+the expected old value as a native compare-and-swap. After Git acknowledges
+`prepare`, Aether verifies symbolic `HEAD` still names the expected branch
+while Git holds both the `HEAD` and branch locks, then commits or aborts within
+that transaction. A changed branch or HEAD fails closed; Aether does not
+emulate the guarantee with its own lock or update whichever branch is current
+later. Stock Ubuntu 24.04 Git 2.43 supports this primitive; it does not require
+a special Git build or new host upgrade prerequisite.
+
+The selected-path index is isolated while constructing the commit: only the
+explicitly selected paths enter the commit, and unrelated staging is preserved.
+This is not a snapshot lock over files being edited concurrently: selected
+content can change while Git reads it. Updating the selected entries in the live
+index after publication is a separate step. A result with `committed=true`
+and `index_updated=false` means the commit exists but index reconciliation
+failed; inspect the reported error and repository status rather than blindly
+retrying the commit.
+
+The native `commit-tree` path deliberately does **not** run commit hooks
+(`hooks_run=false`). Use `git commit` in the run terminal when commit hooks
+are required. Native `reference-transaction` hooks are not disabled or replaced;
+their preparation veto remains effective. Custom environments without the
+required native transaction support fail closed, preserving native stderr and
+reporting missing protocol acknowledgements rather than falling back to an
+unchecked update. Other repository reads remain available. See
+[install.md](install.md#git-inside-run-environments) for exact diagnostics.
+
 ## Workspace source mirrors
 
 A workspace without a mirror is **local-only**. A configured mirror is an
@@ -197,6 +300,45 @@ adoption can move it. Run branches remain publishable to the workspace, and
 `aether pull` remains the safe review path before a human merges locally and
 pushes the reviewed branch to checkout Origin.
 
+## Candidate verification and delivery
+
+Candidate operations use the existing workspace capabilities, not a new
+integration role. Reading a candidate requires the caller's normal view
+authority; preparing, resolving, verifying, requesting delivery, and executing
+delivery use the existing **Push** capability. The service resolves the
+current member, workspace, run ownership, and candidate state itself. It
+rechecks the caller and the approved human approver at the actual delivery,
+so an old page, role change, or stale request cannot turn into authority.
+`integration.decide` is human-only: an agent/run actor cannot approve its own
+delivery, and an optional mission identifier is context rather than a
+permission grant.
+
+Verification runs against a server-owned isolated candidate revision and a
+disposable verification tree; candidate inputs and retained evidence are not
+re-read from a mutable live checkout. The isolation protects the source tree
+and post-execution integrity check, not the selected account's credentials.
+The trusted shared-home rule still applies: `aether account share` gives the
+recipient's runs the owner's home, saved login, signing key, and other files.
+Do not use account sharing to imply a per-candidate credential boundary.
+
+Delivery to a local workspace target is an expected-old atomic ref update.
+Delivery to a mirrored target must use the `proposal` action: it creates a
+public `refs/heads/aether/proposal-<request-id>` ref and a private receipt,
+without pushing the upstream or moving its protected mirror base. The proposal
+is labelled proposed, not landed; a human fetches and pushes it through the
+normal upstream review route. The mirror's read-only deploy key is only for
+server fetches and is never reused as a delivery credential.
+
+Nothing here blocks native credential use outside Aether. An agent with a
+member home can still run its own `git push`, `gh` operation, or pull-request
+flow under that member's credentials, subject to the upstream's permissions.
+Candidate delivery's Push checks govern only the Aether-managed operation.
+
+See [teams.md](teams.md#candidate-integration) for the operator flow,
+[integration.md](integration.md) for the exact wire contract, and
+[failure-handling.md](failure-handling.md#candidate-assembly-verification-and-delivery)
+for restart and cleanup behavior.
+
 ### Hostile agents
 
 If you run agents you do not trust, put the `--data-dir` on a filesystem
@@ -205,11 +347,24 @@ without that a root agent can plant a setuid binary through a writable bind
 mount and have it survive on the host. See the security note on
 `ValidateMounts` in `internal/runtime/mounts.go`.
 
+### Subscription quota reads
+
+The read-only `account.usage` control method makes the server, not the
+browser, read native Claude Code and Codex OAuth files from the selected
+member home and call fixed vendor HTTPS usage endpoints. This is server-side
+token use for status reporting, not credential extraction: Aether never copies
+the credential bytes, refreshes or rewrites native OAuth files, or sends tokens
+or provider response bodies to clients. API-key logins and unsupported
+harnesses do not become quota collectors. Account selection uses the same
+explicit directional grant as launches; administrators do not gain implicit
+access, and membership/share authorization is checked before and after the
+provider read.
 ## The dashboard gateways
+
 
 The dashboard runs over one of two gateways, which share their handlers and
 differ only in who they trust (`internal/webgate` is the shared core;
-[local-gateway.md](local-gateway.md)).
+[local-gateway.md](local-gateway.md)). An edge serves no dashboard.
 
 ### `aether gui`, on the user's own machine
 
@@ -346,16 +501,16 @@ identify its callers.
 
 ### Browser configuration imports
 
-The local onboarding importer reads a directory only after `config.roots`
-returns and a destination is known. Credential names and `*.pem` files are
-filtered before any browser read, while runtime/history paths use the selected
-root's `runtime_ignores`; the server remains authoritative and scans all bytes
-that survive those local exclusions. Unknown or ambiguous directory basenames
-must be assigned explicitly, and changing the destination re-reads the retained
-browser `File` handles. Generation guards discard stale reads and prevent a
-preview prepared for one destination from being submitted to another. The
-server-hosted dashboard cannot read a directory on the user's machine, so this
-surface exists only in `aether gui`.
+The shared Configuration importer reads a user-selected directory only after
+`config.roots` returns and a destination is known. Credential names and `*.pem`
+files are filtered before any browser read, while runtime/history paths use
+the selected root's `runtime_ignores`; the server remains authoritative and
+scans the accepted bytes that are uploaded. Unknown or ambiguous directory
+basenames must be assigned explicitly, and changing the destination re-reads
+the retained browser `File` handles. Generation guards discard stale reads and
+prevent a preview prepared for one destination from being submitted to another.
+Both local and server-hosted dashboards can read a directory explicitly chosen
+through the browser picker; neither can read arbitrary local paths.
 
 ### Terminal image uploads
 
@@ -388,26 +543,55 @@ shared account's home.
 
 ## Browser configuration and Files
 
-The local dashboard's onboarding directory picker is an explicit, one-time
-browser import. A server-hosted dashboard has no laptop directory picker; use
-`aether gui` for this step. The browser waits for `config.roots` and a known
+The permanent **Configuration** route provides explicit, repeatable browser
+directory import on both local and server-hosted dashboards when `config.roots`
+and `config.import` are advertised. Agents, the shared navigation rail, and the
+command palette expose it; no workspace or onboarding progress is required.
+Local onboarding is an optional entrypoint to the same importer. After a result,
+the user can select another directory or choose **Open remote files** to visit
+the existing **Files** editor. The browser waits for `config.roots` and a known
 destination before previewing or reading bytes. A known unique basename selects
 its destination automatically; an unknown or ambiguous basename requires an
 explicit choice. Credential names in any path component and `*.pem` files are
 always skipped before upload. Runtime/history paths come from the selected
 root's `runtime_ignores` metadata and match exact, root-relative paths or
 component prefixes case-sensitively after trailing slashes are trimmed.
-Changing the destination clears the old preview and re-reads retained browser
-`File` handles; generation guards discard stale reads. It reads remaining
-selected regular-file bytes and sends them to the server, where they are
-scanned before writing; a secret finding is therefore not proof that the
-content stayed local. Empty files and arbitrary binary regular bytes are
-preserved under the 1 MiB/file, 20 MiB decoded aggregate, and 2,000-file
-limits. The shared HTTP gateway permits a 30 MiB request for `config.import`,
-128 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
-The 64 MiB editor file limit remains authoritative after JSON decoding. These
-are framing limits, not larger decoded import allowances. The SSH control
-channel still caps one JSON line at 32 MiB.
+Changing the destination recomputes the preview from retained browser `File`
+handles without reading their bytes. The preview lists eligible paths and
+policy exclusions. No directory-wide count or byte ceiling discards files.
+The browser reads and encodes one bounded batch at a time, targeting 20 MiB
+decoded and at most 2,000 files; a larger individual file travels alone.
+Requests permit 64 MiB decoded and individual files have the existing 64 MiB
+configuration-file ceiling. Invalid or oversized files fail explicitly rather
+than enabling an incomplete-selection override.
+Owner-scoped progress and results survive dashboard navigation. Identity changes
+discard preparation and prevent subsequent batches, including after an awaited
+file read. An already submitted request may finish for its original owner;
+its result is never shown to the new identity. There is no watcher, automatic
+configuration synchronization, or automatic import retry.
+
+The browser reads accepted regular-file bytes and sends them to the server,
+where they are scanned before writing; a secret finding is therefore not proof
+that the content stayed local. Empty files and arbitrary binary regular bytes
+are preserved. A failed or interrupted batch stops the import and reports
+earlier confirmed writes; a lost response leaves that request's outcome unknown.
+The shared HTTP gateway permits a 96 MiB request for `config.import`,
+385 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
+Decoded file and import-request limits remain authoritative. The authenticated
+SSH control channel caps a JSON line at 96 MiB; the larger framing budget does
+not remove decoded import bounds or filesystem validation.
+Before reading an import body, each HTTP gateway admits at most two imports;
+admission lasts through backend processing and the response. Excess requests
+receive HTTP 503 without their bodies being read. Body reads expire after
+30 seconds without progress or 15 minutes total and return HTTP 408.
+SSH control frames that grow beyond 64 KiB require admission: at most two
+globally and one per member, held through dispatch and the response. Small
+control requests do not consume those slots. Partial-frame reads have a
+30-second idle timeout and a 15-minute total timeout. Expanded frames retain
+the total timeout through dispatch and response; complete small requests do not.
+Expiry closes the offending SSH connection, including its other channels, so
+a peer cannot retain the large buffer by ignoring channel closure. Idle
+channels between frames do not start a frame timer.
 
 Browser metadata is intentionally limited. New imported files are `0644`;
 existing modes are preserved even when the server uses a restrictive umask.
@@ -418,10 +602,14 @@ requires the `Launch` capability and targets only the authenticated member's
 own home; an admin cannot select another member or account.
 
 The imported and edited files are in the member's shared read-write home,
-mounted into that member's environment terminal and runs, including active
-runs. An account share grants another member's run that same home; it is not a
-per-run isolated configuration copy. A snapshot pin records launch provenance,
-not an isolation boundary or a promise that home edits wait for later runs.
+mounted into that member's environment terminal and active and future runs
+using that account. An account share grants another member's run that same
+home; it is not a per-run isolated configuration copy. A snapshot pin records
+optional launch provenance, not an isolation boundary or a promise that home
+edits wait for later runs. Browser imports and Files edits do not create or
+update CLI snapshot history; the HOME persists independently. Manual profile
+push and rollback overlay snapshot files into that same HOME and leave paths
+absent from the snapshot untouched. Rollback is not an exact-tree restore.
 Files edits do not rebuild the installed-agent image.
 
 The Files editor accepts complete UTF-8 text without NUL bytes up to 64 MiB.
@@ -447,45 +635,252 @@ an HTTP loopback address. It binds the matching local callback port before
 opening the authorization page, then forwards that port only to the terminal
 where the link appeared. Other links keep the normal browser behavior.
 
+## Edge remote access
+
+The edge ([edge.md](edge.md)) is an identity broker, not an authority. The
+server believes it about who signed in; whether that admits a new device is
+the server's access policy, and membership, role and device status are
+always the server's own. [edge.md](edge.md#what-an-attacker-can-do)
+tabulates what a taken-over GitHub account and a compromised edge
+can do under each policy, with the tests that show it; the reasons follow.
+
+- **A server uses an edge only when its operator chose one.** `edge-url` is
+  empty unless the config file or a flag names an edge. `aether-server
+  setup` is the only command that sets it without being told: on a host
+  without tailscaled it turns on the project's edge and prints what that
+  edge sees and how to turn it off; with tailscaled it asks, defaulting to
+  no. An upgraded server whose config never named an edge stays off it and
+  discloses nothing (`TestIntegrationUpgradeFromMainWithoutTheEdge`).
+- **The server trusts an edge by its signing key, not its host name.** It
+  keeps one pinned edge key, whatever `edge-url` names, and its owner per
+  edge key. A new host name of the same edge keeps both. A different key,
+  at any host name, is refused until `sudo aether-server edge trust` pins
+  it after a person compared fingerprints; the server then has no owner
+  for that key and reports itself ownerless to an edge that records one.
+  Changing `edge-url` alone never makes the server trust another key.
+- **SSH is end to end.** The relay splices bytes between two outbound
+  WebSockets and never holds a key that could decrypt them. Clients check
+  the host key against the server id on every path, so an edge cannot pose
+  as a server.
+- **Grants are checked by the server.** Each relayed connection carries a
+  grant signed by the edge key the server pinned at enrollment. The server
+  checks the signature, its own id, the connection id and a 60-second
+  lifetime, and refuses a connection id it has seen. The key the client
+  offers must be the grant's device key, so a stolen device token alone
+  authenticates nothing.
+- **Membership stays on the server.** The server maps the account to a
+  member itself and checks the device. A compromised edge can forge a grant
+  for any account, but that account gets in only as a member or through an
+  open invitation the server holds. The SSH user name of a relayed
+  connection names the account the device signed in as, under the device's
+  own signature, and the server refuses a grant naming another before it
+  records anything; so an edge cannot file the key of a device it relays
+  under another account unless it also lied to that device at sign-in. Under `approved-devices` a grant for an
+  invited account changes nothing on the server but a device waiting on
+  the invitation: no member, role or bound account exists, and the
+  invitation stays open, until a person approves that device. Approving it
+  creates the member and uses the invitation in one transaction; the other
+  devices waiting on it are deleted.
+- **The access policy decides what a grant is worth.** Under `edge-access
+  account`, a grant for a member's account admits a new device of that
+  member: an attacker gets in when either the member's GitHub account or
+  the edge is taken over. Under `approved-devices`, every new
+  device key, a member's first included, waits until a person approves it:
+  the member from an approved device, SSH key or tailnet connection, an
+  admin, or `sudo aether-server device approve <code>` on the server. An
+  attacker then also needs an approver to type the code their device
+  shows. The policy is set only on the server's host, and a missing
+  setting means `approved-devices`. Under either policy a device that only
+  signed in cannot mint an invite code, a bearer credential that would
+  outlive a switch to `approved-devices`. Neither policy assumes OAuth is
+  weaker or SSH keys stronger; they differ in how many parties must fail.
+- **An approved device key is a credential on its own on the direct
+  path.** The direct SSH port admits approved device keys, under both
+  policies, without asking the edge, as it admits a member SSH key.
+  Through the edge the key also needs the device's token or the edge.
+- **Approval codes are typed, not listed.** The code is derived from the
+  device key and shown to that device inside SSH; `aether device list`
+  never carries it, so approving proves the approver was handed the code
+  of the device in front of the person. Approve only a code read from a
+  device you are holding. Two keys can derive one code; such a code
+  approves neither, and `sudo aether-server device review` approves by
+  choosing the device instead. An approval from a connection that signed
+  in with an unapproved device is refused under either policy.
+- **An approver sees what a code admits before approving.** The member a
+  waiting device belongs to follows from the account it signed in as,
+  which the edge vouches for, so a compromised edge, or someone holding a
+  member's GitHub account, can make a code admit their own key as that
+  member. `aether device approve`, `sudo aether-server device approve` and
+  the dashboard first look the code up (`member.device.lookup`), show the
+  device, the account, and the member and role approving admits it as, and
+  approve only after a yes; `member.device.approve` takes the device id the
+  lookup returned and refuses a code that names another. Someone handed a
+  code that admits their own member, or an admin, should refuse it.
+- **Waiting devices are bounded.** A relayed connection with a new key
+  records a device. The server keeps at most 10 pending devices per account
+  and 10 per invitation, and refuses more with a banner naming `aether
+  device list` and `sudo aether-server device review`.
+- **Enrollment signatures cannot become host signatures.** The host key
+  signs `aether-edge-enroll-v1\x00`, the edge origin, the server id and a
+  nonce. That message is longer than any SSH exchange hash, so an edge that
+  collects it cannot use it in a handshake.
+- **Claims travel inside SSH.** `aether link --claim` opens a claim
+  connection through the edge and offers the code, with the account this
+  device signed in as, in the SSH user name. An SSH client sends the user
+  name only after the key exchange has checked the host key, and the
+  client accepts only a host key that derives the server id in the code,
+  so the code reaches that server encrypted and nothing else. The client's
+  SSH signature covers the user name, and the server refuses a claim whose
+  grant names another account before it tries the code. The edge relays
+  the bytes without reading them; to take a claim it would need the code,
+  which only the server's console printed. An edge that also lied to the
+  client about who signed in could make the claim for its own account:
+  the person then has to notice the account shown by `aether login`,
+  `aether link --claim` and the dashboard's claim form, which is the one
+  the edge reported, before the code is sent.
+- **Console recovery restores an existing admin and nothing else.** `sudo
+  aether-server edge claim-code --admin <member id>` issues a code whose
+  claim binds the claiming account to that admin and approves the claiming
+  device. The code is refused for a member who is not an admin, when issued
+  and again when used; it creates no member, raises no role, and cannot
+  move an account that is another member's. The server logs each use.
+- **One account of a member can be removed.** An account linked to a
+  member while someone else held it is unlinked with `aether member unlink`
+  by the member or an admin, from a credential a person approved: the
+  devices that signed in with it are revoked, not deleted, so their keys
+  stay refused if the account is linked again.
+- **The first link decides which server a client pins.** Every later
+  connection must present a host key that derives the linked id. An id
+  from the server's admin, or from `sudo aether-server edge status`, rules
+  out being sent elsewhere. An id from `aether servers` comes from the edge,
+  and an edge that lists a false id can send that first link to another
+  server; `aether link --from-edge` and the wizard show the id and host key
+  fingerprint and ask before they pin it.
+- **Device tokens go to two origins only.** A token is sent to the relay
+  origin it is stored under and to the sign-in origin that issued it, never
+  to an origin the edge's metadata names later, and the client follows no
+  redirect.
+- **The edge stores bearer secrets hashed** (device tokens, session
+  cookies, device codes) and rate-limits sign-in, device
+  codes and claim connections per address; claim connections also per
+  account and per server. An IPv6 address counts against its /64,
+  its /56 (4 times the budget) and its /48 (16 times), so one allocation
+  cannot spend more than its /48's share; a full limiter evicts the block
+  with the most budget left instead of refusing new addresses. Device-code
+  entry is also limited per account. The address a relayed connection came from is for
+  logs and rate limits only, never for authentication. Behind a reverse
+  proxy the edge reads the address from the right-most `X-Forwarded-For`
+  entry, and only when the connection comes from a loopback address. With
+  `--trusted-proxies` it takes the right-most entry outside the named
+  networks, only from a peer inside them, and refuses every other peer,
+  loopback included; a list that trusts every address is refused. A
+  request whose header is missing or not an IP address is refused. The
+  packaged nginx configuration sets the header to the address nginx saw,
+  discarding the client's.
+- **Sign-in and relay are two host names.** The sign-in cookies are
+  `__Host-` cookies with no `Domain` attribute, bound to the sign-in host
+  alone, and each host refuses the other's paths. A server's ownership is
+  recorded only from that server's own report on its control connection,
+  for the account whose claim connection presented the code; no client
+  request or operator command records an owner or approves a device.
+- **Deleting an account needs a fresh sign-in in the same browser.** The
+  edge deletes an account only on its Account page, from a browser that
+  itself signed in with GitHub in the last 5 minutes, with the login typed
+  back. A device token cannot delete it, and neither can a
+  session cookie from a browser that has not signed in since, even after
+  the person signs in elsewhere. Deleting takes the person's GitHub
+  sign-in, or a cookie stolen within 5 minutes of its sign-in.
+- **Invitations match only a recently confirmed login or email.** The edge
+  learns an account's GitHub login and verified email only when that person
+  signs in with GitHub in a browser. Signing in takes the login from
+  any other account that held it, but someone who renamed on GitHub, or
+  whose email moved to another account, keeps the old value until they
+  sign in again. So an invitation matches an account only within 24 hours
+  of its last sign-in: the edge refuses such an account with `your login
+  and email were last confirmed over 24 hours ago; open this edge in a
+  browser to confirm them, then retry`, any edge page opened later asks
+  GitHub again, and the server checks the same age in the grant, which
+  carries when GitHub last confirmed the account. Within those 24 hours an
+  old login or email can still match. Members match by GitHub's immutable
+  user id and are unaffected.
+- **Recovering a GitHub account removes nothing at the edge or on a
+  server.** Device tokens do not expire, so devices signed in while the
+  account was taken over keep working until revoked
+  ([edge.md](edge.md#recovering-a-github-account)).
+- **Only self-hosted servers exist.** The protocol reserves a `hosted`
+  kind for a workspace Aether would operate. Such a workspace would not be
+  protected end to end against Aether's operators, who would hold its host
+  key and data ([edge.md](edge.md#trust-models)).
+
+What the edge operator does see: server ids and host names, account
+identities, device labels, client addresses, timing and byte counts
+([privacy.md](privacy.md#what-an-edge-stores)).
+
 ## Conflict coordination
 
-When two runs edit the same file, each container gets a unix socket it can
-message the other run through. Detail is in `docs/coordination.md` (host side
-and wire) and `docs/mcp-bridge.md` (the in-container half); the operator-facing
-stances are these.
+When two runs edit the same file, each container may receive a run-scoped unix
+socket for coordination. Detail is in `docs/coordination.md` (host side and
+wire) and `docs/mcp-bridge.md` (the optional in-container bridge); the
+operator-facing stances are these.
 
+- **Binary availability is not run identity.** The canonical
+  `/usr/local/bin/aether-internal` CLI is an Aether-provided, version-matched
+  executable available in managed containers, and the staged server binary
+  may also be present for the optional bridge and lifecycle plumbing. Neither
+  path authenticates a caller. The socket at `/run/aether/coord3.sock` is the
+  run identity: a connection accepted there is treated as that run. An
+  identity-less environment terminal or container can use general help or
+  non-run skill guidance, but status, messaging, reporting, and mission
+  operations are unavailable.
 - **The mount is the authentication, so no token enters a container.** Each run
-  gets its own socket at `/run/aether/coord3.sock`; whoever connects on it *is*
-  that run. There is nothing inside the container to steal, and nothing to
-  rotate. The host-side modes (`0700` on the coordination root, `0755` on the
-  per-run directory, `0666` on the socket, `0444` on the config and the
-  co-author list, `0555` on the staged binary) are a contract with a
+  gets its own socket; there is nothing inside the container to steal, and
+  nothing to rotate. The host-side modes (`0700` on the coordination root,
+  `0755` on the per-run directory, `0666` on the socket, `0444` on the config
+  and the co-author list, `0555` on the staged binary) are a contract with a
   semi-trusted container that may not run as root - they are not the access
   control. Both container paths are reserved:
   `runtime.ValidateMounts` refuses any caller-supplied mount that targets or
   nests under them, so a credential home cannot shadow either.
-- **The socket exposes six methods and no control verbs.** `coord.status`,
-  `coord.send`, `coord.inbox`, `coord.ask`, `coord.reply`, and `coord.report`
-  are the complete set - no `run.kill`, no git, no other run's transcript.
-  Messages are capped at 4 KiB, rate-limited per run, bounded at 100 unread per
-  inbox, and every one is recorded on the workspace timeline.
-- **A run can widen its own peer set, and the cap is what bounds it.** The
-  overlap that authorizes a message is computed from the two runs' own diff
-  snapshots, so a run that touches every tracked file is reported as
-  overlapping with every other run in the workspace. The server cannot tell
-  that from a wide refactor, so it limits each run to 8 distinct
-  correspondents instead of trying to. Read this as defence in depth, not a
-  boundary: runs in one workspace already share a repository, so influencing
-  each other through file contents needs no authorization at all. Turn the
-  feature off with `--conflict-coordination=false` if that is not acceptable.
+- **Disabling coordination still disables coordination.** With
+  `--conflict-coordination=false`, the read-only canonical CLI mount remains
+  available, but no usable run socket, borrowed run identity, or MCP bridge is
+  available. Run-bound CLI calls and bridge calls return unavailable; the
+  identity-free CLI can still provide general help and non-run skill guidance.
+  The overlap radar remains active.
+- **The run socket exposes no general control verbs.** Its six advertised
+  coordination methods are `coord.status`, `coord.send`, `coord.inbox`,
+  `coord.ask`, `coord.reply`, and `coord.report`. Native hooks also use the
+  internal read-only `coord.hook.status` endpoint, with the same run identity
+  and status authorization but an independent bounded request budget.
+  Malformed envelopes and unknown methods still consume the ordinary budget;
+  the hook endpoint cannot dispatch mutations. A mission-assigned run
+  additionally receives only the current assignment's `task.*` and `worker.*`
+  methods over that same run-authenticated socket; those methods are not a
+  general control API. There is no `run.kill`, no Git access, and no other
+  run's transcript. Messages are capped at 4 KiB, rate-limited per run,
+  bounded at 100 unread per inbox, and every one is recorded on the workspace
+  timeline. The optional bridge is manual and still exposes only its six
+  existing tools; it is not automatic registration or a Release B
+  mission/worker interface.
+- **A run can widen its own peer set, and the cap is what bounds it.** For
+  ordinary runs, the overlap that authorizes a message is computed from the two
+  runs' own diff snapshots, so a run that touches every tracked file is
+  reported as overlapping with every other run in the workspace. Mission
+  assignments instead provide a server-derived peer set that may authorize
+  active integrator and worker runs before file overlap; neither set is
+  caller-selected, and both remain bounded. The server limits each run to 8
+  distinct correspondents instead of trying to infer intent from a wide
+  refactor. Read this as defence in depth, not a boundary: runs in one
+  workspace already share a repository, so influencing each other through file
+  contents needs no authorization at all. Turn the feature off if that is not
+  acceptable.
 - **The staged bridge binary is the server's own binary.** It is mounted
-  read-only at `/opt/aether/aether-server` so any image can run the MCP bridge
-  without shipping an extra artifact. A container therefore holds a copy of the
-  server's code and can run any of its subcommands - `serve`, `mcp --socket
-  <path>`, the rest. This grants nothing new: the binary carries no
-  credentials, reaches no host state that the container was not already given,
-  and the isolation is still the container, exactly as in "The agent container"
-  above.
+  read-only at `/opt/aether/aether-server` so a container can run the optional
+  MCP bridge without shipping an extra artifact. A container therefore holds a
+  copy of the server's code and can run its available subcommands. This grants
+  nothing new: the binary carries no credentials, reaches no host state that
+  the container was not already given, and the isolation is still the
+  container, exactly as in "The agent container" above.
 
 ## Server self-update
 
@@ -593,8 +988,9 @@ into, and every directory above it, is root's alone
 
 ## Dependency and toolchain vulnerability scanning
 
-`make vulncheck` runs `govulncheck` over the whole module. CI runs it on every
-PR in the `build-and-test` job.
+`make vulncheck` runs `govulncheck` over the whole module. CI runs it in the
+`build-and-test` job. A docs-only pull request does not run it, because it
+does not change module dependencies.
 
 The step is **advisory** (`continue-on-error: true`), not a gate. Two reachable
 Moby CVEs in the Docker SDK (`GO-2026-4887`, `GO-2026-4883`) have no fixed

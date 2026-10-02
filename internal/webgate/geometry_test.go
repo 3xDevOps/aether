@@ -72,7 +72,7 @@ func TestAttachRelaysOrderedTerminalRecordsToBrowser(t *testing.T) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 	if err = wsjson.Write(ctx, conn, protocol.DashAttachRequest{
-		Write: true, Cols: 80, Rows: 24, Follow: true,
+		Write: true, Cols: 80, Rows: 24, Follow: true, Interactive: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +91,10 @@ func TestAttachRelaysOrderedTerminalRecordsToBrowser(t *testing.T) {
 	go func() {
 		_, _ = protocol.WriteTerminalOutput(term.w, []byte("old"))
 		_ = protocol.WriteTerminalGeometry(term.w, 120, 40)
+		_ = protocol.WriteTerminalControl(term.w, protocol.DashAttachControl{
+			Type: protocol.DashAttachControlFrame, RequestID: 1,
+			Code: protocol.CodeConflict, ControlGeneration: 8, HasControl: false,
+		})
 		_, _ = protocol.WriteTerminalOutput(term.w, []byte("new"))
 		_ = term.w.Close()
 	}()
@@ -108,6 +112,15 @@ func TestAttachRelaysOrderedTerminalRecordsToBrowser(t *testing.T) {
 	}
 	if frame.Type != protocol.DashAttachGeometry || frame.Cols != 120 || frame.Rows != 40 {
 		t.Fatalf("frame = %+v, want a geometry frame of 120x40", frame)
+	}
+	var control struct {
+		HasControl *bool `json:"has_control"`
+	}
+	if err = wsjson.Read(ctx, conn, &control); err != nil {
+		t.Fatal(err)
+	}
+	if control.HasControl == nil || *control.HasControl {
+		t.Fatalf("control result lost explicit negative authority: %+v", control)
 	}
 	typ, data, err = conn.Read(ctx)
 	if err != nil {

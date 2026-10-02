@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -17,7 +17,7 @@ import (
 // byte of the hook payload through the call. It sits under the timeout the
 // harness gives the hook, because the hook runs on the agent's own turn
 // boundaries: being late is worse than being wrong.
-const reportBudget = 4 * time.Second
+var reportBudget = 4 * time.Second
 
 // maxHookPayload bounds the hook body read from stdin. A payload is not
 // only metadata: Claude Code's tool events carry the tool's own input and
@@ -54,7 +54,7 @@ func report(args []string) {
 	harness, args := args[0], args[1:]
 	fs := flag.NewFlagSet("report "+harness, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	socket := fs.String("socket", mcpbridge.SocketPath, "coordination socket to report on")
+	socket := fs.String("socket", coordtransport.SocketPath, "coordination socket to report on")
 	event := fs.String("event", "", "the event being reported (opencode, pi, omp)")
 	status := fs.String("status", "", "the session status type the event carries (opencode session.status)")
 	tool := fs.String("tool", "", "the tool the event names, where it names one (pi, omp)")
@@ -96,7 +96,7 @@ func report(args []string) {
 	if !mapped {
 		return
 	}
-	err := mcpbridge.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
+	err := coordtransport.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
 		State:  string(rep.State),
 		Reason: rep.Reason,
 	}, nil)

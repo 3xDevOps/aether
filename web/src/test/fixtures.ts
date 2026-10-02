@@ -3,18 +3,32 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  DevController,
+  DevControlStatusParams,
+  DevTerminal,
+  DevTerminalTarget,
   EvidencePacket,
   Member,
+  Mission,
+  MissionAttempt,
+  MissionPlanItem,
+  MissionPlanReview,
+  MissionQuestion,
+  MissionTask,
+  MissionTaskRevision,
   RoomMessage,
   RoomStatusResult,
   Run,
+  RunGitStatusResult,
   Schedule,
   ServerInfo,
   ServerUpdateStatus,
   Template,
   UpdateStatus,
+  UsageResult,
   Workspace,
 } from '@/lib/types'
+import type { Candidate } from '@/lib/integration-types'
 export const alice: Member = {
   id: 'mem_alice',
   display_name: 'Alice',
@@ -43,11 +57,133 @@ export const workspace: Workspace = {
   created_at: '2026-08-14T08:00:00Z',
 }
 
+export const integrationCandidate: Candidate = {
+  candidate_id: 'candidate_fixture',
+  workspace_id: workspace.id,
+  submissions: [],
+  inputs: [],
+  target_ref: 'refs/heads/main',
+  expected_target_revision: 'fixture-target-revision',
+  state: 'preparing',
+  applied_inputs: 0,
+  verifications: [],
+  mutations: [],
+  created_at: '2026-08-14T10:05:00Z',
+  expires_at: '2026-09-14T10:05:00Z',
+  version: 1,
+}
+
 export const otherWorkspace: Workspace = {
   id: 'wsp_2',
   name: 'docs-site',
   base_branch: 'main',
   created_at: '2026-08-14T07:00:00Z',
+}
+export function mission(over: Partial<Mission> = {}): Mission {
+  return {
+    id: 'mission_1',
+    workspace_id: workspace.id,
+    objective: 'coordinate checkout work',
+    accountable_human_id: alice.id,
+    integrator: { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    execution_choices: [
+      { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    ],
+    max_concurrent_attempts: 2,
+    max_total_attempts: 8,
+    current_integrator_run_id: 'run_integrator',
+    integrator_generation: 1,
+    accepted_set_version: 0,
+    phase: 'active',
+    plan_version: 1,
+    open_questions: 0,
+    created_at: '2026-08-14T10:00:00Z',
+    updated_at: '2026-08-14T10:00:00Z',
+    ...over,
+  }
+}
+
+export function missionQuestion(over: Partial<MissionQuestion> = {}): MissionQuestion {
+  return {
+    id: 'question_1',
+    mission_id: 'mission_1',
+    seq: 1,
+    body: 'which checkout flow?',
+    asked_by_run_id: 'run_integrator',
+    asked_at: '2026-08-14T10:01:00Z',
+    ...over,
+  }
+}
+
+export function missionPlanReview(over: Partial<MissionPlanReview> = {}): MissionPlanReview {
+  return {
+    mission_id: 'mission_1',
+    plan_version: 1,
+    summary: 'split the checkout rewrite into two bounded tasks',
+    submitted_by_run_id: 'run_integrator',
+    submitted_at: '2026-08-14T10:02:00Z',
+    submitted_phase: 'clarified',
+    ...over,
+  }
+}
+
+export function missionPlanItem(over: Partial<MissionPlanItem> = {}): MissionPlanItem {
+  return {
+    task_id: 'task_1',
+    revision: 2,
+    new_task: false,
+    material: false,
+    title: 'rewrite the guest checkout flow',
+    ...over,
+  }
+}
+
+export function missionTaskRevision(over: Partial<MissionTaskRevision> = {}): MissionTaskRevision {
+  return {
+    task_id: 'task_1',
+    revision: 1,
+    title: 'rewrite the guest checkout flow',
+    objective: 'replace the legacy guest checkout controller',
+    scope: { expected_paths: ['web/checkout/'] },
+    evidence_requirements: [],
+    status: 'accepted',
+    created_at: '2026-08-14T10:02:00Z',
+    ...over,
+  }
+}
+
+export function missionTask(over: Partial<MissionTask> = {}): MissionTask {
+  return {
+    id: 'task_1',
+    mission_id: 'mission_1',
+    current_revision: 1,
+    revision: missionTaskRevision(),
+    status: 'ready',
+    created_at: '2026-08-14T10:02:00Z',
+    updated_at: '2026-08-14T10:02:00Z',
+    ...over,
+  }
+}
+
+export function missionAttempt(over: Partial<MissionAttempt> = {}): MissionAttempt {
+  return {
+    id: 'attempt_1',
+    mission_id: 'mission_1',
+    task_id: 'task_1',
+    task_revision: 1,
+    number: 1,
+    dispatch_key: 'dispatch_1',
+    harness: 'claude',
+    mode: 'headless',
+    state: 'running',
+    run_id: 'run_worker',
+    authority_generation: 1,
+    integrator_generation: 1,
+    created_at: '2026-08-14T10:03:00Z',
+    reserved_at: '2026-08-14T10:03:00Z',
+    ...over,
+  }
 }
 
 export function run(over: Partial<Run> = {}): Run {
@@ -212,6 +348,7 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
     trigger: 'report',
     objective: 'Inspect the change',
     captured_at: '2026-08-14T10:00:00Z',
+    availability: 'available',
     event_boundary: 1,
     created_at: '2026-08-14T10:00:00Z',
     updated_at: '2026-08-14T10:00:00Z',
@@ -222,17 +359,179 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
 
 /** An Api stub; every method is a spy so tests can assert on calls. */
 export function fakeApi(over: Partial<Api> = {}): Api {
+  const terminals = new Map<string, Map<string, DevTerminal>>()
+  const controllers = new Map<string, DevController>()
+  let terminalSequence = 0
+  let controlGeneration = 0
+  const gitStatus: RunGitStatusResult = {
+    branch: run().branch,
+    head: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
+    detached: false,
+    unborn: false,
+    changes: [],
+    truncated: false,
+    account_member_id: alice.id,
+    account_name: alice.display_name,
+    identity: 'alice',
+    remotes: [],
+    output: { exit_code: 0, truncated: false },
+  }
+  const gitState = { branch: gitStatus.branch, head: gitStatus.head }
+  function findTerminal(params: DevTerminalTarget): DevTerminal {
+    const terminal = terminals.get(params.run_id)?.get(params.terminal_id)
+    if (!terminal || terminal.incarnation !== params.incarnation) {
+      throw new Error('Test terminal does not exist or its incarnation changed')
+    }
+    return terminal
+  }
+  function controlKey(params: DevControlStatusParams): string {
+    return JSON.stringify([params.run_id, params.surface.kind, params.surface.id, params.surface.incarnation])
+  }
+  function needsOverride(method: string): never {
+    throw new Error(`fakeApi: override ${method} to exercise this operation`)
+  }
   return {
     serverInfo: vi.fn(async () => serverInfo),
     workspaceGet: vi.fn(async () => workspace),
     memberList: vi.fn(async () => [alice, bob]),
+    accountUsage: vi.fn(async (): Promise<UsageResult> => ({
+      account_member_id: alice.id,
+      providers: [],
+    })),
     accountList: vi.fn(async () => ({ accounts: [alice], shared_with: [] })),
     accountShare: vi.fn(async () => ({})),
     accountRevoke: vi.fn(async () => ({})),
     runList: vi.fn(async () => [run()]),
     runGet: vi.fn(async () => run()),
+    missionCreate: vi.fn(async () => ({ mission: mission() })),
+    missionShow: vi.fn(async () => ({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [], plan_reviews: [] })),
+    missionList: vi.fn(async () => ({ missions: [mission()], next_cursor: undefined })),
+    missionQuestionAnswer: vi.fn(async () => ({ question: missionQuestion({ answer: 'the guest flow', answered_by_member_id: alice.id, answered_at: '2026-08-14T10:03:00Z' }) })),
+    missionPlanDecide: vi.fn(async () => ({ mission: mission() })),
+    missionCancel: vi.fn(async () => ({ mission: mission({ phase: 'rejected' }) })),
+    missionWorkerRelease: vi.fn(async () => ({ run_id: 'run_worker', takeover_active: false, takeover_generation: 2 })),
+    missionReplaceIntegrator: vi.fn(async () => ({ mission: mission(), run_id: 'run_integrator' })),
     runLaunch: vi.fn(async () => run()),
     runKill: vi.fn(async () => ({})),
+    runGitStatus: vi.fn<Api['runGitStatus']>(async () => ({
+      ...gitStatus, changes: [], remotes: [], output: { ...gitStatus.output },
+    })),
+    runGitDiff: vi.fn<Api['runGitDiff']>(async () => ({
+      state: { ...gitState }, output: { exit_code: 0, truncated: false },
+    })),
+    runGitCommit: vi.fn<Api['runGitCommit']>(async () => needsOverride('runGitCommit')),
+    runGitPush: vi.fn<Api['runGitPush']>(async () => needsOverride('runGitPush')),
+    runPRStatus: vi.fn<Api['runPRStatus']>(async () => ({
+      identity: gitStatus.identity,
+      account_member_id: alice.id,
+      pull_request: null,
+      output: { exit_code: 0, truncated: false },
+    })),
+    runPRCreate: vi.fn<Api['runPRCreate']>(async () => needsOverride('runPRCreate')),
+    runPRFeedback: vi.fn<Api['runPRFeedback']>(async () => ({
+      identity: gitStatus.identity,
+      account_member_id: alice.id,
+      pull_request: null,
+      checks: [], comments: [], reviews: [], review_comments: [],
+      truncated: false,
+      output: { exit_code: 0, truncated: false },
+    })),
+    workspaceImport: vi.fn<Api['workspaceImport']>(async () => needsOverride('workspaceImport')),
+    devTerminalList: vi.fn<Api['devTerminalList']>(async ({ run_id }) => ({
+      terminals: Array.from(terminals.get(run_id)?.values() ?? [], (terminal) => ({
+        ...terminal, process: { ...terminal.process },
+      })),
+    })),
+    devTerminalStart: vi.fn<Api['devTerminalStart']>(async ({ run_id, name, cols, rows }) => {
+      const inventory = terminals.get(run_id) ?? new Map<string, DevTerminal>()
+      if (Array.from(inventory.values()).filter((terminal) => terminal.process.state === 'running').length >= 4) {
+        throw new Error('Test run already has four active terminals')
+      }
+      terminalSequence++
+      const terminal: DevTerminal = {
+        terminal_id: `terminal_${terminalSequence}`,
+        incarnation: `incarnation_${terminalSequence}`,
+        name: name || `Terminal ${terminalSequence}`,
+        cols: cols || 80,
+        rows: rows || 24,
+        process: { state: 'running' },
+      }
+      inventory.set(terminal.terminal_id, terminal)
+      terminals.set(run_id, inventory)
+      return { terminal: { ...terminal, process: { ...terminal.process } } }
+    }),
+    devTerminalOutput: vi.fn<Api['devTerminalOutput']>(async () => needsOverride('devTerminalOutput')),
+    devTerminalScreen: vi.fn<Api['devTerminalScreen']>(async () => needsOverride('devTerminalScreen')),
+    devTerminalScreenshot: vi.fn<Api['devTerminalScreenshot']>(async () => needsOverride('devTerminalScreenshot')),
+    devTerminalInput: vi.fn<Api['devTerminalInput']>(async (params) => {
+      if (findTerminal(params).process.state !== 'running') throw new Error('Test terminal is not running')
+      return { accepted: true }
+    }),
+    devTerminalResize: vi.fn<Api['devTerminalResize']>(async (params) => {
+      const current = findTerminal(params)
+      const terminal = { ...current, cols: params.cols, rows: params.rows }
+      terminals.get(params.run_id)!.set(params.terminal_id, terminal)
+      return { terminal, screen_revision: 1, geometry_revision: 1 }
+    }),
+    devTerminalWait: vi.fn<Api['devTerminalWait']>(async () => needsOverride('devTerminalWait')),
+    devTerminalStop: vi.fn<Api['devTerminalStop']>(async (params) => {
+      const current = findTerminal(params)
+      const terminal: DevTerminal = { ...current, process: { state: 'stopped' } }
+      terminals.get(params.run_id)!.set(params.terminal_id, terminal)
+      return { terminal, stopped: true, timed_out: false }
+    }),
+    devControlStatus: vi.fn<Api['devControlStatus']>(async (params) => ({
+      surface: params.surface, controller: controllers.get(controlKey(params)) ?? null,
+    })),
+    devControlAcquire: vi.fn<Api['devControlAcquire']>(async (params) => {
+      const key = controlKey(params)
+      const displaced = controllers.get(key)
+      if (displaced && displaced.control_session_id !== params.control_session_id && !params.takeover) {
+        throw new Error('Test surface already has a controller')
+      }
+      const controller: DevController = {
+        kind: 'member',
+        member_id: alice.id,
+        control_session_id: params.control_session_id,
+        control_generation: ++controlGeneration,
+        connected: true,
+        acquired_at: '2026-08-14T10:05:00Z',
+      }
+      controllers.set(key, controller)
+      return { surface: params.surface, controller, ...(displaced ? { displaced } : {}) }
+    }),
+    devControlRelease: vi.fn<Api['devControlRelease']>(async (params) => {
+      const key = controlKey(params)
+      const controller = controllers.get(key)
+      const released = controller?.control_session_id === params.control_session_id &&
+        controller.control_generation === params.control_generation
+      if (released) controllers.delete(key)
+      return { released }
+    }),
+    devBrowserStatus: vi.fn<Api['devBrowserStatus']>(async () => ({
+      available: false, running: false, state: 'unavailable', reason: 'No browser configured in this test',
+    })),
+    devBrowserPages: vi.fn<Api['devBrowserPages']>(async () => ({ pages: [] })),
+    devBrowserOpen: vi.fn<Api['devBrowserOpen']>(async () => needsOverride('devBrowserOpen')),
+    devBrowserNavigate: vi.fn<Api['devBrowserNavigate']>(async () => needsOverride('devBrowserNavigate')),
+    devBrowserSnapshot: vi.fn<Api['devBrowserSnapshot']>(async () => needsOverride('devBrowserSnapshot')),
+    devBrowserAction: vi.fn<Api['devBrowserAction']>(async () => needsOverride('devBrowserAction')),
+    devBrowserScreenshot: vi.fn<Api['devBrowserScreenshot']>(async () => needsOverride('devBrowserScreenshot')),
+    devBrowserViewport: vi.fn<Api['devBrowserViewport']>(async () => needsOverride('devBrowserViewport')),
+    devBrowserWait: vi.fn<Api['devBrowserWait']>(async () => needsOverride('devBrowserWait')),
+    devBrowserConsole: vi.fn<Api['devBrowserConsole']>(async () => ({
+      entries: [], next: 0, missing_cursor: false, truncated: false,
+    })),
+    devBrowserNetwork: vi.fn<Api['devBrowserNetwork']>(async () => ({
+      entries: [], next: 0, missing_cursor: false, truncated: false,
+    })),
+    devBrowserReset: vi.fn<Api['devBrowserReset']>(async () => needsOverride('devBrowserReset')),
+    devBrowserClose: vi.fn<Api['devBrowserClose']>(async () => needsOverride('devBrowserClose')),
+    devArtifactList: vi.fn<Api['devArtifactList']>(async () => ({ artifacts: [], truncated: false })),
+    devArtifactGet: vi.fn<Api['devArtifactGet']>(async () => needsOverride('devArtifactGet')),
+    devArtifactDelete: vi.fn<Api['devArtifactDelete']>(async () => needsOverride('devArtifactDelete')),
+    devArtifactRetain: vi.fn<Api['devArtifactRetain']>(async () => needsOverride('devArtifactRetain')),
+    devArtifactDownload: vi.fn<Api['devArtifactDownload']>(async () => needsOverride('devArtifactDownload')),
     runDelete: vi.fn(async () => ({})),
     runPause: vi.fn(async () => ({})),
     runResume: vi.fn(async () => ({})),
@@ -253,6 +552,16 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runEvidenceGet: vi.fn(async () => ({ packet: evidencePacket() })),
     runEvidencePatch: vi.fn(async () => ({ packet: evidencePacket(), patch: '', truncated: false })),
     runEvidenceTranscript: vi.fn(async () => ({ packet: evidencePacket(), data_base64: '', truncated: false })),
+    integrationPrepare: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationShow: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationList: vi.fn(async () => ({ candidates: [] })),
+    integrationResolve: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationVerify: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationRequestDelivery: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationDecide: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationDeliver: vi.fn(async () => ({ candidate: integrationCandidate })),
+    integrationPatch: vi.fn(async () => ({ patch: '', truncated: false })),
+    integrationDelete: vi.fn(async () => ({})),
     approvalList: vi.fn(async () => []),
     approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),
@@ -308,6 +617,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
         `ws://localhost/ws/attach/${runID}?shell=${encodeURIComponent(tab)}`,
     ),
     terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
+    terminalHistory: vi.fn(async () => ({ lines: [], has_more: false })),
     uploadTerminalImage: vi.fn(async () => ({ path: '/home/alice/.aether/uploads/image.png' })),
     terminalStop: vi.fn(async () => ({})),
     envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
@@ -340,8 +650,17 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       git_email: email,
     })),
     memberRole: vi.fn(async () => bob),
+    // No edge devices or invitations unless a test says so.
+    memberDeviceList: vi.fn(async () => []),
+    memberDeviceLookup: vi.fn(async () => needsOverride('memberDeviceLookup')),
+    memberDeviceApprove: vi.fn(async () => needsOverride('memberDeviceApprove')),
+    memberDeviceRevoke: vi.fn(async () => needsOverride('memberDeviceRevoke')),
+    memberInvitationList: vi.fn(async () => []),
+    memberInvitationCreate: vi.fn(async () => needsOverride('memberInvitationCreate')),
+    memberInvitationRevoke: vi.fn(async () => needsOverride('memberInvitationRevoke')),
     workspaceAdd: vi.fn(async () => workspace),
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
+    workspaceDelete: vi.fn(async () => ({ ok: true as const })),
     workspaceSettings: vi.fn(async () => workspace),
     // Local-only is the default in the mirror control plane; tests that
     // exercise configuration override the relevant response.
@@ -400,6 +719,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       }),
     ),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),
+    localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,
       linked: true,
@@ -428,6 +748,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     localLinkSwitch: vi.fn(async (name: string) => {
       throw new Error(`restart aether gui --server ${name} to switch servers`)
     }),
+    // Signed in to no edge.
+    localEdgeStatus: vi.fn(async () => ({ edges: [] })),
+    localEdgeLogin: vi.fn(async () => needsOverride('localEdgeLogin')),
+    localEdgeServers: vi.fn(async () => needsOverride('localEdgeServers')),
+    localEdgeHostKey: vi.fn(async () => needsOverride('localEdgeHostKey')),
+    localEdgeLink: vi.fn(async () => needsOverride('localEdgeLink')),
+    localEdgeClaim: vi.fn(async () => needsOverride('localEdgeClaim')),
     localPull: vi.fn(async () => ({
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',

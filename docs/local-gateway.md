@@ -66,12 +66,19 @@ than retrying a credential the gateway has already rejected. Open the URL
 
 `run` is the other query parameter the dashboard reads on first load, and it
 leaves the address bar the same way. `?run=<run_id>` opens that run's
-terminal as soon as the first hydration has the runs; a run the member cannot
-see is ignored and the board stays. This is how both shells deliver an
+terminal as soon as the first hydration has the runs, even when the local
+gateway has no project clone. An authorized run link takes precedence over
+optional local onboarding. A run the member cannot see is ignored.
+This is how both shells deliver an
 `aether://run/<id>` deep link - the desktop shell (`desktop/main.js`) and the
 Android app (`android/`) append it to the dashboard URL and load that -
 and removing it is what stops a reload, or the re-hydration a reconnect runs,
 from reopening a run the member has since left.
+
+Once a server is configured, local-repository onboarding is only an initial
+landing page. Choosing **Manage workspaces** during startup keeps that route;
+reconnecting does not send it back to onboarding. Remote import needs no local
+clone.
 
 ### Agent OAuth logins
 
@@ -133,13 +140,16 @@ in-process backend for the member identified by Tailscale WhoIs. This keeps
 the API and stream behavior independent of whether the browser is local or on
 the tailnet.
 
-For the local backend, when a call fails on transport (a server restart or a
-dropped network), it redials once and retries once before surfacing `-32004`
-(unavailable); a failure the server itself answered passes through untouched as
-that `protocol.Error`. Streams get the same treatment with a guard: a channel
-that fails to open triggers a redial only when a keepalive shows the
-connection is actually gone, because tearing down a healthy connection would
-kill every live stream riding on it.
+For the local backend, a replay-safe call that fails on transport (a server
+restart or dropped network) redials once and retries once before surfacing
+`-32004` (unavailable). `config.import`, `workspace.import`, `dev.*`, `run.git.*`
+and `run.pr.*` are not replayed: a lost response may follow committed writes,
+so uncertainty surfaces immediately. A subsequent explicit request can
+reconnect. A server refusal passes through untouched as that `protocol.Error`;
+in particular, busy retention admission requires an explicit retry, not
+automatic replay. Streams have a separate guard: a channel that fails to open
+triggers a redial only when a keepalive shows the connection is actually gone,
+because tearing down a healthy connection would kill its other live streams.
 
 Every `-32004` carries a message prefix that says who has to fix it, and both
 map to HTTP 503 as before. `network unreachable: ` means this machine could
@@ -164,12 +174,16 @@ unavailable identity service is reported as `-32004`.
 | `GET` | `/` and any other non-API path | the SPA (fallback to `index.html`) |
 | `POST` | `/api/v1/<rpc.method>` | any control-channel method, dispatched through the shared webgate |
 | `GET` | `/api/v1/run/<run_id>/patch` | `run.patch` |
+| `GET` | `/api/runs/<run_id>/terminal-history` | non-dashboard compatibility stream of the complete retained raw ANSI archive |
+| `POST` | `/api/runs/<run_id>/terminal-history` | legacy form compatibility for that raw archive; not a dashboard action |
 | `GET` | `/api/v1/disk` | `server.disk` |
 | `GET` | `/api/v1/capabilities` | what this gateway can do |
 | `GET` | `/ws/events` | event subscription (WebSocket) |
 | `GET` | `/ws/attach/<run_id>` | PTY attach (WebSocket) |
 | `GET` | `/ws/attach/<run_id>?shell=<tab>` | writable run-container shell tab (WebSocket) |
 | `GET` | `/ws/terminal?tab=<tab>` | persistent member environment terminal (WebSocket) |
+| `GET` | `/ws/dev/browser/<run_id>` | observation-only binary browser frame stream |
+| `GET` | `/api/v1/dev/<run_id>/artifacts/<artifact_id>` | transient capture bytes; add `?evidence_packet_id=<packet_id>` for the retained copy |
 | `POST` | `/local/v1/<verb>` | client-machine verbs, on `aether gui` only |
 
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
@@ -182,6 +196,121 @@ so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
 separately at 8 MiB. File and configuration exceptions are listed below.
+
+### Development streams and retained captures
+
+Development control calls use the existing `POST /api/v1/dev.*` RPC routes.
+Transient capture downloads, browser observation and development-terminal
+attaches require **Steer** and access to the run's backing account. Adding
+`evidence_packet_id` to the existing artifact route selects the immutable
+retained copy instead: the server checks packet/run/artifact identity and
+existing evidence **View** permission and expiry, including during transfer.
+This broader access is why retention must be deliberate. Downloads stream
+bytes with the recorded content type and length, `Cache-Control: no-store`
+and attachment headers; they do not return base64 in a control response.
+
+`/ws/dev/browser/<run_id>` accepts a JSON page target (`session_id`, `page_id`,
+`page_revision`) and returns a JSON acknowledgement or refusal. Each following
+binary message is one complete frame: two big-endian 32-bit lengths, JSON
+metadata (at most 16 KiB), then image bytes (at most 2 MiB). Metadata carries
+run/session/page/revision/viewport identity and image dimensions; clients must
+honor these fences. Input goes through `dev.browser.action`, never this stream.
+Late subscribers receive the latest complete frame of the active stream;
+slow viewers skip obsolete frames rather than building an image backlog.
+
+The existing `/ws/attach/<run_id>?shell=<terminal_id>` attaches to the shared
+development terminal, including one started by an agent. Retain the
+acknowledgement's `terminal_id` and `incarnation`; reconnect with the incarnation
+to avoid attaching to an explicit replacement. `server_owned_responder: true`
+means the server answers terminal queries; viewers must not send competing
+device replies. Writer ownership is fenced by surface, incarnation,
+`control_session_id` and `control_generation`. Viewer attach does not resize
+the app; resize and stop require explicit control. Development control changes
+use `dev.control.*` and reconnect, not interactive primary-harness attach.
+
+Cancellation and authority revocation stop source work and close download
+readers before waiting for SSH status or close messages. A stalled SSH close
+has a bounded grace period before the underlying transport is aborted; this
+can end sibling streams on that connection. Responsive peers retain their
+other channels. HTTP downloads also have bounded writes and abort on
+interrupted/short sources rather than returning a successful truncated capture.
+These transport bounds do not automatically replay a development mutation.
+
+### Terminal history
+
+The dashboard browses recorded output through
+`POST /api/v1/terminal.history`. Like every gateway RPC, it uses the local
+bearer token or server-side Tailscale WhoIs identity; the guarded method also
+requires **View** permission for the named run. A member who cannot view the
+run cannot page or search its transcript.
+
+The request names `run_id`, an optional opaque `before` cursor returned as
+`next_cursor` by the previous response, an optional case-insensitive literal
+`query`, and a bounded `limit`. An omitted or zero limit defaults to 100; the
+server caps it at 200. Queries are limited to 256 UTF-8 bytes. A cursor must be
+returned unchanged and used with the same run and query; it is authenticated
+server state, not an offset for clients to construct or edit. Malformed,
+tampered, or mismatched cursors are rejected as invalid parameters.
+
+The first request starts at the newest retained output. Every response orders
+its normalized text lines chronologically and returns `has_more`; when another
+window is available it also returns `next_cursor`, which requests the next
+older window. Search applies the literal query while scanning retained casts
+and returns only matching normalized lines. Escape sequences and terminal
+controls are interpreted into text rather than sent to the browser.
+
+Line count is not the only bound. Each request also limits raw disk reads,
+decoded bytes and events, elapsed time, cast segments, directory discovery,
+and concurrent readers; searches have their own lower concurrency cap. A page
+or search may therefore return fewer than the requested number of lines,
+including none, with `has_more:true`. Continuing uses an older-page request
+with `next_cursor`; the live attach does not do this work. The dashboard's
+integrated upward scroller starts at the newest page and prefetches older
+windows near the loaded edge, automatically continuing empty scan windows.
+It never writes archive pages into xterm. Its existing Find searches retained
+loaded pages and frozen screen rows locally, rather than issuing server-search
+queries. The protocol's `query` option and bounds remain available unchanged.
+
+The browser renders a bounded visible-row window, retaining pages and saved
+view state in IndexedDB with an eight-page resident text LRU rather than
+discarding older lines. Prepending pages preserves the cursor-linked row,
+relative pixel offset and horizontal offset. A frozen VT presentation is
+separated from normalized recorded text by an inline boundary; the two are
+not text-deduplicated, and normalized history is not exact historical VT
+reconstruction. Leaving a run closes its main attach but keeps its static
+read position. A fresh live bootstrap on return does not overwrite that view.
+Scrolling down to the bottom or `End` returns live; only a subsequent new
+reading episode refreshes paging from the newest archive head.
+
+Cache state is fenced by identity, terminal-data epoch and run creation
+identity, and invalidated for deleted runs. Storage failures are reported;
+an in-memory fallback when storage is unavailable is not a persistence
+guarantee. These are browser policies, not changes to the request, cursor or
+authorization contract.
+
+The raw `GET /api/runs/<run_id>/terminal-history` route remains only for
+non-dashboard compatibility consumers that need the complete recording. The
+dashboard neither calls it nor exposes a full-history download action. The
+route performs the normal gateway and member authorization, then streams the
+available cast incarnations as raw ANSI bytes with
+`Content-Type: application/octet-stream`, `Cache-Control: no-store`, and
+`Content-Disposition: attachment; filename="terminal-history-<run_id>.ansi"`.
+It supplies the archive byte count as `Content-Length`; the stream ends at the
+finite archive boundary captured for the request even if the run is live. It
+does not parse the bytes into a screen snapshot, buffer the archive in memory,
+acquire control, or write to the PTY. The same-origin rule and the gateway's
+normal bearer-token or Tailscale WhoIs authorization apply. If the run has no
+retained transcript, the route returns the gateway's normal not-found or
+unavailable refusal rather than an empty archive.
+
+The `POST /api/runs/<run_id>/terminal-history` form route remains for legacy
+compatibility clients. Its body is `application/x-www-form-urlencoded`, no
+larger than 8 KiB, and may contain only an optional `token` field. When
+present, the gateway copies that token into a cloned `Authorization: Bearer`
+check; it never accepts the token in the URL. The original `Origin` and normal
+member authorization still apply. The response streams directly with the same
+raw-export headers and finite archive boundary as `GET`; errors remain JSON.
+It does not build a Blob or buffer the archive in the browser.
 
 ### `POST /api/v1/<method>`
 
@@ -216,12 +345,35 @@ Param and result shapes are the ones in `internal/protocol` (`wire.go` and
 the per-feature files), unchanged by this transport, and every call passes
 the same capability and member-authorization checks regardless of transport.
 
+`run.list` and `run.get` include optional `mission_id`, `mission_role`, and
+`integrator_run_id` fields on each run snapshot. The current mission integrator
+has role `integrator` and points to its own run ID; workers have role `worker`
+and point to that mission's current integrator, including finished and older
+attempts. Replacing the integrator changes that parent ID on worker snapshots
+and removes the mission fields from the replaced integrator. Ordinary runs
+omit all three fields. A worker linked to conflicting missions also omits
+them rather than choosing an arbitrary parent; repeated attempts within one
+mission retain that mission. These fields come from durable relationships,
+not task text, and confer no authorization.
+
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live run it stops the container and
 waits for supervision to publish the final branch before removing the
 checkout, transcripts and run-owned database records. For an old run it
 removes the checkout and transcripts directly. The run's timeline remains as
 audit history.
+
+`workspace.delete` is admin-only and accepts `{"workspace_id":"..."}`,
+returning `{"ok":true}`. It permanently removes an inactive workspace and its
+server-side data, repository and mirror keys. It preserves member accounts,
+homes, local clones and upstream repositories. Revoke remote deploy keys
+separately. Active runs, pending runtime or mission work, configured schedules,
+active candidate verification and unfinished delivery block deletion; the
+error names the blocker. In-flight control or Git operations return `-32003`
+instead of waiting behind them. Cleanup errors leave the workspace available
+for retry but do not restore already removed data. Success publishes
+`workspace.deleted` with the workspace ID in the event envelope and `{}` as
+the payload.
 
 `run.archive` also uses the `Kill` capability and accepts
 `{"run_id":"...","archived":true}`. It hides a finished run from the board
@@ -257,18 +409,19 @@ boot. Once expiry destroys the retained container, the call returns `-32002`
 (invalid state, retained container unavailable), and the run cannot be
 relaunched. An expired or otherwise unavailable retained run cannot be
 relaunched; a row removed by `run.delete` instead returns not found. The
-default `--run-container-ttl` is `1h`; negative values disable retention, so a
-closed TUI run is unavailable to `run.relaunch` immediately.
+default `--run-container-ttl` is `168h` (7 days); negative values disable
+retention, so a closed TUI run is unavailable to `run.relaunch` immediately.
 
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","terminal"],
- "local":["daemon.install","daemon.status","env.harnesses","forward.start",
+{"gateway":"local","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
+ "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.link",
+          "edge.login","edge.logout","edge.servers","edge.status","env.harnesses","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.status","link.switch","pull","pull.switch","repo.fast-forward",
           "repo.push","sync.start","sync.status","sync.stop",
-          "update.apply","update.check","update.status"],
+          "update.apply","update.check","update.status","workspace.selection"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -276,7 +429,7 @@ The server gateway answers the same shape with no `local` field because it
 cannot run verbs on the browser's machine:
 
 ```json
-{"gateway":"server","methods":["*"],"ws":["events","attach","terminal"],
+{"gateway":"server","methods":["*"],"ws":["events","attach","terminal","dev/browser"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
@@ -299,11 +452,51 @@ the file reads and the member and workspace writes below. `aether gui`
 proxies these methods over SSH; the server gateway dispatches them in-process.
 Both transports therefore expose the same API shape and authorization checks.
 
+### Candidate integration methods
+
+The authenticated gateway exposes the candidate integration service through
+the same generic control-channel route. `aether gui` sends these calls over
+its authenticated SSH backend; `aether-server --web-port` dispatches them
+in-process for the member identified by Tailscale WhoIs. The method names,
+parameter fields, aggregate states, and result objects are documented in
+[integration.md](integration.md).
+
+| Method | Request body | Success result |
+| --- | --- | --- |
+| `integration.prepare` | `IntegrationPrepareParams` | `{ "candidate": Candidate }` |
+| `integration.show` | `IntegrationShowParams` | `{ "candidate": Candidate }` |
+| `integration.patch` | `IntegrationShowParams` | `{ "patch": string, "truncated": boolean }` |
+| `integration.list` | `IntegrationListParams` | `{ "candidates": CandidateSummary[] }` |
+| `integration.resolve` | `IntegrationResolveParams` | `{ "candidate": Candidate }` |
+| `integration.verify` | `IntegrationVerifyParams` | `{ "candidate": Candidate }` |
+| `integration.request_delivery` | `IntegrationRequestDeliveryParams` | `{ "candidate": Candidate }` |
+| `integration.decide` | `IntegrationDecideParams` | `{ "candidate": Candidate }` |
+| `integration.deliver` | `IntegrationDeliverParams` | `{ "candidate": Candidate }` |
+| `integration.delete` | `IntegrationDeleteParams` | `{}` |
+
+For example, the dashboard sends the params object directly (not a JSON-RPC
+envelope):
+
+```http
+POST /api/v1/integration.show
+Content-Type: application/json
+Authorization: Bearer <local-gateway-token>
+
+{"workspace_id":"ws_123","candidate_id":"cand_456"}
+```
+
+The response is `200` with the result object as the whole body. Every
+integration mutation is authenticated and re-authorized at the service
+boundary; a client cannot supply an actor, run identity, mission authority,
+or push grant. A transport failure is handled by the existing local-gateway
+redial/retry policy, while a service denial, conflict, stale revision, or
+unavailable owned source remains the server's protocol error.
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
+| `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
@@ -350,12 +543,27 @@ arbitrary live-agent filesystem writers.
 `config.import` always address the authenticated member's own persistent home.
 They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
-rules as `files.write`, while `config.import` installs a one-time directory
-selection into that home.
-All of the member's run containers and environment terminal mount one shared
-read-write persistent HOME. A file edit, configuration import, or manual CLI
-profile operation is therefore visible to already-running processes
-immediately, although a tool may need to reload its configuration.
+rules as `files.write`, while `config.import` installs an explicitly selected
+directory into that home and may be used repeatedly.
+The permanent **Configuration** route appears in shared navigation and the
+command palette, and as an action on **Agents**, whenever `config.roots` and
+`config.import` are advertised. It works through both gateways without a
+workspace or onboarding prerequisite; local onboarding is another optional
+entrypoint to the same importer. A server-hosted page can read local files
+explicitly selected in the browser directory picker.
+All runs using the member's account and the environment terminal mount one
+shared read-write persistent HOME. A file edit, configuration import, or
+manual CLI profile operation is therefore visible to active and future runs,
+although a tool may need to reload its configuration.
+Configuration saves and imports bind inherited permissions to the observed
+destination inode and mode. After staging, they recheck that identity and mode
+immediately before atomic rename; an absent destination must still be absent,
+and editor saves also recheck the content revision. A detected change returns
+`config: conflict` without replacing that destination. Staged bytes remain
+private until the destination permissions have been validated.
+These checks are optimistic, not a filesystem compare-and-swap: Aether's root
+lock coordinates its own operations, not arbitrary processes in the shared
+HOME, which can still write between the final check and rename.
 
 The browser uses the selected root's `runtime_ignores` metadata before
 reading or uploading any bytes. `runtime_ignores` contains exact,
@@ -366,19 +574,36 @@ custom harness. Known credential names wherever they occur in a path, and
 every basename ending in `.pem`, remain filtered by the existing
 destination-independent credential policy. The browser keeps raw local file
 handles so it can recompute an import when the destination changes, and
-cannot change destinations during import or after a result exists.
-All remaining bytes are uploaded and server-scanned. Imports allow at most
-2,000 files, 1 MiB per file, and 20 MiB decoded in aggregate. Empty and binary
-regular files are preserved; a browser import sends mode `0644` and cannot
-preserve executable mode or symlinks. Existing remote modes are preserved.
+cannot change destinations during import. After a result, the user can start
+another directory selection or choose **Open remote files** to navigate to the
+existing **Files** editor.
+The preview lists eligible paths and policy exclusions without reading file
+bytes. Directories have no file-count or decoded-total ceiling. The browser
+reads and encodes only the current batch: at most 2,000 files and a target of
+20 MiB decoded. A larger individual file is sent alone. Each `config.import`
+request permits at most 2,000 files and 64 MiB decoded, with a 64 MiB per-file
+ceiling matching configuration editing. These bounds limit a request, not the
+directory. Oversized files and invalid paths block preparation rather than
+offering to import a truncated subset.
+Preparation checks canonical destination keys across the whole selection, so
+root-prefixed aliases cannot overwrite each other in separate batches.
+Accepted bytes are uploaded and server-scanned, so a secret finding does not
+mean those bytes stayed local. Empty and binary regular files are preserved;
+new browser-imported files use `0644`, while overwrites preserve existing
+remote modes. The browser cannot preserve source executable bits or symlinks.
 The server rejects unsafe paths, symlink components, hardlinks, and
 non-regular destinations.
 
 The result's `files` and `bytes` count
 accepted files only; `excluded` reports server-side credential, ignore,
 secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
-`rollback` remain separate manual operations; the dashboard does not invoke
-profile synchronization or watch a local directory.
+`rollback` remain separate manual operations; neither browser imports nor
+**Files** edits create CLI snapshot history. The persistent HOME does not
+depend on snapshots. Snapshot pins record optional launch provenance, not
+isolated writable run copies. Manual push and rollback overlay snapshot files
+into the same HOME without deleting files absent from the snapshot; rollback
+is not an exact-tree restore. There is no directory watcher, automatic
+configuration synchronization, or automatic import retry.
 
 If an import fails after writing one or more files, the response is still a
 `config.import` result rather than a JSON-RPC failure. Its `files` and `bytes`
@@ -396,11 +621,32 @@ dashboard says that some files may remain and directs the user to inspect
 **Files** before retrying. Cancellation can prevent the response from being
 delivered; the protocol does not claim a stronger delivery guarantee.
 
+Across batches the dashboard accumulates confirmed counts, paths, and server
+exclusions. A read failure or server-reported partial failure stops subsequent
+batches. A lost response leaves only that request's outcome unknown; earlier
+confirmed writes remain reported. Navigation retains owner-scoped progress and
+results. Before each request, including after file reads, the importer checks
+the authenticated identity and stops if it changed. An in-flight request may
+still complete for its original owner; the new identity cannot see its result.
+
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` at 30 MiB. The 64 MiB editor file limit remains
-authoritative after JSON decoding. The SSH control-channel line cap is 32 MiB;
-the decoded import limits above remain authoritative.
+and `config.import` at 96 MiB. The 64 MiB file and per-request import limits
+remain authoritative after JSON decoding. The SSH control-channel line cap is
+96 MiB, allowing base64 import requests without unbounded framing.
+The HTTP gateway admits at most two imports at once, before reading their
+bodies, and retains admission through backend processing and the response.
+Excess requests receive HTTP 503 (`configuration import capacity is busy;
+retry later`) without being read. An import body must make progress within
+30 seconds and finish within 15 minutes; expired reads return HTTP 408.
+These are transfer protections, not limits on the selected directory.
+SSH frames exceeding 64 KiB require a separate server admission: two globally
+and one per member, retained through the response. Small control requests
+remain available. Partial-frame reads have a 30-second idle timeout and a
+15-minute total timeout. Expanded frames retain that total timeout through
+dispatch and response; complete small requests do not. Expiry closes the
+offending SSH connection, including its other channels. Idle channels between
+requests do not start these timers.
 
 ### `GET /api/v1/run/<run_id>/patch`
 
@@ -591,7 +837,14 @@ authority.
 | Verb | Request | Response |
 | --- | --- | --- |
 | `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
-| `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
+| `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","edge_url":"...","server_id":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`edge_url` and `server_id` are present only on an edge link; `links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
+| `edge.login` | `{"edge":"https://...","label":"..."}` (both optional) | `{"state":"pending","edge":"https://edge.onaether.dev","signin_origin":"https://auth.onaether.dev","user_code":"...","verification_uri":"https://auth.onaether.dev/device"}` |
+| `edge.status` | `{}` | `{"edges":[{"edge":"https://...","signin_origin":"https://...","account":{"id":"acct_...","provider":"github","subject":"...","login":"...","email":"...","name":"..."},"device":{"id":"...","label":"...","key":"ssh-ed25519 ..."},"error":"..."}],"login":{"state":"pending"\|"signed_in"\|"failed","edge":"...","signin_origin":"...","user_code":"...","verification_uri":"...","account":{...},"error":"..."}}` (`login` only once `edge.login` ran in this process; an entry's `error` replaces its `signin_origin`, `account` and `device` when its stored sign-in cannot be read) |
+| `edge.servers` | `{"edge":"https://..."}` (optional) | `{"edge":"https://...","servers":[{"id":"...","name":"...","online":bool,"role":"admin","access_policy":"account"\|"approved-devices","kind":"self-hosted"\|"hosted"}]}` |
+| `edge.hostkey` | `{"server_id":"...","edge":"https://..."}` (`edge` optional) | `{"edge":"https://...","server_id":"...","fingerprint":"SHA256:..."}` |
+| `edge.link` | `{"server_id":"...","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `server_id` optional) | `{"server_id":"...","edge":"https://...","addr":"...","user":"aether","member":{...}}` |
+| `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link` |
+| `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
@@ -611,11 +864,84 @@ authority.
 | `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
+| `workspace.selection` | `{}` reads; `{"workspace_id":"..."}` saves; an empty ID clears | `{"workspace_id":"..."}` |
 
 `link.apply` saves the link and swaps the gateway connection in place, so
 subsequent API and WebSocket requests use the new server without a restart. If
 no SSH key is offered and the server requires one, it may create
 `~/.ssh/id_ed25519` and its `.pub` file.
+
+The `edge.*` verbs let the onboarding wizard reach a server through an
+[edge](edge.md) without a terminal. Each does what the command beside it
+does, with the same files in the config directory:
+
+| Verb | Command |
+| --- | --- |
+| `edge.login` | `aether login` |
+| `edge.servers` | `aether servers` |
+| `edge.hostkey` | the host key `aether link --from-edge` shows before it asks |
+| `edge.link` | `aether link <server id>` |
+| `edge.claim` | `aether link --claim <code>` |
+| `edge.logout` | `aether logout` |
+
+- `edge` names the edge by its relay origin. Without it a verb uses the one
+  edge this machine is signed in to, else `https://edge.onaether.dev`. An
+  address that is not `https://host[:port]`, or `http://` on loopback,
+  answers `-32602`.
+- `edge.login` answers once the edge has registered the sign-in. The person
+  opens `verification_uri` and confirms `user_code`; the gateway polls the
+  edge in the background and `edge.status` reports `pending`, then
+  `signed_in` or `failed` with the client's own error. `label` names the
+  device on the edge's Devices page and defaults to the host name. A second
+  `edge.login` replaces one still pending. The device code the gateway polls
+  with and the device token it receives are never in an answer; the token
+  goes only to `edge-tokens.json`, mode `0600`.
+- `edge.hostkey` reads the SSH host key the server presents through the
+  edge, refuses one that does not derive `server_id`, and ends the
+  connection before authenticating. The wizard shows its fingerprint, with
+  the server's name and id, before it links a server from the edge's list,
+  and asks for a confirmation; a server id typed from the admin links
+  without one.
+- `edge.link` and `edge.claim` save the link and swap the gateway connection
+  in place, as `link.apply` does. `server_id` must be a server id, and the
+  server's SSH host key is checked against it before anything is sent.
+  `edge.claim` checks the host key against the id in the code before it
+  sends the code, inside SSH. `addr` is an SSH address tried before the
+  edge; a claim never uses it.
+- `edge.logout` revokes the device token at the edge and forgets it, and
+  drops a pending `edge.login` for that edge.
+- Errors carry the client's own message. Not signed in, or an edge refusal
+  with a `4xx` status such as a revoked token or a claimed server, answers
+  `-32002`. An edge that cannot be reached or answers `5xx` answers
+  `-32004`. `edge.link` and `edge.claim` answer `-32002` for any failure of
+  the SSH connection, with what the server said, such as a wrong claim code
+  or a device waiting for approval.
+
+The member's devices and edge invitations are control-channel methods, so
+the dashboard calls them through `POST /api/v1/<method>` like any other:
+`member.device.list`, `member.device.lookup` (`{"code":"..."}`),
+`member.device.approve` (`{"code":"...","device_id":"..."}`, the id the
+lookup returned),
+`member.device.revoke` (`{"device_id":"..."}`),
+`member.invitation.create`, `member.invitation.list`,
+`member.invitation.revoke` (`{"invitation_id":"..."}`),
+`member.identity.link`, `member.identity.list` (`{"member_id":"..."}`),
+`member.identity.remove`
+(`{"member_id":"...","provider":"github","subject":"..."}`) and
+`server.owner.transfer` (`{"member_id":"..."}`). Their shapes are in
+`internal/protocol/identity.go`,
+and [edge.md](edge.md) describes what each does.
+
+`workspace.selection` stores only the last selected workspace ID in
+`workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash
+keys the linked server address and authenticated member ID from `server.info`;
+different members and servers keep separate selections. Writes replace the
+file atomically with mode `0600`. The gateway token and same-origin checks
+apply. The dashboard reads the preference at startup and saves changes in
+order, so an ephemeral gateway port does not reset the selection. A deleted
+selection falls back to a remaining workspace, or clears when none remain.
+An unreadable preference produces a dashboard error toast but does not prevent
+the server snapshot from loading.
 
 - `link.repo` honors a `workspace_id` naming the workspace the remote URL
   must carry (the onboarding wizard sends the one just picked). Without
@@ -938,14 +1264,16 @@ out the rest of a 30-second wait. A foreground return leaves a socket that is
 still there alone; `online` replaces it whatever state it reached, because a
 network switch leaves even an acknowledged socket half open, with the browser
 still reporting it as connected and no close ever arriving on the client side.
-If an attach is still inside its replay boundary when `online` fires, the
+If an attach is still inside its bootstrap boundary when `online` fires, the
 client cancels that parser and drain with an explicit cancellation signal,
 clears the partial operations, and drops the socket while keeping the terminal
-hidden. The replacement attach starts a fresh hidden replay; the incomplete
-prefix is never revealed. If the replacement is finally refused, the client
-settles the replay gate before showing the server's error. An attach the gateway
-refused, one parked on a `session ended` close, and a run still waiting for its
-PTY session are not reopened by either event.
+hidden. The replacement attach starts a fresh hidden bootstrap; the incomplete
+prefix is never revealed. For a dashboard run attach the replacement is a
+compact current-screen snapshot captured without scanning the retained raw
+archive. If the replacement is finally refused, the client settles the
+bootstrap gate before showing the server's error. An attach the gateway
+refused, one parked on a `session ended` close, and a run still waiting for
+its PTY session are not reopened by either event.
 
 Every live socket - `events`, `attach`, and `terminal` - is pinged by the
 server every **30 seconds** and closed when the pong does not arrive within
@@ -988,194 +1316,197 @@ anything dropped.
 
 ### `GET /ws/attach/<run_id>`
 
-PTY attach. Output is binary, control is JSON, matching the terminal view's
-needs.
+PTY attach. Output is binary; JSON text frames carry the header, input,
+resize, control, geometry, and acknowledgements.
 
-1. Client sends one **text** frame with the attach header (the run comes
-   from the path). The header must arrive within 10 seconds or the socket
-   is closed. The dashboard requests write on first entry; a CLI read-only
-   mirror sends `{}`:
+1. Client sends one **text** header frame (the run comes from the path). The
+   header must arrive within 10 seconds or the socket closes. A dashboard run
+   terminal sends the interactive header:
 
    ```json
-   {"write":true,"cols":120,"rows":40}
-   {"write":true,"follow":true,"cols":80,"rows":24}
-   {"resume":true,"cursor":4120,"resume_id":"pty-incarnation-7","cols":120,"rows":40}
+   {
+     "write":true,"screen":true,"interactive":true,
+     "cols":120,"rows":40,"control_session_id":"tab-7"
+   }
+   ```
+   `screen:true` requests a compact current-screen bootstrap: viewport,
+   cursor, terminal modes, colours, alternate buffer, and at most 200
+   scrollback rows, not the raw transcript. A live session serializes this
+   state in memory at the same output boundary returned by the ack; opening the
+   terminal does not scan durable history. Screen dimensions and the server's
+   snapshot store are capped at 4,096 rows, 4,096 columns, and 1,048,576 cells.
+   The dashboard's xterm independently requests up to 5,000 live-scrollback
+   rows and reduces that count as needed to keep its normal and alternate
+   buffers within 1,000,000 cells. A finished run whose compact checkpoint is
+   temporarily unavailable falls back to at most 1 MiB of recent output while
+   checkpoint repair proceeds separately. It never falls through to a complete
+   archive replay. `screen:true` is the dashboard run default.
+   `screen:false` deliberately selects the retained raw transcript stream for
+   compatibility clients such as the CLI; the dashboard does not request it.
+   `interactive:true` opts into same-stream acknowledged control frames and is
+   the dashboard run default. Shell and CLI attachments do not gain this
+   browser control protocol merely by using the attach endpoint.
+
+   An already-mounted dashboard surface deliberately reopening while its
+   parsed screen remains valid may send its settled `cursor` and the nonempty
+   `resume_id` from the same PTY incarnation:
+
+   ```json
+   {
+     "write":true,"screen":true,"interactive":true,
+     "resume":true,"cursor":4120,"resume_id":"pty-incarnation-7",
+     "cols":120,"rows":40,"control_session_id":"tab-7",
+     "control_generation":8
+   }
    ```
 
-   `resume` asks to reattach while preserving parsed xterm state already held by
-   a dashboard client. For a cached client, it is sent after inactivity has
-   intentionally closed the old socket.
-   For that client, `cursor` is the raw-output boundary whose xterm writes have
-   settled, not merely bytes received, and `resume_id` is the nonempty
-   server-issued PTY incarnation ID from the ack that produced that screen.
-   The dashboard sends both with the same logical `control_session_id`; without
-   a known `resume_id`, it sends a full attach rather than an ambiguous cursor.
-   The ID changes on every PTY/server incarnation, so it fences a cursor across
-   restarts.
-   When resume is honored, the ack says `"resumed":true` and the replay is
-   exactly the bytes after that cursor - the gap - while the cached screen is
-   retained. When the ID or cursor cannot be honored, the ack says
-   `"resumed":false`, returns the current cursor and `resume_id`, and a run
-   attach receives the complete retained transcript again; the dashboard
-   applies it through the hidden, ordered replay transaction, so no historical
-   timelapse is visible. A reusable shell may instead receive its current-screen
-   replay.
+   A valid same-incarnation resume sends only bytes still present in the
+   bounded in-memory replay ring and keeps the parsed screen; it never reads
+   the transcript to reconstruct a gap. If the cursor, ring, geometry, or
+   incarnation cannot serve that gap, the ack says `"resumed":false` and the
+   server sends a compact current-screen bootstrap instead. The dashboard
+   replaces that hidden surface; it does not replay the retained raw archive.
+   A finished run with `screen:true` likewise supplies bounded current/recent
+   state read-only. Non-dashboard compatibility consumers may request the
+   complete raw archive through `GET` or the legacy form `POST` at
+   `/api/runs/<run_id>/terminal-history` instead.
 
-   `release_control` combines lease release with this attach. At the PTY-host
-   commit boundary, the server holds the run-scoped authority lock, validates
-   the request's session and generation, admits the replacement, then releases
-   and fences the old lease before any replay, output, or geometry is sent. If
-   admission fails, the request is refused while the old writer and lease
-   remain intact. A successful commit cancels the displaced writer, then
-   continues as the replacement read-only PTY attach on this same request,
-   honoring `resume`/`cursor`, returning one normal attach ack, and streaming
-   output. Invalid, stale, or cross-member release is refused; release is not
-   an acknowledgement-only throwaway connection.
+   `follow` remains available for a viewer that must render the session at its
+   acknowledged size without imposing local geometry. `cols` and `rows` do
+   not override a live or recorded screen's geometry.
 
-   `follow` says the client renders the session at the size it already is
-   and imposes none of its own, so it is left out of the minimum the PTY is
-   sized to whether or not it can write (step 4). Its `cols` and `rows` do not
-   override a live or recorded screen's geometry. The dashboard follows from
-   a phone, mirroring and steering alike, which is how a 45-column screen
-   steers an agent without
-   reflowing that agent's screen for everyone else watching it.
+   Geometry `follow` is independent of viewport follow-bottom state. Live
+   xterm follows output at the bottom; upward reading in the dashboard run
+   pane switches to a static, virtualized surface with its own row/pixel
+   anchor. Compact bootstrap and live geometry changes do not overwrite that
+   saved presentation. For xterm's own structural replay or column reflow,
+   viewport restoration remains conditional on a current operation, no newer
+   user scroll and the same normal/alternate buffer. On a phone the live pane
+   pans horizontally across the acknowledged grid, while the history surface
+   owns scrolling during reading; neither adds a competing vertical scroller.
+   Ordinary alternate-screen gestures remain application input; `Shift+PageUp`
+   is the dashboard's explicit archive gesture, not a protocol operation.
 
-2. Server answers one **text** frame:
-   `{"ok":true,"framed":true,"cols":120,"rows":40,"replay":4096,"cursor":4120,"resume_id":"pty-incarnation-7"}`,
-   or `{"ok":false,"code":-32001,"error":"..."}` followed by a close.
-   Every successful live run or shell attach ack includes the current nonempty
-   `resume_id`; finished transcript-only replays have no live PTY incarnation.
-   The ack's geometry is the captured screen's size, not an echo of the header.
-   A later accepted resize arrives after that screen's replay bytes.
-   The optional `replay` value is the exact number of binary output bytes
-   preceding live output. Clients split at that byte boundary even when one
-   binary frame contains the end of replay and the beginning of live output.
-   A declared replay length must be a finite, nonnegative safe integer; the
-   dashboard turns an invalid declaration into a final visible refusal rather
-   than attempting an allocation. Dashboard clients do not allocate
-   `Uint8Array(replay)` or any equivalent browser-sized declared-length
-   buffer. They start parsing each arriving frame-sized replay operation
-   immediately through one serial public xterm write chain while the host
-   remains hidden with CSS visibility; they do not retain replay bytes until
-   the full boundary arrives. Each completion is awaited before the next
-   operation, preserving xterm backpressure and wire order. Only the slice
-   containing the exact final replay byte is tagged `replay-end`; live records
-   and geometry received during replay queue behind the replay writes. After
-   the final replay-write callback, the host remains hidden for two
-   `requestAnimationFrame` turns so the xterm DOM paints the settled terminal,
-   then reveals it.
-   Every retained transcript byte is fed to xterm. xterm retains normal
-   scrollback and rows preserved by its configured full-screen erase behavior;
-   control bytes and cursor overwrites affect terminal state but are not
-   themselves scrollback rows. Terminal-generated replies and user input stay
-   muted from the ack through the final replay-write callback.
-   For a fresh run attach these bytes are the complete retained raw transcript,
-   including segments from earlier server incarnations. A successful resume
-   supplies only the missing raw output after the settled cursor. A failed
-   resume may repeat the complete run transcript, but that fallback uses the
-   same hidden, ordered replay transaction and returns the server's current
-   cursor and incarnation fence; it is never exposed as historical playback.
-   The dashboard's next `cursor` is therefore the output boundary settled by
-   xterm, paired with the ack's `resume_id`.
-
-   The server keeps full-transcript replay resource-bounded: it streams retained
-   segments lazily, opening and reading at most one segment at a time rather
-   than loading the complete history or opening every segment file at once.
-   A write attach is refused with `-32001`
-   unless the member holds the **steer** capability on that run; dropping
-   `"write"` always works for a member who can see the run. An unknown run is
-   refused with `-32000`.
-   A finished run supplies its complete transcript read-only, ending with the
-   session-end close below. A `queued`,
-   `provisioning` or `running` run with no session is refused with `-32004`
-   rather than held open - the container is still being built, or recovery is
-   starting the session - as is a finished run whose transcript was never
-   persisted. The refusal is the answer, so a client that means to wait for a
-   session has to retry rather than expect the socket to stay open.
-3. Server then streams terminal output as **binary** frames. The first
-   `replay` bytes are historical output; live output begins at the exact next
-   byte, including when that boundary falls inside a frame.
-4. Client sends **text** control frames:
+2. Server answers one **text** ack:
 
    ```json
-   {"type":"input","data":"ls -la\r"}
+   {
+     "ok":true,"framed":true,"cols":120,"rows":40,
+     "replay":4096,"cursor":4120,"resume_id":"pty-incarnation-7",
+     "resumed":false,"has_control":true,"control_generation":8
+   }
+   ```
+
+   A refusal is `{"ok":false,"code":-32001,"error":"..."}` followed by a
+   close. `replay` is the exact number of binary bootstrap bytes before live
+   output; with `screen:true` those bytes are the bounded compact snapshot,
+   while `screen:false` uses the retained raw replay. A binary frame may straddle
+   that boundary. The ack's geometry is the captured screen's size, not an
+   echo of the header. Successful live attaches return a nonempty
+   `resume_id`; finished transcript-only snapshots have no live incarnation.
+   The dashboard keeps the surface hidden while it parses framed records and
+   serializes xterm writes. User input and terminal-generated replies stay
+   muted through the final replay write callback. That callback opens input;
+   the surface remains hidden for two paint turns and until structural viewport
+   restoration settles, and is revealed only afterward.
+
+   The backend's ordered terminal stream uses binary records on the SSH
+   subsystem: an `o` byte and four-byte big-endian payload length precede each
+   output record, a `g` byte plus two four-byte dimensions carry geometry, and
+   a `c` byte plus a four-byte length carries one JSON control record. At the
+   webgate boundary those records are decoded and stripped: output payloads are
+   sent to the browser as binary WebSocket messages, while geometry and control
+   records become JSON text messages. The server-hosted gateway performs the same
+   translation without the SSH hop, so the browser never receives `o`/`g`/`c`
+   record headers.
+   Replay counts exclude the backend record headers. The browser never allocates
+   a transcript-sized buffer from `replay`; it processes frame-sized records in
+   wire order and follows the visibility, input, and viewport ordering above.
+   Client frames are capped at 64 KiB; the SPA splits larger input in ordered frames.
+
+   A write attach requires **steer** permission and otherwise refuses with
+   `-32001`; an unknown run is `-32000`. A `queued`, `provisioning`, or
+   `running` run without a session is `-32004` rather than a held socket.
+   A finished run remains readable through its snapshot or raw replay,
+   depending on `screen`.
+
+3. Server then streams terminal output as **binary** frames. For framed
+   dashboard output, live bytes begin after the ack-declared bootstrap
+   boundary. Raw clients consume the same boundary without dashboard parsing.
+
+4. Client sends **text** frames:
+
+   ```json
+   {"type":"input","data":"ls -la\r","control_generation":8}
    {"type":"resize","cols":132,"rows":50}
+   {"type":"control","request_id":17,"write":true}
+   {"type":"control","request_id":18,"write":false,"control_generation":8}
+   {"type":"control","request_id":19,"write":true,"takeover":true,
+    "control_generation":8}
    ```
 
-   Input from a read-only attach is ignored; its resizes are not, because
-   whether they count is the session's to decide. The shared terminal
-   geometry is the per-dimension minimum over the attaches that impose one:
-   every write-capable attach, plus a read-only one while it is the only
-   attach that is not a `follow` client. So a narrow writer reflows the
-   agent's screen for everyone, a follower never does, and a lone watcher
-   sizes the PTY to its own window the way `ssh` does - until a second
-   attach arrives, when it stops imposing and the minimum is recomputed
-   without it.
-5. Server sends one **text** control frame to attached dashboard clients
-   whenever the runtime accepts a changed PTY size:
+   `control` changes the lease on this same WebSocket; it does not reconnect
+   or replay. The optional `takeover:true` explicitly displaces the current
+   controller. Include the current `control_generation` when fencing a
+   release, takeover, or input. Read-only input is ignored and stale input is
+   rejected rather than reaching the PTY.
+
+5. The server answers each requested control change on the same ordered
+   stream:
+
+   ```json
+   {
+     "type":"control","request_id":17,"ok":true,
+     "has_control":true,"control_session_id":"tab-7",
+     "control_generation":9
+   }
+   ```
+
+   A refusal keeps the same `type` and `request_id` and adds `code` and
+   `error`; it also reports the authoritative `has_control`,
+   `control_session_id`, and `control_generation`. A lease revocation that
+   was not requested is an unsolicited `type:"control"` frame with no
+   `request_id`; the displaced client remains a read-only observer. The
+   browser changes its input state only from this acknowledged metadata, not
+   from the requested `write` bit.
+
+6. Server sends one **text** geometry frame whenever the runtime accepts a
+   changed shared PTY size:
 
    ```json
    {"type":"geometry","cols":132,"rows":43}
    ```
 
-   Every dashboard terminal renders at this size, including writers: another
-   writer can make the effective grid smaller than the local pane. The pane's
-   requested geometry remains separate from the rendered grid. Geometry and
-   output use one ordered stream between the server and gateway: a resize
-   reaches the browser before the repaint drawn at that size. A reattach learns
-   the initial size from the ack.
-   The ordered stream keeps fresh-run replay and successful resume from
-   exposing intermediate redraw frames: each replay operation is parsed
-   serially as it arrives while the terminal remains hidden, and the final
-   replay callback is followed by two `requestAnimationFrame` turns before
-   the settled surface is revealed. A successful resume keeps the existing
-   screen. Raw screen-bearing attachments request a redraw nudge; adapter taps
-   do not.
+   The geometry frame is ordered before output drawn at that size. The PTY is
+   the per-dimension minimum over attaches that impose geometry; a follower
+   is excluded. A dashboard phone follows the acknowledged size, pans an
+   oversized grid horizontally, and does not reflow the agent's screen.
 
-   Client frames are capped at 64 KiB; the SPA splits larger input (a paste)
-   across several ordered `input` frames.
-6. The server re-checks the attach's authorization every few seconds. A
-   write attach whose member loses **steer** (role change, handoff, run
-   protection, workspace policy) closes with **1008**, reason
-   `steer permission withdrawn`; the SPA reconnects as a read-only mirror.
-   A member removed or set back to pending closes with **1008**, reason
-   `membership withdrawn`, and the SPA stops reconnecting. The run's
-   terminal session ending - the run shell exiting, or a finished run's replay
-   draining - closes with **1000**, reason `session ended`, and the SPA
-   stops reconnecting; any other end closes with **1011**.
+7. The server re-checks authorization periodically. On an interactive attach,
+   losing **steer** sends an unsolicited `type:"control"` notification on the
+   same WebSocket, with `ok:false`, `has_control:false`, the authoritative
+   `control_session_id`, and the exact `control_generation` that was revoked.
+   The socket stays open as a read-only mirror; the dashboard disables input
+   without replaying or reconnecting. A raw legacy (non-interactive) attach
+   keeps the named close behavior: **1008**, reason `steer permission
+   withdrawn`. Membership withdrawal closes every attach with **1008**, reason
+   `membership withdrawn`, and stops reconnecting. A terminal session ending
+   closes with **1000**, reason `session ended`; other failures use **1011**.
 
-Closing the socket detaches; the run is unaffected.
+Closing the socket detaches; the run is unaffected. Changing away from a
+dashboard run route closes that socket and unmounts its xterm, removing
+Watching presence, control transport, and geometry participation. The browser
+does not keep a fixed cache of recently visited terminal routes. A deliberate
+reopen of the same mounted surface may use a bounded same-incarnation gap;
+returning to an unmounted route starts from a compact snapshot.
 
-For a cached dashboard primary, inactivity intentionally closes the socket.
-That ordinary detach removes Watching presence, active control transport, and
-geometry participation; the browser keeps the parsed xterm state and logical
-control-session identity only while its memory cache retains the entry. This
-client cache is not server persistence. A completed entry whose session ended
-does not reconnect unless that same run is relaunched; a relaunch records a
-fresh full attach while parked and opens it when the entry becomes active.
-
-Dashboard attachments request `framed:true` and require the server to confirm it
-in the ack. An older server that ignores the request is refused with an update
-error rather than having raw bytes decoded as terminal records. After the ack,
-an `o` byte and four-byte big-endian payload length precede each output record;
-a `g` byte and two four-byte big-endian dimensions form a geometry record. The
-gateway decodes these sequentially into WebSocket frames. Replay counts exclude
-frame headers. Dashboard resume cursors count original session output only
-through the xterm-settled boundary described above. The dashboard starts each
-frame-sized replay operation as it arrives, but one serial xterm write chain
-preserves geometry/output wire order and backpressure; it never allocates a
-transcript-sized replay buffer or runs an independent geometry pump.
-For a persistent dashboard dock, `rebind(next)` means that a new terminal host
-has taken over: the client cancels any old replay parser or drain with an
-explicit cancellation signal, drops the old socket, installs the new handlers,
-and starts one fresh full replay after cancellation. The dock does not issue a
-separate reopen after rebind.
-
-CLI attachments do not request framing and retain their raw terminal stream:
-they consume the ack-declared replay byte count, then continue with live bytes.
-They do not receive the dashboard's segmented, ordered, hidden-surface
-presentation. A writable CLI attach still discards input that arrives before
-its announced replay has been written; it does not defer those keystrokes.
+CLI attachments do not request framing or `interactive`; they retain their raw
+terminal stream and consume the ack-declared replay byte count before treating
+following bytes as live. A CLI `screen:false` attach receives the retained raw
+history, while a dashboard `screen:true` attach receives compact current-screen
+state and never the archive. A writable CLI attach still discards input that
+arrives before its announced replay has been written; it does not defer those
+keystrokes.
 
 #### Run shell tabs
 
@@ -1203,23 +1534,27 @@ matching `^[a-z0-9-]{1,32}$`.
 1. Client sends one text header with `cols` and `rows`, and `follow` where
    it means the same as it does for an attach. The gateway ensures the
    member's environment container and the requested shell.
-2. The gateway answers `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}`
-   with the session's live geometry
-   or a JSON error followed by a close. When present, `replay` is the exact
-   number of binary output bytes that follow the ack before live output. A
-   binary frame may straddle that boundary, so the client splits it by the
-   count. That declaration must be a finite, nonnegative safe integer; an
-   invalid value becomes a final visible refusal rather than an allocation.
-   The dashboard starts parsing frame-sized replay operations as they arrive,
-   serially through public xterm write callbacks while the terminal surface
-   stays hidden with CSS visibility. It does not retain replay until the full
-   boundary or allocate a browser-sized buffer from the declared length.
-   Only the slice containing the exact final replay byte is tagged
+2. The gateway answers
+   `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}` with
+   the session's live geometry or a JSON error followed by a close. For a
+   framed dashboard terminal, the replay is a compact current-screen snapshot
+   with bounded scrollback, not the shell's full recorded output. Each
+   reconnect requests a fresh snapshot; environment-terminal attaches do not
+   use the run attach's cursor-delta resume protocol.
+   `replay` is the exact number of binary output bytes that follow the ack
+   before live output. A binary frame may straddle that boundary, so the client
+   splits it by the count. That declaration must be a finite, nonnegative safe
+   integer; an invalid value becomes a final visible refusal rather than an
+   allocation. The dashboard starts parsing frame-sized replay operations as
+   they arrive, serially through public xterm write callbacks while the
+   terminal surface stays hidden with CSS visibility. It does not retain replay
+   until the full boundary or allocate a browser-sized buffer from the declared
+   length. Only the slice containing the exact final replay byte is tagged
    `replay-end`; live output and geometry queue behind xterm backpressure.
-   After the final replay callback, two `requestAnimationFrame` turns let the
-   xterm DOM paint the settled state before reveal. Terminal-generated replies
-   and user input stay muted through that callback. At most six tabs may be
-   active.
+   Terminal-generated replies and user input stay muted through the final
+   replay callback, then input opens. The surface remains hidden for two paint
+   turns and structural viewport restoration before reveal. At most six tabs
+   may be active.
 3. Output is binary. Input and resize are text frames, and the server's
    `geometry` frame arrives here the same way it does on an attach:
 

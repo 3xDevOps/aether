@@ -149,7 +149,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">Task</p>
-                        <p className="mt-1 break-all whitespace-pre-wrap text-[13px] leading-5 text-foreground/90">
+                        <p className="mt-1 break-words whitespace-pre-wrap text-[13px] leading-5 text-foreground/90">
                           {template.task}
                         </p>
                       </div>
@@ -272,8 +272,7 @@ function TemplateForm({
         <DialogHeader>
           <DialogTitle>{template ? 'Edit template' : 'New template'}</DialogTitle>
           <DialogDescription>
-            template.save replaces a template by name; the schedule keeps
-            pointing at it.
+            Reuse this task for manual and scheduled runs.
           </DialogDescription>
         </DialogHeader>
         <form

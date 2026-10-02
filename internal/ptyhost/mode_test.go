@@ -125,7 +125,7 @@ func TestModePreambleOutlivesTheReplayRing(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}}
+	s := &session{ring: newRingAt(1024, TerminalPosition{}), tr: tr, clients: map[*client]struct{}{}}
 	s.deliver([]byte("\x1b[?2004h"))
 	s.deliver(bytes.Repeat([]byte("scrollback\r\n"), 200))
 
@@ -201,12 +201,12 @@ func TestResumeReplaysOnlyTheGap(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{resumeID: "pty-old", ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s := &session{resumeID: "pty-old", ring: newRingAt(1024, TerminalPosition{Epoch: "pty-old"}), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	s.deliver([]byte("\x1b[?2004h agent output\r\n"))
-	caughtUp := s.ring.written
+	caughtUp := s.ring.position()
 
 	// Nothing happened while this client was away.
-	idle := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-old", Cursor: caughtUp})
+	idle := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-old", Cursor: uint64(caughtUp.Sequence)})
 	if aerr := s.addClient(idle); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
@@ -220,7 +220,7 @@ func TestResumeReplaysOnlyTheGap(t *testing.T) {
 
 	// The agent kept talking during the reattach; that much and no more.
 	s.deliver([]byte("during the gap"))
-	behind := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-old", Cursor: caughtUp})
+	behind := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-old", Cursor: uint64(caughtUp.Sequence)})
 	if aerr := s.addClient(behind); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
@@ -240,7 +240,7 @@ func TestResumeRequiresCurrentPTYIncarnation(t *testing.T) {
 			t.Fatalf("newCastWriter: %v", err)
 		}
 		t.Cleanup(func() { _ = tr.close() })
-		s := &session{run: TerminalSession("m1", "tab"), resumeID: id, ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+		s := &session{run: TerminalSession("m1", "tab"), resumeID: id, ring: newRingAt(1024, TerminalPosition{Epoch: TerminalEpoch(id)}), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 		s.deliver([]byte("old output"))
 		s.deliver([]byte("replacement gap"))
 		return s
@@ -280,12 +280,12 @@ func TestResumeFallsBackWhenTheGapIsGone(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{resumeID: "pty-fallback", ring: newRing(64), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s := &session{resumeID: "pty-fallback", ring: newRingAt(64, TerminalPosition{Epoch: "pty-fallback"}), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	s.deliver([]byte("\x1b[?2004h"))
-	stale := s.ring.written
+	stale := s.ring.position().Sequence
 	s.deliver(bytes.Repeat([]byte("x"), 512))
 
-	c := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-fallback", Cursor: stale})
+	c := newClient(nil, AttachClient{Cols: 80, Rows: 24, Resume: true, ResumeID: "pty-fallback", Cursor: uint64(stale)})
 	if aerr := s.addClient(c); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
 	}
@@ -305,7 +305,7 @@ func TestFreshClientStillGetsTheReplay(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s := &session{ring: newRingAt(1024, TerminalPosition{}), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	s.deliver([]byte("agent output\r\n"))
 
 	fresh := newClient(nil, AttachClient{Cols: 80, Rows: 24})
@@ -316,8 +316,8 @@ func TestFreshClientStillGetsTheReplay(t *testing.T) {
 	if fresh.resumed || len(freshReplay) == 0 {
 		t.Fatal("a client that is not resuming must still get the replay")
 	}
-	if fresh.cursor != s.ring.written {
-		t.Fatalf("cursor = %d, want %d so a later resume starts from here", fresh.cursor, s.ring.written)
+	if fresh.position != s.ring.position() {
+		t.Fatalf("position = %+v, want %+v so a later resume starts from here", fresh.position, s.ring.position())
 	}
 }
 
@@ -329,7 +329,7 @@ func TestResumeAtANewSizeStillResizes(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
+	s := &session{ring: newRingAt(1024, TerminalPosition{}), tr: tr, clients: map[*client]struct{}{}, cols: 80, rows: 24}
 	c := newClient(nil, AttachClient{Cols: 132, Rows: 43, Resume: true})
 	if aerr := s.addClient(c); aerr != nil {
 		t.Fatalf("addClient: %v", aerr)
@@ -347,7 +347,7 @@ func TestTapNeverSizesTheSession(t *testing.T) {
 		t.Fatalf("newCastWriter: %v", err)
 	}
 	t.Cleanup(func() { _ = tr.close() })
-	s := &session{ring: newRing(1024), tr: tr, clients: map[*client]struct{}{}, cols: 120, rows: 30}
+	s := &session{ring: newRingAt(1024, TerminalPosition{}), tr: tr, clients: map[*client]struct{}{}, cols: 120, rows: 30}
 
 	tap := newClient(tapConn{}, AttachClient{ReadOnly: true})
 	if aerr := s.addClient(tap); aerr != nil {
@@ -387,30 +387,51 @@ func TestResumeStillFacesTheSteerGate(t *testing.T) {
 
 // The ring answers a resume only from a cursor it still holds all of.
 func TestRingSinceEdges(t *testing.T) {
-	r := newRing(8)
+	epoch := TerminalEpoch("ring")
+	r := newRingAt(8, TerminalPosition{Epoch: epoch})
 	r.write([]byte("abcd"))
-	if got, ok := r.since(r.written); !ok || len(got) != 0 {
+	if got, ok := r.since(r.position()); !ok || len(got) != 0 {
 		t.Fatalf("caught up: %q %v", got, ok)
 	}
-	if got, ok := r.since(0); !ok || string(got) != "abcd" {
+	if got, ok := r.since(TerminalPosition{Epoch: epoch}); !ok || string(got) != "abcd" {
 		t.Fatalf("from zero: %q %v", got, ok)
 	}
-	if _, ok := r.since(r.written + 1); ok {
-		t.Fatal("a cursor ahead of the stream must not be served")
+	if _, ok := r.since(TerminalPosition{Epoch: epoch, Sequence: r.position().Sequence + 1}); ok {
+		t.Fatal("a future position must not be served")
 	}
 	r.write([]byte("efghij")) // wraps: retains the last 8 of "abcdefghij"
-	if got, ok := r.since(2); !ok || string(got) != "cdefghij" {
+	if got, ok := r.since(TerminalPosition{Epoch: epoch, Sequence: 2}); !ok || string(got) != "cdefghij" {
 		t.Fatalf("exactly the retained window: %q %v", got, ok)
 	}
-	if _, ok := r.since(1); ok {
-		t.Fatal("a cursor older than the ring must report false")
+	if _, ok := r.since(TerminalPosition{Epoch: epoch, Sequence: 1}); ok {
+		t.Fatal("an evicted position must not be served")
 	}
-	big := newRing(4)
-	big.write([]byte("0123456789")) // single write larger than the ring
-	if _, ok := big.since(0); ok {
-		t.Fatal("a write bigger than the ring cannot serve an old cursor")
+	if _, ok := r.since(TerminalPosition{Epoch: "other", Sequence: 2}); ok {
+		t.Fatal("a position from another epoch must not be served")
 	}
-	if got, ok := big.since(big.written); !ok || len(got) != 0 {
+	big := newRingAt(4, TerminalPosition{Epoch: epoch})
+	big.write([]byte("0123456789"))
+	if _, ok := big.since(TerminalPosition{Epoch: epoch}); ok {
+		t.Fatal("a write bigger than the ring cannot serve an old position")
+	}
+	if got, ok := big.since(big.position()); !ok || len(got) != 0 {
 		t.Fatalf("caught up after an oversized write: %q %v", got, ok)
+	}
+}
+
+func TestRingRestartSeedPreservesAbsolutePosition(t *testing.T) {
+	position := TerminalPosition{Epoch: "persisted", Sequence: 100}
+	r := newRingAt(6, position)
+	r.seed([]byte("567890"), position)
+	r.write([]byte("abc"))
+
+	if got := r.position(); got != (TerminalPosition{Epoch: "persisted", Sequence: 103}) {
+		t.Fatalf("position after restart output = %+v", got)
+	}
+	if got, ok := r.since(TerminalPosition{Epoch: "persisted", Sequence: 98}); !ok || string(got) != "90abc" {
+		t.Fatalf("seeded delta = %q, ok=%v, want %q", got, ok, "90abc")
+	}
+	if _, ok := r.since(TerminalPosition{Epoch: "replacement", Sequence: 98}); ok {
+		t.Fatal("replacement epoch resumed from prior terminal seed")
 	}
 }

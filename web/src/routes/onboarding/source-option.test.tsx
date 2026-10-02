@@ -181,7 +181,7 @@ describe('onboarding source option', () => {
     render(<OnboardingSourceOption client={client} workspaceID={workspace.id} suggestedSource={suggestedSource} />)
 
     const status = await screen.findByRole('status', { name: 'Source mirror status' })
-    expect(status.textContent).toContain('workspace.mirror.status: unavailable')
+    await waitFor(() => expect(status.textContent).toContain('workspace.mirror.status: unavailable'))
     expect(screen.getByRole('button', { name: 'Set up source mirror' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Set up source mirror' }))
