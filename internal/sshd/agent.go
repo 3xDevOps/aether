@@ -90,12 +90,15 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		}
 		info := protocol.AgentInfo{Name: name, Source: source, Installed: installed, InstallScript: installScript}
 		if account != member {
-			shared, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, name)
+			shared, refusal, err := s.cfg.Runs.CheckSharedLaunch(ctx, member, account, name)
 			if err != nil {
 				return protocol.AgentInfo{}, fmt.Errorf("check agent %q login: %w", name, err)
 			}
 			info.LoginMissing = shared == scheduler.SharedLoginMissing
 			info.OwnAccountOnly = shared == scheduler.SharedOwnDefinitionOnly
+			if shared == scheduler.SharedLoginUnavailable {
+				info.Unavailable = refusal
+			}
 		}
 		return info, nil
 	}

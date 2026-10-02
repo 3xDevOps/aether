@@ -211,9 +211,9 @@ func TestCheckSharedLaunchMatchesLaunch(t *testing.T) {
 	e := newShareEnv(t, nil)
 	check := func(member, account domain.MemberID, name string) SharedLaunch {
 		t.Helper()
-		got, err := e.sched.CheckSharedLaunch(t.Context(), member, account, name)
-		if err != nil {
-			t.Fatalf("CheckSharedLaunch(%s): %v", name, err)
+		got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), member, account, name)
+		if err != nil || refusal != "" {
+			t.Fatalf("CheckSharedLaunch(%s) = %v, %q, %v", name, got, refusal, err)
 		}
 		return got
 	}
@@ -243,7 +243,7 @@ func TestCheckSharedLaunchMatchesLaunch(t *testing.T) {
 	if check(e.member.ID, e.owner.ID, "fake") != SharedLaunchable || check(e.member.ID, e.member.ID, "claude") != SharedLaunchable {
 		t.Fatal("a harness without login paths, or the caller's own account, is refused")
 	}
-	if _, err := e.sched.CheckSharedLaunch(t.Context(), e.member.ID, e.owner.ID, "nosuch"); err == nil {
+	if _, _, err := e.sched.CheckSharedLaunch(t.Context(), e.member.ID, e.owner.ID, "nosuch"); err == nil {
 		t.Fatal("unknown harness resolved")
 	}
 
@@ -261,8 +261,12 @@ func TestCheckSharedLaunchMatchesLaunch(t *testing.T) {
 	}
 
 	replaceWithLink(t, filepath.Join(e.ownerHome, claudeLogin), filepath.Join(e.ownerHome, ".aider/auth.json"))
-	if got := check(e.member.ID, e.owner.ID, "claude"); got != SharedLoginMissing {
-		t.Fatalf("symlinked owner login = %v, want SharedLoginMissing", got)
+	got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), e.member.ID, e.owner.ID, "claude")
+	if err != nil || got != SharedLoginUnavailable || !strings.Contains(refusal, "is a symlink and cannot be shared") {
+		t.Fatalf("symlinked owner login = %v, %q, %v; want SharedLoginUnavailable with the symlink refusal", got, refusal, err)
+	}
+	if _, err = e.launch(t, "claude"); err == nil || !strings.Contains(err.Error(), refusal) {
+		t.Fatalf("launch on the symlinked login = %v, want the refusal %q", err, refusal)
 	}
 }
 
@@ -279,8 +283,8 @@ func TestSharerPlaceholderIsNotALogin(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "is not logged in to claude") {
 		t.Fatalf("recipient launch on the placeholder = %v, want the not-logged-in refusal", err)
 	}
-	if got, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginMissing {
-		t.Fatalf("CheckSharedLaunch on the placeholder = %v, %v; want SharedLoginMissing", got, err)
+	if got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginMissing || refusal != "" {
+		t.Fatalf("CheckSharedLaunch on the placeholder = %v, %q, %v; want SharedLoginMissing", got, refusal, err)
 	}
 	if got := subpathMounts(e.terminal(t)); !slices.Equal(got, []runtime.Mount{e.pin()}) {
 		t.Fatalf("sharer terminal subpath mounts = %+v, want the pin", got)
@@ -303,8 +307,8 @@ func TestSharerHardLinkedLoginIsRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "hard link") {
 		t.Fatalf("recipient launch on a hard-linked login = %v, want a hard-link refusal", err)
 	}
-	if got, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginMissing {
-		t.Fatalf("CheckSharedLaunch on a hard-linked login = %v, %v; want SharedLoginMissing", got, err)
+	if got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginUnavailable || !strings.Contains(refusal, "has another hard link and cannot be shared") {
+		t.Fatalf("CheckSharedLaunch on a hard-linked login = %v, %q, %v; want SharedLoginUnavailable with the hard-link refusal", got, refusal, err)
 	}
 	if got := subpathMounts(e.ownRun(t)); len(got) != 0 {
 		t.Fatalf("sharer run subpath mounts = %+v, want none", got)

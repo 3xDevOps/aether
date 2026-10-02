@@ -850,6 +850,10 @@ agents**. A launch from the CLI fails with a reason like:
 provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in to claude in their own environment terminal
 ```
 
+An agent whose owner login is there but cannot be shared (a symlink in its
+path, a file with another hard link) is listed as `<name> (unavailable)`, with
+the error a launch returns.
+
 A Claude Code login refreshed in the owner's environment terminal reaches
 recipients' runs only if that terminal was started after the owner's first
 share ([security.md](security.md#account-sharing) explains why). When the

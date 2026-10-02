@@ -322,11 +322,20 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatal(perr)
 	}
 	shared := func(name string) string { return string(grantee.ID) + ":" + string(owner.ID) + ":" + name }
-	s.cfg.Runs = &fakeRuns{sharedLaunches: map[string]scheduler.SharedLaunch{
-		shared("claude"): scheduler.SharedLoginMissing,
-		shared("ownbot"): scheduler.SharedOwnDefinitionOnly,
-		string(grantee.ID) + ":" + string(grantee.ID) + ":claude": scheduler.SharedLoginMissing,
-	}}
+	const refusal = `scheduler: memberhome: login path .omp/agent in "owner" is a symlink and cannot be shared`
+	s.cfg.Runs = &fakeRuns{
+		sharedLaunches: map[string]scheduler.SharedLaunch{
+			shared("claude"): scheduler.SharedLoginMissing,
+			shared("ownbot"): scheduler.SharedOwnDefinitionOnly,
+			shared("omp"):    scheduler.SharedLoginUnavailable,
+			string(grantee.ID) + ":" + string(grantee.ID) + ":claude": scheduler.SharedLoginMissing,
+			string(grantee.ID) + ":" + string(grantee.ID) + ":omp":    scheduler.SharedLoginUnavailable,
+		},
+		sharedRefusals: map[string]string{
+			shared("omp"): refusal,
+			string(grantee.ID) + ":" + string(grantee.ID) + ":omp": refusal,
+		},
+	}
 	list := func(params []byte) map[string]protocol.AgentInfo {
 		t.Helper()
 		result, perr := s.agentList(ctx, grantee.ID, params)
@@ -358,6 +367,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		"claude": {Name: "claude", Source: "shipped", Installed: false, LoginMissing: true},
 		"codex":  {Name: "codex", Source: "shipped", Installed: true},
 		"ownbot": {Name: "ownbot", Source: "member", Installed: true, OwnAccountOnly: true},
+		"omp":    {Name: "omp", Source: "shipped", Installed: false, Unavailable: refusal},
 	} {
 		got := agents[name]
 		got.InstallScript = ""
@@ -371,7 +381,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatalf("own account agents = %+v, want only the grantee's installations and definitions", agents)
 	}
 	for _, agent := range agents {
-		if agent.LoginMissing || agent.OwnAccountOnly {
+		if agent.LoginMissing || agent.OwnAccountOnly || agent.Unavailable != "" {
 			t.Fatalf("own account %s reports a refusal: %+v", agent.Name, agent)
 		}
 	}

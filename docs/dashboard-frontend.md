@@ -1060,17 +1060,20 @@ puts the caller first, followed by accounts explicitly shared with them. A
 shared selection sends its ID as `account_member_id` on `agent.list` and
 `run.launch`. `agent.list` still returns the caller's own agents and
 installations, since the run executes in the caller's environment, and marks
-with `login_missing` each agent the account's owner has no login for, and
-with `own_account_only` each name that resolves to the caller's own
-member-defined agent, which runs only on the caller's own account. The form
-takes the reason from those two flags, never from `source`: a member-defined
-name that is also a server-wide definition launches the server-wide one, so
-it can be `login_missing`. It lists the first as disabled "(not logged in)"
-entries and says "<owner> is not logged in to <agent>", that the owner logs
-in from the terminal dock on their own Board, and to press **Refresh
-agents** then; the second as "(your account only)" entries with "Your own
-agent definitions run only on your own account" and which **Account** entry
-launches them; the swarm grid disables their worker rows the same way and
+with `login_missing` each agent the account's owner has no login for, with
+`own_account_only` each name that resolves to the caller's own
+member-defined agent, which runs only on the caller's own account, and with
+`unavailable` the launch's own error for each agent whose owner login exists
+but cannot be shared. The form takes the reason from those three fields,
+never from `source`: a member-defined name that is also a server-wide
+definition launches the server-wide one, so it can be `login_missing`. It
+lists the first as disabled "(not logged in)" entries and says "<owner> is
+not logged in to <agent>", that the owner logs in from the terminal dock on
+their own Board, and to press **Refresh agents** then; the second as "(your
+account only)" entries with "Your own agent definitions run only on your own
+account" and which **Account** entry launches them; the third as
+"(unavailable)" entries with "<agent> cannot launch on this account: " and
+the server's error unchanged; the swarm grid disables their worker rows the same way and
 drops a ticked worker whose agent stops being launchable when the lists
 refresh. The task is optional in
 interactive mode - a taskless launch drops the member into the agent's TUI
@@ -1710,7 +1713,8 @@ page's notice after a member's first account share: containers started
 before that share lack the in-place mount of Claude Code's login file
 ([security.md](security.md#account-sharing)), so when the store's
 `envTerminal.status`, re-read with `terminal.status` at the share, says the
-terminal is running, **Your agent account** says so and offers **Stop
+terminal is running, or that re-read fails, **Your agent account** says so
+(that the terminal could not be checked, on a failed read) and offers **Stop
 environment**. A share while another grant already exists shows nothing,
 because the page cannot tell whether the terminal predates the first one.
 

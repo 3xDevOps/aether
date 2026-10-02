@@ -875,9 +875,12 @@ installation: each recipient installs the agent in their own environment
 the caller's own agents and installations, and says why a launch of one on
 that account would be refused, resolving the name as a launch does:
 `login_missing: true` when the account owner has no login at its **Login
-state** path (a missing or empty file), and `own_account_only: true` when it
+state** path (a missing or empty file), `own_account_only: true` when it
 resolves to the caller's own member-defined agent, which runs only on the
-caller's own account. A member-defined name that is also a server-wide
+caller's own account, and `unavailable` with the launch's own error when the
+login is there but cannot be shared (a symlink in its path, a file with
+another hard link, or neither a file nor a directory). At most one is set. A
+member-defined name that is also a server-wide
 definition resolves to the server-wide one, so it can report
 `login_missing`. The launch dialog does not offer a refused agent on that
 account, and the server refuses such a launch.

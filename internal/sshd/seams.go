@@ -61,7 +61,7 @@ type RunController interface {
 	// CheckSharedLaunch reports whether member's launch of harness on
 	// account would be refused over the harness or the account owner's
 	// login, and why, resolving it as Launch does.
-	CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, error)
+	CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error)
 	// ContainerAddr resolves the network address of a supervised run
 	// container.
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)

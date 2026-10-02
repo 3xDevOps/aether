@@ -743,7 +743,10 @@ type AgentInfo struct {
 	// account would be refused because the account owner has no login for
 	// it. OwnAccountOnly is true when it would be refused because the agent
 	// resolves to the caller's own definition, which runs only on their own
-	// account. At most one is set, and neither for the caller's own account.
-	LoginMissing   bool `json:"login_missing,omitempty"`
-	OwnAccountOnly bool `json:"own_account_only,omitempty"`
+	// account. Unavailable is the launch's refusal when the owner's login
+	// exists but cannot be shared. At most one is set, and none for the
+	// caller's own account.
+	LoginMissing   bool   `json:"login_missing,omitempty"`
+	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
+	Unavailable    string `json:"unavailable,omitempty"`
 }

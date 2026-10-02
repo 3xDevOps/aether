@@ -311,6 +311,42 @@ describe('members view', () => {
       expect(useStore.getState().envTerminal.status?.running).toBe(false)
     })
 
+    it('says nothing for a share while another grant already exists', async () => {
+      const client = sharing(true)
+      vi.mocked(client.accountList)
+        .mockReset()
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [vera] })
+        .mockResolvedValue({ accounts: [alice], shared_with: [vera, bob] })
+      client.memberList = vi.fn(async () => [alice, bob, vera])
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      await waitFor(() => expect(screen.getAllByRole('button', { name: 'Revoke access' })).toHaveLength(2))
+      expect(client.terminalStatus).not.toHaveBeenCalled()
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    it('drops the advice when the first share is revoked', async () => {
+      const client = sharing(true)
+      vi.mocked(client.accountList)
+        .mockReset()
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [] })
+        .mockResolvedValueOnce({ accounts: [alice], shared_with: [bob] })
+        .mockResolvedValue({ accounts: [alice], shared_with: [] })
+      client.accountRevoke = vi.fn(async () => ({}))
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })
+      render(<MembersRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Share account' }))
+      await screen.findByRole('status')
+      fireEvent.click(await screen.findByRole('button', { name: 'Revoke access' }))
+
+      await waitFor(() => expect(client.accountRevoke).toHaveBeenCalledWith(bob.id))
+      await screen.findByRole('button', { name: 'Share account' })
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
     it('says nothing more when no terminal is running', async () => {
       const client = sharing(false)
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach', 'terminal'] } })

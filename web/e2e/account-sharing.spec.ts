@@ -7,7 +7,8 @@
 // launched by a `claude` shim installed in the recipient's home. On a shared
 // account `claude` needs a login in the owner's home: the spec writes a
 // placeholder `~/.claude/.credentials.json` there, which the scheduler mounts
-// into the run as a Docker volume subpath (Docker Engine 26.0 or newer).
+// into the run as a Docker volume subpath (Docker Engine 26.0 or newer). The
+// shim prints the login it sees, so the run's terminal shows whose it is.
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -18,8 +19,11 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 test.skip(!dockerReachable(), 'the environment terminal and the run need a reachable Docker daemon')
 
-/** What the recipient's `claude` shim runs: the seed repository's script. */
-const agentShim = 'sh /workspace/agent.sh'
+/** What the recipient's `claude` shim runs: the seed repository's script,
+ * then the login at the harness's login path. */
+const agentShim = `sh /workspace/agent.sh
+printf 'login-seen:%s\\n' "$(cat "$HOME/.claude/.credentials.json")"`
+const ownerLogin = '{"claudeAiOauth":{"owner":"alice-e2e"}}'
 const task = 'a run on a shared account'
 
 test('a member shares their agent account and a teammate launches on it', async ({
@@ -112,7 +116,7 @@ test('a member shares their agent account and a teammate launches on it', async 
     // The login a vendor flow would leave in Alice's home.
     const login = path.join(aether.server.memberHome(aliceID), '.claude', '.credentials.json')
     mkdirSync(path.dirname(login), { recursive: true })
-    writeFileSync(login, '{"claudeAiOauth":{}}\n', { mode: 0o600 })
+    writeFileSync(login, `${ownerLogin}\n`, { mode: 0o600 })
 
     await dialog.getByRole('button', { name: 'Refresh agents' }).click()
     await expect(dialog.getByRole('combobox', { name: 'Agent', exact: true })).toHaveText('claude')
@@ -121,9 +125,9 @@ test('a member shares their agent account and a teammate launches on it', async 
     await dialog.getByRole('button', { name: 'Launch', exact: true }).click()
 
     await expect(bobPage.getByRole('heading', { name: task, exact: true })).toBeVisible()
-    await expect(
-      bobPage.locator('.xterm-rows:not([data-aether-frozen-view] *)'),
-    ).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
+    const terminal = bobPage.locator('.xterm-rows:not([data-aether-frozen-view] *)')
+    await expect(terminal).toContainText('agent-ready', { timeout: 3 * 60 * 1000 })
+    await expect(terminal).toContainText(`login-seen:${ownerLogin}`)
 
     await bobPage
       .getByRole('tablist', { name: 'Run tabs' })

@@ -195,6 +195,14 @@ type accountLogin struct {
 	dir bool
 }
 
+// errNotLoggedIn marks accountLogins' refusal of an owner with no login at
+// any declared path.
+var errNotLoggedIn = errors.New("not logged in")
+
+// unshareableLoginError is accountLogins' refusal of a login path that exists
+// but cannot be shared.
+type unshareableLoginError struct{ error }
+
 // accountLogins resolves profile's login paths in account's home without
 // changing anything in it. A profile that declares none has nothing to share.
 // One whose declared paths are all missing or empty files is refused, since
@@ -212,7 +220,7 @@ func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, 
 			continue
 		}
 		if pathErr != nil {
-			return nil, fmt.Errorf("scheduler: %w", pathErr)
+			return nil, unshareableLoginError{fmt.Errorf("scheduler: %w", pathErr)}
 		}
 		logins = append(logins, accountLogin{rel: rel, dir: dir})
 	}
@@ -227,8 +235,8 @@ func (s *Scheduler) accountLogins(ctx context.Context, account domain.MemberID, 
 	for i, rel := range paths {
 		shown[i] = "~/" + rel
 	}
-	return nil, fmt.Errorf("scheduler: %s is not logged in to %s: no login at %s in their home; %s logs in to %s in their own environment terminal",
-		owner.DisplayName, profile.Name, strings.Join(shown, ", "), owner.DisplayName, profile.Name)
+	return nil, fmt.Errorf("scheduler: %s is %w to %s: no login at %s in their home; %s logs in to %s in their own environment terminal",
+		owner.DisplayName, errNotLoggedIn, profile.Name, strings.Join(shown, ", "), owner.DisplayName, profile.Name)
 }
 
 // SharedLaunch is whether a launch on another member's shared account would
@@ -238,8 +246,10 @@ type SharedLaunch int
 const (
 	SharedLaunchable SharedLaunch = iota
 	// SharedLoginMissing: the account owner has no login for the harness at
-	// any declared path, or one that cannot be shared.
+	// any declared path.
 	SharedLoginMissing
+	// SharedLoginUnavailable: the owner's login exists but cannot be shared.
+	SharedLoginUnavailable
 	// SharedOwnDefinitionOnly: the harness resolves to member's own
 	// definition, which runs only on member's own account.
 	SharedOwnDefinitionOnly
@@ -247,24 +257,32 @@ const (
 
 // CheckSharedLaunch reports whether member's launch of harnessName on
 // account would be refused over the harness or the owner's login, resolving
-// the harness exactly as a launch does. It changes no file in either home;
+// the harness exactly as a launch does. For SharedLoginUnavailable, refusal
+// is the error that launch returns. It changes no file in either home;
 // reading the owner's home creates it, empty, if it does not exist yet. On
 // member's own account a launch is always SharedLaunchable here.
-func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harnessName string) (SharedLaunch, error) {
+func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harnessName string) (state SharedLaunch, refusal string, err error) {
 	if account == member || s.cfg.Homes == nil {
-		return SharedLaunchable, nil
+		return SharedLaunchable, "", nil
 	}
 	profile, _, _, err := s.launchProfile(ctx, member, account, harnessName)
 	if errors.Is(err, errMemberDefinitionOnly) {
-		return SharedOwnDefinitionOnly, nil
+		return SharedOwnDefinitionOnly, "", nil
 	}
 	if err != nil {
-		return SharedLaunchable, err
+		return SharedLaunchable, "", err
 	}
-	if _, err = s.accountLogins(ctx, account, profile); err != nil {
-		return SharedLoginMissing, nil
+	_, err = s.accountLogins(ctx, account, profile)
+	var unshareable unshareableLoginError
+	switch {
+	case err == nil:
+		return SharedLaunchable, "", nil
+	case errors.Is(err, errNotLoggedIn):
+		return SharedLoginMissing, "", nil
+	case errors.As(err, &unshareable):
+		return SharedLoginUnavailable, err.Error(), nil
 	}
-	return SharedLaunchable, nil
+	return SharedLaunchable, "", err
 }
 
 // pinnedLogins mounts each login file of a PinLogin harness in member's own

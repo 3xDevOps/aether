@@ -363,8 +363,10 @@ type fakeRuns struct {
 	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
 	// sharedLaunches is what CheckSharedLaunch reports, keyed by
-	// "member:account:harness"; absent means launchable.
+	// "member:account:harness"; absent means launchable. sharedRefusals is
+	// the refusal it reports with the same key.
 	sharedLaunches map[string]scheduler.SharedLaunch
+	sharedRefusals map[string]string
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -430,10 +432,11 @@ func (f *fakeRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, mem
 	return f.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, domain.LaunchOptions{})
 }
 
-func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, error) {
+func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.sharedLaunches[fmt.Sprintf("%s:%s:%s", member, account, harness)], nil
+	key := fmt.Sprintf("%s:%s:%s", member, account, harness)
+	return f.sharedLaunches[key], f.sharedRefusals[key], nil
 }
 
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
