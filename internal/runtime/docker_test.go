@@ -619,3 +619,13 @@ func TestHijackStdinCancellationDoesNotCloseSharedConnection(t *testing.T) {
 		t.Fatalf("later read = %q, want second", got)
 	}
 }
+
+// An engine older than API 1.45 ignores a volume subpath and would mount the
+// whole base directory, so it must be refused rather than asked.
+func TestRequireSubpathAPI(t *testing.T) {
+	for version, ok := range map[string]bool{"": false, "1.40": false, "1.44": false, "1.45": true, "1.56": true, "2.0": true} {
+		if err := requireSubpathAPI(version); (err == nil) != ok {
+			t.Errorf("requireSubpathAPI(%q) = %v, want supported=%t", version, err, ok)
+		}
+	}
+}

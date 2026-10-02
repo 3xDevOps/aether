@@ -22,6 +22,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 )
 
 const (
@@ -108,6 +109,15 @@ func (d *Docker) Close() error { return d.cli.Close() }
 func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 	if err := spec.Validate(); err != nil {
 		return "", err
+	}
+	if slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" }) {
+		ping, err := d.cli.Ping(ctx, client.PingOptions{})
+		if err != nil {
+			return "", fmt.Errorf("runtime: read docker engine API version: %w", err)
+		}
+		if err := requireSubpathAPI(ping.APIVersion); err != nil {
+			return "", err
+		}
 	}
 	cfg, hostCfg := d.containerConfig(spec)
 	var name string
@@ -208,6 +218,18 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 		hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 	}
 	return cfg, hostCfg
+}
+
+// minSubpathAPI is the first Docker API version whose engine honours a volume
+// subpath. An older engine ignores the field and mounts the whole base, so a
+// subpath mount is refused there instead of sent.
+const minSubpathAPI = "1.45"
+
+func requireSubpathAPI(version string) error {
+	if version == "" || versions.LessThan(version, minSubpathAPI) {
+		return fmt.Errorf("runtime: docker engine API %q cannot mount a path beneath a member home; that needs API %s (Docker Engine 26.0) or newer", version, minSubpathAPI)
+	}
+	return nil
 }
 
 // subpathMount translates a Subpath mount into a volume mount of the base
