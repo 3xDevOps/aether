@@ -199,8 +199,9 @@ compiler archives; each Go release-build lane owns its
 `release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
 The installer uses a separate `windows-install` compiler lane; only its
 PowerShell/system-Node main lane saves that cache and its Bun dependency
-cache, leaving Windows module writes to CI's `windows` job. Cache reuse
-does not replace any build or validation gate.
+cache, leaving Windows module writes to CI's `windows` job. Before compressing
+an archive, each writer checks whether its exact key already exists and skips
+the save on a hit. Cache reuse does not replace any build or validation gate.
 
 ## Headless browser and remote-development acceptance
 

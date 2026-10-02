@@ -21,8 +21,16 @@ runs:
         key: bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-${{ hashFiles('web/bun.lock') }}
         restore-keys: |
           bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-
-    - name: Save bun cache
+    - name: Check for saved bun cache
+      id: saved-cache
       if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('web/.bun-version') }}-${{ hashFiles('web/bun.lock') }}
+        lookup-only: true
+    - name: Save bun cache
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: ~/.bun/install/cache
